@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
-// eq import removed - not used currently
+import { eq } from "drizzle-orm";
 
 // GET /api/salons - List all salons
 export async function GET() {
@@ -60,6 +60,47 @@ export async function POST(request: Request) {
     console.error("[Salons API] Database error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to create salon" },
+      { status: 500 }
+    );
+  }
+}
+
+// DELETE /api/salons?id=<uuid> - Delete a salon by ID
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: "Salon ID is required" },
+        { status: 400 }
+      );
+    }
+
+    console.log(`[Salons API] Executing: DELETE FROM salons WHERE id = '${id}'`);
+    const [deleted] = await db
+      .delete(salons)
+      .where(eq(salons.id, id))
+      .returning();
+
+    if (!deleted) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
+    console.log(`[Salons API] DELETE successful, removed salon: ${deleted.name}`);
+
+    return NextResponse.json({
+      success: true,
+      data: deleted,
+    });
+  } catch (error) {
+    console.error("[Salons API] Database error:", error);
+    return NextResponse.json(
+      { success: false, error: "Failed to delete salon" },
       { status: 500 }
     );
   }
