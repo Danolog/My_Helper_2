@@ -5,7 +5,8 @@ import { useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { TimeGrid } from "@/components/calendar/time-grid";
 import { RescheduleDialog } from "@/components/calendar/reschedule-dialog";
-import { ChevronLeft, ChevronRight, Calendar, Lock } from "lucide-react";
+import { CalendarLegend } from "@/components/calendar/calendar-legend";
+import { ChevronLeft, ChevronRight, Calendar, Lock, Palette } from "lucide-react";
 import { toast } from "sonner";
 import type { Appointment, CalendarEvent, Employee } from "@/types/calendar";
 
@@ -18,6 +19,9 @@ export default function CalendarPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Color mode: "status" for status-based colors, "employee" for employee-based colors
+  const [colorMode, setColorMode] = useState<"status" | "employee">("status");
 
   // Drag & drop state
   const [draggedEvent, setDraggedEvent] = useState<CalendarEvent | null>(null);
@@ -113,6 +117,11 @@ export default function CalendarPage() {
     setCurrentDate(new Date());
   };
 
+  // Toggle color mode
+  const toggleColorMode = () => {
+    setColorMode((prev) => (prev === "status" ? "employee" : "status"));
+  };
+
   // Drag handlers
   const handleDragStart = (event: CalendarEvent) => {
     setDraggedEvent(event);
@@ -140,10 +149,19 @@ export default function CalendarPage() {
   // Event click handler
   const handleEventClick = (event: CalendarEvent) => {
     // For now, just show a toast with event info
+    const statusLabels: Record<string, string> = {
+      scheduled: "Zaplanowana",
+      confirmed: "Potwierdzona",
+      completed: "Zakonczona",
+      cancelled: "Anulowana",
+      no_show: "Niestawienie sie",
+    };
+
     toast.info(`Wizyta: ${event.title}`, {
-      description: event.appointment.client
+      description: `${event.appointment.client
         ? `Klient: ${event.appointment.client.firstName} ${event.appointment.client.lastName}`
-        : "Brak przypisanego klienta",
+        : "Brak przypisanego klienta"
+      } | Status: ${statusLabels[event.appointment.status] || event.appointment.status}`,
     });
   };
 
@@ -248,8 +266,21 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        {/* Navigation */}
+        {/* Navigation & Controls */}
         <div className="flex items-center gap-2">
+          {/* Color mode toggle */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleColorMode}
+            title={colorMode === "status" ? "Koloruj wg statusu" : "Koloruj wg pracownika"}
+          >
+            <Palette className="h-4 w-4 mr-1" />
+            {colorMode === "status" ? "Status" : "Pracownik"}
+          </Button>
+
+          <div className="w-px h-6 bg-border mx-1" />
+
           <Button variant="outline" size="sm" onClick={goToPreviousDay}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -265,6 +296,11 @@ export default function CalendarPage() {
       {/* Current date display */}
       <div className="mb-4">
         <h2 className="text-lg font-medium capitalize">{formatDate(currentDate)}</h2>
+      </div>
+
+      {/* Legend */}
+      <div className="mb-4">
+        <CalendarLegend colorMode={colorMode} employees={employees} />
       </div>
 
       {/* Calendar grid */}
@@ -289,6 +325,7 @@ export default function CalendarPage() {
           onDrop={handleDrop}
           onEventClick={handleEventClick}
           draggedEvent={draggedEvent}
+          colorMode={colorMode}
         />
       )}
 
