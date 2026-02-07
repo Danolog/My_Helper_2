@@ -16,6 +16,7 @@ interface TimeGridProps {
   startHour?: number;
   endHour?: number;
   slotDuration?: number; // in minutes
+  colorMode?: "employee" | "status"; // Color appointments by employee or status
 }
 
 export function TimeGrid({
@@ -30,6 +31,7 @@ export function TimeGrid({
   startHour = 8,
   endHour = 20,
   slotDuration = 30,
+  colorMode = "status",
 }: TimeGridProps) {
   // Generate time slots
   const timeSlots: TimeSlot[] = useMemo(() => {
@@ -156,6 +158,7 @@ export function TimeGrid({
                       onDragStart={onDragStart}
                       onDragEnd={onDragEnd}
                       onClick={onEventClick}
+                      colorMode={colorMode}
                     />
                   </div>
                 );
