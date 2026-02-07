@@ -73,7 +73,7 @@ Edit the `.env.local` file:
 
 ```env filename=".env.local"
 OPENROUTER_API_KEY=sk-or-v1-xxxxxxxxx
-OPENROUTER_MODEL=openai/gpt-5-mini
+OPENROUTER_MODEL=anthropic/claude-sonnet-4-5-20250929
 ```
 
 Replace the API key with your actual OpenRouter API key from [https://openrouter.ai/settings/keys](https://openrouter.ai/settings/keys).
@@ -102,7 +102,7 @@ export async function POST(req: Request) {
   });
 
   const result = streamText({
-    model: openrouter(process.env.OPENROUTER_MODEL || "openai/gpt-5-mini"),
+    model: openrouter(process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4-5-20250929"),
     messages: convertToModelMessages(messages),
   });
 
@@ -218,7 +218,7 @@ export async function POST(req: Request) {
   });
 
   const result = streamText({
-    model: openrouter(process.env.OPENROUTER_MODEL || "openai/gpt-5-mini"),
+    model: openrouter(process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4-5-20250929"),
     messages: convertToModelMessages(messages),
     tools: {
       weather: tool({
@@ -349,7 +349,7 @@ export async function POST(req: Request) {
   });
 
   const result = streamText({
-    model: openrouter(process.env.OPENROUTER_MODEL || "openai/gpt-5-mini"),
+    model: openrouter(process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4-5-20250929"),
     messages: convertToModelMessages(messages),
     stopWhen: stepCountIs(5),
     tools: {
@@ -407,7 +407,7 @@ export async function POST(req: Request) {
   });
 
   const result = streamText({
-    model: openrouter(process.env.OPENROUTER_MODEL || "openai/gpt-5-mini"),
+    model: openrouter(process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4-5-20250929"),
     messages: convertToModelMessages(messages),
     stopWhen: stepCountIs(5),
     tools: {

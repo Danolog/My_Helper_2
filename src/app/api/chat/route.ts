@@ -70,7 +70,7 @@ export async function POST(req: Request) {
   const openrouter = createOpenRouter({ apiKey });
 
   const result = streamText({
-    model: openrouter(process.env.OPENROUTER_MODEL || "openai/gpt-5-mini"),
+    model: openrouter(process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4-5-20250929"),
     messages: convertToModelMessages(messages),
   });
 
