@@ -19,7 +19,7 @@ async function testConnection() {
       WHERE table_schema = 'public'
       ORDER BY table_name
     `;
-    console.log("Tables in database:", tables.map((t: { table_name: string }) => t.table_name));
+    console.log("Tables in database:", tables.map((t) => (t as { table_name: string }).table_name));
 
     await sql.end();
     process.exit(0);

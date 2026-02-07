@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+// eq import removed - not used currently
 
 // GET /api/salons - List all salons
 export async function GET() {
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[Salons API] INSERT successful, created salon with id: ${newSalon.id}`);
+    console.log(`[Salons API] INSERT successful, created salon with id: ${newSalon?.id}`);
 
     return NextResponse.json({
       success: true,
