@@ -64,11 +64,11 @@ The only things to preserve are:
 
 \`\`\`typescript
 // ✓ Correct - Use environment variable
-const model = process.env.OPENAI_MODEL || "gpt-5-mini";
+const model = process.env.OPENAI_MODEL || "anthropic/claude-sonnet-4-5-20250929";
 model: openai(model)
 
 // ✗ Incorrect - Don't hardcode model names
-model: openai("gpt-5-mini")
+model: openai("anthropic/claude-sonnet-4-5-20250929")
 \`\`\`
 
 This allows for easy model switching without code changes and ensures consistency across the application.
