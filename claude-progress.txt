@@ -1,5 +1,60 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-07 (Session #22 - Feature #5 assigned)
+
+### Feature Assigned
+- Feature #5: "Backend API queries real database"
+
+### What was attempted:
+1. Claimed Feature #5 using feature_claim_and_get
+2. Checked Docker status:
+   - Docker socket at ~/.docker/run/docker.sock does NOT exist
+   - Docker client v29.1.3 installed
+   - `docker compose ps` fails with "Cannot connect to Docker daemon"
+3. Port 5432 check - no process listening (PostgreSQL not running)
+4. Node process on port 3000 but not responding to HTTP requests
+5. Verified code implementation is correct:
+   - `/api/salons/route.ts` uses `db.select().from(salons)` and `db.insert(salons)` - real Drizzle queries
+   - `/api/clients/route.ts` uses `db.select().from(clients)` and `db.insert(clients)` - real Drizzle queries
+   - `/lib/db.ts` properly connects to PostgreSQL using postgres-js driver
+   - `/lib/schema.ts` has complete table definitions (user, session, account, salons, clients, employees, services, appointments, timeBlocks)
+   - Console logging added to all API routes for SQL query verification
+
+### BLOCKER - Docker Desktop not running:
+- Docker daemon socket does not exist at ~/.docker/run/docker.sock
+- Cannot start PostgreSQL container
+- Port 5432 is closed (PostgreSQL not accessible)
+- This is a TRUE EXTERNAL BLOCKER requiring user to manually start Docker Desktop
+
+### Action taken:
+- Feature #5 SKIPPED (moved to end of queue - priority 288)
+
+### Code Verification (Implementation is CORRECT):
+All API routes use real Drizzle ORM queries:
+- `db.select().from(salons)` - SELECT * FROM salons
+- `db.insert(salons).values(...).returning()` - INSERT with return
+- `db.select().from(clients).where(eq(clients.salonId, salonId))` - SELECT with WHERE clause
+- No mock data patterns found in codebase
+
+### What the user needs to do to unblock ALL infrastructure features:
+1. **Open Docker Desktop application manually** (macOS app in /Applications)
+2. Wait for Docker daemon to start (socket will appear at ~/.docker/run/docker.sock)
+3. Run: `docker compose up -d` to start PostgreSQL
+4. Wait for PostgreSQL to be ready
+5. Run: `pnpm dev` to restart Next.js (if not running)
+6. Test: Navigate to http://localhost:3000/api/health - should return `status: "healthy"`
+7. Then all infrastructure features (#1, #2, #3, #5) can be verified and marked passing
+
+### Current Status
+- Feature #4: PASSED
+- Features #1, #2, #3, #5: BLOCKED on Docker (external blocker)
+- Overall: 1/253 features passing (0.4%)
+
+### Critical Note:
+This is the 22nd session blocked on Docker. The orchestrator keeps assigning infrastructure features that require Docker/PostgreSQL. User must start Docker Desktop manually before any of these features can be verified.
+
+---
+
 ## Session: 2026-02-07 (Session #21 - Features #1, #2 assigned as batch)
 
 ### Features Assigned (Batch)
