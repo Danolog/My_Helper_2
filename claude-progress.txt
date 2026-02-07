@@ -1,5 +1,46 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-07 (Session #45 - Feature #3 assigned)
+
+### Feature Assigned
+- Feature #3: "Data persists across server restart"
+- Description: CRITICAL - Verify data is stored in real database, not in-memory
+
+### What was attempted:
+1. Claimed Feature #3 using feature_claim_and_get
+2. Checked Docker status - daemon socket not available at ~/.docker/run/docker.sock
+3. Attempted to kill existing processes on port 3000 (PIDs 82000, 90163)
+4. Tried `docker compose up -d` - failed with "Cannot connect to Docker daemon"
+5. Verified code implementation uses real PostgreSQL via Drizzle ORM (no mock data)
+6. The `open` command is blocked so cannot start Docker Desktop programmatically
+
+### Code Verification (No Mock Data):
+- `/src/lib/db.ts` - Uses drizzle-orm/postgres-js with real PostgreSQL connection
+- `/src/app/api/salons/route.ts` - Uses `db.select().from(salons)` and `db.insert(salons)`
+- Grep for mock patterns (globalThis, devStore, mockDb, etc.) - NO MATCHES FOUND
+
+### BLOCKER - Docker Desktop not running:
+- Docker daemon socket does not exist at ~/.docker/run/docker.sock
+- PostgreSQL container cannot be started without Docker daemon
+- The `open -a Docker` command is blocked by allowlist
+- This is a TRUE EXTERNAL BLOCKER requiring user to manually start Docker Desktop
+
+### Action taken:
+- Feature #3 SKIPPED (moved to end of queue - priority 312)
+
+### What the user needs to do to unblock this feature:
+1. **Open Docker Desktop application manually** (macOS app in /Applications)
+2. Wait for Docker daemon to start (green icon in menu bar)
+3. Run: `./init.sh` (this will start PostgreSQL, apply schema, start dev server)
+4. Once PostgreSQL is running, the persistence test can be verified
+
+### Current Status
+- Feature #4, #5, #38: PASSED
+- Features #1, #2, #3: BLOCKED on Docker
+- Overall: 3/253 features passing (1.2%)
+
+---
+
 ## Session: 2026-02-07 (Session #44 - Feature #2 assigned)
 
 ### Feature Assigned
