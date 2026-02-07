@@ -1,5 +1,59 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-07 (Session #18 - Feature #5 assigned)
+
+### Feature Assigned
+- Feature #5: "Backend API queries real database"
+
+### What was attempted:
+1. Claimed Feature #5 using feature_claim_and_get
+2. Checked Docker status:
+   - Docker client v29.1.3 installed
+   - Socket at ~/.docker/run/docker.sock does NOT exist
+   - Docker Desktop processes running (`cagent`, `vmnetd`) but daemon not started
+   - Docker context is `desktop-linux` pointing to missing socket
+3. Dev server IS running on port 3000 and responding:
+   - `curl http://localhost:3000/api/health` returns 503 with `status: "unhealthy"`
+   - Database status correctly shows "disconnected"
+4. Verified API code implementation is CORRECT:
+   - `/api/salons/route.ts` uses `db.select().from(salons)` - real Drizzle ORM query
+   - `/api/clients/route.ts` uses `db.select().from(clients)` - real Drizzle ORM query
+   - Console logging in place for SQL query verification
+5. Ran mock data grep checks - NO MOCKS FOUND:
+   - No globalThis, devStore, mockDb, mockData, etc.
+   - No TODO.*real, TODO.*database, STUB, MOCK patterns
+6. Attempted to start Docker Desktop with `open -a Docker` - blocked by command allowlist
+
+### BLOCKER - Docker Desktop not running:
+- Docker daemon socket does not exist at ~/.docker/run/docker.sock
+- Docker context points to missing socket
+- Cannot start PostgreSQL via docker-compose
+- Cannot verify SQL queries appear in logs without database running
+- `open -a Docker` command is blocked by security policy
+- This is a TRUE EXTERNAL BLOCKER requiring user to manually start Docker Desktop
+
+### Action taken:
+- Feature #5 SKIPPED (moved to end of queue - priority 282)
+- Updated progress notes
+
+### What the user needs to do to unblock ALL infrastructure features:
+1. **Open Docker Desktop application manually** (macOS app in /Applications)
+2. Wait for Docker daemon to start (socket will appear at ~/.docker/run/docker.sock)
+3. Run: `docker compose up -d` to start PostgreSQL
+4. Wait for PostgreSQL to be ready
+5. Test: `curl http://localhost:3000/api/health` should return `status: "healthy"`
+6. Then all infrastructure features (#1, #2, #3, #5) can be verified and marked passing
+
+### Current Status
+- Feature #4: PASSED
+- Features #1, #2, #3, #5: BLOCKED on Docker (external blocker)
+- Overall: 1/253 features passing (0.4%)
+
+### Critical Note:
+This is the 18th session blocked on Docker. The code implementation is complete and verified correct (uses real Drizzle ORM queries, no mock data). User must start Docker Desktop manually to verify database functionality.
+
+---
+
 ## Session: 2026-02-07 (Session #17 - Feature #5 assigned)
 
 ### Feature Assigned
