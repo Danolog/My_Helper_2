@@ -71,7 +71,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[Clients API] INSERT successful, created client with id: ${newClient.id}`);
+    console.log(`[Clients API] INSERT successful, created client with id: ${newClient?.id}`);
 
     return NextResponse.json({
       success: true,
