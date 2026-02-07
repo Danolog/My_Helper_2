@@ -15,6 +15,13 @@
       "when": 1766719908715,
       "tag": "0001_last_warpath",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770484640541,
+      "tag": "0002_aberrant_sharon_carter",
+      "breakpoints": true
     }
   ]
 }

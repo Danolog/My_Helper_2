@@ -218,6 +218,7 @@ export const appointments = pgTable(
       .notNull()
       .references(() => employees.id, { onDelete: "cascade" }),
     serviceId: uuid("service_id").references(() => services.id, { onDelete: "set null" }),
+    variantId: uuid("variant_id"), // References service_variants.id
     startTime: timestamp("start_time").notNull(),
     endTime: timestamp("end_time").notNull(),
     status: text("status").default("scheduled").notNull(), // 'scheduled', 'confirmed', 'completed', 'cancelled', 'no_show'
@@ -256,5 +257,580 @@ export const timeBlocks = pgTable(
   (table) => [
     index("time_blocks_employee_id_idx").on(table.employeeId),
     index("time_blocks_start_time_idx").on(table.startTime),
+  ]
+);
+
+// Temporary access - for granting temporary permissions to employees
+export const temporaryAccess = pgTable(
+  "temporary_access",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    featureName: text("feature_name").notNull(),
+    grantedBy: text("granted_by")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("temporary_access_user_id_idx").on(table.userId),
+    index("temporary_access_expires_at_idx").on(table.expiresAt),
+  ]
+);
+
+// Service variants - variations of services with price/duration modifiers
+export const serviceVariants = pgTable(
+  "service_variants",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    serviceId: uuid("service_id")
+      .notNull()
+      .references(() => services.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    priceModifier: numeric("price_modifier", { precision: 10, scale: 2 }).default("0"),
+    durationModifier: integer("duration_modifier").default(0), // in minutes
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("service_variants_service_id_idx").on(table.serviceId),
+  ]
+);
+
+// Employee service prices - custom pricing per employee per service
+export const employeeServicePrices = pgTable(
+  "employee_service_prices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id")
+      .notNull()
+      .references(() => services.id, { onDelete: "cascade" }),
+    variantId: uuid("variant_id").references(() => serviceVariants.id, { onDelete: "cascade" }),
+    customPrice: numeric("custom_price", { precision: 10, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("employee_service_prices_employee_id_idx").on(table.employeeId),
+    index("employee_service_prices_service_id_idx").on(table.serviceId),
+  ]
+);
+
+// Appointment materials - products used during appointment
+export const appointmentMaterials = pgTable(
+  "appointment_materials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    appointmentId: uuid("appointment_id")
+      .notNull()
+      .references(() => appointments.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").notNull(), // will reference products table
+    quantityUsed: numeric("quantity_used", { precision: 10, scale: 2 }).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("appointment_materials_appointment_id_idx").on(table.appointmentId),
+    index("appointment_materials_product_id_idx").on(table.productId),
+  ]
+);
+
+// Treatment history - detailed records of treatments performed
+export const treatmentHistory = pgTable(
+  "treatment_history",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    appointmentId: uuid("appointment_id")
+      .notNull()
+      .references(() => appointments.id, { onDelete: "cascade" }),
+    recipe: text("recipe"),
+    techniques: text("techniques"),
+    materialsJson: jsonb("materials_json").default([]),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("treatment_history_appointment_id_idx").on(table.appointmentId),
+  ]
+);
+
+// Work schedules - regular working hours for employees
+export const workSchedules = pgTable(
+  "work_schedules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    dayOfWeek: integer("day_of_week").notNull(), // 0=Sunday, 1=Monday, etc.
+    startTime: text("start_time").notNull(), // e.g., "09:00"
+    endTime: text("end_time").notNull(), // e.g., "17:00"
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("work_schedules_employee_id_idx").on(table.employeeId),
+    index("work_schedules_day_of_week_idx").on(table.dayOfWeek),
+  ]
+);
+
+// Gallery photos - before/after photos from treatments
+export const galleryPhotos = pgTable(
+  "gallery_photos",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    employeeId: uuid("employee_id").references(() => employees.id, { onDelete: "set null" }),
+    serviceId: uuid("service_id").references(() => services.id, { onDelete: "set null" }),
+    beforePhotoUrl: text("before_photo_url"),
+    afterPhotoUrl: text("after_photo_url"),
+    description: text("description"),
+    productsUsed: text("products_used"),
+    techniques: text("techniques"),
+    duration: integer("duration"), // in minutes
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("gallery_photos_salon_id_idx").on(table.salonId),
+    index("gallery_photos_employee_id_idx").on(table.employeeId),
+    index("gallery_photos_service_id_idx").on(table.serviceId),
+  ]
+);
+
+// Albums - photo album organization
+export const albums = pgTable(
+  "albums",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    category: text("category"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("albums_salon_id_idx").on(table.salonId),
+  ]
+);
+
+// Photo albums - junction table for photos and albums
+export const photoAlbums = pgTable(
+  "photo_albums",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    photoId: uuid("photo_id")
+      .notNull()
+      .references(() => galleryPhotos.id, { onDelete: "cascade" }),
+    albumId: uuid("album_id")
+      .notNull()
+      .references(() => albums.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("photo_albums_photo_id_idx").on(table.photoId),
+    index("photo_albums_album_id_idx").on(table.albumId),
+  ]
+);
+
+// Reviews - client reviews for salons/employees
+export const reviews = pgTable(
+  "reviews",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    employeeId: uuid("employee_id").references(() => employees.id, { onDelete: "set null" }),
+    appointmentId: uuid("appointment_id").references(() => appointments.id, { onDelete: "set null" }),
+    rating: integer("rating").notNull(), // 1-5
+    comment: text("comment"),
+    status: text("status").default("pending").notNull(), // 'pending', 'approved', 'rejected'
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("reviews_salon_id_idx").on(table.salonId),
+    index("reviews_client_id_idx").on(table.clientId),
+    index("reviews_employee_id_idx").on(table.employeeId),
+    index("reviews_status_idx").on(table.status),
+  ]
+);
+
+// Notifications - SMS/email notifications
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    type: text("type").notNull(), // 'sms', 'email', 'push'
+    message: text("message").notNull(),
+    sentAt: timestamp("sent_at"),
+    status: text("status").default("pending").notNull(), // 'pending', 'sent', 'failed'
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("notifications_salon_id_idx").on(table.salonId),
+    index("notifications_client_id_idx").on(table.clientId),
+    index("notifications_status_idx").on(table.status),
+  ]
+);
+
+// Waiting list - clients waiting for available slots
+export const waitingList = pgTable(
+  "waiting_list",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id").references(() => services.id, { onDelete: "set null" }),
+    preferredEmployeeId: uuid("preferred_employee_id").references(() => employees.id, { onDelete: "set null" }),
+    preferredDate: timestamp("preferred_date"),
+    notifiedAt: timestamp("notified_at"),
+    accepted: boolean("accepted"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("waiting_list_salon_id_idx").on(table.salonId),
+    index("waiting_list_client_id_idx").on(table.clientId),
+    index("waiting_list_service_id_idx").on(table.serviceId),
+  ]
+);
+
+// Products - inventory management
+export const products = pgTable(
+  "products",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    category: text("category"),
+    quantity: numeric("quantity", { precision: 10, scale: 2 }).default("0"),
+    minQuantity: numeric("min_quantity", { precision: 10, scale: 2 }),
+    unit: text("unit"), // e.g., 'ml', 'g', 'pcs'
+    pricePerUnit: numeric("price_per_unit", { precision: 10, scale: 2 }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("products_salon_id_idx").on(table.salonId),
+    index("products_category_idx").on(table.category),
+  ]
+);
+
+// Product usage - track product usage per appointment
+export const productUsage = pgTable(
+  "product_usage",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    appointmentId: uuid("appointment_id")
+      .notNull()
+      .references(() => appointments.id, { onDelete: "cascade" }),
+    quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("product_usage_product_id_idx").on(table.productId),
+    index("product_usage_appointment_id_idx").on(table.appointmentId),
+  ]
+);
+
+// Promotions - discounts and special offers
+export const promotions = pgTable(
+  "promotions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    type: text("type").notNull(), // 'percentage', 'fixed', 'package'
+    value: numeric("value", { precision: 10, scale: 2 }).notNull(),
+    startDate: timestamp("start_date"),
+    endDate: timestamp("end_date"),
+    conditionsJson: jsonb("conditions_json").default({}),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("promotions_salon_id_idx").on(table.salonId),
+    index("promotions_is_active_idx").on(table.isActive),
+  ]
+);
+
+// Promo codes - discount codes for clients
+export const promoCodes = pgTable(
+  "promo_codes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    promotionId: uuid("promotion_id").references(() => promotions.id, { onDelete: "cascade" }),
+    usageLimit: integer("usage_limit"),
+    usedCount: integer("used_count").default(0),
+    expiresAt: timestamp("expires_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("promo_codes_salon_id_idx").on(table.salonId),
+    index("promo_codes_code_idx").on(table.code),
+    index("promo_codes_promotion_id_idx").on(table.promotionId),
+  ]
+);
+
+// Loyalty points - client loyalty program
+export const loyaltyPoints = pgTable(
+  "loyalty_points",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    points: integer("points").default(0).notNull(),
+    lastUpdated: timestamp("last_updated").defaultNow().notNull(),
+  },
+  (table) => [
+    index("loyalty_points_client_id_idx").on(table.clientId),
+    index("loyalty_points_salon_id_idx").on(table.salonId),
+  ]
+);
+
+// Loyalty transactions - history of points earned/spent
+export const loyaltyTransactions = pgTable(
+  "loyalty_transactions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    loyaltyId: uuid("loyalty_id")
+      .notNull()
+      .references(() => loyaltyPoints.id, { onDelete: "cascade" }),
+    pointsChange: integer("points_change").notNull(),
+    reason: text("reason"),
+    appointmentId: uuid("appointment_id").references(() => appointments.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("loyalty_transactions_loyalty_id_idx").on(table.loyaltyId),
+    index("loyalty_transactions_appointment_id_idx").on(table.appointmentId),
+  ]
+);
+
+// Invoices - billing documents
+export const invoices = pgTable(
+  "invoices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    appointmentId: uuid("appointment_id").references(() => appointments.id, { onDelete: "set null" }),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    invoiceNumber: text("invoice_number").notNull(),
+    type: text("type").notNull(), // 'paragon', 'faktura'
+    companyName: text("company_name"),
+    companyNip: text("company_nip"),
+    amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+    issuedAt: timestamp("issued_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("invoices_salon_id_idx").on(table.salonId),
+    index("invoices_appointment_id_idx").on(table.appointmentId),
+    index("invoices_client_id_idx").on(table.clientId),
+    index("invoices_invoice_number_idx").on(table.invoiceNumber),
+  ]
+);
+
+// Employee commissions - track employee earnings
+export const employeeCommissions = pgTable(
+  "employee_commissions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    appointmentId: uuid("appointment_id")
+      .notNull()
+      .references(() => appointments.id, { onDelete: "cascade" }),
+    amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+    percentage: numeric("percentage", { precision: 5, scale: 2 }),
+    paidAt: timestamp("paid_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("employee_commissions_employee_id_idx").on(table.employeeId),
+    index("employee_commissions_appointment_id_idx").on(table.appointmentId),
+  ]
+);
+
+// AI conversations - chat history with AI assistant
+export const aiConversations = pgTable(
+  "ai_conversations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    channel: text("channel").notNull(), // 'voice', 'chat', 'sms'
+    transcript: text("transcript"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("ai_conversations_salon_id_idx").on(table.salonId),
+    index("ai_conversations_client_id_idx").on(table.clientId),
+  ]
+);
+
+// Newsletters - email campaigns
+export const newsletters = pgTable(
+  "newsletters",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    subject: text("subject").notNull(),
+    content: text("content").notNull(),
+    sentAt: timestamp("sent_at"),
+    recipientsCount: integer("recipients_count").default(0),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("newsletters_salon_id_idx").on(table.salonId),
+  ]
+);
+
+// Marketing consents - GDPR compliance
+export const marketingConsents = pgTable(
+  "marketing_consents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    consentType: text("consent_type").notNull(), // 'email', 'sms', 'phone'
+    grantedAt: timestamp("granted_at").defaultNow().notNull(),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => [
+    index("marketing_consents_client_id_idx").on(table.clientId),
+    index("marketing_consents_salon_id_idx").on(table.salonId),
+  ]
+);
+
+// Favorite salons - client's favorite salons
+export const favoriteSalons = pgTable(
+  "favorite_salons",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    clientUserId: text("client_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("favorite_salons_client_user_id_idx").on(table.clientUserId),
+    index("favorite_salons_salon_id_idx").on(table.salonId),
+  ]
+);
+
+// Subscription plans - pricing plans (Basic, Pro)
+export const subscriptionPlans = pgTable(
+  "subscription_plans",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull().unique(), // 'basic', 'pro'
+    priceMonthly: numeric("price_monthly", { precision: 10, scale: 2 }).notNull(),
+    stripePriceId: text("stripe_price_id"),
+    featuresJson: jsonb("features_json").default([]),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("subscription_plans_slug_idx").on(table.slug),
+  ]
+);
+
+// Salon subscriptions - active subscriptions for salons
+export const salonSubscriptions = pgTable(
+  "salon_subscriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    planId: uuid("plan_id")
+      .notNull()
+      .references(() => subscriptionPlans.id, { onDelete: "restrict" }),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    stripeCustomerId: text("stripe_customer_id"),
+    status: text("status").default("active").notNull(), // 'active', 'past_due', 'canceled', 'trialing'
+    trialEndsAt: timestamp("trial_ends_at"),
+    currentPeriodStart: timestamp("current_period_start"),
+    currentPeriodEnd: timestamp("current_period_end"),
+    canceledAt: timestamp("canceled_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("salon_subscriptions_salon_id_idx").on(table.salonId),
+    index("salon_subscriptions_plan_id_idx").on(table.planId),
+    index("salon_subscriptions_status_idx").on(table.status),
+  ]
+);
+
+// Subscription payments - payment history
+export const subscriptionPayments = pgTable(
+  "subscription_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    subscriptionId: uuid("subscription_id")
+      .notNull()
+      .references(() => salonSubscriptions.id, { onDelete: "cascade" }),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+    currency: text("currency").default("PLN").notNull(),
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    status: text("status").notNull(), // 'succeeded', 'pending', 'failed'
+    paidAt: timestamp("paid_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("subscription_payments_subscription_id_idx").on(table.subscriptionId),
+    index("subscription_payments_salon_id_idx").on(table.salonId),
+    index("subscription_payments_status_idx").on(table.status),
   ]
 );
