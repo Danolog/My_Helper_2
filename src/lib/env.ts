@@ -17,12 +17,18 @@ const serverEnvSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
 
-  // AI
+  // AI (Pro plan only)
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_MODEL: z.string().default("openai/gpt-5-mini"),
 
   // Storage
   BLOB_READ_WRITE_TOKEN: z.string().optional(),
+
+  // Stripe (subscriptions + deposits)
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_PRICE_BASIC: z.string().optional(),
+  STRIPE_PRICE_PRO: z.string().optional(),
 
   // App
   NODE_ENV: z
@@ -36,6 +42,7 @@ const serverEnvSchema = z.object({
  */
 const clientEnvSchema = z.object({
   NEXT_PUBLIC_APP_URL: z.string().url().default("http://localhost:3000"),
+  NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: z.string().optional(),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -66,6 +73,7 @@ export function getServerEnv(): ServerEnv {
 export function getClientEnv(): ClientEnv {
   const parsed = clientEnvSchema.safeParse({
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
+    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
   });
 
   if (!parsed.success) {
@@ -106,6 +114,10 @@ export function checkEnv(): void {
 
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
     warnings.push("BLOB_READ_WRITE_TOKEN is not set. Using local storage for file uploads.");
+  }
+
+  if (!process.env.STRIPE_SECRET_KEY) {
+    warnings.push("STRIPE_SECRET_KEY is not set. Subscription and payment features will not work.");
   }
 
   // Log warnings in development

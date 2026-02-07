@@ -1,0 +1,925 @@
+<project_specification>
+  <project_name>MyHelper</project_name>
+
+  <overview>
+    MyHelper to przystepna cenowo alternatywa dla aplikacji Booksy, zaprojektowana dla malych przedsiebiorcow z branzy uslugowej (salony kosmetyczne, fryzjerzy, gabinety lekarskie). Aplikacja dziala w modelu subskrypcyjnym z dwoma planami: Basic (zarzadzanie salonem bez narzedzi AI) oraz Pro (pelna funkcjonalnosc z asystentem AI glosowym, biznesowym i content marketingowym). System obejmuje panel dla salonu, portal dla klientow z rezerwacja online i platnoscia zadatkow, oraz zaawansowane narzedzia do zarzadzania magazynem, promocjami i raportowania.
+  </overview>
+
+  <technology_stack>
+    <frontend>
+      <framework>Next.js 16 + React 19</framework>
+      <styling>Tailwind CSS 4 + shadcn/ui (Radix UI)</styling>
+      <responsive>Pelna responsywnosc (mobile-first)</responsive>
+      <icons>Lucide React</icons>
+      <themes>next-themes (light/dark mode)</themes>
+    </frontend>
+    <backend>
+      <runtime>Node.js 22+</runtime>
+      <framework>Next.js API Routes</framework>
+      <database>PostgreSQL 18 (z pgvector, via Docker)</database>
+      <orm>Drizzle ORM</orm>
+      <auth>Better Auth (email/password + Google OAuth)</auth>
+    </backend>
+    <communication>
+      <api>REST API (Next.js API Routes)</api>
+      <realtime>WebSockets (dla powiadomien push)</realtime>
+    </communication>
+    <integrations>
+      <payments>Stripe (subskrypcje + zadatki) + Blik P2P</payments>
+      <sms>Zewnetrzny provider SMS (np. SMSAPI, Twilio)</sms>
+      <ai>OpenRouter via Vercel AI SDK (asystent glosowy i biznesowy) - tylko plan Pro</ai>
+      <fiscal>Integracja z drukarka fiskalna/kasa</fiscal>
+      <storage>Vercel Blob (z fallback na local storage)</storage>
+    </integrations>
+  </technology_stack>
+
+  <prerequisites>
+    <environment_setup>
+      - Node.js 22+ (via .nvmrc)
+      - pnpm (package manager)
+      - Docker (dla PostgreSQL)
+      - PostgreSQL 18 (via docker-compose)
+      - Klucze API: OpenRouter (AI), Stripe (platnosci/subskrypcje), SMS provider
+      - BETTER_AUTH_SECRET (min 32 znaki)
+    </environment_setup>
+  </prerequisites>
+
+  <feature_count>253</feature_count>
+
+  <security_and_access_control>
+    <user_roles>
+      <role name="wlasciciel">
+        <permissions>
+          - Pelny dostep do wszystkich funkcjonalnosci
+          - Zarzadzanie pracownikami i recepcja
+          - Nadawanie czasowego dostepu do funkcji
+          - Dostep do wszystkich raportow finansowych
+          - Konfiguracja systemu i integracji
+          - Moderacja opinii
+          - Zarzadzanie promocjami i cenami
+        </permissions>
+        <protected_routes>
+          - /admin/* (pelny dostep)
+          - /settings/* (pelny dostep)
+          - /reports/* (pelny dostep)
+          - /employees/* (pelny dostep)
+        </protected_routes>
+      </role>
+      <role name="pracownik">
+        <permissions>
+          - Wlasny kalendarz (pelny dostep)
+          - Kalendarz ogolny (tylko podglad)
+          - Dodawanie zdjec do galerii
+          - Podglad swoich statystyk
+          - Czasowy dostep do innych funkcji (nadawany przez wlasciciela)
+        </permissions>
+        <protected_routes>
+          - /calendar/my (pelny dostep)
+          - /calendar/all (tylko podglad)
+          - /gallery/add (pelny dostep)
+        </protected_routes>
+      </role>
+      <role name="recepcja">
+        <permissions>
+          - Umawianie wizyt dla wszystkich pracownikow
+          - Dodawanie i edycja klientow
+          - Podglad kalendarza ogolnego
+          - Czasowy dostep do innych funkcji (nadawany przez wlasciciela)
+        </permissions>
+        <protected_routes>
+          - /appointments/* (pelny dostep)
+          - /clients/* (dodawanie/edycja)
+          - /calendar/all (podglad)
+        </protected_routes>
+      </role>
+      <role name="klient">
+        <permissions>
+          - Przegladanie salonow i uslug
+          - Rezerwacja wizyt
+          - Platnosc zadatkow
+          - Wystawianie opinii
+          - Podglad historii wizyt
+          - Zarzadzanie ulubionym pracownikiem i salonami
+        </permissions>
+        <protected_routes>
+          - /client/dashboard (pelny dostep)
+          - /client/appointments (pelny dostep)
+          - /client/reviews (pelny dostep)
+        </protected_routes>
+      </role>
+    </user_roles>
+    <authentication>
+      <method>Email + haslo (Better Auth) z opcjonalnym Google OAuth</method>
+      <session_timeout>15 minut bezczynnosci</session_timeout>
+      <password_requirements>Minimum 8 znakow</password_requirements>
+      <email_verification>Wymagana po rejestracji (link logowany w konsoli w trybie dev)</email_verification>
+      <password_reset>Link resetowania hasla wysylany emailem (logowany w konsoli w trybie dev)</password_reset>
+    </authentication>
+    <sensitive_operations>
+      - Usuniecie klienta wymaga ponownego wpisania hasla
+      - Zmiany finansowe wymagaja ponownego wpisania hasla
+      - Usuniecie pracownika wymaga potwierdzenia haslem
+      - Zmiany w uprawnieniach wymagaja potwierdzenia haslem
+    </sensitive_operations>
+    <temporary_access>
+      - Wlasciciel moze nadac czasowy dostep do funkcji pracownikom i recepcji
+      - Dostep czasowy ma date waznosci
+      - System automatycznie cofa dostep po uplywie czasu
+    </temporary_access>
+  </security_and_access_control>
+
+  <subscription_model>
+    <plans>
+      <plan name="Basic">
+        <price>Nizsza cena miesieczna</price>
+        <features>
+          - Pelne zarzadzanie salonem (kalendarz, grafiki, uslugi)
+          - Kartoteka klientow
+          - System rezerwacji (salon + portal klienta)
+          - Platnosci i zadatki
+          - Galeria i portfolio
+          - Opinie
+          - Powiadomienia SMS i push
+          - Magazyn
+          - Promocje i program lojalnosciowy
+          - Raporty i statystyki
+          - Finanse i faktury
+        </features>
+        <excluded>
+          - Asystent AI glosowy (odbieranie polaczen)
+          - Asystent AI biznesowy (analiza, rekomendacje)
+          - Asystent AI content (generowanie tresci, social media, newslettery)
+          - Rekomendacje AI na dashboardzie
+          - Widget planowania dzialan marketingowych (AI)
+        </excluded>
+      </plan>
+      <plan name="Pro">
+        <price>Wyzsza cena miesieczna</price>
+        <features>
+          - Wszystko z planu Basic
+          - Asystent AI glosowy (automatyczne odbieranie polaczen telefonicznych)
+          - Asystent AI biznesowy (analiza danych, trendy, rekomendacje)
+          - Asystent AI content (generowanie opisow, postow, newsletterow)
+          - Rekomendacje AI na dashboardzie (dzien/tydzien)
+          - Widget planowania dzialan marketingowych
+        </features>
+      </plan>
+    </plans>
+    <billing>
+      - Rozliczenie miesieczne przez Stripe
+      - Okres probny (trial) dla nowych uzytkownikow
+      - Mozliwosc upgrade/downgrade w dowolnym momencie
+      - Automatyczne odnawianie subskrypcji
+      - Powiadomienie przed wygasnieciem
+      - Blokowanie funkcji AI po wygasnieciu planu Pro
+    </billing>
+  </subscription_model>
+
+  <core_features>
+    <infrastructure>
+      - Polaczenie z baza danych
+      - Schemat bazy danych
+      - Trwalosc danych po restarcie serwera
+      - Brak mock data w kodzie
+      - Backend odpytuje prawdziwa baze danych
+    </infrastructure>
+
+    <autentykacja_i_role>
+      - Rejestracja salonu (email + haslo przez Better Auth)
+      - Logowanie przez email + haslo
+      - Logowanie przez Google OAuth (opcjonalne)
+      - Weryfikacja adresu email po rejestracji
+      - Resetowanie hasla (link emailowy)
+      - Automatyczne wylogowanie po 15 min bezczynnosci
+      - Zarzadzanie rolami (wlasciciel, pracownik, recepcja)
+      - Nadawanie czasowego dostepu do funkcji
+      - Cofanie czasowego dostepu
+      - Potwierdzenie haslem dla operacji wrazliwych
+      - Rejestracja klienta (email + haslo)
+      - Logowanie klienta przez email
+    </autentykacja_i_role>
+
+    <dashboard>
+      - Przeglad dnia z wizytami
+      - Lista pracownikow prowadzacych uslugi danego dnia
+      - Szybkie akcje (dodaj wizyte, klienta, blokade)
+      - Statystyki odwolanych wizyt
+      - Informacje o wyslanych powiadomieniach o wolnych terminach
+      - Status akceptacji wczesniejszych terminow
+      - Statystyki z ostatnich 30 dni
+      - Rekomendacje AI na nastepny dzien (tylko plan Pro)
+      - Rekomendacje AI na nastepny tydzien (tylko plan Pro)
+      - Widget planowania dzialan marketingowych (tylko plan Pro)
+    </dashboard>
+
+    <kalendarz_i_grafiki>
+      - Kalendarz indywidualny dla kazdego pracownika
+      - Kalendarz ogolny salonu (widok wszystkich)
+      - Dodawanie wizyt do kalendarza
+      - Blokowanie terminow (przerwa, urlop)
+      - Widok dzienny/tygodniowy/miesieczny
+      - Drag & drop przesuwanie wizyt
+      - Kolorowanie wizyt wg statusu
+      - Kolorowanie wizyt wg pracownika
+      - Ustalanie grafiku pracy pracownikow
+      - Zarzadzanie dniami wolnymi
+      - Zarzadzanie urlopami
+    </kalendarz_i_grafiki>
+
+    <zarzadzanie_uslugami>
+      - Formularz dodawania uslugi
+      - Warianty uslugi (np. wlosy krotkie/srednie/dlugie)
+      - Rozne ceny dla wariantow
+      - Roznicowanie cen wg pracownika (np. senior drożej)
+      - Czas trwania uslugi
+      - Opis uslugi
+      - Przypisywanie uslugi do pracownikow
+      - Edycja uslugi
+      - Usuwanie uslugi
+      - Kategorie uslug
+    </zarzadzanie_uslugami>
+
+    <kartoteka_klientow>
+      - Imie i nazwisko klienta
+      - Telefon klienta
+      - Email klienta
+      - Historia wizyt
+      - Notatki o kliencie
+      - Preferencje klienta
+      - Alergie klienta
+      - Ulubiony pracownik
+      - Historia zabiegu z recepturami
+      - Ilosc uzytych materialow
+      - Technologie uzyte podczas zabiegu
+      - Wyszukiwanie klientow
+      - Filtrowanie klientow
+      - Edycja danych klienta
+      - Usuwanie klienta (z potwierdzeniem haslem)
+    </kartoteka_klientow>
+
+    <rezerwacje_salon>
+      - Umawianie wizyty przez pracownika
+      - Wybor uslugi przy rezerwacji
+      - Wybor pracownika przy rezerwacji
+      - Wybor terminu przy rezerwacji
+      - Przypisanie klienta do wizyty
+      - Edycja wizyty
+      - Anulowanie wizyty
+      - Oznaczanie wizyty jako wykonanej
+      - Umawianie kolejnej wizyty po zakonczeniu
+      - Dodawanie notatek do wizyty
+      - Rejestracja uzytych materialow podczas wizyty
+    </rezerwacje_salon>
+
+    <portal_klienta>
+      - Rejestracja klienta przez portal
+      - Wybor i zapisywanie ulubionych salonow
+      - Przegladanie uslug salonu z cenami
+      - Szczegoly uslugi
+      - Lista pracownikow wykonujacych usluge
+      - Zdjecia pracownikow
+      - Link do portfolio pracownika
+      - Link do opinii o pracowniku
+      - Wyroznienie ulubionego pracownika
+      - Proponowane terminy wizyty
+      - Wybor terminu
+      - Potwierdzenie rezerwacji
+      - Historia wizyt klienta
+      - Anulowanie wizyty przez klienta
+    </portal_klienta>
+
+    <platnosci_i_zadatki>
+      - Integracja z bramka platnosci (Stripe)
+      - Obsluga Blik P2P na telefon
+      - Konfiguracja wymagalnosci zadatku (per klient)
+      - Ustalanie wysokosci zadatku (% lub kwota)
+      - Platnosc zadatku przy rezerwacji
+      - Automatyczny zwrot przy odwolaniu >=24h
+      - Przepadek zadatku przy odwolaniu <24h
+      - Historia platnosci
+      - Potwierdzenie platnosci SMS
+    </platnosci_i_zadatki>
+
+    <galeria_i_portfolio>
+      - Dodawanie zdjec przez pracownikow
+      - Edycja zdjec przez administratora
+      - Usuwanie zdjec przez administratora
+      - Tagowanie zdjec pracownikiem
+      - Tagowanie zdjec usluga
+      - Zdjecia przed i po
+      - Opis uslugi przy zdjeciu
+      - Uzyte produkty przy zdjeciu
+      - Techniki przy zdjeciu
+      - Czas wykonania przy zdjeciu
+      - Widocznosc kosmetykow dla klientow
+      - Grupowanie zdjec w kategorie
+      - Grupowanie zdjec w albumy
+      - Przegladanie galerii przez klientow
+    </galeria_i_portfolio>
+
+    <opinie>
+      - Wystawianie opinii po wizycie
+      - Ocena gwiazdkowa (1-5)
+      - Komentarz tekstowy
+      - Opinia tylko gwiazdki
+      - Opinia tylko tekst
+      - Moderacja opinii przed publikacja
+      - Zatwierdzanie opinii przez admina
+      - Odrzucanie opinii przez admina
+      - Wyswietlanie opinii przy pracowniku
+      - Srednia ocen pracownika
+    </opinie>
+
+    <powiadomienia>
+      - Przypomnienie SMS 24h przed wizyta
+      - Przypomnienie SMS 1h przed wizyta
+      - Powiadomienie push 24h przed wizyta
+      - Powiadomienie push 1h przed wizyta
+      - Lista oczekujacych na wolne terminy
+      - Automatyczne powiadomienie przy odwolaniu
+      - Akceptacja wczesniejszego terminu
+      - Powiadomienia urodzinowe
+      - Prezenty urodzinowe (znizka/kosmetyki)
+      - Powiadomienia "dawno Cie nie bylo"
+      - Propozycja rezerwacji w powiadomieniu
+      - Konfiguracja typow powiadomien
+    </powiadomienia>
+
+    <magazyn>
+      - Dodawanie produktow do magazynu
+      - Stany magazynowe
+      - Alerty o niskim stanie
+      - Powiazanie zuzycia z wizytami
+      - Automatyczne odejmowanie ze stanu
+      - Historia zuzycia
+      - Raport zuzycia materialow
+      - Edycja produktu
+      - Usuwanie produktu
+      - Kategorie produktow
+    </magazyn>
+
+    <promocje_i_lojalnosc>
+      - Promocje procentowe
+      - Promocje 2+1
+      - Happy hours
+      - Znizka na pierwsza wizyte
+      - Pakiety uslug
+      - Ograniczenia czasowe promocji
+      - Kody rabatowe
+      - Generowanie kodow rabatowych
+      - Walidacja kodow rabatowych
+      - Program lojalnosciowy
+      - Zbieranie punktow
+      - Wymiana punktow na nagrody
+    </promocje_i_lojalnosc>
+
+    <raporty_i_statystyki>
+      - Raport przychodow
+      - Raport popularnosci uslug
+      - Raport oblozenia pracownikow
+      - Raport skutecznosci promocji
+      - Raport popularnosci pracownikow
+      - Wspolczynnik odwolan
+      - Kwota utracona przez odwolania (bez zastepstw)
+      - Zyski z poszczegolnych uslug
+      - Zyski i straty na materialach
+      - Porownania miesieczne
+      - Porownania roczne
+      - Eksport do PDF
+      - Eksport do Excel
+      - Filtrowanie raportow po datach
+      - Filtrowanie raportow po pracownikach
+    </raporty_i_statystyki>
+
+    <finanse>
+      - Rozliczenia z pracownikami
+      - Prowizje pracownikow
+      - Integracja z kasa fiskalna
+      - Integracja z drukarka fiskalna
+      - Wystawianie faktur dla osob prywatnych
+      - Wystawianie faktur dla firm
+      - Historia faktur
+      - Podglad faktury
+      - Wysylka faktury emailem
+    </finanse>
+
+    <subskrypcje>
+      - Strona z cennikiem i porownaniem planow (Basic vs Pro)
+      - Wyswietlanie szczegulow planu Basic
+      - Wyswietlanie szczegulow planu Pro
+      - Porownanie funkcji miedzy planami (tabela)
+      - Wybor planu przy rejestracji salonu
+      - Platnosc za subskrypcje przez Stripe
+      - Aktywacja subskrypcji po platnosci
+      - Panel zarzadzania subskrypcja w ustawieniach
+      - Upgrade z planu Basic na Pro
+      - Downgrade z planu Pro na Basic
+      - Anulowanie subskrypcji
+      - Automatyczne odnawianie subskrypcji
+      - Powiadomienie o wygasajacej subskrypcji
+      - Blokowanie funkcji AI dla planu Basic (gate)
+      - Dostep do funkcji AI dla planu Pro
+      - Historia platnosci za subskrypcje
+      - Okres probny (trial) dla nowych uzytkownikow
+    </subskrypcje>
+
+    <asystent_ai_glosowy_pro_only>
+      - Odbieranie polaczen telefonicznych (tylko plan Pro)
+      - Naturalnie brzmiacy glos
+      - Rozpoznawanie intencji klienta
+      - Pytanie o usluge
+      - Sprawdzanie dostepnosci terminow
+      - Umawianie wizyty przez telefon
+      - Wysylka SMS z potwierdzeniem
+      - Przekierowanie do czlowieka gdy nie radzi sobie
+      - Obsluga zmian terminow
+      - Obsluga odwolan
+    </asystent_ai_glosowy_pro_only>
+
+    <asystent_ai_biznesowy_pro_only>
+      - Analiza danych salonu (tylko plan Pro)
+      - Analiza trendow wewnetrznych
+      - Sledzenie trendow branzowych
+      - Sledzenie konkurencji
+      - Proaktywne sugestie
+      - Ostrzezenia o niepokojacych trendach
+      - Ostrzezenia o negatywnych opiniach
+      - Wskazywanie pozytywow do wzmocnienia
+      - Ekspert branzowy (dopasowany do typu dzialalnosci)
+      - Odpowiadanie na pytania o dane salonu
+      - Rekomendacje na nastepny dzien
+      - Rekomendacje na nastepny tydzien
+    </asystent_ai_biznesowy_pro_only>
+
+    <asystent_ai_content_pro_only>
+      - Generowanie opisow uslug (tylko plan Pro)
+      - Generowanie odpowiedzi na opinie
+      - Generowanie postow na social media
+      - Generowanie postow na podstawie zdjec
+      - Tworzenie newsletterow
+      - Wysylka newsletterow do klientow ze zgodami
+      - Zarzadzanie zgodami marketingowymi
+      - Szablony postow
+      - Edycja wygenerowanego contentu
+      - Harmonogram publikacji
+    </asystent_ai_content_pro_only>
+  </core_features>
+
+  <database_schema>
+    <tables>
+      <salons>
+        - id, name, phone, email, address, industry_type, created_at, settings_json
+      </salons>
+      <users>
+        - id, salon_id, phone, role, first_name, last_name, photo_url, is_active, created_at
+      </users>
+      <temporary_access>
+        - id, user_id, feature_name, granted_by, expires_at, created_at
+      </temporary_access>
+      <clients>
+        - id, salon_id, first_name, last_name, phone, email, notes, preferences, allergies, favorite_employee_id, created_at
+      </clients>
+      <services>
+        - id, salon_id, name, description, category_id, base_price, base_duration, is_active
+      </services>
+      <service_variants>
+        - id, service_id, name, price_modifier, duration_modifier
+      </service_variants>
+      <employee_service_prices>
+        - id, employee_id, service_id, variant_id, custom_price
+      </employee_service_prices>
+      <appointments>
+        - id, salon_id, client_id, employee_id, service_id, variant_id, start_time, end_time, status, notes, deposit_amount, deposit_paid, created_at
+      </appointments>
+      <appointment_materials>
+        - id, appointment_id, product_id, quantity_used, notes
+      </appointment_materials>
+      <treatment_history>
+        - id, appointment_id, recipe, techniques, materials_json, notes
+      </treatment_history>
+      <work_schedules>
+        - id, employee_id, day_of_week, start_time, end_time
+      </work_schedules>
+      <time_blocks>
+        - id, employee_id, start_time, end_time, block_type, reason
+      </time_blocks>
+      <gallery_photos>
+        - id, salon_id, employee_id, service_id, before_photo_url, after_photo_url, description, products_used, techniques, duration, created_at
+      </gallery_photos>
+      <albums>
+        - id, salon_id, name, category
+      </albums>
+      <photo_albums>
+        - id, photo_id, album_id
+      </photo_albums>
+      <reviews>
+        - id, salon_id, client_id, employee_id, appointment_id, rating, comment, status, created_at
+      </reviews>
+      <notifications>
+        - id, salon_id, client_id, type, message, sent_at, status
+      </notifications>
+      <waiting_list>
+        - id, salon_id, client_id, service_id, preferred_employee_id, preferred_date, notified_at, accepted
+      </waiting_list>
+      <products>
+        - id, salon_id, name, category, quantity, min_quantity, unit, price_per_unit
+      </products>
+      <product_usage>
+        - id, product_id, appointment_id, quantity, created_at
+      </product_usage>
+      <promotions>
+        - id, salon_id, name, type, value, start_date, end_date, conditions_json, is_active
+      </promotions>
+      <promo_codes>
+        - id, salon_id, code, promotion_id, usage_limit, used_count, expires_at
+      </promo_codes>
+      <loyalty_points>
+        - id, client_id, salon_id, points, last_updated
+      </loyalty_points>
+      <loyalty_transactions>
+        - id, loyalty_id, points_change, reason, appointment_id, created_at
+      </loyalty_transactions>
+      <invoices>
+        - id, salon_id, appointment_id, client_id, invoice_number, type, company_name, company_nip, amount, issued_at
+      </invoices>
+      <employee_commissions>
+        - id, employee_id, appointment_id, amount, percentage, paid_at
+      </employee_commissions>
+      <ai_conversations>
+        - id, salon_id, client_id, channel, transcript, created_at
+      </ai_conversations>
+      <newsletters>
+        - id, salon_id, subject, content, sent_at, recipients_count
+      </newsletters>
+      <marketing_consents>
+        - id, client_id, salon_id, consent_type, granted_at
+      </marketing_consents>
+      <favorite_salons>
+        - id, client_user_id, salon_id, created_at
+      </favorite_salons>
+      <subscription_plans>
+        - id, name, slug, price_monthly, stripe_price_id, features_json, is_active, created_at
+      </subscription_plans>
+      <salon_subscriptions>
+        - id, salon_id, plan_id, stripe_subscription_id, stripe_customer_id, status, trial_ends_at, current_period_start, current_period_end, canceled_at, created_at
+      </salon_subscriptions>
+      <subscription_payments>
+        - id, subscription_id, salon_id, amount, currency, stripe_payment_intent_id, status, paid_at, created_at
+      </subscription_payments>
+    </tables>
+  </database_schema>
+
+  <api_endpoints_summary>
+    <auth>
+      - POST /api/auth/sign-up (rejestracja email + haslo via Better Auth)
+      - POST /api/auth/sign-in (logowanie email + haslo)
+      - POST /api/auth/sign-out (wylogowanie)
+      - GET /api/auth/session (dane sesji)
+      - POST /api/auth/forgot-password (reset hasla)
+      - POST /api/auth/reset-password (nowe haslo)
+      - GET /api/auth/callback/google (Google OAuth callback)
+    </auth>
+    <salons>
+      - POST /api/salons (rejestracja salonu)
+      - GET /api/salons/:id
+      - PUT /api/salons/:id
+      - GET /api/salons/search
+    </salons>
+    <users>
+      - GET /api/users
+      - POST /api/users
+      - PUT /api/users/:id
+      - DELETE /api/users/:id
+      - POST /api/users/:id/temporary-access
+      - DELETE /api/users/:id/temporary-access/:accessId
+    </users>
+    <clients>
+      - GET /api/clients
+      - POST /api/clients
+      - GET /api/clients/:id
+      - PUT /api/clients/:id
+      - DELETE /api/clients/:id
+      - GET /api/clients/:id/history
+    </clients>
+    <services>
+      - GET /api/services
+      - POST /api/services
+      - GET /api/services/:id
+      - PUT /api/services/:id
+      - DELETE /api/services/:id
+      - POST /api/services/:id/variants
+      - PUT /api/services/:id/employee-prices
+    </services>
+    <appointments>
+      - GET /api/appointments
+      - POST /api/appointments
+      - GET /api/appointments/:id
+      - PUT /api/appointments/:id
+      - DELETE /api/appointments/:id
+      - POST /api/appointments/:id/complete
+      - GET /api/appointments/available-slots
+    </appointments>
+    <calendar>
+      - GET /api/calendar/employee/:id
+      - GET /api/calendar/all
+      - POST /api/calendar/time-blocks
+      - DELETE /api/calendar/time-blocks/:id
+    </calendar>
+    <gallery>
+      - GET /api/gallery
+      - POST /api/gallery
+      - PUT /api/gallery/:id
+      - DELETE /api/gallery/:id
+      - GET /api/gallery/albums
+      - POST /api/gallery/albums
+    </gallery>
+    <reviews>
+      - GET /api/reviews
+      - POST /api/reviews
+      - PUT /api/reviews/:id/moderate
+    </reviews>
+    <products>
+      - GET /api/products
+      - POST /api/products
+      - PUT /api/products/:id
+      - DELETE /api/products/:id
+      - POST /api/products/:id/usage
+    </products>
+    <promotions>
+      - GET /api/promotions
+      - POST /api/promotions
+      - PUT /api/promotions/:id
+      - DELETE /api/promotions/:id
+      - POST /api/promo-codes
+      - POST /api/promo-codes/validate
+    </promotions>
+    <loyalty>
+      - GET /api/loyalty/:clientId
+      - POST /api/loyalty/add-points
+      - POST /api/loyalty/redeem
+    </loyalty>
+    <reports>
+      - GET /api/reports/revenue
+      - GET /api/reports/services
+      - GET /api/reports/employees
+      - GET /api/reports/promotions
+      - GET /api/reports/cancellations
+      - GET /api/reports/materials
+      - GET /api/reports/export
+    </reports>
+    <invoices>
+      - GET /api/invoices
+      - POST /api/invoices
+      - GET /api/invoices/:id
+      - POST /api/invoices/:id/send
+    </invoices>
+    <payments>
+      - POST /api/payments/create-intent
+      - POST /api/payments/confirm
+      - POST /api/payments/refund
+    </payments>
+    <notifications>
+      - GET /api/notifications
+      - POST /api/notifications/send
+      - PUT /api/notifications/settings
+    </notifications>
+    <ai>
+      - POST /api/ai/voice/incoming
+      - POST /api/ai/chat
+      - POST /api/ai/generate-content
+      - POST /api/ai/generate-social-post
+      - GET /api/ai/recommendations
+    </ai>
+    <subscriptions>
+      - GET /api/subscriptions/plans (lista planow)
+      - GET /api/subscriptions/current (aktualny plan salonu)
+      - POST /api/subscriptions/checkout (utworz sesje Stripe Checkout)
+      - POST /api/subscriptions/webhook (Stripe webhook handler)
+      - PUT /api/subscriptions/change-plan (upgrade/downgrade)
+      - POST /api/subscriptions/cancel (anulowanie)
+      - GET /api/subscriptions/payments (historia platnosci)
+      - POST /api/subscriptions/portal (Stripe Customer Portal)
+    </subscriptions>
+    <newsletters>
+      - GET /api/newsletters
+      - POST /api/newsletters
+      - POST /api/newsletters/:id/send
+    </newsletters>
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <main_structure>
+      Aplikacja sklada sie z trzech glownych czesci:
+      1. Panel Salonu - dla wlasciciela, pracownikow i recepcji
+      2. Portal Klienta - dla klientow rezerwujacych wizyty
+      3. Strona publiczna salonu - prezentacja uslug i galerii
+
+      Panel Salonu:
+      - Boczna nawigacja (sidebar) z glownymi sekcjami
+      - Gorny pasek z powiadomieniami, profilem i AI asystentem
+      - Glowny obszar roboczy
+      - Responsywny - na mobile sidebar chowa sie do hamburger menu
+
+      Portal Klienta:
+      - Prosta nawigacja gorna
+      - Fokus na proces rezerwacji
+      - Mobile-first design
+    </main_structure>
+    <key_screens>
+      - Strona z cennikiem i planami subskrypcji
+      - Dashboard (przeglad dnia)
+      - Kalendarz (widok ogolny i indywidualny)
+      - Lista klientow
+      - Karta klienta
+      - Formularz wizyty
+      - Usluga i warianty
+      - Galeria zdjec
+      - Raporty
+      - Ustawienia (w tym zarzadzanie subskrypcja)
+      - Chat z AI asystentem (tylko plan Pro)
+      - Portal klienta - wybor salonu
+      - Portal klienta - rezerwacja
+      - Portal klienta - platnosc
+    </key_screens>
+  </ui_layout>
+
+  <design_system>
+    <color_palette>
+      - Primary: Nowoczesny odcien niebieskiego lub fioletowego
+      - Secondary: Komplementarny akcent
+      - Success: Zielony
+      - Warning: Pomaranczowy
+      - Error: Czerwony
+      - Neutrals: Skala szarosci
+      - Background: Jasny (z opcja dark mode)
+    </color_palette>
+    <typography>
+      - Font glowny: Inter lub podobny sans-serif
+      - Naglowki: Semi-bold/Bold
+      - Body: Regular
+      - Czytelnosc na mobile priorytetem
+    </typography>
+    <components>
+      - Przyciski z wyraznymi stanami (hover, active, disabled)
+      - Karty z delikatnym cieniem
+      - Formularze z inline walidacja
+      - Modalne okna dialogowe
+      - Toast notifications
+      - Loading skeletony
+    </components>
+  </design_system>
+
+  <implementation_steps>
+    <step number="1">
+      <title>Infrastruktura i Autentykacja</title>
+      <tasks>
+        - Konfiguracja projektu (Next.js 16 + PostgreSQL + Docker)
+        - Schemat bazy danych (Drizzle ORM)
+        - System autentykacji (Better Auth - email/haslo + Google OAuth)
+        - Role i uprawnienia
+        - Podstawowy layout aplikacji (shadcn/ui)
+      </tasks>
+    </step>
+    <step number="2">
+      <title>Zarzadzanie Salonem</title>
+      <tasks>
+        - CRUD uslug z wariantami
+        - Zarzadzanie pracownikami
+        - Kalendarz i grafiki
+        - Blokowanie terminow
+      </tasks>
+    </step>
+    <step number="3">
+      <title>Klienci i Wizyty</title>
+      <tasks>
+        - Kartoteka klientow
+        - System rezerwacji
+        - Historia zabiegu
+        - Notatki i preferencje
+      </tasks>
+    </step>
+    <step number="4">
+      <title>Portal Klienta</title>
+      <tasks>
+        - Rejestracja/logowanie klienta
+        - Przegladanie salonow i uslug
+        - Proces rezerwacji online
+        - Historia wizyt klienta
+      </tasks>
+    </step>
+    <step number="5">
+      <title>Subskrypcje i Platnosci</title>
+      <tasks>
+        - Integracja Stripe (subskrypcje miesieczne)
+        - Strona z planami i cennikiem
+        - Obsluga upgrade/downgrade planow
+        - Feature gating (blokowanie AI dla Basic)
+        - System zadatkow (Stripe + Blik P2P)
+        - Zwroty i przepadki
+      </tasks>
+    </step>
+    <step number="6">
+      <title>Galeria i Opinie</title>
+      <tasks>
+        - Upload zdjec
+        - Albumy i kategorie
+        - System opinii
+        - Moderacja
+      </tasks>
+    </step>
+    <step number="7">
+      <title>Powiadomienia</title>
+      <tasks>
+        - Integracja SMS
+        - Push notifications
+        - Przypomnienia o wizytach
+        - Lista oczekujacych
+        - Powiadomienia marketingowe
+      </tasks>
+    </step>
+    <step number="8">
+      <title>Magazyn i Finanse</title>
+      <tasks>
+        - Stany magazynowe
+        - Automatyczne zuzycie
+        - Faktury
+        - Rozliczenia z pracownikami
+        - Integracja fiskalna
+      </tasks>
+    </step>
+    <step number="9">
+      <title>Promocje i Lojalnosc</title>
+      <tasks>
+        - Typy promocji
+        - Kody rabatowe
+        - Program lojalnosciowy
+        - Punkty i nagrody
+      </tasks>
+    </step>
+    <step number="10">
+      <title>Raporty</title>
+      <tasks>
+        - Dashboard ze statystykami
+        - Raporty szczegolowe
+        - Eksport PDF/Excel
+        - Porownania okresow
+      </tasks>
+    </step>
+    <step number="11">
+      <title>Asystent AI (tylko plan Pro)</title>
+      <tasks>
+        - Integracja OpenRouter via Vercel AI SDK
+        - Asystent glosowy (telefon)
+        - Asystent biznesowy (chat)
+        - Generowanie contentu
+        - Newslettery
+        - Weryfikacja feature gating (blokada dla planu Basic)
+      </tasks>
+    </step>
+    <step number="12">
+      <title>Polish i Optymalizacja</title>
+      <tasks>
+        - Testy wydajnosci
+        - Optymalizacja mobile
+        - Accessibility
+        - Dark mode
+        - Final QA
+      </tasks>
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      - Salon moze w pelni zastapic Booksy
+      - Wszystkie podstawowe funkcje rezerwacji dzialaja bez zarzutu
+      - AI asystent skutecznie umawia wizyty przez telefon
+      - Klienci moga samodzielnie rezerwowac i placic zadatki
+    </functionality>
+    <user_experience>
+      - Intuicyjna obsluga nawet dla osob nietechnicznych
+      - Szybka nawigacja i responsywnosc
+      - Jasne komunikaty i feedback
+      - Minimalna liczba klikniec do wykonania akcji
+    </user_experience>
+    <technical_quality>
+      - Stabilna praca bez bledow krytycznych
+      - Dane bezpiecznie przechowywane
+      - Szybkie ladowanie stron (<3s)
+      - Dzialanie na wszystkich popularnych przegladarkach
+    </technical_quality>
+    <design_polish>
+      - Profesjonalny, nowoczesny wyglad
+      - Spojny design system
+      - Pelna responsywnosc
+      - Przyjemne animacje i przejscia
+    </design_polish>
+    <business_value>
+      - Oszczednosc czasu wlasciciela salonu
+      - Redukcja odwolanych wizyt dzieki zadatkom
+      - Automatyzacja komunikacji z klientami
+      - Wartosciowe insighty z AI asystenta (plan Pro)
+      - Klarowny model subskrypcyjny z mozliwoscia upgrade
+      - Niska bariera wejscia dzieki planowi Basic
+    </business_value>
+  </success_criteria>
+</project_specification>
