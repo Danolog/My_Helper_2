@@ -1,5 +1,50 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-07 (Session #105 - Feature #3 assigned)
+
+### Feature Assigned
+- Feature #3: "Data persists across server restart"
+- Description: CRITICAL: Verify data is stored in real database, not in-memory
+
+### What was verified:
+1. Claimed Feature #3 using feature_claim_and_get
+2. Checked Docker status:
+   - Docker socket at ~/.docker/run/docker.sock does NOT exist
+   - Docker daemon is not running
+   - Cannot start PostgreSQL container
+3. Checked port 3000:
+   - Node process found (PID 48046) but not responding to HTTP
+   - Curl returns "Couldn't connect to server"
+4. Code implementation verified correct:
+   - db.ts uses Drizzle ORM with postgres-js (real PostgreSQL, not in-memory)
+   - salons/route.ts uses db.select().from(salons) and db.insert(salons)
+   - schema.ts defines salons table with UUID primary keys
+   - Data WILL persist once database is running
+
+### BLOCKER - Docker Desktop not running:
+- Feature steps require: POST /api/salons, server restart, verify data persists
+- Cannot start PostgreSQL without Docker daemon running
+- This is a TRUE EXTERNAL BLOCKER - user must start Docker Desktop manually
+
+### Action taken:
+- Feature #3 SKIPPED (moved to end of queue - priority 374)
+- Code verified to use real database, not in-memory storage
+
+### Current Status
+- Feature #4: PASSED
+- Feature #5: PASSED
+- Feature #1, #2, #3: SKIPPED (Docker blocker)
+- Overall: 3/253 features passing (1.2%)
+
+### To unblock ALL infrastructure features:
+1. User must open Docker Desktop manually
+2. Run: docker compose up -d
+3. Run: pnpm drizzle-kit push
+4. Run: pnpm dev
+5. Re-test features #1, #2, #3
+
+---
+
 ## Session: 2026-02-07 (Session #104 - Feature #2 assigned)
 
 ### Feature Assigned
