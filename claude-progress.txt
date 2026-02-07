@@ -1,5 +1,100 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-07 (Session #12 - Feature #5 assigned)
+
+### Feature Assigned
+- Feature #5: "Backend API queries real database"
+
+### What was attempted:
+1. Claimed Feature #5 using feature_claim_and_get
+2. Checked Docker status:
+   - Docker client v29.1.3 installed
+   - Socket symlink exists at /var/run/docker.sock → ~/.docker/run/docker.sock
+   - Target socket file does NOT exist (Docker daemon not running)
+   - Node process on port 3000 not responding (http_code 000)
+3. Attempted to start Docker Desktop with `open -a Docker` - BLOCKED (command not allowed)
+4. Cannot verify API endpoints execute real SQL queries without database
+
+### BLOCKER - Docker Desktop not running + Cannot start it:
+Same persistent blocker as previous 11 sessions:
+- Docker daemon socket does not exist at ~/.docker/run/docker.sock
+- Cannot start PostgreSQL via docker-compose
+- The `open` command is blocked, so cannot programmatically start Docker Desktop
+- This is a TRUE EXTERNAL BLOCKER requiring user to manually start Docker Desktop
+
+### Action taken:
+- Feature #5 SKIPPED (moved to end of queue - priority 275)
+
+### What the user needs to do to unblock ALL infrastructure features:
+1. **Open Docker Desktop application manually** (macOS app in /Applications)
+2. Wait for Docker daemon to start (green icon in menu bar)
+3. Run: `./init.sh` (this will start PostgreSQL, apply schema, start dev server)
+4. Alternatively run manually:
+   - `docker compose up -d`
+   - `pnpm drizzle-kit push`
+   - `pnpm dev`
+5. Once running, features #1, #2, #3, #5 can be verified and marked passing
+
+### Current Status
+- Feature #4: PASSED
+- Features #1, #2, #3, #5: BLOCKED on Docker (external blocker)
+- Overall: 1/253 features passing (0.4%)
+
+### Critical Note:
+This is the 12th session blocked on Docker. The orchestrator keeps assigning infrastructure features that require Docker/PostgreSQL. User must start Docker Desktop manually before any of these features can be verified.
+
+---
+
+## Session: 2026-02-07 (Session #11 - Features #1, #2, #3 assigned as batch)
+
+### Features Assigned (Batch)
+- Feature #1: "Database connection established"
+- Feature #2: "Database schema applied correctly"
+- Feature #3: "Data persists across server restart"
+
+### What was attempted:
+1. Claimed Feature #1 using feature_claim_and_get
+2. Checked Docker status:
+   - Docker client v29.1.3 installed
+   - Socket at ~/.docker/run/docker.sock does NOT exist
+   - Docker daemon is not running
+   - `docker compose up -d` fails with "Cannot connect to Docker daemon"
+3. Tried `curl http://localhost:3000/api/health` - connection refused (server not running)
+4. Attempted to start Docker Desktop with `open -a Docker` - BLOCKED (command not allowed)
+5. All three features require PostgreSQL which runs via Docker
+
+### BLOCKER - Docker Desktop not running + Cannot start it:
+Same persistent blocker as previous 10 sessions:
+- Docker daemon socket does not exist at ~/.docker/run/docker.sock
+- Cannot start PostgreSQL via docker-compose
+- The `open` command is blocked, so cannot programmatically start Docker Desktop
+- This is a TRUE EXTERNAL BLOCKER requiring user to manually start Docker Desktop
+
+### Action taken:
+- Feature #1 SKIPPED (moved to end of queue - priority 272)
+- Feature #2 SKIPPED (moved to end of queue - priority 273)
+- Feature #3 SKIPPED (moved to end of queue - priority 274)
+
+### What the user needs to do to unblock ALL infrastructure features:
+1. **Open Docker Desktop application manually** (macOS app in /Applications)
+2. Wait for Docker daemon to start (green icon in menu bar)
+3. Run: `./init.sh` (this will start PostgreSQL, apply schema, start dev server)
+4. Alternatively run manually:
+   - `docker compose up -d`
+   - `pnpm drizzle-kit push`
+   - `pnpm dev`
+5. Once running, features #1, #2, #3, #5 can be verified and marked passing
+
+### Current Status
+- Feature #4: PASSED
+- Features #1, #2, #3, #5: BLOCKED on Docker (external blocker)
+- Overall: 1/253 features passing (0.4%)
+
+### Critical Note:
+This is the 11th session blocked on Docker. The orchestrator keeps assigning infrastructure features that require Docker/PostgreSQL. User must start Docker Desktop manually before any of these features can be verified.
+
+---
+
 ## Session: 2026-02-07 (Session #10 - Feature #5 assigned)
 
 ### Feature Assigned
