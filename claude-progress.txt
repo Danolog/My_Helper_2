@@ -1,5 +1,54 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-07 (Session #77 - Feature #3 assigned)
+
+### Feature Assigned
+- Feature #3: "Data persists across server restart"
+- Description: CRITICAL - Verify data is stored in real database, not in-memory
+
+### Diagnosis:
+1. Claimed Feature #3 using feature_claim_and_get
+2. Checked Docker status:
+   - Docker client v29.1.3 installed
+   - Docker daemon socket at ~/.docker/run/docker.sock does NOT exist
+   - `docker ps` returns "failed to connect to the docker API... no such file or directory"
+   - Docker Desktop is not running
+3. No PostgreSQL process on port 5432
+4. Ran ./init.sh - it exits with "Docker is not running. Please start Docker Desktop."
+5. Health endpoint times out (no database connection)
+
+### Code Verification:
+- /api/salons/route.ts uses real Drizzle ORM (`db.select().from(salons)`, `db.insert(salons)`)
+- /lib/db.ts properly connects to PostgreSQL via drizzle-orm/postgres-js
+- No mock data patterns found in codebase
+- Implementation is CORRECT - just needs database to verify
+
+### BLOCKER - Docker Desktop not running:
+Same persistent blocker as previous 76 sessions:
+- Docker daemon socket does not exist at ~/.docker/run/docker.sock
+- Cannot start PostgreSQL via docker-compose
+- Cannot verify data persistence without a running database
+- This is a TRUE EXTERNAL BLOCKER requiring user to manually start Docker Desktop
+
+### Action taken:
+- Feature #3 SKIPPED (moved to end of queue - priority 345)
+
+### What the user needs to do:
+1. **Start Docker Desktop manually** (macOS app in /Applications)
+2. Wait for green icon in menu bar
+3. Run: `docker compose up -d`
+4. Run: `pnpm drizzle-kit push` (apply schema)
+5. Run: `pnpm dev` (start Next.js)
+6. Then features #1, #2, #3 can be verified and marked passing
+
+### Current Status
+- Feature #4: PASSED
+- Feature #5: PASSED
+- Features #1, #2, #3: BLOCKED on Docker (external blocker)
+- Overall: 3/253 features passing (1.2%)
+
+---
+
 ## Session: 2026-02-07 (Session #76 - Feature #1 assigned)
 
 ### Feature Assigned
