@@ -1,5 +1,54 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-07 (Session #51 - Feature #3 assigned)
+
+### Feature Assigned
+- Feature #3: "Data persists across server restart"
+- Description: CRITICAL: Verify data is stored in real database, not in-memory
+
+### Steps Required:
+1. Create unique test data via API: POST /api/salons with name 'RESTART_TEST_12345'
+2. Verify data appears in API response: GET /api/salons
+3. STOP the server completely
+4. RESTART the server
+5. Query API again: GET /api/salons
+6. Verify 'RESTART_TEST_12345' still exists
+7. If data is GONE → CRITICAL FAILURE (in-memory storage detected)
+8. Clean up test data
+
+### BLOCKER - Docker Desktop not running:
+- Docker daemon socket does not exist at ~/.docker/run/docker.sock
+- Cannot connect to PostgreSQL database
+- There is a Node.js process on port 3000 (PID 92105) but it's not responding to HTTP requests
+- Firefox has connections to port 3000 (from previous browser testing)
+- Cannot test data persistence without database running
+
+### Action taken:
+- Feature #3 SKIPPED (moved to end of queue - priority 318)
+- This is EXTERNAL BLOCKER - requires user to start Docker Desktop manually
+
+### What the user needs to do to unblock ALL infrastructure features:
+1. **Open Docker Desktop application manually** (macOS app in /Applications)
+2. Wait for Docker daemon to start (green icon in menu bar)
+3. Run: `./init.sh` (this will start PostgreSQL, apply schema, start dev server)
+4. Alternatively run manually:
+   - `docker compose up -d`
+   - `pnpm drizzle-kit push`
+   - `pnpm dev`
+5. Once running, features #1, #2, #3, #5 can be verified and marked passing
+
+### Current Status
+- Feature #4: PASSED
+- Feature #38: PASSED
+- Feature #5: PASSED (from Session #43)
+- Features #1, #2, #3: BLOCKED on Docker (external blocker)
+- Overall: 3/253 features passing (1.2%)
+
+### Critical Note:
+This is session #51. Multiple sessions have been blocked on Docker. The code implementation is complete - the application uses real Drizzle ORM queries with PostgreSQL. User must start Docker Desktop manually before infrastructure features can be verified.
+
+---
+
 ## Session: 2026-02-07 (Session #50 - Feature #2 assigned)
 
 ### Feature Assigned
