@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Video, Shield, Database, Palette, Bot } from "lucide-react";
+import { Shield, Database, Palette, Bot } from "lucide-react";
 import { SetupChecklist } from "@/components/setup-checklist";
 import { StarterPromptModal } from "@/components/starter-prompt-modal";
 import { Button } from "@/components/ui/button";
@@ -18,38 +18,16 @@ export default function Home() {
               <Bot className="h-7 w-7 text-primary" />
             </div>
             <h1 className="text-5xl font-bold tracking-tight bg-gradient-to-r from-primary via-primary/90 to-primary/70 bg-clip-text text-transparent">
-              Starter Kit
+              MyHelper
             </h1>
           </div>
           <h2 className="text-2xl font-semibold text-muted-foreground">
-            Complete Boilerplate for AI Applications
+            Twoj asystent dla salonu uslugowego
           </h2>
           <p className="text-xl text-muted-foreground">
-            A complete agentic coding boilerplate with authentication, database, AI
-            integration, and modern tooling for building AI-powered applications
+            Przystepna cenowo alternatywa dla Booksy z asystentem AI,
+            rezerwacjami online i zarzadzaniem salonem
           </p>
-        </div>
-
-        {/* YouTube Tutorial Video */}
-        <div className="space-y-4">
-          <h3 className="text-2xl font-semibold flex items-center justify-center gap-2">
-            <Video className="h-6 w-6" />
-            Video Tutorial
-          </h3>
-          <p className="text-muted-foreground">
-            Watch the complete walkthrough of this agentic coding boilerplate:
-          </p>
-          <div className="relative w-full max-w-3xl mx-auto">
-            <div className="relative pb-[56.25%] h-0 overflow-hidden rounded-lg border">
-              <iframe
-                className="absolute top-0 left-0 w-full h-full"
-                src="https://www.youtube.com/embed/JQ86N3WOAh4"
-                title="Agentic Coding Boilerplate Tutorial"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              />
-            </div>
-          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-12">
@@ -118,10 +96,10 @@ export default function Home() {
               </p>
               <div className="space-y-2">
                 <code className="text-sm bg-muted p-2 rounded block">
-                  npm run db:generate
+                  pnpm run db:generate
                 </code>
                 <code className="text-sm bg-muted p-2 rounded block">
-                  npm run db:migrate
+                  pnpm run db:migrate
                 </code>
               </div>
             </div>

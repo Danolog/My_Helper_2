@@ -76,8 +76,8 @@ When reviewing code, you will systematically evaluate against these criteria:
 ## Execution Protocol
 
 1. **First, run automated quality checks:**
-   - Execute lint checks (e.g., `npm run lint`, `pylint`, `eslint`, etc.)
-   - Execute type checks (e.g., `npm run type-check`, `mypy`, `tsc --noEmit`, etc.)
+   - Execute lint checks (e.g., `pnpm run lint`, `pylint`, `eslint`, etc.)
+   - Execute type checks (e.g., `pnpm run typecheck`, `mypy`, `tsc --noEmit`, etc.)
    - Run any project-specific quality tools
    - Report all findings from these tools
 
