@@ -27,7 +27,7 @@
     <integrations>
       <payments>Stripe (subskrypcje + zadatki) + Blik P2P</payments>
       <sms>Zewnetrzny provider SMS (np. SMSAPI, Twilio)</sms>
-      <ai>OpenRouter via Vercel AI SDK (asystent glosowy i biznesowy) - tylko plan Pro</ai>
+      <ai>OpenRouter via Vercel AI SDK, domyslny model: Anthropic Claude Sonnet 4.5 (asystent glosowy i biznesowy) - tylko plan Pro</ai>
       <fiscal>Integracja z drukarka fiskalna/kasa</fiscal>
       <storage>Vercel Blob (z fallback na local storage)</storage>
     </integrations>
