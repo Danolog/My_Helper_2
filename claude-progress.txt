@@ -61,3 +61,46 @@
 - Docker daemon stopped during session, causing database unavailability
 - All code is correctly implemented to use real database via Drizzle ORM
 - No mock data patterns in codebase
+
+---
+
+## Session: 2026-02-07 (Session #2 - Features #1, #2, #3 assigned)
+
+### Features Assigned
+- Feature #1: "Database connection established"
+- Feature #2: "Database schema applied correctly"
+- Feature #3: "Data persists across server restart"
+
+### What was accomplished:
+1. Created health endpoint at `/api/health/route.ts`:
+   - GET /api/health returns JSON with status, timestamp, and database connection info
+   - Returns HTTP 200 with `status: "healthy"` when DB is connected
+   - Returns HTTP 503 with `status: "unhealthy"` when DB is disconnected
+   - Properly catches and reports connection errors
+
+2. Verified the health endpoint works correctly:
+   - Server runs on port 3000
+   - Endpoint returns proper JSON response
+   - Database status correctly reported as "disconnected" when PostgreSQL not running
+   - Took screenshot of health endpoint response
+
+3. Committed health endpoint code (commit: "Add health endpoint for database connection verification")
+
+### BLOCKER - Docker Desktop not running:
+All three infrastructure features require PostgreSQL database which runs via Docker.
+Docker daemon is not running on the system (socket not found at ~/.docker/run/docker.sock).
+
+### Features skipped due to blocker:
+- Feature #1, #2, #3 - skipped, moved to end of queue
+
+### To resolve:
+1. Start Docker Desktop on the Mac
+2. Run `docker compose up -d` to start PostgreSQL container
+3. Re-test the health endpoint - should return `status: "healthy"`
+4. Verify schema with `pnpm drizzle-kit push`
+5. Re-claim and verify features #1, #2, #3
+
+### Current Status
+- Feature #4: PASSED (from previous session)
+- Features #1, #2, #3, #5: BLOCKED on Docker
+- Overall: 1/253 features passing (0.4%)
