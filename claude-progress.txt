@@ -1,5 +1,68 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-07 (Session #36 - Feature #2 assigned)
+
+### Feature Assigned
+- Feature #2: "Database schema applied correctly"
+
+### What was attempted:
+1. Claimed Feature #2 using feature_claim_and_get
+2. Checked Docker status:
+   - Docker socket at ~/.docker/run/docker.sock does NOT exist
+   - Docker client v29.1.3 is installed but daemon not running
+   - Port 5432 (PostgreSQL) is not in use
+   - Port 3000 had stale node process (killed successfully)
+3. Verified schema.ts file has all required tables:
+   - `salons` table: id (uuid), name, phone, email, address, industryType, settingsJson, ownerId, createdAt, updatedAt
+   - `user` table: id, name, email, emailVerified, image, createdAt, updatedAt
+   - `clients` table: id (uuid), salonId, firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId
+   - `employees` table: id (uuid), salonId, userId, firstName, lastName, phone, email, photoUrl, role, isActive, color
+   - `services` table: id (uuid), salonId, categoryId, name, description, basePrice, baseDuration, isActive
+   - `appointments` table: id (uuid), salonId, clientId, employeeId, serviceId, startTime, endTime, status, notes, depositAmount, depositPaid
+   - `timeBlocks` table: id (uuid), employeeId, startTime, endTime, blockType, reason
+   - `serviceCategories` table: id (uuid), salonId, name, sortOrder
+   - Plus BetterAuth tables: session, account, verification
+4. Verified all foreign key relationships are properly defined
+5. Schema is complete and correct, just needs PostgreSQL to verify it's applied
+
+### BLOCKER - Docker Desktop not running:
+- Docker daemon socket does not exist at ~/.docker/run/docker.sock
+- Cannot start PostgreSQL container via docker-compose
+- Cannot verify schema is applied without database running
+- This is a TRUE EXTERNAL BLOCKER requiring user to manually start Docker Desktop
+- **This is now the 36th session blocked on Docker**
+
+### Action taken:
+- Feature #2 SKIPPED (moved to end of queue - priority 304)
+
+### Schema Verification (code review - will pass once DB is running):
+| Table | Key Columns | Foreign Keys | Status |
+|-------|-------------|--------------|--------|
+| salons | id, name, phone, email | ownerId → user.id | ✅ Correct |
+| user | id, name, email | - | ✅ Correct |
+| clients | id, salon_id, first_name, last_name | salonId → salons.id | ✅ Correct |
+| employees | id, salon_id, user_id | salonId → salons.id, userId → user.id | ✅ Correct |
+| services | id, salon_id, name, basePrice | salonId → salons.id | ✅ Correct |
+| appointments | id, salon_id, client_id, employee_id | Multiple FKs | ✅ Correct |
+
+### What the user needs to do to unblock ALL features:
+1. **Open Docker Desktop application manually** (macOS app in /Applications)
+2. Wait for Docker daemon to start (socket will appear at ~/.docker/run/docker.sock)
+3. Run: `docker compose up -d` to start PostgreSQL
+4. Wait for PostgreSQL to be ready
+5. Run: `pnpm drizzle-kit push` to apply schema
+6. Run: `pnpm dev` to start Next.js
+7. Test: `curl http://localhost:3000/api/health`
+8. Features #1, #2, #3, #5, #37, #39 can then be verified
+
+### Current Status
+- Feature #4: PASSED (no mock data in codebase)
+- Feature #38: PASSED (calendar color coding - previously verified)
+- Feature #2: BLOCKED on Docker (external blocker)
+- Overall: 2/253 features passing (0.8%)
+
+---
+
 ## Session: 2026-02-07 (Session #35 - Feature #1 assigned)
 
 ### Feature Assigned
