@@ -1,0 +1,62 @@
+# MyHelper Development Progress
+
+## Session: 2026-02-07
+
+### Features Completed
+- **Feature #4: No mock data patterns in codebase** - PASSED
+  - Ran all grep checks for mock data patterns
+  - No globalThis, devStore, mockData, testData, fakeData, sampleData, dummyData patterns found
+  - No TODO.*real, TODO.*database, STUB, MOCK patterns found
+  - No mocking libraries (json-server, miragejs, msw) in package.json
+  - Code is clean of mock patterns
+
+### Features In Progress
+- **Feature #5: Backend API queries real database** - BLOCKED (External Dependency)
+  - Created salons and clients tables in schema.ts
+  - Created /api/salons route with real Drizzle ORM queries
+  - Created /api/clients route with real Drizzle ORM queries
+  - Schema pushed to database
+  - BLOCKER: Docker daemon stopped mid-session
+  - Cannot verify SQL queries are executed without database running
+  - Implementation is complete and correct, just needs database to verify
+
+### Code Changes Made This Session
+1. Updated src/lib/schema.ts:
+   - Added uuid, jsonb imports from drizzle-orm/pg-core
+   - Added salons table with columns: id, name, phone, email, address, industryType, settingsJson, ownerId, createdAt, updatedAt
+   - Added clients table with columns: id, salonId, firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, createdAt, updatedAt
+
+2. Created src/app/api/salons/route.ts:
+   - GET endpoint to list all salons
+   - POST endpoint to create new salon
+   - Uses db.select().from(salons) and db.insert(salons) - real Drizzle ORM queries
+   - Includes console logging for SQL query verification
+
+3. Created src/app/api/clients/route.ts:
+   - GET endpoint to list clients (optionally filtered by salonId)
+   - POST endpoint to create new client
+   - Uses db.select().from(clients) and db.insert(clients) - real Drizzle ORM queries
+   - Includes console logging for SQL query verification
+
+4. Created scripts/test-db.ts:
+   - Database connection test script for debugging
+
+### Database Schema Changes
+- Ran pnpm drizzle-kit push to apply schema changes
+- Tables created: salons, clients (in addition to existing auth tables)
+
+### Next Steps
+1. Start Docker Desktop to run PostgreSQL
+2. Restart Next.js dev server
+3. Test API endpoints and verify SQL queries in logs
+4. Mark Feature #5 as passing once verified
+
+### Current Status
+- Feature #4: PASSED
+- Feature #5: Implementation complete, awaiting database for verification
+- Overall: 1/253 features passing (0.4%)
+
+### Notes
+- Docker daemon stopped during session, causing database unavailability
+- All code is correctly implemented to use real database via Drizzle ORM
+- No mock data patterns in codebase
