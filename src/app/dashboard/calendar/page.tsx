@@ -162,9 +162,8 @@ export default function CalendarPage() {
     setRescheduleDialogOpen(true);
   };
 
-  // Event click handler
+  // Event click handler - shows allergy warning when client has allergies
   const handleEventClick = (event: CalendarEvent) => {
-    // For now, just show a toast with event info
     const statusLabels: Record<string, string> = {
       scheduled: "Zaplanowana",
       confirmed: "Potwierdzona",
@@ -173,12 +172,28 @@ export default function CalendarPage() {
       no_show: "Niestawienie sie",
     };
 
-    toast.info(`Wizyta: ${event.title}`, {
-      description: `${event.appointment.client
-        ? `Klient: ${event.appointment.client.firstName} ${event.appointment.client.lastName}`
-        : "Brak przypisanego klienta"
-      } | Status: ${statusLabels[event.appointment.status] || event.appointment.status}`,
-    });
+    const clientName = event.appointment.client
+      ? `${event.appointment.client.firstName} ${event.appointment.client.lastName}`
+      : null;
+    const clientInfo = clientName
+      ? `Klient: ${clientName}`
+      : "Brak przypisanego klienta";
+    const statusInfo = `Status: ${statusLabels[event.appointment.status] || event.appointment.status}`;
+
+    // Check if the client has allergies to show a warning toast
+    const clientAllergies = event.appointment.client?.allergies;
+    const hasAllergies = clientAllergies && clientAllergies.trim().length > 0;
+
+    if (hasAllergies) {
+      toast.warning(`Wizyta: ${event.title}`, {
+        description: `${clientInfo} | ${statusInfo}\nUWAGA ALERGIE: ${clientAllergies}`,
+        duration: 8000,
+      });
+    } else {
+      toast.info(`Wizyta: ${event.title}`, {
+        description: `${clientInfo} | ${statusInfo}`,
+      });
+    }
   };
 
   // Confirm reschedule
