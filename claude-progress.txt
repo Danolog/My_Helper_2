@@ -1,5 +1,47 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-07 (Session #81 - Feature #3 assigned)
+
+### Feature Assigned
+- Feature #3: "Data persists across server restart"
+- Description: CRITICAL - Verify data is stored in real database, not in-memory
+
+### Diagnosis:
+1. Claimed Feature #3 using feature_claim_and_get
+2. Checked Docker status:
+   - Docker client v29.1.3 installed
+   - Docker daemon socket at ~/.docker/run/docker.sock does NOT exist
+   - `docker compose up -d` returns "Cannot connect to the Docker daemon"
+3. Node process (PIDs 13746, 25535) on port 3000 exist but are hung:
+   - Shows in `lsof -i :3000` with multiple CLOSED connections
+   - `curl http://localhost:3000/api/health` returns "Server not responding"
+   - Cannot kill processes (they persist even after kill -9)
+
+### BLOCKER - Docker Desktop not running:
+Same persistent blocker as previous 80 sessions:
+- Docker daemon socket does not exist
+- Cannot start PostgreSQL via docker-compose
+- Server on port 3000 is hung and not responding
+- Cannot fully kill the hung processes
+- This is a TRUE EXTERNAL BLOCKER requiring user intervention
+
+### Action taken:
+- Feature #3 SKIPPED (moved to end of queue - priority 349)
+
+### What the user needs to do to unblock:
+1. **Kill hung processes**: `kill -9 13746 25535` (or restart machine)
+2. **Start Docker Desktop manually** (macOS app in /Applications)
+3. Wait for green icon in Docker menu bar
+4. Run: `./init.sh` (will start PostgreSQL, apply schema, start dev server)
+5. Then features #1, #2, #3 can be verified and marked passing
+
+### Current Status
+- Features #4, #5, one other: PASSED (3 total)
+- Features #1, #2, #3: BLOCKED on Docker (external blocker)
+- Overall: 3/253 features passing (1.2%)
+
+---
+
 ## Session: 2026-02-07 (Session #80 - Feature #1 assigned)
 
 ### Feature Assigned
