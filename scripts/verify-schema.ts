@@ -66,7 +66,7 @@ async function verifySchema() {
 
   try {
     // Test connection
-    const result = await db.execute(sql`SELECT 1 as test`);
+    await db.execute(sql`SELECT 1 as test`);
     console.log('✅ Database connection successful\n');
 
     // Get all tables
@@ -77,7 +77,7 @@ async function verifySchema() {
       ORDER BY table_name
     `);
 
-    const existingTables = (tablesResult.rows as { table_name: string }[]).map(r => r.table_name);
+    const existingTables = (tablesResult as unknown as { table_name: string }[]).map(r => r.table_name);
     console.log(`📋 Found ${existingTables.length} tables in database:\n`);
 
     // Check each expected table
@@ -107,7 +107,7 @@ async function verifySchema() {
         WHERE table_name = ${tableName}
       `);
 
-      const existingColumns = (columnsResult.rows as { column_name: string }[]).map(r => r.column_name);
+      const existingColumns = (columnsResult as unknown as { column_name: string }[]).map(r => r.column_name);
 
       let allColumnsExist = true;
       for (const col of columns) {
