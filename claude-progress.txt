@@ -1,5 +1,64 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-07 (Session #31 - Feature #37 assigned)
+
+### Feature Assigned
+- Feature #37: "Drag and drop appointment reschedule"
+
+### What was attempted:
+1. Claimed Feature #37 using feature_claim_and_get
+2. Checked Docker status:
+   - Docker socket at ~/.docker/run/docker.sock does NOT exist
+   - Docker client v29.1.3 is installed but daemon not running
+   - `docker compose up -d` fails with "Cannot connect to the Docker daemon"
+3. Started Next.js dev server successfully on port 3000
+4. Used browser automation to navigate to calendar page
+5. Calendar page requires:
+   - Authentication (Better Auth uses PostgreSQL)
+   - Database access for fetching employees and appointments
+6. Console errors: "Failed to fetch RSC payload" - server-side components failing due to no DB
+7. Feature step 7 explicitly requires: "Check database for new time"
+
+### Implementation Status (from previous Session #6):
+The drag-and-drop calendar functionality was implemented in Session #6:
+- `/src/app/dashboard/calendar/page.tsx` - Full calendar page with drag-drop
+- `/src/components/calendar/time-grid.tsx` - Time grid with employee columns
+- `/src/components/calendar/calendar-event.tsx` - Draggable appointment cards
+- `/src/components/calendar/reschedule-dialog.tsx` - Confirmation dialog
+- `/src/app/api/appointments/route.ts` - GET and POST endpoints
+- `/src/app/api/appointments/[id]/route.ts` - PUT for reschedule, DELETE for cancel
+- All code uses real Drizzle ORM queries (db.select, db.insert, db.update)
+- TypeScript passes (`pnpm run typecheck`)
+
+### BLOCKER - Docker Desktop not running:
+- Docker daemon socket does not exist at ~/.docker/run/docker.sock
+- Cannot start PostgreSQL container via docker-compose
+- Cannot verify drag-drop functionality end-to-end without database
+- Feature step 7 requires database verification: "Check database for new time"
+- This is a TRUE EXTERNAL BLOCKER requiring user to manually start Docker Desktop
+- **This is now the 31st session blocked on Docker**
+
+### Action taken:
+- Feature #37 SKIPPED (moved to end of queue - priority 299)
+
+### What the user needs to do to unblock ALL features:
+1. **Open Docker Desktop application manually** (macOS app in /Applications)
+2. Wait for Docker daemon to start (socket will appear at ~/.docker/run/docker.sock)
+3. Run: `docker compose up -d` to start PostgreSQL
+4. Wait for PostgreSQL to be ready
+5. Run: `pnpm drizzle-kit push` to apply schema
+6. Run: `pnpm dev` to start Next.js
+7. Test: Navigate to http://localhost:3000/api/health - should return `status: "healthy"`
+8. Then features including #37 can be verified and marked passing
+
+### Current Status
+- Feature #4: PASSED
+- Feature #37: BLOCKED on Docker (code complete, needs DB verification)
+- Features #1, #2, #3, #5: BLOCKED on Docker (external blocker)
+- Overall: 1/253 features passing (0.4%)
+
+---
+
 ## Session: 2026-02-07 (Session #30 - Feature #2 assigned)
 
 ### Feature Assigned
