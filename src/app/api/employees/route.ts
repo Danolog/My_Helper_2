@@ -1,7 +1,48 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
+
+// Predefined palette of distinct colors for employees
+const EMPLOYEE_COLORS = [
+  "#3b82f6", // Blue
+  "#10b981", // Emerald
+  "#f59e0b", // Amber
+  "#ef4444", // Red
+  "#8b5cf6", // Violet
+  "#ec4899", // Pink
+  "#06b6d4", // Cyan
+  "#f97316", // Orange
+  "#84cc16", // Lime
+  "#6366f1", // Indigo
+  "#14b8a6", // Teal
+  "#a855f7", // Purple
+];
+
+// Get next available color for a salon
+async function getNextAvailableColor(salonId: string): Promise<string> {
+  try {
+    const existingEmployees = await db
+      .select({ color: employees.color })
+      .from(employees)
+      .where(eq(employees.salonId, salonId));
+
+    const usedColors = new Set(existingEmployees.map((e) => e.color).filter(Boolean));
+
+    // Find first unused color
+    for (const color of EMPLOYEE_COLORS) {
+      if (!usedColors.has(color)) {
+        return color;
+      }
+    }
+
+    // If all colors used, cycle through with index
+    const index = existingEmployees.length % EMPLOYEE_COLORS.length;
+    return EMPLOYEE_COLORS[index] ?? EMPLOYEE_COLORS[0] ?? "#3b82f6";
+  } catch {
+    return EMPLOYEE_COLORS[0] ?? "#3b82f6";
+  }
+}
 
 // GET /api/employees - List all employees
 export async function GET(request: Request) {
@@ -12,16 +53,26 @@ export async function GET(request: Request) {
 
     console.log("[Employees API] GET with params:", { salonId, activeOnly });
 
-    let query = db.select().from(employees);
-
-    if (salonId) {
-      query = query.where(eq(employees.salonId, salonId)) as typeof query;
+    let allEmployees;
+    if (salonId && activeOnly) {
+      allEmployees = await db
+        .select()
+        .from(employees)
+        .where(and(eq(employees.salonId, salonId), eq(employees.isActive, true)));
+    } else if (salonId) {
+      allEmployees = await db
+        .select()
+        .from(employees)
+        .where(eq(employees.salonId, salonId));
+    } else if (activeOnly) {
+      allEmployees = await db
+        .select()
+        .from(employees)
+        .where(eq(employees.isActive, true));
+    } else {
+      allEmployees = await db.select().from(employees);
     }
-    if (activeOnly) {
-      query = query.where(eq(employees.isActive, true)) as typeof query;
-    }
 
-    const allEmployees = await query;
     console.log(`[Employees API] Query returned ${allEmployees.length} rows`);
 
     return NextResponse.json({
@@ -51,7 +102,10 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(`[Employees API] Creating employee: ${firstName} ${lastName}`);
+    // Get next available color if not provided
+    const employeeColor = color || await getNextAvailableColor(salonId);
+
+    console.log(`[Employees API] Creating employee: ${firstName} ${lastName} with color ${employeeColor}`);
     const [newEmployee] = await db
       .insert(employees)
       .values({
@@ -63,7 +117,7 @@ export async function POST(request: Request) {
         email: email || null,
         photoUrl: photoUrl || null,
         role: role || "employee",
-        color: color || "#3b82f6",
+        color: employeeColor,
         isActive: true,
       })
       .returning();
