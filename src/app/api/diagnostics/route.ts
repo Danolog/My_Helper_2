@@ -73,7 +73,7 @@ export async function GET(req: Request) {
           schemaApplied = false;
           // If we can't query the user table, it's likely migrations haven't run
           if (!dbError) {
-            dbError = "Schema not applied. Run: npm run db:migrate";
+            dbError = "Schema not applied. Run: pnpm run db:migrate";
           }
         }
       })();

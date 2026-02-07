@@ -1,36 +1,23 @@
-# Agentic Coding Boilerplate
+# MyHelper
 
-A complete agentic coding boilerplate with authentication, PostgreSQL database, AI chat functionality, and modern UI components - perfect for building AI-powered applications and autonomous agents.
+Przystepna cenowo alternatywa dla Booksy z asystentem AI dla salonow uslugowych. System rezerwacji online, zarzadzanie klientami, uslugami i personelem z inteligentnym asystentem AI.
 
-## 🚀 Features
+## Features
 
-- **🔐 Authentication**: Better Auth with Google OAuth integration
-- **🗃️ Database**: Drizzle ORM with PostgreSQL
-- **🤖 AI Integration**: Vercel AI SDK with OpenRouter (access to 100+ AI models)
-- **📁 File Storage**: Automatic local/Vercel Blob storage with seamless switching
-- **🎨 UI Components**: shadcn/ui with Tailwind CSS
-- **⚡ Modern Stack**: Next.js 16, React 19, TypeScript
-- **📱 Responsive**: Mobile-first design approach
-
-## 🎥 Video Tutorial
-
-Watch the complete walkthrough of this agentic coding template:
-
-[![Agentic Coding Boilerplate Tutorial](https://img.youtube.com/vi/JQ86N3WOAh4/maxresdefault.jpg)](https://youtu.be/JQ86N3WOAh4)
-
-<a href="https://youtu.be/JQ86N3WOAh4" target="_blank" rel="noopener noreferrer">🔗 Watch on YouTube</a>
-
-## ☕ Support This Project
-
-If this boilerplate helped you build something awesome, consider buying me a coffee!
-
-[![Buy me a coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/leonvanzyl)
+- **Authentication**: Better Auth with Google OAuth integration
+- **Database**: Drizzle ORM with PostgreSQL
+- **AI Integration**: Vercel AI SDK with OpenRouter (Anthropic Claude Sonnet 4.5)
+- **Subscriptions**: Stripe-based Basic and Pro plans
+- **File Storage**: Automatic local/Vercel Blob storage with seamless switching
+- **UI Components**: shadcn/ui with Tailwind CSS
+- **Modern Stack**: Next.js 16, React 19, TypeScript
+- **Responsive**: Mobile-first design approach
 
 ## 📋 Prerequisites
 
 Before you begin, ensure you have the following installed on your machine:
 
-- **Node.js**: Version 18.0 or higher (<a href="https://nodejs.org/" target="_blank">Download here</a>)
+- **Node.js**: Version 22.0 or higher (<a href="https://nodejs.org/" target="_blank">Download here</a>)
 - **Git**: For cloning the repository (<a href="https://git-scm.com/" target="_blank">Download here</a>)
 - **PostgreSQL**: Either locally installed or access to a hosted service like Vercel Postgres
 
@@ -60,8 +47,8 @@ The CLI will:
 
 1. Update `.env` with your API keys and database credentials
 2. Start the database: `docker compose up -d`
-3. Run migrations: `npm run db:migrate`
-4. Start dev server: `npm run dev`
+3. Run migrations: `pnpm run db:migrate`
+4. Start dev server: `pnpm run dev`
 
 ### Manual Setup (Alternative)
 
@@ -72,8 +59,8 @@ If you prefer to set up manually:
 **Option A: Clone with Git**
 
 ```bash
-git clone https://github.com/leonvanzyl/agentic-coding-starter-kit.git
-cd agentic-coding-starter-kit
+git clone <your-repo-url>
+cd MyHelper
 ```
 
 **Option B: Download ZIP**
@@ -82,7 +69,7 @@ Download the repository as a ZIP file and extract it to your desired location.
 **2. Install Dependencies**
 
 ```bash
-npm install
+pnpm install
 ```
 
 **3. Environment Setup**
@@ -110,7 +97,7 @@ GOOGLE_CLIENT_SECRET="your-google-client-secret"
 # Get your API key from: https://openrouter.ai/settings/keys
 # View available models at: https://openrouter.ai/models
 OPENROUTER_API_KEY="sk-or-v1-your-openrouter-api-key-here"
-OPENROUTER_MODEL="openai/gpt-5-mini"
+OPENROUTER_MODEL="anthropic/claude-sonnet-4-5-20250929"
 
 # App URL (for production deployments)
 NEXT_PUBLIC_APP_URL="http://localhost:3000"
@@ -126,14 +113,14 @@ BLOB_READ_WRITE_TOKEN=""
 Generate and run database migrations:
 
 ```bash
-npm run db:generate
-npm run db:migrate
+pnpm run db:generate
+pnpm run db:migrate
 ```
 
 **5. Start the Development Server**
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 Your application will be available at [http://localhost:3000](http://localhost:3000)
@@ -214,16 +201,16 @@ src/
 ## 🔧 Available Scripts
 
 ```bash
-npm run dev          # Start development server with Turbopack
-npm run build        # Build for production
-npm run start        # Start production server
-npm run lint         # Run ESLint
-npm run db:generate  # Generate database migrations
-npm run db:migrate   # Run database migrations
-npm run db:push      # Push schema changes to database
-npm run db:studio    # Open Drizzle Studio (database GUI)
-npm run db:dev       # Push schema for development
-npm run db:reset     # Reset database (drop all tables)
+pnpm run dev          # Start development server with Turbopack
+pnpm run build        # Build for production
+pnpm run start        # Start production server
+pnpm run lint         # Run ESLint
+pnpm run db:generate  # Generate database migrations
+pnpm run db:migrate   # Run database migrations
+pnpm run db:push      # Push schema changes to database
+pnpm run db:studio    # Open Drizzle Studio (database GUI)
+pnpm run db:dev       # Push schema for development
+pnpm run db:reset     # Reset database (drop all tables)
 ```
 
 ## 📖 Pages Overview
@@ -239,7 +226,7 @@ npm run db:reset     # Reset database (drop all tables)
 1. Install the Vercel CLI globally:
 
    ```bash
-   npm install -g vercel
+   pnpm install -g vercel
    ```
 
 2. Deploy your application:
@@ -260,17 +247,11 @@ Ensure these are set in your production environment:
 - `GOOGLE_CLIENT_ID` - Google OAuth Client ID
 - `GOOGLE_CLIENT_SECRET` - Google OAuth Client Secret
 - `OPENROUTER_API_KEY` - OpenRouter API key (optional, for AI chat functionality)
-- `OPENROUTER_MODEL` - Model name from OpenRouter (optional, defaults to openai/gpt-5-mini)
+- `OPENROUTER_MODEL` - Model name from OpenRouter (optional, defaults to anthropic/claude-sonnet-4-5-20250929)
 - `NEXT_PUBLIC_APP_URL` - Your production domain
 - `BLOB_READ_WRITE_TOKEN` - Vercel Blob token (optional, uses local storage if not set)
 
-## 🎥 Tutorial Video
-
-Watch my comprehensive tutorial on how to use this agentic coding boilerplate to build AI-powered applications:
-
-<a href="https://youtu.be/JQ86N3WOAh4" target="_blank" rel="noopener noreferrer">📺 YouTube Tutorial - Building with Agentic Coding Boilerplate</a>
-
-## 🤖 Claude Code Commands
+## Claude Code Commands
 
 This project includes custom slash commands for [Claude Code](https://claude.ai/code) that streamline feature development with GitHub integration.
 
@@ -431,10 +412,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 If you encounter any issues:
 
-1. Check the [Issues](https://github.com/leonvanzyl/agentic-coding-starter-kit/issues) section
-2. Review the documentation above
-3. Create a new issue with detailed information about your problem
-
----
-
-**Happy coding! 🚀**
+1. Review the documentation above
+2. Create a new issue with detailed information about your problem

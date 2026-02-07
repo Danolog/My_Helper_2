@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Interactive setup wizard for the Agentic Coding Starter Kit.
+ * Interactive setup wizard for MyHelper.
  * Run with: npx tsx scripts/setup.ts
  */
 
@@ -76,7 +76,7 @@ async function confirm(question: string): Promise<boolean> {
 }
 
 function checkNodeVersion(): boolean {
-  const requiredMajor = 20;
+  const requiredMajor = 22;
   const currentVersion = process.version;
   const currentMajor = parseInt(currentVersion.slice(1).split(".")[0] || "0", 10);
 
@@ -225,7 +225,7 @@ function printNextSteps(envStatus: EnvStatus) {
 }
 
 async function main() {
-  header("Agentic Coding Starter Kit - Setup Wizard");
+  header("MyHelper - Setup Wizard");
 
   // Step 1: Check Node version
   log("Checking Node.js version...", "cyan");

@@ -12,35 +12,35 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-const STARTER_PROMPT = `I'm working with an agentic coding boilerplate project that includes authentication, database integration, and AI capabilities. Here's what's already set up:
+const STARTER_PROMPT = `I'm working with the MyHelper project - an affordable Booksy alternative with AI assistant for service salons. Here's what's already set up:
 
-## Current Agentic Coding Boilerplate Structure
+## Current MyHelper Project Structure
 - **Authentication**: Better Auth with Google OAuth integration
 - **Database**: Drizzle ORM with PostgreSQL setup  
-- **AI Integration**: Vercel AI SDK with OpenAI integration
+- **AI Integration**: Vercel AI SDK with OpenRouter (Anthropic Claude Sonnet 4.5)
 - **UI**: shadcn/ui components with Tailwind CSS
 - **Current Routes**:
   - \`/\` - Home page with setup instructions and feature overview
   - \`/dashboard\` - Protected dashboard page (requires authentication)
-  - \`/chat\` - AI chat interface (requires OpenAI API key)
+  - \`/chat\` - AI chat interface (requires OpenRouter API key)
 
 ## Important Context
-This is an **agentic coding boilerplate/starter template** - all existing pages and components are meant to be examples and should be **completely replaced** to build the actual AI-powered application.
+This is the **MyHelper** project - an affordable Booksy alternative for service salons with AI assistant capabilities. The existing pages and components are the starting point and should be **extended and customized** to build the full application.
 
-### CRITICAL: You MUST Override All Boilerplate Content
-**DO NOT keep any boilerplate components, text, or UI elements unless explicitly requested.** This includes:
+### CRITICAL: Build on the MyHelper Foundation
+**Extend the existing MyHelper structure** to implement the full feature set:
 
-- **Remove all placeholder/demo content** (setup checklists, welcome messages, boilerplate text)
-- **Replace the entire navigation structure** - don't keep the existing site header or nav items
-- **Override all page content completely** - don't append to existing pages, replace them entirely
-- **Remove or replace all example components** (setup-checklist, starter-prompt-modal, etc.)
-- **Replace placeholder routes and pages** with the actual application functionality
+- **Replace placeholder/demo content** with actual MyHelper functionality
+- **Customize the navigation** for salon management workflows
+- **Build out the pages** for bookings, services, clients, and salon management
+- **Add subscription features** (Basic and Pro plans via Stripe)
+- **Implement AI tools** (voice assistant, business analytics, content generator) for Pro plan
 
 ### Required Actions:
-1. **Start Fresh**: Treat existing components as temporary scaffolding to be removed
-2. **Complete Replacement**: Build the new application from scratch using the existing tech stack
-3. **No Hybrid Approach**: Don't try to integrate new features alongside existing boilerplate content
-4. **Clean Slate**: The final application should have NO trace of the original boilerplate UI or content
+1. **Build on existing stack**: Use the existing tech stack and extend it
+2. **Implement MyHelper features**: Bookings, services, clients, salon management, subscriptions
+3. **AI features for Pro plan**: Voice assistant, business analytics, content generation
+4. **Maintain consistency**: Follow existing patterns and coding conventions
 
 The only things to preserve are:
 - **All installed libraries and dependencies** (DO NOT uninstall or remove any packages from package.json)
@@ -60,15 +60,15 @@ The only things to preserve are:
 - Lucide React icons
 
 ## AI Model Configuration
-**IMPORTANT**: When implementing any AI functionality, always use the \`OPENAI_MODEL\` environment variable for the model name instead of hardcoding it:
+**IMPORTANT**: When implementing any AI functionality, always use the \`OPENROUTER_MODEL\` environment variable for the model name instead of hardcoding it:
 
 \`\`\`typescript
 // ✓ Correct - Use environment variable
-const model = process.env.OPENAI_MODEL || "anthropic/claude-sonnet-4-5-20250929";
-model: openai(model)
+const model = process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4-5-20250929";
+model: openrouter(model)
 
 // ✗ Incorrect - Don't hardcode model names
-model: openai("anthropic/claude-sonnet-4-5-20250929")
+model: openrouter("anthropic/claude-sonnet-4-5-20250929")
 \`\`\`
 
 This allows for easy model switching without code changes and ensures consistency across the application.
@@ -86,12 +86,10 @@ The project already includes several shadcn/ui components (button, dialog, avata
 [PROJECT_DESCRIPTION]
 
 ## Request
-Please help me transform this boilerplate into my actual application. **You MUST completely replace all existing boilerplate code** to match my project requirements. The current implementation is just temporary scaffolding that should be entirely removed and replaced.
+Please help me build out the MyHelper application features. Extend the existing codebase to implement the full functionality described above.
 
-## Final Reminder: COMPLETE REPLACEMENT REQUIRED
-**⚠️ IMPORTANT**: Do not preserve any of the existing boilerplate UI, components, or content. The user expects a completely fresh application that implements their requirements from scratch. Any remnants of the original boilerplate (like setup checklists, welcome screens, demo content, or placeholder navigation) indicate incomplete implementation.
-
-**Success Criteria**: The final application should look and function as if it was built from scratch for the specific use case, with no evidence of the original boilerplate template.
+## Success Criteria
+**The application should be a fully functional salon management platform** with online booking, client management, service catalog, and AI-powered tools for Pro plan subscribers. It should work as a complete, polished Booksy alternative.
 
 ## Post-Implementation Documentation
 After completing the implementation, you MUST document any new features or significant changes in the \`/docs/features/\` directory:

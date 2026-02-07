@@ -18,36 +18,36 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "Agentic Coding Boilerplate",
-    template: "%s | Agentic Coding Boilerplate",
+    default: "MyHelper",
+    template: "%s | MyHelper",
   },
   description:
-    "Complete agentic coding boilerplate with authentication, database, AI integration, and modern tooling - perfect for building AI-powered applications and autonomous agents by Leon van Zyl",
+    "MyHelper - przystepna cenowo alternatywa dla Booksy z asystentem AI dla salonow uslugowych",
   keywords: [
     "Next.js",
     "React",
     "TypeScript",
     "AI",
     "OpenRouter",
-    "Boilerplate",
+    "Booksy alternative",
     "Authentication",
     "PostgreSQL",
   ],
-  authors: [{ name: "Leon van Zyl" }],
-  creator: "Leon van Zyl",
+  authors: [{ name: "MyHelper Team" }],
+  creator: "MyHelper Team",
   openGraph: {
     type: "website",
     locale: "en_US",
-    siteName: "Agentic Coding Boilerplate",
-    title: "Agentic Coding Boilerplate",
+    siteName: "MyHelper",
+    title: "MyHelper",
     description:
-      "Complete agentic coding boilerplate with authentication, database, AI integration, and modern tooling",
+      "MyHelper - przystepna cenowo alternatywa dla Booksy z asystentem AI dla salonow uslugowych",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Agentic Coding Boilerplate",
+    title: "MyHelper",
     description:
-      "Complete agentic coding boilerplate with authentication, database, AI integration, and modern tooling",
+      "MyHelper - przystepna cenowo alternatywa dla Booksy z asystentem AI dla salonow uslugowych",
   },
   robots: {
     index: true,
@@ -59,10 +59,10 @@ export const metadata: Metadata = {
 const jsonLd = {
   "@context": "https://schema.org",
   "@type": "WebApplication",
-  name: "Agentic Coding Boilerplate",
+  name: "MyHelper",
   description:
     "Complete agentic coding boilerplate with authentication, database, AI integration, and modern tooling",
-  applicationCategory: "DeveloperApplication",
+  applicationCategory: "BusinessApplication",
   operatingSystem: "Any",
   offers: {
     "@type": "Offer",
@@ -71,7 +71,7 @@ const jsonLd = {
   },
   author: {
     "@type": "Person",
-    name: "Leon van Zyl",
+    name: "MyHelper Team",
   },
 };
 

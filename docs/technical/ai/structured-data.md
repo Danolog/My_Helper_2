@@ -29,7 +29,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 
 const { object } = await generateObject({
-  model: "openai/gpt-4.1",
+  model: "anthropic/claude-sonnet-4-5-20250929",
   schema: z.object({
     recipe: z.object({
       name: z.string(),
@@ -119,12 +119,12 @@ When you use the `array` output strategy, the schema specifies the shape of an a
 With `streamObject`, you can also stream the generated array elements using `elementStream`.
 
 ```ts highlight="7,18"
-import { openai } from "@ai-sdk/openai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { streamObject } from "ai";
 import { z } from "zod";
 
 const { elementStream } = streamObject({
-  model: openai("gpt-4.1"),
+  model: openrouter("anthropic/claude-sonnet-4-5-20250929"),
   output: "array",
   schema: z.object({
     name: z.string(),
@@ -153,7 +153,7 @@ and provide a list of possible values in the `enum` parameter.
 import { generateObject } from "ai";
 
 const { object } = await generateObject({
-  model: "openai/gpt-4.1",
+  model: "anthropic/claude-sonnet-4-5-20250929",
   output: "enum",
   enum: ["action", "comedy", "drama", "horror", "sci-fi"],
   prompt:
@@ -171,11 +171,11 @@ You can use the `output` setting to set the output format to `no-schema` in thos
 and omit the schema parameter.
 
 ```ts highlight="6"
-import { openai } from "@ai-sdk/openai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateObject } from "ai";
 
 const { object } = await generateObject({
-  model: openai("gpt-4.1"),
+  model: openrouter("anthropic/claude-sonnet-4-5-20250929"),
   output: "no-schema",
   prompt: "Generate a lasagna recipe.",
 });
@@ -190,7 +190,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 
 const { object } = await generateObject({
-  model: "openai/gpt-4.1",
+  model: "anthropic/claude-sonnet-4-5-20250929",
   schemaName: "Recipe",
   schemaDescription: "A recipe for a dish.",
   schema: z.object({
@@ -207,12 +207,12 @@ const { object } = await generateObject({
 You can access the reasoning used by the language model to generate the object via the `reasoning` property on the result. This property contains a string with the model's thought process, if available.
 
 ```ts
-import { openai, OpenAIResponsesProviderOptions } from "@ai-sdk/openai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateObject } from "ai";
 import { z } from "zod/v4";
 
 const result = await generateObject({
-  model: openai("gpt-5"),
+  model: openrouter("anthropic/claude-sonnet-4-5-20250929"),
   schema: z.object({
     recipe: z.object({
       name: z.string(),
@@ -226,12 +226,7 @@ const result = await generateObject({
     }),
   }),
   prompt: "Generate a lasagna recipe.",
-  providerOptions: {
-    openai: {
-      strictJsonSchema: true,
-      reasoningSummary: "detailed",
-    } satisfies OpenAIResponsesProviderOptions,
-  },
+  // providerOptions can be set for provider-specific features
 });
 
 console.log(result.reasoning);
