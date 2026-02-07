@@ -1,5 +1,58 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-07 (Session #25 - Feature #5 assigned)
+
+### Feature Assigned
+- Feature #5: "Backend API queries real database"
+
+### What was attempted:
+1. Claimed Feature #5 using feature_claim_and_get (already marked in_progress by previous session)
+2. Checked Docker status:
+   - Docker socket at ~/.docker/run/docker.sock does NOT exist
+   - `docker ps` fails with "failed to connect to the docker API at unix:///Users/dariuszgradzik/.docker/run/docker.sock"
+   - Symlink at /var/run/docker.sock exists but target doesn't exist
+3. Port 3000 check - nothing running (dev server not started)
+4. Port 5432 check - PostgreSQL not running (Docker not available)
+5. Verified code implementation is correct:
+   - `/api/salons/route.ts` - Uses real Drizzle ORM: `db.select().from(salons)` and `db.insert(salons)`
+   - `/api/clients/route.ts` - Uses real Drizzle ORM queries
+   - `/lib/db.ts` - Properly configured with `drizzle(client, { schema })`
+   - Console logging added: `[Salons API] Executing: SELECT * FROM salons`
+
+### BLOCKER - Docker Desktop not running:
+- Docker daemon socket does not exist at ~/.docker/run/docker.sock
+- Cannot start PostgreSQL container via docker-compose
+- Cannot verify API endpoints execute real SQL queries without database
+- This is a TRUE EXTERNAL BLOCKER requiring user to manually start Docker Desktop
+- **This is now the 25th session blocked on Docker**
+
+### Action taken:
+- Feature #5 SKIPPED (moved to end of queue - priority 292)
+
+### What the user needs to do to unblock ALL infrastructure features:
+1. **Open Docker Desktop application manually** (macOS app in /Applications)
+2. Wait for Docker daemon to start (socket will appear at ~/.docker/run/docker.sock)
+3. Run: `docker compose up -d` to start PostgreSQL
+4. Wait for PostgreSQL to be ready
+5. Run: `pnpm drizzle-kit push` to apply schema
+6. Run: `pnpm dev` to start Next.js
+7. Test: Navigate to http://localhost:3000/api/health - should return `status: "healthy"`
+8. Then all infrastructure features (#1, #2, #3, #5) can be verified and marked passing
+
+### Current Status
+- Feature #4: PASSED
+- Features #1, #2, #3, #5: BLOCKED on Docker (external blocker)
+- Overall: 1/253 features passing (0.4%)
+
+### Critical Note:
+This is the 25th session blocked on Docker. The code implementation is complete and verified correct:
+- API routes use real Drizzle ORM queries (not mock data)
+- Console logging is in place to verify SQL queries
+- All that's needed is for Docker/PostgreSQL to be running
+User must start Docker Desktop manually before this feature can be verified.
+
+---
+
 ## Session: 2026-02-07 (Session #24 - Features #1, #2 assigned as batch)
 
 ### Features Assigned (Batch)
