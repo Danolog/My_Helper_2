@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { TimeGrid } from "@/components/calendar/time-grid";
 import { RescheduleDialog } from "@/components/calendar/reschedule-dialog";
 import { CalendarLegend } from "@/components/calendar/calendar-legend";
-import { ChevronLeft, ChevronRight, Calendar, Lock, Palette } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar, Lock, Palette, Users } from "lucide-react";
 import { toast } from "sonner";
-import type { Appointment, CalendarEvent, Employee } from "@/types/calendar";
+import Link from "next/link";
+import type { Appointment, CalendarEvent, Employee, WorkSchedule } from "@/types/calendar";
 
 // Demo salon ID - in production this would come from user's session
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
@@ -18,6 +19,7 @@ export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [workSchedules, setWorkSchedules] = useState<WorkSchedule[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Color mode: "status" for status-based colors, "employee" for employee-based colors
@@ -46,6 +48,19 @@ export default function CalendarPage() {
     } catch (error) {
       console.error("Failed to fetch employees:", error);
       toast.error("Nie udalo sie pobrac listy pracownikow");
+    }
+  }, []);
+
+  // Fetch work schedules for all employees in the salon
+  const fetchWorkSchedules = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/work-schedules/by-salon?salonId=${DEMO_SALON_ID}`);
+      const data = await response.json();
+      if (data.success) {
+        setWorkSchedules(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch work schedules:", error);
     }
   }, []);
 
@@ -90,7 +105,8 @@ export default function CalendarPage() {
   // Initial data load
   useEffect(() => {
     fetchEmployees();
-  }, [fetchEmployees]);
+    fetchWorkSchedules();
+  }, [fetchEmployees, fetchWorkSchedules]);
 
   useEffect(() => {
     fetchAppointments();
@@ -268,6 +284,14 @@ export default function CalendarPage() {
 
         {/* Navigation & Controls */}
         <div className="flex items-center gap-2">
+          {/* Employees link */}
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/dashboard/employees">
+              <Users className="h-4 w-4 mr-1" />
+              Pracownicy
+            </Link>
+          </Button>
+
           {/* Color mode toggle */}
           <Button
             variant="outline"
@@ -320,6 +344,7 @@ export default function CalendarPage() {
           date={currentDate}
           employees={employees}
           events={events}
+          workSchedules={workSchedules}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           onDrop={handleDrop}

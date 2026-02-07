@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Lock, Calendar } from "lucide-react";
+import { Lock, Calendar, Users } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
 import { useDiagnostics } from "@/hooks/use-diagnostics";
@@ -53,6 +53,19 @@ export default function DashboardPage() {
           </p>
           <Button asChild>
             <Link href="/dashboard/calendar">Otworz kalendarz</Link>
+          </Button>
+        </div>
+
+        <div className="p-6 border border-border rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <Users className="w-5 h-5 text-primary" />
+            <h2 className="text-xl font-semibold">Pracownicy</h2>
+          </div>
+          <p className="text-muted-foreground mb-4">
+            Zarzadzaj zespolem i harmonogramem pracy
+          </p>
+          <Button asChild>
+            <Link href="/dashboard/employees">Zarzadzaj pracownikami</Link>
           </Button>
         </div>
 
