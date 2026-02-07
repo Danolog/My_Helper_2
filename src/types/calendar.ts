@@ -75,4 +75,13 @@ export interface TimeSlot {
   displayTime: string;
 }
 
+export interface WorkSchedule {
+  id: string;
+  employeeId: string;
+  dayOfWeek: number; // 0=Sunday, 1=Monday, etc.
+  startTime: string; // e.g., "09:00"
+  endTime: string; // e.g., "17:00"
+  createdAt: Date;
+}
+
 export type CalendarView = "day" | "week" | "month";
