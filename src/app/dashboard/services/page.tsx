@@ -24,7 +24,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Lock, Scissors, Plus, Clock, DollarSign, ChevronRight } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Lock, Scissors, Plus, Clock, DollarSign, ChevronRight, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
@@ -60,6 +70,11 @@ export default function ServicesPage() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Delete state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [serviceToDelete, setServiceToDelete] = useState<Service | null>(null);
+  const [deletingService, setDeletingService] = useState(false);
 
   // Form state
   const [formName, setFormName] = useState("");
@@ -156,6 +171,31 @@ export default function ServicesPage() {
       toast.error("Blad podczas zapisywania uslugi");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDeleteService = async () => {
+    if (!serviceToDelete) return;
+    setDeletingService(true);
+    try {
+      const res = await fetch(`/api/services/${serviceToDelete.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        toast.success(`Usluga "${serviceToDelete.name}" zostala usunieta`);
+        await fetchServices();
+      } else {
+        toast.error(data.error || "Nie udalo sie usunac uslugi");
+      }
+    } catch (error) {
+      console.error("Failed to delete service:", error);
+      toast.error("Blad podczas usuwania uslugi");
+    } finally {
+      setDeletingService(false);
+      setDeleteDialogOpen(false);
+      setServiceToDelete(null);
     }
   };
 
@@ -380,12 +420,58 @@ export default function ServicesPage() {
                     </span>
                   </div>
                 </div>
-                <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setServiceToDelete(service);
+                      setDeleteDialogOpen(true);
+                    }}
+                    data-testid={`delete-service-${service.id}`}
+                  >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                  <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                </div>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
+
+      {/* Delete Service Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={(open) => {
+        setDeleteDialogOpen(open);
+        if (!open) setServiceToDelete(null);
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Usunac usluge?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Czy na pewno chcesz usunac usluge &quot;{serviceToDelete?.name}&quot;?
+              Ta operacja jest nieodwracalna. Zostan rowniez usuniete
+              wszystkie warianty, przypisania pracownikow i indywidualne ceny
+              powiazane z ta usluga. Istniejace wizyty zachowaja swoja historie.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="cancel-delete-service-btn">
+              Anuluj
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteService}
+              disabled={deletingService}
+              className="bg-destructive text-white hover:bg-destructive/90"
+              data-testid="confirm-delete-service-btn"
+            >
+              {deletingService ? "Usuwanie..." : "Usun usluge"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -18,6 +20,24 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Lock,
   Scissors,
   Plus,
@@ -27,8 +47,11 @@ import {
   Trash2,
   Edit2,
   Layers,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
+
+const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 interface ServiceVariant {
   id: string;
@@ -62,6 +85,26 @@ interface ServiceDetail {
   variants: ServiceVariant[];
 }
 
+interface Employee {
+  id: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  isActive: boolean;
+  color: string | null;
+}
+
+interface EmployeePrice {
+  id: string;
+  employeeId: string;
+  serviceId: string;
+  variantId: string | null;
+  customPrice: string;
+  createdAt: string;
+  employee: Employee | null;
+  variant: ServiceVariant | null;
+}
+
 export default function ServiceDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -77,6 +120,31 @@ export default function ServiceDetailPage() {
   const [variantPriceModifier, setVariantPriceModifier] = useState("0");
   const [variantDurationModifier, setVariantDurationModifier] = useState("0");
   const [savingVariant, setSavingVariant] = useState(false);
+
+  // Employee assignment state
+  const [assignedEmployeeIds, setAssignedEmployeeIds] = useState<Set<string>>(new Set());
+  const [togglingAssignment, setTogglingAssignment] = useState<string | null>(null);
+
+  // Employee pricing state
+  const [employeePrices, setEmployeePrices] = useState<EmployeePrice[]>([]);
+  const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
+  const [empPriceDialogOpen, setEmpPriceDialogOpen] = useState(false);
+  const [empPriceEmployeeId, setEmpPriceEmployeeId] = useState("");
+  const [empPriceCustomPrice, setEmpPriceCustomPrice] = useState("");
+  const [savingEmpPrice, setSavingEmpPrice] = useState(false);
+
+  // Edit service state
+  const [editServiceDialogOpen, setEditServiceDialogOpen] = useState(false);
+  const [editServiceName, setEditServiceName] = useState("");
+  const [editServiceDescription, setEditServiceDescription] = useState("");
+  const [editServicePrice, setEditServicePrice] = useState("");
+  const [editServiceDuration, setEditServiceDuration] = useState("");
+  const [editServiceIsActive, setEditServiceIsActive] = useState(true);
+  const [savingService, setSavingService] = useState(false);
+
+  // Delete service state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingService, setDeletingService] = useState(false);
 
   const fetchService = useCallback(async () => {
     try {
@@ -96,9 +164,102 @@ export default function ServiceDetailPage() {
     }
   }, [serviceId, router]);
 
+  const fetchEmployeeAssignments = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/services/${serviceId}/employee-assignments`);
+      const data = await res.json();
+      if (data.success) {
+        const ids = new Set<string>(
+          data.data.map((a: { employeeId: string }) => a.employeeId)
+        );
+        setAssignedEmployeeIds(ids);
+      }
+    } catch (error) {
+      console.error("Failed to fetch employee assignments:", error);
+    }
+  }, [serviceId]);
+
+  const fetchEmployeePrices = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/services/${serviceId}/employee-prices`);
+      const data = await res.json();
+      if (data.success) {
+        setEmployeePrices(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch employee prices:", error);
+    }
+  }, [serviceId]);
+
+  const fetchEmployees = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}&activeOnly=true`);
+      const data = await res.json();
+      if (data.success) {
+        setAllEmployees(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch employees:", error);
+    }
+  }, []);
+
   useEffect(() => {
-    fetchService();
-  }, [fetchService]);
+    async function loadData() {
+      setLoading(true);
+      await Promise.all([fetchService(), fetchEmployeeAssignments(), fetchEmployeePrices(), fetchEmployees()]);
+      setLoading(false);
+    }
+    loadData();
+  }, [fetchService, fetchEmployeeAssignments, fetchEmployeePrices, fetchEmployees]);
+
+  const handleToggleEmployeeAssignment = async (employeeId: string, isCurrentlyAssigned: boolean) => {
+    setTogglingAssignment(employeeId);
+    try {
+      if (isCurrentlyAssigned) {
+        // Unassign
+        const res = await fetch(
+          `/api/services/${serviceId}/employee-assignments?employeeId=${employeeId}`,
+          { method: "DELETE" }
+        );
+        const data = await res.json();
+        if (data.success) {
+          setAssignedEmployeeIds((prev) => {
+            const next = new Set(prev);
+            next.delete(employeeId);
+            return next;
+          });
+          const emp = allEmployees.find((e) => e.id === employeeId);
+          toast.success(
+            `${emp ? `${emp.firstName} ${emp.lastName}` : "Pracownik"} odlaczony od uslugi`
+          );
+        } else {
+          toast.error(data.error || "Nie udalo sie odlaczyc pracownika");
+        }
+      } else {
+        // Assign
+        const res = await fetch(`/api/services/${serviceId}/employee-assignments`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ employeeId }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          setAssignedEmployeeIds((prev) => new Set([...prev, employeeId]));
+          const emp = allEmployees.find((e) => e.id === employeeId);
+          toast.success(
+            `${emp ? `${emp.firstName} ${emp.lastName}` : "Pracownik"} przypisany do uslugi`
+          );
+        } else {
+          toast.error(data.error || "Nie udalo sie przypisac pracownika");
+        }
+      }
+    } catch (error) {
+      console.error("Failed to toggle employee assignment:", error);
+      toast.error("Blad podczas zmiany przypisania pracownika");
+    } finally {
+      setTogglingAssignment(null);
+    }
+  };
 
   const resetVariantForm = () => {
     setVariantName("");
@@ -186,6 +347,168 @@ export default function ServiceDetailPage() {
     }
   };
 
+  // Edit service handlers
+  const openEditServiceDialog = () => {
+    if (!service) return;
+    setEditServiceName(service.name);
+    setEditServiceDescription(service.description || "");
+    setEditServicePrice(parseFloat(service.basePrice).toString());
+    setEditServiceDuration(service.baseDuration.toString());
+    setEditServiceIsActive(service.isActive);
+    setEditServiceDialogOpen(true);
+  };
+
+  const handleSaveService = async () => {
+    if (!editServiceName.trim()) {
+      toast.error("Nazwa uslugi jest wymagana");
+      return;
+    }
+    if (!editServicePrice || parseFloat(editServicePrice) < 0) {
+      toast.error("Podaj prawidlowa cene bazowa");
+      return;
+    }
+    if (!editServiceDuration || parseInt(editServiceDuration, 10) <= 0) {
+      toast.error("Podaj prawidlowy czas trwania");
+      return;
+    }
+
+    setSavingService(true);
+    try {
+      const res = await fetch(`/api/services/${serviceId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editServiceName.trim(),
+          description: editServiceDescription.trim() || null,
+          basePrice: parseFloat(editServicePrice),
+          baseDuration: parseInt(editServiceDuration, 10),
+          isActive: editServiceIsActive,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        toast.success(`Usluga "${editServiceName.trim()}" zaktualizowana`);
+        setEditServiceDialogOpen(false);
+        await fetchService();
+      } else {
+        toast.error(data.error || "Nie udalo sie zapisac uslugi");
+      }
+    } catch (error) {
+      console.error("Failed to save service:", error);
+      toast.error("Blad podczas zapisywania uslugi");
+    } finally {
+      setSavingService(false);
+    }
+  };
+
+  // Delete service handler
+  const handleDeleteService = async () => {
+    setDeletingService(true);
+    try {
+      const res = await fetch(`/api/services/${serviceId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        toast.success(`Usluga "${service?.name}" zostala usunieta`);
+        router.push("/dashboard/services");
+      } else {
+        toast.error(data.error || "Nie udalo sie usunac uslugi");
+      }
+    } catch (error) {
+      console.error("Failed to delete service:", error);
+      toast.error("Blad podczas usuwania uslugi");
+    } finally {
+      setDeletingService(false);
+      setDeleteDialogOpen(false);
+    }
+  };
+
+  // Employee pricing handlers
+  const resetEmpPriceForm = () => {
+    setEmpPriceEmployeeId("");
+    setEmpPriceCustomPrice("");
+  };
+
+  const handleSaveEmployeePrice = async () => {
+    if (!empPriceEmployeeId) {
+      toast.error("Wybierz pracownika");
+      return;
+    }
+    if (!empPriceCustomPrice || parseFloat(empPriceCustomPrice) < 0) {
+      toast.error("Podaj prawidlowa cene");
+      return;
+    }
+
+    setSavingEmpPrice(true);
+    try {
+      const res = await fetch(`/api/services/${serviceId}/employee-prices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employeeId: empPriceEmployeeId,
+          customPrice: empPriceCustomPrice,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        const employee = allEmployees.find((e) => e.id === empPriceEmployeeId);
+        const empName = employee
+          ? `${employee.firstName} ${employee.lastName}`
+          : "pracownika";
+        toast.success(
+          data.updated
+            ? `Cena dla ${empName} zaktualizowana`
+            : `Cena dla ${empName} ustawiona`
+        );
+        resetEmpPriceForm();
+        setEmpPriceDialogOpen(false);
+        await fetchEmployeePrices();
+      } else {
+        toast.error(data.error || "Nie udalo sie zapisac ceny");
+      }
+    } catch (error) {
+      console.error("Failed to save employee price:", error);
+      toast.error("Blad podczas zapisywania ceny pracownika");
+    } finally {
+      setSavingEmpPrice(false);
+    }
+  };
+
+  const handleDeleteEmployeePrice = async (price: EmployeePrice) => {
+    const empName = price.employee
+      ? `${price.employee.firstName} ${price.employee.lastName}`
+      : "tego pracownika";
+
+    if (!confirm(`Czy na pewno chcesz usunac indywidualna cene dla ${empName}?`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `/api/services/${serviceId}/employee-prices?priceId=${price.id}`,
+        { method: "DELETE" }
+      );
+
+      const data = await res.json();
+
+      if (data.success) {
+        toast.success(`Indywidualna cena dla ${empName} usunieta`);
+        await fetchEmployeePrices();
+      } else {
+        toast.error(data.error || "Nie udalo sie usunac ceny");
+      }
+    } catch (error) {
+      console.error("Failed to delete employee price:", error);
+      toast.error("Blad podczas usuwania ceny pracownika");
+    }
+  };
+
   const formatPrice = (price: string) => {
     return parseFloat(price).toFixed(2);
   };
@@ -233,6 +556,11 @@ export default function ServiceDetailPage() {
     );
   }
 
+  // Get employees that don't already have custom pricing (for the "add" dialog)
+  const employeesWithoutCustomPrice = allEmployees.filter(
+    (emp) => !employeePrices.some((ep) => ep.employeeId === emp.id && !ep.variantId)
+  );
+
   return (
     <div className="container mx-auto p-6 max-w-4xl">
       {/* Header */}
@@ -255,6 +583,49 @@ export default function ServiceDetailPage() {
               <Badge variant={service.isActive ? "default" : "secondary"}>
                 {service.isActive ? "Aktywna" : "Nieaktywna"}
               </Badge>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={openEditServiceDialog}
+                data-testid="edit-service-btn"
+              >
+                <Edit2 className="h-4 w-4" />
+              </Button>
+              <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    data-testid="delete-service-btn"
+                  >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Usunac usluge?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Czy na pewno chcesz usunac usluge &quot;{service.name}&quot;?
+                      Ta operacja jest nieodwracalna. Zostan rowniez usuniete
+                      wszystkie warianty, przypisania pracownikow i indywidualne ceny
+                      powiazane z ta usluga. Istniejace wizyty zachowaja swoja historie.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel data-testid="cancel-delete-btn">
+                      Anuluj
+                    </AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={handleDeleteService}
+                      disabled={deletingService}
+                      className="bg-destructive text-white hover:bg-destructive/90"
+                      data-testid="confirm-delete-btn"
+                    >
+                      {deletingService ? "Usuwanie..." : "Usun usluge"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
             {service.category && (
               <Badge variant="outline" className="mt-1">
@@ -294,7 +665,7 @@ export default function ServiceDetailPage() {
       </Card>
 
       {/* Variants Section */}
-      <Card data-testid="variants-section">
+      <Card className="mb-6" data-testid="variants-section">
         <CardHeader className="flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
             <Layers className="h-5 w-5 text-primary" />
@@ -484,6 +855,383 @@ export default function ServiceDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Employee Assignment Section */}
+      <Card className="mb-6" data-testid="employee-assignment-section">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Users className="h-5 w-5 text-primary" />
+            <CardTitle className="text-lg">Przypisani pracownicy</CardTitle>
+            <Badge variant="outline" data-testid="assigned-employees-count">
+              {assignedEmployeeIds.size}
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1">
+            Zaznacz pracownikow, ktorzy oferuja ta usluge. Tylko przypisani pracownicy beda dostepni podczas rezerwacji.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {allEmployees.length === 0 ? (
+            <div className="text-center py-8">
+              <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground" data-testid="no-employees-message">
+                Brak pracownikow w salonie. Dodaj pracownikow, aby moc ich przypisac do uslug.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {allEmployees.map((emp) => {
+                const isAssigned = assignedEmployeeIds.has(emp.id);
+                const isToggling = togglingAssignment === emp.id;
+                return (
+                  <div
+                    key={emp.id}
+                    className={`flex items-center justify-between p-3 border rounded-lg transition-colors ${
+                      isAssigned ? "bg-primary/5 border-primary/30" : "hover:bg-muted/50"
+                    } ${isToggling ? "opacity-60" : ""}`}
+                    data-testid={`employee-assignment-${emp.id}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        id={`assign-emp-${emp.id}`}
+                        checked={isAssigned}
+                        disabled={isToggling}
+                        onCheckedChange={() =>
+                          handleToggleEmployeeAssignment(emp.id, isAssigned)
+                        }
+                        data-testid={`assign-checkbox-${emp.id}`}
+                      />
+                      <label
+                        htmlFor={`assign-emp-${emp.id}`}
+                        className="flex items-center gap-2 cursor-pointer"
+                      >
+                        {emp.color && (
+                          <span
+                            className="inline-block w-3 h-3 rounded-full"
+                            style={{ backgroundColor: emp.color }}
+                          />
+                        )}
+                        <span className="font-medium">
+                          {emp.firstName} {emp.lastName}
+                        </span>
+                        {emp.role === "owner" && (
+                          <Badge variant="outline" className="text-xs">
+                            wlasciciel
+                          </Badge>
+                        )}
+                      </label>
+                    </div>
+                    <div>
+                      {isAssigned && (
+                        <Badge variant="default" className="text-xs" data-testid={`assigned-badge-${emp.id}`}>
+                          Przypisany
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Employee-Specific Pricing Section */}
+      <Card data-testid="employee-pricing-section">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Users className="h-5 w-5 text-primary" />
+            <CardTitle className="text-lg">Ceny indywidualne pracownikow</CardTitle>
+            <Badge variant="outline" data-testid="employee-prices-count">
+              {employeePrices.length}
+            </Badge>
+          </div>
+          <Dialog
+            open={empPriceDialogOpen}
+            onOpenChange={(open) => {
+              setEmpPriceDialogOpen(open);
+              if (!open) resetEmpPriceForm();
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button size="sm" data-testid="add-employee-price-btn">
+                <Plus className="h-4 w-4 mr-2" />
+                Ustaw cene
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[450px]">
+              <DialogHeader>
+                <DialogTitle>Ustaw cene indywidualna</DialogTitle>
+                <DialogDescription>
+                  Ustaw indywidualna cene za ta usluge dla wybranego pracownika.
+                  Cena ta bedzie wyswietlana zamiast ceny bazowej przy rezerwacji
+                  wizyty u tego pracownika.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="emp-price-employee">Pracownik *</Label>
+                  <Select
+                    value={empPriceEmployeeId}
+                    onValueChange={setEmpPriceEmployeeId}
+                  >
+                    <SelectTrigger
+                      id="emp-price-employee"
+                      data-testid="employee-price-select"
+                    >
+                      <SelectValue placeholder="Wybierz pracownika" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {employeesWithoutCustomPrice.length === 0 ? (
+                        <SelectItem value="__none" disabled>
+                          Wszyscy pracownicy maja juz ceny
+                        </SelectItem>
+                      ) : (
+                        employeesWithoutCustomPrice.map((emp) => (
+                          <SelectItem key={emp.id} value={emp.id}>
+                            <div className="flex items-center gap-2">
+                              {emp.color && (
+                                <span
+                                  className="inline-block w-3 h-3 rounded-full"
+                                  style={{ backgroundColor: emp.color }}
+                                />
+                              )}
+                              {emp.firstName} {emp.lastName}
+                              {emp.role === "owner" && (
+                                <span className="text-xs text-muted-foreground">(wlasciciel)</span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="emp-price-value">Cena indywidualna (PLN) *</Label>
+                  <Input
+                    id="emp-price-value"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder={service.basePrice}
+                    value={empPriceCustomPrice}
+                    onChange={(e) => setEmpPriceCustomPrice(e.target.value)}
+                    data-testid="employee-price-input"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Cena bazowa uslugi: {formatPrice(service.basePrice)} PLN.
+                    Wprowadz cene, ktora zamiast niej bedzie stosowana dla tego
+                    pracownika.
+                  </p>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    resetEmpPriceForm();
+                    setEmpPriceDialogOpen(false);
+                  }}
+                >
+                  Anuluj
+                </Button>
+                <Button
+                  onClick={handleSaveEmployeePrice}
+                  disabled={savingEmpPrice}
+                  data-testid="save-employee-price-btn"
+                >
+                  {savingEmpPrice ? "Zapisywanie..." : "Zapisz cene"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </CardHeader>
+        <CardContent>
+          {employeePrices.length === 0 ? (
+            <div className="text-center py-8">
+              <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground mb-4" data-testid="no-employee-prices-message">
+                Brak indywidualnych cen. Wszyscy pracownicy stosuja cene bazowa (
+                {formatPrice(service.basePrice)} PLN).
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => setEmpPriceDialogOpen(true)}
+                data-testid="empty-state-add-employee-price-btn"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Ustaw pierwsza cene indywidualna
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {employeePrices.map((ep) => {
+                const basePrice = parseFloat(service.basePrice);
+                const customPrice = parseFloat(ep.customPrice);
+                const diff = customPrice - basePrice;
+                const diffPercent = basePrice > 0 ? ((diff / basePrice) * 100).toFixed(0) : "0";
+
+                return (
+                  <div
+                    key={ep.id}
+                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                    data-testid={`employee-price-card-${ep.id}`}
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        {ep.employee?.color && (
+                          <span
+                            className="inline-block w-3 h-3 rounded-full"
+                            style={{ backgroundColor: ep.employee.color }}
+                          />
+                        )}
+                        <span className="font-medium" data-testid={`employee-price-name-${ep.id}`}>
+                          {ep.employee
+                            ? `${ep.employee.firstName} ${ep.employee.lastName}`
+                            : "Nieznany pracownik"}
+                        </span>
+                        {ep.employee?.role === "owner" && (
+                          <Badge variant="outline" className="text-xs">
+                            wlasciciel
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                        <span className="flex items-center gap-1">
+                          <DollarSign className="h-3.5 w-3.5" />
+                          <span
+                            className="font-medium text-foreground"
+                            data-testid={`employee-price-value-${ep.id}`}
+                          >
+                            {formatPrice(ep.customPrice)} PLN
+                          </span>
+                        </span>
+                        <span
+                          className={`text-xs ${
+                            diff > 0
+                              ? "text-red-500"
+                              : diff < 0
+                              ? "text-green-500"
+                              : "text-muted-foreground"
+                          }`}
+                          data-testid={`employee-price-diff-${ep.id}`}
+                        >
+                          {diff > 0 ? "+" : ""}
+                          {diff.toFixed(2)} PLN ({diff >= 0 ? "+" : ""}
+                          {diffPercent}% od ceny bazowej)
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteEmployeePrice(ep)}
+                        data-testid={`delete-employee-price-${ep.id}`}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Edit Service Dialog */}
+      <Dialog
+        open={editServiceDialogOpen}
+        onOpenChange={(open) => {
+          setEditServiceDialogOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edytuj usluge</DialogTitle>
+            <DialogDescription>
+              Zmien szczegoly uslugi. Pola oznaczone * sa wymagane.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-service-name">Nazwa uslugi *</Label>
+              <Input
+                id="edit-service-name"
+                placeholder="np. Strzyzenie meskie"
+                value={editServiceName}
+                onChange={(e) => setEditServiceName(e.target.value)}
+                data-testid="edit-service-name-input"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-service-description">Opis</Label>
+              <Textarea
+                id="edit-service-description"
+                placeholder="Opis uslugi (opcjonalny)"
+                value={editServiceDescription}
+                onChange={(e) => setEditServiceDescription(e.target.value)}
+                data-testid="edit-service-description-input"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="edit-service-price">Cena bazowa (PLN) *</Label>
+                <Input
+                  id="edit-service-price"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={editServicePrice}
+                  onChange={(e) => setEditServicePrice(e.target.value)}
+                  data-testid="edit-service-price-input"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-service-duration">Czas trwania (min) *</Label>
+                <Input
+                  id="edit-service-duration"
+                  type="number"
+                  min="1"
+                  step="5"
+                  placeholder="30"
+                  value={editServiceDuration}
+                  onChange={(e) => setEditServiceDuration(e.target.value)}
+                  data-testid="edit-service-duration-input"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="edit-service-active"
+                checked={editServiceIsActive}
+                onCheckedChange={(checked) => setEditServiceIsActive(checked)}
+              />
+              <Label htmlFor="edit-service-active" className="cursor-pointer">
+                Usluga aktywna
+              </Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditServiceDialogOpen(false)}
+            >
+              Anuluj
+            </Button>
+            <Button
+              onClick={handleSaveService}
+              disabled={savingService}
+              data-testid="save-service-edit-btn"
+            >
+              {savingService ? "Zapisywanie..." : "Zapisz zmiany"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -95,6 +95,11 @@ export async function PUT(
 }
 
 // DELETE /api/services/[id] - Delete a service
+// Related records are handled by database cascade rules:
+// - service_variants: CASCADE (deleted)
+// - employee_services: CASCADE (deleted)
+// - employee_service_prices: CASCADE (deleted)
+// - appointments.serviceId: SET NULL (appointments preserved, serviceId nullified)
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -113,6 +118,8 @@ export async function DELETE(
         { status: 404 }
       );
     }
+
+    console.log(`[Services API] Deleted service: ${deleted.name} (${deleted.id})`);
 
     return NextResponse.json({
       success: true,
