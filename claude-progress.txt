@@ -104,3 +104,52 @@ Docker daemon is not running on the system (socket not found at ~/.docker/run/do
 - Feature #4: PASSED (from previous session)
 - Features #1, #2, #3, #5: BLOCKED on Docker
 - Overall: 1/253 features passing (0.4%)
+
+---
+
+## Session: 2026-02-07 (Session #3 - Feature #5 assigned)
+
+### Feature Assigned
+- Feature #5: "Backend API queries real database"
+
+### What was attempted:
+1. Claimed Feature #5 using feature_claim_and_get
+2. Checked Docker status - Docker client v29.1.3 installed but daemon not running
+3. Attempted to start Docker containers - failed due to missing socket
+4. Verified the code implementation is correct:
+   - `/api/salons/route.ts` uses real Drizzle ORM queries (db.select, db.insert)
+   - `/api/clients/route.ts` uses real Drizzle ORM queries (db.select, db.insert)
+   - `/lib/db.ts` properly connects to PostgreSQL via Drizzle
+   - `/lib/schema.ts` has correct table definitions (salons, clients, employees, services, appointments, timeBlocks)
+   - No mock data patterns found in codebase
+
+### BLOCKER - Docker Desktop not running:
+- Docker client is installed (v29.1.3) but daemon socket not available
+- Socket symlink exists at `/var/run/docker.sock` pointing to `~/.docker/run/docker.sock` but target doesn't exist
+- Cannot verify API endpoints without PostgreSQL running
+- User needs to start Docker Desktop manually
+
+### Action taken:
+- Feature #5 SKIPPED (moved to end of queue with priority 258)
+- This is a TRUE EXTERNAL BLOCKER - requires user to start Docker Desktop application
+
+### Code Review (verified correct implementation):
+The implementation is correct and will work once Docker is running:
+- API routes use `db.select().from(salons)` and `db.insert(salons)` - real Drizzle ORM
+- Console logging added to verify SQL queries: `[Salons API] Executing: SELECT * FROM salons`
+- Database connection properly configured in db.ts using POSTGRES_URL env var
+- Schema includes all required tables: user, session, account, verification, salons, clients, employees, serviceCategories, services, appointments, timeBlocks
+
+### To resolve:
+1. User must start Docker Desktop manually
+2. Run `docker compose up -d` to start PostgreSQL
+3. Run `pnpm dev` to start Next.js
+4. Test GET /api/salons and POST /api/salons
+5. Verify server console shows SQL query logs
+6. Mark Feature #5 as passing
+
+### Current Status
+- Feature #4: PASSED
+- Feature #5: SKIPPED (Docker not running - external blocker)
+- Features #1, #2, #3: Also blocked on Docker
+- Overall: 1/253 features passing (0.4%)
