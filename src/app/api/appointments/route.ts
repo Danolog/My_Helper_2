@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { appointments, clients, employees, services } from "@/lib/schema";
-import { eq, and, gte, lte, or, not } from "drizzle-orm";
+import { appointments, clients, employees, services, timeBlocks } from "@/lib/schema";
+import { eq, and, gte, lte, or, not, lt, gt } from "drizzle-orm";
 
 // GET /api/appointments - List appointments with optional date range filter
 export async function GET(request: Request) {
@@ -109,6 +109,34 @@ export async function POST(request: Request) {
     if (overlapping.length > 0) {
       return NextResponse.json(
         { success: false, error: "Time slot conflicts with existing appointment" },
+        { status: 409 }
+      );
+    }
+
+    // Check for vacation/time blocks that overlap with the requested time
+    const conflictingBlocks = await db.select()
+      .from(timeBlocks)
+      .where(
+        and(
+          eq(timeBlocks.employeeId, employeeId),
+          // Time block overlaps with requested appointment time
+          lt(timeBlocks.startTime, new Date(endTime)),
+          gt(timeBlocks.endTime, new Date(startTime))
+        )
+      );
+
+    if (conflictingBlocks.length > 0) {
+      const block = conflictingBlocks[0];
+      const blockTypeLabels: Record<string, string> = {
+        vacation: "urlop",
+        holiday: "dzien wolny",
+        break: "przerwa",
+        personal: "czas osobisty",
+        other: "blokada czasu",
+      };
+      const label = block ? (blockTypeLabels[block.blockType] || block.blockType) : "blokada czasu";
+      return NextResponse.json(
+        { success: false, error: `Pracownik ma ${label} w tym terminie${block?.reason ? ` (${block.reason})` : ""}` },
         { status: 409 }
       );
     }
