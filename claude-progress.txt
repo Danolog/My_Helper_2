@@ -10,8 +10,8 @@
   - No mocking libraries (json-server, miragejs, msw) in package.json
   - Code is clean of mock patterns
 
-### Features In Progress
-- **Feature #5: Backend API queries real database** - BLOCKED (External Dependency)
+### Features Skipped (External Blocker)
+- **Feature #5: Backend API queries real database** - SKIPPED (moved to end of queue)
   - Created salons and clients tables in schema.ts
   - Created /api/salons route with real Drizzle ORM queries
   - Created /api/clients route with real Drizzle ORM queries
@@ -19,6 +19,7 @@
   - BLOCKER: Docker daemon stopped mid-session
   - Cannot verify SQL queries are executed without database running
   - Implementation is complete and correct, just needs database to verify
+  - Will be retried once Docker/PostgreSQL is running
 
 ### Code Changes Made This Session
 1. Updated src/lib/schema.ts:
@@ -53,7 +54,7 @@
 
 ### Current Status
 - Feature #4: PASSED
-- Feature #5: Implementation complete, awaiting database for verification
+- Feature #5: SKIPPED (Docker not running - external blocker)
 - Overall: 1/253 features passing (0.4%)
 
 ### Notes
