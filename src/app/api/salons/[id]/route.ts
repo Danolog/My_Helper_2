@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { salons, services, employees, reviews } from "@/lib/schema";
-import { eq, and, avg } from "drizzle-orm";
+import { salons, services, employees, reviews, serviceCategories, serviceVariants } from "@/lib/schema";
+import { eq, and, avg, asc, inArray } from "drizzle-orm";
 
 // GET /api/salons/[id] - Get salon details with services, employees, and rating
 export async function GET(
@@ -26,6 +26,30 @@ export async function GET(
       .from(services)
       .where(and(eq(services.salonId, id), eq(services.isActive, true)));
 
+    // Get service categories for this salon
+    const categories = await db
+      .select()
+      .from(serviceCategories)
+      .where(eq(serviceCategories.salonId, id))
+      .orderBy(asc(serviceCategories.sortOrder));
+
+    // Get variants for all active services
+    const serviceIds = salonServices.map((s) => s.id);
+    let variants: { id: string; serviceId: string; name: string; priceModifier: string | null; durationModifier: number | null }[] = [];
+    if (serviceIds.length > 0) {
+      variants = await db
+        .select()
+        .from(serviceVariants)
+        .where(inArray(serviceVariants.serviceId, serviceIds));
+    }
+
+    // Attach variants to each service
+    const servicesWithVariants = salonServices.map((service) => ({
+      ...service,
+      categoryName: categories.find((c) => c.id === service.categoryId)?.name || null,
+      variants: variants.filter((v) => v.serviceId === service.id),
+    }));
+
     // Get active employees
     const salonEmployees = await db
       .select()
@@ -42,7 +66,8 @@ export async function GET(
       success: true,
       data: {
         ...salon,
-        services: salonServices,
+        services: servicesWithVariants,
+        categories,
         employees: salonEmployees,
         averageRating: ratingResult?.avgRating
           ? parseFloat(String(ratingResult.avgRating))
