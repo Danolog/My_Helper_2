@@ -30,6 +30,12 @@ import {
   ChevronUp,
   Scissors,
   History,
+  FlaskConical,
+  Wrench,
+  FileText,
+  Edit3,
+  Check,
+  Package,
 } from "lucide-react";
 import {
   Select,
@@ -69,6 +75,34 @@ interface AppointmentService {
   baseDuration: number;
 }
 
+interface TreatmentData {
+  id: string;
+  recipe: string | null;
+  techniques: string | null;
+  materialsJson: unknown[];
+  notes: string | null;
+  createdAt: string;
+}
+
+interface MaterialProduct {
+  id: string;
+  name: string;
+  category: string | null;
+  quantity: string | null;
+  unit: string | null;
+  pricePerUnit: string | null;
+}
+
+interface MaterialData {
+  id: string;
+  appointmentId: string;
+  productId: string;
+  quantityUsed: string;
+  notes: string | null;
+  createdAt: string;
+  product: MaterialProduct | null;
+}
+
 interface AppointmentData {
   id: string;
   salonId: string;
@@ -85,6 +119,8 @@ interface AppointmentData {
   updatedAt: string;
   employee: AppointmentEmployee | null;
   service: AppointmentService | null;
+  treatment: TreatmentData | null;
+  materials: MaterialData[];
 }
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
@@ -176,6 +212,13 @@ export default function ClientProfilePage() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [expandedAppointmentId, setExpandedAppointmentId] = useState<string | null>(null);
 
+  // Treatment form state
+  const [editingTreatmentId, setEditingTreatmentId] = useState<string | null>(null);
+  const [treatmentRecipe, setTreatmentRecipe] = useState("");
+  const [treatmentTechniques, setTreatmentTechniques] = useState("");
+  const [treatmentNotes, setTreatmentNotes] = useState("");
+  const [savingTreatment, setSavingTreatment] = useState(false);
+
   // Editable form fields
   const [formNotes, setFormNotes] = useState("");
   const [allergiesList, setAllergiesList] = useState<string[]>([]);
@@ -256,6 +299,70 @@ export default function ClientProfilePage() {
     setExpandedAppointmentId((prev) =>
       prev === appointmentId ? null : appointmentId
     );
+  };
+
+  const startEditingTreatment = (appointment: AppointmentData) => {
+    setEditingTreatmentId(appointment.id);
+    setTreatmentRecipe(appointment.treatment?.recipe || "");
+    setTreatmentTechniques(appointment.treatment?.techniques || "");
+    setTreatmentNotes(appointment.treatment?.notes || "");
+  };
+
+  const cancelEditingTreatment = () => {
+    setEditingTreatmentId(null);
+    setTreatmentRecipe("");
+    setTreatmentTechniques("");
+    setTreatmentNotes("");
+  };
+
+  const handleSaveTreatment = async (appointmentId: string) => {
+    setSavingTreatment(true);
+    try {
+      const res = await fetch(`/api/appointments/${appointmentId}/treatment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipe: treatmentRecipe.trim() || null,
+          techniques: treatmentTechniques.trim() || null,
+          notes: treatmentNotes.trim() || null,
+          materialsJson: [],
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("Karta zabiegu zostala zapisana");
+        // Update the visit history with the new treatment data
+        setVisitHistory((prev) =>
+          prev.map((apt) =>
+            apt.id === appointmentId
+              ? {
+                  ...apt,
+                  status: apt.status === "scheduled" || apt.status === "confirmed" ? "completed" : apt.status,
+                  treatment: {
+                    id: data.data.id,
+                    recipe: data.data.recipe,
+                    techniques: data.data.techniques,
+                    materialsJson: data.data.materialsJson || [],
+                    notes: data.data.notes,
+                    createdAt: data.data.createdAt,
+                  },
+                }
+              : apt
+          )
+        );
+        setEditingTreatmentId(null);
+        setTreatmentRecipe("");
+        setTreatmentTechniques("");
+        setTreatmentNotes("");
+      } else {
+        toast.error(data.error || "Nie udalo sie zapisac karty zabiegu");
+      }
+    } catch (error) {
+      console.error("Failed to save treatment:", error);
+      toast.error("Blad podczas zapisywania karty zabiegu");
+    } finally {
+      setSavingTreatment(false);
+    }
   };
 
   const handleAddAllergy = () => {
@@ -942,6 +1049,241 @@ export default function ClientProfilePage() {
                                 </div>
                               )}
                             </div>
+
+                            {/* Treatment History Section */}
+                            <Separator />
+                            <div data-testid={`treatment-section-${appointment.id}`}>
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                  <FlaskConical className="h-4 w-4 text-purple-500" />
+                                  <p className="text-sm font-semibold">Karta zabiegu</p>
+                                </div>
+                                {editingTreatmentId !== appointment.id && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => startEditingTreatment(appointment)}
+                                    data-testid={`edit-treatment-btn-${appointment.id}`}
+                                  >
+                                    {appointment.treatment ? (
+                                      <>
+                                        <Edit3 className="h-3.5 w-3.5 mr-1" />
+                                        Edytuj
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Plus className="h-3.5 w-3.5 mr-1" />
+                                        Dodaj karte zabiegu
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
+                              </div>
+
+                              {/* Show existing treatment details (read-only) */}
+                              {appointment.treatment && editingTreatmentId !== appointment.id && (
+                                <div className="space-y-3 bg-purple-50 dark:bg-purple-950/20 rounded-lg p-3 border border-purple-200 dark:border-purple-800" data-testid={`treatment-details-${appointment.id}`}>
+                                  {appointment.treatment.recipe && (
+                                    <div>
+                                      <p className="text-xs font-medium text-muted-foreground uppercase mb-1 flex items-center gap-1">
+                                        <FlaskConical className="h-3 w-3" />
+                                        Receptura / Formula
+                                      </p>
+                                      <p className="text-sm whitespace-pre-wrap" data-testid={`treatment-recipe-${appointment.id}`}>
+                                        {appointment.treatment.recipe}
+                                      </p>
+                                    </div>
+                                  )}
+                                  {appointment.treatment.techniques && (
+                                    <div>
+                                      <p className="text-xs font-medium text-muted-foreground uppercase mb-1 flex items-center gap-1">
+                                        <Wrench className="h-3 w-3" />
+                                        Zastosowane techniki
+                                      </p>
+                                      <p className="text-sm whitespace-pre-wrap" data-testid={`treatment-techniques-${appointment.id}`}>
+                                        {appointment.treatment.techniques}
+                                      </p>
+                                    </div>
+                                  )}
+                                  {appointment.treatment.notes && (
+                                    <div>
+                                      <p className="text-xs font-medium text-muted-foreground uppercase mb-1 flex items-center gap-1">
+                                        <FileText className="h-3 w-3" />
+                                        Notatki zabiegu
+                                      </p>
+                                      <p className="text-sm whitespace-pre-wrap" data-testid={`treatment-notes-${appointment.id}`}>
+                                        {appointment.treatment.notes}
+                                      </p>
+                                    </div>
+                                  )}
+                                  {!appointment.treatment.recipe && !appointment.treatment.techniques && !appointment.treatment.notes && (
+                                    <p className="text-sm text-muted-foreground italic">Karta zabiegu jest pusta</p>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* No treatment - show placeholder */}
+                              {!appointment.treatment && editingTreatmentId !== appointment.id && (
+                                <p className="text-sm text-muted-foreground italic" data-testid={`no-treatment-${appointment.id}`}>
+                                  Brak karty zabiegu - kliknij &quot;Dodaj karte zabiegu&quot; aby uzupelnic
+                                </p>
+                              )}
+
+                              {/* Treatment edit form */}
+                              {editingTreatmentId === appointment.id && (
+                                <div className="space-y-4 bg-purple-50 dark:bg-purple-950/20 rounded-lg p-4 border border-purple-200 dark:border-purple-800" data-testid={`treatment-form-${appointment.id}`}>
+                                  <div>
+                                    <Label htmlFor={`recipe-${appointment.id}`} className="text-sm font-medium flex items-center gap-1 mb-1.5">
+                                      <FlaskConical className="h-3.5 w-3.5 text-purple-500" />
+                                      Receptura / Formula
+                                    </Label>
+                                    <Textarea
+                                      id={`recipe-${appointment.id}`}
+                                      placeholder="np. Farba Wella Koleston 7/0 + 6% oksydant, proporcja 1:1, 30ml"
+                                      value={treatmentRecipe}
+                                      onChange={(e) => setTreatmentRecipe(e.target.value)}
+                                      rows={3}
+                                      data-testid={`treatment-recipe-input-${appointment.id}`}
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label htmlFor={`techniques-${appointment.id}`} className="text-sm font-medium flex items-center gap-1 mb-1.5">
+                                      <Wrench className="h-3.5 w-3.5 text-purple-500" />
+                                      Zastosowane techniki
+                                    </Label>
+                                    <Textarea
+                                      id={`techniques-${appointment.id}`}
+                                      placeholder="np. Balayage, ombre, pasemka foliowe, tonowanie"
+                                      value={treatmentTechniques}
+                                      onChange={(e) => setTreatmentTechniques(e.target.value)}
+                                      rows={2}
+                                      data-testid={`treatment-techniques-input-${appointment.id}`}
+                                    />
+                                  </div>
+                                  <div>
+                                    <Label htmlFor={`treatment-notes-${appointment.id}`} className="text-sm font-medium flex items-center gap-1 mb-1.5">
+                                      <FileText className="h-3.5 w-3.5 text-purple-500" />
+                                      Notatki zabiegu
+                                    </Label>
+                                    <Textarea
+                                      id={`treatment-notes-${appointment.id}`}
+                                      placeholder="Dodatkowe informacje o zabiegu, reakcje klienta, zalecenia..."
+                                      value={treatmentNotes}
+                                      onChange={(e) => setTreatmentNotes(e.target.value)}
+                                      rows={2}
+                                      data-testid={`treatment-notes-input-${appointment.id}`}
+                                    />
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleSaveTreatment(appointment.id)}
+                                      disabled={savingTreatment}
+                                      data-testid={`save-treatment-btn-${appointment.id}`}
+                                    >
+                                      <Check className="h-3.5 w-3.5 mr-1" />
+                                      {savingTreatment ? "Zapisywanie..." : "Zapisz karte zabiegu"}
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={cancelEditingTreatment}
+                                      disabled={savingTreatment}
+                                      data-testid={`cancel-treatment-btn-${appointment.id}`}
+                                    >
+                                      <X className="h-3.5 w-3.5 mr-1" />
+                                      Anuluj
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Materials Used Section */}
+                            {appointment.materials && appointment.materials.length > 0 && (
+                              <>
+                                <Separator />
+                                <div data-testid={`materials-section-${appointment.id}`}>
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <Package className="h-4 w-4 text-green-600" />
+                                    <p className="text-sm font-semibold">Uzyte materialy</p>
+                                    <Badge variant="secondary" className="text-xs" data-testid={`materials-count-${appointment.id}`}>
+                                      {appointment.materials.length}
+                                    </Badge>
+                                  </div>
+                                  <div className="space-y-2 bg-green-50 dark:bg-green-950/20 rounded-lg p-3 border border-green-200 dark:border-green-800">
+                                    {appointment.materials.map((material) => {
+                                      const cost = material.product?.pricePerUnit
+                                        ? (parseFloat(material.quantityUsed) * parseFloat(material.product.pricePerUnit)).toFixed(2)
+                                        : null;
+                                      return (
+                                        <div
+                                          key={material.id}
+                                          className="text-sm"
+                                          data-testid={`material-row-${material.id}`}
+                                        >
+                                          <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                                              <Package className="h-3.5 w-3.5 text-green-600 shrink-0" />
+                                              <span className="font-medium truncate" data-testid={`material-name-${material.id}`}>
+                                                {material.product?.name || "Nieznany produkt"}
+                                              </span>
+                                              {material.product?.category && (
+                                                <Badge variant="secondary" className="text-xs shrink-0">
+                                                  {material.product.category}
+                                                </Badge>
+                                              )}
+                                            </div>
+                                            <div className="flex items-center gap-3 text-muted-foreground shrink-0 ml-2">
+                                              <span data-testid={`material-qty-${material.id}`}>
+                                                {material.quantityUsed} {material.product?.unit || "szt."}
+                                              </span>
+                                              {cost && (
+                                                <span className="font-medium text-foreground">
+                                                  {cost} PLN
+                                                </span>
+                                              )}
+                                              <a
+                                                href="/dashboard/products"
+                                                className="text-primary hover:underline text-xs"
+                                                data-testid={`material-product-link-${material.id}`}
+                                              >
+                                                Magazyn
+                                              </a>
+                                            </div>
+                                          </div>
+                                          {material.notes && (
+                                            <p className="text-xs text-muted-foreground ml-5.5 mt-0.5">
+                                              {material.notes}
+                                            </p>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                    {/* Total material cost */}
+                                    {(() => {
+                                      const totalCost = appointment.materials.reduce((sum, m) => {
+                                        if (m.product?.pricePerUnit) {
+                                          return sum + parseFloat(m.quantityUsed) * parseFloat(m.product.pricePerUnit);
+                                        }
+                                        return sum;
+                                      }, 0);
+                                      if (totalCost > 0) {
+                                        return (
+                                          <div className="flex justify-between items-center pt-2 mt-2 border-t border-green-300 dark:border-green-700">
+                                            <span className="text-sm font-medium">Laczny koszt materialow:</span>
+                                            <span className="text-sm font-bold" data-testid={`materials-total-cost-${appointment.id}`}>
+                                              {totalCost.toFixed(2)} PLN
+                                            </span>
+                                          </div>
+                                        );
+                                      }
+                                      return null;
+                                    })()}
+                                  </div>
+                                </div>
+                              </>
+                            )}
 
                             {/* Appointment ID */}
                             <div className="pt-2 border-t">
