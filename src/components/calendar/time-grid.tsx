@@ -13,6 +13,8 @@ interface TimeGridProps {
   onDragEnd: () => void;
   onDrop: (employeeId: string, time: Date) => void;
   onEventClick: (event: CalendarEvent) => void;
+  onEventCancel?: (event: CalendarEvent) => void;
+  onEventComplete?: (event: CalendarEvent) => void;
   draggedEvent: CalendarEvent | null;
   startHour?: number;
   endHour?: number;
@@ -29,6 +31,8 @@ export function TimeGrid({
   onDragEnd,
   onDrop,
   onEventClick,
+  onEventCancel,
+  onEventComplete,
   draggedEvent,
   startHour = 8,
   endHour = 20,
@@ -229,6 +233,8 @@ export function TimeGrid({
                       onDragStart={onDragStart}
                       onDragEnd={onDragEnd}
                       onClick={onEventClick}
+                      {...(onEventCancel ? { onCancel: onEventCancel } : {})}
+                      {...(onEventComplete ? { onComplete: onEventComplete } : {})}
                       colorMode={colorMode}
                     />
                   </div>
