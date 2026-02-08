@@ -1,5 +1,183 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-08 (Feature #56 - Search clients) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #56: "Search clients" (Clients category)
+- Description: Find clients by name/phone/email
+
+### What was accomplished:
+1. Search functionality was already implemented in the clients page (client-side filtering)
+2. Verified existing implementation through browser automation:
+   - Search by partial first name ("Zenon") → 1 correct result
+   - Search by partial last name ("Dabrowsk") → 1 correct result
+   - Search by phone number ("888 333") → 1 correct result
+   - Search by email ("tomasz.kowalczyk56") → 1 correct result
+   - No results state ("zzzznonexistent") → proper empty state message
+   - Clear search → all 31 clients shown with correct count
+3. Created 3 test clients with unique names, phones, and emails for testing
+4. All test clients cleaned up after verification
+5. Zero console errors during testing
+6. No mock data patterns found in src/
+
+### Implementation Details:
+- Search input at top of clients page with placeholder text
+- Client-side filtering in React using `includes()` on firstName, lastName, phone, email
+- Result count shows "Wyniki wyszukiwania: X z Y" when filtering, "Liczba klientow: Y" when not
+- Empty state with search icon when no results match
+
+### Files verified (no changes needed):
+- src/app/dashboard/clients/page.tsx (search UI + filtering logic)
+- src/app/api/clients/route.ts (data source)
+
+### Current Stats:
+- 24/253 features passing (9.5%)
+
+---
+
+## Session: 2026-02-08 (Feature #53 assigned) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #53: "Client visit history" (Clients category)
+- Dependencies: None
+
+### What was accomplished:
+1. Created /api/clients/[id]/appointments API endpoint with GET handler
+   - Fetches all appointments for a specific client
+   - Joins with employees and services tables for complete data
+   - Orders by startTime descending
+   - Returns formatted appointments with employee/service details
+2. Updated client profile page with tabbed interface (Profil / Historia wizyt)
+   - Added Tabs component with Profil and Historia wizyt tabs
+   - Lazy-loads appointment history when Historia wizyt tab is clicked
+   - Shows appointment count badge
+   - Each appointment shows: date (day/month/year), service name, status badge, time range, employee name
+3. Implemented expandable appointment details
+   - Click appointment row to expand/collapse
+   - Expanded view shows: full date with day-of-week, time range with duration, service with base price, employee with color dot, status badge, deposit info, notes, appointment ID, creation timestamp
+   - ChevronDown/ChevronUp icon toggle
+4. All labels in Polish (Zaplanowana, Potwierdzona, Zakonczona, Anulowana, Nieobecnosc)
+5. Browser verification: registered user, navigated to client profile, clicked Historia wizyt tab, verified 2 appointments displayed with dates/services/employees, expanded appointment to verify details, zero console errors
+6. Committed as 35aa1d4
+
+### Key files:
+- NEW: src/app/api/clients/[id]/appointments/route.ts (client appointment history API)
+- MODIFIED: src/app/dashboard/clients/[id]/page.tsx (tabbed profile with visit history)
+
+### Stats after: 20/253 features passing (7.9%)
+
+---
+
+## Session: 2026-02-07 (Feature #50 assigned) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #50: "Client allergy tracking" (Clients category)
+- Dependencies: None
+
+### What was accomplished:
+1. Created /api/clients/[id] route with GET/PUT/DELETE for individual client CRUD
+2. Created /dashboard/clients/[id] client profile page with allergy management UI
+3. Allergy management: add allergies via input, remove via X button, badges display
+4. Allergy warning banner (orange) shown on profile when client has allergies
+5. Modified clients list to show allergy warning icons (AlertTriangle) next to names
+6. Modified calendar page handleEventClick to show allergy warning toast (toast.warning)
+7. Browser verification: registered user, navigated to client profile, added "Latex" allergy, saved, refreshed (persisted), verified icon on clients list, verified warning toast on calendar
+8. Mock data checks: all clean (no globalThis, mockDb, testData, etc.)
+9. Committed as 60d5ba3
+
+### Key files:
+- NEW: src/app/api/clients/[id]/route.ts (individual client GET/PUT/DELETE)
+- NEW: src/app/dashboard/clients/[id]/page.tsx (client profile with allergy management)
+- MODIFIED: src/app/dashboard/clients/page.tsx (clickable cards, allergy icons)
+- MODIFIED: src/app/dashboard/calendar/page.tsx (allergy warning toast on event click)
+
+### Stats after: 18/253 features passing (7.1%)
+
+---
+
+## Session: 2026-02-07 (Feature #49 assigned) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #49: "Add new client" (Clients category)
+- Dependencies: None (standalone feature)
+
+### What was accomplished:
+1. Created /dashboard/clients page with full client management UI
+2. Add Client dialog with form validation (firstName, lastName required)
+3. Search/filter clients by name, phone, or email
+4. Polish language UI consistent with existing pages
+5. Added "Klienci" navigation card to dashboard
+6. Browser verification: registered user, navigated to clients, added client, verified persistence
+7. Mock data checks: all clean (no globalThis, mockDb, testData, etc.)
+8. Committed as c50cc9c
+
+### Key files:
+- NEW: src/app/dashboard/clients/page.tsx
+- MODIFIED: src/app/dashboard/page.tsx (added Klienci card)
+- EXISTING: src/app/api/clients/route.ts (GET/POST already existed)
+
+### Stats after: 17/253 features passing (6.7%)
+
+---
+
+## Session: 2026-02-07 (Feature #47 assigned) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #47: "Delete service" (Services category)
+- Dependencies: Features #40-#46 (all passing)
+
+### What was accomplished:
+1. Reviewed existing DELETE endpoint in /api/services/[id]/route.ts - already functional
+2. Installed shadcn AlertDialog component for confirmation dialogs
+3. Added delete button (Trash2 icon) + AlertDialog confirmation to service detail page
+4. Added delete button (Trash2 icon) + AlertDialog confirmation to services list page
+5. Enhanced DELETE API with cascade documentation and logging
+6. Tested end-to-end: created DELETE_TEST_47_Service, navigated to detail page
+7. Clicked delete → confirmation dialog appeared with correct text
+8. Confirmed deletion → toast success, redirected to services list
+9. Verified service removed from list and API returns 404
+10. Verified cascade rules: variants/employees/prices CASCADE, appointments SET NULL
+
+### Key Files:
+- `/src/app/dashboard/services/[id]/page.tsx` - Service detail page with delete button + AlertDialog
+- `/src/app/dashboard/services/page.tsx` - Services list with delete button per card + AlertDialog
+- `/src/app/api/services/[id]/route.ts` - DELETE endpoint with cascade documentation
+- `/src/components/ui/alert-dialog.tsx` - New shadcn AlertDialog component
+
+### Feature Status:
+- Feature #47: ✅ PASSED - Delete service works end-to-end with confirmation
+- Overall: 15/253 features passing (~5.9%)
+
+## Session: 2026-02-07 (Feature #46 assigned) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #46: "Edit existing service" (Services category)
+- Dependencies: Features #40-#45 (all passing)
+
+### What was accomplished:
+1. Verified dev server running on port 3000
+2. Registered test user and logged in
+3. Navigated to /dashboard/services, clicked "Strzyzenie damskie" service
+4. Service detail page loaded with: 80.00 PLN, 1h duration, 2 variants, 2 employees
+5. Clicked edit (pencil) button - dialog opened with pre-filled values
+6. Modified: name → "TEST_46_Strzyzenie premium", price → 120 PLN, duration → 45 min
+7. Saved changes - toast notification confirmed, page updated immediately
+8. Variants recalculated correctly: Krotkie wlosy = 110 PLN / 30 min, Dlugie wlosy = 140 PLN / 1h
+9. Employee pricing recalculated: Anna Kowalska = 96 PLN (-20%)
+10. **Refreshed page** - all changes persisted from database ✅
+11. Reverted test data back to original values (Strzyzenie damskie, 80 PLN, 60 min)
+12. No mock/fake data found in code
+
+### Key Files:
+- `/src/app/dashboard/services/[id]/page.tsx` - Service detail page with edit dialog
+- `/src/app/api/services/[id]/route.ts` - PUT endpoint using Drizzle ORM
+
+### Feature Status:
+- Feature #46: ✅ PASSED - Edit existing service works end-to-end
+- Overall: 13/253 features passing (5.1%)
+
+---
+
 ## Session: 2026-02-07 (Feature #6 assigned) *** SUCCESS ***
 
 ### Feature Assigned
@@ -5945,3 +6123,103 @@ Same persistent blocker as previous 8 sessions:
 
 ### Critical Note:
 This is the 9th session blocked on Docker. The code implementation is complete and verified correct (uses real Drizzle ORM queries, not mock data). User must start Docker Desktop manually before any infrastructure features can be verified.
+
+## Session: 2026-02-07 (Feature #41) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #41: "Holiday and vacation management" (Employee Management category)
+- Description: Mark days off and vacations
+
+### What was accomplished:
+1. Created /api/time-blocks API (GET/POST/DELETE) for vacation/break/holiday CRUD
+2. Added vacation blocking logic to /api/appointments POST - returns 409 with Polish message
+3. Vacation management section was already added to employee schedule page in Feature #40 session
+4. Added select UI component for vacation type dropdown
+
+### Verification:
+- Browser automation: Navigated to schedule page, clicked Dodaj urlop, filled dates (2026-02-10 to 2026-02-14), selected Urlop type, added reason, confirmed
+- Vacation appeared in Nadchodzace list with correct formatting
+- API test: POST to /api/appointments during vacation returned 409
+- API test: POST to /api/appointments outside vacation succeeded (201)
+- TypeScript: 0 errors in modified files
+- No mock data detected
+
+### Files changed:
+- NEW: src/app/api/time-blocks/route.ts (vacation CRUD API)
+- MODIFIED: src/app/api/appointments/route.ts (vacation blocking logic)
+- NEW: src/components/ui/select.tsx (shadcn select component)
+
+### Commit: cfcc096
+
+## Session: 2026-02-07 (Feature #43 assigned) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #43: "Service variants configuration" (Services category)
+- Steps: Open service details, navigate to variants section, add variants with price/duration modifiers
+
+### What was accomplished:
+1. Schema already had `serviceVariants` table - no migration needed
+2. Created API routes:
+   - GET/PUT/DELETE `/api/services/[id]` - Individual service CRUD with variants
+   - GET/POST `/api/services/[id]/variants` - Variants list/create
+   - PUT/DELETE `/api/services/[id]/variants/[variantId]` - Individual variant update/delete
+3. Created service detail page at `/dashboard/services/[id]`:
+   - Shows service name, status badge, base price, base duration
+   - Variants section with count badge
+   - Add/edit variant dialog (name, price modifier, duration modifier)
+   - Each variant shows calculated final price/duration with modifier display
+   - Edit and delete buttons per variant
+4. Modified services list page to make cards clickable with navigation to detail
+5. Browser verification:
+   - Logged in, seeded data, navigated to services list
+   - Clicked service "Strzyzenie damskie" (base: 80 PLN, 1h)
+   - Added variant "Krotkie wlosy" (price: -10, duration: -15) → 70 PLN, 45 min ✓
+   - Added variant "Dlugie wlosy" (price: +20, duration: +15) → 100 PLN, 1h 15min ✓
+   - Refreshed page - both variants persisted from database ✓
+6. TypeScript compilation: PASS (fixed unused params with _ prefix)
+
+### Files created/modified:
+- NEW: src/app/api/services/[id]/route.ts
+- NEW: src/app/api/services/[id]/variants/route.ts
+- NEW: src/app/api/services/[id]/variants/[variantId]/route.ts
+- NEW: src/app/dashboard/services/[id]/page.tsx
+- MODIFIED: src/app/dashboard/services/page.tsx (clickable cards with navigation)
+
+### Commit: 19f078e
+
+---
+
+## Session: 2026-02-07 (Feature #44 - Employee-specific pricing) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #44: "Employee-specific pricing"
+- Goal: Set custom prices per employee for services, verify price resolution
+
+### What was accomplished:
+1. Verified implementation already existed - Schema, API routes, and UI all previously built:
+   - src/lib/schema.ts - employeeServicePrices table
+   - src/app/api/services/[id]/employee-prices/route.ts - CRUD for employee pricing
+   - src/app/api/services/[id]/price/route.ts - Price resolution with employee overrides
+   - src/app/dashboard/services/[id]/page.tsx - Full UI for managing employee prices
+2. Schema verified - drizzle-kit push confirmed no changes detected
+3. Test data confirmed - 9 employees and 18 services in database
+4. Browser testing:
+   - Registered new user feature44@example.com
+   - Navigated to service detail page for Strzyzenie damskie (base price 80.00 PLN)
+   - Found existing employee price: Anna Kowalska at 96.00 PLN (+20%)
+   - Added new employee price: Marta Nowak at 96.00 PLN (+20%)
+   - Toast notification confirmed: Cena dla Marta Nowak ustawiona
+   - Employee pricing section updated from 1 to 2 entries
+   - Page refreshed - both prices persisted from database
+5. API verification:
+   - GET employee-prices returned 2 custom prices (Marta 96.00, Anna 96.00)
+   - Price resolution with Marta: effectivePrice 96.00, hasCustomPrice true
+   - Price resolution with Anna: effectivePrice 96.00, hasCustomPrice true
+   - Price resolution without employee: effectivePrice 80.00, hasCustomPrice false
+6. Mock data check - No mock/dummy/fake/hardcoded data found in API or service pages
+
+### Feature Status:
+- Feature #44: PASSED - Employee-specific pricing works end-to-end
+
+### Current Stats:
+- 14/253 features passing (5.5%)
