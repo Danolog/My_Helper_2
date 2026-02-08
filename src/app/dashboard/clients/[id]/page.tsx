@@ -22,7 +22,15 @@ import {
   X,
   Save,
   Heart,
+  Star,
 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 
 interface ClientData {
@@ -40,25 +48,36 @@ interface ClientData {
   updatedAt: string;
 }
 
-/**
- * Parses the comma-separated allergies string into an array of trimmed,
- * non-empty allergy entries.
- */
-function parseAllergies(allergiesStr: string | null): string[] {
-  if (!allergiesStr) return [];
-  return allergiesStr
-    .split(",")
-    .map((a) => a.trim())
-    .filter((a) => a.length > 0);
+const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+const NO_FAVORITE = "__none__";
+
+interface Employee {
+  id: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  isActive: boolean;
+  color: string | null;
 }
 
 /**
- * Serializes an array of allergy strings back to a comma-separated string,
+ * Parses a comma-separated string into an array of trimmed, non-empty entries.
+ */
+function parseCommaSeparated(str: string | null): string[] {
+  if (!str) return [];
+  return str
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Serializes an array of strings back to a comma-separated string,
  * or null if the array is empty.
  */
-function serializeAllergies(allergies: string[]): string | null {
-  if (allergies.length === 0) return null;
-  return allergies.join(", ");
+function serializeCommaSeparated(items: string[]): string | null {
+  if (items.length === 0) return null;
+  return items.join(", ");
 }
 
 export default function ClientProfilePage() {
@@ -73,9 +92,12 @@ export default function ClientProfilePage() {
 
   // Editable form fields
   const [formNotes, setFormNotes] = useState("");
-  const [formPreferences, setFormPreferences] = useState("");
   const [allergiesList, setAllergiesList] = useState<string[]>([]);
   const [newAllergyInput, setNewAllergyInput] = useState("");
+  const [preferencesList, setPreferencesList] = useState<string[]>([]);
+  const [newPreferenceInput, setNewPreferenceInput] = useState("");
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [selectedFavoriteEmployeeId, setSelectedFavoriteEmployeeId] = useState<string>("");
 
   const fetchClient = useCallback(async () => {
     try {
@@ -85,8 +107,9 @@ export default function ClientProfilePage() {
         const clientData = data.data as ClientData;
         setClient(clientData);
         setFormNotes(clientData.notes || "");
-        setFormPreferences(clientData.preferences || "");
-        setAllergiesList(parseAllergies(clientData.allergies));
+        setAllergiesList(parseCommaSeparated(clientData.allergies));
+        setPreferencesList(parseCommaSeparated(clientData.preferences));
+        setSelectedFavoriteEmployeeId(clientData.favoriteEmployeeId || "");
       } else {
         toast.error("Nie znaleziono klienta");
         router.push("/dashboard/clients");
@@ -109,7 +132,6 @@ export default function ClientProfilePage() {
       toast.error("Wpisz nazwe alergii");
       return;
     }
-    // Prevent duplicate entries (case-insensitive check)
     if (allergiesList.some((a) => a.toLowerCase() === trimmed.toLowerCase())) {
       toast.error("Ta alergia jest juz na liscie");
       return;
@@ -129,6 +151,35 @@ export default function ClientProfilePage() {
     }
   };
 
+  const handleAddPreference = () => {
+    const trimmed = newPreferenceInput.trim();
+    if (!trimmed) {
+      toast.error("Wpisz preferencje klienta");
+      return;
+    }
+    if (
+      preferencesList.some((p) => p.toLowerCase() === trimmed.toLowerCase())
+    ) {
+      toast.error("Ta preferencja jest juz na liscie");
+      return;
+    }
+    setPreferencesList((prev) => [...prev, trimmed]);
+    setNewPreferenceInput("");
+  };
+
+  const handleRemovePreference = (index: number) => {
+    setPreferencesList((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handlePreferenceKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleAddPreference();
+    }
+  };
+
   const handleSave = async () => {
     if (!client) return;
 
@@ -139,8 +190,8 @@ export default function ClientProfilePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           notes: formNotes.trim() || null,
-          preferences: formPreferences.trim() || null,
-          allergies: serializeAllergies(allergiesList),
+          preferences: serializeCommaSeparated(preferencesList),
+          allergies: serializeCommaSeparated(allergiesList),
         }),
       });
 
@@ -242,6 +293,24 @@ export default function ClientProfilePage() {
         </div>
       )}
 
+      {/* Preferences info banner - displayed when preferences exist */}
+      {preferencesList.length > 0 && (
+        <div
+          className="flex items-start gap-3 p-4 mb-6 rounded-lg border border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/30"
+          data-testid="preferences-info-banner"
+        >
+          <StickyNote className="h-5 w-5 text-blue-600 dark:text-blue-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold text-blue-800 dark:text-blue-300">
+              Preferencje klienta
+            </p>
+            <p className="text-sm text-blue-700 dark:text-blue-400 mt-1">
+              {preferencesList.join(", ")}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Client info card */}
       <Card className="mb-6" data-testid="client-info-card">
         <CardHeader>
@@ -281,9 +350,7 @@ export default function ClientProfilePage() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Heart className="h-5 w-5 text-primary" />
-            <CardTitle className="text-lg">
-              Zdrowie i preferencje
-            </CardTitle>
+            <CardTitle className="text-lg">Zdrowie i preferencje</CardTitle>
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -355,20 +422,68 @@ export default function ClientProfilePage() {
 
           {/* Preferences */}
           <div>
-            <div className="flex items-center gap-2 mb-2">
-              <StickyNote className="h-4 w-4 text-muted-foreground" />
-              <Label htmlFor="client-preferences" className="text-base font-medium">
+            <div className="flex items-center gap-2 mb-3">
+              <StickyNote className="h-4 w-4 text-blue-500" />
+              <Label className="text-base font-medium">
                 Preferencje klienta
               </Label>
             </div>
-            <Textarea
-              id="client-preferences"
-              placeholder="np. Preferuje ciche otoczenie, lubi rozmawiac podczas zabiegu..."
-              value={formPreferences}
-              onChange={(e) => setFormPreferences(e.target.value)}
-              rows={3}
-              data-testid="client-preferences-input"
-            />
+
+            {preferencesList.length === 0 ? (
+              <p
+                className="text-sm text-muted-foreground mb-3"
+                data-testid="no-preferences-message"
+              >
+                Brak preferencji
+              </p>
+            ) : (
+              <div
+                className="flex flex-wrap gap-2 mb-3"
+                data-testid="preferences-list"
+              >
+                {preferencesList.map((preference, index) => (
+                  <Badge
+                    key={`${preference}-${index}`}
+                    variant="secondary"
+                    className="flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300"
+                    data-testid={`preference-badge-${index}`}
+                  >
+                    {preference}
+                    <button
+                      type="button"
+                      onClick={() => handleRemovePreference(index)}
+                      className="ml-1 hover:bg-blue-200 dark:hover:bg-blue-800 rounded-full p-0.5"
+                      aria-label={`Usun preferencje: ${preference}`}
+                      data-testid={`remove-preference-${index}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            {/* Add preference form */}
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder="np. Preferuje kawe, Wrazliwa skora glowy"
+                value={newPreferenceInput}
+                onChange={(e) => setNewPreferenceInput(e.target.value)}
+                onKeyDown={handlePreferenceKeyDown}
+                className="max-w-sm"
+                data-testid="new-preference-input"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleAddPreference}
+                data-testid="add-preference-btn"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Dodaj preferencje
+              </Button>
+            </div>
           </div>
 
           <Separator />
