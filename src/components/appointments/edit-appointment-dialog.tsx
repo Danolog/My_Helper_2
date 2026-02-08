@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -518,11 +519,12 @@ export function EditAppointmentDialog({
 
           {/* Notes */}
           <div>
-            <Label className="mb-1.5 block">Notatki</Label>
-            <Input
+            <Label className="mb-1.5 block">Notatki wewnetrzne</Label>
+            <Textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Dodatkowe uwagi (opcjonalnie)"
+              placeholder="Notatki wewnetrzne dla personelu (np. preferencje klienta, uwagi, szczegoly zabiegu)..."
+              className="min-h-[80px]"
               data-testid="edit-appointment-notes-input"
             />
           </div>
