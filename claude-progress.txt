@@ -1,5 +1,35 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-08 (Feature #73 - Book appointment online) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #73: "Book appointment online" (ClientPortal category)
+- Description: Complete booking flow - Login as client, select salon, service, variant, employee, date/time, review and confirm
+
+### What was accomplished:
+- No code changes needed - the booking page was already fully implemented at `src/app/(client)/salons/[id]/book/page.tsx` (1,303 lines)
+- Set up test data: assigned employees to services, created service variants, added work schedules
+- Complete browser-based end-to-end verification of the booking flow
+
+### Verification (browser automation):
+1. **Login**: Registered new client (testbooking73@example.com), auto-logged in
+2. **Select service**: Navigated to `/salons/00000000-.../book`, selected "Strzyzenie damskie" (with 2 warianty badge)
+3. **Select variant**: Chose "Dlugie wlosy" (100 PLN, 1h 15min) - checkmark appeared
+4. **Select employee**: Chose "Anna Kowalska" from 2 available - "Wybrany" badge shown
+5. **Select date**: Entered 2026-02-09 (Monday) - work hours 09:00-17:00, blocked times shown (10:00-11:00 appointment, 13:00-14:00 break)
+6. **Select time**: Clicked 14:00 slot - confirmed "Wybrany termin: 14:00 - 15:15"
+7. **Review summary**: All details correct (salon, service+variant, employee, date, time, price 100 PLN, duration 1h 15min)
+8. **Confirm**: Clicked "Potwierdz rezerwacje" - success page "Wizyta zarezerwowana!" with toast notification
+9. **Data persistence**: Verified appointment saved in PostgreSQL via API (ID: e8258578-..., status: scheduled)
+10. **Mock data check**: No globalThis.__, devStore, mockDb, inMemoryStore, Map(), localStorage/sessionStorage in API routes
+
+### Files: No modifications needed - feature was already fully implemented
+
+### Current Stats:
+- 40/253 features passing (15.8%)
+
+---
+
 ## Session: 2026-02-08 (Feature #72 - View employee profiles) *** SUCCESS ***
 
 ### Feature Assigned
