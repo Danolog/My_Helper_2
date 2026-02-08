@@ -20,6 +20,12 @@ import {
   FileText,
   Receipt,
   ShieldCheck,
+  Ban,
+  AlertTriangle,
+  Clock,
+  DollarSign,
+  RefreshCw,
+  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,7 +36,15 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { useSession } from "@/lib/auth-client";
+import { toast } from "sonner";
 
 interface TreatmentInfo {
   id: string;
@@ -75,6 +89,25 @@ interface AppointmentDetail {
   depositPayment: DepositPaymentInfo | null;
 }
 
+interface CancelInfo {
+  appointmentId: string;
+  status: string;
+  startTime: string;
+  endTime: string;
+  hoursUntilAppointment: number;
+  isMoreThan24h: boolean;
+  isPast: boolean;
+  canCancel: boolean;
+  deposit: {
+    amount: number;
+    paid: boolean;
+    action: "refund" | "forfeit" | "none";
+  };
+  employee: { name: string } | null;
+  service: { name: string; price: string } | null;
+  salon: { name: string } | null;
+}
+
 function formatDate(dateStr: string): string {
   const d = new Date(dateStr);
   return d.toLocaleDateString("pl-PL", {
@@ -99,6 +132,30 @@ function formatDuration(minutes: number): string {
   const remaining = minutes % 60;
   if (remaining === 0) return `${hours}h`;
   return `${hours}h ${remaining}min`;
+}
+
+function formatDateTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  return date.toLocaleDateString("pl-PL", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatTimeRemaining(hours: number): string {
+  if (hours < 1) {
+    const minutes = Math.round(hours * 60);
+    return `${minutes} min`;
+  }
+  if (hours < 48) {
+    return `${Math.round(hours)}h`;
+  }
+  const days = Math.round(hours / 24);
+  return `${days} dni`;
 }
 
 function getStatusBadge(status: string) {
@@ -143,6 +200,15 @@ function getStatusBadge(status: string) {
   }
 }
 
+function isUpcoming(startTime: string, status: string): boolean {
+  return (
+    new Date(startTime) > new Date() &&
+    status !== "cancelled" &&
+    status !== "completed" &&
+    status !== "no_show"
+  );
+}
+
 export default function AppointmentDetailPage() {
   const params = useParams();
   const appointmentId = params.id as string;
@@ -151,6 +217,13 @@ export default function AppointmentDetailPage() {
   const [appointment, setAppointment] = useState<AppointmentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Cancel dialog state
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelInfo, setCancelInfo] = useState<CancelInfo | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const fetchAppointment = useCallback(async () => {
     try {
@@ -178,6 +251,71 @@ export default function AppointmentDetailPage() {
       fetchAppointment();
     }
   }, [session, isPending, router, fetchAppointment]);
+
+  // Fetch cancellation info when dialog opens
+  const fetchCancelInfo = useCallback(async () => {
+    setCancelLoading(true);
+    setCancelError(null);
+    try {
+      const res = await fetch(`/api/client/appointments/${appointmentId}/cancel`);
+      const data = await res.json();
+      if (data.success) {
+        setCancelInfo(data.data);
+      } else {
+        setCancelError(data.error || "Nie udalo sie pobrac informacji o anulowaniu");
+      }
+    } catch (err) {
+      console.error("Failed to fetch cancel info:", err);
+      setCancelError("Blad polaczenia z serwerem");
+    } finally {
+      setCancelLoading(false);
+    }
+  }, [appointmentId]);
+
+  useEffect(() => {
+    if (cancelDialogOpen) {
+      fetchCancelInfo();
+    } else {
+      setCancelInfo(null);
+      setCancelError(null);
+    }
+  }, [cancelDialogOpen, fetchCancelInfo]);
+
+  // Handle the actual cancellation
+  const handleCancelAppointment = async () => {
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/client/appointments/${appointmentId}/cancel`, {
+        method: "POST",
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        const details = data.cancellationDetails;
+        let description = "Twoja wizyta zostala pomyslnie anulowana.";
+
+        if (details?.depositRefunded) {
+          description += ` Zadatek ${details.depositAmount.toFixed(2)} PLN zostanie zwrocony.`;
+        } else if (details?.depositForfeited) {
+          description += ` Zadatek ${details.depositAmount.toFixed(2)} PLN nie podlega zwrotowi.`;
+        }
+
+        toast.success("Wizyta anulowana", { description });
+        setCancelDialogOpen(false);
+        // Refresh appointment data to show updated status
+        fetchAppointment();
+      } else {
+        toast.error("Nie udalo sie anulowac wizyty", {
+          description: data.error,
+        });
+      }
+    } catch (err) {
+      console.error("Failed to cancel appointment:", err);
+      toast.error("Blad podczas anulowania wizyty");
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   if (isPending || loading) {
     return (
@@ -226,6 +364,9 @@ export default function AppointmentDetailPage() {
   const baseDuration = appointment.serviceDuration || 0;
   const variantDurationModifier = appointment.variantDurationModifier || 0;
   const effectiveDuration = baseDuration + variantDurationModifier;
+
+  // Can this appointment be cancelled?
+  const canCancel = isUpcoming(appointment.startTime, appointment.status);
 
   return (
     <div className="container mx-auto p-6 max-w-2xl">
@@ -515,6 +656,30 @@ export default function AppointmentDetailPage() {
 
       {/* Actions */}
       <div className="flex flex-col gap-3 mt-6">
+        {/* Cancel button - only for upcoming appointments that haven't been cancelled/completed */}
+        {canCancel && (
+          <Button
+            variant="destructive"
+            onClick={() => setCancelDialogOpen(true)}
+            data-testid="cancel-appointment-btn"
+          >
+            <Ban className="w-4 h-4 mr-2" />
+            Anuluj wizyte
+          </Button>
+        )}
+
+        {/* Cancelled status message */}
+        {appointment.status === "cancelled" && (
+          <Card className="border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20" data-testid="cancelled-status-card">
+            <CardContent className="py-4">
+              <div className="flex items-center gap-2 text-red-700 dark:text-red-400">
+                <CalendarX className="w-5 h-5" />
+                <span className="font-medium">Ta wizyta zostala anulowana</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <Button asChild variant="outline">
           <Link href={`/salons/${appointment.salonId}/book`}>
             <CalendarDays className="w-4 h-4 mr-2" />
@@ -528,6 +693,159 @@ export default function AppointmentDetailPage() {
           </Link>
         </Button>
       </div>
+
+      {/* Cancel Appointment Dialog */}
+      <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+        <DialogContent className="max-w-md" data-testid="client-cancel-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Ban className="h-5 w-5" />
+              Anulowanie wizyty
+            </DialogTitle>
+          </DialogHeader>
+
+          {cancelLoading && (
+            <div className="flex justify-center items-center py-8">
+              <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          )}
+
+          {cancelError && (
+            <div className="flex items-center gap-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+              <XCircle className="h-4 w-4 shrink-0" />
+              {cancelError}
+            </div>
+          )}
+
+          {cancelInfo && !cancelLoading && (
+            <div className="space-y-4">
+              {/* Appointment summary */}
+              <div className="space-y-2 p-3 rounded-lg bg-muted/50 border">
+                {cancelInfo.service && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <Scissors className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="font-medium">{cancelInfo.service.name}</span>
+                    <span className="text-muted-foreground ml-auto">
+                      {parseFloat(cancelInfo.service.price).toFixed(2)} PLN
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 text-sm">
+                  <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span>{formatDateTime(cancelInfo.startTime)}</span>
+                </div>
+                {cancelInfo.employee && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    Pracownik: {cancelInfo.employee.name}
+                  </div>
+                )}
+                {cancelInfo.salon && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <MapPin className="h-3.5 w-3.5" />
+                    {cancelInfo.salon.name}
+                  </div>
+                )}
+              </div>
+
+              {/* Cancellation policy */}
+              <div
+                className={`p-3 rounded-lg border ${
+                  cancelInfo.isMoreThan24h
+                    ? "bg-green-50 dark:bg-green-950/30 border-green-300 dark:border-green-700"
+                    : "bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700"
+                }`}
+                data-testid="cancellation-policy"
+              >
+                <div className="flex items-start gap-2">
+                  {cancelInfo.isMoreThan24h ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400 mt-0.5 shrink-0" />
+                  )}
+                  <div className="text-sm">
+                    <p className="font-medium" data-testid="cancellation-policy-title">
+                      {cancelInfo.isMoreThan24h
+                        ? "Anulacja bez kosztow"
+                        : "Anulacja z utrata zadatku"}
+                    </p>
+                    <p className="text-muted-foreground mt-1">
+                      Do wizyty pozostalo: {formatTimeRemaining(cancelInfo.hoursUntilAppointment)}
+                    </p>
+                    <p className="text-muted-foreground mt-1">
+                      {cancelInfo.isMoreThan24h
+                        ? "Wizyta moze byc anulowana bez kosztow (wiecej niz 24h do wizyty)."
+                        : "Uwaga: Anulacja mniej niz 24h przed wizyta oznacza utrate zadatku."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Deposit info */}
+              {cancelInfo.deposit.amount > 0 && cancelInfo.deposit.paid && (
+                <div
+                  className={`p-3 rounded-lg border ${
+                    cancelInfo.deposit.action === "refund"
+                      ? "bg-blue-50 dark:bg-blue-950/30 border-blue-300 dark:border-blue-700"
+                      : "bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-700"
+                  }`}
+                  data-testid="deposit-info"
+                >
+                  <div className="flex items-start gap-2">
+                    <DollarSign
+                      className={`h-4 w-4 mt-0.5 shrink-0 ${
+                        cancelInfo.deposit.action === "refund"
+                          ? "text-blue-600 dark:text-blue-400"
+                          : "text-red-600 dark:text-red-400"
+                      }`}
+                    />
+                    <div className="text-sm">
+                      <p className="font-medium">
+                        Zadatek: {cancelInfo.deposit.amount.toFixed(2)} PLN
+                      </p>
+                      <p
+                        className={
+                          cancelInfo.deposit.action === "refund"
+                            ? "text-blue-700 dark:text-blue-400"
+                            : "text-red-700 dark:text-red-400"
+                        }
+                        data-testid="deposit-action-message"
+                      >
+                        {cancelInfo.deposit.action === "refund"
+                          ? "Zadatek zostanie zwrocony na Twoje konto."
+                          : "Zadatek nie podlega zwrotowi (anulacja < 24h)."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Warning */}
+              <p className="text-sm text-muted-foreground text-center">
+                Czy na pewno chcesz anulowac te wizyte? Tej operacji nie mozna cofnac.
+              </p>
+            </div>
+          )}
+
+          <DialogFooter className="mt-2">
+            <Button
+              variant="outline"
+              onClick={() => setCancelDialogOpen(false)}
+              disabled={cancelling}
+              data-testid="cancel-dialog-back-btn"
+            >
+              Wstecz
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCancelAppointment}
+              disabled={cancelling || cancelLoading || !!cancelError}
+              data-testid="confirm-cancel-btn"
+            >
+              {cancelling ? "Anulowanie..." : "Anuluj wizyte"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

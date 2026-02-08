@@ -1,0 +1,247 @@
+import { NextResponse } from "next/server";
+import { headers } from "next/headers";
+import { db } from "@/lib/db";
+import { appointments, employees, services, salons } from "@/lib/schema";
+import { eq, and } from "drizzle-orm";
+import { auth } from "@/lib/auth";
+
+// GET /api/client/appointments/[id]/cancel - Get cancellation policy info for client
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
+    const userId = session.user.id;
+    const { id } = await params;
+
+    // Fetch appointment ensuring it belongs to this user
+    const result = await db
+      .select({
+        appointment: appointments,
+        employee: employees,
+        service: services,
+        salon: salons,
+      })
+      .from(appointments)
+      .leftJoin(employees, eq(appointments.employeeId, employees.id))
+      .leftJoin(services, eq(appointments.serviceId, services.id))
+      .leftJoin(salons, eq(appointments.salonId, salons.id))
+      .where(
+        and(
+          eq(appointments.id, id),
+          eq(appointments.bookedByUserId, userId)
+        )
+      )
+      .limit(1);
+
+    const row = result[0];
+    if (!row) {
+      return NextResponse.json(
+        { success: false, error: "Appointment not found" },
+        { status: 404 }
+      );
+    }
+
+    const appointment = row.appointment;
+
+    // Already cancelled?
+    if (appointment.status === "cancelled") {
+      return NextResponse.json(
+        { success: false, error: "Wizyta jest juz anulowana" },
+        { status: 400 }
+      );
+    }
+
+    // Already completed?
+    if (appointment.status === "completed") {
+      return NextResponse.json(
+        { success: false, error: "Nie mozna anulowac zakonczonej wizyty" },
+        { status: 400 }
+      );
+    }
+
+    // Calculate time difference for cancellation policy
+    const now = new Date();
+    const startTime = new Date(appointment.startTime);
+    const hoursUntilAppointment = (startTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+    const isMoreThan24h = hoursUntilAppointment > 24;
+    const isPast = hoursUntilAppointment < 0;
+
+    // Determine deposit handling
+    const hasDeposit = appointment.depositAmount && parseFloat(appointment.depositAmount) > 0;
+    const depositPaid = appointment.depositPaid;
+
+    let depositAction: "refund" | "forfeit" | "none" = "none";
+    if (hasDeposit && depositPaid) {
+      depositAction = isMoreThan24h ? "refund" : "forfeit";
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        appointmentId: appointment.id,
+        status: appointment.status,
+        startTime: appointment.startTime,
+        endTime: appointment.endTime,
+        hoursUntilAppointment: Math.max(0, hoursUntilAppointment),
+        isMoreThan24h,
+        isPast,
+        canCancel: !isPast,
+        deposit: {
+          amount: appointment.depositAmount ? parseFloat(appointment.depositAmount) : 0,
+          paid: !!depositPaid,
+          action: depositAction,
+        },
+        employee: row.employee
+          ? { name: `${row.employee.firstName} ${row.employee.lastName}` }
+          : null,
+        service: row.service
+          ? { name: row.service.name, price: row.service.basePrice }
+          : null,
+        salon: row.salon
+          ? { name: row.salon.name }
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error("[Client Cancel API] Error:", error);
+    return NextResponse.json(
+      { success: false, error: "Failed to get cancellation info" },
+      { status: 500 }
+    );
+  }
+}
+
+// POST /api/client/appointments/[id]/cancel - Cancel an appointment as a client
+export async function POST(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
+    const userId = session.user.id;
+    const { id } = await params;
+
+    // Fetch appointment ensuring it belongs to this user
+    const result = await db
+      .select({
+        appointment: appointments,
+        service: services,
+      })
+      .from(appointments)
+      .leftJoin(services, eq(appointments.serviceId, services.id))
+      .where(
+        and(
+          eq(appointments.id, id),
+          eq(appointments.bookedByUserId, userId)
+        )
+      )
+      .limit(1);
+
+    const row = result[0];
+    if (!row) {
+      return NextResponse.json(
+        { success: false, error: "Appointment not found" },
+        { status: 404 }
+      );
+    }
+
+    const appointment = row.appointment;
+
+    // Already cancelled?
+    if (appointment.status === "cancelled") {
+      return NextResponse.json(
+        { success: false, error: "Wizyta jest juz anulowana" },
+        { status: 400 }
+      );
+    }
+
+    // Already completed?
+    if (appointment.status === "completed") {
+      return NextResponse.json(
+        { success: false, error: "Nie mozna anulowac zakonczonej wizyty" },
+        { status: 400 }
+      );
+    }
+
+    // Check if appointment is in the past
+    const now = new Date();
+    const startTime = new Date(appointment.startTime);
+    const hoursUntilAppointment = (startTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+    if (hoursUntilAppointment < 0) {
+      return NextResponse.json(
+        { success: false, error: "Nie mozna anulowac wizyty, ktora juz sie rozpoczela" },
+        { status: 400 }
+      );
+    }
+
+    const isMoreThan24h = hoursUntilAppointment > 24;
+
+    // Determine deposit handling
+    const hasDeposit = appointment.depositAmount && parseFloat(appointment.depositAmount) > 0;
+    const depositPaid = appointment.depositPaid;
+    let depositRefunded = false;
+    let depositForfeited = false;
+
+    if (hasDeposit && depositPaid) {
+      if (isMoreThan24h) {
+        depositRefunded = true;
+      } else {
+        depositForfeited = true;
+      }
+    }
+
+    // Cancel the appointment
+    const [cancelledAppointment] = await db
+      .update(appointments)
+      .set({ status: "cancelled" })
+      .where(eq(appointments.id, id))
+      .returning();
+
+    console.log(`[Client Cancel API] Client ${userId} cancelled appointment ${id}`, {
+      hoursUntilAppointment: hoursUntilAppointment.toFixed(1),
+      isMoreThan24h,
+      hasDeposit,
+      depositPaid,
+      depositRefunded,
+      depositForfeited,
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: cancelledAppointment,
+      message: "Wizyta zostala anulowana",
+      cancellationDetails: {
+        hoursUntilAppointment: Math.max(0, hoursUntilAppointment),
+        isMoreThan24h,
+        hasDeposit: !!hasDeposit,
+        depositPaid: !!depositPaid,
+        depositAmount: appointment.depositAmount ? parseFloat(appointment.depositAmount) : 0,
+        depositRefunded,
+        depositForfeited,
+      },
+    });
+  } catch (error) {
+    console.error("[Client Cancel API] Error:", error);
+    return NextResponse.json(
+      { success: false, error: "Failed to cancel appointment" },
+      { status: 500 }
+    );
+  }
+}
