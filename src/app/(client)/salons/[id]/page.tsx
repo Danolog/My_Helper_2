@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronUp,
   Tag,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -83,10 +84,12 @@ function ServiceCard({
   service,
   isExpanded,
   onToggle,
+  salonId,
 }: {
   service: ServiceItem;
   isExpanded: boolean;
   onToggle: () => void;
+  salonId: string;
 }) {
   const hasDetails = service.description || service.variants.length > 0;
 
@@ -119,6 +122,16 @@ function ServiceCard({
           <Badge variant="outline" className="font-semibold whitespace-nowrap">
             {parseFloat(service.basePrice).toFixed(0)} PLN
           </Badge>
+          {!hasDetails && (
+            <Link
+              href={`/salons/${salonId}/services/${service.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-primary hover:text-primary/80"
+              data-testid={`service-details-link-${service.id}`}
+            >
+              <Eye className="w-4 h-4" />
+            </Link>
+          )}
           {hasDetails && (
             <div className="text-muted-foreground">
               {isExpanded ? (
@@ -192,6 +205,17 @@ function ServiceCard({
               </div>
             </div>
           )}
+          <div className="mt-3 flex justify-end">
+            <Link
+              href={`/salons/${salonId}/services/${service.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline font-medium"
+              data-testid={`service-details-link-${service.id}`}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              Szczegoly uslugi
+            </Link>
+          </div>
         </div>
       )}
     </div>
@@ -480,6 +504,7 @@ export default function SalonProfilePage() {
                           service={service}
                           isExpanded={expandedServices.has(service.id)}
                           onToggle={() => toggleServiceExpanded(service.id)}
+                          salonId={salonId}
                         />
                       ))}
                     </div>
@@ -495,6 +520,7 @@ export default function SalonProfilePage() {
                     service={service}
                     isExpanded={expandedServices.has(service.id)}
                     onToggle={() => toggleServiceExpanded(service.id)}
+                    salonId={salonId}
                   />
                 ))}
               </div>
