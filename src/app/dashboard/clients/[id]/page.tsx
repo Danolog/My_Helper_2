@@ -219,6 +219,12 @@ export default function ClientProfilePage() {
   const [treatmentNotes, setTreatmentNotes] = useState("");
   const [savingTreatment, setSavingTreatment] = useState(false);
 
+  // Editable contact fields
+  const [formFirstName, setFormFirstName] = useState("");
+  const [formLastName, setFormLastName] = useState("");
+  const [formPhone, setFormPhone] = useState("");
+  const [formEmail, setFormEmail] = useState("");
+
   // Editable form fields
   const [formNotes, setFormNotes] = useState("");
   const [allergiesList, setAllergiesList] = useState<string[]>([]);
@@ -235,6 +241,10 @@ export default function ClientProfilePage() {
       if (data.success) {
         const clientData = data.data as ClientData;
         setClient(clientData);
+        setFormFirstName(clientData.firstName);
+        setFormLastName(clientData.lastName);
+        setFormPhone(clientData.phone || "");
+        setFormEmail(clientData.email || "");
         setFormNotes(clientData.notes || "");
         setAllergiesList(parseCommaSeparated(clientData.allergies));
         setPreferencesList(parseCommaSeparated(clientData.preferences));
@@ -422,12 +432,22 @@ export default function ClientProfilePage() {
   const handleSave = async () => {
     if (!client) return;
 
+    // Validate required fields
+    if (!formFirstName.trim() || !formLastName.trim()) {
+      toast.error("Imie i nazwisko sa wymagane");
+      return;
+    }
+
     setSaving(true);
     try {
       const res = await fetch(`/api/clients/${clientId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          firstName: formFirstName.trim(),
+          lastName: formLastName.trim(),
+          phone: formPhone.trim() || null,
+          email: formEmail.trim() || null,
           notes: formNotes.trim() || null,
           preferences: serializeCommaSeparated(preferencesList),
           allergies: serializeCommaSeparated(allergiesList),
@@ -438,7 +458,13 @@ export default function ClientProfilePage() {
       const data = await res.json();
 
       if (data.success) {
-        setClient(data.data as ClientData);
+        const updatedClient = data.data as ClientData;
+        setClient(updatedClient);
+        // Sync form fields with updated data
+        setFormFirstName(updatedClient.firstName);
+        setFormLastName(updatedClient.lastName);
+        setFormPhone(updatedClient.phone || "");
+        setFormEmail(updatedClient.email || "");
         toast.success("Dane klienta zostaly zapisane");
       } else {
         toast.error(data.error || "Nie udalo sie zapisac danych klienta");
@@ -500,7 +526,7 @@ export default function ClientProfilePage() {
               className="text-2xl font-bold"
               data-testid="client-profile-name"
             >
-              {client.firstName} {client.lastName}
+              {formFirstName || client.firstName} {formLastName || client.lastName}
             </h1>
             <p className="text-muted-foreground text-sm">Profil klienta</p>
           </div>
@@ -566,36 +592,70 @@ export default function ClientProfilePage() {
 
         {/* Profile Tab */}
         <TabsContent value="profile">
-          {/* Client info card */}
+          {/* Client info card - editable */}
           <Card className="mb-6" data-testid="client-info-card">
             <CardHeader>
-              <CardTitle className="text-lg">Dane kontaktowe</CardTitle>
+              <div className="flex items-center gap-2">
+                <Edit3 className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">Dane kontaktowe</CardTitle>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="flex items-center gap-2 text-sm">
-                  <User className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <span className="font-medium">
-                    {client.firstName} {client.lastName}
-                  </span>
+                <div>
+                  <Label htmlFor="client-firstName" className="text-sm font-medium flex items-center gap-1.5 mb-1.5">
+                    <User className="h-3.5 w-3.5 text-muted-foreground" />
+                    Imie
+                  </Label>
+                  <Input
+                    id="client-firstName"
+                    placeholder="Imie klienta"
+                    value={formFirstName}
+                    onChange={(e) => setFormFirstName(e.target.value)}
+                    data-testid="client-firstName-input"
+                  />
                 </div>
-                {client.phone && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <Phone className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span data-testid="client-phone">{client.phone}</span>
-                  </div>
-                )}
-                {client.email && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span data-testid="client-email">{client.email}</span>
-                  </div>
-                )}
-                {!client.phone && !client.email && (
-                  <p className="text-sm text-muted-foreground col-span-2">
-                    Brak danych kontaktowych
-                  </p>
-                )}
+                <div>
+                  <Label htmlFor="client-lastName" className="text-sm font-medium flex items-center gap-1.5 mb-1.5">
+                    <User className="h-3.5 w-3.5 text-muted-foreground" />
+                    Nazwisko
+                  </Label>
+                  <Input
+                    id="client-lastName"
+                    placeholder="Nazwisko klienta"
+                    value={formLastName}
+                    onChange={(e) => setFormLastName(e.target.value)}
+                    data-testid="client-lastName-input"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="client-phone" className="text-sm font-medium flex items-center gap-1.5 mb-1.5">
+                    <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                    Numer telefonu
+                  </Label>
+                  <Input
+                    id="client-phone"
+                    type="tel"
+                    placeholder="np. +48 123 456 789"
+                    value={formPhone}
+                    onChange={(e) => setFormPhone(e.target.value)}
+                    data-testid="client-phone-input"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="client-email" className="text-sm font-medium flex items-center gap-1.5 mb-1.5">
+                    <Mail className="h-3.5 w-3.5 text-muted-foreground" />
+                    Email
+                  </Label>
+                  <Input
+                    id="client-email"
+                    type="email"
+                    placeholder="np. klient@example.com"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    data-testid="client-email-input"
+                  />
+                </div>
               </div>
             </CardContent>
           </Card>
