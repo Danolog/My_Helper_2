@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { services, appointments, depositPayments } from "@/lib/schema";
 import { eq, and, not, or, lte, gte, lt, gt } from "drizzle-orm";
 import { timeBlocks } from "@/lib/schema";
+import { auth } from "@/lib/auth";
 
 /**
  * POST /api/deposits/create-session
@@ -33,6 +35,17 @@ export async function POST(request: Request) {
         { success: false, error: "salonId, employeeId, startTime, endTime, and depositAmount are required" },
         { status: 400 }
       );
+    }
+
+    // Try to get logged-in user ID from session
+    let bookedByUserId: string | null = null;
+    try {
+      const session = await auth.api.getSession({ headers: await headers() });
+      if (session?.user?.id) {
+        bookedByUserId = session.user.id;
+      }
+    } catch {
+      // Not authenticated, continue without user ID
     }
 
     if (parseFloat(depositAmount) <= 0) {
@@ -111,6 +124,7 @@ export async function POST(request: Request) {
         employeeId,
         serviceId: serviceId || null,
         variantId: variantId || null,
+        bookedByUserId,
         startTime: new Date(startTime),
         endTime: new Date(endTime),
         notes: notes || null,

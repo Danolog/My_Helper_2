@@ -224,6 +224,7 @@ export const appointments = pgTable(
       .references(() => employees.id, { onDelete: "cascade" }),
     serviceId: uuid("service_id").references(() => services.id, { onDelete: "set null" }),
     variantId: uuid("variant_id"), // References service_variants.id
+    bookedByUserId: text("booked_by_user_id").references(() => user.id, { onDelete: "set null" }), // User account who booked (for client portal)
     startTime: timestamp("start_time").notNull(),
     endTime: timestamp("end_time").notNull(),
     status: text("status").default("scheduled").notNull(), // 'scheduled', 'confirmed', 'completed', 'cancelled', 'no_show'
