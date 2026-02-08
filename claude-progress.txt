@@ -1,5 +1,75 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-08 (Feature #59 - Delete client requires password) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #59: "Delete client requires password" (Clients category)
+- Description: Secure deletion with confirmation - user must re-enter password
+
+### What was accomplished:
+1. Enhanced DELETE API (`/api/clients/[id]`) with password verification:
+   - Checks authenticated session via Better Auth
+   - Requires password in request body
+   - Looks up user's credential account for stored password hash
+   - Verifies password using `verifyPassword` from `better-auth/crypto`
+   - Returns appropriate error codes (401/400/403/404)
+2. Added delete UI to client profile page:
+   - Red "Usun klienta" button in page header
+   - Password confirmation dialog with warning icon
+   - Client name shown in deletion warning
+   - Password input with error message display
+   - Cancel and confirm buttons
+   - Enter key support for quick submission
+   - Success toast notification after deletion
+   - Redirect to clients list after successful delete
+
+### Verification:
+- All 9 feature steps verified via browser automation
+- Incorrect password correctly blocked deletion (403 + error message)
+- Correct password successfully deleted client from database
+- Client no longer appears in clients list after deletion
+- Toast notification confirms deletion
+- No mock data detected - uses real DB, auth, and crypto
+
+### Commit: 4f31952
+
+## Session: 2026-02-08 (Feature #57 - Filter clients) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #57: "Filter clients" (Clients category)
+- Description: Filter clients by date added, last visit, and allergies
+
+### What was accomplished:
+1. Enhanced clients API (`/api/clients`) with server-side filtering:
+   - Added query params: dateAddedFrom, dateAddedTo, lastVisitFrom, lastVisitTo, hasAllergies
+   - Added LEFT JOIN with appointments subquery for computing last visit per client
+   - Dynamic WHERE condition building with Drizzle ORM
+   - Returns lastVisit field in response
+2. Rewrote clients page with comprehensive filter UI:
+   - Collapsible filter panel (toggle with "Filtry" button)
+   - Date inputs for "Data dodania klienta" (From/To) and "Ostatnia wizyta" (From/To)
+   - "Tylko klienci z alergiami" checkbox
+   - "Filtruj" and "Wyczysc" buttons
+   - Active filter count badge on toggle button
+   - Filter tag badges showing applied filters
+   - Empty state for no results with clear filters button
+   - Toast notifications for filter application and clearing
+3. Browser verification (all passed):
+   - 28 clients shown initially → filter by date added (2026-02-08) → 12 clients
+   - Clear filters → 28 clients returned
+   - Multiple filters (last visit + allergies) → empty state with proper UI
+   - Clear from empty state → 28 clients returned
+   - Zero console errors throughout testing
+4. No mock data patterns found in source files
+
+### Files modified:
+- src/app/api/clients/route.ts (API filtering with LEFT JOIN subquery)
+- src/app/dashboard/clients/page.tsx (filter UI components + state management)
+
+### Commit: 0951d32
+
+---
+
 ## Session: 2026-02-08 (Feature #56 - Search clients) *** SUCCESS ***
 
 ### Feature Assigned
@@ -6223,3 +6293,19 @@ This is the 9th session blocked on Docker. The code implementation is complete a
 
 ### Current Stats:
 - 14/253 features passing (5.5%)
+
+
+=== Feature #60: Create appointment by staff ===
+Date: 2026-02-08 12:23
+Status: PASSING
+Summary: Verified existing appointment creation flow end-to-end via browser automation.
+- Calendar page loads with employees and existing appointments
+- 'Nowa wizyta' dialog opens with client search, service selection, employee selection, date/time inputs
+- Selected: Client Agnieszka Wojcik, Service Strzyzenie damskie (80 PLN, 60min), Employee Anna Kowalska, Time 18:00
+- Overlap detection works (15:00 blocked due to existing Koloryzacja 14:00-15:30 UTC)
+- Appointment created successfully at 18:00-19:00 with TEST_F60_appointment notes
+- Appointment appears on calendar grid in correct column and time slot
+- Data persists after full page refresh (PostgreSQL storage confirmed)
+- No mock data found in code
+- API endpoints: POST /api/appointments with conflict detection, GET with date/salon/employee filters
+
