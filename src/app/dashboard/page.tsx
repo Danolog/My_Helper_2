@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact } from "lucide-react";
+import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
 import { useDiagnostics } from "@/hooks/use-diagnostics";
@@ -122,6 +122,19 @@ export default function DashboardPage() {
               <Link href="/chat">Go to Chat</Link>
             </Button>
           )}
+        </div>
+
+        <div className="p-6 border border-border rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <CreditCard className="w-5 h-5 text-primary" />
+            <h2 className="text-xl font-semibold">Platnosci</h2>
+          </div>
+          <p className="text-muted-foreground mb-4">
+            Konfiguracja integracji Stripe i ustawienia platnosci
+          </p>
+          <Button asChild>
+            <Link href="/dashboard/settings/payments">Ustawienia platnosci</Link>
+          </Button>
         </div>
 
         <div className="p-6 border border-border rounded-lg">
