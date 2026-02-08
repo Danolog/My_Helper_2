@@ -1,5 +1,102 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-08 (Feature #63 - Mark appointment as completed) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #63: "Mark appointment as completed" (Appointments category)
+- Description: Complete appointment with treatment notes, materials, and commission calculation
+
+### What was accomplished:
+1. Created POST /api/appointments/[id]/complete endpoint:
+   - Validates appointment status (must be scheduled/confirmed)
+   - Creates/updates treatment record with recipe, techniques, notes
+   - Marks appointment as "completed"
+   - Calculates employee commission (default 50%, uses employee-specific pricing if available)
+   - Returns appointment, treatment, and commission data
+2. Created GET /api/appointments/[id]/commission endpoint:
+   - Returns commission record with employee details
+3. Created CompleteAppointmentDialog component (~350 lines):
+   - Appointment summary (service, price, client, employee)
+   - Treatment notes form (recipe, techniques, additional notes textareas)
+   - Materials summary with cost calculation
+   - Commission section with percentage input and auto-calculated amount
+   - Confirm button with loading state
+4. Enhanced appointment detail page:
+   - Added treatment record display section (recipe, techniques, notes)
+   - Added commission display section (employee, percentage, amount)
+   - Integrated CompleteAppointmentDialog
+   - Added TypeScript interfaces for TreatmentRecord and CommissionRecord
+5. Calendar integration (done in prior session, refined here):
+   - Green checkmark (✓) hover button on completable events
+   - CompleteAppointmentDialog opens from calendar
+   - Events turn green with "ZAKONCZONA" label after completion
+
+### Verification:
+- ✅ Clicked ✓ button on Koloryzacja appointment in calendar
+- ✅ CompleteAppointmentDialog opened with correct appointment data
+- ✅ Filled treatment notes (recipe, techniques, additional notes)
+- ✅ Commission auto-calculated: 150 PLN × 50% = 75 PLN
+- ✅ Confirmed completion → toast "Wizyta zakonczona pomyslnie"
+- ✅ Calendar event turned green with "ZAKONCZONA" label
+- ✅ API confirms status: "completed"
+- ✅ Treatment record persisted with all 3 fields
+- ✅ Commission record persisted: 75.00 PLN (50%)
+- ✅ Appointment detail page shows all data correctly
+- ✅ No mock data, no console.logs, TypeScript compiles clean
+
+### Commit:
+- 841edbd: feat: add appointment completion flow with treatment notes and commission (Feature #63)
+
+---
+
+## Session: 2026-02-08 (Feature #62 - Cancel appointment with deposit rules) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #62: "Cancel appointment" (Appointments category)
+- Description: Cancel and handle deposit rules (>24h = refund, <24h = forfeit)
+
+### What was accomplished:
+1. Enhanced DELETE endpoint (`/api/appointments/[id]`) with full deposit rules:
+   - Fetches appointment with client, employee, service relations
+   - Checks if already cancelled (returns 400)
+   - Calculates hours until appointment for cancellation policy
+   - Deposit refund logic: >24h = refund eligible, <24h = deposit forfeited
+   - Creates SMS notification record when client notification requested
+   - Returns detailed cancellationDetails in response
+2. Added cancel-info GET endpoint (`/api/appointments/[id]/cancel-info`):
+   - Returns appointment details, time remaining, deposit action
+   - Used by dialog to show policy before confirmation
+3. Created CancelAppointmentDialog component (364 lines):
+   - Appointment details (service, client, date, employee)
+   - Color-coded cancellation policy (green = no cost, orange = forfeit)
+   - Deposit info with refund/forfeit details in blue/red
+   - Client notification checkbox with contact info
+   - Confirmation warning and action buttons
+4. Updated PUT endpoint to accept depositAmount and depositPaid fields
+5. Added cancel button (✕) to CalendarEventComponent on hover
+6. Integrated CancelAppointmentDialog into calendar page
+
+### Verification:
+- <24h scenario: Dialog shows "Anulacja z utrata zadatku" with orange warning
+- >24h scenario: Dialog shows "Anulacja bez kosztow" with green check, deposit refund in blue
+- Deposit info: "Zadatek: 50.00 PLN - Zadatek zostanie zwrocony klientowi"
+- Cancellation toast: "Wizyta anulowana - Zadatek 50.00 PLN do zwrotu. Klient zostanie powiadomiony."
+- Calendar shows cancelled appointment with grey/striped pattern and "ANULOWANA" label
+- API confirms status changed to "cancelled"
+- Client notification record created in database
+
+### Files Changed:
+- Modified: `src/app/api/appointments/[id]/route.ts` (DELETE enhanced, PUT updated)
+- Created: `src/app/api/appointments/[id]/cancel-info/route.ts`
+- Created: `src/components/appointments/cancel-appointment-dialog.tsx`
+- Modified: `src/app/dashboard/calendar/page.tsx` (cancel dialog integration)
+- Modified: `src/components/calendar/calendar-event.tsx` (cancel button, status colors)
+- Modified: `src/components/calendar/time-grid.tsx` (onEventCancel prop)
+
+### Progress: 30/253 features passing (11.9%)
+
+---
+
 ## Session: 2026-02-08 (Feature #59 - Delete client requires password) *** SUCCESS ***
 
 ### Feature Assigned
