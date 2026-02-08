@@ -1,0 +1,533 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
+import { useRouter, useParams } from "next/navigation";
+import {
+  CalendarDays,
+  MapPin,
+  ArrowLeft,
+  Scissors,
+  Phone,
+  Mail,
+  CalendarCheck,
+  CalendarX,
+  AlertCircle,
+  CheckCircle2,
+  Timer,
+  Wallet,
+  CreditCard,
+  FileText,
+  Receipt,
+  ShieldCheck,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { useSession } from "@/lib/auth-client";
+
+interface TreatmentInfo {
+  id: string;
+  recipe: string | null;
+  techniques: string | null;
+  notes: string | null;
+  materialsJson: unknown;
+}
+
+interface DepositPaymentInfo {
+  amount: string;
+  currency: string;
+  paymentMethod: string;
+  status: string;
+  paidAt: string | null;
+}
+
+interface AppointmentDetail {
+  id: string;
+  salonId: string;
+  salonName: string;
+  salonAddress: string | null;
+  salonPhone: string | null;
+  salonEmail: string | null;
+  employeeName: string;
+  employeeColor: string | null;
+  serviceName: string;
+  serviceDescription: string | null;
+  servicePrice: string | null;
+  serviceDuration: number | null;
+  variantName: string | null;
+  variantPriceModifier: string | null;
+  variantDurationModifier: number | null;
+  startTime: string;
+  endTime: string;
+  status: string;
+  notes: string | null;
+  depositAmount: string | null;
+  depositPaid: boolean | null;
+  createdAt: string;
+  treatment: TreatmentInfo | null;
+  depositPayment: DepositPaymentInfo | null;
+}
+
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("pl-PL", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function formatTime(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString("pl-PL", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remaining = minutes % 60;
+  if (remaining === 0) return `${hours}h`;
+  return `${hours}h ${remaining}min`;
+}
+
+function getStatusBadge(status: string) {
+  switch (status) {
+    case "scheduled":
+      return (
+        <Badge className="bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300">
+          <Timer className="w-3 h-3 mr-1" />
+          Zaplanowana
+        </Badge>
+      );
+    case "confirmed":
+      return (
+        <Badge className="bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300">
+          <CalendarCheck className="w-3 h-3 mr-1" />
+          Potwierdzona
+        </Badge>
+      );
+    case "completed":
+      return (
+        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300">
+          <CheckCircle2 className="w-3 h-3 mr-1" />
+          Zakonczona
+        </Badge>
+      );
+    case "cancelled":
+      return (
+        <Badge className="bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300">
+          <CalendarX className="w-3 h-3 mr-1" />
+          Anulowana
+        </Badge>
+      );
+    case "no_show":
+      return (
+        <Badge className="bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300">
+          <AlertCircle className="w-3 h-3 mr-1" />
+          Nieobecnosc
+        </Badge>
+      );
+    default:
+      return <Badge variant="outline">{status}</Badge>;
+  }
+}
+
+export default function AppointmentDetailPage() {
+  const params = useParams();
+  const appointmentId = params.id as string;
+  const { data: session, isPending } = useSession();
+  const router = useRouter();
+  const [appointment, setAppointment] = useState<AppointmentDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchAppointment = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/client/appointments/${appointmentId}`);
+      const json = await res.json();
+      if (json.success) {
+        setAppointment(json.data);
+      } else {
+        setError(json.error || "Nie znaleziono wizyty");
+      }
+    } catch (err) {
+      console.error("Failed to fetch appointment:", err);
+      setError("Blad ladowania danych wizyty");
+    } finally {
+      setLoading(false);
+    }
+  }, [appointmentId]);
+
+  useEffect(() => {
+    if (!isPending && !session) {
+      router.push("/login");
+      return;
+    }
+    if (session) {
+      fetchAppointment();
+    }
+  }, [session, isPending, router, fetchAppointment]);
+
+  if (isPending || loading) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="flex justify-center items-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !appointment) {
+    return (
+      <div className="container mx-auto p-6 max-w-2xl">
+        <div className="mb-6">
+          <Button variant="ghost" asChild>
+            <Link href="/appointments">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Powrot do moich wizyt
+            </Link>
+          </Button>
+        </div>
+        <Card>
+          <CardContent className="py-12 text-center">
+            <AlertCircle className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+            <h2 className="text-lg font-semibold mb-2">
+              {error || "Wizyta nie znaleziona"}
+            </h2>
+            <Button asChild>
+              <Link href="/appointments">Powrot do moich wizyt</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Calculate effective price
+  const basePrice = appointment.servicePrice ? parseFloat(appointment.servicePrice) : 0;
+  const variantPriceModifier = appointment.variantPriceModifier
+    ? parseFloat(appointment.variantPriceModifier)
+    : 0;
+  const effectivePrice = basePrice + variantPriceModifier;
+
+  // Calculate effective duration
+  const baseDuration = appointment.serviceDuration || 0;
+  const variantDurationModifier = appointment.variantDurationModifier || 0;
+  const effectiveDuration = baseDuration + variantDurationModifier;
+
+  return (
+    <div className="container mx-auto p-6 max-w-2xl">
+      {/* Back navigation */}
+      <div className="mb-6">
+        <Button variant="ghost" asChild>
+          <Link href="/appointments">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Powrot do moich wizyt
+          </Link>
+        </Button>
+      </div>
+
+      {/* Header with status */}
+      <div className="flex items-start justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <Receipt className="w-8 h-8 text-primary" />
+          <div>
+            <h1 className="text-2xl font-bold">Szczegoly wizyty</h1>
+            <p className="text-sm text-muted-foreground">
+              Zarezerwowano {new Date(appointment.createdAt).toLocaleDateString("pl-PL")}
+            </p>
+          </div>
+        </div>
+        {getStatusBadge(appointment.status)}
+      </div>
+
+      {/* Main appointment info */}
+      <Card className="mb-4" data-testid="appointment-detail-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <CalendarDays className="w-5 h-5 text-primary" />
+            Termin wizyty
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex justify-between text-sm" data-testid="detail-date">
+            <span className="text-muted-foreground">Data:</span>
+            <span className="font-medium">{formatDate(appointment.startTime)}</span>
+          </div>
+          <div className="flex justify-between text-sm" data-testid="detail-time">
+            <span className="text-muted-foreground">Godzina:</span>
+            <span className="font-medium">
+              {formatTime(appointment.startTime)} - {formatTime(appointment.endTime)}
+            </span>
+          </div>
+          {effectiveDuration > 0 && (
+            <div className="flex justify-between text-sm" data-testid="detail-duration">
+              <span className="text-muted-foreground">Czas trwania:</span>
+              <span className="font-medium">{formatDuration(effectiveDuration)}</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Service info */}
+      <Card className="mb-4" data-testid="service-detail-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Scissors className="w-5 h-5 text-primary" />
+            Usluga
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex justify-between text-sm" data-testid="detail-service">
+            <span className="text-muted-foreground">Usluga:</span>
+            <span className="font-medium">{appointment.serviceName}</span>
+          </div>
+          {appointment.variantName && (
+            <div className="flex justify-between text-sm" data-testid="detail-variant">
+              <span className="text-muted-foreground">Wariant:</span>
+              <span className="font-medium">{appointment.variantName}</span>
+            </div>
+          )}
+          {appointment.serviceDescription && (
+            <div className="text-sm" data-testid="detail-service-desc">
+              <span className="text-muted-foreground">Opis: </span>
+              <span>{appointment.serviceDescription}</span>
+            </div>
+          )}
+          <div className="flex justify-between text-sm" data-testid="detail-employee">
+            <span className="text-muted-foreground">Pracownik:</span>
+            <div className="flex items-center gap-1.5">
+              {appointment.employeeColor && (
+                <span
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: appointment.employeeColor }}
+                />
+              )}
+              <span className="font-medium">{appointment.employeeName}</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Receipt / Pricing */}
+      <Card className="mb-4" data-testid="receipt-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <FileText className="w-5 h-5 text-primary" />
+            Podsumowanie kosztow
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">
+              {appointment.serviceName}
+              {appointment.variantName ? ` - ${appointment.variantName}` : ""}
+            </span>
+            <span className="font-medium">{effectivePrice.toFixed(2)} PLN</span>
+          </div>
+          {appointment.variantPriceModifier && variantPriceModifier !== 0 && (
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>
+                Cena bazowa: {basePrice.toFixed(2)} PLN + wariant:{" "}
+                {variantPriceModifier > 0 ? "+" : ""}
+                {variantPriceModifier.toFixed(2)} PLN
+              </span>
+            </div>
+          )}
+
+          {/* Deposit info */}
+          {appointment.depositAmount && parseFloat(appointment.depositAmount) > 0 && (
+            <>
+              <Separator />
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground flex items-center gap-1">
+                  <Wallet className="w-3 h-3" />
+                  Zadatek:
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">
+                    {parseFloat(appointment.depositAmount).toFixed(2)} PLN
+                  </span>
+                  {appointment.depositPaid ? (
+                    <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300">
+                      <ShieldCheck className="w-3 h-3 mr-1" />
+                      Oplacony
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300">
+                      Oczekujacy
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              {appointment.depositPaid && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Do zaplaty w salonie:</span>
+                  <span className="font-semibold">
+                    {(effectivePrice - parseFloat(appointment.depositAmount)).toFixed(2)} PLN
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+
+          <Separator />
+          <div className="flex justify-between text-base font-semibold" data-testid="detail-total-price">
+            <span>Razem:</span>
+            <span>{effectivePrice.toFixed(2)} PLN</span>
+          </div>
+
+          {/* Deposit payment details */}
+          {appointment.depositPayment && (
+            <div className="mt-3 p-3 bg-muted/50 rounded-md">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Platnosc zadatku:</p>
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Metoda:</span>
+                  <span className="flex items-center gap-1">
+                    <CreditCard className="w-3 h-3" />
+                    {appointment.depositPayment.paymentMethod === "stripe" ? "Karta" : "BLIK"}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground">Status:</span>
+                  <span className={appointment.depositPayment.status === "succeeded" ? "text-green-600" : ""}>
+                    {appointment.depositPayment.status === "succeeded" ? "Zrealizowana" : appointment.depositPayment.status}
+                  </span>
+                </div>
+                {appointment.depositPayment.paidAt && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Data platnosci:</span>
+                    <span>{new Date(appointment.depositPayment.paidAt).toLocaleDateString("pl-PL")}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Salon info */}
+      <Card className="mb-4" data-testid="salon-detail-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <MapPin className="w-5 h-5 text-primary" />
+            Salon
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex justify-between text-sm" data-testid="detail-salon">
+            <span className="text-muted-foreground">Nazwa:</span>
+            <Link
+              href={`/salons/${appointment.salonId}`}
+              className="font-medium text-primary hover:underline"
+            >
+              {appointment.salonName}
+            </Link>
+          </div>
+          {appointment.salonAddress && (
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Adres:</span>
+              <span className="font-medium text-right max-w-[200px]">
+                {appointment.salonAddress}
+              </span>
+            </div>
+          )}
+          {appointment.salonPhone && (
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Telefon:</span>
+              <a href={`tel:${appointment.salonPhone}`} className="font-medium flex items-center gap-1 text-primary hover:underline">
+                <Phone className="w-3 h-3" />
+                {appointment.salonPhone}
+              </a>
+            </div>
+          )}
+          {appointment.salonEmail && (
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Email:</span>
+              <a href={`mailto:${appointment.salonEmail}`} className="font-medium flex items-center gap-1 text-primary hover:underline">
+                <Mail className="w-3 h-3" />
+                {appointment.salonEmail}
+              </a>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Treatment notes (for completed appointments) */}
+      {appointment.treatment && (
+        <Card className="mb-4" data-testid="treatment-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <FileText className="w-5 h-5 text-primary" />
+              Notatki z zabiegu
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {appointment.treatment.recipe && (
+              <div className="text-sm">
+                <span className="text-muted-foreground font-medium">Receptura: </span>
+                <span>{appointment.treatment.recipe}</span>
+              </div>
+            )}
+            {appointment.treatment.techniques && (
+              <div className="text-sm">
+                <span className="text-muted-foreground font-medium">Techniki: </span>
+                <span>{appointment.treatment.techniques}</span>
+              </div>
+            )}
+            {appointment.treatment.notes && (
+              <div className="text-sm">
+                <span className="text-muted-foreground font-medium">Uwagi: </span>
+                <span>{appointment.treatment.notes}</span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Appointment notes */}
+      {appointment.notes && (
+        <Card className="mb-4" data-testid="notes-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <FileText className="w-5 h-5 text-primary" />
+              Notatki
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm">{appointment.notes}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Actions */}
+      <div className="flex flex-col gap-3 mt-6">
+        <Button asChild variant="outline">
+          <Link href={`/salons/${appointment.salonId}/book`}>
+            <CalendarDays className="w-4 h-4 mr-2" />
+            Zarezerwuj ponownie w tym salonie
+          </Link>
+        </Button>
+        <Button asChild variant="ghost">
+          <Link href="/appointments">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Powrot do moich wizyt
+          </Link>
+        </Button>
+      </div>
+    </div>
+  );
+}

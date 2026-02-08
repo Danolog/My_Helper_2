@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { appointments, clients, employees, services, timeBlocks } from "@/lib/schema";
 import { eq, and, gte, lte, or, not, lt, gt } from "drizzle-orm";
+import { auth } from "@/lib/auth";
 
 // GET /api/appointments - List appointments with optional date range filter
 export async function GET(request: Request) {
@@ -73,7 +75,20 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount } = body;
+    const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId } = body;
+
+    // Try to get logged-in user ID from session (for client portal bookings)
+    let bookedByUserId: string | null = bodyUserId || null;
+    if (!bookedByUserId) {
+      try {
+        const session = await auth.api.getSession({ headers: await headers() });
+        if (session?.user?.id) {
+          bookedByUserId = session.user.id;
+        }
+      } catch {
+        // Not authenticated, that's ok for staff-created appointments
+      }
+    }
 
     if (!salonId || !employeeId || !startTime || !endTime) {
       return NextResponse.json(
@@ -141,7 +156,7 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(`[Appointments API] Creating appointment for employee ${employeeId}`);
+    console.log(`[Appointments API] Creating appointment for employee ${employeeId}, bookedBy: ${bookedByUserId}`);
     const [newAppointment] = await db
       .insert(appointments)
       .values({
@@ -149,6 +164,7 @@ export async function POST(request: Request) {
         clientId: clientId || null,
         employeeId,
         serviceId: serviceId || null,
+        bookedByUserId,
         startTime: new Date(startTime),
         endTime: new Date(endTime),
         notes: notes || null,
