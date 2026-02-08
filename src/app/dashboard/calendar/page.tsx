@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { TimeGrid } from "@/components/calendar/time-grid";
 import { RescheduleDialog } from "@/components/calendar/reschedule-dialog";
 import { CalendarLegend } from "@/components/calendar/calendar-legend";
-import { ChevronLeft, ChevronRight, Calendar, Lock, Palette, Users } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar, Lock, Palette, Users, Plus } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import { NewAppointmentDialog } from "@/components/appointments/new-appointment-dialog";
 import type { Appointment, CalendarEvent, Employee, WorkSchedule } from "@/types/calendar";
 
 // Demo salon ID - in production this would come from user's session
@@ -36,6 +37,9 @@ export default function CalendarPage() {
     newEmployeeId: string;
   } | null>(null);
   const [isRescheduling, setIsRescheduling] = useState(false);
+
+  // New appointment dialog state
+  const [newAppointmentDialogOpen, setNewAppointmentDialogOpen] = useState(false);
 
   // Fetch employees
   const fetchEmployees = useCallback(async () => {
@@ -314,6 +318,16 @@ export default function CalendarPage() {
 
         {/* Navigation & Controls */}
         <div className="flex items-center gap-2">
+          {/* New Appointment button */}
+          <Button
+            size="sm"
+            onClick={() => setNewAppointmentDialogOpen(true)}
+            data-testid="new-appointment-btn"
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            Nowa wizyta
+          </Button>
+
           {/* Employees link */}
           <Button variant="outline" size="sm" asChild>
             <Link href="/dashboard/employees">
@@ -394,6 +408,14 @@ export default function CalendarPage() {
         onConfirm={handleConfirmReschedule}
         onCancel={handleCancelReschedule}
         isLoading={isRescheduling}
+      />
+
+      {/* New appointment dialog */}
+      <NewAppointmentDialog
+        open={newAppointmentDialogOpen}
+        onOpenChange={setNewAppointmentDialogOpen}
+        onAppointmentCreated={fetchAppointments}
+        defaultDate={currentDate}
       />
     </div>
   );
