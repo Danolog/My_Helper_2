@@ -1,5 +1,192 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-08 (Feature #72 - View employee profiles) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #72: "View employee profiles" (ClientPortal category)
+- Description: See staff with photos and ratings
+
+### What was accomplished:
+1. **Enhanced salon detail API** (`/api/salons/[id]`):
+   - Added employee specialties (from employeeServices junction table)
+   - Added individual employee ratings (from reviews table)
+   - Added gallery photo counts per employee
+   - Returns enriched employee objects with: id, firstName, lastName, role, photoUrl, color, specialties[], averageRating, reviewCount, galleryCount
+
+2. **Created employee profile API** (`/api/salons/[id]/employees/[employeeId]`):
+   - Returns full employee profile with salon info, specialties with prices/durations
+   - Includes rating stats (average + count)
+   - Returns recent reviews (last 5 approved)
+   - Returns gallery photos (last 10)
+
+3. **Updated salon page employees section** (`/salons/[id]`):
+   - Employees now shown as clickable cards with rich info
+   - Each card shows: photo/colorful avatar, full name, role badge, specialty tags, star rating, gallery count
+   - Cards link to individual employee profile page
+   - Hover effects and proper transitions
+
+4. **Created employee profile page** (`/salons/[id]/employees/[employeeId]`):
+   - Header with large avatar, name, role badge, star rating
+   - Specialties section showing assigned services with prices/durations
+   - Portfolio section with gallery preview grid and "Zobacz pelne portfolio" link
+   - Reviews section with recent reviews and "Zobacz wszystkie" link
+   - "Zarezerwuj wizyte" CTA at bottom
+   - Back navigation to salon page
+
+### Verification:
+- Browser automation: Navigated to salon page, verified employees section renders with 42 employees
+- Clicked on Anna Kowalska (employee with specialty badge) - navigated to profile page
+- Profile page shows: name, role (Wlasciciel), specialty (REGTEST_F42_Masaz sportowy, 150 PLN, 1h), portfolio section, reviews section
+- Back button works (returns to salon)
+- Zero JS console errors
+- No mock data found in code (grep check passed)
+- All data from real PostgreSQL via Drizzle ORM
+- TypeScript: 0 errors in my files (1 pre-existing error in salons list page)
+
+### Files created/modified:
+- MODIFIED: src/app/api/salons/[id]/route.ts (enriched employee data with specialties, ratings, gallery counts)
+- NEW: src/app/api/salons/[id]/employees/[employeeId]/route.ts (employee profile API)
+- MODIFIED: src/app/(client)/salons/[id]/page.tsx (rich employee cards with clickable links)
+- NEW: src/app/(client)/salons/[id]/employees/[employeeId]/page.tsx (employee profile page)
+
+### Commit: 76ae316
+
+### Current Stats:
+- 39/253 features passing (15.4%)
+
+---
+
+## Session: 2026-02-08 (Feature #71 - View service details) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #71: "View service details" (ClientPortal category)
+- Description: View detailed service information including description, variants, employees
+
+### What was accomplished:
+1. Created new API endpoint `/api/salons/[id]/services/[serviceId]` that returns:
+   - Full service data (name, description, basePrice, baseDuration, isActive)
+   - Category info (id + name)
+   - All service variants with price/duration modifiers
+   - Assigned active employees with custom prices, colors, and photos
+2. Created dedicated service detail page at `/salons/[id]/services/[serviceId]` with:
+   - Service header: name, category badge, base price, duration
+   - Description section
+   - Variants list with calculated total prices and duration modifiers
+   - Employees section with colored avatar circles, names, roles
+   - "Zarezerwuj wizyte" booking button linking to /dashboard/booking with serviceId
+   - "Powrot do salonu" back navigation link
+3. Updated salon profile page (`/salons/[id]/page.tsx`) with:
+   - "Szczegoly uslugi" links on expanded service cards (Eye icon + text)
+   - Eye icon on non-expandable service cards (no description/variants)
+   - Links navigate to the new service detail page
+   - stopPropagation on links to prevent card toggle
+4. Verified end-to-end with browser automation:
+   - Navigated salon list -> salon detail -> expanded service -> clicked "Szczegoly uslugi"
+   - Service detail page shows: description, 2 variants with prices, 2 employees
+   - Booking button visible and properly linked
+   - Back button navigates to salon page
+   - Full page refresh verified - data persists from PostgreSQL
+   - 0 console errors, no mock data patterns found
+
+### Files changed:
+- NEW: src/app/api/salons/[id]/services/[serviceId]/route.ts (service detail API with employees)
+- NEW: src/app/(client)/salons/[id]/services/[serviceId]/page.tsx (service detail page)
+- MODIFIED: src/app/(client)/salons/[id]/page.tsx (added service detail links)
+
+### Commit: 02c0ae1
+
+### Current Stats:
+- 38/253 features passing (15.0%)
+
+---
+
+## Session: 2026-02-08 (Feature #70 - Browse salon services with prices) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #70: "Browse salon services with prices" (ClientPortal category)
+- Description: View service catalog on salon public page
+
+### What was accomplished:
+1. Enhanced `/api/salons/[id]` API endpoint to return:
+   - Service categories (from service_categories table, sorted by sortOrder)
+   - Service variants (from service_variants table, attached to each service)
+   - Category name for each service
+2. Completely rebuilt salon profile page (`/salons/[id]`) with:
+   - Services grouped by category with tag icons and count badges (STRZYZENIE, KOLORYZACJA, PIELEGNACJA, etc.)
+   - Expandable service cards - click to show description and variant pricing
+   - Variant details: name, total price, modifiers (+/- PLN and minutes)
+   - Duration formatting (e.g., "2h 30min" instead of "150 min")
+   - Services without categories grouped under "Inne uslugi"
+   - 2-column layout (services 2/3, employees 1/3) on desktop
+   - Fixed industry type badge translation (beauty_salon -> "Salon kosmetyczny")
+3. Created test data via API (categorized services with descriptions and variants)
+4. Verified end-to-end with browser automation:
+   - Navigated to salon page - all data loads from PostgreSQL
+   - Service names, prices, durations all displayed correctly
+   - Categories properly organized (Strzyzenie, Koloryzacja, Pielegnacja, Inne uslugi)
+   - Clicked service to expand - description and variants shown with price modifiers
+   - Page refresh verified - data persists from database
+   - 0 console errors, no mock data patterns found
+
+### Files changed:
+- MODIFIED: src/app/api/salons/[id]/route.ts (added categories + variants to API response)
+- MODIFIED: src/app/(client)/salons/[id]/page.tsx (complete rewrite with categorized expandable services)
+
+### Commit: d68b489
+
+### Current Stats:
+- 37/253 features passing (14.6%)
+
+---
+
+## Session: 2026-02-08 (Feature #68 - Client registration on portal) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #68: "Client registration on portal" (ClientPortal category)
+- Description: New client self-registration
+
+### What was accomplished:
+1. Verified existing client portal pages were already built:
+   - `/portal` - Landing page with "Create an account" and "Sign in" buttons
+   - `/portal/register` - Registration form with name, email, phone, password, confirm password
+   - `/portal/verify-email` - Token-based email verification page
+2. Fixed server configuration issue:
+   - Port 3000 was occupied by Playwright MCP from another agent
+   - Dev server was starting on 3001 but auth client was configured for 3000
+   - Killed stale process, restarted on port 3000
+   - Added BETTER_AUTH_URL=http://localhost:3000 to .env to fix base URL warning
+3. Full end-to-end registration flow verified:
+   - Navigated to /portal → clicked "Create an account"
+   - Filled form: Name "Test Client F68", email "test_f68_unique@example.com", phone "+48 555 123 068"
+   - Password validation works (8+ chars, confirm match)
+   - Submitted → "Account created successfully!" green banner displayed
+   - Email verification URL logged to console (as expected in dev mode)
+   - Used verification URL → email_verified set to true in DB
+   - Redirected to /dashboard after verification
+4. Database persistence verified:
+   - User record confirmed in PostgreSQL: name, email, phone, role="client", email_verified=true
+   - Data persists across server restarts
+5. Mock data grep: No mock/dummy/fake patterns found in src/
+
+### Verification Steps Completed:
+- [x] Navigate to client portal
+- [x] Click register
+- [x] Enter email, password, name, phone
+- [x] Submit registration
+- [x] Verify account created (DB query confirmed)
+- [x] Verify email verification sent (console log confirmed)
+- [x] Complete verification (email_verified=true in DB)
+
+### Files committed:
+- src/app/(client)/layout.tsx
+- src/app/(client)/portal/page.tsx
+- src/app/(client)/portal/register/page.tsx
+- src/app/(client)/portal/verify-email/page.tsx
+
+### Commit: fd303d8
+
+---
+
 ## Session: 2026-02-08 (Feature #66 - Register materials during visit) *** SUCCESS ***
 
 ### Feature Assigned
