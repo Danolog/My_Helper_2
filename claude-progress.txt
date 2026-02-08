@@ -1,5 +1,95 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-08 (Feature #76 - Client can cancel appointment) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #76: "Client can cancel appointment" (ClientPortal category)
+- Description: Self-service cancellation with cancellation policy display, deposit handling, and status update
+
+### What was accomplished:
+1. **New client cancel API** (`src/app/api/client/appointments/[id]/cancel/route.ts`):
+   - GET: Returns cancellation policy info (hours remaining, deposit action: refund/forfeit/none)
+   - POST: Performs the actual cancellation (sets status to 'cancelled')
+   - Both handlers verify appointment ownership via `bookedByUserId === session.user.id`
+   - Validates: not already cancelled, not completed, not in past
+   - Cancellation policy: >24h = free cancel (deposit refund), <24h = deposit forfeited
+
+2. **Updated appointment detail page** (`src/app/(client)/appointments/[id]/page.tsx`):
+   - Added red "Anuluj wizyte" cancel button for upcoming non-cancelled/completed appointments
+   - Cancel confirmation dialog with policy display (green for >24h free, orange for <24h fee)
+   - Appointment summary in dialog (service, price, date, employee, salon)
+   - Deposit info display (blue for refund, red for forfeit)
+   - Post-cancellation status card ("Ta wizyta zostala anulowana")
+   - Toast notifications via sonner for success/error
+   - Status badge updates to "Anulowana" after cancellation
+   - Cancel button hidden for past/cancelled/completed appointments
+
+### Browser-verified testing:
+- Registered test client user, created test appointment
+- Verified appointment shows in "Nadchodzace" tab
+- Clicked cancel button → dialog opened with policy info
+- Confirmed cancellation → status changed to "Anulowana"
+- Toast notification displayed correctly
+- Appointment moved from "Nadchodzace (0)" to "Historia (1)"
+- Persistence verified on page reload
+
+### No mock data:
+- Zero globalThis, devStore, mockDb, hardcoded patterns
+- TypeScript compiles with zero errors
+
+---
+
+## Session: 2026-02-08 (Feature #75 - Client appointment history) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #75: "Client appointment history - View past visits" (ClientPortal category)
+- Description: Login as client, navigate to appointments, see list of past appointments with dates/services/status, click on past appointment, see details/receipt
+
+### What was accomplished:
+1. **Schema change** (`src/lib/schema.ts`):
+   - Added `bookedByUserId` column to appointments table (references user.id, onDelete: set null)
+   - Ran drizzle-kit push migration
+
+2. **Updated booking APIs**:
+   - `src/app/api/appointments/route.ts` - Captures logged-in user ID from session on appointment creation
+   - `src/app/api/deposits/create-session/route.ts` - Same bookedByUserId capture
+
+3. **New client appointments API**:
+   - `src/app/api/client/appointments/route.ts` - Lists authenticated client's appointments with employee/service/salon joins
+   - `src/app/api/client/appointments/[id]/route.ts` - Single appointment detail with auth guard
+
+4. **New client UI pages**:
+   - `src/app/(client)/appointments/page.tsx` - Appointments history page with upcoming/past tabs, status badges, appointment cards
+   - `src/app/(client)/appointments/[id]/page.tsx` - Appointment detail/receipt page with service info, cost summary, salon details
+
+5. **Bug fix**: Removed unused `CardDescription` import in `src/app/(client)/salons/page.tsx`
+
+### Verification (browser automation):
+1. **Login**: Registered client (feature75@test.com), authenticated via API
+2. **Created test appointments**: 1 past appointment (Feb 5), 2 future appointments via API
+3. **Appointments page**: Navigated to `/appointments`, confirmed "Moje wizyty" heading
+4. **Upcoming tab**: Shows "Nadchodzace (2)" with 2 appointment cards
+5. **History tab**: Shows "Historia (1)" with past appointment card
+6. **Detail page**: Clicked past appointment, verified all sections (Termin wizyty, Usluga, Podsumowanie kosztow, Salon, Notatki)
+7. **Screenshots**: Captured upcoming tab, history tab, and detail page
+8. **Mock data check**: No mock/fake/dummy/hardcoded data found in codebase
+9. **Server restart persistence**: Killed and restarted dev server, re-authenticated, data persisted (same 2 upcoming + 1 past)
+
+### Files changed (8 files, +1103 lines):
+- `src/lib/schema.ts` (modified)
+- `src/app/api/appointments/route.ts` (modified)
+- `src/app/api/deposits/create-session/route.ts` (modified)
+- `src/app/api/client/appointments/route.ts` (new)
+- `src/app/api/client/appointments/[id]/route.ts` (new)
+- `src/app/(client)/appointments/page.tsx` (new)
+- `src/app/(client)/appointments/[id]/page.tsx` (new)
+- `src/app/(client)/salons/page.tsx` (modified)
+
+### Current Stats:
+- 42/253 features passing (16.6%)
+
+---
+
 ## Session: 2026-02-08 (Feature #73 - Book appointment online) *** SUCCESS ***
 
 ### Feature Assigned
