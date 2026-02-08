@@ -1,5 +1,47 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-08 (Feature #66 - Register materials during visit) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #66: "Register materials during visit" (Appointments category)
+- Description: Track products used during appointments
+
+### What was accomplished:
+- Feature was ALREADY fully implemented by previous sessions
+- This session was purely verification via browser automation - no code changes needed
+- Created test products in database, registered test account, verified full flow
+
+### Key Components Verified:
+1. Materials API (`src/app/api/appointments/[id]/materials/route.ts`):
+   - GET: Lists materials with product details (LEFT JOIN)
+   - POST: Adds material, validates stock, deducts inventory
+   - DELETE: Removes material and restores inventory
+2. Appointment Detail Page (`src/app/dashboard/appointments/[id]/page.tsx`):
+   - Materials section with count badge
+   - "Dodaj material" dialog with product Select, quantity Input, notes Input
+   - Material list with product name, category badge, quantity used, cost
+   - Total material cost summary
+   - Remove material button (restores inventory)
+3. Products API (`src/app/api/products/route.ts` & `[id]/route.ts`):
+   - Full CRUD for products with salonId filter
+
+### Browser Verification Steps:
+1. Navigated to appointment detail page for Maria Kaczmarek
+2. Clicked "Dodaj material" - dialog opened with product dropdown
+3. Selected TEST_55_Farba_Wella (450ml), entered 50ml quantity, note "Koloryzacja podstawowa"
+4. Submitted - toast: "Dodano 50 ml produktu. Pozostalo w magazynie: 400.00 ml"
+5. Added second material: TEST_F66_Odzywka_Loreal (200ml), 30ml, "Pielegnacja po koloryzacji"
+6. Toast: "Dodano 30 ml. Pozostalo w magazynie: 170.00 ml"
+7. Materials section shows: 2 materials, total cost 49.00 PLN
+8. API confirmed inventory: Farba=400ml (450-50), Odzywka=170ml (200-30)
+9. Full page reload confirmed data persistence - both materials still shown
+10. Screenshot taken: feature66-materials-verification.png
+
+### Mock Data Check: PASSED - No mock/fake/dummy data patterns found
+### Persistence Test: PASSED - Data survives page reload
+
+---
+
 ## Session: 2026-02-08 (Feature #64 - Schedule next appointment) *** SUCCESS ***
 
 ### Feature Assigned
