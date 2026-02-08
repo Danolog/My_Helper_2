@@ -10,6 +10,8 @@ import { ChevronLeft, ChevronRight, Calendar, Lock, Palette, Users, Plus } from 
 import { toast } from "sonner";
 import Link from "next/link";
 import { NewAppointmentDialog } from "@/components/appointments/new-appointment-dialog";
+import { CancelAppointmentDialog } from "@/components/appointments/cancel-appointment-dialog";
+import { CompleteAppointmentDialog } from "@/components/appointments/complete-appointment-dialog";
 import type { Appointment, CalendarEvent, Employee, WorkSchedule } from "@/types/calendar";
 
 // Demo salon ID - in production this would come from user's session
@@ -40,6 +42,15 @@ export default function CalendarPage() {
 
   // New appointment dialog state
   const [newAppointmentDialogOpen, setNewAppointmentDialogOpen] = useState(false);
+
+  // Cancel appointment dialog state
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelAppointmentId, setCancelAppointmentId] = useState<string | null>(null);
+
+  // Complete appointment dialog state
+  const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
+  const [completeAppointment, setCompleteAppointment] = useState<CalendarEvent["appointment"] | null>(null);
+  const [completeMaterials, setCompleteMaterials] = useState<Array<{id: string; product: {name: string; pricePerUnit: string | null; unit: string | null;} | null; quantityUsed: string;}>>([]);
 
   // Fetch employees
   const fetchEmployees = useCallback(async () => {
@@ -166,7 +177,38 @@ export default function CalendarPage() {
     setRescheduleDialogOpen(true);
   };
 
-  // Event click handler - shows allergy warning and preferences when client has them
+  // Handle opening cancel dialog
+  const handleCancelAppointment = (appointmentId: string) => {
+    setCancelAppointmentId(appointmentId);
+    setCancelDialogOpen(true);
+  };
+
+  // Handle opening complete dialog
+  const handleCompleteAppointment = async (event: CalendarEvent) => {
+    setCompleteAppointment(event.appointment);
+    // Fetch materials for this appointment
+    try {
+      const res = await fetch(`/api/appointments/${event.id}/materials`);
+      const data = await res.json();
+      if (data.success) {
+        setCompleteMaterials(data.data.map((m: { id: string; quantityUsed: string; product: { name: string; pricePerUnit: string | null; unit: string | null } | null }) => ({
+          id: m.id,
+          product: m.product ? {
+            name: m.product.name,
+            pricePerUnit: m.product.pricePerUnit,
+            unit: m.product.unit,
+          } : null,
+          quantityUsed: m.quantityUsed,
+        })));
+      }
+    } catch (error) {
+      console.error("Failed to fetch materials:", error);
+      setCompleteMaterials([]);
+    }
+    setCompleteDialogOpen(true);
+  };
+
+  // Event click handler - shows details with action buttons
   const handleEventClick = (event: CalendarEvent) => {
     const statusLabels: Record<string, string> = {
       scheduled: "Zaplanowana",
@@ -198,19 +240,43 @@ export default function CalendarPage() {
       description += `\nUWAGA ALERGIE: ${clientAllergies}`;
     }
 
+    // Show "Complete" button for completable appointments (scheduled/confirmed)
+    const isCompletable = event.appointment.status === "scheduled" || event.appointment.status === "confirmed";
+
     if (hasAllergies) {
       toast.warning(`Wizyta: ${event.title}`, {
         description,
         duration: 8000,
+        action: isCompletable ? {
+          label: "Zakoncz wizyte",
+          onClick: () => handleCompleteAppointment(event),
+        } : {
+          label: "Szczegoly",
+          onClick: () => window.location.href = `/dashboard/appointments/${event.id}`,
+        },
       });
     } else if (hasPreferences) {
       toast.info(`Wizyta: ${event.title}`, {
         description,
         duration: 6000,
+        action: isCompletable ? {
+          label: "Zakoncz wizyte",
+          onClick: () => handleCompleteAppointment(event),
+        } : {
+          label: "Szczegoly",
+          onClick: () => window.location.href = `/dashboard/appointments/${event.id}`,
+        },
       });
     } else {
       toast.info(`Wizyta: ${event.title}`, {
         description,
+        action: isCompletable ? {
+          label: "Zakoncz wizyte",
+          onClick: () => handleCompleteAppointment(event),
+        } : {
+          label: "Szczegoly",
+          onClick: () => window.location.href = `/dashboard/appointments/${event.id}`,
+        },
       });
     }
   };
@@ -393,6 +459,8 @@ export default function CalendarPage() {
           onDragEnd={handleDragEnd}
           onDrop={handleDrop}
           onEventClick={handleEventClick}
+          onEventCancel={(event) => handleCancelAppointment(event.id)}
+          onEventComplete={(event) => handleCompleteAppointment(event)}
           draggedEvent={draggedEvent}
           colorMode={colorMode}
         />
@@ -417,6 +485,48 @@ export default function CalendarPage() {
         onAppointmentCreated={fetchAppointments}
         defaultDate={currentDate}
       />
+
+      {/* Cancel appointment dialog */}
+      <CancelAppointmentDialog
+        open={cancelDialogOpen}
+        onOpenChange={setCancelDialogOpen}
+        appointmentId={cancelAppointmentId}
+        onAppointmentCancelled={fetchAppointments}
+      />
+
+      {/* Complete appointment dialog */}
+      {completeAppointment && (
+        <CompleteAppointmentDialog
+          open={completeDialogOpen}
+          onOpenChange={setCompleteDialogOpen}
+          appointment={{
+            id: completeAppointment.id,
+            employeeId: completeAppointment.employeeId,
+            status: completeAppointment.status,
+            service: completeAppointment.service ? {
+              id: completeAppointment.service.id,
+              name: completeAppointment.service.name,
+              basePrice: completeAppointment.service.basePrice,
+              baseDuration: completeAppointment.service.baseDuration,
+            } : null,
+            employee: completeAppointment.employee ? {
+              id: completeAppointment.employee.id,
+              firstName: completeAppointment.employee.firstName,
+              lastName: completeAppointment.employee.lastName,
+            } : null,
+            client: completeAppointment.client ? {
+              id: completeAppointment.client.id,
+              firstName: completeAppointment.client.firstName,
+              lastName: completeAppointment.client.lastName,
+            } : null,
+          }}
+          materials={completeMaterials}
+          onCompleted={() => {
+            fetchAppointments();
+            setCompleteAppointment(null);
+          }}
+        />
+      )}
     </div>
   );
 }

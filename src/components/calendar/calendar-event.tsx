@@ -8,6 +8,8 @@ interface CalendarEventProps {
   onDragStart: (event: CalendarEvent) => void;
   onDragEnd: () => void;
   onClick: (event: CalendarEvent) => void;
+  onCancel?: (event: CalendarEvent) => void;
+  onComplete?: (event: CalendarEvent) => void;
   colorMode?: "employee" | "status"; // Color by employee or by status
 }
 
@@ -55,6 +57,8 @@ export function CalendarEventComponent({
   onDragStart,
   onDragEnd,
   onClick,
+  onCancel,
+  onComplete,
   colorMode = "status",
 }: CalendarEventProps) {
   const { isDragging, dragProps } = useDraggable({
@@ -90,6 +94,8 @@ export function CalendarEventComponent({
 
   // Check if appointment is draggable (only scheduled or confirmed can be rescheduled)
   const isDraggable = status === "scheduled" || status === "confirmed";
+  const isCancellable = status === "scheduled" || status === "confirmed";
+  const isCompletable = status === "scheduled" || status === "confirmed";
 
   return (
     <div
@@ -99,7 +105,7 @@ export function CalendarEventComponent({
         onClick(event);
       }}
       className={`
-        absolute left-1 right-1 rounded-md px-2 py-1 text-xs overflow-hidden
+        group/event absolute left-1 right-1 rounded-md px-2 py-1 text-xs overflow-hidden
         transition-all duration-200 border-l-4
         ${isDraggable ? "cursor-grab" : "cursor-pointer"}
         ${isDragging ? "opacity-50 cursor-grabbing shadow-lg scale-105 z-50" : "hover:shadow-md"}
@@ -119,6 +125,34 @@ export function CalendarEventComponent({
     >
       <div className="flex items-center gap-1">
         <div className="font-medium truncate flex-1">{event.title}</div>
+        {/* Complete button - appears on hover for completable appointments */}
+        {isCompletable && onComplete && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onComplete(event);
+            }}
+            className="opacity-0 group-hover/event:opacity-100 transition-opacity shrink-0 w-4 h-4 rounded-full bg-white/30 hover:bg-green-500 flex items-center justify-center"
+            title="Zakoncz wizyte"
+            data-testid="complete-event-btn"
+          >
+            <span className="text-[10px] leading-none font-bold">✓</span>
+          </button>
+        )}
+        {/* Cancel button - appears on hover for cancellable appointments */}
+        {isCancellable && onCancel && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCancel(event);
+            }}
+            className="opacity-0 group-hover/event:opacity-100 transition-opacity shrink-0 w-4 h-4 rounded-full bg-white/30 hover:bg-red-500 flex items-center justify-center"
+            title="Anuluj wizyte"
+            data-testid="cancel-event-btn"
+          >
+            <span className="text-[10px] leading-none font-bold">✕</span>
+          </button>
+        )}
         {/* Status indicator dot for employee color mode */}
         {colorMode === "employee" && (
           <div
