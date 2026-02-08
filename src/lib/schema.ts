@@ -11,6 +11,8 @@ export const user = pgTable(
     email: text("email").notNull().unique(),
     emailVerified: boolean("email_verified").default(false).notNull(),
     image: text("image"),
+    phone: text("phone"),
+    role: text("role").default("client"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
@@ -192,6 +194,9 @@ export const services = pgTable(
     description: text("description"),
     basePrice: numeric("base_price", { precision: 10, scale: 2 }).notNull(),
     baseDuration: integer("base_duration").notNull(), // Duration in minutes
+    suggestedNextVisitDays: integer("suggested_next_visit_days"), // Suggested follow-up interval in days (e.g., 30 for monthly haircut)
+    depositRequired: boolean("deposit_required").default(false).notNull(),
+    depositPercentage: integer("deposit_percentage").default(30), // percentage of service price
     isActive: boolean("is_active").default(true).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
@@ -851,5 +856,31 @@ export const subscriptionPayments = pgTable(
     index("subscription_payments_subscription_id_idx").on(table.subscriptionId),
     index("subscription_payments_salon_id_idx").on(table.salonId),
     index("subscription_payments_status_idx").on(table.status),
+  ]
+);
+
+// Deposit payments - track deposit payments for appointments
+export const depositPayments = pgTable(
+  "deposit_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    appointmentId: uuid("appointment_id")
+      .notNull()
+      .references(() => appointments.id, { onDelete: "cascade" }),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+    currency: text("currency").default("PLN").notNull(),
+    paymentMethod: text("payment_method").notNull(), // 'stripe', 'blik'
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    status: text("status").default("pending").notNull(), // 'pending', 'succeeded', 'failed', 'refunded'
+    paidAt: timestamp("paid_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("deposit_payments_appointment_id_idx").on(table.appointmentId),
+    index("deposit_payments_salon_id_idx").on(table.salonId),
+    index("deposit_payments_status_idx").on(table.status),
   ]
 );
