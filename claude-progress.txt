@@ -1,5 +1,83 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-08 (Feature #64 - Schedule next appointment) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #64: "Schedule next appointment" (Appointments category)
+- Description: Book follow-up appointment after completing current one
+
+### What was accomplished:
+- Feature was ALREADY fully implemented by previous sessions (Features #60-63)
+- This session was purely verification via browser automation - no code changes needed
+
+### Key Components Verified:
+1. CompleteAppointmentDialog (`src/components/appointments/complete-appointment-dialog.tsx`):
+   - Success state with "Umow nastepna wizyte?" prompt
+   - Suggested date: 30 days (default) or from service.suggestedNextVisitDays
+   - Pre-filled data: client, service, employee info
+   - Two buttons: "Nie teraz" (skip) and "Umow nastepna wizyte" (schedule)
+2. Calendar page (`src/app/dashboard/calendar/page.tsx`):
+   - scheduleNextData state coordinates the flow between dialogs
+   - onScheduleNext callback builds data and opens NewAppointmentDialog
+3. NewAppointmentDialog (`src/components/appointments/new-appointment-dialog.tsx`):
+   - Follow-up mode with pre-filled props (defaultClientId, defaultServiceId, etc.)
+   - Title shows "Nastepna wizyta" when in follow-up mode
+
+### End-to-End Verification (Browser Automation):
+- ✅ Completed appointment (Strzyzenie damskie, Maria Kaczmarek, Marta Nowak)
+- ✅ "Schedule Next" prompt appeared with "Umow nastepna wizyte?" heading
+- ✅ Suggested date: 30 dni (10 marca 2026) - correct 30-day calculation
+- ✅ Pre-filled data shown: Client, Service, Employee
+- ✅ Clicked "Umow nastepna wizyte" → NewAppointmentDialog opened
+- ✅ Client pre-selected: Maria Kaczmarek (+48 111 222 333)
+- ✅ Service pre-selected: Strzyzenie damskie - 80.00 PLN (60 min)
+- ✅ Employee pre-selected: Marta Nowak
+- ✅ Date pre-filled: 2026-03-10 (30 days from today)
+- ✅ Set time to 10:00, clicked "Utwórz wizytę"
+- ✅ Toast: "Wizyta została utworzona" with "2026-03-10 o 10:00"
+- ✅ No mock data, TODOs, or hacks in any feature files
+
+### Stats: 33/253 features passing (13.0%)
+
+---
+
+## Session: 2026-02-08 (Feature #65 - Add notes to appointment) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #65: "Add notes to appointment" (Appointments category)
+- Description: Internal notes for staff - add, edit, and persist notes on appointments
+
+### What was accomplished:
+1. Enhanced appointment detail page (`src/app/dashboard/appointments/[id]/page.tsx`):
+   - Added dedicated "Notatki wewnetrzne" (Internal Notes) Card section
+   - Inline editing with Textarea (view/edit toggle pattern)
+   - Empty state with FileText icon + "Brak notatek wewnetrznych" message
+   - Edit mode with Textarea (min-h-[120px]) + Save/Cancel buttons
+   - Read-only mode showing persisted notes with "Edytuj" button
+   - "Dodaj notatke" button when no notes exist
+   - Hidden edit button for cancelled appointments
+   - Saves via PUT /api/appointments/[id] with { notes: value }
+   - Success toast "Notatki zostaly zapisane" on save
+2. Upgraded edit dialog (`src/components/appointments/edit-appointment-dialog.tsx`):
+   - Changed notes field from single-line Input to multi-line Textarea
+   - Label changed to "Notatki wewnetrzne" with better placeholder text
+   - Textarea with min-h-[80px] for adequate editing space
+
+### Verification:
+- ✅ Empty state displays correctly ("Brak notatek wewnetrznych")
+- ✅ Click "Dodaj notatke" opens Textarea for editing
+- ✅ Typed test notes and clicked "Zapisz notatki" → success toast appeared
+- ✅ Notes display in read-only mode with "Edytuj" button
+- ✅ Full page refresh → notes persisted from PostgreSQL database
+- ✅ Notes stored in appointments table, visible to all authenticated staff
+- ✅ No mock data patterns (globalThis, devStore, localStorage, etc.)
+- ✅ TypeScript compiles clean
+
+### Commit:
+- d65672e: feat: add internal notes to appointment detail page (Feature #65)
+
+---
+
 ## Session: 2026-02-08 (Feature #63 - Mark appointment as completed) *** SUCCESS ***
 
 ### Feature Assigned
