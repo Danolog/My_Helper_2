@@ -1,37 +1,98 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { clients } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { clients, appointments } from "@/lib/schema";
+import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
 
-// GET /api/clients - List all clients (optionally filtered by salon)
+// GET /api/clients - List all clients with optional filtering
+// Supported query params:
+//   salonId        - filter by salon
+//   dateAddedFrom  - clients added on or after this ISO date
+//   dateAddedTo    - clients added on or before this ISO date
+//   lastVisitFrom  - clients whose last visit is on or after this ISO date
+//   lastVisitTo    - clients whose last visit is on or before this ISO date
+//   hasAllergies   - "true" to return only clients with allergies set
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
+    const dateAddedFrom = searchParams.get("dateAddedFrom");
+    const dateAddedTo = searchParams.get("dateAddedTo");
+    const lastVisitFrom = searchParams.get("lastVisitFrom");
+    const lastVisitTo = searchParams.get("lastVisitTo");
+    const hasAllergies = searchParams.get("hasAllergies");
+
+    console.log("[Clients API] GET with params:", {
+      salonId,
+      dateAddedFrom,
+      dateAddedTo,
+      lastVisitFrom,
+      lastVisitTo,
+      hasAllergies,
+    });
+
+    // Subquery: compute the most recent appointment start_time per client
+    const lastVisitSubquery = db
+      .select({
+        clientId: appointments.clientId,
+        lastVisit: sql<string>`MAX(${appointments.startTime})`.as("last_visit"),
+      })
+      .from(appointments)
+      .groupBy(appointments.clientId)
+      .as("last_visit_sq");
+
+    // Build the base query: select all client fields plus the computed lastVisit
+    let query = db
+      .select({
+        client: clients,
+        lastVisit: lastVisitSubquery.lastVisit,
+      })
+      .from(clients)
+      .leftJoin(lastVisitSubquery, eq(clients.id, lastVisitSubquery.clientId));
+
+    // Accumulate WHERE conditions dynamically
+    const conditions = [];
 
     if (salonId) {
-      console.log(`[Clients API] Executing: SELECT * FROM clients WHERE salon_id = '${salonId}'`);
-      const salonClients = await db
-        .select()
-        .from(clients)
-        .where(eq(clients.salonId, salonId));
-      console.log(`[Clients API] Query returned ${salonClients.length} rows`);
-
-      return NextResponse.json({
-        success: true,
-        data: salonClients,
-        count: salonClients.length,
-      });
+      conditions.push(eq(clients.salonId, salonId));
     }
 
-    console.log("[Clients API] Executing: SELECT * FROM clients");
-    const allClients = await db.select().from(clients);
-    console.log(`[Clients API] Query returned ${allClients.length} rows`);
+    if (dateAddedFrom) {
+      conditions.push(gte(clients.createdAt, new Date(dateAddedFrom)));
+    }
+
+    if (dateAddedTo) {
+      conditions.push(lte(clients.createdAt, new Date(dateAddedTo)));
+    }
+
+    if (lastVisitFrom) {
+      conditions.push(gte(lastVisitSubquery.lastVisit, lastVisitFrom));
+    }
+
+    if (lastVisitTo) {
+      conditions.push(lte(lastVisitSubquery.lastVisit, lastVisitTo));
+    }
+
+    if (hasAllergies === "true") {
+      conditions.push(isNotNull(clients.allergies));
+    }
+
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions)) as typeof query;
+    }
+
+    const result = await query;
+    console.log(`[Clients API] Query returned ${result.length} rows`);
+
+    // Flatten: spread client fields and attach lastVisit at the top level
+    const data = result.map((row) => ({
+      ...row.client,
+      lastVisit: row.lastVisit ?? null,
+    }));
 
     return NextResponse.json({
       success: true,
-      data: allClients,
-      count: allClients.length,
+      data,
+      count: data.length,
     });
   } catch (error) {
     console.error("[Clients API] Database error:", error);

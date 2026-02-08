@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,11 @@ import {
   UserPlus,
   StickyNote,
   AlertTriangle,
+  Filter,
+  X,
+  Calendar,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -46,6 +52,7 @@ interface Client {
   favoriteEmployeeId: string | null;
   createdAt: string;
   updatedAt: string;
+  lastVisit: string | null;
 }
 
 export default function ClientsPage() {
@@ -56,6 +63,23 @@ export default function ClientsPage() {
   const [saving, setSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Filter state
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [dateAddedFrom, setDateAddedFrom] = useState("");
+  const [dateAddedTo, setDateAddedTo] = useState("");
+  const [lastVisitFrom, setLastVisitFrom] = useState("");
+  const [lastVisitTo, setLastVisitTo] = useState("");
+  const [filterHasAllergies, setFilterHasAllergies] = useState(false);
+
+  // Track whether filters are actively applied (after clicking "Filtruj")
+  const [appliedFilters, setAppliedFilters] = useState({
+    dateAddedFrom: "",
+    dateAddedTo: "",
+    lastVisitFrom: "",
+    lastVisitTo: "",
+    hasAllergies: false,
+  });
+
   // Form state
   const [formFirstName, setFormFirstName] = useState("");
   const [formLastName, setFormLastName] = useState("");
@@ -63,17 +87,64 @@ export default function ClientsPage() {
   const [formEmail, setFormEmail] = useState("");
   const [formNotes, setFormNotes] = useState("");
 
-  const fetchClients = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/clients?salonId=${DEMO_SALON_ID}`);
-      const data = await res.json();
-      if (data.success) {
-        setClients(data.data);
+  const hasActiveFilters =
+    appliedFilters.dateAddedFrom !== "" ||
+    appliedFilters.dateAddedTo !== "" ||
+    appliedFilters.lastVisitFrom !== "" ||
+    appliedFilters.lastVisitTo !== "" ||
+    appliedFilters.hasAllergies;
+
+  const activeFilterCount = [
+    appliedFilters.dateAddedFrom || appliedFilters.dateAddedTo ? 1 : 0,
+    appliedFilters.lastVisitFrom || appliedFilters.lastVisitTo ? 1 : 0,
+    appliedFilters.hasAllergies ? 1 : 0,
+  ].reduce((a, b) => a + b, 0);
+
+  const fetchClients = useCallback(
+    async (filters?: {
+      dateAddedFrom: string;
+      dateAddedTo: string;
+      lastVisitFrom: string;
+      lastVisitTo: string;
+      hasAllergies: boolean;
+    }) => {
+      try {
+        const params = new URLSearchParams({
+          salonId: DEMO_SALON_ID,
+        });
+
+        const f = filters || appliedFilters;
+
+        if (f.dateAddedFrom) {
+          params.set("dateAddedFrom", new Date(f.dateAddedFrom).toISOString());
+        }
+        if (f.dateAddedTo) {
+          // Set to end of day
+          const endDate = new Date(f.dateAddedTo);
+          endDate.setHours(23, 59, 59, 999);
+          params.set("dateAddedTo", endDate.toISOString());
+        }
+        if (f.lastVisitFrom) {
+          params.set("lastVisitFrom", f.lastVisitFrom);
+        }
+        if (f.lastVisitTo) {
+          params.set("lastVisitTo", f.lastVisitTo);
+        }
+        if (f.hasAllergies) {
+          params.set("hasAllergies", "true");
+        }
+
+        const res = await fetch(`/api/clients?${params.toString()}`);
+        const data = await res.json();
+        if (data.success) {
+          setClients(data.data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch clients:", error);
       }
-    } catch (error) {
-      console.error("Failed to fetch clients:", error);
-    }
-  }, []);
+    },
+    [appliedFilters]
+  );
 
   useEffect(() => {
     async function loadData() {
@@ -83,6 +154,41 @@ export default function ClientsPage() {
     }
     loadData();
   }, [fetchClients]);
+
+  const handleApplyFilters = async () => {
+    const newFilters = {
+      dateAddedFrom,
+      dateAddedTo,
+      lastVisitFrom,
+      lastVisitTo,
+      hasAllergies: filterHasAllergies,
+    };
+    setAppliedFilters(newFilters);
+    setLoading(true);
+    await fetchClients(newFilters);
+    setLoading(false);
+    toast.success("Filtry zastosowane");
+  };
+
+  const handleClearFilters = async () => {
+    setDateAddedFrom("");
+    setDateAddedTo("");
+    setLastVisitFrom("");
+    setLastVisitTo("");
+    setFilterHasAllergies(false);
+    const emptyFilters = {
+      dateAddedFrom: "",
+      dateAddedTo: "",
+      lastVisitFrom: "",
+      lastVisitTo: "",
+      hasAllergies: false,
+    };
+    setAppliedFilters(emptyFilters);
+    setLoading(true);
+    await fetchClients(emptyFilters);
+    setLoading(false);
+    toast.success("Filtry wyczyszczone");
+  };
 
   const resetForm = () => {
     setFormFirstName("");
@@ -137,7 +243,7 @@ export default function ClientsPage() {
     }
   };
 
-  // Filter clients by search query
+  // Filter clients by search query (client-side text search on top of server-side date filters)
   const filteredClients = clients.filter((client) => {
     if (!searchQuery.trim()) return true;
     const query = searchQuery.toLowerCase();
@@ -148,6 +254,20 @@ export default function ClientsPage() {
       (client.email && client.email.toLowerCase().includes(query))
     );
   });
+
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return null;
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString("pl-PL", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      });
+    } catch {
+      return null;
+    }
+  };
 
   if (isPending) {
     return (
@@ -277,7 +397,7 @@ export default function ClientsPage() {
       </div>
 
       {/* Search bar */}
-      <div className="relative mb-6">
+      <div className="relative mb-4">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           placeholder="Szukaj klienta po imieniu, nazwisku, telefonie lub emailu..."
@@ -288,12 +408,183 @@ export default function ClientsPage() {
         />
       </div>
 
+      {/* Filter toggle button */}
+      <div className="flex items-center gap-2 mb-4">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setFiltersOpen(!filtersOpen)}
+          data-testid="toggle-filters-btn"
+          className="flex items-center gap-2"
+        >
+          <Filter className="h-4 w-4" />
+          Filtry
+          {hasActiveFilters && (
+            <Badge variant="default" className="ml-1 text-xs px-1.5 py-0" data-testid="active-filter-count">
+              {activeFilterCount}
+            </Badge>
+          )}
+          {filtersOpen ? (
+            <ChevronUp className="h-3 w-3" />
+          ) : (
+            <ChevronDown className="h-3 w-3" />
+          )}
+        </Button>
+        {hasActiveFilters && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleClearFilters}
+            data-testid="clear-filters-btn"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4 mr-1" />
+            Wyczysc filtry
+          </Button>
+        )}
+      </div>
+
+      {/* Active filter badges */}
+      {hasActiveFilters && (
+        <div className="flex flex-wrap gap-2 mb-4" data-testid="active-filters-badges">
+          {(appliedFilters.dateAddedFrom || appliedFilters.dateAddedTo) && (
+            <Badge variant="secondary" className="text-xs gap-1" data-testid="filter-badge-date-added">
+              <Calendar className="h-3 w-3" />
+              Data dodania: {appliedFilters.dateAddedFrom || "..."} - {appliedFilters.dateAddedTo || "..."}
+            </Badge>
+          )}
+          {(appliedFilters.lastVisitFrom || appliedFilters.lastVisitTo) && (
+            <Badge variant="secondary" className="text-xs gap-1" data-testid="filter-badge-last-visit">
+              <Calendar className="h-3 w-3" />
+              Ostatnia wizyta: {appliedFilters.lastVisitFrom || "..."} - {appliedFilters.lastVisitTo || "..."}
+            </Badge>
+          )}
+          {appliedFilters.hasAllergies && (
+            <Badge variant="secondary" className="text-xs gap-1" data-testid="filter-badge-allergies">
+              <AlertTriangle className="h-3 w-3" />
+              Z alergiami
+            </Badge>
+          )}
+        </div>
+      )}
+
+      {/* Filter panel */}
+      {filtersOpen && (
+        <Card className="mb-6" data-testid="filter-panel">
+          <CardContent className="p-4">
+            <div className="grid gap-4">
+              {/* Date Added filter row */}
+              <div>
+                <Label className="text-sm font-medium mb-2 block">
+                  Data dodania klienta
+                </Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label htmlFor="filter-date-added-from" className="text-xs text-muted-foreground">
+                      Od
+                    </Label>
+                    <Input
+                      id="filter-date-added-from"
+                      type="date"
+                      value={dateAddedFrom}
+                      onChange={(e) => setDateAddedFrom(e.target.value)}
+                      data-testid="filter-date-added-from"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="filter-date-added-to" className="text-xs text-muted-foreground">
+                      Do
+                    </Label>
+                    <Input
+                      id="filter-date-added-to"
+                      type="date"
+                      value={dateAddedTo}
+                      onChange={(e) => setDateAddedTo(e.target.value)}
+                      data-testid="filter-date-added-to"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Last Visit filter row */}
+              <div>
+                <Label className="text-sm font-medium mb-2 block">
+                  Ostatnia wizyta
+                </Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label htmlFor="filter-last-visit-from" className="text-xs text-muted-foreground">
+                      Od
+                    </Label>
+                    <Input
+                      id="filter-last-visit-from"
+                      type="date"
+                      value={lastVisitFrom}
+                      onChange={(e) => setLastVisitFrom(e.target.value)}
+                      data-testid="filter-last-visit-from"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="filter-last-visit-to" className="text-xs text-muted-foreground">
+                      Do
+                    </Label>
+                    <Input
+                      id="filter-last-visit-to"
+                      type="date"
+                      value={lastVisitTo}
+                      onChange={(e) => setLastVisitTo(e.target.value)}
+                      data-testid="filter-last-visit-to"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Has Allergies filter */}
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="filter-has-allergies"
+                  checked={filterHasAllergies}
+                  onCheckedChange={(checked) =>
+                    setFilterHasAllergies(checked === true)
+                  }
+                  data-testid="filter-has-allergies"
+                />
+                <Label htmlFor="filter-has-allergies" className="text-sm cursor-pointer">
+                  Tylko klienci z alergiami
+                </Label>
+              </div>
+
+              {/* Filter action buttons */}
+              <div className="flex gap-2 pt-2">
+                <Button
+                  size="sm"
+                  onClick={handleApplyFilters}
+                  data-testid="apply-filters-btn"
+                >
+                  <Filter className="h-4 w-4 mr-2" />
+                  Filtruj
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleClearFilters}
+                  data-testid="clear-filters-panel-btn"
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Wyczysc
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Clients list */}
       {loading ? (
         <div className="flex justify-center items-center h-48">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
         </div>
-      ) : clients.length === 0 ? (
+      ) : clients.length === 0 && !hasActiveFilters ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <UserPlus className="w-12 h-12 text-muted-foreground mb-4" />
@@ -309,6 +600,24 @@ export default function ClientsPage() {
             </Button>
           </CardContent>
         </Card>
+      ) : clients.length === 0 && hasActiveFilters ? (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <Filter className="w-12 h-12 text-muted-foreground mb-4" />
+            <p className="text-muted-foreground mb-2" data-testid="no-filter-results">
+              Brak klientow pasujacych do wybranych filtrow
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleClearFilters}
+              className="mt-2"
+            >
+              <X className="h-4 w-4 mr-1" />
+              Wyczysc filtry
+            </Button>
+          </CardContent>
+        </Card>
       ) : filteredClients.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
@@ -320,10 +629,12 @@ export default function ClientsPage() {
         </Card>
       ) : (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground mb-2">
-            {filteredClients.length === clients.length
-              ? `Liczba klientow: ${clients.length}`
-              : `Wyniki wyszukiwania: ${filteredClients.length} z ${clients.length}`}
+          <p className="text-sm text-muted-foreground mb-2" data-testid="clients-count-text">
+            {hasActiveFilters
+              ? `Wyniki filtrowania: ${filteredClients.length} klientow`
+              : filteredClients.length === clients.length
+                ? `Liczba klientow: ${clients.length}`
+                : `Wyniki wyszukiwania: ${filteredClients.length} z ${clients.length}`}
           </p>
           {filteredClients.map((client) => {
             const clientAllergies = client.allergies
@@ -333,6 +644,8 @@ export default function ClientsPage() {
                   .filter((a) => a.length > 0)
               : [];
             const hasAllergies = clientAllergies.length > 0;
+            const lastVisitFormatted = formatDate(client.lastVisit);
+            const createdAtFormatted = formatDate(client.createdAt);
 
             return (
               <Link
@@ -380,6 +693,18 @@ export default function ClientsPage() {
                             {client.notes.length > 50
                               ? client.notes.substring(0, 50) + "..."
                               : client.notes}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                        {createdAtFormatted && (
+                          <span data-testid={`client-created-${client.id}`}>
+                            Dodano: {createdAtFormatted}
+                          </span>
+                        )}
+                        {lastVisitFormatted && (
+                          <span data-testid={`client-last-visit-${client.id}`}>
+                            Ostatnia wizyta: {lastVisitFormatted}
                           </span>
                         )}
                       </div>
