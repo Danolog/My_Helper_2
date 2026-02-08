@@ -12,6 +12,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Lock,
   ArrowLeft,
   User,
@@ -36,6 +44,7 @@ import {
   Edit3,
   Check,
   Package,
+  Trash2,
 } from "lucide-react";
 import {
   Select,
@@ -218,6 +227,12 @@ export default function ClientProfilePage() {
   const [treatmentTechniques, setTreatmentTechniques] = useState("");
   const [treatmentNotes, setTreatmentNotes] = useState("");
   const [savingTreatment, setSavingTreatment] = useState(false);
+
+  // Delete confirmation state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   // Editable contact fields
   const [formFirstName, setFormFirstName] = useState("");
@@ -477,6 +492,51 @@ export default function ClientProfilePage() {
     }
   };
 
+  const handleDeleteClient = async () => {
+    if (!deletePassword.trim()) {
+      setDeleteError("Wpisz haslo, aby potwierdzic usuniecie");
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteError("");
+
+    try {
+      const res = await fetch(`/api/clients/${clientId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: deletePassword }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        toast.success(
+          `Klient "${client?.firstName} ${client?.lastName}" zostal usuniety`
+        );
+        setDeleteDialogOpen(false);
+        router.push("/dashboard/clients");
+      } else {
+        if (res.status === 403) {
+          setDeleteError("Nieprawidlowe haslo. Sprobuj ponownie.");
+        } else {
+          setDeleteError(data.error || "Nie udalo sie usunac klienta");
+        }
+      }
+    } catch (error) {
+      console.error("Failed to delete client:", error);
+      setDeleteError("Blad podczas usuwania klienta");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const openDeleteDialog = () => {
+    setDeletePassword("");
+    setDeleteError("");
+    setDeleteDialogOpen(true);
+  };
+
   if (isPending || loading) {
     return (
       <div className="flex justify-center items-center h-screen">
@@ -531,15 +591,95 @@ export default function ClientProfilePage() {
             <p className="text-muted-foreground text-sm">Profil klienta</p>
           </div>
         </div>
-        <Button
-          onClick={handleSave}
-          disabled={saving}
-          data-testid="save-client-btn"
-        >
-          <Save className="h-4 w-4 mr-2" />
-          {saving ? "Zapisywanie..." : "Zapisz zmiany"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="destructive"
+            onClick={openDeleteDialog}
+            data-testid="delete-client-btn"
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Usun klienta
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={saving}
+            data-testid="save-client-btn"
+          >
+            <Save className="h-4 w-4 mr-2" />
+            {saving ? "Zapisywanie..." : "Zapisz zmiany"}
+          </Button>
+        </div>
       </div>
+
+      {/* Delete confirmation dialog with password */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Usuwanie klienta
+            </DialogTitle>
+            <DialogDescription>
+              Czy na pewno chcesz usunac klienta{" "}
+              <strong>
+                {client?.firstName} {client?.lastName}
+              </strong>
+              ? Ta operacja jest nieodwracalna. Wpisz swoje haslo, aby
+              potwierdzic.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="delete-password">Twoje haslo</Label>
+              <Input
+                id="delete-password"
+                type="password"
+                placeholder="Wpisz swoje haslo..."
+                value={deletePassword}
+                onChange={(e) => {
+                  setDeletePassword(e.target.value);
+                  if (deleteError) setDeleteError("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !deleting) {
+                    e.preventDefault();
+                    handleDeleteClient();
+                  }
+                }}
+                data-testid="delete-password-input"
+                autoFocus
+              />
+              {deleteError && (
+                <p
+                  className="text-sm text-destructive"
+                  data-testid="delete-error-message"
+                >
+                  {deleteError}
+                </p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deleting}
+              data-testid="cancel-delete-btn"
+            >
+              Anuluj
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteClient}
+              disabled={deleting}
+              data-testid="confirm-delete-btn"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              {deleting ? "Usuwanie..." : "Usun klienta"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Allergy warning banner - displayed prominently when allergies exist */}
       {allergiesList.length > 0 && (

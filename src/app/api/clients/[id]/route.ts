@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { clients } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { clients, account } from "@/lib/schema";
+import { eq, and } from "drizzle-orm";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+import { verifyPassword } from "better-auth/crypto";
 
 // GET /api/clients/[id] - Get a single client by ID
 export async function GET(
@@ -91,14 +94,74 @@ export async function PUT(
   }
 }
 
-// DELETE /api/clients/[id] - Delete a client
+// DELETE /api/clients/[id] - Delete a client (requires password confirmation)
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
 
+    // 1. Verify the user is authenticated
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Musisz byc zalogowany, aby usunac klienta" },
+        { status: 401 }
+      );
+    }
+
+    // 2. Parse request body for password
+    let body: { password?: string } = {};
+    try {
+      body = await request.json();
+    } catch {
+      // Body parsing failed
+    }
+
+    const { password } = body;
+
+    if (!password) {
+      return NextResponse.json(
+        { success: false, error: "Haslo jest wymagane do usuniecia klienta" },
+        { status: 400 }
+      );
+    }
+
+    // 3. Get the user's password hash from the account table
+    const [userAccount] = await db
+      .select()
+      .from(account)
+      .where(
+        and(
+          eq(account.userId, session.user.id),
+          eq(account.providerId, "credential")
+        )
+      )
+      .limit(1);
+
+    if (!userAccount || !userAccount.password) {
+      return NextResponse.json(
+        { success: false, error: "Nie mozna zweryfikowac hasla - brak konta z haslem" },
+        { status: 400 }
+      );
+    }
+
+    // 4. Verify the password
+    const isPasswordValid = await verifyPassword({
+      hash: userAccount.password,
+      password,
+    });
+
+    if (!isPasswordValid) {
+      console.log(`[Clients API] Password verification failed for user ${session.user.email} when attempting to delete client ${id}`);
+      return NextResponse.json(
+        { success: false, error: "Nieprawidlowe haslo" },
+        { status: 403 }
+      );
+    }
+
+    // 5. Password verified - proceed with deletion
     const [deleted] = await db
       .delete(clients)
       .where(eq(clients.id, id))
@@ -111,7 +174,7 @@ export async function DELETE(
       );
     }
 
-    console.log(`[Clients API] Deleted client: ${deleted.firstName} ${deleted.lastName} (${deleted.id})`);
+    console.log(`[Clients API] Deleted client: ${deleted.firstName} ${deleted.lastName} (${deleted.id}) by user ${session.user.email} after password verification`);
 
     return NextResponse.json({
       success: true,
