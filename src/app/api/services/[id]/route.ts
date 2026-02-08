@@ -58,7 +58,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, description, basePrice, baseDuration, isActive, categoryId } = body;
+    const { name, description, basePrice, baseDuration, isActive, categoryId, depositRequired, depositPercentage } = body;
 
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name;
@@ -67,6 +67,8 @@ export async function PUT(
     if (baseDuration !== undefined) updateData.baseDuration = parseInt(baseDuration, 10);
     if (isActive !== undefined) updateData.isActive = isActive;
     if (categoryId !== undefined) updateData.categoryId = categoryId;
+    if (depositRequired !== undefined) updateData.depositRequired = depositRequired;
+    if (depositPercentage !== undefined) updateData.depositPercentage = parseInt(depositPercentage, 10);
 
     const [updated] = await db
       .update(services)

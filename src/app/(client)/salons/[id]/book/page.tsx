@@ -15,10 +15,13 @@ import {
   ChevronRight,
   ArrowLeft,
   Lock,
-  Star,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  CreditCard,
+  Wallet,
+  ShieldCheck,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +56,8 @@ interface ServiceItem {
   description: string | null;
   categoryId: string | null;
   categoryName: string | null;
+  depositRequired: boolean;
+  depositPercentage: number | null;
   variants: ServiceVariant[];
 }
 
@@ -219,6 +224,12 @@ export default function ClientBookingPage() {
   const [isBooking, setIsBooking] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
 
+  // Deposit payment state
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("stripe");
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [_depositPaymentId, setDepositPaymentId] = useState<string>("");
+  const [_depositSessionId, setDepositSessionId] = useState<string>("");
+
   // ---------------------------------------------------------------------------
   // Derived values
   // ---------------------------------------------------------------------------
@@ -236,6 +247,13 @@ export default function ClientBookingPage() {
 
   const effectiveDuration = selectedService
     ? selectedService.baseDuration + (selectedVariant?.durationModifier ?? 0)
+    : 0;
+
+  // Deposit calculation
+  const depositRequired = selectedService?.depositRequired ?? false;
+  const depositPercentage = selectedService?.depositPercentage ?? 30;
+  const depositAmount = depositRequired
+    ? Math.ceil(effectivePrice * (depositPercentage / 100))
     : 0;
 
   // Whether variant step is required and satisfied
@@ -419,14 +437,80 @@ export default function ClientBookingPage() {
       return;
     }
 
+    const startTime = new Date(`${selectedDate}T${selectedTimeSlot}:00`);
+    const endTime = new Date(startTime.getTime() + effectiveDuration * 60000);
+    const variantName = selectedVariant?.name ?? "";
+    const notesText = `Rezerwacja online: ${selectedService.name}${variantName ? ` - ${variantName}` : ""}`;
+
+    // If deposit is required, use the deposit flow
+    if (depositRequired && depositAmount > 0) {
+      setIsProcessingPayment(true);
+      try {
+        const depositBody = {
+          salonId,
+          clientId: null,
+          employeeId: selectedEmployeeId,
+          serviceId: selectedServiceId,
+          variantId: selectedVariantId || null,
+          startTime: startTime.toISOString(),
+          endTime: endTime.toISOString(),
+          notes: notesText,
+          depositAmount,
+          paymentMethod: selectedPaymentMethod,
+        };
+
+        // Step 1: Create deposit session (which also creates the appointment)
+        const sessionRes = await fetch("/api/deposits/create-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(depositBody),
+        });
+
+        const sessionJson = await sessionRes.json();
+        if (!sessionJson.success) {
+          if (sessionRes.status === 409) {
+            toast.error("Wybrany termin jest juz zajety. Wybierz inny termin.");
+          } else {
+            toast.error(sessionJson.error || "Nie udalo sie utworzyc sesji platnosci");
+          }
+          setIsProcessingPayment(false);
+          return;
+        }
+
+        const { depositPaymentId: payId, sessionId: sessId } = sessionJson.data;
+        setDepositPaymentId(payId);
+        setDepositSessionId(sessId);
+
+        // Step 2: Simulate processing the payment (in production this would redirect to Stripe Checkout)
+        toast.info("Przetwarzanie platnosci zadatku...", { duration: 2000 });
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
+        // Step 3: Confirm the payment
+        const confirmRes = await fetch("/api/deposits/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ depositPaymentId: payId, sessionId: sessId }),
+        });
+
+        const confirmJson = await confirmRes.json();
+        if (confirmJson.success) {
+          toast.success("Zadatek oplacony! Wizyta potwierdzona.", { duration: 4000 });
+          setBookingSuccess(true);
+        } else {
+          toast.error(confirmJson.error || "Nie udalo sie potwierdzic platnosci");
+        }
+      } catch (error) {
+        console.error("Failed to process deposit payment:", error);
+        toast.error("Blad przetwarzania platnosci");
+      } finally {
+        setIsProcessingPayment(false);
+      }
+      return;
+    }
+
+    // Standard booking without deposit
     setIsBooking(true);
     try {
-      const startTime = new Date(`${selectedDate}T${selectedTimeSlot}:00`);
-      const endTime = new Date(startTime.getTime() + effectiveDuration * 60000);
-
-      const variantName = selectedVariant?.name ?? "";
-      const notesText = `Rezerwacja online: ${selectedService.name}${variantName ? ` - ${variantName}` : ""}`;
-
       const body: Record<string, unknown> = {
         salonId,
         clientId: null,
@@ -476,6 +560,10 @@ export default function ClientBookingPage() {
     setAssignedEmployees([]);
     setExpandedServices(new Set());
     setBookingSuccess(false);
+    setSelectedPaymentMethod("stripe");
+    setIsProcessingPayment(false);
+    setDepositPaymentId("");
+    setDepositSessionId("");
   }
 
   // ---------------------------------------------------------------------------
@@ -625,8 +713,29 @@ export default function ClientBookingPage() {
                 <span className="text-muted-foreground">Czas trwania:</span>
                 <span className="font-medium">{formatDuration(effectiveDuration)}</span>
               </div>
+              {depositRequired && depositAmount > 0 && (
+                <>
+                  <Separator className="my-2" />
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Zadatek:</span>
+                    <span className="font-medium text-green-600">{depositAmount} PLN (oplacony)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Pozostalo do zaplaty:</span>
+                    <span className="font-medium">{(effectivePrice - depositAmount).toFixed(0)} PLN</span>
+                  </div>
+                </>
+              )}
             </div>
             <Separator className="my-4" />
+            {depositRequired && depositAmount > 0 && (
+              <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-md border border-green-200 dark:border-green-800 mb-4">
+                <ShieldCheck className="w-5 h-5 text-green-600" />
+                <span className="text-sm text-green-800 dark:text-green-300">
+                  Zadatek {depositAmount} PLN zostal pomyslnie oplacony. Wizyta jest potwierdzona.
+                </span>
+              </div>
+            )}
             <div className="flex flex-col gap-3">
               <Button onClick={resetBooking} size="lg">
                 <CalendarPlus className="w-5 h-5 mr-2" />
@@ -1158,17 +1267,98 @@ export default function ClientBookingPage() {
                   </span>
                 </div>
               </div>
+
+              {/* Deposit payment section */}
+              {depositRequired && depositAmount > 0 && (
+                <>
+                  <Separator className="my-3" />
+                  <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800" data-testid="deposit-info-section">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Wallet className="w-5 h-5 text-amber-600" />
+                      <span className="font-semibold text-amber-800 dark:text-amber-300">
+                        Wymagany zadatek
+                      </span>
+                    </div>
+                    <div className="space-y-2 mb-4">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-amber-700 dark:text-amber-400">Kwota zadatku ({depositPercentage}%):</span>
+                        <span className="font-bold text-amber-800 dark:text-amber-200" data-testid="deposit-amount-display">
+                          {depositAmount} PLN
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-amber-700 dark:text-amber-400">Pozostalo do zaplaty w salonie:</span>
+                        <span className="font-medium text-amber-800 dark:text-amber-200">
+                          {(effectivePrice - depositAmount).toFixed(0)} PLN
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mb-4">
+                      Zadatek jest wymagany do potwierdzenia rezerwacji. Pozostala kwota platna w salonie.
+                    </p>
+
+                    {/* Payment method selection */}
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Metoda platnosci:</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div
+                          className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors ${
+                            selectedPaymentMethod === "stripe"
+                              ? "bg-primary/10 border-primary"
+                              : "bg-white dark:bg-background hover:bg-muted/50"
+                          }`}
+                          onClick={() => setSelectedPaymentMethod("stripe")}
+                          data-testid="payment-method-stripe"
+                        >
+                          <CreditCard className="w-5 h-5 text-primary" />
+                          <div>
+                            <p className="text-sm font-medium">Karta</p>
+                            <p className="text-xs text-muted-foreground">Visa, Mastercard</p>
+                          </div>
+                          {selectedPaymentMethod === "stripe" && (
+                            <Check className="w-4 h-4 text-primary ml-auto" />
+                          )}
+                        </div>
+                        <div
+                          className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors ${
+                            selectedPaymentMethod === "blik"
+                              ? "bg-primary/10 border-primary"
+                              : "bg-white dark:bg-background hover:bg-muted/50"
+                          }`}
+                          onClick={() => setSelectedPaymentMethod("blik")}
+                          data-testid="payment-method-blik"
+                        >
+                          <Wallet className="w-5 h-5 text-pink-600" />
+                          <div>
+                            <p className="text-sm font-medium">BLIK</p>
+                            <p className="text-xs text-muted-foreground">Platnosc BLIK</p>
+                          </div>
+                          {selectedPaymentMethod === "blik" && (
+                            <Check className="w-4 h-4 text-primary ml-auto" />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
               <Button
                 className="w-full"
                 size="lg"
                 onClick={handleBookAppointment}
-                disabled={isBooking}
+                disabled={isBooking || isProcessingPayment}
                 data-testid="book-appointment-btn"
               >
-                {isBooking ? (
+                {isBooking || isProcessingPayment ? (
                   <div className="flex items-center gap-2">
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                    Rezerwowanie...
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {isProcessingPayment ? "Przetwarzanie platnosci..." : "Rezerwowanie..."}
+                  </div>
+                ) : depositRequired && depositAmount > 0 ? (
+                  <div className="flex items-center gap-2">
+                    <CreditCard className="h-5 w-5" />
+                    Zaplac zadatek {depositAmount} PLN i zarezerwuj
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
@@ -1230,6 +1420,14 @@ export default function ClientBookingPage() {
                   {formatDuration(service.baseDuration)}
                 </span>
               </div>
+              {service.depositRequired && (
+                <div className="flex items-center gap-1">
+                  <CreditCard className="w-3 h-3 text-amber-500" />
+                  <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                    Zadatek {service.depositPercentage ?? 30}%
+                  </span>
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
