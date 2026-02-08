@@ -54,6 +54,19 @@ interface ServiceCategory {
   sortOrder: number | null;
 }
 
+interface EmployeeProfile {
+  id: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  photoUrl: string | null;
+  color: string | null;
+  specialties: string[];
+  averageRating: number | null;
+  reviewCount: number;
+  galleryCount: number;
+}
+
 interface SalonDetail {
   id: string;
   name: string;
@@ -63,12 +76,7 @@ interface SalonDetail {
   industryType: string | null;
   services: ServiceItem[];
   categories: ServiceCategory[];
-  employees: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    role: string;
-  }[];
+  employees: EmployeeProfile[];
   averageRating: number | null;
 }
 
@@ -544,27 +552,97 @@ export default function SalonProfilePage() {
             ) : (
               <div className="space-y-3">
                 {salon.employees.map((emp) => (
-                  <div
+                  <Link
                     key={emp.id}
-                    className="flex items-center gap-3 py-2 border-b last:border-0"
+                    href={`/salons/${salonId}/employees/${emp.id}`}
+                    className="block"
+                    data-testid={`employee-card-${emp.id}`}
                   >
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium text-sm">
-                      {emp.firstName.charAt(0)}
-                      {emp.lastName.charAt(0)}
+                    <div className="flex items-start gap-3 py-3 px-2 border rounded-lg hover:border-primary/40 hover:shadow-sm transition-all cursor-pointer">
+                      {/* Employee Photo / Avatar */}
+                      {emp.photoUrl ? (
+                        <img
+                          src={emp.photoUrl}
+                          alt={`${emp.firstName} ${emp.lastName}`}
+                          className="w-12 h-12 rounded-full object-cover flex-shrink-0"
+                        />
+                      ) : (
+                        <div
+                          className="w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0"
+                          style={{
+                            backgroundColor: emp.color || "#3b82f6",
+                          }}
+                        >
+                          {emp.firstName.charAt(0)}
+                          {emp.lastName.charAt(0)}
+                        </div>
+                      )}
+
+                      <div className="flex-1 min-w-0">
+                        {/* Name */}
+                        <p className="font-medium text-sm" data-testid={`employee-name-${emp.id}`}>
+                          {emp.firstName} {emp.lastName}
+                        </p>
+
+                        {/* Role */}
+                        <p className="text-xs text-muted-foreground capitalize">
+                          {emp.role === "owner"
+                            ? "Wlasciciel"
+                            : emp.role === "employee"
+                              ? "Pracownik"
+                              : emp.role === "receptionist"
+                                ? "Recepcja"
+                                : emp.role}
+                        </p>
+
+                        {/* Specialties */}
+                        {emp.specialties && emp.specialties.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1.5" data-testid={`employee-specialties-${emp.id}`}>
+                            {emp.specialties.slice(0, 3).map((spec, idx) => (
+                              <Badge
+                                key={idx}
+                                variant="secondary"
+                                className="text-[10px] px-1.5 py-0"
+                              >
+                                {spec}
+                              </Badge>
+                            ))}
+                            {emp.specialties.length > 3 && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 py-0"
+                              >
+                                +{emp.specialties.length - 3}
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Rating + Stats */}
+                        <div className="flex items-center gap-3 mt-1.5">
+                          {emp.averageRating !== null && emp.averageRating > 0 && (
+                            <div className="flex items-center gap-1" data-testid={`employee-rating-${emp.id}`}>
+                              <Star className="w-3 h-3 fill-yellow-400 text-yellow-400" />
+                              <span className="text-xs font-medium">
+                                {emp.averageRating.toFixed(1)}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                ({emp.reviewCount})
+                              </span>
+                            </div>
+                          )}
+                          {emp.galleryCount > 0 && (
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Scissors className="w-3 h-3" />
+                              <span>
+                                {emp.galleryCount} {emp.galleryCount === 1 ? "praca" : "prac"}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-medium text-sm">
-                        {emp.firstName} {emp.lastName}
-                      </p>
-                      <p className="text-xs text-muted-foreground capitalize">
-                        {emp.role === "owner"
-                          ? "Wlasciciel"
-                          : emp.role === "employee"
-                            ? "Pracownik"
-                            : emp.role}
-                      </p>
-                    </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}
