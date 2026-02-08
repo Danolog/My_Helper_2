@@ -299,6 +299,25 @@ export const serviceVariants = pgTable(
   ]
 );
 
+// Employee services - junction table for which employees offer which services
+export const employeeServices = pgTable(
+  "employee_services",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id")
+      .notNull()
+      .references(() => services.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("employee_services_employee_id_idx").on(table.employeeId),
+    index("employee_services_service_id_idx").on(table.serviceId),
+  ]
+);
+
 // Employee service prices - custom pricing per employee per service
 export const employeeServicePrices = pgTable(
   "employee_service_prices",
