@@ -36,9 +36,12 @@ import {
   CheckCircle,
   AlertTriangle,
   Pencil,
+  ClipboardList,
+  DollarSign,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EditAppointmentDialog } from "@/components/appointments/edit-appointment-dialog";
+import { CompleteAppointmentDialog } from "@/components/appointments/complete-appointment-dialog";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -104,13 +107,36 @@ interface Product {
   pricePerUnit: string | null;
 }
 
+interface TreatmentRecord {
+  id: string;
+  appointmentId: string;
+  recipe: string | null;
+  techniques: string | null;
+  notes: string | null;
+  materialsJson: unknown;
+}
+
+interface CommissionRecord {
+  id: string;
+  employeeId: string;
+  appointmentId: string;
+  amount: string;
+  percentage: string | null;
+  paidAt: string | null;
+  employee: {
+    id: string;
+    firstName: string;
+    lastName: string;
+  } | null;
+}
+
 function getStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     scheduled: "Zaplanowana",
     confirmed: "Potwierdzona",
-    completed: "Zakończona",
+    completed: "Zakonczona",
     cancelled: "Anulowana",
-    no_show: "Nieobecność",
+    no_show: "Nieobecnosc",
   };
   return labels[status] || status;
 }
@@ -148,6 +174,8 @@ export default function AppointmentDetailPage() {
   const [appointment, setAppointment] = useState<AppointmentDetail | null>(null);
   const [materials, setMaterials] = useState<MaterialRecord[]>([]);
   const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
+  const [treatment, setTreatment] = useState<TreatmentRecord | null>(null);
+  const [commission, setCommission] = useState<CommissionRecord | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Add material dialog
@@ -157,8 +185,8 @@ export default function AppointmentDetailPage() {
   const [materialNotes, setMaterialNotes] = useState("");
   const [addingMaterial, setAddingMaterial] = useState(false);
 
-  // Complete appointment state
-  const [completing, setCompleting] = useState(false);
+  // Complete appointment dialog state
+  const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
 
   // Edit appointment dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -175,7 +203,7 @@ export default function AppointmentDetailPage() {
       }
     } catch (error) {
       console.error("Failed to fetch appointment:", error);
-      toast.error("Błąd podczas ładowania wizyty");
+      toast.error("Blad podczas ladowania wizyty");
     } finally {
       setLoading(false);
     }
@@ -205,11 +233,37 @@ export default function AppointmentDetailPage() {
     }
   }, []);
 
+  const fetchTreatment = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/appointments/${appointmentId}/treatment`);
+      const data = await res.json();
+      if (data.success) {
+        setTreatment(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch treatment:", error);
+    }
+  }, [appointmentId]);
+
+  const fetchCommission = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/appointments/${appointmentId}/commission`);
+      const data = await res.json();
+      if (data.success) {
+        setCommission(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch commission:", error);
+    }
+  }, [appointmentId]);
+
   useEffect(() => {
     fetchAppointment();
     fetchMaterials();
     fetchProducts();
-  }, [fetchAppointment, fetchMaterials, fetchProducts]);
+    fetchTreatment();
+    fetchCommission();
+  }, [fetchAppointment, fetchMaterials, fetchProducts, fetchTreatment, fetchCommission]);
 
   const handleAddMaterial = async () => {
     if (!selectedProductId) {
@@ -217,7 +271,7 @@ export default function AppointmentDetailPage() {
       return;
     }
     if (!materialQuantity || parseFloat(materialQuantity) <= 0) {
-      toast.error("Podaj ilość większą od 0");
+      toast.error("Podaj ilosc wieksza od 0");
       return;
     }
 
@@ -235,7 +289,7 @@ export default function AppointmentDetailPage() {
 
       const data = await res.json();
       if (data.success) {
-        toast.success(data.message || "Materiał dodany");
+        toast.success(data.message || "Material dodany");
         setAddMaterialOpen(false);
         setSelectedProductId("");
         setMaterialQuantity("");
@@ -243,11 +297,11 @@ export default function AppointmentDetailPage() {
         fetchMaterials();
         fetchProducts(); // Refresh product quantities
       } else {
-        toast.error(data.error || "Nie udało się dodać materiału");
+        toast.error(data.error || "Nie udalo sie dodac materialu");
       }
     } catch (error) {
       console.error("Failed to add material:", error);
-      toast.error("Błąd podczas dodawania materiału");
+      toast.error("Blad podczas dodawania materialu");
     } finally {
       setAddingMaterial(false);
     }
@@ -261,39 +315,22 @@ export default function AppointmentDetailPage() {
       );
       const data = await res.json();
       if (data.success) {
-        toast.success("Materiał usunięty, stan magazynowy przywrócony");
+        toast.success("Material usuniety, stan magazynowy przywrocony");
         fetchMaterials();
         fetchProducts();
       } else {
-        toast.error(data.error || "Nie udało się usunąć materiału");
+        toast.error(data.error || "Nie udalo sie usunac materialu");
       }
     } catch (error) {
       console.error("Failed to remove material:", error);
-      toast.error("Błąd podczas usuwania materiału");
+      toast.error("Blad podczas usuwania materialu");
     }
   };
 
-  const handleCompleteAppointment = async () => {
-    setCompleting(true);
-    try {
-      const res = await fetch(`/api/appointments/${appointmentId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "completed" }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        toast.success("Wizyta zakończona pomyślnie");
-        fetchAppointment();
-      } else {
-        toast.error(data.error || "Nie udało się zakończyć wizyty");
-      }
-    } catch (error) {
-      console.error("Failed to complete appointment:", error);
-      toast.error("Błąd podczas kończenia wizyty");
-    } finally {
-      setCompleting(false);
-    }
+  const handleCompleted = () => {
+    fetchAppointment();
+    fetchTreatment();
+    fetchCommission();
   };
 
   // Calculate total material cost
@@ -351,7 +388,7 @@ export default function AppointmentDetailPage() {
         </Button>
         <div className="flex-1">
           <h1 className="text-2xl font-bold" data-testid="appointment-title">
-            Szczegóły wizyty
+            Szczegoly wizyty
           </h1>
           <p className="text-muted-foreground text-sm">
             {appointment.service?.name || "Wizyta"} -{" "}
@@ -373,12 +410,11 @@ export default function AppointmentDetailPage() {
               Edytuj
             </Button>
             <Button
-              onClick={handleCompleteAppointment}
-              disabled={completing}
+              onClick={() => setCompleteDialogOpen(true)}
               data-testid="complete-appointment-btn"
             >
               <CheckCircle className="h-4 w-4 mr-2" />
-              {completing ? "Kończenie..." : "Zakończ wizytę"}
+              Zakoncz wizyte
             </Button>
           </div>
         )}
@@ -446,7 +482,7 @@ export default function AppointmentDetailPage() {
 
             <div>
               <p className="text-xs font-medium text-muted-foreground uppercase mb-1">
-                Usługa
+                Usluga
               </p>
               {appointment.service ? (
                 <div>
@@ -460,7 +496,7 @@ export default function AppointmentDetailPage() {
                   </p>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground italic">Brak usługi</p>
+                <p className="text-sm text-muted-foreground italic">Brak uslugi</p>
               )}
             </div>
 
@@ -516,34 +552,123 @@ export default function AppointmentDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Treatment record section (shown when completed) */}
+      {treatment && (
+        <Card className="mb-6" data-testid="treatment-card">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-primary" />
+              <CardTitle className="text-lg">Notatki z zabiegu</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {treatment.recipe && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase mb-1">
+                    Receptura
+                  </p>
+                  <p className="text-sm" data-testid="treatment-recipe">{treatment.recipe}</p>
+                </div>
+              )}
+              {treatment.techniques && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase mb-1">
+                    Techniki
+                  </p>
+                  <p className="text-sm" data-testid="treatment-techniques">{treatment.techniques}</p>
+                </div>
+              )}
+              {treatment.notes && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase mb-1">
+                    Notatki dodatkowe
+                  </p>
+                  <p className="text-sm" data-testid="treatment-notes">{treatment.notes}</p>
+                </div>
+              )}
+              {!treatment.recipe && !treatment.techniques && !treatment.notes && (
+                <p className="text-sm text-muted-foreground italic">
+                  Brak notatek z zabiegu
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Commission section (shown when completed) */}
+      {commission && (
+        <Card className="mb-6" data-testid="commission-card">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-primary" />
+              <CardTitle className="text-lg">Prowizja pracownika</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase mb-1">
+                  Pracownik
+                </p>
+                <p className="text-sm" data-testid="commission-employee">
+                  {commission.employee
+                    ? `${commission.employee.firstName} ${commission.employee.lastName}`
+                    : "Nieznany"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase mb-1">
+                  Procent prowizji
+                </p>
+                <p className="text-sm font-medium" data-testid="commission-percentage">
+                  {commission.percentage ? `${parseFloat(commission.percentage).toFixed(0)}%` : "N/A"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase mb-1">
+                  Kwota prowizji
+                </p>
+                <p className="text-sm font-bold text-green-600" data-testid="commission-amount">
+                  {parseFloat(commission.amount).toFixed(2)} PLN
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Materials section */}
       <Card data-testid="materials-card">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Package className="h-5 w-5 text-primary" />
-              <CardTitle className="text-lg">Użyte materiały</CardTitle>
+              <CardTitle className="text-lg">Uzyte materialy</CardTitle>
               <Badge variant="secondary" data-testid="materials-count">
                 {materials.length}
               </Badge>
             </div>
-            <Button
-              size="sm"
-              onClick={() => setAddMaterialOpen(true)}
-              data-testid="add-material-btn"
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Dodaj materiał
-            </Button>
+            {appointment.status !== "completed" && appointment.status !== "cancelled" && (
+              <Button
+                size="sm"
+                onClick={() => setAddMaterialOpen(true)}
+                data-testid="add-material-btn"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                Dodaj material
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
           {materials.length === 0 ? (
             <div className="text-center py-8" data-testid="no-materials">
               <Package className="h-10 w-10 mx-auto mb-3 text-muted-foreground/50" />
-              <p className="text-muted-foreground">Nie dodano jeszcze materiałów</p>
+              <p className="text-muted-foreground">Nie dodano jeszcze materialow</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Dodaj zużyte produkty, aby śledzić stan magazynowy
+                Dodaj uzyte produkty, aby sledzic stan magazynowy
               </p>
             </div>
           ) : (
@@ -567,7 +692,7 @@ export default function AppointmentDetailPage() {
                     </div>
                     <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
                       <span data-testid="material-quantity">
-                        Zużyto: {material.quantityUsed}{" "}
+                        Zuzyto: {material.quantityUsed}{" "}
                         {material.product?.unit || "szt."}
                       </span>
                       {material.product?.pricePerUnit && (
@@ -586,7 +711,7 @@ export default function AppointmentDetailPage() {
                           className="text-primary hover:underline text-xs"
                           data-testid="product-link"
                         >
-                          → Magazyn
+                          &rarr; Magazyn
                         </a>
                       )}
                     </div>
@@ -596,15 +721,17 @@ export default function AppointmentDetailPage() {
                       </p>
                     )}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-destructive shrink-0"
-                    onClick={() => handleRemoveMaterial(material.id)}
-                    data-testid={`remove-material-${material.id}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {appointment.status !== "completed" && appointment.status !== "cancelled" && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive shrink-0"
+                      onClick={() => handleRemoveMaterial(material.id)}
+                      data-testid={`remove-material-${material.id}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               ))}
 
@@ -613,7 +740,7 @@ export default function AppointmentDetailPage() {
                 <>
                   <Separator />
                   <div className="flex justify-between items-center px-3">
-                    <span className="font-medium">Łączny koszt materiałów:</span>
+                    <span className="font-medium">Laczny koszt materialow:</span>
                     <span className="font-bold" data-testid="total-material-cost">
                       {totalMaterialCost.toFixed(2)} PLN
                     </span>
@@ -624,6 +751,17 @@ export default function AppointmentDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Complete Appointment Dialog */}
+      {appointment && (
+        <CompleteAppointmentDialog
+          open={completeDialogOpen}
+          onOpenChange={setCompleteDialogOpen}
+          appointment={appointment}
+          materials={materials}
+          onCompleted={handleCompleted}
+        />
+      )}
 
       {/* Edit Appointment Dialog */}
       {appointment && (
@@ -639,7 +777,7 @@ export default function AppointmentDetailPage() {
       <Dialog open={addMaterialOpen} onOpenChange={setAddMaterialOpen}>
         <DialogContent className="max-w-md" data-testid="add-material-dialog">
           <DialogHeader>
-            <DialogTitle>Dodaj zużyty materiał</DialogTitle>
+            <DialogTitle>Dodaj zuzyty material</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -669,7 +807,7 @@ export default function AppointmentDetailPage() {
                 if (!selected) return null;
                 return (
                   <p className="text-xs text-muted-foreground mt-1">
-                    Dostępne w magazynie: {selected.quantity || "0"}{" "}
+                    Dostepne w magazynie: {selected.quantity || "0"}{" "}
                     {selected.unit || "szt."}
                     {selected.pricePerUnit &&
                       ` | Cena: ${parseFloat(selected.pricePerUnit).toFixed(2)} PLN/${selected.unit || "szt."}`}
@@ -678,7 +816,7 @@ export default function AppointmentDetailPage() {
               })()}
             </div>
             <div>
-              <Label>Ilość *</Label>
+              <Label>Ilosc *</Label>
               <Input
                 type="number"
                 step="0.01"
@@ -711,7 +849,7 @@ export default function AppointmentDetailPage() {
               disabled={addingMaterial}
               data-testid="confirm-add-material-btn"
             >
-              {addingMaterial ? "Dodawanie..." : "Dodaj materiał"}
+              {addingMaterial ? "Dodawanie..." : "Dodaj material"}
             </Button>
           </DialogFooter>
         </DialogContent>
