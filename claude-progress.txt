@@ -1,5 +1,44 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-09 (Feature #85 - Admin can edit gallery photos) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #85: "Admin can edit gallery photos" (Gallery category)
+- Goal: Owner manages all photos - edit description, tags, techniques, products, employee/service
+
+### What was accomplished:
+1. Added PATCH endpoint to `/api/gallery/[id]/route.ts`:
+   - Auth check via Better Auth session
+   - Role-based authorization: owners can edit any photo, employees can only edit their own
+   - Partial updates: description, techniques, productsUsed, employeeId, serviceId, duration
+   - Returns full photo data with employee/service joins
+2. Added edit UI to gallery page (`/dashboard/gallery/page.tsx`):
+   - Edit button overlay on gallery grid cards (blue pencil icon)
+   - Full edit dialog with: photo preview, description textarea, techniques input, products input, employee select, service select
+   - Pre-populated form from selected photo data
+   - "none" handling for employee/service dropdowns
+   - Local state update on save success
+3. Authorization enforcement:
+   - Unauthenticated requests return 401
+   - Non-owners can only edit photos assigned to their employee profile
+   - Owners/admins can edit any photo in the salon
+
+### Verification:
+- TypeScript compilation: PASSED (zero errors in app code)
+- Browser test: Registered test user, set owner role, navigated to gallery
+- Created test photo via API with description "TEST_85_ORIGINAL_DESC"
+- Opened edit dialog, edited description to "TEST_85_EDITED_DESC - Updated by owner"
+- Edited techniques to "Edited technique - balayage" and products to "Edited products - Kerastase"
+- Saved changes successfully, gallery card updated with new description
+- Page refresh: edited data persisted (fetched from database)
+- API persistence: GET /api/gallery confirmed edited fields in database
+- Auth test: PATCH without auth returns 401 "Authentication required"
+- Data not modified by unauthorized request
+- Mock data check: No TEST_85/MOCK_/HARDCODED_ patterns in src/
+- Commit: a726218
+
+---
+
 ## Session: 2026-02-09 (Feature #84 - Employee can add photos) *** SUCCESS ***
 
 ### Feature Assigned
