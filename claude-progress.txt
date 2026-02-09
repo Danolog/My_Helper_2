@@ -1,5 +1,26 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-09 (Feature #88 - Tag photos with service) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #88: "Tag photos with service" (Gallery category)
+- Goal: Link photos to services, filter gallery by service, show tagged photos on service detail page
+
+### What was accomplished:
+1. Updated gallery API (`src/app/api/gallery/route.ts`) to support `serviceId` query parameter for filtering
+2. Added service filter dropdown to gallery page (`src/app/dashboard/gallery/page.tsx`) alongside employee filter
+3. Added "Galeria zdjec" section to service detail page (`src/app/dashboard/services/[id]/page.tsx`) showing photos tagged with that service
+4. Browser-verified full workflow:
+   - Created test photo tagged with "Strzyzenie damskie" service
+   - Gallery page shows both employee and service filter dropdowns
+   - Filtering by service correctly shows only tagged photos (1 of 3)
+   - Service detail page shows gallery section with count badge and tagged photo
+5. TypeScript check passes (only pre-existing errors in scripts/set-owner-role.ts)
+6. No mock data in source files
+7. Committed as: e97c1ad
+
+---
+
 ## Session: 2026-02-09 (Feature #87 - Tag photos with employee) *** SUCCESS ***
 
 ### Feature Assigned
