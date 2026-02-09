@@ -1,5 +1,38 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-10 (Feature #99 - Reject inappropriate review) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #99: "Reject inappropriate review" (Reviews category)
+- Goal: Admin removes bad reviews - navigate to pending reviews, select inappropriate review, click reject, verify marked as rejected, verify not visible publicly
+
+### What was accomplished:
+- Verified existing implementation already supports full review rejection workflow (no code changes needed)
+- API: `PATCH /api/reviews/[id]/moderate` with `{action: "reject"}` updates status to "rejected"
+- UI: `/dashboard/reviews` page with tabs (Pending/Approved/Rejected) and "Odrzuc" button on pending reviews
+- Public APIs filter to `status: "approved"` only - rejected reviews hidden
+
+### Verification (browser automation):
+1. Registered test user owner99@test.com, verified email, set as salon owner
+2. Created test data via setup-f99-reject-review.ts (inappropriate 1-star review + normal 5-star review)
+3. Navigated to /dashboard/reviews → saw pending reviews including inappropriate one ✓
+4. Clicked "Odrzuc" on inappropriate review (1/5 stars, nasty comment) ✓
+5. Toast appeared: "Opinia zostala odrzucona" ✓
+6. Clicked "Odrzucone" tab → rejected review visible with red "Odrzucona" badge ✓
+7. Navigated to public salon page → no TEST_F99_INAPPROPRIATE text visible ✓
+8. API check: salon API and employee API confirmed no rejected reviews in public output ✓
+9. Auth check: unauthenticated access returns 401 ✓
+10. No mock data patterns in review code (grep clean) ✓
+
+### Screenshots:
+- feature99-pending-reviews.png - Pending reviews list with inappropriate review visible
+- feature99-reject-success-toast.png - Toast confirming rejection
+- feature99-rejected-tab.png - Rejected tab showing review with red badge
+
+### Progress: 66/253 (26.1%)
+
+---
+
 ## Session: 2026-02-10 (Feature #96 - Text-only review allowed) *** SUCCESS ***
 
 ### Feature Assigned
