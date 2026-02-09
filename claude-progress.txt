@@ -1,5 +1,56 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-09 (Feature #83 - SMS payment confirmation) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #83: "SMS payment confirmation"
+- Goal: Send SMS after payment, verify SMS contains amount and appointment details, check notification log
+
+### What was accomplished:
+1. Created SMS sending service (`src/lib/sms.ts`):
+   - `sendSms()` - Generic SMS sender, logs to console in dev mode, saves to notifications table
+   - `sendPaymentConfirmationSms()` - Formatted payment confirmation message in Polish
+   - All notifications stored in PostgreSQL with 'sent' status and sentAt timestamp
+2. Updated deposit confirmation API (`src/app/api/deposits/confirm/route.ts`):
+   - After confirming payment, fetches client, employee, and service details
+   - Sends SMS with: client name, amount (PLN), service name, employee name, appointment date
+   - SMS failure doesn't block payment confirmation (non-blocking)
+   - Returns `smsSent: true/false` in API response
+3. Created notifications API (`src/app/api/notifications/route.ts`):
+   - GET endpoint with salonId, type (sms/email/push), status (pending/sent/failed) filters
+   - Pagination support (limit, offset)
+   - Joins with clients table for client name and phone
+   - Returns total count for pagination
+4. Created notifications UI page (`src/app/dashboard/notifications/page.tsx`):
+   - Notification log with type badges (SMS/Email/Push) and status badges (Sent/Pending/Failed)
+   - Type and status filter dropdowns
+   - Client name, phone, message content, sent/created timestamps
+   - Refresh button, back-to-dashboard navigation
+5. Added Powiadomienia card to dashboard page
+6. Verification:
+   - Created deposit session via API, confirmed payment
+   - API returned smsSent: true, SMS logged to console
+   - SMS message contains: amount (30.00 PLN), service (Manicure hybrydowy), employee (Anna Kowalska), date
+   - Notification visible on /dashboard/notifications page with "Wyslano" status
+   - Filters work correctly (status filter shows only matching notifications)
+   - Data persists after server restart (PostgreSQL confirmed)
+   - No mock data patterns found in code
+   - TypeScript compilation: zero errors
+
+### Files created/modified:
+- NEW: src/lib/sms.ts
+- NEW: src/app/api/notifications/route.ts
+- NEW: src/app/dashboard/notifications/page.tsx
+- MODIFIED: src/app/api/deposits/confirm/route.ts
+- MODIFIED: src/app/dashboard/page.tsx
+
+### Commit: 73cc53e
+
+### Current Stats:
+- 50/253 features passing (19.8%)
+
+---
+
 ## Session: 2026-02-09 (Feature #82 - Payment history visible) *** SUCCESS ***
 
 ### Feature Assigned
