@@ -78,6 +78,39 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
 }
 
 /**
+ * Send an appointment reminder SMS to the client 1 hour before the appointment.
+ */
+export async function sendAppointmentReminderSms(params: {
+  clientPhone: string;
+  clientName: string;
+  serviceName: string;
+  employeeName: string;
+  appointmentDate: Date;
+  salonName: string;
+  salonId: string;
+  clientId?: string;
+}): Promise<SmsResult> {
+  const formattedTime = params.appointmentDate.toLocaleTimeString("pl-PL", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const formattedDate = params.appointmentDate.toLocaleDateString("pl-PL", {
+    day: "numeric",
+    month: "long",
+  });
+
+  const message =
+    `Przypomnienie: ${params.clientName}, Twoja wizyta "${params.serviceName}" u ${params.employeeName} w ${params.salonName} juz dzisiaj o ${formattedTime} (${formattedDate}). Do zobaczenia!`;
+
+  return sendSms({
+    to: params.clientPhone,
+    message,
+    salonId: params.salonId,
+    clientId: params.clientId,
+  });
+}
+
+/**
  * Send a payment confirmation SMS to the client after a deposit payment.
  */
 export async function sendPaymentConfirmationSms(params: {
