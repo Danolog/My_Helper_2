@@ -877,6 +877,7 @@ export const depositPayments = pgTable(
     amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
     currency: text("currency").default("PLN").notNull(),
     paymentMethod: text("payment_method").notNull(), // 'stripe', 'blik'
+    blikPhoneNumber: text("blik_phone_number"), // Phone number for Blik P2P payments
     stripePaymentIntentId: text("stripe_payment_intent_id"),
     status: text("status").default("pending").notNull(), // 'pending', 'succeeded', 'failed', 'refunded'
     paidAt: timestamp("paid_at"),
