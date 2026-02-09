@@ -37,6 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import Link from "next/link";
 import {
   Lock,
   Scissors,
@@ -48,6 +49,7 @@ import {
   Edit2,
   Layers,
   Users,
+  Image as ImageIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -105,6 +107,17 @@ interface EmployeePrice {
   variant: ServiceVariant | null;
 }
 
+interface GalleryPhoto {
+  id: string;
+  afterPhotoUrl: string | null;
+  beforePhotoUrl: string | null;
+  description: string | null;
+  employeeFirstName: string | null;
+  employeeLastName: string | null;
+  serviceName: string | null;
+  createdAt: string;
+}
+
 export default function ServiceDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -145,6 +158,9 @@ export default function ServiceDetailPage() {
   // Delete service state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingService, setDeletingService] = useState(false);
+
+  // Gallery photos state
+  const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>([]);
 
   const fetchService = useCallback(async () => {
     try {
@@ -203,14 +219,26 @@ export default function ServiceDetailPage() {
     }
   }, []);
 
+  const fetchGalleryPhotos = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/gallery?salonId=${DEMO_SALON_ID}&serviceId=${serviceId}`);
+      const data = await res.json();
+      if (data.success) {
+        setGalleryPhotos(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch gallery photos:", error);
+    }
+  }, [serviceId]);
+
   useEffect(() => {
     async function loadData() {
       setLoading(true);
-      await Promise.all([fetchService(), fetchEmployeeAssignments(), fetchEmployeePrices(), fetchEmployees()]);
+      await Promise.all([fetchService(), fetchEmployeeAssignments(), fetchEmployeePrices(), fetchEmployees(), fetchGalleryPhotos()]);
       setLoading(false);
     }
     loadData();
-  }, [fetchService, fetchEmployeeAssignments, fetchEmployeePrices, fetchEmployees]);
+  }, [fetchService, fetchEmployeeAssignments, fetchEmployeePrices, fetchEmployees, fetchGalleryPhotos]);
 
   const handleToggleEmployeeAssignment = async (employeeId: string, isCurrentlyAssigned: boolean) => {
     setTogglingAssignment(employeeId);
@@ -1136,6 +1164,86 @@ export default function ServiceDetailPage() {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Gallery Photos Section */}
+      <Card className="mt-6" data-testid="service-gallery-section">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ImageIcon className="h-5 w-5 text-primary" />
+            <CardTitle className="text-lg">Galeria zdjec</CardTitle>
+            <Badge variant="outline" data-testid="gallery-photos-count">
+              {galleryPhotos.length}
+            </Badge>
+          </div>
+          <Button size="sm" variant="outline" asChild>
+            <Link href={`/dashboard/gallery`}>
+              <ImageIcon className="h-4 w-4 mr-2" />
+              Otworz galerie
+            </Link>
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {galleryPhotos.length === 0 ? (
+            <div className="text-center py-8">
+              <ImageIcon className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground mb-2" data-testid="no-gallery-photos-message">
+                Brak zdjec powiazanych z ta usluga.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Dodaj zdjecia w galerii i oznacz je ta usluga, aby sie tutaj pojawily.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {galleryPhotos.map((photo) => (
+                <div
+                  key={photo.id}
+                  className="relative group border rounded-lg overflow-hidden"
+                  data-testid={`service-gallery-photo-${photo.id}`}
+                >
+                  <div className="aspect-square relative">
+                    {photo.afterPhotoUrl ? (
+                      <img
+                        src={photo.afterPhotoUrl}
+                        alt={photo.description || "Zdjecie uslugi"}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : photo.beforePhotoUrl ? (
+                      <img
+                        src={photo.beforePhotoUrl}
+                        alt={photo.description || "Zdjecie uslugi"}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-muted">
+                        <ImageIcon className="w-8 h-8 text-muted-foreground" />
+                      </div>
+                    )}
+                    {/* Before/After badge */}
+                    {photo.beforePhotoUrl && photo.afterPhotoUrl && (
+                      <div className="absolute top-1 left-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded">
+                        Przed / Po
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2">
+                    {photo.employeeFirstName && (
+                      <p className="text-xs font-medium truncate">
+                        {photo.employeeFirstName} {photo.employeeLastName}
+                      </p>
+                    )}
+                    {photo.description && (
+                      <p className="text-xs text-muted-foreground truncate">
+                        {photo.description}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </CardContent>

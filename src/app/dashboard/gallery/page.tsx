@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Plus, X, Loader2, Pencil, Check, Filter, Users } from "lucide-react";
+import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Plus, X, Loader2, Pencil, Check, Filter, Users, Scissors, SlidersHorizontal, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -53,6 +53,109 @@ interface Service {
   name: string;
 }
 
+// Comparison slider component for before/after photos
+function ComparisonSlider({
+  beforeUrl,
+  afterUrl,
+}: {
+  beforeUrl: string;
+  afterUrl: string;
+}) {
+  const [sliderPosition, setSliderPosition] = useState(50);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+
+  const handleMove = useCallback((clientX: number) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    setSliderPosition(percentage);
+  }, []);
+
+  const handleMouseDown = useCallback(() => {
+    isDragging.current = true;
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    isDragging.current = false;
+  }, []);
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (isDragging.current) {
+        handleMove(e.clientX);
+      }
+    },
+    [handleMove]
+  );
+
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      const touch = e.touches[0];
+      if (touch) handleMove(touch.clientX);
+    },
+    [handleMove]
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-full aspect-[4/3] overflow-hidden rounded-lg cursor-col-resize select-none"
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onMouseMove={handleMouseMove}
+      onTouchMove={handleTouchMove}
+      onTouchStart={handleMouseDown}
+      onTouchEnd={handleMouseUp}
+      onClick={(e) => handleMove(e.clientX)}
+      data-testid="comparison-slider"
+    >
+      {/* After photo (full width background) */}
+      <img
+        src={afterUrl}
+        alt="Po zabiegu"
+        className="absolute inset-0 w-full h-full object-cover"
+        draggable={false}
+      />
+
+      {/* Before photo (clipped) */}
+      <div
+        className="absolute inset-0 overflow-hidden"
+        style={{ width: `${sliderPosition}%` }}
+      >
+        <img
+          src={beforeUrl}
+          alt="Przed zabiegiem"
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ width: containerRef.current ? `${containerRef.current.offsetWidth}px` : '100%' }}
+          draggable={false}
+        />
+      </div>
+
+      {/* Slider line */}
+      <div
+        className="absolute top-0 bottom-0 w-0.5 bg-white shadow-lg z-10"
+        style={{ left: `${sliderPosition}%` }}
+      >
+        {/* Slider handle */}
+        <div className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center border-2 border-gray-200">
+          <SlidersHorizontal className="w-5 h-5 text-gray-600" />
+        </div>
+      </div>
+
+      {/* Labels */}
+      <div className="absolute top-3 left-3 bg-black/60 text-white text-xs font-semibold px-2 py-1 rounded z-20">
+        PRZED
+      </div>
+      <div className="absolute top-3 right-3 bg-black/60 text-white text-xs font-semibold px-2 py-1 rounded z-20">
+        PO
+      </div>
+    </div>
+  );
+}
+
 export default function GalleryPage() {
   const { data: session, isPending } = useSession();
   const [photos, setPhotos] = useState<GalleryPhoto[]>([]);
@@ -71,6 +174,9 @@ export default function GalleryPage() {
   const [editEmployeeId, setEditEmployeeId] = useState("");
   const [editServiceId, setEditServiceId] = useState("");
   const [filterEmployeeId, setFilterEmployeeId] = useState<string>("");
+  const [filterServiceId, setFilterServiceId] = useState<string>("");
+  const [filterPairsOnly, setFilterPairsOnly] = useState(false);
+  const [comparisonMode, setComparisonMode] = useState<"slider" | "side-by-side">("slider");
 
   // Upload form state
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -85,11 +191,21 @@ export default function GalleryPage() {
   const afterInputRef = useRef<HTMLInputElement>(null);
   const beforeInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchPhotos = useCallback(async (employeeFilter?: string) => {
+  // Link photo dialog state - for adding matching before/after to existing photo
+  const [linkingPhoto, setLinkingPhoto] = useState<GalleryPhoto | null>(null);
+  const [linkFile, setLinkFile] = useState<File | null>(null);
+  const [linkPreview, setLinkPreview] = useState<string | null>(null);
+  const [linkUploading, setLinkUploading] = useState(false);
+  const linkInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchPhotos = useCallback(async (employeeFilter?: string, serviceFilter?: string) => {
     try {
       let url = `/api/gallery?salonId=${SALON_ID}`;
       if (employeeFilter) {
         url += `&employeeId=${employeeFilter}`;
+      }
+      if (serviceFilter) {
+        url += `&serviceId=${serviceFilter}`;
       }
       const res = await fetch(url);
       const data = await res.json();
@@ -133,15 +249,39 @@ export default function GalleryPage() {
     fetchServices();
   }, [fetchPhotos, fetchEmployees, fetchServices]);
 
+  // Helper to get active filter values
+  const getActiveEmployeeFilter = (empFilter?: string) => {
+    const eid = empFilter !== undefined ? empFilter : filterEmployeeId;
+    return eid && eid !== "all" ? eid : undefined;
+  };
+  const getActiveServiceFilter = (svcFilter?: string) => {
+    const sid = svcFilter !== undefined ? svcFilter : filterServiceId;
+    return sid && sid !== "all" ? sid : undefined;
+  };
+
+  // Filtered photos - apply pairs filter client-side
+  const displayPhotos = filterPairsOnly
+    ? photos.filter((p) => p.beforePhotoUrl && p.afterPhotoUrl)
+    : photos;
+
   // Refetch when employee filter changes
   const handleFilterChange = (value: string) => {
     setFilterEmployeeId(value);
     setLoading(true);
-    if (value === "all") {
-      fetchPhotos();
-    } else {
-      fetchPhotos(value);
-    }
+    fetchPhotos(
+      value !== "all" ? value : undefined,
+      getActiveServiceFilter()
+    );
+  };
+
+  // Refetch when service filter changes
+  const handleServiceFilterChange = (value: string) => {
+    setFilterServiceId(value);
+    setLoading(true);
+    fetchPhotos(
+      getActiveEmployeeFilter(),
+      value !== "all" ? value : undefined
+    );
   };
 
   const handleFileChange = (
@@ -179,21 +319,28 @@ export default function GalleryPage() {
   };
 
   const handleUpload = async () => {
-    if (!uploadFile) return;
+    if (!uploadFile && !beforeFile) return;
     setUploading(true);
 
     try {
-      // Upload after photo (required)
-      const afterUrl = await uploadFileToServer(uploadFile);
-      if (!afterUrl) {
-        alert("Nie udalo sie przeslac zdjecia");
-        return;
+      // Upload after photo (if provided)
+      let afterUrl: string | null = null;
+      if (uploadFile) {
+        afterUrl = await uploadFileToServer(uploadFile);
+        if (!afterUrl) {
+          alert("Nie udalo sie przeslac zdjecia 'po'");
+          return;
+        }
       }
 
-      // Upload before photo (optional)
+      // Upload before photo (if provided)
       let beforeUrl: string | null = null;
       if (beforeFile) {
         beforeUrl = await uploadFileToServer(beforeFile);
+        if (!beforeUrl) {
+          alert("Nie udalo sie przeslac zdjecia 'przed'");
+          return;
+        }
       }
 
       // Create gallery entry
@@ -225,8 +372,8 @@ export default function GalleryPage() {
         setTechniques("");
         setProductsUsed("");
         setDialogOpen(false);
-        // Refresh photos (respecting current filter)
-        fetchPhotos(filterEmployeeId && filterEmployeeId !== "all" ? filterEmployeeId : undefined);
+        // Refresh photos (respecting current filters)
+        fetchPhotos(getActiveEmployeeFilter(), getActiveServiceFilter());
       } else {
         alert("Blad przy dodawaniu zdjecia: " + data.error);
       }
@@ -235,6 +382,51 @@ export default function GalleryPage() {
       alert("Blad przy przesylaniu zdjecia");
     } finally {
       setUploading(false);
+    }
+  };
+
+  // Link a matching photo to an existing gallery entry
+  const handleLinkUpload = async () => {
+    if (!linkingPhoto || !linkFile) return;
+    setLinkUploading(true);
+
+    try {
+      const url = await uploadFileToServer(linkFile);
+      if (!url) {
+        alert("Nie udalo sie przeslac zdjecia");
+        return;
+      }
+
+      // Determine which field to update
+      const isAddingBefore = !linkingPhoto.beforePhotoUrl;
+      const updatePayload = isAddingBefore
+        ? { beforePhotoUrl: url }
+        : { afterPhotoUrl: url };
+
+      const res = await fetch(`/api/gallery/${linkingPhoto.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatePayload),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        // Update local state
+        setPhotos((prev) =>
+          prev.map((p) => (p.id === linkingPhoto.id ? data.data : p))
+        );
+        setLinkingPhoto(null);
+        setLinkFile(null);
+        setLinkPreview(null);
+        setSelectedPhoto(null);
+      } else {
+        alert("Blad przy laczeniu zdjecia: " + data.error);
+      }
+    } catch (error) {
+      console.error("Link error:", error);
+      alert("Blad przy laczeniu zdjecia");
+    } finally {
+      setLinkUploading(false);
     }
   };
 
@@ -297,6 +489,13 @@ export default function GalleryPage() {
     }
   };
 
+  const openLinkDialog = (photo: GalleryPhoto) => {
+    setLinkingPhoto(photo);
+    setLinkFile(null);
+    setLinkPreview(null);
+    setSelectedPhoto(null);
+  };
+
   if (isPending) {
     return (
       <div className="flex justify-center items-center h-screen">
@@ -350,57 +549,11 @@ export default function GalleryPage() {
             </DialogHeader>
 
             <div className="space-y-4 mt-4">
-              {/* After photo (required) */}
+              {/* Before photo */}
               <div>
                 <Label className="mb-2 block">
-                  Zdjecie (po zabiegu) <span className="text-red-500">*</span>
+                  Zdjecie PRZED zabiegem
                 </Label>
-                <input
-                  ref={afterInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif"
-                  onChange={(e) => handleFileChange(e, "after")}
-                  className="hidden"
-                />
-                {uploadPreview ? (
-                  <div className="relative">
-                    <img
-                      src={uploadPreview}
-                      alt="Podglad"
-                      className="w-full h-48 object-cover rounded-lg border"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="absolute top-2 right-2"
-                      onClick={() => {
-                        setUploadFile(null);
-                        setUploadPreview(null);
-                      }}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => afterInputRef.current?.click()}
-                    className="w-full h-48 border-2 border-dashed border-muted-foreground/25 rounded-lg flex flex-col items-center justify-center gap-2 hover:border-primary/50 transition-colors"
-                  >
-                    <Upload className="w-8 h-8 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">
-                      Kliknij aby wybrac zdjecie
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      JPEG, PNG, WebP, GIF (max 10MB)
-                    </span>
-                  </button>
-                )}
-              </div>
-
-              {/* Before photo (optional) */}
-              <div>
-                <Label className="mb-2 block">Zdjecie (przed zabiegem) - opcjonalne</Label>
                 <input
                   ref={beforeInputRef}
                   type="file"
@@ -413,8 +566,11 @@ export default function GalleryPage() {
                     <img
                       src={beforePreview}
                       alt="Podglad przed"
-                      className="w-full h-32 object-cover rounded-lg border"
+                      className="w-full h-40 object-cover rounded-lg border"
                     />
+                    <div className="absolute top-2 left-2 bg-orange-500 text-white text-xs font-semibold px-2 py-1 rounded">
+                      PRZED
+                    </div>
                     <Button
                       variant="outline"
                       size="sm"
@@ -431,15 +587,96 @@ export default function GalleryPage() {
                   <button
                     type="button"
                     onClick={() => beforeInputRef.current?.click()}
-                    className="w-full h-32 border-2 border-dashed border-muted-foreground/25 rounded-lg flex flex-col items-center justify-center gap-2 hover:border-primary/50 transition-colors"
+                    className="w-full h-40 border-2 border-dashed border-orange-300 rounded-lg flex flex-col items-center justify-center gap-2 hover:border-orange-500 transition-colors bg-orange-50/50"
                   >
-                    <Upload className="w-6 h-6 text-muted-foreground" />
+                    <Upload className="w-6 h-6 text-orange-400" />
+                    <span className="text-sm text-orange-600 font-medium">
+                      Zdjecie PRZED
+                    </span>
                     <span className="text-xs text-muted-foreground">
-                      Przed zabiegem (opcjonalne)
+                      JPEG, PNG, WebP, GIF (max 10MB)
                     </span>
                   </button>
                 )}
               </div>
+
+              {/* After photo */}
+              <div>
+                <Label className="mb-2 block">
+                  Zdjecie PO zabiegu
+                </Label>
+                <input
+                  ref={afterInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={(e) => handleFileChange(e, "after")}
+                  className="hidden"
+                />
+                {uploadPreview ? (
+                  <div className="relative">
+                    <img
+                      src={uploadPreview}
+                      alt="Podglad po"
+                      className="w-full h-40 object-cover rounded-lg border"
+                    />
+                    <div className="absolute top-2 left-2 bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded">
+                      PO
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="absolute top-2 right-2"
+                      onClick={() => {
+                        setUploadFile(null);
+                        setUploadPreview(null);
+                      }}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => afterInputRef.current?.click()}
+                    className="w-full h-40 border-2 border-dashed border-green-300 rounded-lg flex flex-col items-center justify-center gap-2 hover:border-green-500 transition-colors bg-green-50/50"
+                  >
+                    <Upload className="w-6 h-6 text-green-400" />
+                    <span className="text-sm text-green-600 font-medium">
+                      Zdjecie PO
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      JPEG, PNG, WebP, GIF (max 10MB)
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              {/* Pair preview */}
+              {beforePreview && uploadPreview && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Link2 className="w-4 h-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-700">Para przed/po zostanie polaczona</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="relative">
+                      <img src={beforePreview} alt="Przed" className="w-full h-20 object-cover rounded border" />
+                      <span className="absolute bottom-1 left-1 bg-orange-500 text-white text-[10px] px-1 rounded">PRZED</span>
+                    </div>
+                    <div className="relative">
+                      <img src={uploadPreview} alt="Po" className="w-full h-20 object-cover rounded border" />
+                      <span className="absolute bottom-1 left-1 bg-green-500 text-white text-[10px] px-1 rounded">PO</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Info about partial uploads */}
+              {!beforePreview && !uploadPreview && (
+                <p className="text-xs text-muted-foreground text-center">
+                  Mozesz dodac samo zdjecie &quot;przed&quot; lub &quot;po&quot;, a drugie dolaczyc pozniej
+                </p>
+              )}
 
               {/* Employee selection */}
               <div>
@@ -508,7 +745,7 @@ export default function GalleryPage() {
 
               <Button
                 onClick={handleUpload}
-                disabled={!uploadFile || uploading}
+                disabled={(!uploadFile && !beforeFile) || uploading}
                 className="w-full"
               >
                 {uploading ? (
@@ -519,7 +756,11 @@ export default function GalleryPage() {
                 ) : (
                   <>
                     <Upload className="w-4 h-4 mr-2" />
-                    Dodaj do galerii
+                    {beforeFile && uploadFile
+                      ? "Dodaj pare przed/po"
+                      : beforeFile
+                      ? "Dodaj zdjecie (przed)"
+                      : "Dodaj zdjecie (po)"}
                   </>
                 )}
               </Button>
@@ -528,14 +769,14 @@ export default function GalleryPage() {
         </Dialog>
       </div>
 
-      {/* Employee filter bar */}
-      <div className="flex items-center gap-3 mb-6 p-3 bg-muted/50 rounded-lg">
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-3 mb-6 p-3 bg-muted/50 rounded-lg">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Filter className="w-4 h-4" />
-          <span>Filtruj po pracowniku:</span>
+          <span>Filtry:</span>
         </div>
         <Select value={filterEmployeeId || "all"} onValueChange={handleFilterChange}>
-          <SelectTrigger className="w-[250px]">
+          <SelectTrigger className="w-[220px]">
             <SelectValue placeholder="Wszyscy pracownicy" />
           </SelectTrigger>
           <SelectContent>
@@ -552,18 +793,51 @@ export default function GalleryPage() {
             ))}
           </SelectContent>
         </Select>
-        {filterEmployeeId && filterEmployeeId !== "all" && (
+        <Select value={filterServiceId || "all"} onValueChange={handleServiceFilterChange}>
+          <SelectTrigger className="w-[220px]">
+            <SelectValue placeholder="Wszystkie uslugi" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">
+              <span className="flex items-center gap-2">
+                <Scissors className="w-4 h-4" />
+                Wszystkie uslugi
+              </span>
+            </SelectItem>
+            {services.map((svc) => (
+              <SelectItem key={svc.id} value={svc.id}>
+                {svc.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button
+          variant={filterPairsOnly ? "default" : "outline"}
+          size="sm"
+          onClick={() => setFilterPairsOnly(!filterPairsOnly)}
+          className="gap-1"
+        >
+          <SlidersHorizontal className="w-4 h-4" />
+          Tylko pary
+        </Button>
+        {((filterEmployeeId && filterEmployeeId !== "all") || (filterServiceId && filterServiceId !== "all") || filterPairsOnly) && (
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => handleFilterChange("all")}
+            onClick={() => {
+              setFilterEmployeeId("");
+              setFilterServiceId("");
+              setFilterPairsOnly(false);
+              setLoading(true);
+              fetchPhotos();
+            }}
           >
             <X className="w-4 h-4 mr-1" />
-            Wyczysc filtr
+            Wyczysc filtry
           </Button>
         )}
         <span className="text-xs text-muted-foreground ml-auto">
-          {photos.length} {photos.length === 1 ? "zdjecie" : "zdjec"}
+          {displayPhotos.length} {displayPhotos.length === 1 ? "zdjecie" : "zdjec"}
         </span>
       </div>
 
@@ -572,12 +846,16 @@ export default function GalleryPage() {
         <div className="flex justify-center items-center h-64">
           <Loader2 className="w-8 h-8 animate-spin" />
         </div>
-      ) : photos.length === 0 ? (
+      ) : displayPhotos.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 text-center">
           <ImageIcon className="w-16 h-16 text-muted-foreground mb-4" />
-          <h2 className="text-lg font-semibold mb-2">Galeria jest pusta</h2>
+          <h2 className="text-lg font-semibold mb-2">
+            {filterPairsOnly ? "Brak par przed/po" : "Galeria jest pusta"}
+          </h2>
           <p className="text-muted-foreground mb-4">
-            Dodaj pierwsze zdjecie do portfolio salonu
+            {filterPairsOnly
+              ? "Dodaj zdjecia przed i po zabiegu, aby utworzyc pary"
+              : "Dodaj pierwsze zdjecie do portfolio salonu"}
           </p>
           <Button onClick={() => setDialogOpen(true)}>
             <Plus className="w-4 h-4 mr-2" />
@@ -586,90 +864,139 @@ export default function GalleryPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {photos.map((photo) => (
-            <div
-              key={photo.id}
-              className="group relative border rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-              onClick={() => setSelectedPhoto(photo)}
-            >
-              <div className="aspect-square relative">
-                {photo.afterPhotoUrl ? (
-                  <img
-                    src={photo.afterPhotoUrl}
-                    alt={photo.description || "Zdjecie galerii"}
-                    className="w-full h-full object-cover"
-                  />
-                ) : photo.beforePhotoUrl ? (
-                  <img
-                    src={photo.beforePhotoUrl}
-                    alt={photo.description || "Zdjecie galerii"}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center bg-muted">
-                    <ImageIcon className="w-12 h-12 text-muted-foreground" />
-                  </div>
-                )}
+          {displayPhotos.map((photo) => {
+            const isPair = photo.beforePhotoUrl && photo.afterPhotoUrl;
+            const isBeforeOnly = photo.beforePhotoUrl && !photo.afterPhotoUrl;
+            const isAfterOnly = !photo.beforePhotoUrl && photo.afterPhotoUrl;
 
-                {/* Before/After badge */}
-                {photo.beforePhotoUrl && photo.afterPhotoUrl && (
-                  <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                    Przed / Po
-                  </div>
-                )}
-              </div>
+            return (
+              <div
+                key={photo.id}
+                className="group relative border rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                onClick={() => setSelectedPhoto(photo)}
+              >
+                <div className="aspect-square relative">
+                  {isPair ? (
+                    /* Show split preview for pairs */
+                    <div className="w-full h-full flex">
+                      <div className="w-1/2 h-full relative overflow-hidden">
+                        <img
+                          src={photo.beforePhotoUrl!}
+                          alt="Przed"
+                          className="absolute inset-0 w-[200%] h-full object-cover"
+                        />
+                      </div>
+                      <div className="w-0.5 bg-white z-10 relative" />
+                      <div className="w-1/2 h-full relative overflow-hidden">
+                        <img
+                          src={photo.afterPhotoUrl!}
+                          alt="Po"
+                          className="absolute inset-0 w-[200%] h-full object-cover object-right"
+                        />
+                      </div>
+                    </div>
+                  ) : photo.afterPhotoUrl ? (
+                    <img
+                      src={photo.afterPhotoUrl}
+                      alt={photo.description || "Zdjecie galerii"}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : photo.beforePhotoUrl ? (
+                    <img
+                      src={photo.beforePhotoUrl}
+                      alt={photo.description || "Zdjecie galerii"}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-muted">
+                      <ImageIcon className="w-12 h-12 text-muted-foreground" />
+                    </div>
+                  )}
 
-              <div className="p-3">
-                {photo.employeeFirstName && (
-                  <p className="text-sm font-medium">
-                    {photo.employeeFirstName} {photo.employeeLastName}
+                  {/* Badges */}
+                  {isPair && (
+                    <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs font-semibold px-2 py-1 rounded flex items-center gap-1">
+                      <SlidersHorizontal className="w-3 h-3" />
+                      Przed / Po
+                    </div>
+                  )}
+                  {isBeforeOnly && (
+                    <div className="absolute top-2 left-2 bg-orange-500 text-white text-xs font-semibold px-2 py-1 rounded">
+                      Przed
+                    </div>
+                  )}
+                  {isAfterOnly && (
+                    <div className="absolute top-2 left-2 bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded">
+                      Po
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3">
+                  {photo.employeeFirstName && (
+                    <p className="text-sm font-medium">
+                      {photo.employeeFirstName} {photo.employeeLastName}
+                    </p>
+                  )}
+                  {photo.serviceName && (
+                    <p className="text-xs text-muted-foreground">{photo.serviceName}</p>
+                  )}
+                  {photo.description && (
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                      {photo.description}
+                    </p>
+                  )}
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {new Date(photo.createdAt).toLocaleDateString("pl-PL")}
                   </p>
-                )}
-                {photo.serviceName && (
-                  <p className="text-xs text-muted-foreground">{photo.serviceName}</p>
-                )}
-                {photo.description && (
-                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                    {photo.description}
-                  </p>
-                )}
-                <p className="text-xs text-muted-foreground mt-1">
-                  {new Date(photo.createdAt).toLocaleDateString("pl-PL")}
-                </p>
-              </div>
+                </div>
 
-              {/* Action button overlays */}
-              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openEditDialog(photo);
-                  }}
-                  className="bg-blue-500/80 text-white p-1.5 rounded hover:bg-blue-600/90 transition-colors"
-                  title="Edytuj zdjecie"
-                >
-                  <Pencil className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setDeleteConfirm(photo.id);
-                  }}
-                  className="bg-red-500/80 text-white p-1.5 rounded hover:bg-red-600/90 transition-colors"
-                  title="Usun zdjecie"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {/* Action button overlays */}
+                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* Link button for incomplete pairs */}
+                  {(isBeforeOnly || isAfterOnly) && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openLinkDialog(photo);
+                      }}
+                      className="bg-blue-500/80 text-white p-1.5 rounded hover:bg-blue-600/90 transition-colors"
+                      title={isBeforeOnly ? "Dodaj zdjecie 'po'" : "Dodaj zdjecie 'przed'"}
+                    >
+                      <Link2 className="w-4 h-4" />
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEditDialog(photo);
+                    }}
+                    className="bg-blue-500/80 text-white p-1.5 rounded hover:bg-blue-600/90 transition-colors"
+                    title="Edytuj zdjecie"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteConfirm(photo.id);
+                    }}
+                    className="bg-red-500/80 text-white p-1.5 rounded hover:bg-red-600/90 transition-colors"
+                    title="Usun zdjecie"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
       {/* Photo detail dialog */}
       {selectedPhoto && (
         <Dialog open={!!selectedPhoto} onOpenChange={() => setSelectedPhoto(null)}>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
                 {selectedPhoto.description || "Zdjecie galerii"}
@@ -678,30 +1005,95 @@ export default function GalleryPage() {
             <div className="space-y-4 mt-4">
               {/* Before/After comparison */}
               {selectedPhoto.beforePhotoUrl && selectedPhoto.afterPhotoUrl ? (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm font-medium mb-2 text-center">Przed</p>
-                    <img
-                      src={selectedPhoto.beforePhotoUrl}
-                      alt="Przed"
-                      className="w-full rounded-lg"
-                    />
+                <div>
+                  {/* Comparison mode toggle */}
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-sm font-medium">Widok porownania:</span>
+                    <Button
+                      variant={comparisonMode === "slider" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setComparisonMode("slider")}
+                    >
+                      <SlidersHorizontal className="w-4 h-4 mr-1" />
+                      Suwak
+                    </Button>
+                    <Button
+                      variant={comparisonMode === "side-by-side" ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setComparisonMode("side-by-side")}
+                    >
+                      Obok siebie
+                    </Button>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium mb-2 text-center">Po</p>
-                    <img
-                      src={selectedPhoto.afterPhotoUrl}
-                      alt="Po"
-                      className="w-full rounded-lg"
+
+                  {comparisonMode === "slider" ? (
+                    <ComparisonSlider
+                      beforeUrl={selectedPhoto.beforePhotoUrl}
+                      afterUrl={selectedPhoto.afterPhotoUrl}
                     />
-                  </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-sm font-medium mb-2 text-center bg-orange-100 text-orange-700 rounded py-1">Przed</p>
+                        <img
+                          src={selectedPhoto.beforePhotoUrl}
+                          alt="Przed"
+                          className="w-full rounded-lg"
+                        />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium mb-2 text-center bg-green-100 text-green-700 rounded py-1">Po</p>
+                        <img
+                          src={selectedPhoto.afterPhotoUrl}
+                          alt="Po"
+                          className="w-full rounded-lg"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <img
-                  src={selectedPhoto.afterPhotoUrl || selectedPhoto.beforePhotoUrl || ""}
-                  alt={selectedPhoto.description || "Zdjecie"}
-                  className="w-full rounded-lg"
-                />
+                <div>
+                  {/* Single photo with option to add matching */}
+                  <img
+                    src={selectedPhoto.afterPhotoUrl || selectedPhoto.beforePhotoUrl || ""}
+                    alt={selectedPhoto.description || "Zdjecie"}
+                    className="w-full rounded-lg"
+                  />
+                  {/* Show badge for single photos */}
+                  {selectedPhoto.beforePhotoUrl && !selectedPhoto.afterPhotoUrl && (
+                    <div className="mt-2 p-3 bg-orange-50 border border-orange-200 rounded-lg flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="bg-orange-500 text-white text-xs font-semibold px-2 py-1 rounded">PRZED</span>
+                        <span className="text-sm text-orange-700">Brak zdjecia &quot;po&quot; - dodaj aby utworzyc pare</span>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openLinkDialog(selectedPhoto)}
+                      >
+                        <Link2 className="w-4 h-4 mr-1" />
+                        Dodaj &quot;po&quot;
+                      </Button>
+                    </div>
+                  )}
+                  {!selectedPhoto.beforePhotoUrl && selectedPhoto.afterPhotoUrl && (
+                    <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded">PO</span>
+                        <span className="text-sm text-green-700">Brak zdjecia &quot;przed&quot; - dodaj aby utworzyc pare</span>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openLinkDialog(selectedPhoto)}
+                      >
+                        <Link2 className="w-4 h-4 mr-1" />
+                        Dodaj &quot;przed&quot;
+                      </Button>
+                    </div>
+                  )}
+                </div>
               )}
 
               <div className="space-y-2">
@@ -760,6 +1152,153 @@ export default function GalleryPage() {
                 >
                   <Trash2 className="w-4 h-4 mr-2" />
                   Usun zdjecie
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Link matching photo dialog */}
+      {linkingPhoto && (
+        <Dialog open={!!linkingPhoto} onOpenChange={() => { setLinkingPhoto(null); setLinkFile(null); setLinkPreview(null); }}>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>
+                {linkingPhoto.beforePhotoUrl && !linkingPhoto.afterPhotoUrl
+                  ? "Dodaj zdjecie PO zabiegu"
+                  : "Dodaj zdjecie PRZED zabiegiem"}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 mt-4">
+              {/* Show existing photo */}
+              <div>
+                <Label className="mb-2 block text-sm text-muted-foreground">
+                  Istniejace zdjecie ({linkingPhoto.beforePhotoUrl ? "przed" : "po"}):
+                </Label>
+                <div className="relative">
+                  <img
+                    src={linkingPhoto.beforePhotoUrl || linkingPhoto.afterPhotoUrl || ""}
+                    alt="Istniejace zdjecie"
+                    className="w-full h-40 object-cover rounded-lg border"
+                  />
+                  <div className={`absolute top-2 left-2 text-white text-xs font-semibold px-2 py-1 rounded ${
+                    linkingPhoto.beforePhotoUrl ? "bg-orange-500" : "bg-green-500"
+                  }`}>
+                    {linkingPhoto.beforePhotoUrl ? "PRZED" : "PO"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Upload matching photo */}
+              <div>
+                <Label className="mb-2 block">
+                  {linkingPhoto.beforePhotoUrl && !linkingPhoto.afterPhotoUrl
+                    ? "Zdjecie PO zabiegu"
+                    : "Zdjecie PRZED zabiegiem"}
+                  <span className="text-red-500 ml-1">*</span>
+                </Label>
+                <input
+                  ref={linkInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setLinkFile(file);
+                      const reader = new FileReader();
+                      reader.onload = () => setLinkPreview(reader.result as string);
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="hidden"
+                />
+                {linkPreview ? (
+                  <div className="relative">
+                    <img
+                      src={linkPreview}
+                      alt="Nowe zdjecie"
+                      className="w-full h-40 object-cover rounded-lg border"
+                    />
+                    <div className={`absolute top-2 left-2 text-white text-xs font-semibold px-2 py-1 rounded ${
+                      linkingPhoto.beforePhotoUrl ? "bg-green-500" : "bg-orange-500"
+                    }`}>
+                      {linkingPhoto.beforePhotoUrl ? "PO" : "PRZED"}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="absolute top-2 right-2"
+                      onClick={() => { setLinkFile(null); setLinkPreview(null); }}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => linkInputRef.current?.click()}
+                    className={`w-full h-40 border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-2 transition-colors ${
+                      linkingPhoto.beforePhotoUrl
+                        ? "border-green-300 hover:border-green-500 bg-green-50/50"
+                        : "border-orange-300 hover:border-orange-500 bg-orange-50/50"
+                    }`}
+                  >
+                    <Upload className={`w-6 h-6 ${linkingPhoto.beforePhotoUrl ? "text-green-400" : "text-orange-400"}`} />
+                    <span className={`text-sm font-medium ${linkingPhoto.beforePhotoUrl ? "text-green-600" : "text-orange-600"}`}>
+                      {linkingPhoto.beforePhotoUrl ? "Zdjecie PO" : "Zdjecie PRZED"}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      JPEG, PNG, WebP, GIF (max 10MB)
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              {/* Pair preview */}
+              {linkPreview && (
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Link2 className="w-4 h-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-700">Podglad pary</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="relative">
+                      <img
+                        src={linkingPhoto.beforePhotoUrl || linkPreview}
+                        alt="Przed"
+                        className="w-full h-20 object-cover rounded border"
+                      />
+                      <span className="absolute bottom-1 left-1 bg-orange-500 text-white text-[10px] px-1 rounded">PRZED</span>
+                    </div>
+                    <div className="relative">
+                      <img
+                        src={linkingPhoto.beforePhotoUrl ? linkPreview : (linkingPhoto.afterPhotoUrl || "")}
+                        alt="Po"
+                        className="w-full h-20 object-cover rounded border"
+                      />
+                      <span className="absolute bottom-1 left-1 bg-green-500 text-white text-[10px] px-1 rounded">PO</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => { setLinkingPhoto(null); setLinkFile(null); setLinkPreview(null); }}>
+                  Anuluj
+                </Button>
+                <Button onClick={handleLinkUpload} disabled={!linkFile || linkUploading}>
+                  {linkUploading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Laczenie...
+                    </>
+                  ) : (
+                    <>
+                      <Link2 className="w-4 h-4 mr-2" />
+                      Polacz zdjecia
+                    </>
+                  )}
                 </Button>
               </div>
             </div>

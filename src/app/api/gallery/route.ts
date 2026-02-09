@@ -9,6 +9,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const employeeId = searchParams.get("employeeId");
+    const serviceId = searchParams.get("serviceId");
 
     if (!salonId) {
       return NextResponse.json(
@@ -17,56 +18,39 @@ export async function GET(request: Request) {
       );
     }
 
-    let photos;
+    // Build filter conditions
+    const conditions = [eq(galleryPhotos.salonId, salonId)];
     if (employeeId) {
-      photos = await db
-        .select({
-          id: galleryPhotos.id,
-          salonId: galleryPhotos.salonId,
-          employeeId: galleryPhotos.employeeId,
-          serviceId: galleryPhotos.serviceId,
-          beforePhotoUrl: galleryPhotos.beforePhotoUrl,
-          afterPhotoUrl: galleryPhotos.afterPhotoUrl,
-          description: galleryPhotos.description,
-          productsUsed: galleryPhotos.productsUsed,
-          techniques: galleryPhotos.techniques,
-          duration: galleryPhotos.duration,
-          createdAt: galleryPhotos.createdAt,
-          employeeFirstName: employees.firstName,
-          employeeLastName: employees.lastName,
-          serviceName: services.name,
-        })
-        .from(galleryPhotos)
-        .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
-        .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-        .where(and(eq(galleryPhotos.salonId, salonId), eq(galleryPhotos.employeeId, employeeId)))
-        .orderBy(desc(galleryPhotos.createdAt));
-    } else {
-      photos = await db
-        .select({
-          id: galleryPhotos.id,
-          salonId: galleryPhotos.salonId,
-          employeeId: galleryPhotos.employeeId,
-          serviceId: galleryPhotos.serviceId,
-          beforePhotoUrl: galleryPhotos.beforePhotoUrl,
-          afterPhotoUrl: galleryPhotos.afterPhotoUrl,
-          description: galleryPhotos.description,
-          productsUsed: galleryPhotos.productsUsed,
-          techniques: galleryPhotos.techniques,
-          duration: galleryPhotos.duration,
-          createdAt: galleryPhotos.createdAt,
-          employeeFirstName: employees.firstName,
-          employeeLastName: employees.lastName,
-          serviceName: services.name,
-        })
-        .from(galleryPhotos)
-        .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
-        .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-        .where(eq(galleryPhotos.salonId, salonId))
-        .orderBy(desc(galleryPhotos.createdAt));
+      conditions.push(eq(galleryPhotos.employeeId, employeeId));
+    }
+    if (serviceId) {
+      conditions.push(eq(galleryPhotos.serviceId, serviceId));
     }
 
-    console.log(`[Gallery API] GET: ${photos.length} photos found`);
+    const photos = await db
+      .select({
+        id: galleryPhotos.id,
+        salonId: galleryPhotos.salonId,
+        employeeId: galleryPhotos.employeeId,
+        serviceId: galleryPhotos.serviceId,
+        beforePhotoUrl: galleryPhotos.beforePhotoUrl,
+        afterPhotoUrl: galleryPhotos.afterPhotoUrl,
+        description: galleryPhotos.description,
+        productsUsed: galleryPhotos.productsUsed,
+        techniques: galleryPhotos.techniques,
+        duration: galleryPhotos.duration,
+        createdAt: galleryPhotos.createdAt,
+        employeeFirstName: employees.firstName,
+        employeeLastName: employees.lastName,
+        serviceName: services.name,
+      })
+      .from(galleryPhotos)
+      .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
+      .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
+      .where(and(...conditions))
+      .orderBy(desc(galleryPhotos.createdAt));
+
+    console.log(`[Gallery API] GET: ${photos.length} photos found (filters: employeeId=${employeeId || 'none'}, serviceId=${serviceId || 'none'})`);
 
     return NextResponse.json({
       success: true,
