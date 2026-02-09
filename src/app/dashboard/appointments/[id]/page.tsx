@@ -145,6 +145,7 @@ interface RefundStatus {
   paymentStatus?: string;
   refundStatus: string;
   refundAmount: number;
+  forfeitedAmount?: number;
   refundedAt?: string;
   stripeRefundId?: string;
   refundReason?: string;
@@ -624,7 +625,9 @@ export default function AppointmentDetailPage() {
           <CardHeader>
             <div className="flex items-center gap-2">
               <RefreshCw className="h-5 w-5 text-primary" />
-              <CardTitle className="text-lg">Status zwrotu zadatku</CardTitle>
+              <CardTitle className="text-lg">
+                {refundStatus.refundStatus === "forfeited" ? "Zadatek - przepadek" : "Status zwrotu zadatku"}
+              </CardTitle>
             </div>
           </CardHeader>
           <CardContent>
@@ -632,14 +635,18 @@ export default function AppointmentDetailPage() {
               className={`p-4 rounded-lg border ${
                 refundStatus.refundStatus === "refunded"
                   ? "bg-green-50 dark:bg-green-950/30 border-green-300 dark:border-green-700"
-                  : refundStatus.paymentStatus === "succeeded" && !appointment.depositPaid
-                    ? "bg-blue-50 dark:bg-blue-950/30 border-blue-300 dark:border-blue-700"
-                    : "bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700"
+                  : refundStatus.refundStatus === "forfeited"
+                    ? "bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-700"
+                    : refundStatus.paymentStatus === "succeeded" && !appointment.depositPaid
+                      ? "bg-blue-50 dark:bg-blue-950/30 border-blue-300 dark:border-blue-700"
+                      : "bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700"
               }`}
             >
               <div className="flex items-start gap-3">
                 {refundStatus.refundStatus === "refunded" ? (
                   <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
+                ) : refundStatus.refundStatus === "forfeited" ? (
+                  <Ban className="h-5 w-5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
                 ) : (
                   <Ban className="h-5 w-5 text-orange-600 dark:text-orange-400 mt-0.5 shrink-0" />
                 )}
@@ -648,13 +655,19 @@ export default function AppointmentDetailPage() {
                     <p className="font-semibold" data-testid="refund-status-label">
                       {refundStatus.refundStatus === "refunded"
                         ? "Zwrot zrealizowany"
-                        : "Zadatek zatrzymany"}
+                        : refundStatus.refundStatus === "forfeited"
+                          ? "Zadatek przepadl - zatrzymany przez salon"
+                          : "Zadatek zatrzymany"}
                     </p>
                     <Badge
                       variant={refundStatus.refundStatus === "refunded" ? "default" : "destructive"}
                       data-testid="refund-status-badge"
                     >
-                      {refundStatus.refundStatus === "refunded" ? "Zwrocono" : "Brak zwrotu"}
+                      {refundStatus.refundStatus === "refunded"
+                        ? "Zwrocono"
+                        : refundStatus.refundStatus === "forfeited"
+                          ? "Przepadek"
+                          : "Brak zwrotu"}
                     </Badge>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">

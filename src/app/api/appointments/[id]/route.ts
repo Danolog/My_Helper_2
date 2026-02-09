@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { appointments, clients, employees, services, notifications } from "@/lib/schema";
+import { appointments, clients, employees, services, notifications, depositPayments } from "@/lib/schema";
 import { eq, and, not, or, lte, gte } from "drizzle-orm";
 import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
 
@@ -251,6 +251,23 @@ export async function DELETE(
           serviceName,
           startTime
         );
+      }
+    }
+
+    // Mark deposit as forfeited if late cancellation (<24h)
+    if (depositForfeited) {
+      try {
+        await db
+          .update(depositPayments)
+          .set({
+            status: "forfeited",
+            refundReason: "Anulacja wizyty mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
+          })
+          .where(eq(depositPayments.appointmentId, id));
+        console.log(`[Appointments API] Deposit marked as forfeited for appointment ${id}`);
+      } catch (forfeitError) {
+        console.error("[Appointments API] Failed to mark deposit as forfeited:", forfeitError);
+        // Don't fail the cancellation if deposit status update fails
       }
     }
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { db } from "@/lib/db";
-import { appointments, employees, services, salons } from "@/lib/schema";
+import { appointments, employees, services, salons, depositPayments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { processAutomaticRefund } from "@/lib/refund";
@@ -232,6 +232,22 @@ export async function POST(
         "Anulacja wizyty przez klienta - wiecej niz 24h przed terminem"
       );
       console.log(`[Client Cancel API] Refund result for appointment ${id}:`, refundResult);
+    }
+
+    // Mark deposit as forfeited if late cancellation (<24h)
+    if (depositForfeited) {
+      try {
+        await db
+          .update(depositPayments)
+          .set({
+            status: "forfeited",
+            refundReason: "Anulacja wizyty przez klienta mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
+          })
+          .where(eq(depositPayments.appointmentId, id));
+        console.log(`[Client Cancel API] Deposit marked as forfeited for appointment ${id}`);
+      } catch (forfeitError) {
+        console.error("[Client Cancel API] Failed to mark deposit as forfeited:", forfeitError);
+      }
     }
 
     return NextResponse.json({

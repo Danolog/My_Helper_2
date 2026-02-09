@@ -44,6 +44,14 @@ export async function GET(
       });
     }
 
+    // Determine refund/forfeit status
+    let refundStatus: "refunded" | "forfeited" | "none" = "none";
+    if (payment.status === "refunded") {
+      refundStatus = "refunded";
+    } else if (payment.status === "forfeited") {
+      refundStatus = "forfeited";
+    }
+
     return NextResponse.json({
       success: true,
       data: {
@@ -53,8 +61,9 @@ export async function GET(
         depositPaid: appointment.depositPaid,
         paymentMethod: payment.paymentMethod,
         paymentStatus: payment.status,
-        refundStatus: payment.status === "refunded" ? "refunded" : "none",
+        refundStatus,
         refundAmount: payment.status === "refunded" ? parseFloat(payment.amount) : 0,
+        forfeitedAmount: payment.status === "forfeited" ? parseFloat(payment.amount) : 0,
         refundedAt: payment.refundedAt,
         stripeRefundId: payment.stripeRefundId,
         refundReason: payment.refundReason,
