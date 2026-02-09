@@ -421,6 +421,7 @@ export const galleryPhotos = pgTable(
     productsUsed: text("products_used"),
     techniques: text("techniques"),
     duration: integer("duration"), // in minutes
+    showProductsToClients: boolean("show_products_to_clients").default(true).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [

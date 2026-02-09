@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Plus, X, Loader2, Pencil, Check, Filter, Users, Scissors, SlidersHorizontal, Link2 } from "lucide-react";
+import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Plus, X, Loader2, Pencil, Check, Filter, Users, Scissors, SlidersHorizontal, Link2, Eye, EyeOff, FolderPlus, FolderOpen, Folder, MoreVertical, FolderMinus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useSession } from "@/lib/auth-client";
 
 const SALON_ID = "00000000-0000-0000-0000-000000000001";
@@ -36,6 +37,7 @@ interface GalleryPhoto {
   productsUsed: string | null;
   techniques: string | null;
   duration: number | null;
+  showProductsToClients: boolean;
   createdAt: string;
   employeeFirstName: string | null;
   employeeLastName: string | null;
@@ -51,6 +53,15 @@ interface Employee {
 interface Service {
   id: string;
   name: string;
+}
+
+interface Album {
+  id: string;
+  salonId: string;
+  name: string;
+  category: string | null;
+  createdAt: string;
+  photoCount: number;
 }
 
 // Comparison slider component for before/after photos
@@ -174,10 +185,28 @@ export default function GalleryPage() {
   const [editEmployeeId, setEditEmployeeId] = useState("");
   const [editServiceId, setEditServiceId] = useState("");
   const [editDuration, setEditDuration] = useState("");
+  const [editShowProductsToClients, setEditShowProductsToClients] = useState(true);
   const [filterEmployeeId, setFilterEmployeeId] = useState<string>("");
   const [filterServiceId, setFilterServiceId] = useState<string>("");
   const [filterPairsOnly, setFilterPairsOnly] = useState(false);
   const [comparisonMode, setComparisonMode] = useState<"slider" | "side-by-side">("slider");
+
+  // Album state
+  const [activeTab, setActiveTab] = useState<"photos" | "albums">("photos");
+  const [albumsList, setAlbumsList] = useState<Album[]>([]);
+  const [albumsLoading, setAlbumsLoading] = useState(false);
+  const [createAlbumOpen, setCreateAlbumOpen] = useState(false);
+  const [newAlbumName, setNewAlbumName] = useState("");
+  const [newAlbumCategory, setNewAlbumCategory] = useState("");
+  const [creatingAlbum, setCreatingAlbum] = useState(false);
+  const [viewingAlbum, setViewingAlbum] = useState<Album | null>(null);
+  const [albumPhotos, setAlbumPhotos] = useState<GalleryPhoto[]>([]);
+  const [albumPhotosLoading, setAlbumPhotosLoading] = useState(false);
+  const [addToAlbumPhotoId, setAddToAlbumPhotoId] = useState<string | null>(null);
+  const [addToAlbumDialogOpen, setAddToAlbumDialogOpen] = useState(false);
+  const [addingToAlbum, setAddingToAlbum] = useState(false);
+  const [deleteAlbumConfirm, setDeleteAlbumConfirm] = useState<Album | null>(null);
+  const [removingFromAlbum, setRemovingFromAlbum] = useState<string | null>(null);
 
   // Upload form state
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -245,11 +274,150 @@ export default function GalleryPage() {
     }
   }, []);
 
+  const fetchAlbums = useCallback(async () => {
+    setAlbumsLoading(true);
+    try {
+      const res = await fetch(`/api/albums?salonId=${SALON_ID}`);
+      const data = await res.json();
+      if (data.success) {
+        setAlbumsList(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch albums:", error);
+    } finally {
+      setAlbumsLoading(false);
+    }
+  }, []);
+
+  const fetchAlbumPhotos = useCallback(async (albumId: string) => {
+    setAlbumPhotosLoading(true);
+    try {
+      const res = await fetch(`/api/albums/${albumId}/photos`);
+      const data = await res.json();
+      if (data.success) {
+        setAlbumPhotos(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch album photos:", error);
+    } finally {
+      setAlbumPhotosLoading(false);
+    }
+  }, []);
+
+  const handleCreateAlbum = async () => {
+    if (!newAlbumName.trim()) return;
+    setCreatingAlbum(true);
+    try {
+      const res = await fetch("/api/albums", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          salonId: SALON_ID,
+          name: newAlbumName.trim(),
+          category: newAlbumCategory.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAlbumsList((prev) => [data.data, ...prev]);
+        setNewAlbumName("");
+        setNewAlbumCategory("");
+        setCreateAlbumOpen(false);
+      } else {
+        alert("Blad: " + data.error);
+      }
+    } catch (error) {
+      console.error("Create album error:", error);
+      alert("Blad przy tworzeniu albumu");
+    } finally {
+      setCreatingAlbum(false);
+    }
+  };
+
+  const handleDeleteAlbum = async (album: Album) => {
+    try {
+      const res = await fetch(`/api/albums/${album.id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) {
+        setAlbumsList((prev) => prev.filter((a) => a.id !== album.id));
+        setDeleteAlbumConfirm(null);
+        if (viewingAlbum?.id === album.id) {
+          setViewingAlbum(null);
+          setAlbumPhotos([]);
+        }
+      }
+    } catch (error) {
+      console.error("Delete album error:", error);
+    }
+  };
+
+  const handleAddToAlbum = async (albumId: string) => {
+    if (!addToAlbumPhotoId) return;
+    setAddingToAlbum(true);
+    try {
+      const res = await fetch(`/api/albums/${albumId}/photos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoIds: [addToAlbumPhotoId] }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAddToAlbumPhotoId(null);
+        setAddToAlbumDialogOpen(false);
+        // Refresh albums to update photo counts
+        fetchAlbums();
+        // If viewing an album, refresh its photos
+        if (viewingAlbum) {
+          fetchAlbumPhotos(viewingAlbum.id);
+        }
+      } else {
+        alert("Blad: " + data.error);
+      }
+    } catch (error) {
+      console.error("Add to album error:", error);
+    } finally {
+      setAddingToAlbum(false);
+    }
+  };
+
+  const handleRemoveFromAlbum = async (photoId: string) => {
+    if (!viewingAlbum) return;
+    setRemovingFromAlbum(photoId);
+    try {
+      const res = await fetch(
+        `/api/albums/${viewingAlbum.id}/photos?photoId=${photoId}`,
+        { method: "DELETE" }
+      );
+      const data = await res.json();
+      if (data.success) {
+        setAlbumPhotos((prev) => prev.filter((p) => p.id !== photoId));
+        // Update album photo count locally
+        setAlbumsList((prev) =>
+          prev.map((a) =>
+            a.id === viewingAlbum.id
+              ? { ...a, photoCount: Math.max(0, a.photoCount - 1) }
+              : a
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Remove from album error:", error);
+    } finally {
+      setRemovingFromAlbum(null);
+    }
+  };
+
+  const openViewAlbum = (album: Album) => {
+    setViewingAlbum(album);
+    fetchAlbumPhotos(album.id);
+  };
+
   useEffect(() => {
     fetchPhotos();
     fetchEmployees();
     fetchServices();
-  }, [fetchPhotos, fetchEmployees, fetchServices]);
+    fetchAlbums();
+  }, [fetchPhotos, fetchEmployees, fetchServices, fetchAlbums]);
 
   // Helper to get active filter values
   const getActiveEmployeeFilter = (empFilter?: string) => {
@@ -456,6 +624,7 @@ export default function GalleryPage() {
     setEditEmployeeId(photo.employeeId || "");
     setEditServiceId(photo.serviceId || "");
     setEditDuration(photo.duration ? String(photo.duration) : "");
+    setEditShowProductsToClients(photo.showProductsToClients ?? true);
     setSelectedPhoto(null); // Close detail dialog
   };
 
@@ -474,6 +643,7 @@ export default function GalleryPage() {
           employeeId: editEmployeeId && editEmployeeId !== "none" ? editEmployeeId : null,
           serviceId: editServiceId && editServiceId !== "none" ? editServiceId : null,
           duration: editDuration ? parseInt(editDuration, 10) : null,
+          showProductsToClients: editShowProductsToClients,
         }),
       });
 
@@ -542,7 +712,14 @@ export default function GalleryPage() {
           </div>
         </div>
 
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <div className="flex items-center gap-2">
+          {activeTab === "albums" && (
+            <Button variant="outline" onClick={() => setCreateAlbumOpen(true)}>
+              <FolderPlus className="w-4 h-4 mr-2" />
+              Nowy album
+            </Button>
+          )}
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="w-4 h-4 mr-2" />
@@ -785,8 +962,209 @@ export default function GalleryPage() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
+      {/* Tab navigation */}
+      <div className="flex gap-1 mb-6 border-b">
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "photos"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+          onClick={() => { setActiveTab("photos"); setViewingAlbum(null); }}
+        >
+          <ImageIcon className="w-4 h-4 inline-block mr-2" />
+          Zdjecia
+        </button>
+        <button
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "albums"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+          onClick={() => { setActiveTab("albums"); setViewingAlbum(null); }}
+        >
+          <Folder className="w-4 h-4 inline-block mr-2" />
+          Albumy ({albumsList.length})
+        </button>
+      </div>
+
+      {/* Albums tab content */}
+      {activeTab === "albums" && !viewingAlbum && (
+        <div>
+          {albumsLoading ? (
+            <div className="flex justify-center items-center h-64">
+              <Loader2 className="w-8 h-8 animate-spin" />
+            </div>
+          ) : albumsList.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-center">
+              <Folder className="w-16 h-16 text-muted-foreground mb-4" />
+              <h2 className="text-lg font-semibold mb-2">Brak albumow</h2>
+              <p className="text-muted-foreground mb-4">
+                Utworz pierwszy album, aby pogrupowac zdjecia
+              </p>
+              <Button onClick={() => setCreateAlbumOpen(true)}>
+                <FolderPlus className="w-4 h-4 mr-2" />
+                Nowy album
+              </Button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {albumsList.map((album) => (
+                <div
+                  key={album.id}
+                  className="group relative border rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                  onClick={() => openViewAlbum(album)}
+                >
+                  <div className="aspect-video bg-muted flex flex-col items-center justify-center gap-2">
+                    <FolderOpen className="w-12 h-12 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">
+                      {album.photoCount} {album.photoCount === 1 ? "zdjecie" : "zdjec"}
+                    </span>
+                  </div>
+                  <div className="p-3">
+                    <p className="font-medium truncate">{album.name}</p>
+                    {album.category && (
+                      <p className="text-xs text-muted-foreground">{album.category}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {new Date(album.createdAt).toLocaleDateString("pl-PL")}
+                    </p>
+                  </div>
+                  {/* Delete button overlay */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteAlbumConfirm(album);
+                    }}
+                    className="absolute top-2 right-2 bg-red-500/80 text-white p-1.5 rounded hover:bg-red-600/90 transition-colors opacity-0 group-hover:opacity-100"
+                    title="Usun album"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Album detail view */}
+      {activeTab === "albums" && viewingAlbum && (
+        <div>
+          <div className="flex items-center gap-3 mb-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setViewingAlbum(null); setAlbumPhotos([]); }}
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Wszystkie albumy
+            </Button>
+            <div>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <FolderOpen className="w-5 h-5" />
+                {viewingAlbum.name}
+              </h2>
+              {viewingAlbum.category && (
+                <p className="text-xs text-muted-foreground">{viewingAlbum.category}</p>
+              )}
+            </div>
+            <span className="text-xs text-muted-foreground ml-auto">
+              {albumPhotos.length} {albumPhotos.length === 1 ? "zdjecie" : "zdjec"}
+            </span>
+          </div>
+
+          {albumPhotosLoading ? (
+            <div className="flex justify-center items-center h-64">
+              <Loader2 className="w-8 h-8 animate-spin" />
+            </div>
+          ) : albumPhotos.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-center">
+              <ImageIcon className="w-16 h-16 text-muted-foreground mb-4" />
+              <h2 className="text-lg font-semibold mb-2">Album jest pusty</h2>
+              <p className="text-muted-foreground mb-4">
+                Dodaj zdjecia do tego albumu z zakladki Zdjecia
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {albumPhotos.map((photo) => {
+                const isPair = photo.beforePhotoUrl && photo.afterPhotoUrl;
+
+                return (
+                  <div
+                    key={photo.id}
+                    className="group relative border rounded-lg overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                    onClick={() => setSelectedPhoto(photo)}
+                  >
+                    <div className="aspect-square relative">
+                      {isPair ? (
+                        <div className="w-full h-full flex">
+                          <div className="w-1/2 h-full relative overflow-hidden">
+                            <img src={photo.beforePhotoUrl!} alt="Przed" className="absolute inset-0 w-[200%] h-full object-cover" />
+                          </div>
+                          <div className="w-0.5 bg-white z-10 relative" />
+                          <div className="w-1/2 h-full relative overflow-hidden">
+                            <img src={photo.afterPhotoUrl!} alt="Po" className="absolute inset-0 w-[200%] h-full object-cover object-right" />
+                          </div>
+                        </div>
+                      ) : photo.afterPhotoUrl ? (
+                        <img src={photo.afterPhotoUrl} alt={photo.description || "Zdjecie"} className="w-full h-full object-cover" />
+                      ) : photo.beforePhotoUrl ? (
+                        <img src={photo.beforePhotoUrl} alt={photo.description || "Zdjecie"} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-muted">
+                          <ImageIcon className="w-12 h-12 text-muted-foreground" />
+                        </div>
+                      )}
+                      {isPair && (
+                        <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs font-semibold px-2 py-1 rounded flex items-center gap-1">
+                          <SlidersHorizontal className="w-3 h-3" />
+                          Przed / Po
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-3">
+                      {photo.employeeFirstName && (
+                        <p className="text-sm font-medium">{photo.employeeFirstName} {photo.employeeLastName}</p>
+                      )}
+                      {photo.serviceName && (
+                        <p className="text-xs text-muted-foreground">{photo.serviceName}</p>
+                      )}
+                      {photo.description && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{photo.description}</p>
+                      )}
+                    </div>
+                    {/* Remove from album button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRemoveFromAlbum(photo.id);
+                      }}
+                      className="absolute top-2 right-2 bg-orange-500/80 text-white p-1.5 rounded hover:bg-orange-600/90 transition-colors opacity-0 group-hover:opacity-100"
+                      title="Usun z albumu"
+                      disabled={removingFromAlbum === photo.id}
+                    >
+                      {removingFromAlbum === photo.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <FolderMinus className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Photos tab: Filter bar */}
+      {activeTab === "photos" && (
+      <>
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-3 mb-6 p-3 bg-muted/50 rounded-lg">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -964,9 +1342,16 @@ export default function GalleryPage() {
                       {photo.description}
                     </p>
                   )}
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {new Date(photo.createdAt).toLocaleDateString("pl-PL")}
-                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(photo.createdAt).toLocaleDateString("pl-PL")}
+                    </p>
+                    {photo.productsUsed && !photo.showProductsToClients && (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded" title="Produkty ukryte przed klientami">
+                        <EyeOff className="w-3 h-3" />
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Action button overlays */}
@@ -984,6 +1369,17 @@ export default function GalleryPage() {
                       <Link2 className="w-4 h-4" />
                     </button>
                   )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAddToAlbumPhotoId(photo.id);
+                      setAddToAlbumDialogOpen(true);
+                    }}
+                    className="bg-purple-500/80 text-white p-1.5 rounded hover:bg-purple-600/90 transition-colors"
+                    title="Dodaj do albumu"
+                  >
+                    <FolderPlus className="w-4 h-4" />
+                  </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1132,9 +1528,20 @@ export default function GalleryPage() {
                   </p>
                 )}
                 {selectedPhoto.productsUsed && (
-                  <p className="text-sm">
+                  <div className="text-sm">
                     <span className="font-medium">Produkty:</span> {selectedPhoto.productsUsed}
-                  </p>
+                    <span className="ml-2 inline-flex items-center gap-1 text-xs">
+                      {selectedPhoto.showProductsToClients ? (
+                        <span className="text-green-600 flex items-center gap-1">
+                          <Eye className="w-3 h-3" /> widoczne dla klientow
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground flex items-center gap-1">
+                          <EyeOff className="w-3 h-3" /> ukryte przed klientami
+                        </span>
+                      )}
+                    </span>
+                  </div>
                 )}
                 {selectedPhoto.duration && (
                   <p className="text-sm">
@@ -1158,6 +1565,18 @@ export default function GalleryPage() {
               </div>
 
               <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setAddToAlbumPhotoId(selectedPhoto.id);
+                    setAddToAlbumDialogOpen(true);
+                    setSelectedPhoto(null);
+                  }}
+                >
+                  <FolderPlus className="w-4 h-4 mr-2" />
+                  Do albumu
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -1389,6 +1808,32 @@ export default function GalleryPage() {
                 />
               </div>
 
+              {/* Product visibility toggle */}
+              <div className="flex items-center justify-between p-3 rounded-lg border bg-muted/30" data-testid="product-visibility-toggle">
+                <div className="flex items-center gap-2">
+                  {editShowProductsToClients ? (
+                    <Eye className="w-4 h-4 text-green-600" />
+                  ) : (
+                    <EyeOff className="w-4 h-4 text-muted-foreground" />
+                  )}
+                  <div>
+                    <Label className="text-sm font-medium cursor-pointer">
+                      Pokaz produkty klientom
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {editShowProductsToClients
+                        ? "Klienci widza uzyte produkty"
+                        : "Produkty ukryte przed klientami"}
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={editShowProductsToClients}
+                  onCheckedChange={setEditShowProductsToClients}
+                  data-testid="product-visibility-switch"
+                />
+              </div>
+
               {/* Employee selection */}
               <div>
                 <Label className="mb-2 block">Pracownik</Label>
@@ -1467,6 +1912,128 @@ export default function GalleryPage() {
                 onClick={() => handleDelete(deleteConfirm)}
               >
                 Usun
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+    )}
+
+      {/* Create Album dialog */}
+      <Dialog open={createAlbumOpen} onOpenChange={setCreateAlbumOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nowy album</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div>
+              <Label className="mb-2 block">Nazwa albumu</Label>
+              <Input
+                value={newAlbumName}
+                onChange={(e) => setNewAlbumName(e.target.value)}
+                placeholder="np. Koloryzacje lato 2025"
+                autoFocus
+              />
+            </div>
+            <div>
+              <Label className="mb-2 block">Kategoria (opcjonalnie)</Label>
+              <Input
+                value={newAlbumCategory}
+                onChange={(e) => setNewAlbumCategory(e.target.value)}
+                placeholder="np. Koloryzacja, Strzyzenie"
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => setCreateAlbumOpen(false)}>
+                Anuluj
+              </Button>
+              <Button onClick={handleCreateAlbum} disabled={!newAlbumName.trim() || creatingAlbum}>
+                {creatingAlbum ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Tworzenie...
+                  </>
+                ) : (
+                  <>
+                    <FolderPlus className="w-4 h-4 mr-2" />
+                    Utworz album
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add to Album dialog */}
+      <Dialog open={addToAlbumDialogOpen} onOpenChange={(open) => { setAddToAlbumDialogOpen(open); if (!open) setAddToAlbumPhotoId(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Dodaj do albumu</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-4">
+            {albumsList.length === 0 ? (
+              <div className="text-center py-6">
+                <Folder className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground mb-3">Brak albumow. Utworz pierwszy album.</p>
+                <Button size="sm" onClick={() => { setAddToAlbumDialogOpen(false); setCreateAlbumOpen(true); }}>
+                  <FolderPlus className="w-4 h-4 mr-2" />
+                  Nowy album
+                </Button>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">Wybierz album, do ktorego chcesz dodac zdjecie:</p>
+                <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                  {albumsList.map((album) => (
+                    <button
+                      key={album.id}
+                      onClick={() => handleAddToAlbum(album.id)}
+                      disabled={addingToAlbum}
+                      className="w-full flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors text-left disabled:opacity-50"
+                    >
+                      <FolderOpen className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">{album.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {album.photoCount} {album.photoCount === 1 ? "zdjecie" : "zdjec"}
+                          {album.category && ` · ${album.category}`}
+                        </p>
+                      </div>
+                      {addingToAlbum && (
+                        <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Album confirmation dialog */}
+      {deleteAlbumConfirm && (
+        <Dialog open={!!deleteAlbumConfirm} onOpenChange={() => setDeleteAlbumConfirm(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Usun album</DialogTitle>
+            </DialogHeader>
+            <p className="text-muted-foreground">
+              Czy na pewno chcesz usunac album <strong>&quot;{deleteAlbumConfirm.name}&quot;</strong>?
+              Zdjecia nie zostana usuniete - tylko album.
+            </p>
+            <div className="flex gap-2 justify-end mt-4">
+              <Button variant="outline" onClick={() => setDeleteAlbumConfirm(null)}>
+                Anuluj
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => handleDeleteAlbum(deleteAlbumConfirm)}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Usun album
               </Button>
             </div>
           </DialogContent>
