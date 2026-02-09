@@ -1,5 +1,93 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-10 (Feature #103 - SMS reminder 1h before appointment) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #103: "SMS reminder 1h before appointment" (Notifications category)
+- Steps: Create appointment in 1 hour, Wait for trigger, Verify SMS sent, Verify content appropriate, Verify timing correct
+
+### What was accomplished:
+1. Added `sendAppointmentReminderSms` function to `src/lib/sms.ts`:
+   - Formats Polish reminder message: "Przypomnienie: {name}, Twoja wizyta ... juz dzisiaj o {time} ({date}). Do zobaczenia!"
+   - Sends via the existing `sendSms` infrastructure (console log in dev, DB persistence always)
+2. Created `/api/cron/sms-reminders` endpoint (`src/app/api/cron/sms-reminders/route.ts`):
+   - POST: Finds appointments in 30-90 minute window, sends SMS to clients with phone numbers
+   - GET: Status endpoint showing pending reminders in window
+   - Uses `reminder1hSentAt` field (already in schema from Feature #102) for idempotency
+   - Filters: non-cancelled/completed, has client with phone, reminder not yet sent
+   - Optional CRON_SECRET for production security
+   - Handles errors gracefully, marks reminders sent even on SMS failure to prevent loops
+3. Test setup script creates 3 test appointments:
+   - 1h from now (should get reminder) ✓
+   - 3h from now (too far, should NOT get reminder) ✓
+   - 45min from now with reminder already sent (should NOT get duplicate) ✓
+4. Verification:
+   - Cron triggered: found exactly 1 appointment, sent 1 SMS ✓
+   - Second trigger: found 0 (idempotent) ✓
+   - Console log shows SMS message with correct content ✓
+   - Notification saved to database with 'sent' status ✓
+   - Notification appears in /dashboard/notifications UI with SMS badge ✓
+   - Server restart: data persists in PostgreSQL ✓
+   - No mock data patterns in code ✓
+   - TypeScript compiles with zero errors ✓
+
+### Files created/modified:
+- NEW: src/app/api/cron/sms-reminders/route.ts (1h SMS reminder cron endpoint)
+- MODIFIED: src/lib/sms.ts (added sendAppointmentReminderSms function)
+- NEW: scripts/setup-f103-sms-reminder.ts (test data setup)
+- NEW: scripts/setup-f103-user.ts (test user setup)
+- NEW: scripts/verify-f103-persistence.ts (persistence verification + cleanup)
+
+### Commit: 531d702
+### Stats: 70/253 features passing (27.7%)
+
+---
+
+## Session: 2026-02-10 (Feature #102 - SMS reminder 24h before appointment) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #102: "SMS reminder 24h before appointment" (Notifications category)
+- Steps: Create appointment for tomorrow, trigger SMS, verify content (time, salon, service)
+
+### What was accomplished:
+1. Added `reminderSentAt` timestamp column to appointments schema (+ `reminder1hSentAt` for future use)
+2. Pushed schema changes via drizzle-kit push
+3. Created API endpoint: POST `/api/reminders/appointment`
+   - Finds all scheduled/confirmed appointments within next 24 hours
+   - Filters out appointments that already received a reminder (reminderSentAt is not null)
+   - Sends SMS with client name, service name, salon name, employee name, date and time
+   - Marks reminderSentAt on appointment after successful send
+   - Supports optional ?salonId filter
+   - Duplicate prevention: calling twice sends zero duplicates
+4. Created API endpoint: GET `/api/reminders/appointment?salonId=xxx`
+   - Preview of upcoming appointments and their reminder status
+   - Shows pendingReminders count
+5. Test flow:
+   - Created test appointment for Maria Kaczmarek at Strzyzenie damskie, Beauty Studio Demo
+   - Triggered POST endpoint - processed 1 appointment, sent 1 SMS
+   - SMS message: "Przypomnienie: Maria Kaczmarek, Twoja wizyta 'Strzyzenie damskie' w Beauty Studio Demo u Anna Kowalska odbedzie sie wtorek, 10 lutego 2026 o godz. 12:00. Do zobaczenia!"
+   - Verified in notifications page UI (15 total SMS reminders visible)
+   - Second POST call: 0 processed (duplicate prevention works)
+6. Verification:
+   - Browser: logged in, navigated to /dashboard/notifications, screenshot taken
+   - No mock data patterns in code
+   - Server restart persistence test: all 15 notifications and reminderSentAt persist
+   - Zero console errors
+
+### Files created/modified:
+- MODIFIED: src/lib/schema.ts (added reminderSentAt, reminder1hSentAt to appointments)
+- NEW: src/app/api/reminders/appointment/route.ts (POST: send reminders, GET: preview)
+- NEW: scripts/setup-f102-reminder.ts (test setup)
+- NEW: scripts/setup-f102-fresh.ts (test setup)
+- NEW: scripts/setup-f102-user.ts (test user setup)
+
+### Commit: 65714df
+
+### Current Stats:
+- 70/253 features passing (27.7%)
+
+---
+
 ## Session: 2026-02-10 (Feature #101 - Employee average rating calculated) *** SUCCESS ***
 
 ### Feature Assigned
