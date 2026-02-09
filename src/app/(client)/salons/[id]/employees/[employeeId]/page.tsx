@@ -11,6 +11,7 @@ import {
   MessageSquare,
   Clock,
   User,
+  Package,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,9 +32,10 @@ interface EmployeeSpecialty {
 
 interface Review {
   id: string;
-  rating: number;
+  rating: number | null;
   comment: string | null;
   createdAt: string;
+  clientName: string;
 }
 
 interface GalleryPhoto {
@@ -41,6 +43,8 @@ interface GalleryPhoto {
   beforePhotoUrl: string | null;
   afterPhotoUrl: string | null;
   description: string | null;
+  productsUsed: string | null;
+  showProductsToClients: boolean;
   createdAt: string;
 }
 
@@ -293,23 +297,31 @@ export default function EmployeeProfilePage() {
                   {employee.galleryPhotos.slice(0, 4).map((photo) => (
                     <div
                       key={photo.id}
-                      className="aspect-square rounded-lg bg-muted overflow-hidden"
+                      className="rounded-lg bg-muted overflow-hidden"
                     >
-                      {photo.afterPhotoUrl ? (
-                        <img
-                          src={photo.afterPhotoUrl}
-                          alt={photo.description || "Portfolio photo"}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : photo.beforePhotoUrl ? (
-                        <img
-                          src={photo.beforePhotoUrl}
-                          alt={photo.description || "Portfolio photo"}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Camera className="w-8 h-8 text-muted-foreground" />
+                      <div className="aspect-square relative">
+                        {photo.afterPhotoUrl ? (
+                          <img
+                            src={photo.afterPhotoUrl}
+                            alt={photo.description || "Portfolio photo"}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : photo.beforePhotoUrl ? (
+                          <img
+                            src={photo.beforePhotoUrl}
+                            alt={photo.description || "Portfolio photo"}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Camera className="w-8 h-8 text-muted-foreground" />
+                          </div>
+                        )}
+                      </div>
+                      {photo.productsUsed && photo.showProductsToClients && (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground flex items-start gap-1" data-testid="product-info-visible">
+                          <Package className="w-3 h-3 mt-0.5 shrink-0" />
+                          <span className="line-clamp-2">{photo.productsUsed}</span>
                         </div>
                       )}
                     </div>
@@ -388,15 +400,30 @@ export default function EmployeeProfilePage() {
           ) : (
             <div className="space-y-4" data-testid="reviews-list">
               {employee.recentReviews.map((review) => (
-                <div key={review.id} className="border-b last:border-0 pb-3 last:pb-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <StarRating rating={review.rating} />
-                    <span className="text-xs text-muted-foreground">
+                <div key={review.id} className="border-b last:border-0 pb-3 last:pb-0" data-testid="review-item">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm font-medium" data-testid="reviewer-name">
+                        {review.clientName}
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted-foreground" data-testid="review-date">
                       {new Date(review.createdAt).toLocaleDateString("pl-PL")}
                     </span>
                   </div>
+                  <div className="flex items-center gap-2 mb-1 ml-6">
+                    {review.rating ? (
+                      <StarRating rating={review.rating} />
+                    ) : (
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <MessageSquare className="w-3 h-3" />
+                        Komentarz
+                      </span>
+                    )}
+                  </div>
                   {review.comment && (
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground ml-6">
                       {review.comment}
                     </p>
                   )}
