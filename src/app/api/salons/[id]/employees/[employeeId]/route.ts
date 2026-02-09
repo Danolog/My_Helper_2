@@ -7,8 +7,9 @@ import {
   reviews,
   galleryPhotos,
   salons,
+  clients,
 } from "@/lib/schema";
-import { eq, and, avg, count } from "drizzle-orm";
+import { eq, and, avg, count, desc } from "drizzle-orm";
 
 // GET /api/salons/[id]/employees/[employeeId] - Get employee profile details
 export async function GET(
@@ -72,22 +73,25 @@ export async function GET(
         )
       );
 
-    // Get recent reviews
+    // Get recent reviews with client names
     const recentReviews = await db
       .select({
         id: reviews.id,
         rating: reviews.rating,
         comment: reviews.comment,
         createdAt: reviews.createdAt,
+        clientFirstName: clients.firstName,
+        clientLastName: clients.lastName,
       })
       .from(reviews)
+      .leftJoin(clients, eq(reviews.clientId, clients.id))
       .where(
         and(
           eq(reviews.employeeId, employeeId),
           eq(reviews.status, "approved")
         )
       )
-      .orderBy(reviews.createdAt)
+      .orderBy(desc(reviews.createdAt))
       .limit(5);
 
     // Get gallery photos for this employee
@@ -97,6 +101,8 @@ export async function GET(
         beforePhotoUrl: galleryPhotos.beforePhotoUrl,
         afterPhotoUrl: galleryPhotos.afterPhotoUrl,
         description: galleryPhotos.description,
+        productsUsed: galleryPhotos.productsUsed,
+        showProductsToClients: galleryPhotos.showProductsToClients,
         createdAt: galleryPhotos.createdAt,
       })
       .from(galleryPhotos)
@@ -139,8 +145,19 @@ export async function GET(
           rating: r.rating,
           comment: r.comment,
           createdAt: r.createdAt,
+          clientName: r.clientFirstName && r.clientLastName
+            ? `${r.clientFirstName} ${r.clientLastName.charAt(0)}.`
+            : "Anonim",
         })),
-        galleryPhotos: photos,
+        galleryPhotos: photos.map((p) => ({
+          id: p.id,
+          beforePhotoUrl: p.beforePhotoUrl,
+          afterPhotoUrl: p.afterPhotoUrl,
+          description: p.description,
+          productsUsed: p.showProductsToClients ? p.productsUsed : null,
+          showProductsToClients: p.showProductsToClients,
+          createdAt: p.createdAt,
+        })),
         galleryCount: photos.length,
       },
     });
