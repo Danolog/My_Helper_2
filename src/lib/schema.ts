@@ -234,6 +234,8 @@ export const appointments = pgTable(
     notes: text("notes"),
     depositAmount: numeric("deposit_amount", { precision: 10, scale: 2 }),
     depositPaid: boolean("deposit_paid").default(false),
+    reminderSentAt: timestamp("reminder_sent_at"), // When the 24h SMS reminder was sent
+    reminder1hSentAt: timestamp("reminder_1h_sent_at"), // When the 1h SMS reminder was sent
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
