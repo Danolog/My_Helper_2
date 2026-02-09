@@ -230,6 +230,15 @@ export default function ClientBookingPage() {
   const [_depositPaymentId, setDepositPaymentId] = useState<string>("");
   const [_depositSessionId, setDepositSessionId] = useState<string>("");
 
+  // Client-specific deposit settings (fetched from salon's client record)
+  const [clientDepositSettings, setClientDepositSettings] = useState<{
+    found: boolean;
+    clientId?: string;
+    requireDeposit: boolean;
+    depositType: string | null;
+    depositValue: string | null;
+  } | null>(null);
+
   // ---------------------------------------------------------------------------
   // Derived values
   // ---------------------------------------------------------------------------
@@ -249,12 +258,42 @@ export default function ClientBookingPage() {
     ? selectedService.baseDuration + (selectedVariant?.durationModifier ?? 0)
     : 0;
 
-  // Deposit calculation
-  const depositRequired = selectedService?.depositRequired ?? false;
-  const depositPercentage = selectedService?.depositPercentage ?? 30;
-  const depositAmount = depositRequired
-    ? Math.ceil(effectivePrice * (depositPercentage / 100))
+  // Deposit calculation - client-level settings override service-level
+  const serviceDepositRequired = selectedService?.depositRequired ?? false;
+  const serviceDepositPercentage = selectedService?.depositPercentage ?? 30;
+
+  // Client deposit settings take priority over service settings
+  const clientRequiresDeposit = clientDepositSettings?.requireDeposit ?? false;
+  const clientDepositType = clientDepositSettings?.depositType ?? "percentage";
+  const clientDepositValue = clientDepositSettings?.depositValue
+    ? parseFloat(clientDepositSettings.depositValue)
     : 0;
+
+  // Deposit is required if either the service or the client requires it
+  const depositRequired = serviceDepositRequired || clientRequiresDeposit;
+
+  // Calculate deposit amount based on source (client settings have priority)
+  let depositAmount = 0;
+  let depositPercentage = serviceDepositPercentage;
+  let depositSource: "service" | "client" = "service";
+
+  if (clientRequiresDeposit && clientDepositValue > 0) {
+    depositSource = "client";
+    if (clientDepositType === "fixed") {
+      depositAmount = clientDepositValue;
+      depositPercentage = 0; // Not percentage-based
+    } else {
+      depositPercentage = clientDepositValue;
+      depositAmount = Math.ceil(effectivePrice * (clientDepositValue / 100));
+    }
+  } else if (serviceDepositRequired) {
+    depositSource = "service";
+    depositPercentage = serviceDepositPercentage;
+    depositAmount = Math.ceil(effectivePrice * (serviceDepositPercentage / 100));
+  }
+
+  // Suppress unused variable warning
+  void depositSource;
 
   // Whether variant step is required and satisfied
   const variantStepRequired = hasVariants;
@@ -290,6 +329,25 @@ export default function ClientBookingPage() {
   useEffect(() => {
     fetchSalon();
   }, [fetchSalon]);
+
+  // Fetch client-specific deposit settings when session and salon are available
+  useEffect(() => {
+    async function fetchClientDepositSettings() {
+      if (!session?.user?.email || !salonId) return;
+      try {
+        const res = await fetch(
+          `/api/clients/deposit-settings?salonId=${salonId}&email=${encodeURIComponent(session.user.email)}`
+        );
+        const json = await res.json();
+        if (json.success) {
+          setClientDepositSettings(json.data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch client deposit settings:", error);
+      }
+    }
+    fetchClientDepositSettings();
+  }, [session?.user?.email, salonId]);
 
   const fetchAssignedEmployees = useCallback(
     async (serviceId: string) => {

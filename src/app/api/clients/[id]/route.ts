@@ -51,7 +51,7 @@ export async function PUT(
   try {
     const { id } = await params;
     const body = await request.json();
-    const { firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId } = body;
+    const { firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
 
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {};
@@ -63,6 +63,9 @@ export async function PUT(
     if (preferences !== undefined) updateData.preferences = preferences;
     if (allergies !== undefined) updateData.allergies = allergies;
     if (favoriteEmployeeId !== undefined) updateData.favoriteEmployeeId = favoriteEmployeeId;
+    if (requireDeposit !== undefined) updateData.requireDeposit = requireDeposit;
+    if (depositType !== undefined) updateData.depositType = depositType;
+    if (depositValue !== undefined) updateData.depositValue = depositValue;
 
     console.log(`[Clients API] Updating client ${id}:`, updateData);
 
