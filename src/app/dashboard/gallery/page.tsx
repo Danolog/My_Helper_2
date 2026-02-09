@@ -173,6 +173,7 @@ export default function GalleryPage() {
   const [editProductsUsed, setEditProductsUsed] = useState("");
   const [editEmployeeId, setEditEmployeeId] = useState("");
   const [editServiceId, setEditServiceId] = useState("");
+  const [editDuration, setEditDuration] = useState("");
   const [filterEmployeeId, setFilterEmployeeId] = useState<string>("");
   const [filterServiceId, setFilterServiceId] = useState<string>("");
   const [filterPairsOnly, setFilterPairsOnly] = useState(false);
@@ -188,6 +189,7 @@ export default function GalleryPage() {
   const [selectedServiceId, setSelectedServiceId] = useState<string>("");
   const [techniques, setTechniques] = useState("");
   const [productsUsed, setProductsUsed] = useState("");
+  const [uploadDuration, setUploadDuration] = useState("");
   const afterInputRef = useRef<HTMLInputElement>(null);
   const beforeInputRef = useRef<HTMLInputElement>(null);
 
@@ -356,6 +358,7 @@ export default function GalleryPage() {
           description: description || null,
           techniques: techniques || null,
           productsUsed: productsUsed || null,
+          duration: uploadDuration ? parseInt(uploadDuration, 10) : null,
         }),
       });
 
@@ -371,6 +374,7 @@ export default function GalleryPage() {
         setSelectedServiceId("");
         setTechniques("");
         setProductsUsed("");
+        setUploadDuration("");
         setDialogOpen(false);
         // Refresh photos (respecting current filters)
         fetchPhotos(getActiveEmployeeFilter(), getActiveServiceFilter());
@@ -451,6 +455,7 @@ export default function GalleryPage() {
     setEditProductsUsed(photo.productsUsed || "");
     setEditEmployeeId(photo.employeeId || "");
     setEditServiceId(photo.serviceId || "");
+    setEditDuration(photo.duration ? String(photo.duration) : "");
     setSelectedPhoto(null); // Close detail dialog
   };
 
@@ -468,6 +473,7 @@ export default function GalleryPage() {
           productsUsed: editProductsUsed,
           employeeId: editEmployeeId && editEmployeeId !== "none" ? editEmployeeId : null,
           serviceId: editServiceId && editServiceId !== "none" ? editServiceId : null,
+          duration: editDuration ? parseInt(editDuration, 10) : null,
         }),
       });
 
@@ -740,6 +746,18 @@ export default function GalleryPage() {
                   value={productsUsed}
                   onChange={(e) => setProductsUsed(e.target.value)}
                   placeholder="Produkty uzyte podczas zabiegu"
+                />
+              </div>
+
+              {/* Duration */}
+              <div>
+                <Label className="mb-2 block">Czas trwania (minuty)</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={uploadDuration}
+                  onChange={(e) => setUploadDuration(e.target.value)}
+                  placeholder="np. 60"
                 />
               </div>
 
@@ -1118,6 +1136,11 @@ export default function GalleryPage() {
                     <span className="font-medium">Produkty:</span> {selectedPhoto.productsUsed}
                   </p>
                 )}
+                {selectedPhoto.duration && (
+                  <p className="text-sm">
+                    <span className="font-medium">Czas trwania:</span> {selectedPhoto.duration} min
+                  </p>
+                )}
                 {selectedPhoto.description && (
                   <p className="text-sm">
                     <span className="font-medium">Opis:</span> {selectedPhoto.description}
@@ -1351,6 +1374,18 @@ export default function GalleryPage() {
                   value={editProductsUsed}
                   onChange={(e) => setEditProductsUsed(e.target.value)}
                   placeholder="Produkty uzyte podczas zabiegu"
+                />
+              </div>
+
+              {/* Duration */}
+              <div>
+                <Label className="mb-2 block">Czas trwania (minuty)</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={editDuration}
+                  onChange={(e) => setEditDuration(e.target.value)}
+                  placeholder="np. 60"
                 />
               </div>
 
