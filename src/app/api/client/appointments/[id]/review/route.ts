@@ -84,7 +84,18 @@ export async function POST(
     const body = await request.json();
     const { rating, comment } = body;
 
-    if (typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+    // Rating is optional (null for text-only reviews), but if provided must be 1-5
+    const hasRating = rating !== null && rating !== undefined && rating !== 0;
+    const hasComment = typeof comment === "string" && comment.trim().length > 0;
+
+    if (!hasRating && !hasComment) {
+      return NextResponse.json(
+        { success: false, error: "Musisz podac ocene lub komentarz" },
+        { status: 400 }
+      );
+    }
+
+    if (hasRating && (typeof rating !== "number" || !Number.isInteger(rating) || rating < 1 || rating > 5)) {
       return NextResponse.json(
         { success: false, error: "Ocena musi byc liczba calkowita od 1 do 5" },
         { status: 400 }
@@ -141,15 +152,15 @@ export async function POST(
         employeeId: appointment.employeeId,
         appointmentId: appointment.id,
         clientId: appointment.clientId,
-        rating,
-        comment: comment || null,
+        rating: hasRating ? rating : null,
+        comment: hasComment ? comment.trim() : null,
         status: "pending",
       })
       .returning();
 
     console.log(
       `[Client Review API] User ${userId} submitted review for appointment ${id}`,
-      { rating, reviewId: newReview?.id }
+      { rating: hasRating ? rating : null, hasComment, reviewId: newReview?.id }
     );
 
     return NextResponse.json({
