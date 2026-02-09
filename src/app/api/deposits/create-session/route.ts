@@ -27,6 +27,7 @@ export async function POST(request: Request) {
       notes,
       depositAmount,
       paymentMethod,
+      blikPhoneNumber,
     } = body;
 
     // Validate required fields
@@ -53,6 +54,25 @@ export async function POST(request: Request) {
         { success: false, error: "Deposit amount must be greater than 0" },
         { status: 400 }
       );
+    }
+
+    // Validate Blik phone number is required for Blik P2P payments
+    if (paymentMethod === "blik") {
+      if (!blikPhoneNumber || typeof blikPhoneNumber !== "string") {
+        return NextResponse.json(
+          { success: false, error: "Numer telefonu jest wymagany dla platnosci BLIK" },
+          { status: 400 }
+        );
+      }
+      // Validate Polish phone number format (9 digits, optionally with +48 prefix)
+      const cleanedPhone = blikPhoneNumber.replace(/[\s\-()]/g, "");
+      const phoneRegex = /^(\+48)?[0-9]{9}$/;
+      if (!phoneRegex.test(cleanedPhone)) {
+        return NextResponse.json(
+          { success: false, error: "Nieprawidlowy numer telefonu. Podaj 9-cyfrowy numer." },
+          { status: 400 }
+        );
+      }
     }
 
     // Verify the service exists and has deposit required
@@ -150,6 +170,7 @@ export async function POST(request: Request) {
         amount: String(depositAmount),
         currency: "PLN",
         paymentMethod: paymentMethod || "stripe",
+        blikPhoneNumber: paymentMethod === "blik" ? blikPhoneNumber : null,
         status: "pending",
       })
       .returning();
@@ -165,7 +186,7 @@ export async function POST(request: Request) {
     // For now, return a session with the payment ID as the session reference.
     const sessionId = `dep_session_${depositPayment.id}`;
 
-    console.log(`[Deposit API] Created payment session: ${sessionId} for appointment: ${newAppointment.id}, amount: ${depositAmount} PLN`);
+    console.log(`[Deposit API] Created payment session: ${sessionId} for appointment: ${newAppointment.id}, amount: ${depositAmount} PLN, method: ${paymentMethod || "stripe"}${paymentMethod === "blik" ? `, phone: ${blikPhoneNumber}` : ""}`);
 
     return NextResponse.json({
       success: true,
@@ -175,8 +196,12 @@ export async function POST(request: Request) {
         depositPaymentId: depositPayment.id,
         amount: depositAmount,
         currency: "PLN",
-        // In production, this would be the Stripe Checkout URL
-        paymentUrl: `/api/deposits/checkout?session=${sessionId}`,
+        paymentMethod: paymentMethod || "stripe",
+        ...(paymentMethod === "blik" ? { blikPhoneNumber } : {}),
+        // In production, this would be the Stripe Checkout URL or Blik P2P redirect
+        paymentUrl: paymentMethod === "blik"
+          ? `/api/deposits/blik-confirm?session=${sessionId}`
+          : `/api/deposits/checkout?session=${sessionId}`,
       },
     }, { status: 201 });
   } catch (error) {

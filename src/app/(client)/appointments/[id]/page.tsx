@@ -58,6 +58,7 @@ interface DepositPaymentInfo {
   amount: string;
   currency: string;
   paymentMethod: string;
+  blikPhoneNumber: string | null;
   status: string;
   paidAt: string | null;
 }
@@ -539,9 +540,15 @@ export default function AppointmentDetailPage() {
                   <span className="text-muted-foreground">Metoda:</span>
                   <span className="flex items-center gap-1">
                     <CreditCard className="w-3 h-3" />
-                    {appointment.depositPayment.paymentMethod === "stripe" ? "Karta" : "BLIK"}
+                    {appointment.depositPayment.paymentMethod === "stripe" ? "Karta" : "BLIK P2P"}
                   </span>
                 </div>
+                {appointment.depositPayment.paymentMethod === "blik" && appointment.depositPayment.blikPhoneNumber && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted-foreground">Telefon BLIK:</span>
+                    <span>{appointment.depositPayment.blikPhoneNumber}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">Status:</span>
                   <span className={appointment.depositPayment.status === "succeeded" ? "text-green-600" : ""}>

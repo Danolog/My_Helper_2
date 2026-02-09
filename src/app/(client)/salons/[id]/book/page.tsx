@@ -22,6 +22,8 @@ import {
   Wallet,
   ShieldCheck,
   Loader2,
+  Smartphone,
+  Phone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -226,6 +228,8 @@ export default function ClientBookingPage() {
 
   // Deposit payment state
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("stripe");
+  const [blikPhoneNumber, setBlikPhoneNumber] = useState<string>("");
+  const [blikPhoneError, setBlikPhoneError] = useState<string>("");
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [_depositPaymentId, setDepositPaymentId] = useState<string>("");
   const [_depositSessionId, setDepositSessionId] = useState<string>("");
@@ -502,6 +506,18 @@ export default function ClientBookingPage() {
 
     // If deposit is required, use the deposit flow
     if (depositRequired && depositAmount > 0) {
+      // Validate Blik phone number if Blik P2P selected
+      if (selectedPaymentMethod === "blik") {
+        const cleanedPhone = blikPhoneNumber.replace(/[\s\-()]/g, "");
+        const phoneRegex = /^(\+48)?[0-9]{9}$/;
+        if (!cleanedPhone || !phoneRegex.test(cleanedPhone)) {
+          setBlikPhoneError("Podaj prawidlowy 9-cyfrowy numer telefonu");
+          toast.error("Podaj prawidlowy numer telefonu dla platnosci BLIK");
+          return;
+        }
+        setBlikPhoneError("");
+      }
+
       setIsProcessingPayment(true);
       try {
         const depositBody = {
@@ -515,6 +531,7 @@ export default function ClientBookingPage() {
           notes: notesText,
           depositAmount,
           paymentMethod: selectedPaymentMethod,
+          ...(selectedPaymentMethod === "blik" ? { blikPhoneNumber: blikPhoneNumber.replace(/[\s\-()]/g, "") } : {}),
         };
 
         // Step 1: Create deposit session (which also creates the appointment)
@@ -539,8 +556,12 @@ export default function ClientBookingPage() {
         setDepositPaymentId(payId);
         setDepositSessionId(sessId);
 
-        // Step 2: Simulate processing the payment (in production this would redirect to Stripe Checkout)
-        toast.info("Przetwarzanie platnosci zadatku...", { duration: 2000 });
+        // Step 2: Simulate processing the payment
+        if (selectedPaymentMethod === "blik") {
+          toast.info(`Wysylanie zadania platnosci BLIK na numer ${blikPhoneNumber}...`, { duration: 2000 });
+        } else {
+          toast.info("Przetwarzanie platnosci zadatku...", { duration: 2000 });
+        }
         await new Promise((resolve) => setTimeout(resolve, 1500));
 
         // Step 3: Confirm the payment
@@ -619,6 +640,8 @@ export default function ClientBookingPage() {
     setExpandedServices(new Set());
     setBookingSuccess(false);
     setSelectedPaymentMethod("stripe");
+    setBlikPhoneNumber("");
+    setBlikPhoneError("");
     setIsProcessingPayment(false);
     setDepositPaymentId("");
     setDepositSessionId("");
@@ -779,6 +802,18 @@ export default function ClientBookingPage() {
                     <span className="font-medium text-green-600">{depositAmount} PLN (oplacony)</span>
                   </div>
                   <div className="flex justify-between">
+                    <span className="text-muted-foreground">Metoda platnosci:</span>
+                    <span className="font-medium">
+                      {selectedPaymentMethod === "blik" ? "BLIK P2P" : "Karta"}
+                    </span>
+                  </div>
+                  {selectedPaymentMethod === "blik" && blikPhoneNumber && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Telefon BLIK:</span>
+                      <span className="font-medium">{blikPhoneNumber}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
                     <span className="text-muted-foreground">Pozostalo do zaplaty:</span>
                     <span className="font-medium">{(effectivePrice - depositAmount).toFixed(0)} PLN</span>
                   </div>
@@ -790,7 +825,9 @@ export default function ClientBookingPage() {
               <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 rounded-md border border-green-200 dark:border-green-800 mb-4">
                 <ShieldCheck className="w-5 h-5 text-green-600" />
                 <span className="text-sm text-green-800 dark:text-green-300">
-                  Zadatek {depositAmount} PLN zostal pomyslnie oplacony. Wizyta jest potwierdzona.
+                  Zadatek {depositAmount} PLN zostal pomyslnie oplacony
+                  {selectedPaymentMethod === "blik" ? " przez BLIK P2P" : " karta"}.
+                  Wizyta jest potwierdzona.
                 </span>
               </div>
             )}
@@ -1365,7 +1402,10 @@ export default function ClientBookingPage() {
                               ? "bg-primary/10 border-primary"
                               : "bg-white dark:bg-background hover:bg-muted/50"
                           }`}
-                          onClick={() => setSelectedPaymentMethod("stripe")}
+                          onClick={() => {
+                            setSelectedPaymentMethod("stripe");
+                            setBlikPhoneError("");
+                          }}
                           data-testid="payment-method-stripe"
                         >
                           <CreditCard className="w-5 h-5 text-primary" />
@@ -1386,16 +1426,49 @@ export default function ClientBookingPage() {
                           onClick={() => setSelectedPaymentMethod("blik")}
                           data-testid="payment-method-blik"
                         >
-                          <Wallet className="w-5 h-5 text-pink-600" />
+                          <Smartphone className="w-5 h-5 text-pink-600" />
                           <div>
-                            <p className="text-sm font-medium">BLIK</p>
-                            <p className="text-xs text-muted-foreground">Platnosc BLIK</p>
+                            <p className="text-sm font-medium">BLIK P2P</p>
+                            <p className="text-xs text-muted-foreground">Platnosc na telefon</p>
                           </div>
                           {selectedPaymentMethod === "blik" && (
                             <Check className="w-4 h-4 text-primary ml-auto" />
                           )}
                         </div>
                       </div>
+
+                      {/* Blik P2P phone number input */}
+                      {selectedPaymentMethod === "blik" && (
+                        <div className="mt-3 p-3 bg-pink-50 dark:bg-pink-900/20 rounded-lg border border-pink-200 dark:border-pink-800" data-testid="blik-phone-section">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Phone className="w-4 h-4 text-pink-600" />
+                            <p className="text-sm font-medium text-pink-800 dark:text-pink-300">Numer telefonu do platnosci BLIK</p>
+                          </div>
+                          <p className="text-xs text-pink-600 dark:text-pink-400 mb-2">
+                            Podaj numer telefonu, na ktory zostanie wyslane zadanie platnosci BLIK P2P.
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-pink-700 dark:text-pink-300 whitespace-nowrap">+48</span>
+                            <Input
+                              type="tel"
+                              placeholder="123 456 789"
+                              value={blikPhoneNumber}
+                              onChange={(e) => {
+                                setBlikPhoneNumber(e.target.value);
+                                setBlikPhoneError("");
+                              }}
+                              className={`flex-1 ${blikPhoneError ? "border-red-500" : ""}`}
+                              maxLength={15}
+                              data-testid="blik-phone-input"
+                            />
+                          </div>
+                          {blikPhoneError && (
+                            <p className="text-xs text-red-500 mt-1" data-testid="blik-phone-error">
+                              {blikPhoneError}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </>

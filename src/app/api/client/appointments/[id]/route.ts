@@ -114,6 +114,7 @@ export async function GET(
             amount: depositPayment.amount,
             currency: depositPayment.currency,
             paymentMethod: depositPayment.paymentMethod,
+            blikPhoneNumber: depositPayment.blikPhoneNumber || null,
             status: depositPayment.status,
             paidAt: depositPayment.paidAt,
           }
