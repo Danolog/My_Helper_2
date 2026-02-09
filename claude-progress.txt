@@ -1,5 +1,49 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-10 (Feature #100 - Reviews displayed on employee profile) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #100: Reviews displayed on employee profile
+- Category: Reviews
+- Status: PASSING
+
+### Changes Made
+1. **API Enhancement** (`src/app/api/salons/[id]/employees/[employeeId]/route.ts`):
+   - Added leftJoin with clients table to include reviewer names in recent reviews
+   - Added `clientName` field to response (format: "FirstName L." for privacy)
+   - Changed review ordering to `desc(reviews.createdAt)` for newest-first display
+   - Imported `clients` schema and `desc` from drizzle-orm
+
+2. **Frontend Update** (`src/app/(client)/salons/[id]/employees/[employeeId]/page.tsx`):
+   - Added `clientName` field to Review interface
+   - Updated review rendering to show reviewer name with User icon
+   - Added date display on the right side of each review
+   - Supports star-only reviews (no comment) and text-only reviews (no rating)
+   - Added data-testid attributes for testing
+
+3. **Test Data Script** (`scripts/setup-f100-employee-reviews.ts`):
+   - Creates 3 test clients with known names
+   - Creates 3 approved reviews (2 with comments, 1 star-only)
+
+### Verification (all 6 steps)
+1. ✅ Navigate to employee profile (public) - `/salons/.../employees/...`
+2. ✅ Reviews section visible - "Opinie (6)" with MessageSquare icon
+3. ✅ Individual reviews listed - 5 reviews displayed in list
+4. ✅ Rating shown per review - Star ratings (3★, 4★, 5★, 5★, 4★) visible
+5. ✅ Reviewer name shown - "Feature101 T.", "Test C.", "Client R.", "Katarzyna N.", "Jan K."
+6. ✅ Date shown - Polish format dates: "10.02.2026", "5.02.2026", "3.02.2026"
+
+### Quality Checks
+- Zero console errors
+- No mock/fake data patterns in src/
+- All data from PostgreSQL via Drizzle ORM
+- Screenshots: feature100-employee-profile-reviews.png, feature100-reviews-section.png
+
+### Stats
+- 68/253 features passing (26.9%)
+
+---
+
 ## Session: 2026-02-10 (Feature #98 - Approve review for publication) *** SUCCESS ***
 
 ### Feature Assigned
