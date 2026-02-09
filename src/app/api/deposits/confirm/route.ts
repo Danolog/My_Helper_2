@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { appointments, depositPayments } from "@/lib/schema";
+import { appointments, depositPayments, clients, services, employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { sendPaymentConfirmationSms } from "@/lib/sms";
 
 /**
  * POST /api/deposits/confirm
  *
  * Confirms a deposit payment and updates the appointment status.
+ * Sends SMS confirmation to the client with payment and appointment details.
  * In production, this would be called by Stripe webhook or after redirect from Stripe Checkout.
  * For development, this simulates the payment confirmation.
  */
@@ -66,12 +68,66 @@ export async function POST(request: Request) {
 
     console.log(`[Deposit API] Payment confirmed: ${depositPaymentId}, appointment: ${payment.appointmentId}`);
 
+    // Send SMS confirmation to client (async, don't block the response)
+    let smsSent = false;
+    try {
+      if (updatedAppointment && updatedAppointment.clientId) {
+        // Fetch client details
+        const [client] = await db
+          .select()
+          .from(clients)
+          .where(eq(clients.id, updatedAppointment.clientId));
+
+        // Fetch employee details
+        const [employee] = await db
+          .select()
+          .from(employees)
+          .where(eq(employees.id, updatedAppointment.employeeId));
+
+        // Fetch service details
+        let serviceName = "Wizyta";
+        if (updatedAppointment.serviceId) {
+          const [service] = await db
+            .select()
+            .from(services)
+            .where(eq(services.id, updatedAppointment.serviceId));
+          if (service) {
+            serviceName = service.name;
+          }
+        }
+
+        if (client && client.phone) {
+          const smsResult = await sendPaymentConfirmationSms({
+            clientPhone: client.phone,
+            clientName: `${client.firstName} ${client.lastName}`,
+            amount: parseFloat(updatedPayment!.amount),
+            currency: updatedPayment!.currency,
+            serviceName,
+            appointmentDate: updatedAppointment.startTime,
+            employeeName: employee
+              ? `${employee.firstName} ${employee.lastName}`
+              : "pracownik",
+            salonId: payment.salonId,
+            clientId: client.id,
+          });
+          smsSent = smsResult.success;
+          console.log(`[Deposit API] SMS confirmation ${smsSent ? "sent" : "failed"} for client ${client.id}`);
+        } else {
+          console.log(`[Deposit API] No phone number for client, skipping SMS`);
+        }
+      }
+    } catch (smsError) {
+      // SMS failure should not affect payment confirmation
+      console.error("[Deposit API] SMS notification error (non-blocking):", smsError);
+    }
+
     return NextResponse.json({
       success: true,
       data: {
         depositPayment: updatedPayment,
         appointment: updatedAppointment,
         message: "Platnosc zadatku potwierdzona",
+        smsSent,
       },
     });
   } catch (error) {
