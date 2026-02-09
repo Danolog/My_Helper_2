@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { galleryPhotos, employees, services } from "@/lib/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 
 // GET /api/gallery - List gallery photos
 export async function GET(request: Request) {
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
         .from(galleryPhotos)
         .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
         .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-        .where(eq(galleryPhotos.employeeId, employeeId))
+        .where(and(eq(galleryPhotos.salonId, salonId), eq(galleryPhotos.employeeId, employeeId)))
         .orderBy(desc(galleryPhotos.createdAt));
     } else {
       photos = await db

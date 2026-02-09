@@ -43,6 +43,14 @@ export default function CalendarPage() {
   // New appointment dialog state
   const [newAppointmentDialogOpen, setNewAppointmentDialogOpen] = useState(false);
 
+  // Schedule next appointment data (from complete dialog)
+  const [scheduleNextData, setScheduleNextData] = useState<{
+    clientId: string;
+    serviceId: string;
+    employeeId: string;
+    suggestedDate: string;
+  } | null>(null);
+
   // Cancel appointment dialog state
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelAppointmentId, setCancelAppointmentId] = useState<string | null>(null);
@@ -481,9 +489,20 @@ export default function CalendarPage() {
       {/* New appointment dialog */}
       <NewAppointmentDialog
         open={newAppointmentDialogOpen}
-        onOpenChange={setNewAppointmentDialogOpen}
-        onAppointmentCreated={fetchAppointments}
+        onOpenChange={(v) => {
+          setNewAppointmentDialogOpen(v);
+          if (!v) setScheduleNextData(null);
+        }}
+        onAppointmentCreated={() => {
+          fetchAppointments();
+          setScheduleNextData(null);
+        }}
         defaultDate={currentDate}
+        defaultClientId={scheduleNextData?.clientId}
+        defaultServiceId={scheduleNextData?.serviceId}
+        defaultEmployeeId={scheduleNextData?.employeeId || undefined}
+        defaultDateString={scheduleNextData?.suggestedDate}
+        title={scheduleNextData ? "Nastepna wizyta" : undefined}
       />
 
       {/* Cancel appointment dialog */}
@@ -508,6 +527,7 @@ export default function CalendarPage() {
               name: completeAppointment.service.name,
               basePrice: completeAppointment.service.basePrice,
               baseDuration: completeAppointment.service.baseDuration,
+              suggestedNextVisitDays: completeAppointment.service.suggestedNextVisitDays ?? null,
             } : null,
             employee: completeAppointment.employee ? {
               id: completeAppointment.employee.id,
@@ -523,7 +543,16 @@ export default function CalendarPage() {
           materials={completeMaterials}
           onCompleted={() => {
             fetchAppointments();
+          }}
+          onScheduleNext={(data) => {
+            setScheduleNextData({
+              clientId: data.clientId,
+              serviceId: data.serviceId,
+              employeeId: data.employeeId,
+              suggestedDate: data.suggestedDate,
+            });
             setCompleteAppointment(null);
+            setNewAppointmentDialogOpen(true);
           }}
         />
       )}

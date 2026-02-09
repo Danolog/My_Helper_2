@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Plus, X, Loader2, Pencil, Check } from "lucide-react";
+import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Plus, X, Loader2, Pencil, Check, Filter, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -70,6 +70,7 @@ export default function GalleryPage() {
   const [editProductsUsed, setEditProductsUsed] = useState("");
   const [editEmployeeId, setEditEmployeeId] = useState("");
   const [editServiceId, setEditServiceId] = useState("");
+  const [filterEmployeeId, setFilterEmployeeId] = useState<string>("");
 
   // Upload form state
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -84,9 +85,13 @@ export default function GalleryPage() {
   const afterInputRef = useRef<HTMLInputElement>(null);
   const beforeInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchPhotos = useCallback(async () => {
+  const fetchPhotos = useCallback(async (employeeFilter?: string) => {
     try {
-      const res = await fetch(`/api/gallery?salonId=${SALON_ID}`);
+      let url = `/api/gallery?salonId=${SALON_ID}`;
+      if (employeeFilter) {
+        url += `&employeeId=${employeeFilter}`;
+      }
+      const res = await fetch(url);
       const data = await res.json();
       if (data.success) {
         setPhotos(data.data);
@@ -127,6 +132,17 @@ export default function GalleryPage() {
     fetchEmployees();
     fetchServices();
   }, [fetchPhotos, fetchEmployees, fetchServices]);
+
+  // Refetch when employee filter changes
+  const handleFilterChange = (value: string) => {
+    setFilterEmployeeId(value);
+    setLoading(true);
+    if (value === "all") {
+      fetchPhotos();
+    } else {
+      fetchPhotos(value);
+    }
+  };
 
   const handleFileChange = (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -209,8 +225,8 @@ export default function GalleryPage() {
         setTechniques("");
         setProductsUsed("");
         setDialogOpen(false);
-        // Refresh photos
-        fetchPhotos();
+        // Refresh photos (respecting current filter)
+        fetchPhotos(filterEmployeeId && filterEmployeeId !== "all" ? filterEmployeeId : undefined);
       } else {
         alert("Blad przy dodawaniu zdjecia: " + data.error);
       }
@@ -510,6 +526,45 @@ export default function GalleryPage() {
             </div>
           </DialogContent>
         </Dialog>
+      </div>
+
+      {/* Employee filter bar */}
+      <div className="flex items-center gap-3 mb-6 p-3 bg-muted/50 rounded-lg">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Filter className="w-4 h-4" />
+          <span>Filtruj po pracowniku:</span>
+        </div>
+        <Select value={filterEmployeeId || "all"} onValueChange={handleFilterChange}>
+          <SelectTrigger className="w-[250px]">
+            <SelectValue placeholder="Wszyscy pracownicy" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">
+              <span className="flex items-center gap-2">
+                <Users className="w-4 h-4" />
+                Wszyscy pracownicy
+              </span>
+            </SelectItem>
+            {employees.map((emp) => (
+              <SelectItem key={emp.id} value={emp.id}>
+                {emp.firstName} {emp.lastName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {filterEmployeeId && filterEmployeeId !== "all" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => handleFilterChange("all")}
+          >
+            <X className="w-4 h-4 mr-1" />
+            Wyczysc filtr
+          </Button>
+        )}
+        <span className="text-xs text-muted-foreground ml-auto">
+          {photos.length} {photos.length === 1 ? "zdjecie" : "zdjec"}
+        </span>
       </div>
 
       {/* Gallery grid */}

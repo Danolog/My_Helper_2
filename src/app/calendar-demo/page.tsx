@@ -104,6 +104,7 @@ function generateDemoEvents(date: Date): CalendarEvent[] {
           description: null,
           basePrice: "100",
           baseDuration: durationMinutes,
+          suggestedNextVisitDays: null,
           isActive: true,
           createdAt: new Date(),
           updatedAt: new Date(),
