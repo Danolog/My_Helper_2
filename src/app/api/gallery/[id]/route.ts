@@ -196,6 +196,18 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
   try {
     const { id } = await params;
 
+    // Auth check - get current session
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required" },
+        { status: 401 }
+      );
+    }
+
     // Get photo first to find file path
     const [photo] = await db
       .select()
@@ -207,6 +219,40 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
         { success: false, error: "Photo not found" },
         { status: 404 }
       );
+    }
+
+    // Authorization: Check if user is owner of the salon
+    // Owners can delete any photo in their salon
+    // Non-owners (employees) can only delete photos assigned to their employee profile
+    const userRole = (session.user as Record<string, unknown>).role as string | undefined;
+    const isOwner = userRole === "owner" || userRole === "admin";
+
+    if (!isOwner) {
+      // Check if user is an employee linked to this photo
+      const [employeeRecord] = await db
+        .select()
+        .from(employees)
+        .where(
+          and(
+            eq(employees.userId, session.user.id),
+            eq(employees.salonId, photo.salonId)
+          )
+        );
+
+      if (!employeeRecord) {
+        return NextResponse.json(
+          { success: false, error: "You do not have permission to delete this photo" },
+          { status: 403 }
+        );
+      }
+
+      // Employee can only delete their own photos
+      if (photo.employeeId !== employeeRecord.id) {
+        return NextResponse.json(
+          { success: false, error: "You can only delete your own photos" },
+          { status: 403 }
+        );
+      }
     }
 
     // Delete from database
