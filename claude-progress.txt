@@ -1,5 +1,33 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-09 (Feature #87 - Tag photos with employee) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #87: "Tag photos with employee" (Gallery category)
+- Goal: Associate gallery photos with staff members (employee tagging)
+
+### What was accomplished:
+Feature #87 was already fully implemented in the codebase. Verification confirmed:
+1. **Upload form** has "Pracownik" (Employee) dropdown to select employee when adding photo
+2. **Edit form** has employee dropdown to change/add employee tag after upload
+3. **Employee filter bar** at top of gallery allows filtering photos by employee
+4. **Employee name display** shows on photo cards when tagged
+5. **API** supports `?employeeId=` query parameter for server-side filtering
+
+### Verification:
+- Uploaded a new photo with employee "Anna Kowalska" selected
+- Description: "Feature 87 test - photo tagged with employee Anna Kowalska"
+- Photo saved successfully, employee name displayed on gallery card
+- Page reload confirmed employee tag persists (database storage verified)
+- Employee filter tested: selected "Anna Kowalska" → showed only 1 photo (tagged one)
+- Untagged photo correctly filtered out
+- "Wyczysc filtr" (Clear filter) button appears when filter is active
+- Screenshots: feature87-upload-with-employee-tag.png, feature87-photo-saved-with-employee-tag.png, feature87-filter-by-employee.png
+
+### Stats: 54/253 passing (21.3%)
+
+---
+
 ## Session: 2026-02-09 (Feature #86 - Admin can delete gallery photos) *** SUCCESS ***
 
 ### Feature Assigned
@@ -7124,4 +7152,54 @@ Verification:
 - Browser automation screenshots taken
 
 Commit: 8f1acc1
+
+
+=== Session: Feature #67 - Available slots calculation ===
+Date: 2026-02-09
+Feature: #67 - Available slots calculation (Appointments)
+Status: PASSING
+
+Implementation (pre-existing, verified):
+- API: src/app/api/available-slots/route.ts - Calculates available booking slots
+  - Queries workSchedules for employee day-of-week availability
+  - Queries appointments (non-cancelled) to build blocked ranges
+  - Queries timeBlocks (vacations, breaks) to build blocked ranges
+  - Generates 15-minute interval slots within work hours
+  - Returns available slots, all slots, and blocked ranges with labels
+- UI: src/app/dashboard/booking/page.tsx - 5-step booking wizard
+  - Step 1: Client selection (or walk-in)
+  - Step 2: Service selection with price/duration
+  - Step 3: Employee selection (filtered by service assignment)
+  - Step 4: Date picker with day-of-week display
+  - Step 5: Time slot selection with work hours, blocked ranges, and available count badge
+
+Verification (browser automation):
+- Logged in as feature67@test.com, navigated to /dashboard/booking
+- Selected service "Strzyzenie damskie" (60 min, 80 PLN) and employee Anna Kowalska
+- Feb 16 (Monday): 10/29 available slots, 3 existing appointments correctly blocked
+  - Blocked: 09:00-09:45, 11:00-12:00, 13:00-14:30
+  - Screenshot: feature67-slots-with-appointments.png
+- Feb 15 (Sunday): Day off correctly detected - "Pracownik nie pracuje w tym dniu"
+  - Screenshot: feature67-day-off-sunday.png
+- Feb 11 (Wednesday): All slots blocked by vacation (Feb 10-14)
+  - Shows "00:00 - 24:00 (Urlop wypoczynkowy)"
+  - Screenshot: feature67-vacation-exclusion.png
+- Booked 15:45 slot -> available count dropped from 10 to 5
+  - New blocked range "15:45 - 16:45 (wizyta)" appeared
+  - 15:45, 15:00, 15:15, 15:30, 16:00 slots removed (overlapping 60-min appointment)
+  - Screenshot: feature67-slot-removed-after-booking.png
+- No mock/fake data patterns found - all data from PostgreSQL via Drizzle ORM
+
+All 9 verification steps passed:
+1. Start booking flow
+2. Select service
+3. Select employee
+4. View available slots
+5. Only free slots shown
+6. Blocked times excluded
+7. Existing appointments excluded
+8. Work schedule respected
+9. Breaks/vacations excluded
+
+Stats: 55/253 features passing (21.7%)
 
