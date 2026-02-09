@@ -1,5 +1,126 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-09 (Feature #94 - Client can submit review) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #94: "Client can submit review" (Reviews category)
+- Goal: Leave feedback after visit - star rating (1-5) + text comment, stored as pending for moderation
+
+### What was accomplished:
+1. **Review API endpoint** at `/api/client/appointments/[id]/review/route.ts`
+   - GET: Check if review exists for an appointment (verifies ownership via bookedByUserId)
+   - POST: Submit review with rating (1-5) and optional comment, validates appointment is completed, prevents duplicates, sets status="pending"
+2. **Reviews list API** at `/api/client/reviews/route.ts`
+   - GET: Lists all reviews by authenticated user with salon/employee/service context
+3. **Review UI on appointment detail page** (`/appointments/[id]/page.tsx`):
+   - Review section appears only for completed appointments
+   - Interactive star rating with hover effect and click selection
+   - Optional comment textarea
+   - Submit button disabled until rating is selected
+   - Toast notification on successful submission
+   - Existing review displayed with stars, comment, status badge, and date
+   - Status badges: "Oczekuje na moderacje" (pending), "Zatwierdzona" (approved), "Odrzucona" (rejected)
+
+### Verification (browser automation):
+- Registered test user review94@test.com
+- Created completed appointment via script
+- Navigated to /appointments → Historia tab → saw completed appointment
+- Appointment detail page shows "Opinia" section with "Wystaw opinie" button
+- Clicked button → review form appeared with star rating and textarea
+- Selected 4/5 stars → "4/5" indicator displayed
+- Typed comment "Swietna obsluga i profesjonalny manicure! Polecam kazdemu."
+- Clicked "Wyslij opinie" → toast: "Opinia zostala dodana!" + "Dziekujemy za Twoja opinie. Opinia oczekuje na moderacje."
+- Review displayed with 4/5 stars, comment text, "Oczekuje na moderacje" badge
+- Page reload: review persists from database (GET endpoint confirms)
+- Zero console errors throughout
+
+### Files created/modified:
+- NEW: `src/app/api/client/appointments/[id]/review/route.ts`
+- NEW: `src/app/api/client/reviews/route.ts`
+- MODIFIED: `src/app/(client)/appointments/[id]/page.tsx` (added review section)
+- NEW: `scripts/setup-review-test.ts` (test helper)
+
+---
+
+## Session: 2026-02-09 (Feature #93 - Client gallery browsing) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #93: "Client gallery browsing" (Gallery category)
+- Goal: Clients view public gallery - browse photos, filter by category, view before/after, see descriptions
+
+### What was accomplished:
+1. **Public gallery API** at `/api/salons/[id]/gallery/route.ts` - no auth required, supports filtering by employeeId, serviceId, pairsOnly
+2. **Client gallery page** at `/salons/[id]/gallery/page.tsx` with photo grid, filter dropdowns, and lightbox
+3. **ComparisonSlider** for before/after comparison (drag/touch slider), replicated from admin gallery
+4. **Side-by-side mode** toggle in lightbox for alternative viewing
+5. **PhotoLightbox component** with keyboard navigation (Escape, ArrowLeft, ArrowRight), photo counter
+6. **Service filter** dropdown populated from actual gallery data
+7. **Employee filter** dropdown populated from actual gallery data
+8. **"Przed / Po" toggle** to show only paired before/after photos
+9. **"Wyczysc filtry" button** appears when filters are active
+10. **Gallery section on salon detail page** with "Zobacz pelna galerie" link
+11. Privacy: `showProductsToClients` flag respected - products hidden when false
+12. Fully responsive design with mobile-first approach
+
+### Verification (browser automation):
+- Gallery page loads at `/salons/[id]/gallery` showing 8 photos with "Beauty Studio Demo" salon name
+- Filter dropdowns show available employees and services
+- "Przed / Po" badges on before/after pairs
+- Lightbox opens with ComparisonSlider showing draggable before/after comparison
+- Side-by-side toggle works, showing photos next to each other
+- Description, techniques, products, duration, date all visible in lightbox
+- Service filter (Strzyzenie damskie) correctly filters to 1 photo
+- "Wyczysc filtry" (clear filters) button appears when filters are active
+- Gallery link on salon detail page: "Zobacz pelna galerie" button with correct href
+- 0 console errors, no mock/hardcoded data
+
+### Files created:
+- `src/app/(client)/salons/[id]/gallery/page.tsx` - Full client gallery with lightbox, filters, ComparisonSlider
+- `src/app/api/salons/[id]/gallery/route.ts` - Public gallery API endpoint (no auth)
+
+### Files modified:
+- `src/app/(client)/salons/[id]/page.tsx` - Added gallery section with "Zobacz pelna galerie" link
+
+### Committed as: 9762fd5
+
+---
+
+## Session: 2026-02-09 (Feature #89 - Before and after photos) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #89: "Before and after photos" (Gallery category)
+- Goal: Upload paired before/after comparison photos with slider view
+
+### What was accomplished:
+1. **Enhanced upload dialog** with separate "PRZED" (Before, orange) and "PO" (After, green) upload zones
+2. **Before-only and after-only uploads** supported - users can add one photo now and link the match later
+3. **Link matching photo** button on single photos ("Dodaj zdjecie 'przed'/'po'") opens linking dialog
+4. **ComparisonSlider component** - interactive drag/touch slider for before/after photo comparison
+5. **Side-by-side view** toggle alternative to slider comparison
+6. **"Tylko pary" filter** shows only paired before/after photos
+7. **Color-coded badges**: "Przed / Po" (blue), "Przed" (orange), "Po" (green)
+8. **Split preview** in gallery grid for paired photos showing both thumbnails
+9. **PATCH API** enhanced to support beforePhotoUrl/afterPhotoUrl for linking photos
+10. **Duration field** added to upload and edit forms
+11. TypeScript compiles cleanly (no errors in feature code)
+12. No mock data in source files
+
+### Verification (browser automation):
+- Created 3 test entries via API: before-only, after-only, and before+after pair
+- Gallery shows correct badges (Przed, Po, Przed/Po) for each type
+- "Tylko pary" filter correctly shows only 1 paired photo (from 6 total)
+- Clicked pair card -> ComparisonSlider dialog opens with PRZED/PO labels and slider handle
+- Toggled to "Obok siebie" (Side by side) view -> shows photos side by side with colored headers
+- PATCH authorization correctly prevents unauthorized edits (403 response)
+
+### Files modified:
+- `src/app/dashboard/gallery/page.tsx` - Major enhancement with ComparisonSlider, before/after upload zones, linking dialog, pairs filter
+- `src/app/api/gallery/[id]/route.ts` - PATCH endpoint supports beforePhotoUrl/afterPhotoUrl fields
+
+### Committed as: 411b9ed
+
+---
+
 ## Session: 2026-02-09 (Feature #88 - Tag photos with service) *** SUCCESS ***
 
 ### Feature Assigned
@@ -7223,4 +7344,42 @@ All 9 verification steps passed:
 9. Breaks/vacations excluded
 
 Stats: 55/253 features passing (21.7%)
+
+
+=== Session: Feature #95 - Star-only review allowed ===
+Date: 2026-02-09
+Feature: #95 - Star-only review allowed (Reviews)
+Status: PASSING
+
+Implementation (pre-existing, verified):
+- API: src/app/api/client/appointments/[id]/review/route.ts
+  - POST accepts rating (1-5 integer) + optional comment
+  - Line 145: `comment: comment || null` - accepts null/empty comment
+  - GET checks for existing review on appointment
+- UI: src/app/(client)/appointments/[id]/page.tsx
+  - Star rating UI with hover effects (5 clickable stars)
+  - Line 875: Label "Komentarz (opcjonalnie)" - clearly optional
+  - Line 903: Submit disabled only when reviewRating === 0
+  - Lines 788-792: Comment section only renders if existingReview.comment exists
+- Schema: src/lib/schema.ts reviews table - comment field is nullable text
+
+Verification (browser automation):
+- Registered user review95@test.com
+- Created completed appointment via setup script
+- Navigated to /appointments/bf25823c-42a5-496f-9c26-29e930548364
+- Opened review form, selected 4 stars, left comment empty
+- Submitted -> toast "Opinia zostala dodana!" with moderation message
+- Review displayed: 4/5 stars, "Oczekuje na moderacje" badge, no comment section
+- Page refresh confirmed database persistence
+- Zero console errors
+- No mock/fake data patterns found
+
+Screenshots:
+- feature95-appointment-detail.png
+- feature95-star-only-form.png
+- feature95-star-only-submitted.png
+
+Commit: 00269aa
+
+Stats: 62/253 features passing (24.5%)
 
