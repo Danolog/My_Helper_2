@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { galleryPhotos, employees, services } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { unlink } from "fs/promises";
 import path from "path";
+import { headers } from "next/headers";
+import { auth } from "@/lib/auth";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -49,6 +51,141 @@ export async function GET(_request: Request, { params }: RouteParams) {
     console.error("[Gallery API] Error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to fetch photo" },
+      { status: 500 }
+    );
+  }
+}
+
+// PATCH /api/gallery/[id] - Update a gallery photo
+export async function PATCH(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+
+    // Auth check - get current session
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required" },
+        { status: 401 }
+      );
+    }
+
+    // Get the photo to verify it exists
+    const [photo] = await db
+      .select()
+      .from(galleryPhotos)
+      .where(eq(galleryPhotos.id, id));
+
+    if (!photo) {
+      return NextResponse.json(
+        { success: false, error: "Photo not found" },
+        { status: 404 }
+      );
+    }
+
+    // Authorization: Check if user is owner of the salon
+    // Owners can edit any photo in their salon
+    // Non-owners (employees) can only edit photos assigned to their employee profile
+    const userRole = (session.user as Record<string, unknown>).role as string | undefined;
+    const isOwner = userRole === "owner" || userRole === "admin";
+
+    if (!isOwner) {
+      // Check if user is an employee linked to this photo
+      const [employeeRecord] = await db
+        .select()
+        .from(employees)
+        .where(
+          and(
+            eq(employees.userId, session.user.id),
+            eq(employees.salonId, photo.salonId)
+          )
+        );
+
+      if (!employeeRecord) {
+        return NextResponse.json(
+          { success: false, error: "You do not have permission to edit this photo" },
+          { status: 403 }
+        );
+      }
+
+      // Employee can only edit their own photos
+      if (photo.employeeId !== employeeRecord.id) {
+        return NextResponse.json(
+          { success: false, error: "You can only edit your own photos" },
+          { status: 403 }
+        );
+      }
+    }
+
+    const body = await request.json();
+    const {
+      description,
+      techniques,
+      productsUsed,
+      employeeId,
+      serviceId,
+      duration,
+    } = body;
+
+    // Build update object - only include fields that were sent
+    const updateData: Record<string, unknown> = {};
+    if (description !== undefined) updateData.description = description || null;
+    if (techniques !== undefined) updateData.techniques = techniques || null;
+    if (productsUsed !== undefined) updateData.productsUsed = productsUsed || null;
+    if (employeeId !== undefined) updateData.employeeId = employeeId || null;
+    if (serviceId !== undefined) updateData.serviceId = serviceId || null;
+    if (duration !== undefined)
+      updateData.duration = duration ? parseInt(String(duration), 10) : null;
+
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json(
+        { success: false, error: "No fields to update" },
+        { status: 400 }
+      );
+    }
+
+    await db
+      .update(galleryPhotos)
+      .set(updateData)
+      .where(eq(galleryPhotos.id, id))
+      .returning();
+
+    // Fetch with joins for the response
+    const [fullPhoto] = await db
+      .select({
+        id: galleryPhotos.id,
+        salonId: galleryPhotos.salonId,
+        employeeId: galleryPhotos.employeeId,
+        serviceId: galleryPhotos.serviceId,
+        beforePhotoUrl: galleryPhotos.beforePhotoUrl,
+        afterPhotoUrl: galleryPhotos.afterPhotoUrl,
+        description: galleryPhotos.description,
+        productsUsed: galleryPhotos.productsUsed,
+        techniques: galleryPhotos.techniques,
+        duration: galleryPhotos.duration,
+        createdAt: galleryPhotos.createdAt,
+        employeeFirstName: employees.firstName,
+        employeeLastName: employees.lastName,
+        serviceName: services.name,
+      })
+      .from(galleryPhotos)
+      .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
+      .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
+      .where(eq(galleryPhotos.id, id));
+
+    console.log(`[Gallery API] Updated photo: ${id}`);
+
+    return NextResponse.json({
+      success: true,
+      data: fullPhoto,
+    });
+  } catch (error) {
+    console.error("[Gallery API] Error updating photo:", error);
+    return NextResponse.json(
+      { success: false, error: "Failed to update photo" },
       { status: 500 }
     );
   }
