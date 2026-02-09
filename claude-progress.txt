@@ -1,5 +1,40 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-09 (Feature #84 - Employee can add photos) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #84: "Employee can add photos" (Gallery category)
+- Goal: Staff uploads portfolio images via gallery page
+
+### What was accomplished:
+1. Created Gallery API routes:
+   - `/api/gallery/upload` (POST) - File upload with FormData, validates type (JPEG/PNG/WebP/GIF) and size (max 10MB), generates UUID filename, creates thumbnail copy
+   - `/api/gallery` (GET) - List photos with LEFT JOIN on employees and services, filtered by salonId and optional employeeId
+   - `/api/gallery` (POST) - Create gallery entry with salonId, employeeId, serviceId, photo URLs, description, techniques, products
+   - `/api/gallery/[id]` (GET) - Single photo with employee/service joins
+   - `/api/gallery/[id]` (DELETE) - Remove DB entry and delete files from disk
+2. Created Gallery dashboard page (`/dashboard/gallery/page.tsx`):
+   - Photo grid (4 columns responsive) with thumbnails
+   - Upload dialog with file picker, employee/service dropdowns, description/techniques/products fields
+   - Photo detail dialog with before/after comparison
+   - Delete confirmation with file cleanup
+   - Empty state with "Galeria jest pusta" message
+3. Updated dashboard page with Galeria card (Image icon, link to /dashboard/gallery)
+4. Files stored in `public/uploads/gallery/` with thumbnails in `public/uploads/gallery/thumbs/`
+
+### Verification:
+- TypeScript compilation: PASSED (zero errors)
+- Browser test: Logged in, navigated to gallery, verified empty state, upload dialog opens
+- API test: Uploaded test image via Node.js script, created gallery entry with employee/service
+- Gallery page: Photo appeared in grid with correct employee name, service name, description, date
+- Mock data check: No globalThis/devStore/mockDb patterns found
+- Hardcoded salon ID follows same pattern as all other dashboard pages (DEMO_SALON_ID)
+- Test data cleaned up, test scripts removed
+
+### Git: Committed as `feat: add gallery page with photo upload for employee portfolio (Feature #84)`
+
+---
+
 ## Session: 2026-02-09 (Feature #83 - SMS payment confirmation) *** SUCCESS ***
 
 ### Feature Assigned
