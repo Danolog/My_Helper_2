@@ -128,6 +128,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       employeeId,
       serviceId,
       duration,
+      beforePhotoUrl,
+      afterPhotoUrl,
     } = body;
 
     // Build update object - only include fields that were sent
@@ -139,6 +141,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     if (serviceId !== undefined) updateData.serviceId = serviceId || null;
     if (duration !== undefined)
       updateData.duration = duration ? parseInt(String(duration), 10) : null;
+    if (beforePhotoUrl !== undefined) updateData.beforePhotoUrl = beforePhotoUrl || null;
+    if (afterPhotoUrl !== undefined) updateData.afterPhotoUrl = afterPhotoUrl || null;
 
     if (Object.keys(updateData).length === 0) {
       return NextResponse.json(
