@@ -478,7 +478,7 @@ export const reviews = pgTable(
     clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
     employeeId: uuid("employee_id").references(() => employees.id, { onDelete: "set null" }),
     appointmentId: uuid("appointment_id").references(() => appointments.id, { onDelete: "set null" }),
-    rating: integer("rating").notNull(), // 1-5
+    rating: integer("rating"), // 1-5, null for text-only reviews
     comment: text("comment"),
     status: text("status").default("pending").notNull(), // 'pending', 'approved', 'rejected'
     createdAt: timestamp("created_at").defaultNow().notNull(),
