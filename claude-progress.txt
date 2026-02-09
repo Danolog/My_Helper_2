@@ -1,5 +1,37 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-09 (Feature #86 - Admin can delete gallery photos) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #86: "Admin can delete gallery photos" (Gallery category)
+- Goal: Owner can delete any gallery photo with confirmation dialog
+
+### What was accomplished:
+1. Added auth and authorization to DELETE endpoint in `/api/gallery/[id]/route.ts`:
+   - Session check via Better Auth (returns 401 if unauthenticated)
+   - Role-based authorization: owners/admins can delete any photo in salon
+   - Non-owners can only delete photos assigned to their own profile (403 otherwise)
+   - Modeled after existing PATCH endpoint auth pattern
+2. Delete UI already existed from Feature #84:
+   - Trash icon overlay on gallery grid cards
+   - Confirmation dialog ("Potwierdz usuniecie") with cancel/delete buttons
+   - File deletion from disk + database row removal
+
+### Verification:
+- Mock data grep checks: PASSED (no mock/fake/stub patterns found)
+- Browser test: Logged in as owner, navigated to gallery
+- Uploaded test photo ("DELETE_TEST_86") via API
+- Clicked delete button, confirmed in dialog
+- Photo removed from UI immediately
+- Photo file removed from disk (public/uploads/gallery/)
+- Photo removed from database (0 rows matching DELETE_TEST_86)
+- Page refresh confirmed deletion persists
+
+### Commit:
+- `d370ef9` feat: add auth to gallery photo DELETE endpoint (Feature #86)
+
+---
+
 ## Session: 2026-02-09 (Feature #85 - Admin can edit gallery photos) *** SUCCESS ***
 
 ### Feature Assigned
