@@ -1,5 +1,35 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-10 (Feature #96 - Text-only review allowed) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #96: "Text-only review allowed" (Reviews category)
+- Goal: Submit comment without stars - verify text-only review (no star rating) works end-to-end
+
+### What was accomplished:
+- Verified existing implementation supports text-only reviews (no code changes needed)
+- API: `rating: hasRating ? rating : null` at line 155 of review route
+- UI: Submit enabled when `reviewRating === 0 && reviewComment.trim().length > 0`
+- UI: Shows "Tylko komentarz (bez oceny)" with MessageSquare icon when no rating
+
+### Verification (browser automation):
+1. Registered test user f96textreview@test.com
+2. Created completed appointment cee1ebf2-83a2-4772-bedf-dcbd1e7e7aa4 via setup script
+3. Navigated to appointment detail → clicked "Wystaw opinie"
+4. Review form opened with "Ocena (opcjonalnie)" and "Komentarz (opcjonalnie)"
+5. Submit button disabled with empty form ✓
+6. Typed text comment WITHOUT selecting any stars
+7. Submit button became enabled ✓
+8. Clicked "Wyslij opinie" → success toast "Opinia zostala dodana!"
+9. Review displayed with "Tylko komentarz (bez oceny)" and comment text ✓
+10. Full page refresh → review persists from database ✓
+11. Database check: Rating=null, Comment present, Status=pending ✓
+12. No mock data in review code (grep clean) ✓
+
+### Progress: 64/253 (25.3%)
+
+---
+
 ## Session: 2026-02-09 (Feature #94 - Client can submit review) *** SUCCESS ***
 
 ### Feature Assigned
