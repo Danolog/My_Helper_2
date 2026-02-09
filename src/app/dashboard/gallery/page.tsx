@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Plus, X, Loader2 } from "lucide-react";
+import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Plus, X, Loader2, Pencil, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,6 +63,13 @@ export default function GalleryPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState<GalleryPhoto | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [editingPhoto, setEditingPhoto] = useState<GalleryPhoto | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editDescription, setEditDescription] = useState("");
+  const [editTechniques, setEditTechniques] = useState("");
+  const [editProductsUsed, setEditProductsUsed] = useState("");
+  const [editEmployeeId, setEditEmployeeId] = useState("");
+  const [editServiceId, setEditServiceId] = useState("");
 
   // Upload form state
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -226,6 +233,51 @@ export default function GalleryPage() {
       }
     } catch (error) {
       console.error("Delete error:", error);
+    }
+  };
+
+  const openEditDialog = (photo: GalleryPhoto) => {
+    setEditingPhoto(photo);
+    setEditDescription(photo.description || "");
+    setEditTechniques(photo.techniques || "");
+    setEditProductsUsed(photo.productsUsed || "");
+    setEditEmployeeId(photo.employeeId || "");
+    setEditServiceId(photo.serviceId || "");
+    setSelectedPhoto(null); // Close detail dialog
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingPhoto) return;
+    setEditSaving(true);
+
+    try {
+      const res = await fetch(`/api/gallery/${editingPhoto.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description: editDescription,
+          techniques: editTechniques,
+          productsUsed: editProductsUsed,
+          employeeId: editEmployeeId && editEmployeeId !== "none" ? editEmployeeId : null,
+          serviceId: editServiceId && editServiceId !== "none" ? editServiceId : null,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        // Update photo in local state
+        setPhotos((prev) =>
+          prev.map((p) => (p.id === editingPhoto.id ? data.data : p))
+        );
+        setEditingPhoto(null);
+      } else {
+        alert("Blad przy zapisie: " + data.error);
+      }
+    } catch (error) {
+      console.error("Edit error:", error);
+      alert("Blad przy zapisywaniu zmian");
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -531,16 +583,29 @@ export default function GalleryPage() {
                 </p>
               </div>
 
-              {/* Delete button overlay */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setDeleteConfirm(photo.id);
-                }}
-                className="absolute top-2 right-2 bg-red-500/80 text-white p-1.5 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              {/* Action button overlays */}
+              <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEditDialog(photo);
+                  }}
+                  className="bg-blue-500/80 text-white p-1.5 rounded hover:bg-blue-600/90 transition-colors"
+                  title="Edytuj zdjecie"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteConfirm(photo.id);
+                  }}
+                  className="bg-red-500/80 text-white p-1.5 rounded hover:bg-red-600/90 transition-colors"
+                  title="Usun zdjecie"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -624,6 +689,14 @@ export default function GalleryPage() {
 
               <div className="flex gap-2 justify-end">
                 <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openEditDialog(selectedPhoto)}
+                >
+                  <Pencil className="w-4 h-4 mr-2" />
+                  Edytuj
+                </Button>
+                <Button
                   variant="destructive"
                   size="sm"
                   onClick={() => {
@@ -632,6 +705,113 @@ export default function GalleryPage() {
                 >
                   <Trash2 className="w-4 h-4 mr-2" />
                   Usun zdjecie
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Edit photo dialog */}
+      {editingPhoto && (
+        <Dialog open={!!editingPhoto} onOpenChange={() => setEditingPhoto(null)}>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Edytuj zdjecie</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 mt-4">
+              {/* Photo preview */}
+              <div className="rounded-lg overflow-hidden border">
+                <img
+                  src={editingPhoto.afterPhotoUrl || editingPhoto.beforePhotoUrl || ""}
+                  alt="Edytowane zdjecie"
+                  className="w-full h-40 object-cover"
+                />
+              </div>
+
+              {/* Description */}
+              <div>
+                <Label className="mb-2 block">Opis</Label>
+                <Textarea
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder="Opis zabiegu, efektu..."
+                  rows={2}
+                />
+              </div>
+
+              {/* Techniques */}
+              <div>
+                <Label className="mb-2 block">Techniki</Label>
+                <Input
+                  value={editTechniques}
+                  onChange={(e) => setEditTechniques(e.target.value)}
+                  placeholder="Uzyte techniki"
+                />
+              </div>
+
+              {/* Products used */}
+              <div>
+                <Label className="mb-2 block">Uzyte produkty</Label>
+                <Input
+                  value={editProductsUsed}
+                  onChange={(e) => setEditProductsUsed(e.target.value)}
+                  placeholder="Produkty uzyte podczas zabiegu"
+                />
+              </div>
+
+              {/* Employee selection */}
+              <div>
+                <Label className="mb-2 block">Pracownik</Label>
+                <Select value={editEmployeeId} onValueChange={setEditEmployeeId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Wybierz pracownika" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Brak</SelectItem>
+                    {employees.map((emp) => (
+                      <SelectItem key={emp.id} value={emp.id}>
+                        {emp.firstName} {emp.lastName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Service selection */}
+              <div>
+                <Label className="mb-2 block">Usluga</Label>
+                <Select value={editServiceId} onValueChange={setEditServiceId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Wybierz usluge" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Brak</SelectItem>
+                    {services.map((svc) => (
+                      <SelectItem key={svc.id} value={svc.id}>
+                        {svc.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setEditingPhoto(null)}>
+                  Anuluj
+                </Button>
+                <Button onClick={handleSaveEdit} disabled={editSaving}>
+                  {editSaving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Zapisywanie...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 mr-2" />
+                      Zapisz zmiany
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
