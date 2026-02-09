@@ -36,6 +36,7 @@ export interface Service {
   description: string | null;
   basePrice: string;
   baseDuration: number;
+  suggestedNextVisitDays: number | null;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;

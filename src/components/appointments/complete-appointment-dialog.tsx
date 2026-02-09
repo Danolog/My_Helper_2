@@ -21,6 +21,8 @@ import {
   Package,
   DollarSign,
   ClipboardList,
+  CalendarPlus,
+  CalendarClock,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -43,6 +45,7 @@ interface AppointmentData {
     name: string;
     basePrice: string;
     baseDuration: number;
+    suggestedNextVisitDays?: number | null;
   } | null;
   employee: {
     id: string;
@@ -56,12 +59,22 @@ interface AppointmentData {
   } | null;
 }
 
+interface ScheduleNextData {
+  clientId: string;
+  clientName: string;
+  serviceId: string;
+  serviceName: string;
+  employeeId: string;
+  suggestedDate: string; // YYYY-MM-DD
+}
+
 interface CompleteAppointmentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   appointment: AppointmentData;
   materials: MaterialRecord[];
   onCompleted: () => void;
+  onScheduleNext?: (data: ScheduleNextData) => void;
 }
 
 export function CompleteAppointmentDialog({
@@ -70,12 +83,14 @@ export function CompleteAppointmentDialog({
   appointment,
   materials,
   onCompleted,
+  onScheduleNext,
 }: CompleteAppointmentDialogProps) {
   const [recipe, setRecipe] = useState("");
   const [techniques, setTechniques] = useState("");
   const [notes, setNotes] = useState("");
   const [commissionPercentage, setCommissionPercentage] = useState("50");
   const [completing, setCompleting] = useState(false);
+  const [completedSuccessfully, setCompletedSuccessfully] = useState(false);
 
   // Calculate material cost
   const totalMaterialCost = materials.reduce((sum, m) => {
@@ -94,6 +109,28 @@ export function CompleteAppointmentDialog({
     : 0;
   const commPct = parseFloat(commissionPercentage) || 0;
   const commissionAmount = (servicePrice * commPct) / 100;
+
+  // Calculate suggested next visit date
+  const getSuggestedDate = (): string => {
+    const days = appointment.service?.suggestedNextVisitDays;
+    const suggestedDays = days && days > 0 ? days : 30; // Default 30 days
+    const nextDate = new Date();
+    nextDate.setDate(nextDate.getDate() + suggestedDays);
+    const yyyy = nextDate.getFullYear();
+    const mm = String(nextDate.getMonth() + 1).padStart(2, "0");
+    const dd = String(nextDate.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const getSuggestedDaysLabel = (): string => {
+    const days = appointment.service?.suggestedNextVisitDays;
+    const suggestedDays = days && days > 0 ? days : 30;
+    if (suggestedDays % 7 === 0) {
+      const weeks = suggestedDays / 7;
+      return weeks === 1 ? "1 tydzien" : `${weeks} tygodni`;
+    }
+    return `${suggestedDays} dni`;
+  };
 
   const handleComplete = async () => {
     setCompleting(true);
@@ -115,7 +152,7 @@ export function CompleteAppointmentDialog({
       const data = await res.json();
       if (data.success) {
         toast.success("Wizyta zakonczona pomyslnie");
-        onOpenChange(false);
+        setCompletedSuccessfully(true);
         onCompleted();
       } else {
         toast.error(data.error || "Nie udalo sie zakonczyc wizyty");
@@ -127,6 +164,151 @@ export function CompleteAppointmentDialog({
       setCompleting(false);
     }
   };
+
+  const handleScheduleNext = () => {
+    if (!onScheduleNext) return;
+
+    const data: ScheduleNextData = {
+      clientId: appointment.client?.id || "",
+      clientName: appointment.client
+        ? `${appointment.client.firstName} ${appointment.client.lastName}`
+        : "",
+      serviceId: appointment.service?.id || "",
+      serviceName: appointment.service?.name || "",
+      employeeId: appointment.employeeId,
+      suggestedDate: getSuggestedDate(),
+    };
+
+    onOpenChange(false);
+    // Reset state after closing
+    setTimeout(() => {
+      setCompletedSuccessfully(false);
+      setRecipe("");
+      setTechniques("");
+      setNotes("");
+      setCommissionPercentage("50");
+    }, 300);
+
+    onScheduleNext(data);
+  };
+
+  const handleClose = () => {
+    onOpenChange(false);
+    // Reset state after closing
+    setTimeout(() => {
+      setCompletedSuccessfully(false);
+      setRecipe("");
+      setTechniques("");
+      setNotes("");
+      setCommissionPercentage("50");
+    }, 300);
+  };
+
+  // Show success state with "Schedule Next" prompt
+  if (completedSuccessfully) {
+    return (
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent
+          className="max-w-md"
+          data-testid="complete-appointment-dialog"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              Wizyta zakonczona
+            </DialogTitle>
+            <DialogDescription>
+              Wizyta zostala pomyslnie zakonczona
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Summary of completed appointment */}
+            <div className="rounded-lg border p-4 bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800">
+              <div className="flex items-center gap-2 text-sm mb-2">
+                <Scissors className="h-4 w-4 text-green-700 dark:text-green-400" />
+                <span className="font-medium text-green-800 dark:text-green-300">
+                  {appointment.service?.name || "Wizyta"}
+                </span>
+              </div>
+              {appointment.client && (
+                <p className="text-sm text-green-700 dark:text-green-400">
+                  Klient: {appointment.client.firstName} {appointment.client.lastName}
+                </p>
+              )}
+              {appointment.employee && (
+                <p className="text-sm text-green-700 dark:text-green-400">
+                  Pracownik: {appointment.employee.firstName} {appointment.employee.lastName}
+                </p>
+              )}
+            </div>
+
+            <Separator />
+
+            {/* Schedule next appointment prompt */}
+            <div className="space-y-3" data-testid="schedule-next-prompt">
+              <div className="flex items-center gap-2">
+                <CalendarClock className="h-5 w-5 text-primary" />
+                <h3 className="font-semibold">Umow nastepna wizyte?</h3>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Sugerowany termin nastepnej wizyty: za{" "}
+                <span className="font-medium text-foreground">
+                  {getSuggestedDaysLabel()}
+                </span>{" "}
+                ({new Date(getSuggestedDate()).toLocaleDateString("pl-PL", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                })})
+              </p>
+
+              {appointment.client && appointment.service && (
+                <div className="rounded-lg border p-3 bg-muted/30 text-sm space-y-1">
+                  <p>
+                    <span className="text-muted-foreground">Klient:</span>{" "}
+                    <span className="font-medium">
+                      {appointment.client.firstName} {appointment.client.lastName}
+                    </span>
+                  </p>
+                  <p>
+                    <span className="text-muted-foreground">Usluga:</span>{" "}
+                    <span className="font-medium">{appointment.service.name}</span>
+                  </p>
+                  {appointment.employee && (
+                    <p>
+                      <span className="text-muted-foreground">Pracownik:</span>{" "}
+                      <span className="font-medium">
+                        {appointment.employee.firstName} {appointment.employee.lastName}
+                      </span>
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="mt-4 flex gap-2">
+            <Button
+              variant="outline"
+              onClick={handleClose}
+              data-testid="skip-schedule-next-btn"
+            >
+              Nie teraz
+            </Button>
+            <Button
+              onClick={handleScheduleNext}
+              disabled={!onScheduleNext}
+              data-testid="schedule-next-btn"
+            >
+              <CalendarPlus className="h-4 w-4 mr-2" />
+              Umow nastepna wizyte
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

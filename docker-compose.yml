@@ -2,7 +2,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg18
     environment:
-      POSTGRES_DB: postgres_dev
+      POSTGRES_DB: pos_dev
       POSTGRES_USER: dev_user
       POSTGRES_PASSWORD: dev_password
     ports:

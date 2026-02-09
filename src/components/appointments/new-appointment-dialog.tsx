@@ -61,9 +61,17 @@ interface NewAppointmentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAppointmentCreated: () => void;
-  defaultDate?: Date;
-  defaultEmployeeId?: string;
-  defaultTime?: string;
+  defaultDate?: Date | undefined;
+  defaultEmployeeId?: string | undefined;
+  defaultTime?: string | undefined;
+  /** Pre-fill client for follow-up scheduling */
+  defaultClientId?: string | undefined;
+  /** Pre-fill service for follow-up scheduling */
+  defaultServiceId?: string | undefined;
+  /** Pre-fill date string (YYYY-MM-DD) for follow-up scheduling */
+  defaultDateString?: string | undefined;
+  /** Title override for follow-up mode */
+  title?: string | undefined;
 }
 
 export function NewAppointmentDialog({
@@ -73,6 +81,10 @@ export function NewAppointmentDialog({
   defaultDate,
   defaultEmployeeId,
   defaultTime,
+  defaultClientId,
+  defaultServiceId,
+  defaultDateString,
+  title,
 }: NewAppointmentDialogProps) {
   // Form state
   const [selectedClientId, setSelectedClientId] = useState("");
@@ -102,15 +114,22 @@ export function NewAppointmentDialog({
   // Set default date when dialog opens
   useEffect(() => {
     if (open) {
-      const dateToUse = defaultDate || new Date();
-      const yyyy = dateToUse.getFullYear();
-      const mm = String(dateToUse.getMonth() + 1).padStart(2, "0");
-      const dd = String(dateToUse.getDate()).padStart(2, "0");
-      setAppointmentDate(`${yyyy}-${mm}-${dd}`);
+      // Use defaultDateString (YYYY-MM-DD) if provided (e.g., from schedule-next flow)
+      if (defaultDateString) {
+        setAppointmentDate(defaultDateString);
+      } else {
+        const dateToUse = defaultDate || new Date();
+        const yyyy = dateToUse.getFullYear();
+        const mm = String(dateToUse.getMonth() + 1).padStart(2, "0");
+        const dd = String(dateToUse.getDate()).padStart(2, "0");
+        setAppointmentDate(`${yyyy}-${mm}-${dd}`);
+      }
       if (defaultTime) setAppointmentTime(defaultTime);
       if (defaultEmployeeId) setSelectedEmployeeId(defaultEmployeeId);
+      if (defaultClientId) setSelectedClientId(defaultClientId);
+      if (defaultServiceId) setSelectedServiceId(defaultServiceId);
     }
-  }, [open, defaultDate, defaultTime, defaultEmployeeId]);
+  }, [open, defaultDate, defaultTime, defaultEmployeeId, defaultClientId, defaultServiceId, defaultDateString]);
 
   // Fetch clients
   const fetchClients = useCallback(async () => {
@@ -312,7 +331,7 @@ export function NewAppointmentDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CalendarPlus className="h-5 w-5 text-primary" />
-            Nowa wizyta
+            {title || "Nowa wizyta"}
           </DialogTitle>
         </DialogHeader>
 
