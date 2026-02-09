@@ -26,6 +26,9 @@ import {
   DollarSign,
   RefreshCw,
   XCircle,
+  Star,
+  MessageSquare,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +46,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
 
@@ -88,6 +92,14 @@ interface AppointmentDetail {
   createdAt: string;
   treatment: TreatmentInfo | null;
   depositPayment: DepositPaymentInfo | null;
+}
+
+interface ReviewInfo {
+  id: string;
+  rating: number;
+  comment: string | null;
+  status: string; // 'pending', 'approved', 'rejected'
+  createdAt: string;
 }
 
 interface CancelInfo {
@@ -226,6 +238,15 @@ export default function AppointmentDetailPage() {
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
+  // Review state
+  const [existingReview, setExistingReview] = useState<ReviewInfo | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewHoverRating, setReviewHoverRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
+
   const fetchAppointment = useCallback(async () => {
     try {
       const res = await fetch(`/api/client/appointments/${appointmentId}`);
@@ -243,6 +264,60 @@ export default function AppointmentDetailPage() {
     }
   }, [appointmentId]);
 
+  // Fetch existing review for this appointment
+  const fetchReview = useCallback(async () => {
+    setReviewLoading(true);
+    try {
+      const res = await fetch(`/api/client/appointments/${appointmentId}/review`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setExistingReview(json.data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch review:", err);
+    } finally {
+      setReviewLoading(false);
+    }
+  }, [appointmentId]);
+
+  // Submit review
+  const handleSubmitReview = async () => {
+    if (reviewRating === 0) {
+      toast.error("Wybierz ocene od 1 do 5 gwiazdek");
+      return;
+    }
+    setSubmittingReview(true);
+    try {
+      const res = await fetch(`/api/client/appointments/${appointmentId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rating: reviewRating,
+          comment: reviewComment.trim() || null,
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast.success("Opinia zostala dodana!", {
+          description: "Dziekujemy za Twoja opinie. Opinia oczekuje na moderacje.",
+        });
+        setExistingReview(json.data);
+        setShowReviewForm(false);
+        setReviewRating(0);
+        setReviewComment("");
+      } else {
+        toast.error("Nie udalo sie dodac opinii", {
+          description: json.error,
+        });
+      }
+    } catch (err) {
+      console.error("Failed to submit review:", err);
+      toast.error("Blad podczas dodawania opinii");
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
   useEffect(() => {
     if (!isPending && !session) {
       router.push("/login");
@@ -252,6 +327,13 @@ export default function AppointmentDetailPage() {
       fetchAppointment();
     }
   }, [session, isPending, router, fetchAppointment]);
+
+  // Fetch review once appointment is loaded and is completed
+  useEffect(() => {
+    if (appointment?.status === "completed") {
+      fetchReview();
+    }
+  }, [appointment?.status, fetchReview]);
 
   // Fetch cancellation info when dialog opens
   const fetchCancelInfo = useCallback(async () => {
@@ -664,6 +746,178 @@ export default function AppointmentDetailPage() {
           </CardHeader>
           <CardContent>
             <p className="text-sm">{appointment.notes}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Review section - only for completed appointments */}
+      {appointment.status === "completed" && (
+        <Card className="mb-4" data-testid="review-section-card">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Star className="w-5 h-5 text-primary" />
+              Opinia
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {reviewLoading && (
+              <div className="flex justify-center items-center py-6">
+                <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+
+            {/* Existing review display */}
+            {!reviewLoading && existingReview && (
+              <div className="space-y-3" data-testid="existing-review">
+                <div className="flex items-center gap-1" data-testid="review-stars-display">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <Star
+                      key={star}
+                      className={`w-5 h-5 ${
+                        star <= existingReview.rating
+                          ? "fill-yellow-400 text-yellow-400"
+                          : "text-gray-300 dark:text-gray-600"
+                      }`}
+                    />
+                  ))}
+                  <span className="text-sm font-medium ml-2">
+                    {existingReview.rating}/5
+                  </span>
+                </div>
+
+                {existingReview.comment && (
+                  <div className="p-3 rounded-md bg-muted/50 border" data-testid="review-comment-display">
+                    <p className="text-sm">{existingReview.comment}</p>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <Badge
+                    variant="outline"
+                    className={
+                      existingReview.status === "pending"
+                        ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700"
+                        : existingReview.status === "approved"
+                        ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700"
+                        : "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700"
+                    }
+                    data-testid="review-status-badge"
+                  >
+                    {existingReview.status === "pending" && "Oczekuje na moderacje"}
+                    {existingReview.status === "approved" && "Zatwierdzona"}
+                    {existingReview.status === "rejected" && "Odrzucona"}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(existingReview.createdAt).toLocaleDateString("pl-PL")}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Leave Review button */}
+            {!reviewLoading && !existingReview && !showReviewForm && (
+              <div className="text-center py-4">
+                <p className="text-sm text-muted-foreground mb-3">
+                  Podziel sie swoimi wrazeniami z wizyty
+                </p>
+                <Button
+                  onClick={() => setShowReviewForm(true)}
+                  data-testid="leave-review-btn"
+                >
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  Wystaw opinie
+                </Button>
+              </div>
+            )}
+
+            {/* Review form */}
+            {!reviewLoading && !existingReview && showReviewForm && (
+              <div className="space-y-4" data-testid="review-form">
+                {/* Star rating input */}
+                <div>
+                  <label className="text-sm font-medium mb-2 block">
+                    Ocena
+                  </label>
+                  <div
+                    className="flex items-center gap-1"
+                    data-testid="star-rating-input"
+                  >
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setReviewRating(star)}
+                        onMouseEnter={() => setReviewHoverRating(star)}
+                        onMouseLeave={() => setReviewHoverRating(0)}
+                        className="p-0.5 transition-transform hover:scale-110"
+                        data-testid={`star-${star}`}
+                      >
+                        <Star
+                          className={`w-8 h-8 transition-colors ${
+                            star <= (reviewHoverRating || reviewRating)
+                              ? "fill-yellow-400 text-yellow-400"
+                              : "text-gray-300 dark:text-gray-600"
+                          }`}
+                        />
+                      </button>
+                    ))}
+                    {reviewRating > 0 && (
+                      <span className="text-sm font-medium ml-2" data-testid="rating-label">
+                        {reviewRating}/5
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Comment textarea */}
+                <div>
+                  <label className="text-sm font-medium mb-2 block">
+                    Komentarz (opcjonalnie)
+                  </label>
+                  <Textarea
+                    placeholder="Opisz swoje wrazenia z wizyty..."
+                    value={reviewComment}
+                    onChange={(e) => setReviewComment(e.target.value)}
+                    rows={4}
+                    className="resize-none"
+                    data-testid="review-comment-input"
+                  />
+                </div>
+
+                {/* Submit buttons */}
+                <div className="flex gap-2 justify-end">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowReviewForm(false);
+                      setReviewRating(0);
+                      setReviewComment("");
+                    }}
+                    disabled={submittingReview}
+                    data-testid="cancel-review-btn"
+                  >
+                    Anuluj
+                  </Button>
+                  <Button
+                    onClick={handleSubmitReview}
+                    disabled={submittingReview || reviewRating === 0}
+                    data-testid="submit-review-btn"
+                  >
+                    {submittingReview ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Wysylanie...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4 mr-2" />
+                        Wyslij opinie
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
