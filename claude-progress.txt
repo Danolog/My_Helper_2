@@ -1,5 +1,45 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-09 (Feature #82 - Payment history visible) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #82: "Payment history visible" (Payments category)
+- Description: View all transactions
+
+### What was accomplished:
+1. Claimed feature #82 - payment history page and API already existed from previous sessions
+2. Started dev server, verified database connection (PostgreSQL healthy)
+3. Navigated to /dashboard/payments via browser automation
+4. Verified all 5 real transactions displayed in table with correct columns:
+   - Date (formatted Polish locale: dd.mm.yyyy, hh:mm)
+   - Description (service name + client name)
+   - Type badge (Zadatek)
+   - Payment method (Karta / Stripe, BLIK P2P)
+   - Amount in PLN (with - prefix for refunds)
+   - Status badge (Zaplacono, Zwrocone, Przepadly)
+5. Summary cards verified: Razem oplacone 175.00 PLN, Zwroty 50.00 PLN, Transakcje 5
+6. Tested status filter: Selected "Zwrocone" → only 1 refunded transaction shown, summary updated
+7. Tested date range filter: Set both dates to Feb 8 → only 1 transaction from that day shown
+8. Type filter available: Zadatki/Subskrypcje options in dropdown
+9. Clear filters button works correctly
+10. Mock data grep: zero hits in payments source code
+11. Console errors: 0 errors
+
+### Verification Screenshots:
+- feature82-payment-history-full.png - Full page with all 5 transactions
+- feature82-status-filter-refunded.png - Filtered to show only refunded transactions
+- feature82-date-range-filter.png - Date range filter showing only Feb 8 transactions
+
+### Feature Status:
+- Feature #82: PASSED - Payment history visible with all required fields and filters
+
+### Current Stats:
+- 49/253 features passing (19.4%)
+
+### Commit: dcaeb0c
+
+---
+
 ## Session: 2026-02-09 (Feature #80 - Automatic refund for early cancellation) *** SUCCESS ***
 
 ### Feature Assigned
