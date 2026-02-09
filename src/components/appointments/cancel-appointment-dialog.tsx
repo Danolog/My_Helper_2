@@ -125,7 +125,9 @@ export function CancelAppointmentDialog({
         const details = data.cancellationDetails;
         let description = "Wizyta zostala pomyslnie anulowana.";
 
-        if (details?.depositRefunded) {
+        if (details?.depositRefunded && details?.refund?.processed) {
+          description += ` Zwrot zadatku ${details.refund.amount?.toFixed(2) || details.depositAmount.toFixed(2)} PLN zostal zainicjowany automatycznie.`;
+        } else if (details?.depositRefunded) {
           description += ` Zadatek ${details.depositAmount.toFixed(2)} PLN do zwrotu.`;
         } else if (details?.depositForfeited) {
           description += ` Zadatek ${details.depositAmount.toFixed(2)} PLN zostaje zatrzymany.`;

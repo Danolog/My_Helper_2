@@ -879,8 +879,11 @@ export const depositPayments = pgTable(
     paymentMethod: text("payment_method").notNull(), // 'stripe', 'blik'
     blikPhoneNumber: text("blik_phone_number"), // Phone number for Blik P2P payments
     stripePaymentIntentId: text("stripe_payment_intent_id"),
+    stripeRefundId: text("stripe_refund_id"), // Stripe refund ID when refund is processed
     status: text("status").default("pending").notNull(), // 'pending', 'succeeded', 'failed', 'refunded'
     paidAt: timestamp("paid_at"),
+    refundedAt: timestamp("refunded_at"), // When refund was processed
+    refundReason: text("refund_reason"), // Why the refund was issued
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [

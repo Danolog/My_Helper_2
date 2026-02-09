@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointments, clients, employees, services, notifications } from "@/lib/schema";
 import { eq, and, not, or, lte, gte } from "drizzle-orm";
+import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
 
 // GET /api/appointments/[id] - Get a single appointment
 export async function GET(
@@ -229,6 +230,30 @@ export async function DELETE(
       notifyClient,
     });
 
+    // Process automatic refund if eligible (24h+ before appointment, deposit paid)
+    let refundResult = null;
+    if (depositRefunded) {
+      refundResult = await processAutomaticRefund(
+        id,
+        "Anulacja wizyty przez personel - wiecej niz 24h przed terminem"
+      );
+      console.log(`[Appointments API] Refund result for appointment ${id}:`, refundResult);
+
+      // Create refund notification for client
+      if (refundResult.refunded && row.client) {
+        const clientName = `${row.client.firstName} ${row.client.lastName}`;
+        const serviceName = row.service?.name || "Wizyta";
+        await createRefundNotification(
+          appointment.salonId,
+          row.client.id,
+          refundResult.amount || 0,
+          clientName,
+          serviceName,
+          startTime
+        );
+      }
+    }
+
     // Create notification record if client exists and notification requested
     if (notifyClient && row.client) {
       const clientName = `${row.client.firstName} ${row.client.lastName}`;
@@ -244,7 +269,7 @@ export async function DELETE(
 
       let notificationMessage = `Szanowny/a ${clientName}, Twoja wizyta "${serviceName}" zaplanowana na ${formattedDate} zostala anulowana.`;
 
-      if (depositRefunded) {
+      if (depositRefunded && refundResult?.refunded) {
         notificationMessage += ` Zadatek w kwocie ${parseFloat(appointment.depositAmount!).toFixed(2)} PLN zostanie zwrocony.`;
       } else if (depositForfeited) {
         notificationMessage += ` Zadatek w kwocie ${parseFloat(appointment.depositAmount!).toFixed(2)} PLN nie podlega zwrotowi (anulacja mniej niz 24h przed wizyta).`;
@@ -278,6 +303,12 @@ export async function DELETE(
         depositRefunded,
         depositForfeited,
         clientNotified: notifyClient && !!row.client,
+        refund: refundResult ? {
+          processed: refundResult.refunded,
+          refundId: refundResult.refundId,
+          amount: refundResult.amount,
+          message: refundResult.message,
+        } : null,
       },
     });
   } catch (error) {

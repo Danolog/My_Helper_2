@@ -1,5 +1,76 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-09 (Feature #80 - Automatic refund for early cancellation) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #80: "Automatic refund for early cancellation"
+- Description: Refund deposit if cancelled 24h+ before appointment time
+
+### What was accomplished:
+1. **Schema changes** (`src/lib/schema.ts`):
+   - Added `stripeRefundId` (text), `refundedAt` (timestamp), `refundReason` (text) to depositPayments table
+   - Pushed schema with drizzle-kit
+
+2. **Refund utility** (`src/lib/refund.ts` - NEW):
+   - `processAutomaticRefund()`: Finds succeeded deposit payment, attempts Stripe refund if stripePaymentIntentId exists, falls back to manual refund marking, updates deposit_payments and appointment records
+   - `createRefundNotification()`: Creates SMS notification about refund for client
+
+3. **API updates**:
+   - `src/app/api/appointments/[id]/route.ts` DELETE: Calls processAutomaticRefund when deposit is eligible for refund (>24h before appointment), creates refund notification
+   - `src/app/api/client/appointments/[id]/cancel/route.ts` POST: Same refund logic for client-side cancellation
+   - `src/app/api/appointments/[id]/refund-status/route.ts` (NEW): GET endpoint returning refund status, amount, method, dates
+
+4. **UI updates**:
+   - Cancel appointment dialog: Shows refund amount in success toast when refund is processed
+   - Appointment detail page: Added "Status zwrotu zadatku" card showing refund/forfeit status with amount, payment method, refund date, refund ID, and reason
+
+### Verification:
+- API tests: Created appointment with 50 PLN deposit (>24h away), cancelled → refund processed automatically. Created appointment with 30 PLN deposit (<24h away), cancelled → deposit forfeited
+- Browser automation: Navigated to refunded appointment detail page, verified "Zwrot zrealizowany" card with correct amount (50.00 PLN), payment method, refund date, and reason
+- TypeScript check: zero errors
+- No mock/test data in production code (grep clean: globalThis, devStore, mockData)
+
+---
+
+## Session: 2026-02-09 (Feature #78 - Deposit amount configuration per client) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #78: "Deposit amount configuration per client"
+- Description: Set deposit requirements per client (percentage or fixed amount)
+
+### What was accomplished:
+1. **Schema changes** (`src/lib/schema.ts`):
+   - Added `requireDeposit` (boolean, default false), `depositType` (text, default "percentage"), `depositValue` (numeric 10,2) to clients table
+   - Pushed schema with drizzle-kit
+
+2. **API updates**:
+   - `src/app/api/clients/route.ts` POST: Accepts new deposit fields on client creation
+   - `src/app/api/clients/[id]/route.ts` PUT: Accepts new deposit fields on client update
+   - `src/app/api/clients/deposit-settings/route.ts` (NEW): GET endpoint for booking page lookup by salonId+email
+
+3. **Client profile UI** (`src/app/dashboard/clients/[id]/page.tsx`):
+   - Added "Ustawienia zadatku" (Deposit Settings) card with:
+     - Toggle (Tak/Nie) for requiring deposit
+     - Deposit type selector (percentage/fixed)
+     - Deposit value input with appropriate labels/units
+     - Preview calculation for percentage type
+     - Info banner showing deposit summary
+   - Settings save/load with persistence verified
+
+4. **Booking flow integration** (`src/app/(client)/salons/[id]/book/page.tsx`):
+   - Added useEffect to fetch client deposit settings via email+salonId
+   - Merged deposit calculation: client-level settings take priority over service-level
+   - Supports both percentage and fixed amount deposit types
+
+### Verification:
+- Browser automation: navigated to client profile, set deposit to 30%, saved, refreshed, verified persistence
+- API tests: GET client returns correct deposit fields, deposit-settings endpoint works for found/not-found cases
+- TypeScript check: zero errors
+- No mock/test data in production code
+- Commit: eb573ef
+
+---
+
 ## Session: 2026-02-08 (Feature #76 - Client can cancel appointment) *** SUCCESS ***
 
 ### Feature Assigned
@@ -6832,4 +6903,28 @@ Summary: Verified existing appointment creation flow end-to-end via browser auto
 - Data persists after full page refresh (PostgreSQL storage confirmed)
 - No mock data found in code
 - API endpoints: POST /api/appointments with conflict detection, GET with date/salon/employee filters
+
+
+
+=== Session: Feature #77 - Stripe integration configured ===
+Date: 2026-02-09 00:18
+Feature: #77 - Stripe integration configured (Payments)
+Status: PASSING
+
+Implementation:
+- Installed Stripe SDK v20.3.1
+- Created src/lib/stripe.ts - Stripe client singleton with connection testing (getStripe, isStripeConfigured, testStripeConnection)
+- Created src/app/api/stripe/status/route.ts - GET endpoint returning Stripe connection status
+- Created src/app/dashboard/settings/payments/page.tsx - Payment settings page with connection status, config checklist, and setup instructions
+- Updated src/app/dashboard/page.tsx - Added Platnosci (Payments) card to dashboard
+
+Verification:
+- API endpoint returns correct status (configured: true, connected: false with test keys)
+- Payment settings page renders all configuration items with proper badges
+- Dashboard shows Payments card with navigation link
+- TypeScript typecheck passes with zero errors
+- No mock/fake data patterns in implementation
+- Browser automation screenshots taken
+
+Commit: 8f1acc1
 

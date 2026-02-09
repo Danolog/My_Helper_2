@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { appointments, employees, services, salons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { processAutomaticRefund } from "@/lib/refund";
 
 // GET /api/client/appointments/[id]/cancel - Get cancellation policy info for client
 export async function GET(
@@ -223,6 +224,16 @@ export async function POST(
       depositForfeited,
     });
 
+    // Process automatic refund if eligible (24h+ before appointment, deposit paid)
+    let refundResult = null;
+    if (depositRefunded) {
+      refundResult = await processAutomaticRefund(
+        id,
+        "Anulacja wizyty przez klienta - wiecej niz 24h przed terminem"
+      );
+      console.log(`[Client Cancel API] Refund result for appointment ${id}:`, refundResult);
+    }
+
     return NextResponse.json({
       success: true,
       data: cancelledAppointment,
@@ -235,6 +246,12 @@ export async function POST(
         depositAmount: appointment.depositAmount ? parseFloat(appointment.depositAmount) : 0,
         depositRefunded,
         depositForfeited,
+        refund: refundResult ? {
+          processed: refundResult.refunded,
+          refundId: refundResult.refundId,
+          amount: refundResult.amount,
+          message: refundResult.message,
+        } : null,
       },
     });
   } catch (error) {
