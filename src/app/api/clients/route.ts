@@ -107,7 +107,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { salonId, firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId } = body;
+    const { salonId, firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
 
     if (!salonId || !firstName || !lastName) {
       return NextResponse.json(
@@ -129,6 +129,9 @@ export async function POST(request: Request) {
         preferences: preferences || null,
         allergies: allergies || null,
         favoriteEmployeeId: favoriteEmployeeId || null,
+        requireDeposit: requireDeposit || false,
+        depositType: depositType || "percentage",
+        depositValue: depositValue || null,
       })
       .returning();
 

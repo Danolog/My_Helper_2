@@ -122,6 +122,9 @@ export const clients = pgTable(
     preferences: text("preferences"),
     allergies: text("allergies"),
     favoriteEmployeeId: text("favorite_employee_id"),
+    requireDeposit: boolean("require_deposit").default(false),
+    depositType: text("deposit_type").default("percentage"), // 'percentage' or 'fixed'
+    depositValue: numeric("deposit_value", { precision: 10, scale: 2 }), // percentage value or fixed amount in PLN
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
