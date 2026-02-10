@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, MessageSquare, RefreshCw, Filter } from "lucide-react";
 import Link from "next/link";
+import { PushNotificationManager } from "@/components/push-notification-manager";
 
 interface Notification {
   id: string;
@@ -165,6 +166,11 @@ export default function NotificationsPage() {
           <RefreshCw className="w-4 h-4 mr-1" />
           Odswiez
         </Button>
+      </div>
+
+      {/* Push Notification Settings */}
+      <div className="mb-6">
+        <PushNotificationManager />
       </div>
 
       {/* Filters */}

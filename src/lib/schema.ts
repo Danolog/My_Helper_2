@@ -236,6 +236,8 @@ export const appointments = pgTable(
     depositPaid: boolean("deposit_paid").default(false),
     reminderSentAt: timestamp("reminder_sent_at"), // When the 24h SMS reminder was sent
     reminder1hSentAt: timestamp("reminder_1h_sent_at"), // When the 1h SMS reminder was sent
+    reminderPushSentAt: timestamp("reminder_push_sent_at"), // When the 24h push notification was sent
+    reminderPush1hSentAt: timestamp("reminder_push_1h_sent_at"), // When the 1h push notification was sent
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
@@ -893,5 +895,29 @@ export const depositPayments = pgTable(
     index("deposit_payments_appointment_id_idx").on(table.appointmentId),
     index("deposit_payments_salon_id_idx").on(table.salonId),
     index("deposit_payments_status_idx").on(table.status),
+  ]
+);
+
+// Push notification subscriptions
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(), // Public key for encryption
+    auth: text("auth").notNull(), // Auth secret for encryption
+    userAgent: text("user_agent"), // Browser user agent for identification
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("push_subscriptions_user_id_idx").on(table.userId),
+    index("push_subscriptions_endpoint_idx").on(table.endpoint),
   ]
 );
