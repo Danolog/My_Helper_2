@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { appointments, clients, employees, services, notifications, depositPayments } from "@/lib/schema";
+import { appointments, clients, employees, services, notifications, depositPayments, salons } from "@/lib/schema";
 import { eq, and, not, or, lte, gte } from "drizzle-orm";
 import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
+import { notifyWaitingList } from "@/lib/waiting-list";
 
 // GET /api/appointments/[id] - Get a single appointment
 export async function GET(
@@ -305,6 +306,44 @@ export async function DELETE(
         console.error("[Appointments API] Failed to create notification:", notifError);
         // Don't fail the cancellation if notification creation fails
       }
+    }
+
+    // Notify waiting list entries about the freed slot
+    try {
+      // Get salon name for notification
+      const [salon] = await db
+        .select()
+        .from(salons)
+        .where(eq(salons.id, appointment.salonId))
+        .limit(1);
+
+      const salonName = salon?.name || "Salon";
+      const serviceName = row.service?.name || "Wizyta";
+      const employeeName = row.employee
+        ? `${row.employee.firstName} ${row.employee.lastName}`
+        : "Pracownik";
+
+      const waitingListResult = await notifyWaitingList({
+        salonId: appointment.salonId,
+        serviceId: appointment.serviceId,
+        employeeId: appointment.employeeId,
+        startTime,
+        endTime: new Date(appointment.endTime),
+        serviceName,
+        employeeName,
+        salonName,
+      });
+
+      console.log(
+        `[Appointments API] Waiting list notification result:`,
+        waitingListResult
+      );
+    } catch (waitingListError) {
+      console.error(
+        "[Appointments API] Failed to notify waiting list:",
+        waitingListError
+      );
+      // Don't fail the cancellation if waiting list notification fails
     }
 
     return NextResponse.json({

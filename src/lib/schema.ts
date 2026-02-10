@@ -533,6 +533,14 @@ export const waitingList = pgTable(
     preferredDate: timestamp("preferred_date"),
     notifiedAt: timestamp("notified_at"),
     accepted: boolean("accepted"),
+    // Offered slot details (filled when notification is sent)
+    offeredStartTime: timestamp("offered_start_time"),
+    offeredEndTime: timestamp("offered_end_time"),
+    offeredEmployeeId: uuid("offered_employee_id").references(() => employees.id, { onDelete: "set null" }),
+    // Link to the client's existing appointment that would be moved
+    existingAppointmentId: uuid("existing_appointment_id").references(() => appointments.id, { onDelete: "set null" }),
+    // Acceptance token for secure accept/decline links
+    acceptToken: text("accept_token"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
