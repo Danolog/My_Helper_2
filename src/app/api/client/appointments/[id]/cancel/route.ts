@@ -5,6 +5,7 @@ import { appointments, employees, services, salons, depositPayments } from "@/li
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { processAutomaticRefund } from "@/lib/refund";
+import { notifyWaitingList } from "@/lib/waiting-list";
 
 // GET /api/client/appointments/[id]/cancel - Get cancellation policy info for client
 export async function GET(
@@ -143,9 +144,13 @@ export async function POST(
       .select({
         appointment: appointments,
         service: services,
+        employee: employees,
+        salon: salons,
       })
       .from(appointments)
       .leftJoin(services, eq(appointments.serviceId, services.id))
+      .leftJoin(employees, eq(appointments.employeeId, employees.id))
+      .leftJoin(salons, eq(appointments.salonId, salons.id))
       .where(
         and(
           eq(appointments.id, id),
@@ -248,6 +253,37 @@ export async function POST(
       } catch (forfeitError) {
         console.error("[Client Cancel API] Failed to mark deposit as forfeited:", forfeitError);
       }
+    }
+
+    // Notify waiting list entries about the freed slot
+    try {
+      const salonName = row.salon?.name || "Salon";
+      const serviceName = row.service?.name || "Wizyta";
+      const employeeName = row.employee
+        ? `${row.employee.firstName} ${row.employee.lastName}`
+        : "Pracownik";
+
+      const waitingListResult = await notifyWaitingList({
+        salonId: appointment.salonId,
+        serviceId: appointment.serviceId,
+        employeeId: appointment.employeeId,
+        startTime,
+        endTime: new Date(appointment.endTime),
+        serviceName,
+        employeeName,
+        salonName,
+      });
+
+      console.log(
+        `[Client Cancel API] Waiting list notification result:`,
+        waitingListResult
+      );
+    } catch (waitingListError) {
+      console.error(
+        "[Client Cancel API] Failed to notify waiting list:",
+        waitingListError
+      );
+      // Don't fail the cancellation if waiting list notification fails
     }
 
     return NextResponse.json({

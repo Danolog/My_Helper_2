@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star } from "lucide-react";
+import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
 import { useDiagnostics } from "@/hooks/use-diagnostics";
@@ -186,6 +186,19 @@ export default function DashboardPage() {
           </p>
           <Button asChild>
             <Link href="/dashboard/reviews">Moderacja opinii</Link>
+          </Button>
+        </div>
+
+        <div className="p-6 border border-border rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <Clock className="w-5 h-5 text-primary" />
+            <h2 className="text-xl font-semibold">Lista oczekujacych</h2>
+          </div>
+          <p className="text-muted-foreground mb-4">
+            Zarzadzaj lista klientow oczekujacych na wolne terminy
+          </p>
+          <Button asChild>
+            <Link href="/dashboard/waiting-list">Lista oczekujacych</Link>
           </Button>
         </div>
 
