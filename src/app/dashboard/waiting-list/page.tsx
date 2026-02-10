@@ -49,28 +49,17 @@ interface WaitingListEntry {
   id: string;
   salonId: string;
   clientId: string;
+  clientName: string | null;
+  clientPhone: string | null;
+  clientEmail: string | null;
   serviceId: string | null;
+  serviceName: string | null;
   preferredEmployeeId: string | null;
+  preferredEmployeeName: string | null;
   preferredDate: string | null;
   notifiedAt: string | null;
   accepted: boolean | null;
   createdAt: string;
-  client: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    phone: string | null;
-    email: string | null;
-  } | null;
-  service: {
-    id: string;
-    name: string;
-  } | null;
-  preferredEmployee: {
-    id: string;
-    firstName: string;
-    lastName: string;
-  } | null;
 }
 
 interface ClientOption {
@@ -360,9 +349,7 @@ export default function WaitingListPage() {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base font-medium flex items-center gap-2">
                     <User className="w-4 h-4" />
-                    {entry.client
-                      ? `${entry.client.firstName} ${entry.client.lastName}`
-                      : "Nieznany klient"}
+                    {entry.clientName || "Nieznany klient"}
                   </CardTitle>
                   <div className="flex items-center gap-2">
                     {getStatusBadge(entry)}
@@ -379,18 +366,16 @@ export default function WaitingListPage() {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                  {entry.service && (
+                  {entry.serviceName && (
                     <div className="flex items-center gap-1.5 text-muted-foreground">
                       <Scissors className="w-3.5 h-3.5" />
-                      <span>{entry.service.name}</span>
+                      <span>{entry.serviceName}</span>
                     </div>
                   )}
-                  {entry.preferredEmployee && (
+                  {entry.preferredEmployeeName && (
                     <div className="flex items-center gap-1.5 text-muted-foreground">
                       <Users className="w-3.5 h-3.5" />
-                      <span>
-                        {entry.preferredEmployee.firstName} {entry.preferredEmployee.lastName}
-                      </span>
+                      <span>{entry.preferredEmployeeName}</span>
                     </div>
                   )}
                   {entry.preferredDate && (
@@ -404,10 +389,10 @@ export default function WaitingListPage() {
                     <span>Dodano: {formatDate(entry.createdAt)}</span>
                   </div>
                 </div>
-                {entry.client?.phone && (
+                {entry.clientPhone && (
                   <div className="mt-2 text-xs text-muted-foreground">
-                    Tel: {entry.client.phone}
-                    {entry.client.email && ` | Email: ${entry.client.email}`}
+                    Tel: {entry.clientPhone}
+                    {entry.clientEmail && ` | Email: ${entry.clientEmail}`}
                   </div>
                 )}
                 {entry.notifiedAt && (
