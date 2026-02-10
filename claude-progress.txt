@@ -1,5 +1,62 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-10 (Feature #105 - Push notification 1h before appointment) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #105: "Push notification 1h before" (Notifications category)
+- Steps: Register push subscription, Create appointment in 1 hour, Wait for trigger, Verify push received, Verify timing correct
+
+### What was accomplished:
+1. Installed `web-push` npm package for server-side Web Push API
+2. Generated VAPID keys and added to `.env`
+3. Added `pushSubscriptions` table to schema (userId, endpoint, p256dh, auth, userAgent)
+4. Added `reminderPushSentAt` and `reminderPush1hSentAt` fields to appointments table
+5. Created `src/lib/push.ts` - Core push notification library:
+   - `sendPushNotification(userId, msg)` - Sends to all user devices, saves to notifications DB
+   - `sendAppointmentReminderPush(params)` - 1h reminder with Polish text
+   - `sendAppointmentReminder24hPush(params)` - 24h reminder with Polish text
+   - Handles expired subscriptions (410/404 cleanup)
+6. Created `public/sw.js` - Service worker for push events:
+   - Shows notifications with vibrate, requireInteraction, action buttons
+   - Click handler opens appointment URL
+7. Created push API endpoints:
+   - POST/GET `/api/push/subscribe` - Register/check push subscriptions
+   - POST `/api/push/unsubscribe` - Remove subscriptions
+   - POST `/api/push/test` - Send test notification
+8. Created `/api/cron/push-reminders` endpoint:
+   - POST: Finds appointments in 30-90 min window, sends push to users with subscriptions
+   - GET: Status endpoint showing pending reminders
+   - Uses `reminderPush1hSentAt` for idempotency
+   - Optional CRON_SECRET authentication
+9. Created `src/components/push-notification-manager.tsx` - Client UI:
+   - Shows push status (enabled/disabled, device count)
+   - Enable/Disable/Test buttons
+   - Integrated into `/dashboard/notifications` page
+10. Also created `/api/cron/push-reminders-24h` for 24h push reminders
+
+### Verification:
+- Cron triggered: found 1 appointment, correctly identified user ✓
+- "No push subscriptions" reported when user hasn't enabled push ✓
+- Idempotency: second trigger found 0 appointments (already marked) ✓
+- UI: PushNotificationManager renders on notifications page ✓
+- UI: "Push" filter option in type dropdown works ✓
+- Service worker accessible at /sw.js ✓
+- Zero TypeScript errors in src/ ✓
+- All endpoints return proper JSON responses ✓
+
+### Files changed (17 files, 1852 lines):
+- package.json, pnpm-lock.yaml (web-push dependency)
+- src/lib/schema.ts (pushSubscriptions table + reminder fields)
+- src/lib/push.ts, src/lib/web-push.ts, src/lib/env.ts
+- public/sw.js
+- src/app/api/push/subscribe/route.ts, unsubscribe/route.ts, test/route.ts
+- src/app/api/cron/push-reminders/route.ts, push-reminders-24h/route.ts
+- src/components/push-notification-manager.tsx
+- src/app/dashboard/notifications/page.tsx
+- scripts/setup-f105-push-reminder.ts, setup-f104-push-24h.ts, generate-vapid-keys.js
+
+---
+
 ## Session: 2026-02-10 (Feature #103 - SMS reminder 1h before appointment) *** SUCCESS ***
 
 ### Feature Assigned
