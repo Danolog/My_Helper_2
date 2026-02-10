@@ -76,7 +76,7 @@ export async function POST(request: Request) {
       appointmentId: string;
       clientName: string;
       success: boolean;
-      error?: string;
+      error?: string | undefined;
     }> = [];
 
     for (const appt of upcomingAppointments) {
