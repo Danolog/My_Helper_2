@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, MessageSquare, RefreshCw, Filter } from "lucide-react";
+import { ArrowLeft, MessageSquare, RefreshCw, Filter, Cake, Gift, Send, Settings } from "lucide-react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { PushNotificationManager } from "@/components/push-notification-manager";
 
@@ -19,6 +20,15 @@ interface Notification {
   clientPhone: string | null;
 }
 
+interface BirthdayClient {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string | null;
+  email: string | null;
+  birthday: string | null;
+}
+
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +37,17 @@ export default function NotificationsPage() {
   const [typeFilter, setTypeFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [total, setTotal] = useState(0);
+
+  // Birthday notifications state
+  const [birthdayClients, setBirthdayClients] = useState<BirthdayClient[]>([]);
+  const [loadingBirthday, setLoadingBirthday] = useState(false);
+  const [birthdayChecked, setBirthdayChecked] = useState(false);
+  const [sendingBirthday, setSendingBirthday] = useState(false);
+  const [birthdayDiscount, setBirthdayDiscount] = useState<string>("10");
+  const [birthdaySettingsLoaded, setBirthdaySettingsLoaded] = useState(false);
+  const [birthdayGiftType, setBirthdayGiftType] = useState<string>("discount");
+  const [birthdayProductName, setBirthdayProductName] = useState<string>("");
+  const [birthdayEnabled, setBirthdayEnabled] = useState(false);
 
   // Fetch salon ID first
   useEffect(() => {
@@ -76,6 +97,81 @@ export default function NotificationsPage() {
       fetchNotifications();
     }
   }, [salonId, fetchNotifications]);
+
+  // Check for birthday clients and load saved settings
+  const checkBirthdayClients = useCallback(async () => {
+    if (!salonId) return;
+    setLoadingBirthday(true);
+    try {
+      const res = await fetch(`/api/notifications/birthday?salonId=${salonId}`);
+      const data = await res.json();
+      if (data.success) {
+        setBirthdayClients(data.data.clients);
+        setBirthdayChecked(true);
+        // Load saved birthday settings
+        if (data.data.birthdaySettings) {
+          const saved = data.data.birthdaySettings;
+          setBirthdayEnabled(saved.enabled || false);
+          setBirthdayGiftType(saved.giftType || "discount");
+          setBirthdayDiscount(String(saved.discountPercentage || 10));
+          setBirthdayProductName(saved.productName || "");
+          setBirthdaySettingsLoaded(true);
+        }
+        if (data.data.clients.length === 0) {
+          toast.info("Brak klientow z urodzinami dzisiaj");
+        }
+      }
+    } catch (err) {
+      console.error("Failed to check birthdays:", err);
+      toast.error("Blad sprawdzania urodzin");
+    } finally {
+      setLoadingBirthday(false);
+    }
+  }, [salonId]);
+
+  // Auto-check birthdays when salonId is available
+  useEffect(() => {
+    if (salonId && !birthdayChecked) {
+      checkBirthdayClients();
+    }
+  }, [salonId, birthdayChecked, checkBirthdayClients]);
+
+  // Send birthday notifications
+  const sendBirthdayNotifications = async () => {
+    if (!salonId) return;
+    setSendingBirthday(true);
+    try {
+      // Build request body using saved settings
+      const requestBody: Record<string, unknown> = { salonId };
+      if (birthdayGiftType === "discount") {
+        requestBody.birthdayDiscount = birthdayDiscount ? parseInt(birthdayDiscount) : 0;
+        requestBody.giftType = "discount";
+      } else if (birthdayGiftType === "product") {
+        requestBody.giftType = "product";
+        requestBody.productName = birthdayProductName;
+      }
+      const res = await fetch("/api/notifications/birthday", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.data.message);
+        // Refresh notifications list
+        fetchNotifications();
+        // Re-check birthdays
+        checkBirthdayClients();
+      } else {
+        toast.error(data.error || "Blad wysylania powiadomien urodzinowych");
+      }
+    } catch (err) {
+      console.error("Failed to send birthday notifications:", err);
+      toast.error("Blad wysylania powiadomien");
+    } finally {
+      setSendingBirthday(false);
+    }
+  };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -171,6 +267,113 @@ export default function NotificationsPage() {
       {/* Push Notification Settings */}
       <div className="mb-6">
         <PushNotificationManager />
+      </div>
+
+      {/* Birthday Notifications Section */}
+      <div className="mb-6 border rounded-lg p-4 bg-pink-50 dark:bg-pink-950/20 border-pink-200 dark:border-pink-800" data-testid="birthday-notifications-section">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Cake className="w-5 h-5 text-pink-600" />
+            <h2 className="text-lg font-semibold text-pink-800 dark:text-pink-300">
+              Powiadomienia urodzinowe
+            </h2>
+            {birthdayEnabled && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
+                Wlaczone
+              </span>
+            )}
+          </div>
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/dashboard/settings/notifications">
+              <Settings className="w-4 h-4 mr-1" />
+              Konfiguruj
+            </Link>
+          </Button>
+        </div>
+
+        {loadingBirthday ? (
+          <div className="text-sm text-muted-foreground">Sprawdzanie urodzin...</div>
+        ) : birthdayClients.length > 0 ? (
+          <div>
+            <div className="mb-3">
+              <p className="text-sm text-pink-700 dark:text-pink-400 mb-2" data-testid="birthday-count-message">
+                <Cake className="h-4 w-4 inline mr-1" />
+                Dzisiaj urodziny obchodzi <strong>{birthdayClients.length}</strong>{" "}
+                {birthdayClients.length === 1 ? "klient" : birthdayClients.length >= 2 && birthdayClients.length <= 4 ? "klientow" : "klientow"}:
+              </p>
+              <div className="space-y-1">
+                {birthdayClients.map((client) => (
+                  <div
+                    key={client.id}
+                    className="flex items-center gap-2 text-sm px-2 py-1 bg-white dark:bg-gray-900 rounded border border-pink-200 dark:border-pink-700"
+                    data-testid={`birthday-client-${client.id}`}
+                  >
+                    <Cake className="h-3.5 w-3.5 text-pink-500 shrink-0" />
+                    <span className="font-medium">{client.firstName} {client.lastName}</span>
+                    {client.phone && <span className="text-muted-foreground">({client.phone})</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap">
+              {birthdaySettingsLoaded && (
+                <div className="flex items-center gap-2 text-sm text-pink-700 dark:text-pink-400 mr-2">
+                  <Gift className="h-4 w-4 text-pink-600" />
+                  {birthdayGiftType === "discount" ? (
+                    <span>Prezent: <strong>{birthdayDiscount}% rabatu</strong></span>
+                  ) : (
+                    <span>Prezent: <strong>{birthdayProductName || "Produkt"}</strong></span>
+                  )}
+                </div>
+              )}
+              {!birthdaySettingsLoaded && (
+                <div className="flex items-center gap-2">
+                  <Gift className="h-4 w-4 text-pink-600" />
+                  <label htmlFor="birthday-discount" className="text-sm text-pink-700 dark:text-pink-400">
+                    Rabat urodzinowy:
+                  </label>
+                  <input
+                    id="birthday-discount"
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={birthdayDiscount}
+                    onChange={(e) => setBirthdayDiscount(e.target.value)}
+                    className="w-20 border rounded px-2 py-1 text-sm bg-background"
+                    data-testid="birthday-discount-input"
+                  />
+                  <span className="text-sm text-muted-foreground">%</span>
+                </div>
+              )}
+              <Button
+                size="sm"
+                onClick={sendBirthdayNotifications}
+                disabled={sendingBirthday}
+                className="bg-pink-600 hover:bg-pink-700 text-white"
+                data-testid="send-birthday-notifications-btn"
+              >
+                <Send className="h-4 w-4 mr-1" />
+                {sendingBirthday ? "Wysylanie..." : "Wyslij zyczenia"}
+              </Button>
+            </div>
+          </div>
+        ) : birthdayChecked ? (
+          <p className="text-sm text-muted-foreground" data-testid="no-birthdays-message">
+            Brak klientow z urodzinami dzisiaj
+          </p>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={checkBirthdayClients}
+            disabled={loadingBirthday}
+            data-testid="check-birthdays-btn"
+          >
+            <Cake className="h-4 w-4 mr-1" />
+            Sprawdz urodziny
+          </Button>
+        )}
       </div>
 
       {/* Filters */}
