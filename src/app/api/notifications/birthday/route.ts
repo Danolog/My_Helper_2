@@ -212,6 +212,10 @@ export async function POST(request: Request) {
         message += ` Z tej okazji przygotowalismy dla Ciebie prezent: ${productName}. Zapraszamy!`;
       }
 
+      // Append booking link so the client can directly book their next visit
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      message += ` Zarezerwuj wizyte: ${appUrl}/salons/${salonId}/book`;
+
       // Create notification - send via SMS if phone is available, otherwise email
       const notificationType = client.phone
         ? "sms"

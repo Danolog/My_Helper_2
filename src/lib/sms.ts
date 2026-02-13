@@ -99,8 +99,11 @@ export async function sendAppointmentReminderSms(params: {
     month: "long",
   });
 
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const bookingLink = `${appUrl}/salons/${params.salonId}/book`;
+
   const message =
-    `Przypomnienie: ${params.clientName}, Twoja wizyta "${params.serviceName}" u ${params.employeeName} w ${params.salonName} juz dzisiaj o ${formattedTime} (${formattedDate}). Do zobaczenia!`;
+    `Przypomnienie: ${params.clientName}, Twoja wizyta "${params.serviceName}" u ${params.employeeName} w ${params.salonName} juz dzisiaj o ${formattedTime} (${formattedDate}). Do zobaczenia! Zarezerwuj nastepna wizyte: ${bookingLink}`;
 
   return sendSms({
     to: params.clientPhone,
@@ -133,8 +136,11 @@ export async function sendPaymentConfirmationSms(params: {
     minute: "2-digit",
   });
 
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const bookingLink = `${appUrl}/salons/${params.salonId}/book`;
+
   const message =
-    `Potwierdzenie platnosci: ${params.clientName}, zadatek ${params.amount.toFixed(2)} ${params.currency} za usluge "${params.serviceName}" u ${params.employeeName} dnia ${formattedDate} zostal przyjety. Dziekujemy!`;
+    `Potwierdzenie platnosci: ${params.clientName}, zadatek ${params.amount.toFixed(2)} ${params.currency} za usluge "${params.serviceName}" u ${params.employeeName} dnia ${formattedDate} zostal przyjety. Dziekujemy! Zarezerwuj kolejna wizyte: ${bookingLink}`;
 
   return sendSms({
     to: params.clientPhone,

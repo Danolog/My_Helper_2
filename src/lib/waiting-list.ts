@@ -107,15 +107,18 @@ export async function notifyWaitingList(
       minute: "2-digit",
     });
 
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
     for (const row of entries) {
       const clientName = `${row.client.firstName} ${row.client.lastName}`;
+      const bookingLink = `${appUrl}/salons/${params.salonId}/book`;
 
       // Build the notification message in Polish
       const message =
         `${clientName}, zwolnil sie termin w ${params.salonName}: ` +
         `${params.serviceName} u ${params.employeeName}, ` +
         `${formattedDate} o ${formattedTime}. ` +
-        `Skontaktuj sie z salonem, aby zarezerwowac!`;
+        `Zarezerwuj teraz: ${bookingLink}`;
 
       // Send SMS if the client has a phone number
       if (row.client.phone) {

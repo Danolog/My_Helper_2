@@ -151,7 +151,10 @@ export async function createRefundNotification(
       minute: "2-digit",
     });
 
-    const message = `Szanowny/a ${clientName}, informujemy o zwrocie zadatku ${amount.toFixed(2)} PLN za anulowana wizyte "${serviceName}" zaplanowana na ${formattedDate}. Zwrot zostanie przetworzony w ciagu 5-10 dni roboczych.`;
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const bookingLink = `${appUrl}/salons/${salonId}/book`;
+
+    const message = `Szanowny/a ${clientName}, informujemy o zwrocie zadatku ${amount.toFixed(2)} PLN za anulowana wizyte "${serviceName}" zaplanowana na ${formattedDate}. Zwrot zostanie przetworzony w ciagu 5-10 dni roboczych. Zarezerwuj nowy termin: ${bookingLink}`;
 
     await db.insert(notifications).values({
       salonId,
