@@ -1,5 +1,50 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-13 (Feature #108 - Birthday notifications) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #108: "Birthday notifications" (Notifications category)
+- Description: Send birthday wishes
+
+### What was accomplished:
+1. Claimed Feature #108 - birthday notifications
+2. Existing implementation found: API route at /api/notifications/birthday (GET + POST), UI on /dashboard/notifications
+3. Fixed critical bug: Date object serialization error in SQL query (line 147)
+   - Changed `${todayStart}` to `${todayStartISO}::timestamp` (ISO string with cast)
+   - This was causing POST /api/notifications/birthday to fail with 500 error
+4. Fixed deduplication LIKE pattern: `'%urodziny%'` -> `'%urodzin%'`
+   - The actual message uses "urodzin" (genitive case), not "urodziny"
+   - Without this fix, duplicate notifications were sent
+5. Verified end-to-end via browser automation:
+   - Created test client BIRTHDAY TEST_F108 with birthday 1996-02-13 (today)
+   - Birthday detection API correctly found the client
+   - Birthday section on notifications page shows client name + phone
+   - Birthday notification sent via SMS with message:
+     "Wszystkiego najlepszego z okazji urodzin, BIRTHDAY! Beauty Studio Demo zyczy Ci wspanialego dnia!
+      Z tej okazji przygotowalismy dla Ciebie 10% rabatu na nastepna wizyte. Zapraszamy!"
+   - Deduplication working: second send shows "Wyslano 0 powiadomien urodzinowych"
+   - UI button "Wyslij zyczenia" works correctly via browser click
+   - 0 console errors
+   - No mock data patterns found
+
+### Verification steps completed:
+1. Add client with birthday today - DONE (BIRTHDAY TEST_F108, birthday 1996-02-13)
+2. Verify birthday notification triggered - DONE (auto-detected on page load)
+3. Verify message contains birthday wish - DONE ("Wszystkiego najlepszego z okazji urodzin...")
+4. Verify gift/discount mentioned if configured - DONE ("10% rabatu na nastepna wizyte")
+
+### Files modified:
+- MODIFIED: src/app/api/notifications/birthday/route.ts (bug fixes: Date serialization + LIKE pattern)
+- EXISTING: src/app/dashboard/notifications/page.tsx (birthday section UI already built)
+- NEW: scripts/setup-f108-birthday.ts (test data setup script)
+
+### Commit: 4f5bad7
+
+### Current Stats:
+- 76/253 features passing (30.0%)
+
+---
+
 ## Session: 2026-02-10 (Feature #105 - Push notification 1h before appointment) *** SUCCESS ***
 
 ### Feature Assigned
