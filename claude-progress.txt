@@ -1,5 +1,66 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-13 (Feature #111 - Notification with booking link) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #111: "Notification with booking link"
+- Category: Notifications
+- Description: Include reservation link in message
+
+### Changes Made
+1. **src/app/api/notifications/birthday/route.ts** - Added booking link to birthday notification messages
+2. **src/lib/sms.ts** - Added booking link to appointment reminder SMS and payment confirmation SMS
+3. **src/lib/waiting-list.ts** - Added booking link to waiting list notification messages (replaced "Skontaktuj sie z salonem" text)
+4. **src/lib/refund.ts** - Added booking link to refund notification messages
+5. **src/lib/push.ts** - Added bookingUrl to push notification data payload (1h and 24h reminders)
+- All use consistent pattern: `process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"` + `/salons/${salonId}/book`
+- The `renderMessageWithLinks` helper in notifications page (from Feature #110) renders URLs as clickable `<a>` tags
+
+### Verification
+- TypeScript: zero new errors in modified files (pre-existing errors in waiting-list.ts acceptEarlierSlot are unrelated)
+- Browser automation: logged in, navigated to /dashboard/notifications, verified booking link rendered as clickable `<a>` tag
+- Clicked booking link -> opened /salons/{id}/book page successfully with logged-in user identified
+- Screenshots captured at /tmp/claude/f111-notifications-with-booking-link.png and f111-booking-page-from-link.png
+
+### Commit
+- `ec33289` feat: add booking links to all notification types (Feature #111)
+
+---
+
+## Session: 2026-02-13 (Feature #110 - We miss you notifications) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #110: "We miss you notifications" (Notifications category)
+- Description: Re-engagement notifications for inactive clients
+
+### What was accomplished:
+1. Claimed Feature #110 - "we miss you" re-engagement notifications
+2. Created settings API: `src/app/api/salons/[id]/we-miss-you-settings/route.ts`
+   - GET/PUT endpoints for WeMissYouSettings (enabled, inactiveDays, customMessage, includeBookingLink, autoSend)
+   - Settings stored in salon's settingsJson.weMissYou JSONB field
+3. Created notification API: `src/app/api/notifications/we-miss-you/route.ts`
+   - GET: finds inactive clients using MAX(appointments.startTime) subquery
+   - POST: sends re-engagement notifications with template substitution ({imie}, {salon}, {dni})
+   - 7-day spam guard to prevent duplicate notifications (ILIKE pattern matching)
+   - Booking link auto-appended to messages
+4. Updated notifications page: amber-themed "Tesknimy za Toba" section with inactive client check
+5. Updated settings page: "We miss you" configuration UI with presets (14/30/60/90/180 days), message preview, toggles
+6. Fixed spam guard bug: LIKE → ILIKE for Polish diacritical characters (ę in Tęsknimy)
+7. Verified via API: settings persist, 14 inactive clients found, notifications sent with proper messages and booking links
+8. Verified via browser: UI renders with zero console errors, amber theme, correct components
+9. TypeScript compilation: zero errors in new/modified files
+10. Committed as: `feat: implement "We miss you" re-engagement notifications (Feature #110)`
+
+### Files created/modified:
+- NEW: `src/app/api/notifications/we-miss-you/route.ts` (313 lines)
+- NEW: `src/app/api/salons/[id]/we-miss-you-settings/route.ts` (167 lines)
+- MODIFIED: `src/app/dashboard/notifications/page.tsx` (+211 lines)
+- MODIFIED: `src/app/dashboard/settings/notifications/page.tsx` (+346 lines)
+
+### Feature stats after: 78/253 passing (30.8%)
+
+---
+
 ## Session: 2026-02-13 (Feature #108 - Birthday notifications) *** SUCCESS ***
 
 ### Feature Assigned
