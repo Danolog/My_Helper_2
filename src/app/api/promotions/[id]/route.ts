@@ -65,7 +65,7 @@ export async function PUT(
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name;
     if (type !== undefined) {
-      const validTypes = ["percentage", "fixed", "package"];
+      const validTypes = ["percentage", "fixed", "package", "buy2get1", "happy_hours"];
       if (!validTypes.includes(type)) {
         return NextResponse.json(
           { success: false, error: `Invalid type. Must be one of: ${validTypes.join(", ")}` },
@@ -76,7 +76,7 @@ export async function PUT(
     }
     if (value !== undefined) {
       const effectiveType = type || existing.type;
-      if (effectiveType === "percentage") {
+      if (effectiveType === "percentage" || effectiveType === "buy2get1" || effectiveType === "happy_hours") {
         const numValue = parseFloat(value);
         if (isNaN(numValue) || numValue <= 0 || numValue > 100) {
           return NextResponse.json(
@@ -89,7 +89,19 @@ export async function PUT(
     }
     if (startDate !== undefined) updateData.startDate = startDate ? new Date(startDate) : null;
     if (endDate !== undefined) updateData.endDate = endDate ? new Date(endDate) : null;
-    if (conditionsJson !== undefined) updateData.conditionsJson = conditionsJson;
+
+    // Handle conditionsJson - merge applicableServiceIds if provided
+    if (conditionsJson !== undefined) {
+      updateData.conditionsJson = conditionsJson;
+    }
+    if (body.applicableServiceIds && Array.isArray(body.applicableServiceIds)) {
+      const existingConditions = (conditionsJson !== undefined ? conditionsJson : existing.conditionsJson) || {};
+      updateData.conditionsJson = {
+        ...existingConditions,
+        applicableServiceIds: body.applicableServiceIds,
+      };
+    }
+
     if (isActive !== undefined) updateData.isActive = isActive;
 
     if (Object.keys(updateData).length === 0) {
