@@ -39,6 +39,8 @@ import {
   Trash2,
   AlertTriangle,
   Search,
+  ArrowUpDown,
+  Bell,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -77,6 +79,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("name-asc");
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -95,6 +98,15 @@ export default function ProductsPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
 
+  // Notification state
+  interface LowStockNotification {
+    id: string;
+    message: string;
+    sentAt: string;
+    createdAt: string;
+  }
+  const [lowStockNotifications, setLowStockNotifications] = useState<LowStockNotification[]>([]);
+
   const fetchProducts = useCallback(async () => {
     try {
       const res = await fetch(`/api/products?salonId=${DEMO_SALON_ID}`);
@@ -110,9 +122,28 @@ export default function ProductsPage() {
     }
   }, []);
 
+  const fetchLowStockNotifications = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/notifications?salonId=${DEMO_SALON_ID}&type=system&limit=10`
+      );
+      const data = await res.json();
+      if (data.success) {
+        // Filter for low-stock notifications only
+        const lowStockNotifs = data.data.notifications.filter(
+          (n: { message: string }) => n.message.includes("Niski stan magazynowy")
+        );
+        setLowStockNotifications(lowStockNotifs);
+      }
+    } catch (error) {
+      console.error("Failed to fetch notifications:", error);
+    }
+  }, []);
+
   useEffect(() => {
     fetchProducts();
-  }, [fetchProducts]);
+    fetchLowStockNotifications();
+  }, [fetchProducts, fetchLowStockNotifications]);
 
   const openAddDialog = () => {
     setEditingProduct(null);
@@ -176,8 +207,16 @@ export default function ProductsPage() {
             ? `Produkt "${formName}" zaktualizowany`
             : `Produkt "${formName}" dodany`
         );
+        // Show low-stock alert toast if notification was sent
+        if (data.lowStockAlert?.notificationSent) {
+          toast.warning(
+            `Niski stan magazynowy: "${formName}" - wysłano powiadomienie`,
+            { duration: 6000 }
+          );
+        }
         setDialogOpen(false);
         fetchProducts();
+        fetchLowStockNotifications();
       } else {
         toast.error(data.error || "Nie udało się zapisać produktu");
       }
@@ -212,16 +251,39 @@ export default function ProductsPage() {
     }
   };
 
-  // Filter products
-  const filteredProducts = productsData.filter((p) => {
-    const matchesSearch =
-      !searchQuery ||
-      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesCategory =
-      categoryFilter === "all" || p.category === categoryFilter;
-    return matchesSearch && matchesCategory;
-  });
+  // Filter and sort products
+  const filteredProducts = productsData
+    .filter((p) => {
+      const matchesSearch =
+        !searchQuery ||
+        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesCategory =
+        categoryFilter === "all" || p.category === categoryFilter;
+      return matchesSearch && matchesCategory;
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case "name-asc":
+          return a.name.localeCompare(b.name, "pl");
+        case "name-desc":
+          return b.name.localeCompare(a.name, "pl");
+        case "quantity-asc":
+          return parseFloat(a.quantity || "0") - parseFloat(b.quantity || "0");
+        case "quantity-desc":
+          return parseFloat(b.quantity || "0") - parseFloat(a.quantity || "0");
+        case "category-asc":
+          return (a.category || "").localeCompare(b.category || "", "pl");
+        case "category-desc":
+          return (b.category || "").localeCompare(a.category || "", "pl");
+        case "price-asc":
+          return parseFloat(a.pricePerUnit || "0") - parseFloat(b.pricePerUnit || "0");
+        case "price-desc":
+          return parseFloat(b.pricePerUnit || "0") - parseFloat(a.pricePerUnit || "0");
+        default:
+          return 0;
+      }
+    });
 
   // Get unique categories from data
   const uniqueCategories = Array.from(
@@ -320,6 +382,22 @@ export default function ProductsPage() {
             ))}
           </SelectContent>
         </Select>
+        <Select value={sortBy} onValueChange={setSortBy}>
+          <SelectTrigger className="w-52" data-testid="sort-select">
+            <ArrowUpDown className="h-4 w-4 mr-2 shrink-0" />
+            <SelectValue placeholder="Sortuj" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name-asc">Nazwa A-Z</SelectItem>
+            <SelectItem value="name-desc">Nazwa Z-A</SelectItem>
+            <SelectItem value="quantity-asc">Ilość rosnąco</SelectItem>
+            <SelectItem value="quantity-desc">Ilość malejąco</SelectItem>
+            <SelectItem value="category-asc">Kategoria A-Z</SelectItem>
+            <SelectItem value="category-desc">Kategoria Z-A</SelectItem>
+            <SelectItem value="price-asc">Cena rosnąco</SelectItem>
+            <SelectItem value="price-desc">Cena malejąco</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Stats */}
@@ -353,6 +431,37 @@ export default function ProductsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Recent low-stock notifications */}
+      {lowStockNotifications.length > 0 && (
+        <Card className="mb-6" data-testid="low-stock-notifications">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Bell className="h-4 w-4 text-orange-500" />
+              Ostatnie powiadomienia o niskim stanie
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {lowStockNotifications.slice(0, 5).map((notif) => (
+                <div
+                  key={notif.id}
+                  className="flex items-start gap-2 text-sm p-2 rounded-md bg-muted/50"
+                  data-testid={`notification-${notif.id}`}
+                >
+                  <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm">{notif.message.replace(/\[product:[^\]]+\]/, "").trim()}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {new Date(notif.sentAt || notif.createdAt).toLocaleString("pl-PL")}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Products list */}
       {filteredProducts.length === 0 ? (
