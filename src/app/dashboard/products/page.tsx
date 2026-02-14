@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,6 +42,7 @@ import {
   Search,
   ArrowUpDown,
   Bell,
+  History,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -74,6 +76,7 @@ const PRODUCT_CATEGORIES = [
 const UNITS = ["ml", "g", "szt.", "opak.", "l", "kg"];
 
 export default function ProductsPage() {
+  const router = useRouter();
   const { data: session, isPending } = useSession();
   const [productsData, setProductsData] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -496,7 +499,11 @@ export default function ProductsPage() {
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
-                      <CardTitle className="text-base truncate" data-testid="product-name">
+                      <CardTitle
+                        className="text-base truncate cursor-pointer hover:text-primary transition-colors"
+                        onClick={() => router.push(`/dashboard/products/${product.id}`)}
+                        data-testid="product-name"
+                      >
                         {product.name}
                       </CardTitle>
                       {product.category && (
@@ -564,6 +571,18 @@ export default function ProductsPage() {
                         </span>
                       </div>
                     )}
+                    <div className="pt-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full text-xs text-muted-foreground hover:text-primary"
+                        onClick={() => router.push(`/dashboard/products/${product.id}`)}
+                        data-testid={`usage-history-${product.id}`}
+                      >
+                        <History className="h-3.5 w-3.5 mr-1" />
+                        Historia zuzycia
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
