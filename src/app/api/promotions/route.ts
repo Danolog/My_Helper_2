@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { promotions } from "@/lib/schema";
-import { eq, desc } from "drizzle-orm";
+import { promotions, services } from "@/lib/schema";
+import { eq, desc, inArray } from "drizzle-orm";
 
 // GET /api/promotions - List promotions with optional salonId filter
 export async function GET(request: Request) {
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     }
 
     // Validate type
-    const validTypes = ["percentage", "fixed", "package"];
+    const validTypes = ["percentage", "fixed", "package", "buy2get1", "happy_hours"];
     if (!validTypes.includes(type)) {
       return NextResponse.json(
         { success: false, error: `Invalid type. Must be one of: ${validTypes.join(", ")}` },
@@ -75,6 +75,48 @@ export async function POST(request: Request) {
       }
     }
 
+    // For buy2get1, value represents the discount percentage on the free item (100 = fully free)
+    if (type === "buy2get1") {
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue <= 0 || numValue > 100) {
+        return NextResponse.json(
+          { success: false, error: "Buy 2 Get 1 discount must be between 1 and 100 percent" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Happy hours: value is percentage discount, conditions must include hours and days
+    if (type === "happy_hours") {
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue <= 0 || numValue > 100) {
+        return NextResponse.json(
+          { success: false, error: "Happy hours discount must be between 1 and 100 percent" },
+          { status: 400 }
+        );
+      }
+      // Validate that happy hours conditions are provided
+      const cond = conditionsJson || body.conditionsJson || {};
+      if (!cond.startTime || !cond.endTime) {
+        return NextResponse.json(
+          { success: false, error: "Happy hours require startTime and endTime in conditions" },
+          { status: 400 }
+        );
+      }
+      if (!cond.daysOfWeek || !Array.isArray(cond.daysOfWeek) || cond.daysOfWeek.length === 0) {
+        return NextResponse.json(
+          { success: false, error: "Happy hours require at least one day of the week" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Build conditions JSON - include applicable service IDs if provided
+    const conditions = conditionsJson || {};
+    if (body.applicableServiceIds && Array.isArray(body.applicableServiceIds)) {
+      conditions.applicableServiceIds = body.applicableServiceIds;
+    }
+
     const [newPromotion] = await db
       .insert(promotions)
       .values({
@@ -84,7 +126,7 @@ export async function POST(request: Request) {
         value: value.toString(),
         startDate: startDate ? new Date(startDate) : null,
         endDate: endDate ? new Date(endDate) : null,
-        conditionsJson: conditionsJson || {},
+        conditionsJson: conditions,
         isActive: isActive !== undefined ? isActive : true,
       })
       .returning();

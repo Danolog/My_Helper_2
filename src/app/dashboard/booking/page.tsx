@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Lock, CalendarPlus, Scissors, Users, User, Star, Clock, CalendarDays, Check, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { Lock, CalendarPlus, Scissors, Users, User, Star, Clock, CalendarDays, Check, AlertCircle, ChevronLeft, ChevronRight, Gift } from "lucide-react";
 import { toast } from "sonner";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
@@ -70,6 +70,19 @@ interface AvailableSlotsData {
   message?: string;
 }
 
+interface PromotionCheck {
+  eligible: boolean;
+  appointmentCount?: number;
+  remainingForPromo?: number;
+  promotionId?: string;
+  promotionName?: string;
+  discountPercent?: number;
+  originalPrice?: number;
+  discountAmount?: number;
+  finalPrice?: number;
+  reason?: string;
+}
+
 export default function BookingPage() {
   const { data: session, isPending } = useSession();
   const [services, setServices] = useState<Service[]>([]);
@@ -89,6 +102,10 @@ export default function BookingPage() {
   const [slotsData, setSlotsData] = useState<AvailableSlotsData | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string>("");
+
+  // Promotion check state
+  const [promoCheck, setPromoCheck] = useState<PromotionCheck | null>(null);
+  const [loadingPromo, setLoadingPromo] = useState(false);
 
   // Booking submission state
   const [isBooking, setIsBooking] = useState(false);
@@ -181,6 +198,41 @@ export default function BookingPage() {
       setLoadingSlots(false);
     }
   }, []);
+
+  // Check for applicable promotions when client and service are selected
+  const checkPromotions = useCallback(async (clientId: string, serviceId: string) => {
+    if (!clientId || !serviceId) {
+      setPromoCheck(null);
+      return;
+    }
+
+    setLoadingPromo(true);
+    try {
+      const res = await fetch(
+        `/api/promotions/check?salonId=${DEMO_SALON_ID}&clientId=${clientId}&serviceId=${serviceId}`
+      );
+      const data = await res.json();
+      if (data.success) {
+        setPromoCheck(data.data);
+      } else {
+        setPromoCheck(null);
+      }
+    } catch (error) {
+      console.error("Failed to check promotions:", error);
+      setPromoCheck(null);
+    } finally {
+      setLoadingPromo(false);
+    }
+  }, []);
+
+  // Re-check promotions when client or service changes
+  useEffect(() => {
+    if (selectedClientId && selectedServiceId) {
+      checkPromotions(selectedClientId, selectedServiceId);
+    } else {
+      setPromoCheck(null);
+    }
+  }, [selectedClientId, selectedServiceId, checkPromotions]);
 
   // Auto-fetch slots when employee or date changes
   useEffect(() => {
@@ -440,6 +492,49 @@ export default function BookingPage() {
               {parseFloat(selectedService.basePrice).toFixed(2)} PLN
               {" "}&bull;{" "}
               {selectedService.baseDuration} min
+            </div>
+          )}
+          {/* Promotion indicator */}
+          {loadingPromo && selectedClientId && selectedServiceId && (
+            <div className="flex items-center gap-2 mt-3 p-3 rounded-md border bg-muted/50">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary" />
+              <span className="text-sm text-muted-foreground">Sprawdzanie promocji...</span>
+            </div>
+          )}
+          {promoCheck && !loadingPromo && selectedClientId && selectedServiceId && (
+            <div
+              className={`flex items-start gap-2 mt-3 p-3 rounded-md border ${
+                promoCheck.eligible
+                  ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
+                  : "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
+              }`}
+              data-testid="promo-check-indicator"
+            >
+              <Gift className={`h-4 w-4 shrink-0 mt-0.5 ${promoCheck.eligible ? "text-green-600" : "text-blue-500"}`} />
+              <div className="text-sm">
+                {promoCheck.eligible ? (
+                  <>
+                    <p className="font-semibold text-green-800 dark:text-green-300">
+                      Promocja 2+1: {promoCheck.discountPercent}% znizki!
+                    </p>
+                    <p className="text-green-700 dark:text-green-400 text-xs mt-0.5">
+                      {promoCheck.promotionName} - Cena po rabacie:{" "}
+                      <span className="font-bold">{promoCheck.finalPrice?.toFixed(2)} PLN</span>
+                      {" "}(zamiast {promoCheck.originalPrice?.toFixed(2)} PLN)
+                    </p>
+                  </>
+                ) : promoCheck.remainingForPromo !== undefined ? (
+                  <>
+                    <p className="text-blue-800 dark:text-blue-300">
+                      Promocja 2+1 dostepna!
+                    </p>
+                    <p className="text-blue-700 dark:text-blue-400 text-xs mt-0.5">
+                      Jeszcze {promoCheck.remainingForPromo} wizyt(y) do darmowej uslugi
+                      {promoCheck.promotionName ? ` (${promoCheck.promotionName})` : ""}
+                    </p>
+                  </>
+                ) : null}
+              </div>
             </div>
           )}
         </CardContent>
@@ -749,8 +844,30 @@ export default function BookingPage() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Cena:</span>
-                <span className="font-medium">{parseFloat(selectedService.basePrice).toFixed(2)} PLN</span>
+                {promoCheck?.eligible ? (
+                  <div className="text-right">
+                    <span className="font-medium line-through text-muted-foreground mr-2">
+                      {parseFloat(selectedService.basePrice).toFixed(2)} PLN
+                    </span>
+                    <span className="font-bold text-green-600" data-testid="discounted-price">
+                      {promoCheck.finalPrice?.toFixed(2)} PLN
+                    </span>
+                  </div>
+                ) : (
+                  <span className="font-medium">{parseFloat(selectedService.basePrice).toFixed(2)} PLN</span>
+                )}
               </div>
+              {promoCheck?.eligible && (
+                <div className="flex justify-between text-sm" data-testid="promo-discount-row">
+                  <span className="text-green-600 flex items-center gap-1">
+                    <Gift className="h-3 w-3" />
+                    Promocja 2+1:
+                  </span>
+                  <span className="font-medium text-green-600">
+                    -{promoCheck.discountAmount?.toFixed(2)} PLN ({promoCheck.discountPercent}%)
+                  </span>
+                </div>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Czas trwania:</span>
                 <span className="font-medium">{selectedService.baseDuration} min</span>
