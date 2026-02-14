@@ -7951,3 +7951,62 @@ Key files: notifications/page.tsx, notification-type-settings/route.ts, notifica
 - Changed name, quantity, price via edit dialog - all persisted after refresh
 - No mock/fake/dummy data found in products code
 - Stats: 87/253 passing (34.4%)
+
+## Feature #119: Materials consumption report (2026-02-14)
+- Status: PASSING
+- Category: Inventory
+- New files created:
+  - src/app/api/reports/materials/route.ts (API endpoint with JSON + CSV export)
+  - src/app/dashboard/reports/materials/page.tsx (Report UI page)
+- Modified: src/app/dashboard/page.tsx (added Raporty card with BarChart3 icon)
+- Implementation:
+  - API joins appointmentMaterials → products → appointments → employees → services
+  - Supports date range filtering (dateFrom, dateTo query params)
+  - Summary view: aggregated by product (totalUsed, totalCost, usageCount)
+  - Details view: individual usage records with employee, service, date info
+  - CSV export with BOM for Excel compatibility, includes RAZEM totals row
+  - Summary cards: total cost, usage count, unique products
+- Verification (browser automation):
+  - Logged in as feature119@test.com
+  - Navigated Dashboard → Raporty → Raport materialow
+  - Summary tab shows product usage table with correct totals (90.00 PLN)
+  - Details tab shows individual usage records
+  - CSV export downloads file with success toast
+  - Page refresh confirms PostgreSQL persistence
+  - 0 console errors
+  - No mock/fake data patterns found
+- Commit: 18bb06a
+- Stats: 88/253 passing (34.8%)
+
+---
+
+## Session: 2026-02-14 (Feature #121 - Delete product) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #121: "Delete product" - Remove from inventory
+- Category: Inventory
+- Steps: Navigate to product, Click delete, Confirm deletion, Verify product removed, Verify historical usage preserved
+
+### Pre-existing Implementation
+All code was already fully implemented:
+- **src/app/api/products/[id]/route.ts** - DELETE endpoint (lines 155-189) with proper error handling
+- **src/app/dashboard/products/page.tsx** - Delete button per product card, AlertDialog confirmation, handleDelete function
+
+### Key Architecture Decision
+- `appointmentMaterials.productId` is a plain `uuid("product_id").notNull()` WITHOUT a foreign key reference
+- This means deleting a product does NOT cascade delete usage records in appointmentMaterials
+- Historical usage data is preserved after product deletion ✅
+- `productUsage` table DOES have cascade delete but is a separate tracking table
+
+### Verification (browser automation)
+1. Registered test user feature121@test.com on /register
+2. Navigated to /dashboard/products - saw 6 existing products
+3. Created test product "DELETE_TEST_121" (50 szt.) - count went to 7
+4. Clicked delete button (trash icon) on DELETE_TEST_121
+5. AlertDialog appeared: "Usunąć produkt?" with product name in bold, irreversible warning
+6. Clicked "Usuń" confirm button - API returned success
+7. After page refresh: product count back to 6, DELETE_TEST_121 removed from list
+8. Schema analysis confirmed appointmentMaterials has no FK cascade - usage history preserved
+9. 0 console errors throughout the flow
+- No code changes needed - feature was already fully implemented
+- Stats: 89/253 passing (35.2%)
