@@ -1,5 +1,74 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-14 (Feature #115 - Low stock alerts) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #115: "Low stock alerts - Notification when stock low"
+- Category: Inventory
+- Steps: Set min qty to 5, reduce stock to 4, verify alert, verify notification sent, increase stock, verify alert clears
+
+### Changes Made
+1. **src/app/api/notifications/low-stock/route.ts** (NEW) - Dedicated API endpoint for low-stock notifications
+   - GET: queries products where quantity <= minQuantity for a salon
+   - POST: creates system notification with 24h dedup check
+2. **src/app/api/products/[id]/route.ts** (MODIFIED) - Added `checkAndNotifyLowStock()` to PUT handler
+   - Automatically checks stock levels after every product update
+   - Creates system notification if qty <= minQty (with 24h dedup)
+   - Non-blocking: errors don't fail the product update
+3. **src/app/api/products/route.ts** (MODIFIED) - Added same low stock check to POST handler
+   - New products with low initial stock also trigger notifications
+4. **src/app/dashboard/products/page.tsx** (MODIFIED) - UI enhancements
+   - Added orange warning banner showing low stock product names
+   - Added "Niski stan" counter in stats section
+   - Added "Ostatnie powiadomienia o niskim stanie" section with Bell icon
+   - Added warning toast when saving product triggers notification
+
+### Verification
+- API: Updated "Lakier do paznokci OPI" qty from 30 to 4 (min=5) via PUT
+- API response: `lowStockAlert.notificationSent: true` with notification details
+- Database: System notification created with message "Niski stan magazynowy..."
+- Dedup: Second update returned `notificationSent: false, reason: "duplicate"`
+- UI: Orange banner appeared, stats showed "1 Niski stan", notification card visible
+- Restore: Set qty to 10, alert cleared (stats back to "0"), no warning icon
+- Original qty restored to 30 after testing
+
+### Stats
+- 84/253 features passing (33.2%)
+
+---
+
+## Session: 2026-02-14 (Feature #113 - Add product to inventory) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #113: "Add product to inventory"
+- Category: Inventory
+- Description: Create inventory item with name, category, quantity, unit type, price per unit, minimum quantity alert
+
+### Changes Made
+1. **src/app/dashboard/page.tsx** - Added "Magazyn" (Inventory) navigation card to dashboard with Package icon and link to /dashboard/products
+
+### Pre-existing Implementation
+- Products schema (src/lib/schema.ts lines 554-598) already existed with all required fields
+- API routes (src/app/api/products/route.ts and [id]/route.ts) already fully implemented with real PostgreSQL/Drizzle ORM
+- Products management UI (src/app/dashboard/products/page.tsx) already implemented with add/edit/delete, search, category filter, low stock alerts
+- The only missing piece was a navigation link on the dashboard
+
+### Verification
+- Browser automation: registered user, navigated to /dashboard/products, opened "Dodaj produkt" dialog
+- Filled form: name "TEST_F113_Serum_Witaminowe", category "Pielęgnacja", quantity 25, unit szt., min stock 5, price 45.99 PLN
+- Submitted successfully - toast notification shown, product appeared in grid with correct data
+- Page refresh confirmed database persistence (6 products total)
+- Mock data checks: no globalThis, devStore, mockDb patterns; all API routes use real db from @/lib/db
+- Test product cleaned up via DELETE API after verification
+
+### Commit
+- `974e964` feat: add inventory/products navigation card to dashboard (Feature #113)
+
+### Stats
+- 80/253 features passing (31.6%)
+
+---
+
 ## Session: 2026-02-13 (Feature #111 - Notification with booking link) *** SUCCESS ***
 
 ### Feature Assigned
@@ -7808,3 +7877,9 @@ Commit: 00269aa
 
 Stats: 62/253 features passing (24.5%)
 
+
+## Feature #112: Notification type configuration - PASSED
+Date: 2026-02-14
+Status: PASSED - No code changes needed
+Verified: Toggle SMS off/on, API persistence, cron enforcement, no mock data
+Key files: notifications/page.tsx, notification-type-settings/route.ts, notification-settings.ts, sms-reminders/route.ts
