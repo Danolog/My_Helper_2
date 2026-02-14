@@ -597,6 +597,26 @@ export const productUsage = pgTable(
   ]
 );
 
+// Service products - link products to services for automatic stock deduction on completion
+export const serviceProducts = pgTable(
+  "service_products",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    serviceId: uuid("service_id")
+      .notNull()
+      .references(() => services.id, { onDelete: "cascade" }),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    defaultQuantity: numeric("default_quantity", { precision: 10, scale: 2 }).notNull().default("1"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("service_products_service_id_idx").on(table.serviceId),
+    index("service_products_product_id_idx").on(table.productId),
+  ]
+);
+
 // Promotions - discounts and special offers
 export const promotions = pgTable(
   "promotions",

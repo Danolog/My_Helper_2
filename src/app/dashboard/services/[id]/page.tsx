@@ -50,6 +50,7 @@ import {
   Layers,
   Users,
   Image as ImageIcon,
+  Package,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -107,6 +108,28 @@ interface EmployeePrice {
   variant: ServiceVariant | null;
 }
 
+interface Product {
+  id: string;
+  name: string;
+  category: string | null;
+  unit: string | null;
+  quantity: string | null;
+  minQuantity: string | null;
+}
+
+interface ServiceProductLink {
+  id: string;
+  serviceId: string;
+  productId: string;
+  defaultQuantity: string;
+  createdAt: string;
+  productName: string | null;
+  productCategory: string | null;
+  productUnit: string | null;
+  productQuantity: string | null;
+  productMinQuantity: string | null;
+}
+
 interface GalleryPhoto {
   id: string;
   afterPhotoUrl: string | null;
@@ -158,6 +181,14 @@ export default function ServiceDetailPage() {
   // Delete service state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingService, setDeletingService] = useState(false);
+
+  // Service product links state (auto-deduction)
+  const [serviceProductLinks, setServiceProductLinks] = useState<ServiceProductLink[]>([]);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [productLinkDialogOpen, setProductLinkDialogOpen] = useState(false);
+  const [productLinkProductId, setProductLinkProductId] = useState("");
+  const [productLinkQuantity, setProductLinkQuantity] = useState("1");
+  const [savingProductLink, setSavingProductLink] = useState(false);
 
   // Gallery photos state
   const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>([]);
@@ -219,6 +250,30 @@ export default function ServiceDetailPage() {
     }
   }, []);
 
+  const fetchServiceProductLinks = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/services/${serviceId}/products`);
+      const data = await res.json();
+      if (data.success) {
+        setServiceProductLinks(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch service product links:", error);
+    }
+  }, [serviceId]);
+
+  const fetchAllProducts = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/products?salonId=${DEMO_SALON_ID}`);
+      const data = await res.json();
+      if (data.success) {
+        setAllProducts(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch products:", error);
+    }
+  }, []);
+
   const fetchGalleryPhotos = useCallback(async () => {
     try {
       const res = await fetch(`/api/gallery?salonId=${DEMO_SALON_ID}&serviceId=${serviceId}`);
@@ -234,11 +289,11 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     async function loadData() {
       setLoading(true);
-      await Promise.all([fetchService(), fetchEmployeeAssignments(), fetchEmployeePrices(), fetchEmployees(), fetchGalleryPhotos()]);
+      await Promise.all([fetchService(), fetchEmployeeAssignments(), fetchEmployeePrices(), fetchEmployees(), fetchGalleryPhotos(), fetchServiceProductLinks(), fetchAllProducts()]);
       setLoading(false);
     }
     loadData();
-  }, [fetchService, fetchEmployeeAssignments, fetchEmployeePrices, fetchEmployees, fetchGalleryPhotos]);
+  }, [fetchService, fetchEmployeeAssignments, fetchEmployeePrices, fetchEmployees, fetchGalleryPhotos, fetchServiceProductLinks, fetchAllProducts]);
 
   const handleToggleEmployeeAssignment = async (employeeId: string, isCurrentlyAssigned: boolean) => {
     setTogglingAssignment(employeeId);
@@ -534,6 +589,84 @@ export default function ServiceDetailPage() {
     } catch (error) {
       console.error("Failed to delete employee price:", error);
       toast.error("Blad podczas usuwania ceny pracownika");
+    }
+  };
+
+  // Service product link handlers
+  const resetProductLinkForm = () => {
+    setProductLinkProductId("");
+    setProductLinkQuantity("1");
+  };
+
+  const handleSaveProductLink = async () => {
+    if (!productLinkProductId) {
+      toast.error("Wybierz produkt");
+      return;
+    }
+    if (!productLinkQuantity || parseFloat(productLinkQuantity) <= 0) {
+      toast.error("Podaj prawidlowa ilosc");
+      return;
+    }
+
+    setSavingProductLink(true);
+    try {
+      const res = await fetch(`/api/services/${serviceId}/products`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          productId: productLinkProductId,
+          defaultQuantity: parseFloat(productLinkQuantity),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        const product = allProducts.find((p) => p.id === productLinkProductId);
+        const productName = product ? product.name : "produkt";
+        toast.success(
+          data.updated
+            ? `Ilosc dla "${productName}" zaktualizowana`
+            : `Produkt "${productName}" powiazany z usluga`
+        );
+        resetProductLinkForm();
+        setProductLinkDialogOpen(false);
+        await fetchServiceProductLinks();
+      } else {
+        toast.error(data.error || "Nie udalo sie powiazac produktu");
+      }
+    } catch (error) {
+      console.error("Failed to save product link:", error);
+      toast.error("Blad podczas wiazania produktu z usluga");
+    } finally {
+      setSavingProductLink(false);
+    }
+  };
+
+  const handleDeleteProductLink = async (link: ServiceProductLink) => {
+    const productName = link.productName || "ten produkt";
+
+    if (!confirm(`Czy na pewno chcesz usunac powiazanie z "${productName}"?`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `/api/services/${serviceId}/products?linkId=${link.id}`,
+        { method: "DELETE" }
+      );
+
+      const data = await res.json();
+
+      if (data.success) {
+        toast.success(`Powiazanie z "${productName}" usuniete`);
+        await fetchServiceProductLinks();
+      } else {
+        toast.error(data.error || "Nie udalo sie usunac powiazania");
+      }
+    } catch (error) {
+      console.error("Failed to delete product link:", error);
+      toast.error("Blad podczas usuwania powiazania");
     }
   };
 
@@ -1157,6 +1290,200 @@ export default function ServiceDetailPage() {
                         size="icon"
                         onClick={() => handleDeleteEmployeePrice(ep)}
                         data-testid={`delete-employee-price-${ep.id}`}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Linked Products Section (Auto-deduction) */}
+      <Card className="mt-6" data-testid="service-products-section">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Package className="h-5 w-5 text-primary" />
+            <CardTitle className="text-lg">Powiazane produkty</CardTitle>
+            <Badge variant="outline" data-testid="service-products-count">
+              {serviceProductLinks.length}
+            </Badge>
+          </div>
+          <Dialog
+            open={productLinkDialogOpen}
+            onOpenChange={(open) => {
+              setProductLinkDialogOpen(open);
+              if (!open) resetProductLinkForm();
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button size="sm" data-testid="add-product-link-btn">
+                <Plus className="h-4 w-4 mr-2" />
+                Dodaj produkt
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[450px]">
+              <DialogHeader>
+                <DialogTitle>Powiaz produkt z usluga</DialogTitle>
+                <DialogDescription>
+                  Po zakonczeniu wizyty z ta usluga, powiazane produkty zostana
+                  automatycznie odliczone z magazynu o podana ilosc.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="product-link-product">Produkt *</Label>
+                  <Select
+                    value={productLinkProductId}
+                    onValueChange={setProductLinkProductId}
+                  >
+                    <SelectTrigger
+                      id="product-link-product"
+                      data-testid="product-link-select"
+                    >
+                      <SelectValue placeholder="Wybierz produkt" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allProducts.length === 0 ? (
+                        <SelectItem value="__none" disabled>
+                          Brak produktow w magazynie
+                        </SelectItem>
+                      ) : (
+                        allProducts.map((prod) => (
+                          <SelectItem key={prod.id} value={prod.id}>
+                            <div className="flex items-center gap-2">
+                              <span>{prod.name}</span>
+                              {prod.unit && (
+                                <span className="text-xs text-muted-foreground">
+                                  ({prod.unit})
+                                </span>
+                              )}
+                              {prod.category && (
+                                <span className="text-xs text-muted-foreground">
+                                  [{prod.category}]
+                                </span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="product-link-quantity">
+                    Ilosc do odliczenia *
+                  </Label>
+                  <Input
+                    id="product-link-quantity"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    placeholder="1"
+                    value={productLinkQuantity}
+                    onChange={(e) => setProductLinkQuantity(e.target.value)}
+                    data-testid="product-link-quantity-input"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Ile jednostek produktu zostanie automatycznie odliczone
+                    z magazynu po zakonczeniu wizyty.
+                  </p>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    resetProductLinkForm();
+                    setProductLinkDialogOpen(false);
+                  }}
+                >
+                  Anuluj
+                </Button>
+                <Button
+                  onClick={handleSaveProductLink}
+                  disabled={savingProductLink}
+                  data-testid="save-product-link-btn"
+                >
+                  {savingProductLink ? "Zapisywanie..." : "Powiaz produkt"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-4">
+            Produkty powiazane z usluga sa automatycznie odliczane z magazynu po zakonczeniu wizyty.
+          </p>
+          {serviceProductLinks.length === 0 ? (
+            <div className="text-center py-8">
+              <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground mb-4" data-testid="no-product-links-message">
+                Brak powiazanych produktow. Dodaj produkty, ktore beda automatycznie
+                odliczane z magazynu po zakonczeniu wizyty z ta usluga.
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => setProductLinkDialogOpen(true)}
+                data-testid="empty-state-add-product-link-btn"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Powiaz pierwszy produkt
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {serviceProductLinks.map((link) => {
+                const currentQty = parseFloat(link.productQuantity || "0");
+                const deductQty = parseFloat(link.defaultQuantity || "0");
+                const minQty = link.productMinQuantity ? parseFloat(link.productMinQuantity) : null;
+                const isLowStock = minQty !== null && currentQty <= minQty;
+
+                return (
+                  <div
+                    key={link.id}
+                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                    data-testid={`product-link-card-${link.id}`}
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Package className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium" data-testid={`product-link-name-${link.id}`}>
+                          {link.productName || "Usuniety produkt"}
+                        </span>
+                        {link.productCategory && (
+                          <Badge variant="outline" className="text-xs">
+                            {link.productCategory}
+                          </Badge>
+                        )}
+                        {isLowStock && (
+                          <Badge variant="destructive" className="text-xs">
+                            Niski stan
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                        <span data-testid={`product-link-deduct-${link.id}`}>
+                          Odliczenie: <span className="font-medium text-foreground">{deductQty}</span>{" "}
+                          {link.productUnit || "szt."} / wizyta
+                        </span>
+                        <span data-testid={`product-link-stock-${link.id}`}>
+                          Stan: <span className={`font-medium ${isLowStock ? "text-destructive" : "text-foreground"}`}>
+                            {currentQty}
+                          </span>{" "}
+                          {link.productUnit || "szt."}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteProductLink(link)}
+                        data-testid={`delete-product-link-${link.id}`}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
