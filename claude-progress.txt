@@ -1,5 +1,65 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-14 (Feature #117 - Automatic stock deduction) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #117: "Automatic stock deduction" - Auto-reduce inventory on appointment completion
+
+### Implementation
+1. Added `serviceProducts` junction table to schema (links products to services with `defaultQuantity`)
+2. Created CRUD API at `/api/services/[id]/products` (GET, POST, DELETE)
+3. Updated `/api/appointments/[id]/complete` to auto-deduct linked products on completion
+4. Added product usage recording in `productUsage` table
+5. Integrated low stock notification system (creates notification when stock <= minQuantity)
+6. Added "Powiazane produkty" UI section on service detail page with product linking dialog
+
+### Files Modified
+- `src/lib/schema.ts` - Added serviceProducts table
+- `src/app/api/services/[id]/products/route.ts` - NEW: CRUD API for service-product links
+- `src/app/api/appointments/[id]/complete/route.ts` - Added auto-deduction logic
+- `src/app/dashboard/services/[id]/page.tsx` - Added linked products UI section
+
+### Verification
+- API tested: Created product (100ml), linked to service (25ml/visit), completed appointment → stock correctly deducted to 75ml
+- Browser automation: Verified UI renders correctly with product name, category, deduction amount, and current stock
+- No TypeScript errors in feature files
+- No mock data or TODOs left in code
+
+### Stats: 86/253 features passing (34.0%)
+
+---
+
+## Session: 2026-02-14 (Feature #118 - Product usage history) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #118: "Product usage history - View consumption over time"
+- Category: Inventory
+- Steps: Navigate to product details, view usage history tab, verify list of records, verify dates, verify appointments linked, verify quantities
+
+### Pre-existing Implementation
+All code was already implemented by Feature #116:
+- **src/app/api/products/[id]/usage-history/route.ts** - GET endpoint with joins across appointmentMaterials, appointments, clients, employees, services
+- **src/app/dashboard/products/[id]/page.tsx** - Full detail page with product info, usage stats cards, usage history list
+
+### Changes Made
+1. **scripts/setup-f118-usage-history.ts** (NEW) - Test data setup script creating appointmentMaterials records
+2. **scripts/list-users-f118.ts** (NEW) - Helper script for listing users
+
+### Verification
+- Navigated to product detail page for "Farba do wlosow L'Oreal" (ID: 36a22c93-...)
+- 4 usage records displayed with quantities: 75.00, 30.00, 50.00, 10.00 ml
+- Dates visible: 21 sty 2026, 22 sty 2026, 1 lut 2026, 14 lut 2026
+- Appointments linked: each record shows client, employee, service, and "Wizyta" button
+- Total calculated: 165.00 ml (82.50 PLN), average: 41.25 ml/visit
+- No mock data detected (grep across products UI/API directories: 0 matches)
+- Server restart persistence confirmed: all 4 records survive restart (PostgreSQL)
+- Screenshot saved: f118-post-restart-verification.png
+
+### Stats
+- Feature #118 marked as passing
+
+---
+
 ## Session: 2026-02-14 (Feature #115 - Low stock alerts) *** SUCCESS ***
 
 ### Feature Assigned
@@ -7883,3 +7943,11 @@ Date: 2026-02-14
 Status: PASSED - No code changes needed
 Verified: Toggle SMS off/on, API persistence, cron enforcement, no mock data
 Key files: notifications/page.tsx, notification-type-settings/route.ts, notification-settings.ts, sms-reminders/route.ts
+
+## Feature #120: Edit product details (2026-02-14)
+- Status: PASSING
+- Verification-only feature (code was already implemented)
+- Tested end-to-end via browser automation
+- Changed name, quantity, price via edit dialog - all persisted after refresh
+- No mock/fake/dummy data found in products code
+- Stats: 87/253 passing (34.4%)
