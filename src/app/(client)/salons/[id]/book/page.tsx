@@ -243,6 +243,17 @@ export default function ClientBookingPage() {
     depositValue: string | null;
   } | null>(null);
 
+  // Happy hours promotion state
+  const [happyHoursPromo, setHappyHoursPromo] = useState<{
+    eligible: boolean;
+    promotionId?: string;
+    promotionName?: string;
+    discountPercent?: number;
+    startTime?: string;
+    endTime?: string;
+    reason?: string;
+  } | null>(null);
+
   // ---------------------------------------------------------------------------
   // Derived values
   // ---------------------------------------------------------------------------
@@ -253,10 +264,16 @@ export default function ClientBookingPage() {
   const hasVariants = (selectedService?.variants.length ?? 0) > 0;
 
   // Effective price and duration accounting for variant modifiers
-  const effectivePrice = selectedService
+  const baseEffectivePrice = selectedService
     ? parseFloat(selectedService.basePrice) +
       (selectedVariant?.priceModifier ? parseFloat(selectedVariant.priceModifier) : 0)
     : 0;
+
+  // Apply happy hours discount if applicable
+  const happyHoursDiscountAmount = happyHoursPromo?.eligible && happyHoursPromo.discountPercent
+    ? Math.round(baseEffectivePrice * happyHoursPromo.discountPercent) / 100
+    : 0;
+  const effectivePrice = baseEffectivePrice - happyHoursDiscountAmount;
 
   const effectiveDuration = selectedService
     ? selectedService.baseDuration + (selectedVariant?.durationModifier ?? 0)
@@ -423,6 +440,29 @@ export default function ClientBookingPage() {
       setSelectedTimeSlot("");
     }
   }, [selectedEmployeeId, selectedDate, effectiveDuration, fetchAvailableSlots]);
+
+  // Check happy hours promotion when time slot is selected
+  useEffect(() => {
+    async function checkHappyHours() {
+      if (!selectedDate || !selectedTimeSlot || !salonId) {
+        setHappyHoursPromo(null);
+        return;
+      }
+      try {
+        const res = await fetch(
+          `/api/promotions/check-happy-hours?salonId=${salonId}&date=${selectedDate}&time=${selectedTimeSlot}`
+        );
+        const json = await res.json();
+        if (json.success) {
+          setHappyHoursPromo(json.data);
+        }
+      } catch (error) {
+        console.error("Failed to check happy hours:", error);
+        setHappyHoursPromo(null);
+      }
+    }
+    checkHappyHours();
+  }, [selectedDate, selectedTimeSlot, salonId]);
 
   // ---------------------------------------------------------------------------
   // Handlers
@@ -645,6 +685,7 @@ export default function ClientBookingPage() {
     setIsProcessingPayment(false);
     setDepositPaymentId("");
     setDepositSessionId("");
+    setHappyHoursPromo(null);
   }
 
   // ---------------------------------------------------------------------------
@@ -786,9 +827,31 @@ export default function ClientBookingPage() {
                   {selectedTimeSlot} - {calcEndTime(selectedTimeSlot, effectiveDuration)}
                 </span>
               </div>
+              {happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 && (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Cena regularna:</span>
+                    <span className="font-medium line-through text-muted-foreground">
+                      {baseEffectivePrice.toFixed(0)} PLN
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-green-600 font-medium">
+                      Happy Hours -{happyHoursPromo.discountPercent}%
+                    </span>
+                    <span className="font-medium text-green-600">
+                      -{happyHoursDiscountAmount.toFixed(0)} PLN
+                    </span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Cena:</span>
-                <span className="font-medium">{effectivePrice.toFixed(0)} PLN</span>
+                <span className="text-muted-foreground">
+                  {happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 ? "Cena po rabacie:" : "Cena:"}
+                </span>
+                <span className={`font-medium ${happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 ? "text-green-600 font-bold" : ""}`}>
+                  {effectivePrice.toFixed(0)} PLN
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Czas trwania:</span>
@@ -1349,9 +1412,30 @@ export default function ClientBookingPage() {
                     {calcEndTime(selectedTimeSlot, effectiveDuration)}
                   </span>
                 </div>
+                {/* Happy Hours discount display */}
+                {happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 && (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Cena regularna:</span>
+                      <span className="font-medium line-through text-muted-foreground">
+                        {baseEffectivePrice.toFixed(0)} PLN
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm" data-testid="happy-hours-discount-row">
+                      <span className="text-green-600 font-medium flex items-center gap-1">
+                        Happy Hours -{happyHoursPromo.discountPercent}%
+                      </span>
+                      <span className="font-medium text-green-600">
+                        -{happyHoursDiscountAmount.toFixed(0)} PLN
+                      </span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Cena:</span>
-                  <span className="font-medium">
+                  <span className="text-muted-foreground">
+                    {happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 ? "Cena po rabacie:" : "Cena:"}
+                  </span>
+                  <span className={`font-medium ${happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 ? "text-green-600 font-bold" : ""}`}>
                     {effectivePrice.toFixed(0)} PLN
                   </span>
                 </div>
@@ -1362,6 +1446,23 @@ export default function ClientBookingPage() {
                   </span>
                 </div>
               </div>
+
+              {/* Happy hours info banner */}
+              {happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 && (
+                <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800 mb-4" data-testid="happy-hours-banner">
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-5 h-5 text-green-600" />
+                    <div>
+                      <p className="text-sm font-semibold text-green-800 dark:text-green-300">
+                        {happyHoursPromo.promotionName || "Happy Hours"}
+                      </p>
+                      <p className="text-xs text-green-600 dark:text-green-400">
+                        {happyHoursPromo.reason}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Deposit payment section */}
               {depositRequired && depositAmount > 0 && (
