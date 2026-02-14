@@ -24,6 +24,7 @@ import {
   Loader2,
   Smartphone,
   Phone,
+  UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -254,6 +255,15 @@ export default function ClientBookingPage() {
     reason?: string;
   } | null>(null);
 
+  // First visit promotion state
+  const [firstVisitPromo, setFirstVisitPromo] = useState<{
+    eligible: boolean;
+    promotionId?: string;
+    promotionName?: string;
+    discountPercent?: number;
+    reason?: string;
+  } | null>(null);
+
   // ---------------------------------------------------------------------------
   // Derived values
   // ---------------------------------------------------------------------------
@@ -273,7 +283,21 @@ export default function ClientBookingPage() {
   const happyHoursDiscountAmount = happyHoursPromo?.eligible && happyHoursPromo.discountPercent
     ? Math.round(baseEffectivePrice * happyHoursPromo.discountPercent) / 100
     : 0;
-  const effectivePrice = baseEffectivePrice - happyHoursDiscountAmount;
+
+  // Apply first visit discount if applicable
+  const firstVisitDiscountAmount = firstVisitPromo?.eligible && firstVisitPromo.discountPercent
+    ? Math.round(baseEffectivePrice * firstVisitPromo.discountPercent) / 100
+    : 0;
+
+  // Use the highest applicable discount (don't stack)
+  const bestDiscountAmount = Math.max(happyHoursDiscountAmount, firstVisitDiscountAmount);
+  const activePromoType: "happy_hours" | "first_visit" | "none" =
+    bestDiscountAmount === 0
+      ? "none"
+      : firstVisitDiscountAmount >= happyHoursDiscountAmount
+        ? "first_visit"
+        : "happy_hours";
+  const effectivePrice = baseEffectivePrice - bestDiscountAmount;
 
   const effectiveDuration = selectedService
     ? selectedService.baseDuration + (selectedVariant?.durationModifier ?? 0)
@@ -440,6 +464,29 @@ export default function ClientBookingPage() {
       setSelectedTimeSlot("");
     }
   }, [selectedEmployeeId, selectedDate, effectiveDuration, fetchAvailableSlots]);
+
+  // Check first visit promotion when service is selected
+  useEffect(() => {
+    async function checkFirstVisit() {
+      if (!salonId || !session?.user?.email || !selectedServiceId) {
+        setFirstVisitPromo(null);
+        return;
+      }
+      try {
+        const res = await fetch(
+          `/api/promotions/check-first-visit?salonId=${salonId}&email=${encodeURIComponent(session.user.email)}&serviceId=${selectedServiceId}`
+        );
+        const json = await res.json();
+        if (json.success) {
+          setFirstVisitPromo(json.data);
+        }
+      } catch (error) {
+        console.error("Failed to check first visit promotion:", error);
+        setFirstVisitPromo(null);
+      }
+    }
+    checkFirstVisit();
+  }, [salonId, session?.user?.email, selectedServiceId]);
 
   // Check happy hours promotion when time slot is selected
   useEffect(() => {
@@ -686,6 +733,7 @@ export default function ClientBookingPage() {
     setDepositPaymentId("");
     setDepositSessionId("");
     setHappyHoursPromo(null);
+    setFirstVisitPromo(null);
   }
 
   // ---------------------------------------------------------------------------
@@ -827,7 +875,7 @@ export default function ClientBookingPage() {
                   {selectedTimeSlot} - {calcEndTime(selectedTimeSlot, effectiveDuration)}
                 </span>
               </div>
-              {happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 && (
+              {bestDiscountAmount > 0 && (
                 <>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Cena regularna:</span>
@@ -837,19 +885,21 @@ export default function ClientBookingPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-green-600 font-medium">
-                      Happy Hours -{happyHoursPromo.discountPercent}%
+                      {activePromoType === "first_visit"
+                        ? `Pierwsza wizyta -${firstVisitPromo?.discountPercent}%`
+                        : `Happy Hours -${happyHoursPromo?.discountPercent}%`}
                     </span>
                     <span className="font-medium text-green-600">
-                      -{happyHoursDiscountAmount.toFixed(0)} PLN
+                      -{bestDiscountAmount.toFixed(0)} PLN
                     </span>
                   </div>
                 </>
               )}
               <div className="flex justify-between">
                 <span className="text-muted-foreground">
-                  {happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 ? "Cena po rabacie:" : "Cena:"}
+                  {bestDiscountAmount > 0 ? "Cena po rabacie:" : "Cena:"}
                 </span>
-                <span className={`font-medium ${happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 ? "text-green-600 font-bold" : ""}`}>
+                <span className={`font-medium ${bestDiscountAmount > 0 ? "text-green-600 font-bold" : ""}`}>
                   {effectivePrice.toFixed(0)} PLN
                 </span>
               </div>
@@ -1412,8 +1462,8 @@ export default function ClientBookingPage() {
                     {calcEndTime(selectedTimeSlot, effectiveDuration)}
                   </span>
                 </div>
-                {/* Happy Hours discount display */}
-                {happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 && (
+                {/* Discount display (first visit or happy hours) */}
+                {bestDiscountAmount > 0 && (
                   <>
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Cena regularna:</span>
@@ -1421,21 +1471,23 @@ export default function ClientBookingPage() {
                         {baseEffectivePrice.toFixed(0)} PLN
                       </span>
                     </div>
-                    <div className="flex justify-between text-sm" data-testid="happy-hours-discount-row">
+                    <div className="flex justify-between text-sm" data-testid="discount-row">
                       <span className="text-green-600 font-medium flex items-center gap-1">
-                        Happy Hours -{happyHoursPromo.discountPercent}%
+                        {activePromoType === "first_visit"
+                          ? `Pierwsza wizyta -${firstVisitPromo?.discountPercent}%`
+                          : `Happy Hours -${happyHoursPromo?.discountPercent}%`}
                       </span>
                       <span className="font-medium text-green-600">
-                        -{happyHoursDiscountAmount.toFixed(0)} PLN
+                        -{bestDiscountAmount.toFixed(0)} PLN
                       </span>
                     </div>
                   </>
                 )}
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">
-                    {happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 ? "Cena po rabacie:" : "Cena:"}
+                    {bestDiscountAmount > 0 ? "Cena po rabacie:" : "Cena:"}
                   </span>
-                  <span className={`font-medium ${happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 ? "text-green-600 font-bold" : ""}`}>
+                  <span className={`font-medium ${bestDiscountAmount > 0 ? "text-green-600 font-bold" : ""}`}>
                     {effectivePrice.toFixed(0)} PLN
                   </span>
                 </div>
@@ -1447,17 +1499,25 @@ export default function ClientBookingPage() {
                 </div>
               </div>
 
-              {/* Happy hours info banner */}
-              {happyHoursPromo?.eligible && happyHoursDiscountAmount > 0 && (
-                <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800 mb-4" data-testid="happy-hours-banner">
+              {/* Promotion info banner */}
+              {bestDiscountAmount > 0 && (
+                <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800 mb-4" data-testid="promotion-banner">
                   <div className="flex items-center gap-2">
-                    <Clock className="w-5 h-5 text-green-600" />
+                    {activePromoType === "first_visit" ? (
+                      <UserPlus className="w-5 h-5 text-green-600" />
+                    ) : (
+                      <Clock className="w-5 h-5 text-green-600" />
+                    )}
                     <div>
                       <p className="text-sm font-semibold text-green-800 dark:text-green-300">
-                        {happyHoursPromo.promotionName || "Happy Hours"}
+                        {activePromoType === "first_visit"
+                          ? (firstVisitPromo?.promotionName || "Znizka na pierwsza wizyte")
+                          : (happyHoursPromo?.promotionName || "Happy Hours")}
                       </p>
                       <p className="text-xs text-green-600 dark:text-green-400">
-                        {happyHoursPromo.reason}
+                        {activePromoType === "first_visit"
+                          ? (firstVisitPromo?.reason || `Znizka ${firstVisitPromo?.discountPercent}% na pierwsza wizyte!`)
+                          : (happyHoursPromo?.reason || `Happy Hours -${happyHoursPromo?.discountPercent}%`)}
                       </p>
                     </div>
                   </div>
