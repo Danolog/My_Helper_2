@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +44,8 @@ import {
   ArrowUpDown,
   Bell,
   History,
+  Tag,
+  FolderOpen,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -59,19 +62,17 @@ interface Product {
   updatedAt: string;
 }
 
+interface ProductCategory {
+  id: string;
+  salonId: string;
+  name: string;
+  sortOrder: number | null;
+  createdAt: string;
+  productCount: number;
+}
+
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 const NO_CATEGORY = "__none__";
-
-const PRODUCT_CATEGORIES = [
-  "Farby",
-  "Odżywki",
-  "Szampony",
-  "Stylizacja",
-  "Pielęgnacja",
-  "Materiały jednorazowe",
-  "Chemia",
-  "Inne",
-];
 
 const UNITS = ["ml", "g", "szt.", "opak.", "l", "kg"];
 
@@ -83,6 +84,17 @@ export default function ProductsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("name-asc");
+  const [activeTab, setActiveTab] = useState("products");
+
+  // Categories state
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
+  const [categoryFormName, setCategoryFormName] = useState("");
+  const [savingCategory, setSavingCategory] = useState(false);
+  const [deleteCategoryDialogOpen, setDeleteCategoryDialogOpen] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<ProductCategory | null>(null);
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -119,9 +131,24 @@ export default function ProductsPage() {
       }
     } catch (error) {
       console.error("Failed to fetch products:", error);
-      toast.error("Błąd podczas ładowania produktów");
+      toast.error("Blad podczas ladowania produktow");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const fetchCategories = useCallback(async () => {
+    try {
+      setCategoriesLoading(true);
+      const res = await fetch(`/api/product-categories?salonId=${DEMO_SALON_ID}`);
+      const data = await res.json();
+      if (data.success) {
+        setCategories(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch categories:", error);
+    } finally {
+      setCategoriesLoading(false);
     }
   }, []);
 
@@ -145,8 +172,12 @@ export default function ProductsPage() {
 
   useEffect(() => {
     fetchProducts();
+    fetchCategories();
     fetchLowStockNotifications();
-  }, [fetchProducts, fetchLowStockNotifications]);
+  }, [fetchProducts, fetchCategories, fetchLowStockNotifications]);
+
+  // Category names from DB for product category select
+  const categoryNames = categories.map((c) => c.name);
 
   const openAddDialog = () => {
     setEditingProduct(null);
@@ -172,7 +203,7 @@ export default function ProductsPage() {
 
   const handleSave = async () => {
     if (!formName.trim()) {
-      toast.error("Podaj nazwę produktu");
+      toast.error("Podaj nazwe produktu");
       return;
     }
 
@@ -213,19 +244,20 @@ export default function ProductsPage() {
         // Show low-stock alert toast if notification was sent
         if (data.lowStockAlert?.notificationSent) {
           toast.warning(
-            `Niski stan magazynowy: "${formName}" - wysłano powiadomienie`,
+            `Niski stan magazynowy: "${formName}" - wyslano powiadomienie`,
             { duration: 6000 }
           );
         }
         setDialogOpen(false);
         fetchProducts();
+        fetchCategories();
         fetchLowStockNotifications();
       } else {
-        toast.error(data.error || "Nie udało się zapisać produktu");
+        toast.error(data.error || "Nie udalo sie zapisac produktu");
       }
     } catch (error) {
       console.error("Failed to save product:", error);
-      toast.error("Błąd podczas zapisywania produktu");
+      toast.error("Blad podczas zapisywania produktu");
     } finally {
       setSaving(false);
     }
@@ -240,17 +272,101 @@ export default function ProductsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        toast.success(`Produkt "${productToDelete.name}" usunięty`);
+        toast.success(`Produkt "${productToDelete.name}" usuniety`);
         fetchProducts();
+        fetchCategories();
       } else {
-        toast.error(data.error || "Nie udało się usunąć produktu");
+        toast.error(data.error || "Nie udalo sie usunac produktu");
       }
     } catch (error) {
       console.error("Failed to delete product:", error);
-      toast.error("Błąd podczas usuwania produktu");
+      toast.error("Blad podczas usuwania produktu");
     } finally {
       setDeleteDialogOpen(false);
       setProductToDelete(null);
+    }
+  };
+
+  // Category CRUD handlers
+  const openAddCategoryDialog = () => {
+    setEditingCategory(null);
+    setCategoryFormName("");
+    setCategoryDialogOpen(true);
+  };
+
+  const openEditCategoryDialog = (category: ProductCategory) => {
+    setEditingCategory(category);
+    setCategoryFormName(category.name);
+    setCategoryDialogOpen(true);
+  };
+
+  const handleSaveCategory = async () => {
+    if (!categoryFormName.trim()) {
+      toast.error("Podaj nazwe kategorii");
+      return;
+    }
+
+    setSavingCategory(true);
+    try {
+      let res: Response;
+      if (editingCategory) {
+        res = await fetch(`/api/product-categories/${editingCategory.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: categoryFormName.trim() }),
+        });
+      } else {
+        res = await fetch("/api/product-categories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            salonId: DEMO_SALON_ID,
+            name: categoryFormName.trim(),
+          }),
+        });
+      }
+
+      const data = await res.json();
+      if (data.success) {
+        toast.success(
+          editingCategory
+            ? `Kategoria zmieniona na "${categoryFormName.trim()}"`
+            : `Kategoria "${categoryFormName.trim()}" dodana`
+        );
+        setCategoryDialogOpen(false);
+        fetchCategories();
+        fetchProducts(); // Refresh products in case category was renamed
+      } else {
+        toast.error(data.error || "Nie udalo sie zapisac kategorii");
+      }
+    } catch (error) {
+      console.error("Failed to save category:", error);
+      toast.error("Blad podczas zapisywania kategorii");
+    } finally {
+      setSavingCategory(false);
+    }
+  };
+
+  const handleDeleteCategory = async () => {
+    if (!categoryToDelete) return;
+
+    try {
+      const res = await fetch(`/api/product-categories/${categoryToDelete.id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`Kategoria "${categoryToDelete.name}" usunieta`);
+        fetchCategories();
+      } else {
+        toast.error(data.error || "Nie udalo sie usunac kategorii");
+      }
+    } catch (error) {
+      console.error("Failed to delete category:", error);
+      toast.error("Blad podczas usuwania kategorii");
+    } finally {
+      setDeleteCategoryDialogOpen(false);
+      setCategoryToDelete(null);
     }
   };
 
@@ -288,7 +404,7 @@ export default function ProductsPage() {
       }
     });
 
-  // Get unique categories from data
+  // Get unique categories from data for the filter dropdown
   const uniqueCategories = Array.from(
     new Set(productsData.map((p) => p.category).filter(Boolean))
   ) as string[];
@@ -314,7 +430,7 @@ export default function ProductsPage() {
           <Lock className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
           <h1 className="text-2xl font-bold mb-2">Wymagane logowanie</h1>
           <p className="text-muted-foreground mb-6">
-            Musisz się zalogować, aby zarządzać magazynem
+            Musisz sie zalogowac, aby zarzadzac magazynem
           </p>
         </div>
       </div>
@@ -329,267 +445,371 @@ export default function ProductsPage() {
           <Package className="w-8 h-8 text-primary" />
           <div>
             <h1 className="text-2xl font-bold" data-testid="products-title">
-              Magazyn produktów
+              Magazyn produktow
             </h1>
             <p className="text-muted-foreground text-sm">
-              Zarządzaj produktami i stanem magazynowym
+              Zarzadzaj produktami i stanem magazynowym
             </p>
           </div>
         </div>
-        <Button onClick={openAddDialog} data-testid="add-product-btn">
-          <Plus className="h-4 w-4 mr-2" />
-          Dodaj produkt
-        </Button>
       </div>
 
-      {/* Low stock warning */}
-      {lowStockProducts.length > 0 && (
-        <div
-          className="flex items-start gap-3 p-4 mb-6 rounded-lg border border-orange-300 bg-orange-50 dark:border-orange-700 dark:bg-orange-950/30"
-          data-testid="low-stock-warning"
-        >
-          <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400 mt-0.5 shrink-0" />
-          <div>
-            <p className="font-semibold text-orange-800 dark:text-orange-300">
-              Niski stan magazynowy ({lowStockProducts.length})
-            </p>
-            <p className="text-sm text-orange-700 dark:text-orange-400 mt-1">
-              {lowStockProducts.map((p) => p.name).join(", ")}
-            </p>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="mb-6">
+          <TabsTrigger value="products" data-testid="products-tab">
+            <Package className="h-4 w-4 mr-2" />
+            Produkty
+          </TabsTrigger>
+          <TabsTrigger value="categories" data-testid="categories-tab">
+            <Tag className="h-4 w-4 mr-2" />
+            Kategorie
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ==================== PRODUCTS TAB ==================== */}
+        <TabsContent value="products">
+          <div className="flex items-center justify-end mb-4">
+            <Button onClick={openAddDialog} data-testid="add-product-btn">
+              <Plus className="h-4 w-4 mr-2" />
+              Dodaj produkt
+            </Button>
           </div>
-        </div>
-      )}
 
-      {/* Filters */}
-      <div className="flex gap-3 mb-6">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Szukaj produktu..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-            data-testid="product-search"
-          />
-        </div>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-48" data-testid="category-filter">
-            <SelectValue placeholder="Kategoria" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Wszystkie kategorie</SelectItem>
-            {uniqueCategories.map((cat) => (
-              <SelectItem key={cat} value={cat}>
-                {cat}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={sortBy} onValueChange={setSortBy}>
-          <SelectTrigger className="w-52" data-testid="sort-select">
-            <ArrowUpDown className="h-4 w-4 mr-2 shrink-0" />
-            <SelectValue placeholder="Sortuj" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="name-asc">Nazwa A-Z</SelectItem>
-            <SelectItem value="name-desc">Nazwa Z-A</SelectItem>
-            <SelectItem value="quantity-asc">Ilość rosnąco</SelectItem>
-            <SelectItem value="quantity-desc">Ilość malejąco</SelectItem>
-            <SelectItem value="category-asc">Kategoria A-Z</SelectItem>
-            <SelectItem value="category-desc">Kategoria Z-A</SelectItem>
-            <SelectItem value="price-asc">Cena rosnąco</SelectItem>
-            <SelectItem value="price-desc">Cena malejąco</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+          {/* Low stock warning */}
+          {lowStockProducts.length > 0 && (
+            <div
+              className="flex items-start gap-3 p-4 mb-6 rounded-lg border border-orange-300 bg-orange-50 dark:border-orange-700 dark:bg-orange-950/30"
+              data-testid="low-stock-warning"
+            >
+              <AlertTriangle className="h-5 w-5 text-orange-600 dark:text-orange-400 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold text-orange-800 dark:text-orange-300">
+                  Niski stan magazynowy ({lowStockProducts.length})
+                </p>
+                <p className="text-sm text-orange-700 dark:text-orange-400 mt-1">
+                  {lowStockProducts.map((p) => p.name).join(", ")}
+                </p>
+              </div>
+            </div>
+          )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <p className="text-2xl font-bold" data-testid="total-products-count">
-                {productsData.length}
-              </p>
-              <p className="text-sm text-muted-foreground">Produktów łącznie</p>
+          {/* Filters */}
+          <div className="flex gap-3 mb-6">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Szukaj produktu..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+                data-testid="product-search"
+              />
             </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <p className="text-2xl font-bold">{uniqueCategories.length}</p>
-              <p className="text-sm text-muted-foreground">Kategorii</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center">
-              <p className="text-2xl font-bold text-orange-600" data-testid="low-stock-count">
-                {lowStockProducts.length}
-              </p>
-              <p className="text-sm text-muted-foreground">Niski stan</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-48" data-testid="category-filter">
+                <SelectValue placeholder="Kategoria" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Wszystkie kategorie</SelectItem>
+                {uniqueCategories.map((cat) => (
+                  <SelectItem key={cat} value={cat}>
+                    {cat}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className="w-52" data-testid="sort-select">
+                <ArrowUpDown className="h-4 w-4 mr-2 shrink-0" />
+                <SelectValue placeholder="Sortuj" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name-asc">Nazwa A-Z</SelectItem>
+                <SelectItem value="name-desc">Nazwa Z-A</SelectItem>
+                <SelectItem value="quantity-asc">Ilosc rosnaco</SelectItem>
+                <SelectItem value="quantity-desc">Ilosc malejaco</SelectItem>
+                <SelectItem value="category-asc">Kategoria A-Z</SelectItem>
+                <SelectItem value="category-desc">Kategoria Z-A</SelectItem>
+                <SelectItem value="price-asc">Cena rosnaco</SelectItem>
+                <SelectItem value="price-desc">Cena malejaco</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-      {/* Recent low-stock notifications */}
-      {lowStockNotifications.length > 0 && (
-        <Card className="mb-6" data-testid="low-stock-notifications">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Bell className="h-4 w-4 text-orange-500" />
-              Ostatnie powiadomienia o niskim stanie
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {lowStockNotifications.slice(0, 5).map((notif) => (
-                <div
-                  key={notif.id}
-                  className="flex items-start gap-2 text-sm p-2 rounded-md bg-muted/50"
-                  data-testid={`notification-${notif.id}`}
-                >
-                  <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm">{notif.message.replace(/\[product:[^\]]+\]/, "").trim()}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {new Date(notif.sentAt || notif.createdAt).toLocaleString("pl-PL")}
-                    </p>
-                  </div>
+          {/* Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-center">
+                  <p className="text-2xl font-bold" data-testid="total-products-count">
+                    {productsData.length}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Produktow lacznie</p>
                 </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-center">
+                  <p className="text-2xl font-bold">{categories.length}</p>
+                  <p className="text-sm text-muted-foreground">Kategorii</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-orange-600" data-testid="low-stock-count">
+                    {lowStockProducts.length}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Niski stan</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Recent low-stock notifications */}
+          {lowStockNotifications.length > 0 && (
+            <Card className="mb-6" data-testid="low-stock-notifications">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Bell className="h-4 w-4 text-orange-500" />
+                  Ostatnie powiadomienia o niskim stanie
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {lowStockNotifications.slice(0, 5).map((notif) => (
+                    <div
+                      key={notif.id}
+                      className="flex items-start gap-2 text-sm p-2 rounded-md bg-muted/50"
+                      data-testid={`notification-${notif.id}`}
+                    >
+                      <AlertTriangle className="h-4 w-4 text-orange-500 mt-0.5 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm">{notif.message.replace(/\[product:[^\]]+\]/, "").trim()}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {new Date(notif.sentAt || notif.createdAt).toLocaleString("pl-PL")}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Products list */}
+          {filteredProducts.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <Package className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                <p className="text-muted-foreground text-lg font-medium">
+                  {productsData.length === 0 ? "Brak produktow" : "Brak wynikow"}
+                </p>
+                <p className="text-muted-foreground text-sm mt-1">
+                  {productsData.length === 0
+                    ? "Dodaj pierwszy produkt do magazynu"
+                    : "Zmien kryteria wyszukiwania"}
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="products-grid">
+              {filteredProducts.map((product) => {
+                const qty = parseFloat(product.quantity || "0");
+                const minQty = product.minQuantity
+                  ? parseFloat(product.minQuantity)
+                  : null;
+                const isLowStock = minQty !== null && qty <= minQty;
+
+                return (
+                  <Card
+                    key={product.id}
+                    className={`relative ${isLowStock ? "border-orange-300 dark:border-orange-700" : ""}`}
+                    data-testid={`product-card-${product.id}`}
+                  >
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1 min-w-0">
+                          <CardTitle
+                            className="text-base truncate cursor-pointer hover:text-primary transition-colors"
+                            onClick={() => router.push(`/dashboard/products/${product.id}`)}
+                            data-testid="product-name"
+                          >
+                            {product.name}
+                          </CardTitle>
+                          {product.category && (
+                            <Badge variant="secondary" className="mt-1 text-xs">
+                              {product.category}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex gap-1 shrink-0 ml-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => openEditDialog(product)}
+                            data-testid={`edit-product-${product.id}`}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive"
+                            onClick={() => {
+                              setProductToDelete(product);
+                              setDeleteDialogOpen(true);
+                            }}
+                            data-testid={`delete-product-${product.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-muted-foreground">Stan:</span>
+                          <span
+                            className={`text-sm font-medium ${isLowStock ? "text-orange-600" : ""}`}
+                            data-testid="product-quantity"
+                          >
+                            {qty} {product.unit || "szt."}
+                            {isLowStock && (
+                              <AlertTriangle className="inline h-3.5 w-3.5 ml-1 text-orange-500" />
+                            )}
+                          </span>
+                        </div>
+                        {minQty !== null && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-muted-foreground">
+                              Min. stan:
+                            </span>
+                            <span className="text-sm">
+                              {minQty} {product.unit || "szt."}
+                            </span>
+                          </div>
+                        )}
+                        {product.pricePerUnit && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-muted-foreground">
+                              Cena/jedn.:
+                            </span>
+                            <span className="text-sm">
+                              {parseFloat(product.pricePerUnit).toFixed(2)} PLN
+                            </span>
+                          </div>
+                        )}
+                        <div className="pt-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full text-xs text-muted-foreground hover:text-primary"
+                            onClick={() => router.push(`/dashboard/products/${product.id}`)}
+                            data-testid={`usage-history-${product.id}`}
+                          >
+                            <History className="h-3.5 w-3.5 mr-1" />
+                            Historia zuzycia
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ==================== CATEGORIES TAB ==================== */}
+        <TabsContent value="categories">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-lg font-semibold" data-testid="categories-title">
+                Kategorie produktow
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Organizuj produkty wedlug typow
+              </p>
+            </div>
+            <Button onClick={openAddCategoryDialog} data-testid="add-category-btn">
+              <Plus className="h-4 w-4 mr-2" />
+              Dodaj kategorie
+            </Button>
+          </div>
+
+          {categoriesLoading ? (
+            <div className="flex justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+            </div>
+          ) : categories.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center">
+                <FolderOpen className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                <p className="text-muted-foreground text-lg font-medium">
+                  Brak kategorii
+                </p>
+                <p className="text-muted-foreground text-sm mt-1">
+                  Dodaj pierwsza kategorie, aby organizowac produkty
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3" data-testid="categories-list">
+              {categories.map((category) => (
+                <Card key={category.id} data-testid={`category-card-${category.id}`}>
+                  <CardContent className="py-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Tag className="h-5 w-5 text-primary shrink-0" />
+                        <div>
+                          <p className="font-medium" data-testid={`category-name-${category.id}`}>
+                            {category.name}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {category.productCount === 0
+                              ? "Brak produktow"
+                              : `${category.productCount} ${category.productCount === 1 ? "produkt" : category.productCount < 5 ? "produkty" : "produktow"}`}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => openEditCategoryDialog(category)}
+                          data-testid={`edit-category-${category.id}`}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive"
+                          onClick={() => {
+                            setCategoryToDelete(category);
+                            setDeleteCategoryDialogOpen(true);
+                          }}
+                          disabled={category.productCount > 0}
+                          title={category.productCount > 0 ? "Nie mozna usunac kategorii z produktami" : "Usun kategorie"}
+                          data-testid={`delete-category-${category.id}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
               ))}
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Products list */}
-      {filteredProducts.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Package className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-            <p className="text-muted-foreground text-lg font-medium">
-              {productsData.length === 0 ? "Brak produktów" : "Brak wyników"}
-            </p>
-            <p className="text-muted-foreground text-sm mt-1">
-              {productsData.length === 0
-                ? "Dodaj pierwszy produkt do magazynu"
-                : "Zmień kryteria wyszukiwania"}
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="products-grid">
-          {filteredProducts.map((product) => {
-            const qty = parseFloat(product.quantity || "0");
-            const minQty = product.minQuantity
-              ? parseFloat(product.minQuantity)
-              : null;
-            const isLowStock = minQty !== null && qty <= minQty;
-
-            return (
-              <Card
-                key={product.id}
-                className={`relative ${isLowStock ? "border-orange-300 dark:border-orange-700" : ""}`}
-                data-testid={`product-card-${product.id}`}
-              >
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <CardTitle
-                        className="text-base truncate cursor-pointer hover:text-primary transition-colors"
-                        onClick={() => router.push(`/dashboard/products/${product.id}`)}
-                        data-testid="product-name"
-                      >
-                        {product.name}
-                      </CardTitle>
-                      {product.category && (
-                        <Badge variant="secondary" className="mt-1 text-xs">
-                          {product.category}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex gap-1 shrink-0 ml-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => openEditDialog(product)}
-                        data-testid={`edit-product-${product.id}`}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive"
-                        onClick={() => {
-                          setProductToDelete(product);
-                          setDeleteDialogOpen(true);
-                        }}
-                        data-testid={`delete-product-${product.id}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-muted-foreground">Stan:</span>
-                      <span
-                        className={`text-sm font-medium ${isLowStock ? "text-orange-600" : ""}`}
-                        data-testid="product-quantity"
-                      >
-                        {qty} {product.unit || "szt."}
-                        {isLowStock && (
-                          <AlertTriangle className="inline h-3.5 w-3.5 ml-1 text-orange-500" />
-                        )}
-                      </span>
-                    </div>
-                    {minQty !== null && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">
-                          Min. stan:
-                        </span>
-                        <span className="text-sm">
-                          {minQty} {product.unit || "szt."}
-                        </span>
-                      </div>
-                    )}
-                    {product.pricePerUnit && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">
-                          Cena/jedn.:
-                        </span>
-                        <span className="text-sm">
-                          {parseFloat(product.pricePerUnit).toFixed(2)} PLN
-                        </span>
-                      </div>
-                    )}
-                    <div className="pt-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full text-xs text-muted-foreground hover:text-primary"
-                        onClick={() => router.push(`/dashboard/products/${product.id}`)}
-                        data-testid={`usage-history-${product.id}`}
-                      >
-                        <History className="h-3.5 w-3.5 mr-1" />
-                        Historia zuzycia
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-      )}
+          )}
+        </TabsContent>
+      </Tabs>
 
       {/* Add/Edit Product Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -619,11 +839,11 @@ export default function ProductsPage() {
                 }
               >
                 <SelectTrigger data-testid="product-category-select">
-                  <SelectValue placeholder="Wybierz kategorię" />
+                  <SelectValue placeholder="Wybierz kategorie" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NO_CATEGORY}>Bez kategorii</SelectItem>
-                  {PRODUCT_CATEGORIES.map((cat) => (
+                  {categoryNames.map((cat) => (
                     <SelectItem key={cat} value={cat}>
                       {cat}
                     </SelectItem>
@@ -633,7 +853,7 @@ export default function ProductsPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="product-quantity">Ilość</Label>
+                <Label htmlFor="product-quantity">Ilosc</Label>
                 <Input
                   id="product-quantity"
                   type="number"
@@ -708,13 +928,13 @@ export default function ProductsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
+      {/* Delete Product Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Usunąć produkt?</AlertDialogTitle>
+            <AlertDialogTitle>Usunac produkt?</AlertDialogTitle>
             <AlertDialogDescription>
-              Czy na pewno chcesz usunąć produkt{" "}
+              Czy na pewno chcesz usunac produkt{" "}
               <strong>{productToDelete?.name}</strong>? Ta operacja jest
               nieodwracalna.
             </AlertDialogDescription>
@@ -726,7 +946,70 @@ export default function ProductsPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               data-testid="confirm-delete-product"
             >
-              Usuń
+              Usun
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Add/Edit Category Dialog */}
+      <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
+        <DialogContent className="max-w-sm" data-testid="category-dialog">
+          <DialogHeader>
+            <DialogTitle>
+              {editingCategory ? "Zmien nazwe kategorii" : "Dodaj kategorie"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="category-name">Nazwa kategorii *</Label>
+              <Input
+                id="category-name"
+                value={categoryFormName}
+                onChange={(e) => setCategoryFormName(e.target.value)}
+                placeholder="np. Farby do wlosow"
+                data-testid="category-name-input"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCategoryDialogOpen(false)}>
+              Anuluj
+            </Button>
+            <Button
+              onClick={handleSaveCategory}
+              disabled={savingCategory}
+              data-testid="save-category-btn"
+            >
+              {savingCategory
+                ? "Zapisywanie..."
+                : editingCategory
+                  ? "Zapisz zmiany"
+                  : "Dodaj kategorie"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Category Confirmation Dialog */}
+      <AlertDialog open={deleteCategoryDialogOpen} onOpenChange={setDeleteCategoryDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Usunac kategorie?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Czy na pewno chcesz usunac kategorie{" "}
+              <strong>{categoryToDelete?.name}</strong>? Ta operacja jest
+              nieodwracalna.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Anuluj</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteCategory}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="confirm-delete-category"
+            >
+              Usun
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
