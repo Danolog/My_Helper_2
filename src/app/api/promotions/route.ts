@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { promotions, services } from "@/lib/schema";
-import { eq, desc, inArray } from "drizzle-orm";
+import { promotions } from "@/lib/schema";
+import { eq, desc } from "drizzle-orm";
 
 // GET /api/promotions - List promotions with optional salonId filter
 export async function GET(request: Request) {
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
     }
 
     // Validate type
-    const validTypes = ["percentage", "fixed", "package", "buy2get1", "happy_hours"];
+    const validTypes = ["percentage", "fixed", "package", "buy2get1", "happy_hours", "first_visit"];
     if (!validTypes.includes(type)) {
       return NextResponse.json(
         { success: false, error: `Invalid type. Must be one of: ${validTypes.join(", ")}` },
@@ -81,6 +81,35 @@ export async function POST(request: Request) {
       if (isNaN(numValue) || numValue <= 0 || numValue > 100) {
         return NextResponse.json(
           { success: false, error: "Buy 2 Get 1 discount must be between 1 and 100 percent" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // First visit: percentage discount for new clients
+    if (type === "first_visit") {
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue <= 0 || numValue > 100) {
+        return NextResponse.json(
+          { success: false, error: "First visit discount must be between 1 and 100 percent" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Package: value is the total package price, conditionsJson must include packageServiceIds
+    if (type === "package") {
+      const numValue = parseFloat(value);
+      if (isNaN(numValue) || numValue <= 0) {
+        return NextResponse.json(
+          { success: false, error: "Package price must be greater than 0" },
+          { status: 400 }
+        );
+      }
+      const cond = conditionsJson || {};
+      if (!cond.packageServiceIds || !Array.isArray(cond.packageServiceIds) || cond.packageServiceIds.length < 2) {
+        return NextResponse.json(
+          { success: false, error: "Package must include at least 2 services" },
           { status: 400 }
         );
       }

@@ -46,6 +46,7 @@ import {
   Gift,
   Scissors,
   Clock,
+  UserPlus,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -78,6 +79,7 @@ const TYPE_LABELS: Record<string, string> = {
   package: "Pakiet",
   buy2get1: "2+1 gratis",
   happy_hours: "Happy Hours",
+  first_visit: "Pierwsza wizyta",
 };
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -86,6 +88,7 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
   package: <Package className="w-4 h-4" />,
   buy2get1: <Gift className="w-4 h-4" />,
   happy_hours: <Clock className="w-4 h-4" />,
+  first_visit: <UserPlus className="w-4 h-4" />,
 };
 
 const DAY_NAMES_PL = ["Nd", "Pn", "Wt", "Sr", "Cz", "Pt", "Sb"];
@@ -103,6 +106,8 @@ function formatValue(type: string, value: string): string {
   if (type === "fixed") return `${numVal.toFixed(2)} PLN`;
   if (type === "buy2get1") return `${numVal}% zn. na 3.`;
   if (type === "happy_hours") return `-${numVal}%`;
+  if (type === "first_visit") return `-${numVal}%`;
+  if (type === "package") return `${numVal.toFixed(2)} PLN`;
   return value;
 }
 
@@ -203,8 +208,13 @@ export default function PromotionsPage() {
     setFormIsActive(promo.isActive);
     // Restore selected service IDs from conditionsJson
     const conditions = promo.conditionsJson || {};
-    const serviceIds = (conditions.applicableServiceIds as string[]) || [];
-    setFormSelectedServiceIds(serviceIds);
+    if (promo.type === "package") {
+      const packageIds = (conditions.packageServiceIds as string[]) || [];
+      setFormSelectedServiceIds(packageIds);
+    } else {
+      const serviceIds = (conditions.applicableServiceIds as string[]) || [];
+      setFormSelectedServiceIds(serviceIds);
+    }
     // Restore happy hours fields
     if (promo.type === "happy_hours") {
       setFormHappyHoursStart((conditions.startTime as string) || "14:00");
@@ -227,6 +237,15 @@ export default function PromotionsPage() {
     // When switching to happy_hours, default value to 20%
     if (newType === "happy_hours" && !formValue) {
       setFormValue("20");
+    }
+    // When switching to first_visit, default value to 15%
+    if (newType === "first_visit" && !formValue) {
+      setFormValue("15");
+    }
+    // When switching to package, clear value so user enters package price
+    if (newType === "package") {
+      setFormValue("");
+      setFormSelectedServiceIds([]);
     }
   };
 
@@ -253,12 +272,16 @@ export default function PromotionsPage() {
       toast.error("Podaj prawidlowa wartosc rabatu");
       return;
     }
-    if ((formType === "percentage" || formType === "buy2get1" || formType === "happy_hours") && parseFloat(formValue) > 100) {
+    if ((formType === "percentage" || formType === "buy2get1" || formType === "happy_hours" || formType === "first_visit") && parseFloat(formValue) > 100) {
       toast.error("Rabat procentowy nie moze przekraczac 100%");
       return;
     }
     if (formType === "buy2get1" && formSelectedServiceIds.length === 0) {
       toast.error("Wybierz co najmniej jedna usluge dla promocji 2+1");
+      return;
+    }
+    if (formType === "package" && formSelectedServiceIds.length < 2) {
+      toast.error("Pakiet musi zawierac co najmniej 2 uslugi");
       return;
     }
     if (formType === "happy_hours") {
@@ -289,8 +312,15 @@ export default function PromotionsPage() {
       };
 
       // Include applicable service IDs for buy2get1 promotions
-      if (formType === "buy2get1" || formSelectedServiceIds.length > 0) {
+      if (formType === "buy2get1" || (formType !== "package" && formSelectedServiceIds.length > 0)) {
         payload.applicableServiceIds = formSelectedServiceIds;
+      }
+
+      // Include package service IDs
+      if (formType === "package") {
+        payload.conditionsJson = {
+          packageServiceIds: formSelectedServiceIds,
+        };
       }
 
       // Include happy hours conditions
@@ -541,7 +571,7 @@ export default function PromotionsPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                     <div>
                       <p className="text-muted-foreground">
-                        {promo.type === "buy2get1" ? "Znizka na 3. wizyte" : "Wartosc rabatu"}
+                        {promo.type === "buy2get1" ? "Znizka na 3. wizyte" : promo.type === "first_visit" ? "Znizka na 1. wizyte" : promo.type === "package" ? "Cena pakietu" : "Wartosc rabatu"}
                       </p>
                       <p className="font-semibold text-lg">{formatValue(promo.type, promo.value)}</p>
                     </div>
@@ -576,6 +606,75 @@ export default function PromotionsPage() {
                       </div>
                       <p className="text-xs text-muted-foreground mt-2">
                         Kup 2 wizyty, 3. wizyta z rabatem {formatValue("percentage", promo.value)}
+                      </p>
+                    </div>
+                  )}
+                  {/* Show package details */}
+                  {promo.type === "package" && (() => {
+                    const conditions = promo.conditionsJson || {};
+                    const packageServiceIds = (conditions.packageServiceIds as string[]) || [];
+                    const packageServices = packageServiceIds.map((id) => {
+                      const svc = servicesList.find((s) => s.id === id);
+                      return svc || null;
+                    }).filter((s): s is Service => s !== null);
+                    const totalIndividualPrice = packageServices.reduce(
+                      (sum, s) => sum + parseFloat(s.basePrice), 0
+                    );
+                    const totalDuration = packageServices.reduce(
+                      (sum, s) => sum + s.baseDuration, 0
+                    );
+                    const packagePrice = parseFloat(promo.value);
+                    const savings = totalIndividualPrice - packagePrice;
+
+                    return (
+                      <div className="mt-3 pt-3 border-t">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Package className="w-4 h-4 text-blue-500" />
+                          <p className="text-sm text-muted-foreground font-medium">
+                            Uslugi w pakiecie ({packageServices.length}):
+                          </p>
+                        </div>
+                        <div className="space-y-1 mb-2">
+                          {packageServices.map((svc, i) => (
+                            <div key={i} className="flex items-center justify-between text-sm">
+                              <span>{svc.name}</span>
+                              <span className="text-muted-foreground line-through">
+                                {parseFloat(svc.basePrice).toFixed(2)} PLN
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center justify-between text-sm pt-2 border-t">
+                          <span className="text-muted-foreground">Suma indywidualna:</span>
+                          <span className="line-through text-muted-foreground">
+                            {totalIndividualPrice.toFixed(2)} PLN
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-sm font-semibold">
+                          <span>Cena pakietu:</span>
+                          <span className="text-green-600">{packagePrice.toFixed(2)} PLN</span>
+                        </div>
+                        {savings > 0 && (
+                          <p className="text-xs text-green-600 mt-1">
+                            Oszczednosc: {savings.toFixed(2)} PLN ({Math.round((savings / totalIndividualPrice) * 100)}%)
+                            {totalDuration > 0 && ` | Laczny czas: ${totalDuration} min`}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {/* Show first visit details */}
+                  {promo.type === "first_visit" && (
+                    <div className="mt-3 pt-3 border-t">
+                      <div className="flex items-center gap-2 mb-2">
+                        <UserPlus className="w-4 h-4 text-blue-500" />
+                        <p className="text-sm text-muted-foreground font-medium">
+                          Znizka na pierwsza wizyte
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Nowi klienci otrzymuja {parseFloat(promo.value)}% znizki na swoja pierwsza wizyte w salonie.
+                        Rabat jest automatycznie naliczany podczas rezerwacji online.
                       </p>
                     </div>
                   )}
@@ -656,6 +755,7 @@ export default function PromotionsPage() {
                   <SelectItem value="package">Pakiet</SelectItem>
                   <SelectItem value="buy2get1">2+1 gratis</SelectItem>
                   <SelectItem value="happy_hours">Happy Hours</SelectItem>
+                  <SelectItem value="first_visit">Pierwsza wizyta</SelectItem>
                 </SelectContent>
               </Select>
               {formType === "buy2get1" && (
@@ -663,9 +763,19 @@ export default function PromotionsPage() {
                   Klient kupuje 2 wizyty tej samej uslugi, 3. wizyta z rabatem
                 </p>
               )}
+              {formType === "package" && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Pakiet kilku uslug w obnizanej cenie. Klient rezerwuje wszystkie uslugi naraz.
+                </p>
+              )}
               {formType === "happy_hours" && (
                 <p className="text-xs text-muted-foreground mt-1">
                   Rabat procentowy obowiazujacy w wybranych godzinach i dniach tygodnia
+                </p>
+              )}
+              {formType === "first_visit" && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Rabat procentowy dla nowych klientow przy pierwszej wizycie w salonie
                 </p>
               )}
             </div>
@@ -676,15 +786,19 @@ export default function PromotionsPage() {
                   ? "Znizka na 3. wizyte * (%)"
                   : formType === "happy_hours"
                     ? "Rabat happy hours * (%)"
-                    : `Wartosc rabatu * ${formType === "percentage" ? "(%)" : formType === "fixed" ? "(PLN)" : ""}`
+                    : formType === "first_visit"
+                      ? "Znizka na pierwsza wizyte * (%)"
+                      : formType === "package"
+                        ? "Cena pakietu * (PLN)"
+                        : `Wartosc rabatu * ${formType === "percentage" ? "(%)" : formType === "fixed" ? "(PLN)" : ""}`
                 }
               </Label>
               <Input
                 id="promo-value"
                 type="number"
                 min="0"
-                max={(formType === "percentage" || formType === "buy2get1" || formType === "happy_hours") ? "100" : undefined}
-                step={formType === "percentage" || formType === "buy2get1" || formType === "happy_hours" ? "1" : "0.01"}
+                max={(formType === "percentage" || formType === "buy2get1" || formType === "happy_hours" || formType === "first_visit") ? "100" : undefined}
+                step={formType === "percentage" || formType === "buy2get1" || formType === "happy_hours" || formType === "first_visit" ? "1" : "0.01"}
                 value={formValue}
                 onChange={(e) => setFormValue(e.target.value)}
                 placeholder={
@@ -692,9 +806,13 @@ export default function PromotionsPage() {
                     ? "100 = calkowicie gratis"
                     : formType === "happy_hours"
                       ? "np. 20"
-                      : formType === "percentage"
-                        ? "np. 20"
-                        : "np. 50.00"
+                      : formType === "first_visit"
+                        ? "np. 15"
+                        : formType === "package"
+                          ? "np. 150.00"
+                          : formType === "percentage"
+                            ? "np. 20"
+                            : "np. 50.00"
                 }
               />
               {formType === "buy2get1" && (
@@ -745,6 +863,85 @@ export default function PromotionsPage() {
                     Wybrano: {formSelectedServiceIds.length} uslug(i)
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* Service selection for package */}
+            {formType === "package" && (
+              <div className="space-y-3 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <div className="flex items-center gap-2 mb-2">
+                  <Package className="w-4 h-4 text-blue-600" />
+                  <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">
+                    Uslugi w pakiecie (min. 2) *
+                  </p>
+                </div>
+                {servicesList.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Brak dostepnych uslug. Dodaj uslugi w panelu uslug.
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto border rounded-md p-3 bg-background">
+                    {servicesList.map((svc) => (
+                      <div
+                        key={svc.id}
+                        className="flex items-center space-x-2 cursor-pointer"
+                        onClick={() => toggleServiceSelection(svc.id)}
+                      >
+                        <Checkbox
+                          id={`pkg-svc-${svc.id}`}
+                          checked={formSelectedServiceIds.includes(svc.id)}
+                          onCheckedChange={() => toggleServiceSelection(svc.id)}
+                        />
+                        <label
+                          htmlFor={`pkg-svc-${svc.id}`}
+                          className="text-sm cursor-pointer flex-1"
+                        >
+                          {svc.name}{" "}
+                          <span className="text-muted-foreground">
+                            ({parseFloat(svc.basePrice).toFixed(2)} PLN, {svc.baseDuration} min)
+                          </span>
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {formSelectedServiceIds.length > 0 && (() => {
+                  const selectedServices = servicesList.filter((s) =>
+                    formSelectedServiceIds.includes(s.id)
+                  );
+                  const totalPrice = selectedServices.reduce(
+                    (sum, s) => sum + parseFloat(s.basePrice),
+                    0
+                  );
+                  const totalDuration = selectedServices.reduce(
+                    (sum, s) => sum + s.baseDuration,
+                    0
+                  );
+                  const packagePrice = parseFloat(formValue) || 0;
+                  const savings = totalPrice - packagePrice;
+                  return (
+                    <div className="mt-2 p-3 bg-background rounded-md border space-y-1">
+                      <p className="text-sm">
+                        <span className="text-muted-foreground">Wybrano: </span>
+                        <span className="font-medium">{formSelectedServiceIds.length} uslug</span>
+                      </p>
+                      <p className="text-sm">
+                        <span className="text-muted-foreground">Laczna cena indywidualna: </span>
+                        <span className="font-medium">{totalPrice.toFixed(2)} PLN</span>
+                      </p>
+                      <p className="text-sm">
+                        <span className="text-muted-foreground">Laczny czas: </span>
+                        <span className="font-medium">{totalDuration} min</span>
+                      </p>
+                      {packagePrice > 0 && (
+                        <p className="text-sm font-semibold text-green-600">
+                          Oszczednosc klienta: {savings.toFixed(2)} PLN
+                          ({totalPrice > 0 ? Math.round((savings / totalPrice) * 100) : 0}%)
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
