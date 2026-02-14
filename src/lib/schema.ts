@@ -551,6 +551,23 @@ export const waitingList = pgTable(
   ]
 );
 
+// Product categories - organize products by type
+export const productCategories = pgTable(
+  "product_categories",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").default(0),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("product_categories_salon_id_idx").on(table.salonId),
+  ]
+);
+
 // Products - inventory management
 export const products = pgTable(
   "products",
