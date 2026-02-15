@@ -234,11 +234,16 @@ export default function DashboardPage() {
             <h2 className="text-xl font-semibold">Raporty</h2>
           </div>
           <p className="text-muted-foreground mb-4">
-            Raporty zuzycia materialow i analityka salonu
+            Raporty przychodow, zuzycia materialow i analityka salonu
           </p>
-          <Button asChild>
-            <Link href="/dashboard/reports/materials">Raport materialow</Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild>
+              <Link href="/dashboard/reports/revenue">Raport przychodow</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/reports/materials">Raport materialow</Link>
+            </Button>
+          </div>
         </div>
 
         <div className="p-6 border border-border rounded-lg">
