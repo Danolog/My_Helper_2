@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Lock, CalendarPlus, Scissors, Users, User, Star, Clock, CalendarDays, Check, AlertCircle, ChevronLeft, ChevronRight, Gift } from "lucide-react";
+import { Lock, CalendarPlus, Scissors, Users, User, Star, Clock, CalendarDays, Check, AlertCircle, ChevronLeft, ChevronRight, Gift, Package, Tag, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
@@ -83,6 +83,37 @@ interface PromotionCheck {
   reason?: string;
 }
 
+interface PackageInfo {
+  id: string;
+  name: string;
+  packagePrice: number;
+  totalIndividualPrice: number;
+  savings: number;
+  totalDuration: number;
+  services: Array<{
+    id: string;
+    name: string;
+    basePrice: string;
+    baseDuration: number;
+  }>;
+}
+
+interface PromoCodeValidation {
+  valid: boolean;
+  reason?: string;
+  errorType?: string;
+  code?: string;
+  promoCodeId?: string;
+  promotionId?: string;
+  promotionName?: string;
+  discountType?: string;
+  discountValue?: number;
+  usedCount?: number;
+  usageLimit?: number | null;
+  expiresAt?: string | null;
+  conditionsJson?: Record<string, unknown>;
+}
+
 export default function BookingPage() {
   const { data: session, isPending } = useSession();
   const [services, setServices] = useState<Service[]>([]);
@@ -107,8 +138,25 @@ export default function BookingPage() {
   const [promoCheck, setPromoCheck] = useState<PromotionCheck | null>(null);
   const [loadingPromo, setLoadingPromo] = useState(false);
 
+  // Promo code state
+  const [promoCodeInput, setPromoCodeInput] = useState("");
+  const [promoCodeValidation, setPromoCodeValidation] = useState<PromoCodeValidation | null>(null);
+  const [validatingPromoCode, setValidatingPromoCode] = useState(false);
+
   // Booking submission state
   const [isBooking, setIsBooking] = useState(false);
+
+  // Package booking state
+  const [availablePackages, setAvailablePackages] = useState<PackageInfo[]>([]);
+  const [selectedPackageId, setSelectedPackageId] = useState<string>("");
+  const [bookingMode, setBookingMode] = useState<"service" | "package">("service");
+  const [packageEmployeeId, setPackageEmployeeId] = useState<string>("");
+  const [packageDate, setPackageDate] = useState<string>("");
+  const [packageTimeSlot, setPackageTimeSlot] = useState<string>("");
+  const [packageSlotsData, setPackageSlotsData] = useState<AvailableSlotsData | null>(null);
+  const [loadingPackageSlots, setLoadingPackageSlots] = useState(false);
+  const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
+  const [loadingAllEmployees, setLoadingAllEmployees] = useState(false);
 
   const fetchServices = useCallback(async () => {
     try {
@@ -140,10 +188,38 @@ export default function BookingPage() {
     }
   }, []);
 
+  const fetchPackages = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/promotions/check-package?salonId=${DEMO_SALON_ID}`);
+      const data = await res.json();
+      if (data.success) {
+        setAvailablePackages(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch packages:", error);
+    }
+  }, []);
+
+  const fetchAllEmployees = useCallback(async () => {
+    setLoadingAllEmployees(true);
+    try {
+      const res = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}`);
+      const data = await res.json();
+      if (data.success) {
+        setAllEmployees(data.data.filter((e: Employee) => e.isActive));
+      }
+    } catch (error) {
+      console.error("Failed to fetch employees:", error);
+    } finally {
+      setLoadingAllEmployees(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchServices();
     fetchClients();
-  }, [fetchServices, fetchClients]);
+    fetchPackages();
+  }, [fetchServices, fetchClients, fetchPackages]);
 
   // When a service is selected, fetch assigned employees
   const fetchAssignedEmployees = useCallback(async (serviceId: string) => {
@@ -234,6 +310,86 @@ export default function BookingPage() {
     }
   }, [selectedClientId, selectedServiceId, checkPromotions]);
 
+  // Validate promo code
+  const handleValidatePromoCode = async () => {
+    const code = promoCodeInput.trim();
+    if (!code) {
+      toast.error("Wpisz kod promocyjny");
+      return;
+    }
+
+    setValidatingPromoCode(true);
+    try {
+      const res = await fetch("/api/promo-codes/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code,
+          salonId: DEMO_SALON_ID,
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setPromoCodeValidation(data.data);
+        if (data.data.valid) {
+          toast.success(`Kod "${data.data.code}" zastosowany! ${data.data.promotionName || "Znizka aktywna"}`);
+        } else {
+          toast.error(data.data.reason || "Nieprawidlowy kod promocyjny");
+        }
+      } else {
+        toast.error("Nie udalo sie zwalidowac kodu");
+        setPromoCodeValidation(null);
+      }
+    } catch (error) {
+      console.error("Failed to validate promo code:", error);
+      toast.error("Blad walidacji kodu promocyjnego");
+      setPromoCodeValidation(null);
+    } finally {
+      setValidatingPromoCode(false);
+    }
+  };
+
+  // Clear promo code
+  const handleClearPromoCode = () => {
+    setPromoCodeInput("");
+    setPromoCodeValidation(null);
+  };
+
+  // Calculate discount from promo code
+  const getPromoCodeDiscount = () => {
+    if (!promoCodeValidation?.valid || !selectedService) return null;
+
+    const basePrice = parseFloat(selectedService.basePrice);
+    const discountType = promoCodeValidation.discountType;
+    const discountValue = promoCodeValidation.discountValue || 0;
+
+    // Check if service is in the applicable services list (if conditions exist)
+    const conditions = promoCodeValidation.conditionsJson as { applicableServiceIds?: string[] } | undefined;
+    if (conditions?.applicableServiceIds && conditions.applicableServiceIds.length > 0) {
+      if (!conditions.applicableServiceIds.includes(selectedServiceId)) {
+        return null; // Service not eligible for this promo code
+      }
+    }
+
+    let discountAmount = 0;
+    if (discountType === "percentage") {
+      discountAmount = basePrice * (discountValue / 100);
+    } else if (discountType === "fixed") {
+      discountAmount = Math.min(discountValue, basePrice);
+    } else {
+      // For other types (buy2get1, happy_hours, first_visit, package) - use the value as percentage
+      discountAmount = basePrice * (discountValue / 100);
+    }
+
+    return {
+      discountAmount: Math.round(discountAmount * 100) / 100,
+      finalPrice: Math.round((basePrice - discountAmount) * 100) / 100,
+      originalPrice: basePrice,
+      discountType,
+      discountValue,
+    };
+  };
+
   // Auto-fetch slots when employee or date changes
   useEffect(() => {
     const selectedService = services.find((s) => s.id === selectedServiceId);
@@ -318,32 +474,136 @@ export default function BookingPage() {
       const startTime = new Date(`${selectedDate}T${selectedTimeSlot}:00`);
       const endTime = new Date(startTime.getTime() + selectedService.baseDuration * 60000);
 
+      // Calculate promo code discount if applicable
+      const promoDiscount = getPromoCodeDiscount();
+      const appointmentBody: Record<string, unknown> = {
+        salonId: DEMO_SALON_ID,
+        clientId: selectedClientId || null,
+        employeeId: selectedEmployeeId,
+        serviceId: selectedServiceId,
+        startTime: startTime.toISOString(),
+        endTime: endTime.toISOString(),
+        notes: `Rezerwacja online: ${selectedService.name}`,
+      };
+
+      // Add promo code data if valid
+      if (promoCodeValidation?.valid && promoCodeValidation.promoCodeId && promoDiscount) {
+        appointmentBody.promoCodeId = promoCodeValidation.promoCodeId;
+        appointmentBody.discountAmount = promoDiscount.discountAmount.toFixed(2);
+      }
+
       const res = await fetch("/api/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          salonId: DEMO_SALON_ID,
-          clientId: selectedClientId || null,
-          employeeId: selectedEmployeeId,
-          serviceId: selectedServiceId,
-          startTime: startTime.toISOString(),
-          endTime: endTime.toISOString(),
-          notes: `Rezerwacja online: ${selectedService.name}`,
-        }),
+        body: JSON.stringify(appointmentBody),
       });
 
       const data = await res.json();
       if (data.success) {
-        toast.success("Wizyta zarezerwowana pomyslnie!", { duration: 4000 });
+        const discountMsg = promoDiscount
+          ? ` Zastosowano znizke: -${promoDiscount.discountAmount.toFixed(2)} PLN`
+          : "";
+        toast.success(`Wizyta zarezerwowana pomyslnie!${discountMsg}`, { duration: 4000 });
         // Refresh slots to show the newly booked slot as unavailable
         fetchAvailableSlots(selectedEmployeeId, selectedDate, selectedService.baseDuration);
         setSelectedTimeSlot("");
+        // Clear promo code after successful booking
+        handleClearPromoCode();
       } else {
         toast.error(data.error || "Nie udalo sie zarezerwowac wizyty");
       }
     } catch (error) {
       console.error("Failed to book appointment:", error);
       toast.error("Blad rezerwacji wizyty");
+    } finally {
+      setIsBooking(false);
+    }
+  };
+
+  // Package booking: fetch slots when employee and date change
+  const fetchPackageSlots = useCallback(async (empId: string, date: string, duration: number) => {
+    if (!empId || !date || !duration) {
+      setPackageSlotsData(null);
+      return;
+    }
+    setLoadingPackageSlots(true);
+    setPackageTimeSlot("");
+    try {
+      const res = await fetch(
+        `/api/available-slots?employeeId=${empId}&date=${date}&duration=${duration}`
+      );
+      const data = await res.json();
+      if (data.success) {
+        setPackageSlotsData(data.data);
+      } else {
+        setPackageSlotsData(null);
+      }
+    } catch {
+      setPackageSlotsData(null);
+    } finally {
+      setLoadingPackageSlots(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const selectedPackage = availablePackages.find((p) => p.id === selectedPackageId);
+    if (packageEmployeeId && packageDate && selectedPackage) {
+      fetchPackageSlots(packageEmployeeId, packageDate, selectedPackage.totalDuration);
+    } else {
+      setPackageSlotsData(null);
+      setPackageTimeSlot("");
+    }
+  }, [packageEmployeeId, packageDate, selectedPackageId, availablePackages, fetchPackageSlots]);
+
+  const handleSelectPackage = (pkgId: string) => {
+    setSelectedPackageId(pkgId);
+    setPackageEmployeeId("");
+    setPackageDate("");
+    setPackageTimeSlot("");
+    setPackageSlotsData(null);
+    if (!allEmployees.length) {
+      fetchAllEmployees();
+    }
+  };
+
+  const handleBookPackage = async () => {
+    const selectedPackage = availablePackages.find((p) => p.id === selectedPackageId);
+    if (!selectedPackage || !packageEmployeeId || !packageDate || !packageTimeSlot) {
+      toast.error("Wypelnij wszystkie wymagane pola");
+      return;
+    }
+
+    setIsBooking(true);
+    try {
+      const startTime = new Date(`${packageDate}T${packageTimeSlot}:00`);
+
+      const res = await fetch("/api/appointments/book-package", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          promotionId: selectedPackageId,
+          employeeId: packageEmployeeId,
+          clientId: selectedClientId || null,
+          date: packageDate,
+          startTime: startTime.toISOString(),
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        toast.success(
+          `Pakiet "${data.data.packageName}" zarezerwowany! ${data.data.appointments.length} wizyt utworzonych. Cena: ${data.data.packagePrice.toFixed(2)} PLN (oszczednosc: ${data.data.savings.toFixed(2)} PLN)`,
+          { duration: 6000 }
+        );
+        // Refresh slots
+        fetchPackageSlots(packageEmployeeId, packageDate, selectedPackage.totalDuration);
+        setPackageTimeSlot("");
+      } else {
+        toast.error(data.error || "Nie udalo sie zarezerwowac pakietu");
+      }
+    } catch (error) {
+      console.error("Failed to book package:", error);
+      toast.error("Blad rezerwacji pakietu");
     } finally {
       setIsBooking(false);
     }
@@ -401,6 +661,332 @@ export default function BookingPage() {
         </div>
       </div>
 
+      {/* Booking mode toggle */}
+      {availablePackages.length > 0 && (
+        <div className="flex gap-2 mb-6" data-testid="booking-mode-toggle">
+          <Button
+            variant={bookingMode === "service" ? "default" : "outline"}
+            onClick={() => { setBookingMode("service"); setSelectedPackageId(""); }}
+            className="flex-1"
+          >
+            <Scissors className="w-4 h-4 mr-2" />
+            Pojedyncza usluga
+          </Button>
+          <Button
+            variant={bookingMode === "package" ? "default" : "outline"}
+            onClick={() => setBookingMode("package")}
+            className="flex-1"
+          >
+            <Package className="w-4 h-4 mr-2" />
+            Pakiet uslug ({availablePackages.length})
+          </Button>
+        </div>
+      )}
+
+      {/* Package Booking Flow */}
+      {bookingMode === "package" && (
+        <>
+          {/* Package Client Selection */}
+          <Card className="mb-6">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <User className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">1. Wybierz klienta</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Select
+                value={selectedClientId || NO_CLIENT}
+                onValueChange={handleClientChange}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Wybierz klienta..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_CLIENT}>Brak klienta (walk-in)</SelectItem>
+                  {clients.map((client) => (
+                    <SelectItem key={client.id} value={client.id}>
+                      {client.firstName} {client.lastName}
+                      {client.phone ? ` (${client.phone})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardContent>
+          </Card>
+
+          {/* Package Selection */}
+          <Card className="mb-6" data-testid="package-selection-section">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Package className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">2. Wybierz pakiet</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {availablePackages.map((pkg) => (
+                  <div
+                    key={pkg.id}
+                    className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                      selectedPackageId === pkg.id
+                        ? "bg-primary/10 border-primary"
+                        : "hover:bg-muted/50"
+                    }`}
+                    onClick={() => handleSelectPackage(pkg.id)}
+                    data-testid={`package-option-${pkg.id}`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-semibold">{pkg.name}</h3>
+                      <div className="text-right">
+                        <span className="text-lg font-bold text-green-600">
+                          {pkg.packagePrice.toFixed(2)} PLN
+                        </span>
+                        <span className="text-xs text-muted-foreground line-through ml-2">
+                          {pkg.totalIndividualPrice.toFixed(2)} PLN
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {pkg.services.map((svc) => (
+                        <Badge key={svc.id} variant="outline" className="text-xs">
+                          {svc.name} ({svc.baseDuration} min)
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                      <span>Oszczedzasz: {pkg.savings.toFixed(2)} PLN</span>
+                      <span>Laczny czas: {pkg.totalDuration} min</span>
+                    </div>
+                    {selectedPackageId === pkg.id && (
+                      <Badge variant="default" className="mt-2">Wybrany</Badge>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Package Employee Selection */}
+          {selectedPackageId && (
+            <Card className="mb-6" data-testid="package-employee-section">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Users className="h-5 w-5 text-primary" />
+                  <CardTitle className="text-lg">3. Wybierz pracownika</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingAllEmployees ? (
+                  <div className="flex justify-center py-4">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+                  </div>
+                ) : allEmployees.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">Brak dostepnych pracownikow.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {allEmployees.map((emp) => (
+                      <div
+                        key={emp.id}
+                        className={`flex items-center gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${
+                          packageEmployeeId === emp.id
+                            ? "bg-primary/10 border-primary"
+                            : "hover:bg-muted/50"
+                        }`}
+                        onClick={() => {
+                          setPackageEmployeeId(emp.id);
+                          setPackageTimeSlot("");
+                        }}
+                      >
+                        {emp.color && (
+                          <span
+                            className="inline-block w-4 h-4 rounded-full shrink-0"
+                            style={{ backgroundColor: emp.color }}
+                          />
+                        )}
+                        <span className="font-medium">
+                          {emp.firstName} {emp.lastName}
+                        </span>
+                        {packageEmployeeId === emp.id && (
+                          <Badge variant="default" className="ml-auto text-xs">Wybrany</Badge>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Package Date Selection */}
+          {packageEmployeeId && (
+            <Card className="mb-6" data-testid="package-date-section">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="h-5 w-5 text-primary" />
+                  <CardTitle className="text-lg">4. Wybierz date</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Input
+                  type="date"
+                  value={packageDate}
+                  min={todayStr}
+                  onChange={(e) => { setPackageDate(e.target.value); setPackageTimeSlot(""); }}
+                  data-testid="package-date-input"
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Package Time Slot Selection */}
+          {packageDate && packageEmployeeId && (
+            <Card className="mb-6" data-testid="package-slots-section">
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-primary" />
+                  <CardTitle className="text-lg">5. Wybierz godzine</CardTitle>
+                  {packageSlotsData && !packageSlotsData.dayOff && (
+                    <Badge variant="outline">
+                      {packageSlotsData.slots.length} wolnych terminow
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loadingPackageSlots ? (
+                  <div className="flex justify-center py-6">
+                    <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
+                  </div>
+                ) : packageSlotsData?.dayOff ? (
+                  <div className="text-center py-6">
+                    <AlertCircle className="w-10 h-10 text-orange-500 mx-auto mb-3" />
+                    <p className="text-muted-foreground font-medium">
+                      Pracownik nie pracuje w tym dniu
+                    </p>
+                  </div>
+                ) : packageSlotsData && packageSlotsData.slots.length === 0 ? (
+                  <div className="text-center py-6">
+                    <Clock className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-muted-foreground font-medium">Brak wolnych terminow</p>
+                  </div>
+                ) : packageSlotsData ? (
+                  <div>
+                    <div className="grid grid-cols-4 gap-2" data-testid="package-time-slots-grid">
+                      {packageSlotsData.slots.map((slot) => (
+                        <Button
+                          key={slot.time}
+                          variant={packageTimeSlot === slot.time ? "default" : "outline"}
+                          size="sm"
+                          className="text-sm"
+                          onClick={() => setPackageTimeSlot(slot.time)}
+                          data-testid={`package-slot-${slot.time}`}
+                        >
+                          {slot.time}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Package Booking Summary */}
+          {packageTimeSlot && selectedPackageId && packageEmployeeId && (() => {
+            const pkg = availablePackages.find((p) => p.id === selectedPackageId);
+            if (!pkg) return null;
+            const emp = allEmployees.find((e) => e.id === packageEmployeeId);
+            const startParts = packageTimeSlot.split(":").map(Number);
+            const startMinutes = (startParts[0] ?? 0) * 60 + (startParts[1] ?? 0);
+            const endMinutes = startMinutes + pkg.totalDuration;
+            const endH = Math.floor(endMinutes / 60);
+            const endM = endMinutes % 60;
+            const endTimeStr = `${endH.toString().padStart(2, "0")}:${endM.toString().padStart(2, "0")}`;
+
+            return (
+              <Card className="mb-6 border-primary" data-testid="package-booking-summary">
+                <CardHeader>
+                  <CardTitle className="text-lg">Podsumowanie pakietu</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 mb-4">
+                    {selectedClient && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Klient:</span>
+                        <span className="font-medium">{selectedClient.firstName} {selectedClient.lastName}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Pakiet:</span>
+                      <span className="font-medium">{pkg.name}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Pracownik:</span>
+                      <span className="font-medium">{emp ? `${emp.firstName} ${emp.lastName}` : ""}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Data:</span>
+                      <span className="font-medium">{formatDateDisplay(packageDate)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Godzina:</span>
+                      <span className="font-medium">{packageTimeSlot} - {endTimeStr}</span>
+                    </div>
+                    <div className="border-t pt-2 mt-2">
+                      <p className="text-xs text-muted-foreground mb-1">Uslugi w pakiecie:</p>
+                      {pkg.services.map((svc) => (
+                        <div key={svc.id} className="flex justify-between text-xs">
+                          <span>{svc.name} ({svc.baseDuration} min)</span>
+                          <span className="line-through text-muted-foreground">{parseFloat(svc.basePrice).toFixed(2)} PLN</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-between text-sm pt-2 border-t">
+                      <span className="text-muted-foreground">Suma indywidualna:</span>
+                      <span className="line-through text-muted-foreground">{pkg.totalIndividualPrice.toFixed(2)} PLN</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-bold">
+                      <span>Cena pakietu:</span>
+                      <span className="text-green-600" data-testid="package-price">{pkg.packagePrice.toFixed(2)} PLN</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-green-600">
+                      <span>Oszczednosc:</span>
+                      <span>{pkg.savings.toFixed(2)} PLN</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Laczny czas:</span>
+                      <span className="font-medium">{pkg.totalDuration} min</span>
+                    </div>
+                  </div>
+                  <Button
+                    className="w-full"
+                    size="lg"
+                    onClick={handleBookPackage}
+                    disabled={isBooking}
+                    data-testid="book-package-btn"
+                  >
+                    {isBooking ? (
+                      <div className="flex items-center gap-2">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                        Rezerwowanie pakietu...
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <Package className="h-5 w-5" />
+                        Zarezerwuj pakiet ({pkg.packagePrice.toFixed(2)} PLN)
+                      </div>
+                    )}
+                  </Button>
+                </CardContent>
+              </Card>
+            );
+          })()}
+        </>
+      )}
+
+      {/* Regular Service Booking Flow */}
+      {bookingMode === "service" && (<>
       {/* Step 1: Select Client */}
       <Card className="mb-6" data-testid="booking-client-section">
         <CardHeader>
@@ -797,6 +1383,131 @@ export default function BookingPage() {
         </CardContent>
       </Card>
 
+      {/* Step 6: Promo Code */}
+      <Card className="mb-6" data-testid="booking-promo-section">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Tag className="h-5 w-5 text-primary" />
+            <CardTitle className="text-lg">6. Kod promocyjny (opcjonalnie)</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2">
+            <Input
+              type="text"
+              placeholder="Wpisz kod promocyjny..."
+              value={promoCodeInput}
+              onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleValidatePromoCode();
+                }
+              }}
+              disabled={validatingPromoCode || (promoCodeValidation?.valid === true)}
+              className="flex-1"
+              data-testid="promo-code-input"
+            />
+            {promoCodeValidation?.valid ? (
+              <Button
+                variant="outline"
+                onClick={handleClearPromoCode}
+                data-testid="promo-code-clear-btn"
+              >
+                <X className="h-4 w-4 mr-1" />
+                Usun
+              </Button>
+            ) : (
+              <Button
+                onClick={handleValidatePromoCode}
+                disabled={validatingPromoCode || !promoCodeInput.trim()}
+                data-testid="promo-code-apply-btn"
+              >
+                {validatingPromoCode ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                ) : (
+                  <Check className="h-4 w-4 mr-1" />
+                )}
+                Zastosuj
+              </Button>
+            )}
+          </div>
+
+          {/* Promo code validation result */}
+          {promoCodeValidation && (
+            <div
+              className={`mt-3 p-3 rounded-md border ${
+                promoCodeValidation.valid
+                  ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800"
+                  : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"
+              }`}
+              data-testid="promo-code-result"
+            >
+              {promoCodeValidation.valid ? (
+                <div className="flex items-start gap-2">
+                  <Check className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
+                  <div className="text-sm">
+                    <p className="font-semibold text-green-800 dark:text-green-300">
+                      Kod &quot;{promoCodeValidation.code}&quot; zastosowany!
+                    </p>
+                    {promoCodeValidation.promotionName && (
+                      <p className="text-green-700 dark:text-green-400 text-xs mt-0.5">
+                        {promoCodeValidation.promotionName}
+                        {promoCodeValidation.discountType === "percentage" && promoCodeValidation.discountValue
+                          ? ` - ${promoCodeValidation.discountValue}% znizki`
+                          : promoCodeValidation.discountType === "fixed" && promoCodeValidation.discountValue
+                            ? ` - ${promoCodeValidation.discountValue.toFixed(2)} PLN znizki`
+                            : ""}
+                      </p>
+                    )}
+                    {promoCodeValidation.usageLimit != null && (
+                      <p className="text-green-600 dark:text-green-500 text-xs mt-0.5">
+                        Uzyto: {promoCodeValidation.usedCount || 0}/{promoCodeValidation.usageLimit}
+                      </p>
+                    )}
+                    {/* Show if service is not eligible */}
+                    {(() => {
+                      const discount = getPromoCodeDiscount();
+                      if (!discount && selectedServiceId) {
+                        return (
+                          <p className="text-orange-600 dark:text-orange-400 text-xs mt-1">
+                            <AlertCircle className="h-3 w-3 inline mr-1" />
+                            Ta usluga nie kwalifikuje sie do tej promocji
+                          </p>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+                  <div className="text-sm">
+                    <p className="font-semibold text-red-800 dark:text-red-300" data-testid="promo-error-title">
+                      {promoCodeValidation.errorType === "expired"
+                        ? "Kod wygasl"
+                        : promoCodeValidation.errorType === "usage_limit"
+                          ? "Limit uzycia wyczerpany"
+                          : promoCodeValidation.errorType === "promotion_inactive"
+                            ? "Promocja nieaktywna"
+                            : promoCodeValidation.errorType === "promotion_not_started"
+                              ? "Promocja jeszcze nie rozpoczeta"
+                              : promoCodeValidation.errorType === "promotion_ended"
+                                ? "Promocja zakonczona"
+                                : "Nieprawidlowy kod"}
+                    </p>
+                    <p className="text-red-700 dark:text-red-400 text-xs mt-0.5" data-testid="promo-error-reason">
+                      {promoCodeValidation.reason || "Kod nie istnieje lub jest niewazny"}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Booking Summary & Submit */}
       {canBook && selectedService && (
         <Card className="mb-6 border-primary" data-testid="booking-summary-section">
@@ -844,20 +1555,56 @@ export default function BookingPage() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Cena:</span>
-                {promoCheck?.eligible ? (
-                  <div className="text-right">
-                    <span className="font-medium line-through text-muted-foreground mr-2">
-                      {parseFloat(selectedService.basePrice).toFixed(2)} PLN
-                    </span>
-                    <span className="font-bold text-green-600" data-testid="discounted-price">
-                      {promoCheck.finalPrice?.toFixed(2)} PLN
-                    </span>
-                  </div>
-                ) : (
-                  <span className="font-medium">{parseFloat(selectedService.basePrice).toFixed(2)} PLN</span>
-                )}
+                {(() => {
+                  const promoDiscount = getPromoCodeDiscount();
+                  if (promoDiscount) {
+                    return (
+                      <div className="text-right">
+                        <span className="font-medium line-through text-muted-foreground mr-2">
+                          {promoDiscount.originalPrice.toFixed(2)} PLN
+                        </span>
+                        <span className="font-bold text-green-600" data-testid="discounted-price">
+                          {promoDiscount.finalPrice.toFixed(2)} PLN
+                        </span>
+                      </div>
+                    );
+                  }
+                  if (promoCheck?.eligible) {
+                    return (
+                      <div className="text-right">
+                        <span className="font-medium line-through text-muted-foreground mr-2">
+                          {parseFloat(selectedService.basePrice).toFixed(2)} PLN
+                        </span>
+                        <span className="font-bold text-green-600" data-testid="discounted-price">
+                          {promoCheck.finalPrice?.toFixed(2)} PLN
+                        </span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <span className="font-medium">{parseFloat(selectedService.basePrice).toFixed(2)} PLN</span>
+                  );
+                })()}
               </div>
-              {promoCheck?.eligible && (
+              {(() => {
+                const promoDiscount = getPromoCodeDiscount();
+                if (promoDiscount) {
+                  return (
+                    <div className="flex justify-between text-sm" data-testid="promo-code-discount-row">
+                      <span className="text-green-600 flex items-center gap-1">
+                        <Tag className="h-3 w-3" />
+                        Kod: {promoCodeValidation?.code}
+                      </span>
+                      <span className="font-medium text-green-600">
+                        -{promoDiscount.discountAmount.toFixed(2)} PLN
+                        {promoDiscount.discountType === "percentage" ? ` (${promoDiscount.discountValue}%)` : ""}
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+              {promoCheck?.eligible && !getPromoCodeDiscount() && (
                 <div className="flex justify-between text-sm" data-testid="promo-discount-row">
                   <span className="text-green-600 flex items-center gap-1">
                     <Gift className="h-3 w-3" />
@@ -895,6 +1642,7 @@ export default function BookingPage() {
           </CardContent>
         </Card>
       )}
+      </>)}
     </div>
   );
 }
