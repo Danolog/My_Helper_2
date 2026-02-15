@@ -252,6 +252,15 @@ export default function DashboardPage() {
             <Button variant="outline" asChild>
               <Link href="/dashboard/reports/promotions">Efektywnosc promocji</Link>
             </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/reports/employee-popularity">Popularnosc pracownikow</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/reports/cancellations">Analiza anulacji</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/reports/service-profitability">Rentownosc uslug</Link>
+            </Button>
           </div>
         </div>
 
