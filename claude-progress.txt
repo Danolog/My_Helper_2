@@ -1,5 +1,35 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #155 - Invoice for company) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #155: "Invoice for company" - Business invoice with NIP
+- Category: Finance
+
+### What was accomplished:
+1. Updated schema (src/lib/schema.ts):
+   - Added missing columns to invoices table: clientName, clientAddress, description, paymentMethod, vatRate, vatAmount, netAmount, invoiceDataJson
+
+2. Created API: /api/appointments/[id]/invoice/route.ts (already existed from Feature #154)
+   - Added companyAddress support to POST handler
+   - Updated buyer section in invoiceData to use companyAddress for "faktura" type
+
+3. Updated UI: /dashboard/appointments/[id]/page.tsx
+   - Added state variables for company invoice fields (invoiceCompanyName, invoiceCompanyNip, invoiceCompanyAddress)
+   - Added validation in handleGenerateInvoice for company fields (name required, NIP required with 10-digit validation)
+   - Added company invoice form fields visible when "Firma (faktura VAT)" type is selected
+   - Form includes: Nazwa firmy (required), NIP (required, 10 digits), Adres firmy (optional)
+   - Updated API payload to send companyName, companyNip, companyAddress when type is "faktura"
+   - Added invoice display card showing "Faktura" heading with "Firma" badge and buyer name
+
+### Testing:
+- Browser tested: Selected "Firma (faktura VAT)", filled company name, NIP, address
+- Invoice generated with correct company data in invoiceDataJson
+- VAT details confirmed: 23% rate, net/gross amounts calculated correctly
+- Invoice persisted to database with all company fields
+
+---
+
 ## Session: 2026-02-15 (Feature #152 - Fiscal printer integration) *** SUCCESS ***
 
 ### Feature Assigned
