@@ -1,5 +1,45 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #130 - Validate promo code) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #130: "Validate promo code" - Apply code during booking
+- Category: Promotions
+
+### Changes Made
+**Database (src/lib/schema.ts):**
+- Added `promoCodeId` (uuid) column to appointments table for tracking applied promo codes
+- Added `discountAmount` (numeric 10,2) column to appointments table for recording discount amounts
+- No FK constraint to allow promo code deletion without affecting appointment history
+
+**Backend (src/app/api/appointments/route.ts):**
+- Added imports for promoCodes, promotions, and sql from drizzle-orm
+- Accepts `promoCodeId` and `discountAmount` in POST request body
+- Server-side promo code validation before appointment creation:
+  - Verifies code exists and belongs to the salon
+  - Checks expiry date, usage limit, promotion active status
+  - Recalculates discount server-side for security
+- Stores promoCodeId and discountAmount in new appointment record
+- Increments usedCount on promo code after successful booking
+
+**Test Data (scripts/setup-f130-promo-code.ts):**
+- Creates TEST_F130_Promo promotion (20% percentage discount, active 2026)
+- Creates TEST130 promo code (5 uses, expires 2026-12-31)
+- Creates EXPIRED130 promo code (expired 2025-01-01 for testing)
+
+### Verification
+- Browser automation: Valid code (TEST130) shows green success with 20% discount info
+- Browser automation: Expired code (EXPIRED130) shows red error with Polish message
+- Browser automation: Clear button properly resets promo code state
+- API endpoint verified: TEST130 valid, EXPIRED130 expired, NONEXISTENT not_found
+- TypeScript: zero errors in modified files (only pre-existing errors in unrelated scripts)
+- No mock/hardcoded data patterns found
+
+### Git
+- Commit: feat: integrate promo code validation into booking flow (Feature #130)
+
+---
+
 ## Session: 2026-02-15 (Feature #131 - Invalid promo code handling) *** SUCCESS ***
 
 ### Feature Assigned
