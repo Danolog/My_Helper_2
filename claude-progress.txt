@@ -1,5 +1,46 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #151 - Employee payroll report) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #151: "Employee payroll report" - Summary for payment
+- Category: Finance
+
+### What was accomplished:
+1. Created API endpoint: /api/reports/employee-payroll/route.ts
+   - Joins employeeCommissions + employees + appointments + services
+   - Per-employee: completed appointments, hours worked, revenue, commission, paid/unpaid
+   - Per-employee service breakdown (services performed with revenue/commission)
+   - Date range and employee ID filtering
+   - CSV export with BOM, Excel (XLSX) export, JSON response
+2. Created UI page: /dashboard/reports/employee-payroll/page.tsx
+   - Summary cards: total commission, unpaid, paid, hours worked, revenue, employee count
+   - Full payroll table: employee name, visits, hours, revenue, commission, paid/unpaid, rate
+   - Expandable rows showing per-employee service breakdown
+   - Date range quick filters + custom range
+   - Employee filter (multi-select)
+   - PDF, Excel, CSV export buttons
+3. Added dashboard link: "Raport wynagrodzen" in Reports section
+
+### Verification (browser automation):
+- Registered test user payroll151@test.com
+- Navigated to /dashboard/reports/employee-payroll
+- Report loaded with real data: Anna Kowalska - 6 visits, 5h 45min, 555 PLN revenue, 92.50 PLN commission, 50% rate
+- Expanded service breakdown: Manicure hybrydowy (3x, 300 PLN, 50 PLN commission), Strzyzenie damskie (3x, 255 PLN, 42.50 PLN commission)
+- Export buttons all enabled and functional
+- Zero console errors after React.Fragment key fix
+- No mock data patterns found in source code
+
+### Files created/modified:
+- NEW: src/app/api/reports/employee-payroll/route.ts
+- NEW: src/app/dashboard/reports/employee-payroll/page.tsx
+- MODIFIED: src/app/dashboard/page.tsx (added Raport wynagrodzen link)
+
+### Commit: dd6f889
+### Stats: 118/253 passing (46.6%)
+
+---
+
 ## Session: 2026-02-15 (Feature #149 - Filter reports by employee) *** SUCCESS ***
 
 ### Feature Assigned
