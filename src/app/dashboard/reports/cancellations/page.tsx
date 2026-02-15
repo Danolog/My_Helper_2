@@ -10,7 +10,6 @@ import {
   TrendingUp,
   XCircle,
   UserX,
-  Search,
   RefreshCw,
   BarChart3,
   Percent,
@@ -27,8 +26,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
+import { EmployeeFilter } from "@/components/reports/employee-filter";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { generateReportPDF } from "@/lib/pdf-export";
@@ -165,6 +166,7 @@ export default function CancellationReportPage() {
     thirtyDaysAgo.toISOString().split("T")[0]
   );
 
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<
     "lostrevenue" | "reason" | "employee" | "service" | "dayofweek" | "trend"
   >("lostrevenue");
@@ -178,6 +180,9 @@ export default function CancellationReportPage() {
       });
       if (dateFrom) params.append("dateFrom", dateFrom);
       if (dateTo) params.append("dateTo", dateTo);
+      if (selectedEmployeeIds.length > 0) {
+        params.append("employeeIds", selectedEmployeeIds.join(","));
+      }
       if (showComparison && compareDateFrom && compareDateTo) {
         params.append("compareDateFrom", compareDateFrom);
         params.append("compareDateTo", compareDateTo);
@@ -200,7 +205,7 @@ export default function CancellationReportPage() {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, showComparison, compareDateFrom, compareDateTo]);
+  }, [dateFrom, dateTo, selectedEmployeeIds, showComparison, compareDateFrom, compareDateTo]);
 
   useEffect(() => {
     fetchReport();
@@ -454,83 +459,81 @@ export default function CancellationReportPage() {
       </div>
 
       {/* Date range filter */}
+      <DateRangeFilter
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onDateFromChange={setDateFrom}
+        onDateToChange={setDateTo}
+        onApply={fetchReport}
+        loading={loading}
+      />
+
+      {/* Comparison period toggle */}
       <Card className="mb-6">
         <CardContent className="pt-6">
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="flex-1 min-w-[200px]">
-              <label className="text-sm font-medium mb-1 block">
-                <Calendar className="h-3 w-3 inline mr-1" />
-                Data od
-              </label>
-              <Input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </div>
-            <div className="flex-1 min-w-[200px]">
-              <label className="text-sm font-medium mb-1 block">
-                <Calendar className="h-3 w-3 inline mr-1" />
-                Data do
-              </label>
-              <Input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
-            </div>
-            <Button onClick={fetchReport} disabled={loading}>
-              <Search className="h-4 w-4 mr-2" />
-              {loading ? "Ladowanie..." : "Generuj raport"}
-            </Button>
-          </div>
-
-          {/* Comparison period toggle */}
-          <div className="mt-4 pt-4 border-t">
-            <div className="flex items-center gap-3 mb-3">
-              <button
-                onClick={() => setShowComparison(!showComparison)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  showComparison ? "bg-blue-600" : "bg-gray-300"
+          <div className="flex items-center gap-3 mb-3">
+            <button
+              onClick={() => setShowComparison(!showComparison)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                showComparison ? "bg-blue-600" : "bg-gray-300"
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  showComparison ? "translate-x-6" : "translate-x-1"
                 }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    showComparison ? "translate-x-6" : "translate-x-1"
-                  }`}
-                />
-              </button>
-              <label className="text-sm font-medium flex items-center gap-1">
-                <Scale className="h-4 w-4" />
-                Porownaj z innym okresem
-              </label>
-            </div>
-
-            {showComparison && (
-              <div className="flex flex-wrap items-end gap-4 ml-14">
-                <div className="flex-1 min-w-[200px]">
-                  <label className="text-sm font-medium mb-1 block text-muted-foreground">
-                    Okres porownawczy od
-                  </label>
-                  <Input
-                    type="date"
-                    value={compareDateFrom}
-                    onChange={(e) => setCompareDateFrom(e.target.value)}
-                  />
-                </div>
-                <div className="flex-1 min-w-[200px]">
-                  <label className="text-sm font-medium mb-1 block text-muted-foreground">
-                    Okres porownawczy do
-                  </label>
-                  <Input
-                    type="date"
-                    value={compareDateTo}
-                    onChange={(e) => setCompareDateTo(e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
+              />
+            </button>
+            <label className="text-sm font-medium flex items-center gap-1">
+              <Scale className="h-4 w-4" />
+              Porownaj z innym okresem
+            </label>
           </div>
+
+          {showComparison && (
+            <div className="flex flex-wrap items-end gap-4 ml-14">
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-sm font-medium mb-1 block text-muted-foreground">
+                  Okres porownawczy od
+                </label>
+                <Input
+                  type="date"
+                  value={compareDateFrom}
+                  onChange={(e) => setCompareDateFrom(e.target.value)}
+                />
+              </div>
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-sm font-medium mb-1 block text-muted-foreground">
+                  Okres porownawczy do
+                </label>
+                <Input
+                  type="date"
+                  value={compareDateTo}
+                  onChange={(e) => setCompareDateTo(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Employee filter */}
+      <Card className="mb-6">
+        <CardContent className="pt-6">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+              Filtruj wg pracownika:
+            </span>
+            <EmployeeFilter
+              selectedEmployeeIds={selectedEmployeeIds}
+              onSelectionChange={setSelectedEmployeeIds}
+            />
+          </div>
+          {selectedEmployeeIds.length > 0 && (
+            <p className="text-xs text-muted-foreground mt-2">
+              Raport pokazuje dane tylko dla wybranych pracownikow.
+            </p>
+          )}
         </CardContent>
       </Card>
 

@@ -5,11 +5,9 @@ import Link from "next/link";
 import {
   ArrowLeft,
   Download,
-  Calendar,
   TrendingUp,
   DollarSign,
   Scissors,
-  Search,
   RefreshCw,
   Package,
   Users,
@@ -18,7 +16,7 @@ import {
   ArrowDownRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
@@ -274,38 +272,14 @@ export default function ServiceProfitabilityPage() {
       </div>
 
       {/* Date range filter */}
-      <Card className="mb-6">
-        <CardContent className="pt-6">
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="flex-1 min-w-[200px]">
-              <label className="text-sm font-medium mb-1 block">
-                <Calendar className="h-3 w-3 inline mr-1" />
-                Data od
-              </label>
-              <Input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </div>
-            <div className="flex-1 min-w-[200px]">
-              <label className="text-sm font-medium mb-1 block">
-                <Calendar className="h-3 w-3 inline mr-1" />
-                Data do
-              </label>
-              <Input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
-            </div>
-            <Button onClick={fetchReport} disabled={loading}>
-              <Search className="h-4 w-4 mr-2" />
-              {loading ? "Ladowanie..." : "Generuj raport"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <DateRangeFilter
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onDateFromChange={setDateFrom}
+        onDateToChange={setDateTo}
+        onApply={fetchReport}
+        loading={loading}
+      />
 
       {/* Error */}
       {error && (

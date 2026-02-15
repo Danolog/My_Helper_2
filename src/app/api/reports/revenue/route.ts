@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointments, services, employees, clients } from "@/lib/schema";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 
 // GET /api/reports/revenue - Revenue report with breakdowns by service/employee and trends
@@ -11,6 +11,7 @@ export async function GET(request: Request) {
     const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
+    const employeeIdsParam = searchParams.get("employeeIds"); // comma-separated employee IDs
     const format = searchParams.get("format"); // 'json', 'csv', or 'xlsx'
 
     if (!salonId) {
@@ -33,6 +34,14 @@ export async function GET(request: Request) {
       const endDate = new Date(dateTo);
       endDate.setHours(23, 59, 59, 999);
       conditions.push(lte(appointments.startTime, endDate));
+    }
+
+    // Employee filter
+    const employeeIds = employeeIdsParam
+      ? employeeIdsParam.split(",").filter(Boolean)
+      : [];
+    if (employeeIds.length > 0) {
+      conditions.push(inArray(appointments.employeeId, employeeIds));
     }
 
     // Get all completed appointments with service and employee details
@@ -64,7 +73,7 @@ export async function GET(request: Request) {
     // Calculate total revenue
     let totalRevenue = 0;
     let totalDiscount = 0;
-    let totalAppointments = completedAppointments.length;
+    const totalAppointments = completedAppointments.length;
 
     // Breakdown by service
     const serviceBreakdown: Record<
@@ -340,6 +349,7 @@ export async function GET(request: Request) {
           salonId,
           dateFrom: dateFrom || null,
           dateTo: dateTo || null,
+          employeeIds: employeeIds.length > 0 ? employeeIds : null,
         },
       },
     });

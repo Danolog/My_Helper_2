@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
+import { EmployeeFilter } from "@/components/reports/employee-filter";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
@@ -63,6 +64,7 @@ interface ReportData {
     salonId: string;
     dateFrom: string | null;
     dateTo: string | null;
+    employeeIds: string[] | null;
   };
 }
 
@@ -81,6 +83,7 @@ export default function RevenueReportPage() {
     thirtyDaysAgo.toISOString().split("T")[0]
   );
   const [dateTo, setDateTo] = useState(today.toISOString().split("T")[0]);
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<
     "service" | "employee" | "trend"
   >("service");
@@ -94,6 +97,9 @@ export default function RevenueReportPage() {
       });
       if (dateFrom) params.append("dateFrom", dateFrom);
       if (dateTo) params.append("dateTo", dateTo);
+      if (selectedEmployeeIds.length > 0) {
+        params.append("employeeIds", selectedEmployeeIds.join(","));
+      }
 
       const res = await fetch(`/api/reports/revenue?${params.toString()}`);
       if (!res.ok) {
@@ -110,7 +116,7 @@ export default function RevenueReportPage() {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, selectedEmployeeIds]);
 
   useEffect(() => {
     fetchReport();
@@ -124,6 +130,9 @@ export default function RevenueReportPage() {
       });
       if (dateFrom) params.append("dateFrom", dateFrom);
       if (dateTo) params.append("dateTo", dateTo);
+      if (selectedEmployeeIds.length > 0) {
+        params.append("employeeIds", selectedEmployeeIds.join(","));
+      }
 
       const res = await fetch(`/api/reports/revenue?${params.toString()}`);
       if (!res.ok) {
@@ -303,36 +312,32 @@ export default function RevenueReportPage() {
       </div>
 
       {/* Date range filter */}
+      <DateRangeFilter
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onDateFromChange={setDateFrom}
+        onDateToChange={setDateTo}
+        onApply={fetchReport}
+        loading={loading}
+      />
+
+      {/* Employee filter */}
       <Card className="mb-6">
         <CardContent className="pt-6">
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="flex-1 min-w-[200px]">
-              <label className="text-sm font-medium mb-1 block">
-                <Calendar className="h-3 w-3 inline mr-1" />
-                Data od
-              </label>
-              <Input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </div>
-            <div className="flex-1 min-w-[200px]">
-              <label className="text-sm font-medium mb-1 block">
-                <Calendar className="h-3 w-3 inline mr-1" />
-                Data do
-              </label>
-              <Input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
-            </div>
-            <Button onClick={fetchReport} disabled={loading}>
-              <Search className="h-4 w-4 mr-2" />
-              {loading ? "Ladowanie..." : "Generuj raport"}
-            </Button>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+              Filtruj wg pracownika:
+            </span>
+            <EmployeeFilter
+              selectedEmployeeIds={selectedEmployeeIds}
+              onSelectionChange={setSelectedEmployeeIds}
+            />
           </div>
+          {selectedEmployeeIds.length > 0 && (
+            <p className="text-xs text-muted-foreground mt-2">
+              Raport pokazuje dane tylko dla wybranych pracownikow. Wyczysc filtr aby zobaczyc dane dla wszystkich.
+            </p>
+          )}
         </CardContent>
       </Card>
 

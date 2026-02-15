@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointments, services, employees } from "@/lib/schema";
-import { eq, and, gte, lte } from "drizzle-orm";
+import { eq, and, gte, lte, inArray } from "drizzle-orm";
 
 const DAY_LABELS_PL = [
   "Niedziela",
@@ -365,6 +365,7 @@ export async function GET(request: Request) {
     const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
+    const employeeIdsParam = searchParams.get("employeeIds"); // comma-separated employee IDs
     const compareDateFrom = searchParams.get("compareDateFrom");
     const compareDateTo = searchParams.get("compareDateTo");
     const format = searchParams.get("format"); // 'json' or 'csv'
@@ -375,6 +376,11 @@ export async function GET(request: Request) {
         { status: 400 }
       );
     }
+
+    // Parse employee IDs filter
+    const employeeIds = employeeIdsParam
+      ? employeeIdsParam.split(",").filter(Boolean)
+      : [];
 
     // Helper to fetch appointments for a date range
     async function fetchAppointments(from: string | null, to: string | null) {
@@ -389,6 +395,10 @@ export async function GET(request: Request) {
         const endDate = new Date(to);
         endDate.setHours(23, 59, 59, 999);
         conditions.push(lte(appointments.startTime, endDate));
+      }
+
+      if (employeeIds.length > 0) {
+        conditions.push(inArray(appointments.employeeId, employeeIds));
       }
 
       return db
