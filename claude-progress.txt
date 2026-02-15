@@ -1,5 +1,80 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #128 - Time-limited promotions) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #128: "Time-limited promotions" - Promotions with expiry
+- Category: Promotions
+- Steps: Create promotion with end date, Verify active before end date, Simulate past end date, Verify promotion inactive, Verify cannot apply expired promo
+
+### Implementation Details
+- All time-limited promotion functionality was already implemented
+- Fixed minor bug: PUT endpoint at /api/promotions/[id]/route.ts was missing "first_visit" in validTypes and percentage validation
+
+### Bug Fix
+- File: src/app/api/promotions/[id]/route.ts
+- Line 68: Added "first_visit" to validTypes array
+- Line 79: Added "first_visit" to percentage bounds check
+
+### Verification (API-based + code review)
+1. Created TIMELIMIT_TEST_128 with startDate 2026-02-14, endDate 2026-02-20 -> isActive: true, in future
+2. Created EXPIRED_TEST_128 with endDate 2026-02-10 (past) -> stored correctly
+3. Created expired happy_hours, first_visit, and buy2get1 promotions
+4. Verified /api/promotions/check-happy-hours: expired HH (50%, all days 10-18) NOT applied at 12:00
+5. Verified /api/promotions/check-first-visit: expired first_visit (40%) NOT returned; only active 15% returned
+6. UI code review confirmed: isExpired(), isUpcoming(), active/inactive categorization, "Wygasla" badge, opacity-60
+7. All four check endpoints (check, check-happy-hours, check-first-visit, check-package) filter by date
+8. Client portal booking page uses same check endpoints
+9. No mock/fake data patterns found in promotions code
+10. Data persisted after server restart (PostgreSQL)
+11. All test data cleaned up after verification
+
+### Key Files
+- src/app/api/promotions/route.ts (GET/POST)
+- src/app/api/promotions/[id]/route.ts (GET/PUT/DELETE) - FIXED
+- src/app/api/promotions/check/route.ts (buy2get1 with date filtering)
+- src/app/api/promotions/check-happy-hours/route.ts (happy hours with date filtering)
+- src/app/api/promotions/check-first-visit/route.ts (first visit with date filtering)
+- src/app/api/promotions/check-package/route.ts (package with date filtering)
+- src/app/dashboard/promotions/page.tsx (UI with expired status display)
+
+### Commit: a49bd0c
+### Stats: 96/253 features passing (37.9%)
+
+## Session: 2026-02-14 (Feature #123 - Create percentage discount) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #123: "Create percentage discount" - Full promotions management system
+
+### Implementation
+1. Created promotions API routes at `/api/promotions` (GET with salonId filter, POST with type/value validation)
+2. Created individual promotion routes at `/api/promotions/[id]` (GET, PUT with partial updates, DELETE)
+3. Built full promotions dashboard page at `/dashboard/promotions` with:
+   - Summary cards (total, active, inactive/expired counts)
+   - Promotion list with cards showing name, type badge, status, value, dates
+   - Create/Edit dialog with name, type (percentage/fixed/package), value, dates, active toggle
+   - Delete confirmation via AlertDialog
+   - Toggle active/inactive directly from list
+   - Empty state with CTA
+4. Added Promotions card to main dashboard page with Percent icon
+
+### Files Created/Modified
+- `src/app/api/promotions/route.ts` - NEW: GET/POST API routes
+- `src/app/api/promotions/[id]/route.ts` - NEW: GET/PUT/DELETE API routes
+- `src/app/dashboard/promotions/page.tsx` - NEW: Full promotions management UI
+- `src/app/dashboard/page.tsx` - Added Promotions card with link
+
+### Verification
+- Browser automation: Created 20% percentage discount "TEST_PROMO_123 Znizka letnia 20%"
+- Full page refresh confirmed PostgreSQL data persistence
+- Delete function verified (test data cleaned up)
+- No mock data patterns found (no globalThis, devStore, mockDb, localStorage, etc.)
+- No TypeScript errors
+
+### Stats: 90/253 features passing (35.6%)
+
+---
+
 ## Session: 2026-02-14 (Feature #117 - Automatic stock deduction) *** SUCCESS ***
 
 ### Feature Assigned
