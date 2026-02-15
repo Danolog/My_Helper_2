@@ -20,6 +20,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { FileText } from "lucide-react";
+import { generateReportPDF } from "@/lib/pdf-export";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -147,6 +149,54 @@ export default function EmployeeOccupancyReportPage() {
     }
   };
 
+  const handleExportPDF = () => {
+    if (!reportData) return;
+    try {
+      generateReportPDF({
+        title: "Raport obciazenia pracownikow",
+        subtitle: "Analiza wykorzystania czasu pracy pracownikow",
+        dateRange: dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined,
+        summaryCards: [
+          { label: "Pracownicy", value: `${reportData.summary.totalEmployees}` },
+          { label: "Srednie obciazenie", value: `${parseFloat(reportData.summary.avgOccupancy).toFixed(1)}%` },
+          { label: "Godziny dostepne", value: `${parseFloat(reportData.summary.totalAvailableHours).toFixed(1)} h` },
+          { label: "Godziny wizyt", value: `${parseFloat(reportData.summary.totalAppointmentHours).toFixed(1)} h` },
+        ],
+        tables: [
+          ...(reportData.employees.length > 0
+            ? [
+                {
+                  title: "Obciazenie pracownikow",
+                  headers: ["Pracownik", "Godziny dostepne", "Godziny wizyt", "Liczba wizyt", "Przychod", "Obciazenie"],
+                  rows: reportData.employees.map((emp) => [
+                    emp.employeeName,
+                    `${parseFloat(emp.availableHours).toFixed(1)} h`,
+                    `${parseFloat(emp.appointmentHours).toFixed(1)} h`,
+                    `${emp.appointmentCount}`,
+                    `${parseFloat(emp.revenue).toFixed(2)} PLN`,
+                    `${parseFloat(emp.occupancyPercentage).toFixed(1)}%`,
+                  ]),
+                  footerRow: [
+                    "RAZEM / SREDNIA",
+                    `${parseFloat(reportData.summary.totalAvailableHours).toFixed(1)} h`,
+                    `${parseFloat(reportData.summary.totalAppointmentHours).toFixed(1)} h`,
+                    `${reportData.employees.reduce((sum, e) => sum + e.appointmentCount, 0)}`,
+                    `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN`,
+                    `${parseFloat(reportData.summary.avgOccupancy).toFixed(1)}%`,
+                  ],
+                },
+              ]
+            : []),
+        ],
+        filename: `raport-obciazenie-pracownikow-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
+      });
+      toast.success("Raport wyeksportowany do PDF");
+    } catch (err) {
+      console.error("[Employee Occupancy Report] PDF export error:", err);
+      toast.error("Nie udalo sie wyeksportowac raportu do PDF");
+    }
+  };
+
   return (
     <div className="container mx-auto p-6">
       {/* Header */}
@@ -165,14 +215,24 @@ export default function EmployeeOccupancyReportPage() {
             Analiza wykorzystania czasu pracy pracownikow
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={handleExportCSV}
-          disabled={!reportData || reportData.employees.length === 0}
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Eksport CSV
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExportPDF}
+            disabled={!reportData || reportData.employees.length === 0}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Eksport PDF
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleExportCSV}
+            disabled={!reportData || reportData.employees.length === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Eksport CSV
+          </Button>
+        </div>
       </div>
 
       {/* Date range filter */}

@@ -25,6 +25,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { FileText } from "lucide-react";
+import { generateReportPDF } from "@/lib/pdf-export";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -166,6 +168,60 @@ export default function PromotionsReportPage() {
     }
   };
 
+  const handleExportPDF = () => {
+    if (!reportData) return;
+    try {
+      generateReportPDF({
+        title: "Raport efektywnosci promocji",
+        subtitle: "ROI i skutecznosc promocji w wybranym okresie",
+        dateRange: dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined,
+        summaryCards: [
+          { label: "Laczna kwota znizek", value: `${parseFloat(reportData.summary.totalDiscountGiven).toFixed(2)} PLN` },
+          { label: "Przychod z promocji", value: `${parseFloat(reportData.summary.totalRevenueFromPromos).toFixed(2)} PLN` },
+          { label: "Uzycie promocji", value: `${reportData.summary.totalPromoUsage}` },
+          { label: "ROI", value: `${reportData.summary.overallROI}%` },
+        ],
+        tables: [
+          ...(reportData.promotions.length > 0
+            ? [
+                {
+                  title: "Szczegoly promocji",
+                  headers: ["Promocja", "Typ", "Uzycie", "Ukonczone", "Anulowane", "Koszt znizek", "Przychod", "ROI", "Klienci"],
+                  rows: reportData.promotions.map((promo) => [
+                    promo.promotionName,
+                    promo.promotionType,
+                    `${promo.totalUsageCount}`,
+                    `${promo.completedCount}`,
+                    `${promo.cancelledCount}`,
+                    `${parseFloat(promo.totalDiscountGiven).toFixed(2)} PLN`,
+                    `${parseFloat(promo.totalRevenueGenerated).toFixed(2)} PLN`,
+                    `${promo.roi}%`,
+                    `${promo.uniqueClients}`,
+                  ]),
+                  footerRow: [
+                    "RAZEM",
+                    "",
+                    `${reportData.summary.totalPromoUsage}`,
+                    `${reportData.summary.totalCompletedWithPromo}`,
+                    "",
+                    `${parseFloat(reportData.summary.totalDiscountGiven).toFixed(2)} PLN`,
+                    `${parseFloat(reportData.summary.totalRevenueFromPromos).toFixed(2)} PLN`,
+                    `${reportData.summary.overallROI}%`,
+                    "",
+                  ],
+                },
+              ]
+            : []),
+        ],
+        filename: `raport-promocji-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
+      });
+      toast.success("Raport wyeksportowany do PDF");
+    } catch (err) {
+      console.error("[Promotions Report] PDF export error:", err);
+      toast.error("Nie udalo sie wyeksportowac raportu do PDF");
+    }
+  };
+
   // Calculate max usage for bar chart scaling
   const maxUsage =
     reportData?.promotions
@@ -190,14 +246,24 @@ export default function PromotionsReportPage() {
             ROI i skutecznosc promocji w wybranym okresie
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={handleExportCSV}
-          disabled={!reportData || reportData.promotions.length === 0}
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Eksport CSV
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExportPDF}
+            disabled={!reportData || reportData.promotions.length === 0}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Eksport PDF
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleExportCSV}
+            disabled={!reportData || reportData.promotions.length === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Eksport CSV
+          </Button>
+        </div>
       </div>
 
       {/* Date range filter */}

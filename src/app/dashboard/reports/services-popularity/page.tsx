@@ -23,6 +23,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { FileText } from "lucide-react";
+import { generateReportPDF } from "@/lib/pdf-export";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -141,6 +143,58 @@ export default function ServicePopularityReportPage() {
     }
   };
 
+  const handleExportPDF = () => {
+    if (!reportData) return;
+    try {
+      generateReportPDF({
+        title: "Popularnosc uslug",
+        subtitle: "Ranking najczesciej rezerwowanych uslug w salonie",
+        dateRange: dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined,
+        summaryCards: [
+          { label: "Laczna liczba rezerwacji", value: `${reportData.summary.totalBookings}` },
+          { label: "Liczba uslug", value: `${reportData.summary.totalUniqueServices}` },
+          { label: "Srednia rezerwacji / usluge", value: `${reportData.summary.avgBookingsPerService}` },
+          { label: "Przychod z uslug", value: `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN` },
+        ],
+        tables: [
+          ...(reportData.rankings.length > 0
+            ? [
+                {
+                  title: "Pelny ranking uslug",
+                  headers: ["#", "Usluga", "Rezerwacje", "Ukonczone", "Przychod", "Klienci", "Ocena", "Udzial"],
+                  rows: reportData.rankings.map((svc) => [
+                    `${svc.rank}`,
+                    svc.serviceName,
+                    `${svc.bookingCount}`,
+                    `${svc.completedCount}`,
+                    `${parseFloat(svc.revenue).toFixed(2)} PLN`,
+                    `${svc.uniqueClients}`,
+                    svc.avgRating ? `${svc.avgRating} (${svc.ratingCount})` : "-",
+                    `${svc.share}%`,
+                  ]),
+                  footerRow: [
+                    "-",
+                    "RAZEM",
+                    `${reportData.summary.totalBookings}`,
+                    "-",
+                    `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN`,
+                    "-",
+                    "-",
+                    "100%",
+                  ],
+                },
+              ]
+            : []),
+        ],
+        filename: `raport-popularnosc-uslug-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
+      });
+      toast.success("Raport wyeksportowany do PDF");
+    } catch (err) {
+      console.error("[Service Popularity Report] PDF export error:", err);
+      toast.error("Nie udalo sie wyeksportowac raportu do PDF");
+    }
+  };
+
   // Get max booking count for bar chart scaling
   const maxBookingCount =
     reportData?.rankings
@@ -179,14 +233,24 @@ export default function ServicePopularityReportPage() {
             Ranking najczesciej rezerwowanych uslug w salonie
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={handleExportCSV}
-          disabled={!reportData || reportData.summary.totalBookings === 0}
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Eksport CSV
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExportPDF}
+            disabled={!reportData || reportData.summary.totalBookings === 0}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Eksport PDF
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleExportCSV}
+            disabled={!reportData || reportData.summary.totalBookings === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Eksport CSV
+          </Button>
+        </div>
       </div>
 
       {/* Date range filter */}
