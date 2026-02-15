@@ -8686,3 +8686,41 @@ All code was already fully implemented:
 8. No mock data patterns in source code
 9. Data persists after full server restart (PostgreSQL confirmed)
 - Stats: 108/253 passing (42.7%)
+
+## Session: Feature #145 - Yearly Comparison Report
+Date: 2026-02-15
+
+### What was accomplished:
+- Implemented Feature #145 "Yearly comparison" - full year-over-year comparison report
+- Created API endpoint: /api/reports/yearly-comparison/route.ts
+  - Computes metrics for two years in parallel
+  - Revenue, appointments, cancellation rate, unique/new clients, top service/employee
+  - Monthly breakdown for each year with growth calculations
+  - computeChange() utility for value diff, percent change, and direction
+- Created UI page: /dashboard/reports/yearly-comparison/page.tsx
+  - Year selector inputs (min 2000, max 2099)
+  - 7 metric comparison cards with growth percentages and color coding
+  - Top service and top employee sections for each year
+  - Month-by-month comparison table with revenue and appointment columns
+  - Responsive design, loading states, empty states
+- Dashboard link already existed from prior session
+
+### Issues discovered and fixed:
+- Metric key mismatch: UI METRIC_CONFIGS used short keys ("revenue", "appointments") but API returned full keys ("totalRevenue", "totalAppointments"). This caused 4/7 metric cards to show "Brak danych". Fixed by updating keys in METRIC_CONFIGS, getMetricValue(), and INVERSE_METRICS to match API response.
+
+### Verification:
+1. Registered test user, navigated to yearly comparison page
+2. Generated report comparing 2025 vs 2026
+3. All 7 metric cards show correct values and growth percentages
+4. Top performers section displays correctly
+5. Monthly comparison table renders all 12 months
+6. 0 console errors
+7. No mock data patterns in source code
+
+### Completion status:
+- Feature #145 marked as passing
+- Stats: 112/253 passing (44.3%)
+
+### What should be worked on next:
+- Continue with next ready features from the backlog
+- Check feature_get_ready for next available features
