@@ -1,5 +1,41 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #136 - Service popularity report) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #136: "Service popularity report" - See most booked services
+- Category: Reports
+
+### Changes Made
+**API Endpoint (src/app/api/reports/services-popularity/route.ts):**
+- NEW FILE: Service popularity report API endpoint
+- Queries non-cancelled appointments joined with services, employees, clients, serviceCategories
+- Gets approved review ratings mapped by appointmentId
+- Aggregates by service: bookingCount, completedCount, revenue, uniqueClients, ratings, employeeBreakdown, monthlyTrend
+- Returns ranked services sorted by bookingCount descending
+- CSV export with BOM for Polish Excel compatibility
+- Date range filtering (dateFrom/dateTo)
+
+**UI Page (src/app/dashboard/reports/services-popularity/page.tsx):**
+- NEW FILE: Service popularity report dashboard page
+- Date range filter (default last 90 days)
+- 4 summary cards: total bookings, unique services, avg bookings/service, total revenue
+- Top 3 podium with gold/silver/bronze styling (Crown/Trophy icons)
+- Full ranking table: #, service, bookings (bar chart), completed, revenue, clients, rating (stars), share (bar chart)
+- CSV export button
+
+**Dashboard (src/app/dashboard/page.tsx):**
+- Added "Popularnosc uslug" button to Reports section
+
+### Verification
+- Browser tested: report page loads with real data (36 bookings, 15 services, 1150 PLN revenue)
+- Top 3 podium renders correctly with gold/silver/bronze styling
+- Full ranking table with all columns working
+- Zero console errors
+- Feature marked passing, stats: 104/253 (41.1%)
+
+---
+
 ## Session: 2026-02-15 (Feature #135 - Revenue report generation) *** SUCCESS ***
 
 ### Feature Assigned
