@@ -947,6 +947,38 @@ export const depositPayments = pgTable(
   ]
 );
 
+// Fiscal receipts - track printed fiscal receipts for appointments
+export const fiscalReceipts = pgTable(
+  "fiscal_receipts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    appointmentId: uuid("appointment_id").notNull(),
+    salonId: uuid("salon_id").notNull(),
+    receiptNumber: text("receipt_number").notNull(), // Sequential receipt number
+    nip: text("nip"), // Tax ID printed on receipt
+    clientName: text("client_name"),
+    employeeName: text("employee_name"),
+    serviceName: text("service_name"),
+    servicePrice: numeric("service_price", { precision: 10, scale: 2 }).notNull(),
+    materialsCost: numeric("materials_cost", { precision: 10, scale: 2 }).default("0"),
+    totalAmount: numeric("total_amount", { precision: 10, scale: 2 }).notNull(),
+    vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).default("23"), // Default 23% VAT for Poland
+    vatAmount: numeric("vat_amount", { precision: 10, scale: 2 }),
+    netAmount: numeric("net_amount", { precision: 10, scale: 2 }),
+    paymentMethod: text("payment_method").default("cash"), // cash, card, transfer
+    printerModel: text("printer_model"),
+    printedAt: timestamp("printed_at").defaultNow().notNull(),
+    printStatus: text("print_status").default("sent").notNull(), // sent, confirmed, error
+    receiptDataJson: jsonb("receipt_data_json"), // Full receipt content for reprinting
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    index("fiscal_receipts_appointment_id_idx").on(table.appointmentId),
+    index("fiscal_receipts_salon_id_idx").on(table.salonId),
+    index("fiscal_receipts_receipt_number_idx").on(table.receiptNumber),
+  ]
+);
+
 // Push notification subscriptions
 export const pushSubscriptions = pgTable(
   "push_subscriptions",

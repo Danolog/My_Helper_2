@@ -44,6 +44,8 @@ import {
   X,
   RefreshCw,
   Ban,
+  Printer,
+  Receipt,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EditAppointmentDialog } from "@/components/appointments/edit-appointment-dialog";
@@ -151,6 +153,50 @@ interface RefundStatus {
   refundReason?: string;
 }
 
+interface FiscalReceiptData {
+  id: string;
+  receiptNumber: string;
+  nip: string | null;
+  clientName: string | null;
+  employeeName: string | null;
+  serviceName: string | null;
+  servicePrice: string;
+  materialsCost: string;
+  totalAmount: string;
+  vatRate: string;
+  vatAmount: string;
+  netAmount: string;
+  paymentMethod: string;
+  printerModel: string | null;
+  printedAt: string;
+  printStatus: string;
+  receiptDataJson: {
+    header: { line1: string; line2: string; line3: string; nip: string | null };
+    receiptNumber: string;
+    date: string;
+    time: string;
+    items: Array<{
+      name: string;
+      quantity: number;
+      unitPrice: string;
+      total: string;
+      vatRate: string;
+    }>;
+    summary: {
+      netAmount: string;
+      vatRate: string;
+      vatAmount: string;
+      totalAmount: string;
+    };
+    paymentMethod: string;
+    client: string | null;
+    employee: string | null;
+    appointmentDate: string;
+    appointmentTime: string;
+    footer: string;
+  } | null;
+}
+
 function getStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     scheduled: "Zaplanowana",
@@ -217,6 +263,12 @@ export default function AppointmentDetailPage() {
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesValue, setNotesValue] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
+
+  // Fiscal receipt state
+  const [fiscalReceipt, setFiscalReceipt] = useState<FiscalReceiptData | null>(null);
+  const [receiptDialogOpen, setReceiptDialogOpen] = useState(false);
+  const [printingReceipt, setPrintingReceipt] = useState(false);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("cash");
 
   const fetchAppointment = useCallback(async () => {
     try {
@@ -296,6 +348,42 @@ export default function AppointmentDetailPage() {
     }
   }, [appointmentId]);
 
+  const fetchFiscalReceipt = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/appointments/${appointmentId}/fiscal-receipt`);
+      const data = await res.json();
+      if (data.success && data.hasReceipt) {
+        setFiscalReceipt(data.data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch fiscal receipt:", error);
+    }
+  }, [appointmentId]);
+
+  const handlePrintReceipt = async () => {
+    setPrintingReceipt(true);
+    try {
+      const res = await fetch(`/api/appointments/${appointmentId}/fiscal-receipt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentMethod: selectedPaymentMethod }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFiscalReceipt(data.data);
+        toast.success(data.message || "Paragon fiskalny wyslany do drukarki");
+        setReceiptDialogOpen(false);
+      } else {
+        toast.error(data.error || "Nie udalo sie wydrukowac paragonu");
+      }
+    } catch (error) {
+      console.error("Failed to print fiscal receipt:", error);
+      toast.error("Blad podczas drukowania paragonu");
+    } finally {
+      setPrintingReceipt(false);
+    }
+  };
+
   useEffect(() => {
     fetchAppointment();
     fetchMaterials();
@@ -303,7 +391,8 @@ export default function AppointmentDetailPage() {
     fetchTreatment();
     fetchCommission();
     fetchRefundStatus();
-  }, [fetchAppointment, fetchMaterials, fetchProducts, fetchTreatment, fetchCommission, fetchRefundStatus]);
+    fetchFiscalReceipt();
+  }, [fetchAppointment, fetchMaterials, fetchProducts, fetchTreatment, fetchCommission, fetchRefundStatus, fetchFiscalReceipt]);
 
   const handleAddMaterial = async () => {
     if (!selectedProductId) {
@@ -491,6 +580,28 @@ export default function AppointmentDetailPage() {
               <CheckCircle className="h-4 w-4 mr-2" />
               Zakoncz wizyte
             </Button>
+          </div>
+        )}
+        {appointment.status === "completed" && (
+          <div className="flex items-center gap-2">
+            {fiscalReceipt ? (
+              <Button
+                variant="outline"
+                onClick={() => setReceiptDialogOpen(true)}
+                data-testid="view-receipt-btn"
+              >
+                <Receipt className="h-4 w-4 mr-2" />
+                Podglad paragonu
+              </Button>
+            ) : (
+              <Button
+                onClick={() => setReceiptDialogOpen(true)}
+                data-testid="print-receipt-btn"
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                Drukuj paragon
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -898,6 +1009,70 @@ export default function AppointmentDetailPage() {
         </Card>
       )}
 
+      {/* Fiscal Receipt Section (shown when receipt exists) */}
+      {fiscalReceipt && (
+        <Card className="mb-6" data-testid="fiscal-receipt-card">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Receipt className="h-5 w-5 text-primary" />
+                <CardTitle className="text-lg">Paragon fiskalny</CardTitle>
+                <Badge variant="default" data-testid="receipt-status-badge">
+                  {fiscalReceipt.printStatus === "sent"
+                    ? "Wyslany"
+                    : fiscalReceipt.printStatus === "confirmed"
+                      ? "Potwierdzony"
+                      : "Blad"}
+                </Badge>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setReceiptDialogOpen(true)}
+                data-testid="view-receipt-details-btn"
+              >
+                <FileText className="h-4 w-4 mr-1" />
+                Podglad
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase mb-1">
+                  Numer paragonu
+                </p>
+                <p className="text-sm font-mono" data-testid="receipt-number">
+                  {fiscalReceipt.receiptNumber}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase mb-1">
+                  Kwota brutto
+                </p>
+                <p className="text-sm font-bold" data-testid="receipt-total">
+                  {parseFloat(fiscalReceipt.totalAmount).toFixed(2)} PLN
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase mb-1">
+                  Data wydruku
+                </p>
+                <p className="text-sm" data-testid="receipt-date">
+                  {new Date(fiscalReceipt.printedAt).toLocaleDateString("pl-PL", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Materials section */}
       <Card data-testid="materials-card">
         <CardHeader>
@@ -1031,6 +1206,185 @@ export default function AppointmentDetailPage() {
           onAppointmentUpdated={fetchAppointment}
         />
       )}
+
+      {/* Fiscal Receipt Dialog */}
+      <Dialog open={receiptDialogOpen} onOpenChange={setReceiptDialogOpen}>
+        <DialogContent className="max-w-lg" data-testid="receipt-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Receipt className="h-5 w-5" />
+              {fiscalReceipt ? "Podglad paragonu fiskalnego" : "Drukuj paragon fiskalny"}
+            </DialogTitle>
+          </DialogHeader>
+
+          {fiscalReceipt ? (
+            /* Receipt Preview */
+            <div className="space-y-4">
+              {/* Receipt preview styled like a thermal printer receipt */}
+              <div
+                className="bg-white dark:bg-gray-900 border rounded-lg p-4 font-mono text-xs space-y-2"
+                data-testid="receipt-preview"
+              >
+                {/* Header */}
+                <div className="text-center space-y-0.5">
+                  {fiscalReceipt.receiptDataJson?.header.line1 && (
+                    <p className="font-bold text-sm">{fiscalReceipt.receiptDataJson.header.line1}</p>
+                  )}
+                  {fiscalReceipt.receiptDataJson?.header.line2 && (
+                    <p>{fiscalReceipt.receiptDataJson.header.line2}</p>
+                  )}
+                  {fiscalReceipt.receiptDataJson?.header.line3 && (
+                    <p>{fiscalReceipt.receiptDataJson.header.line3}</p>
+                  )}
+                  {fiscalReceipt.receiptDataJson?.header.nip && (
+                    <p>{fiscalReceipt.receiptDataJson.header.nip}</p>
+                  )}
+                </div>
+                <Separator />
+
+                {/* Receipt number and date */}
+                <div className="flex justify-between">
+                  <span>{fiscalReceipt.receiptDataJson?.receiptNumber}</span>
+                  <span>{fiscalReceipt.receiptDataJson?.date} {fiscalReceipt.receiptDataJson?.time}</span>
+                </div>
+                <Separator />
+
+                {/* Items */}
+                <div className="space-y-1">
+                  {fiscalReceipt.receiptDataJson?.items.map((item, idx) => (
+                    <div key={idx}>
+                      <p className="font-medium">{item.name}</p>
+                      <div className="flex justify-between pl-2">
+                        <span>{item.quantity} x {item.unitPrice} PLN</span>
+                        <span>{item.total} PLN ({item.vatRate})</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <Separator />
+
+                {/* Summary */}
+                <div className="space-y-1">
+                  <div className="flex justify-between">
+                    <span>Netto:</span>
+                    <span>{fiscalReceipt.receiptDataJson?.summary.netAmount} PLN</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>VAT ({fiscalReceipt.receiptDataJson?.summary.vatRate}):</span>
+                    <span>{fiscalReceipt.receiptDataJson?.summary.vatAmount} PLN</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-sm">
+                    <span>RAZEM:</span>
+                    <span>{fiscalReceipt.receiptDataJson?.summary.totalAmount} PLN</span>
+                  </div>
+                </div>
+                <Separator />
+
+                {/* Payment method */}
+                <div className="flex justify-between">
+                  <span>Platnosc:</span>
+                  <span>{fiscalReceipt.receiptDataJson?.paymentMethod}</span>
+                </div>
+
+                {/* Footer */}
+                <div className="text-center mt-3 pt-2">
+                  <p className="text-muted-foreground">{fiscalReceipt.receiptDataJson?.footer}</p>
+                </div>
+              </div>
+
+              {/* Receipt metadata */}
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span className="text-muted-foreground">Drukarka: </span>
+                  <span>{fiscalReceipt.printerModel || "N/A"}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Status: </span>
+                  <Badge variant="default" className="text-xs">
+                    {fiscalReceipt.printStatus === "sent" ? "Wyslany do drukarki" : fiscalReceipt.printStatus}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Print new receipt form */
+            <div className="space-y-4">
+              <div className="p-4 rounded-lg border bg-muted/50">
+                <h4 className="font-medium mb-2">Podsumowanie wizyty</h4>
+                <div className="space-y-1 text-sm">
+                  {appointment.service && (
+                    <div className="flex justify-between">
+                      <span>{appointment.service.name}</span>
+                      <span>{parseFloat(appointment.service.basePrice).toFixed(2)} PLN</span>
+                    </div>
+                  )}
+                  {totalMaterialCost > 0 && (
+                    <div className="flex justify-between">
+                      <span>Materialy</span>
+                      <span>{totalMaterialCost.toFixed(2)} PLN</span>
+                    </div>
+                  )}
+                  <Separator className="my-2" />
+                  <div className="flex justify-between font-bold">
+                    <span>Razem</span>
+                    <span>
+                      {(
+                        parseFloat(appointment.service?.basePrice || "0") +
+                        totalMaterialCost
+                      ).toFixed(2)}{" "}
+                      PLN
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-sm font-medium">Metoda platnosci</Label>
+                <Select
+                  value={selectedPaymentMethod}
+                  onValueChange={setSelectedPaymentMethod}
+                >
+                  <SelectTrigger className="mt-1" data-testid="payment-method-select">
+                    <SelectValue placeholder="Wybierz metode platnosci" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Gotowka</SelectItem>
+                    <SelectItem value="card">Karta</SelectItem>
+                    <SelectItem value="transfer">Przelew</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-start gap-2 text-sm text-muted-foreground p-3 rounded-lg border bg-muted/30">
+                <Printer className="h-4 w-4 mt-0.5 shrink-0" />
+                <p>
+                  Paragon zostanie wyslany do skonfigurowanej drukarki fiskalnej.
+                  Upewnij sie, ze drukarka jest wlaczona i polaczona.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setReceiptDialogOpen(false)}
+            >
+              {fiscalReceipt ? "Zamknij" : "Anuluj"}
+            </Button>
+            {!fiscalReceipt && (
+              <Button
+                onClick={handlePrintReceipt}
+                disabled={printingReceipt}
+                data-testid="confirm-print-receipt-btn"
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                {printingReceipt ? "Drukowanie..." : "Drukuj paragon"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Material Dialog */}
       <Dialog open={addMaterialOpen} onOpenChange={setAddMaterialOpen}>
