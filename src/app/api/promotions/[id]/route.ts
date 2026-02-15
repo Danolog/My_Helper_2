@@ -65,7 +65,7 @@ export async function PUT(
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name;
     if (type !== undefined) {
-      const validTypes = ["percentage", "fixed", "package", "buy2get1", "happy_hours"];
+      const validTypes = ["percentage", "fixed", "package", "buy2get1", "happy_hours", "first_visit"];
       if (!validTypes.includes(type)) {
         return NextResponse.json(
           { success: false, error: `Invalid type. Must be one of: ${validTypes.join(", ")}` },
@@ -76,7 +76,7 @@ export async function PUT(
     }
     if (value !== undefined) {
       const effectiveType = type || existing.type;
-      if (effectiveType === "percentage" || effectiveType === "buy2get1" || effectiveType === "happy_hours") {
+      if (effectiveType === "percentage" || effectiveType === "buy2get1" || effectiveType === "happy_hours" || effectiveType === "first_visit") {
         const numValue = parseFloat(value);
         if (isNaN(numValue) || numValue <= 0 || numValue > 100) {
           return NextResponse.json(
