@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointments, services, employees, clients, reviews, serviceCategories } from "@/lib/schema";
-import { eq, and, gte, lte, desc, ne } from "drizzle-orm";
+import { eq, and, gte, lte, desc, ne, inArray } from "drizzle-orm";
 
 // GET /api/reports/services-popularity - Service popularity report: most booked services
 export async function GET(request: Request) {
@@ -10,6 +10,7 @@ export async function GET(request: Request) {
     const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
+    const employeeIdsParam = searchParams.get("employeeIds"); // comma-separated employee IDs
     const format = searchParams.get("format"); // 'json' or 'csv'
 
     if (!salonId) {
@@ -32,6 +33,14 @@ export async function GET(request: Request) {
       const endDate = new Date(dateTo);
       endDate.setHours(23, 59, 59, 999);
       conditions.push(lte(appointments.startTime, endDate));
+    }
+
+    // Employee filter
+    const employeeIds = employeeIdsParam
+      ? employeeIdsParam.split(",").filter(Boolean)
+      : [];
+    if (employeeIds.length > 0) {
+      conditions.push(inArray(appointments.employeeId, employeeIds));
     }
 
     // Get all non-cancelled appointments with service details
