@@ -30,6 +30,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { FileText } from "lucide-react";
+import { generateReportPDF } from "@/lib/pdf-export";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -241,6 +243,117 @@ export default function CancellationReportPage() {
     }
   };
 
+  const handleExportPDF = () => {
+    if (!reportData) return;
+    try {
+      generateReportPDF({
+        title: "Analiza anulacji",
+        subtitle: "Utracony przychod z anulowanych wizyt z uwzglednieniem zastepstw",
+        dateRange: dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined,
+        summaryCards: [
+          { label: "Laczna liczba wizyt", value: `${reportData.summary.totalAppointments}` },
+          { label: "Anulowane + nieobecnosci", value: `${reportData.summary.cancellationCount}` },
+          { label: "Wskaznik anulacji", value: `${reportData.summary.cancellationRate}%` },
+          { label: "Rzeczywisty utracony przychod", value: `${parseFloat(reportData.summary.netLostRevenue).toFixed(2)} PLN` },
+        ],
+        tables: [
+          ...(reportData.byReason.length > 0
+            ? [
+                {
+                  title: "Podzial wg powodu",
+                  headers: ["Powod", "Liczba", "Udzial"],
+                  rows: reportData.byReason.map((item) => [
+                    item.reasonLabel,
+                    `${item.count}`,
+                    `${item.percentage}%`,
+                  ]),
+                },
+              ]
+            : []),
+          ...(reportData.byEmployee.length > 0
+            ? [
+                {
+                  title: "Anulacje wg pracownika",
+                  headers: ["Pracownik", "Laczne wizyty", "Anulowane", "Nieobecnosci", "Wskaznik"],
+                  rows: reportData.byEmployee.map((emp) => [
+                    emp.employeeName,
+                    `${emp.total}`,
+                    `${emp.cancelled}`,
+                    `${emp.noShow}`,
+                    `${emp.rate}%`,
+                  ]),
+                },
+              ]
+            : []),
+          ...(reportData.byService.length > 0
+            ? [
+                {
+                  title: "Anulacje wg uslugi",
+                  headers: ["Usluga", "Laczne wizyty", "Anulowane", "Nieobecnosci", "Wskaznik", "Strata netto"],
+                  rows: reportData.byService.map((svc) => [
+                    svc.serviceName,
+                    `${svc.total}`,
+                    `${svc.cancelled}`,
+                    `${svc.noShow}`,
+                    `${svc.rate}%`,
+                    `${parseFloat(svc.netLostRevenue).toFixed(2)} PLN`,
+                  ]),
+                },
+              ]
+            : []),
+          ...(reportData.byDayOfWeek.length > 0
+            ? [
+                {
+                  title: "Anulacje wg dnia tygodnia",
+                  headers: ["Dzien", "Laczne wizyty", "Anulowane", "Wskaznik"],
+                  rows: reportData.byDayOfWeek.map((day) => [
+                    day.dayLabel,
+                    `${day.total}`,
+                    `${day.cancelled}`,
+                    `${day.rate}%`,
+                  ]),
+                },
+              ]
+            : []),
+          ...(reportData.trend.length > 0
+            ? [
+                {
+                  title: "Trend dzienny",
+                  headers: ["Data", "Laczne", "Anulowane", "Nieobecnosci", "Wskaznik", "Strata netto"],
+                  rows: reportData.trend.map((point) => [
+                    new Date(point.date + "T12:00:00").toLocaleDateString("pl-PL", {
+                      weekday: "short",
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                    }),
+                    `${point.total}`,
+                    `${point.cancelled}`,
+                    `${point.noShow}`,
+                    `${point.rate}%`,
+                    `${parseFloat(point.netLostRevenue).toFixed(2)} PLN`,
+                  ]),
+                  footerRow: [
+                    "RAZEM",
+                    `${reportData.summary.totalAppointments}`,
+                    `${reportData.summary.cancelledCount}`,
+                    `${reportData.summary.noShowCount}`,
+                    `${reportData.summary.cancellationRate}%`,
+                    `${parseFloat(reportData.summary.netLostRevenue).toFixed(2)} PLN`,
+                  ],
+                },
+              ]
+            : []),
+        ],
+        filename: `raport-anulacji-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
+      });
+      toast.success("Raport wyeksportowany do PDF");
+    } catch (err) {
+      console.error("[Cancellation Report] PDF export error:", err);
+      toast.error("Nie udalo sie wyeksportowac raportu do PDF");
+    }
+  };
+
   const formatDateShort = (dateStr: string) => {
     return new Date(dateStr + "T12:00:00").toLocaleDateString("pl-PL", {
       day: "2-digit",
@@ -320,14 +433,24 @@ export default function CancellationReportPage() {
             Analiza utraconego przychodu z anulowanych wizyt z uwzglednieniem zastepstw
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={handleExportCSV}
-          disabled={!reportData || reportData.summary.totalAppointments === 0}
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Eksport CSV
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExportPDF}
+            disabled={!reportData || reportData.summary.totalAppointments === 0}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Eksport PDF
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleExportCSV}
+            disabled={!reportData || reportData.summary.totalAppointments === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Eksport CSV
+          </Button>
+        </div>
       </div>
 
       {/* Date range filter */}

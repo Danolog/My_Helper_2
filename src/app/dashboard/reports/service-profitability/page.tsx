@@ -23,6 +23,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { FileText } from "lucide-react";
+import { generateReportPDF } from "@/lib/pdf-export";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -143,6 +145,56 @@ export default function ServiceProfitabilityPage() {
     }
   };
 
+  const handleExportPDF = () => {
+    if (!reportData) return;
+    try {
+      generateReportPDF({
+        title: "Rentownosc uslug",
+        subtitle: "Marze zysku na uslugach - przychod minus koszty",
+        dateRange: dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined,
+        summaryCards: [
+          { label: "Przychod", value: `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN` },
+          { label: "Koszty materialow", value: `${parseFloat(reportData.summary.totalMaterialCost).toFixed(2)} PLN` },
+          { label: "Koszty pracy", value: `${parseFloat(reportData.summary.totalLaborCost).toFixed(2)} PLN` },
+          { label: "Zysk", value: `${parseFloat(reportData.summary.totalProfit).toFixed(2)} PLN` },
+        ],
+        tables: [
+          ...(reportData.byService.length > 0
+            ? [
+                {
+                  title: "Rentownosc wg uslugi",
+                  headers: ["Usluga", "Wizyty", "Przychod", "Koszty mat.", "Koszty pracy", "Zysk", "Marza"],
+                  rows: reportData.byService.map((svc) => [
+                    svc.serviceName,
+                    `${svc.appointmentCount}`,
+                    `${parseFloat(svc.totalRevenue).toFixed(2)} PLN`,
+                    `${parseFloat(svc.totalMaterialCost).toFixed(2)} PLN`,
+                    `${parseFloat(svc.totalLaborCost).toFixed(2)} PLN`,
+                    `${parseFloat(svc.totalProfit).toFixed(2)} PLN`,
+                    `${svc.profitMargin}%`,
+                  ]),
+                  footerRow: [
+                    "RAZEM",
+                    `${reportData.summary.totalAppointments}`,
+                    `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN`,
+                    `${parseFloat(reportData.summary.totalMaterialCost).toFixed(2)} PLN`,
+                    `${parseFloat(reportData.summary.totalLaborCost).toFixed(2)} PLN`,
+                    `${parseFloat(reportData.summary.totalProfit).toFixed(2)} PLN`,
+                    `${reportData.summary.profitMargin}%`,
+                  ],
+                },
+              ]
+            : []),
+        ],
+        filename: `raport-rentownosci-uslug-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
+      });
+      toast.success("Raport wyeksportowany do PDF");
+    } catch (err) {
+      console.error("[Service Profitability Report] PDF export error:", err);
+      toast.error("Nie udalo sie wyeksportowac raportu do PDF");
+    }
+  };
+
   const getMarginColor = (margin: number) => {
     if (margin >= 70) return "text-green-700";
     if (margin >= 50) return "text-green-600";
@@ -201,14 +253,24 @@ export default function ServiceProfitabilityPage() {
             Marze zysku na uslugach - przychod minus koszty
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={handleExportCSV}
-          disabled={!reportData || reportData.summary.totalAppointments === 0}
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Eksport CSV
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExportPDF}
+            disabled={!reportData || reportData.summary.totalAppointments === 0}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Eksport PDF
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleExportCSV}
+            disabled={!reportData || reportData.summary.totalAppointments === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Eksport CSV
+          </Button>
+        </div>
       </div>
 
       {/* Date range filter */}

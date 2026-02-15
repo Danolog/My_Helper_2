@@ -31,6 +31,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { FileText } from "lucide-react";
+import { generateReportPDF } from "@/lib/pdf-export";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -239,6 +241,68 @@ export default function MonthlyComparisonPage() {
     }
   }, [month1, month2]);
 
+  const handleExportPDF = () => {
+    if (!comparisonData) return;
+    try {
+      const m1 = comparisonData.month1;
+      const m2 = comparisonData.month2;
+
+      generateReportPDF({
+        title: "Porownanie miesieczne",
+        subtitle: `${m1.label} vs ${m2.label}`,
+        summaryCards: METRIC_CONFIGS.map((config) => {
+          const m1Value = getMetricValue(m1.metrics, config.key);
+          const m2Value = getMetricValue(m2.metrics, config.key);
+          const change = comparisonData.changes[config.key];
+          const changeStr = change ? ` (${change.direction === "down" ? "" : "+"}${change.percent}%)` : "";
+          return {
+            label: config.label,
+            value: `${config.format(m1Value)} -> ${config.format(m2Value)}${changeStr}`,
+          };
+        }),
+        tables: [
+          {
+            title: "Porownanie metryk",
+            headers: ["Metryka", m1.label, m2.label, "Zmiana", "Zmiana %"],
+            rows: METRIC_CONFIGS.map((config) => {
+              const m1Value = getMetricValue(m1.metrics, config.key);
+              const m2Value = getMetricValue(m2.metrics, config.key);
+              const change = comparisonData.changes[config.key];
+              return [
+                config.label,
+                config.format(m1Value),
+                config.format(m2Value),
+                change ? change.value : "-",
+                change ? `${change.percent}%` : "-",
+              ];
+            }),
+          },
+          {
+            title: "Najpopularniejsi",
+            headers: ["Kategoria", m1.label, m2.label],
+            rows: [
+              [
+                "Najpopularniejsza usluga",
+                m1.metrics.topService ? `${m1.metrics.topService.name} (${m1.metrics.topService.count} wiz.)` : "Brak danych",
+                m2.metrics.topService ? `${m2.metrics.topService.name} (${m2.metrics.topService.count} wiz.)` : "Brak danych",
+              ],
+              [
+                "Najbardziej zapracowany pracownik",
+                m1.metrics.topEmployee ? `${m1.metrics.topEmployee.name} (${m1.metrics.topEmployee.count} wiz.)` : "Brak danych",
+                m2.metrics.topEmployee ? `${m2.metrics.topEmployee.name} (${m2.metrics.topEmployee.count} wiz.)` : "Brak danych",
+              ],
+            ],
+          },
+        ],
+        filename: `porownanie-miesieczne-${month1}-vs-${month2}.pdf`,
+      });
+      toast.success("Raport wyeksportowany do PDF");
+    } catch (err) {
+      console.error("[Monthly Comparison] PDF export error:", err);
+      toast.error("Nie udalo sie wyeksportowac raportu do PDF");
+    }
+  };
+
   // Suppress unused-import warnings for icons used only in the config array
   // by referencing them in the module scope via METRIC_CONFIGS above.
   // The following are used inside JSX or helper functions:
@@ -263,6 +327,14 @@ export default function MonthlyComparisonPage() {
             Porownaj metryki salonu miesiac do miesiaca
           </p>
         </div>
+        <Button
+          variant="outline"
+          onClick={handleExportPDF}
+          disabled={!comparisonData}
+        >
+          <FileText className="h-4 w-4 mr-2" />
+          Eksport PDF
+        </Button>
       </div>
 
       {/* Month selectors */}

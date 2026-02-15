@@ -22,6 +22,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { FileText } from "lucide-react";
+import { generateReportPDF } from "@/lib/pdf-export";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -170,6 +172,86 @@ export default function MaterialsProfitLossPage() {
     }
   };
 
+  const handleExportPDF = () => {
+    if (!reportData) return;
+    try {
+      generateReportPDF({
+        title: "Zysk/Strata materialow",
+        subtitle: "Koszt materialow vs przychod z uslug - analiza rentownosci produktow",
+        dateRange: dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined,
+        summaryCards: [
+          { label: "Koszt materialow", value: `${parseFloat(reportData.totals.totalMaterialCost).toFixed(2)} PLN` },
+          { label: "Przychod z uslug", value: `${parseFloat(reportData.totals.totalRevenue).toFixed(2)} PLN` },
+          { label: "Zysk / Strata", value: `${parseFloat(reportData.totals.totalProfitLoss).toFixed(2)} PLN` },
+          { label: "Marza zysku", value: `${reportData.totals.profitMargin}%` },
+        ],
+        tables: [
+          ...(reportData.summary.length > 0
+            ? [
+                {
+                  title: "Rentownosc wg produktu",
+                  headers: ["Produkt", "Zuzycie", "Koszt mat.", "Przychod", "Zysk/Strata", "Marza"],
+                  rows: reportData.summary.map((item) => [
+                    item.productName,
+                    `${item.totalQuantityUsed.toFixed(2)} ${item.unit || "szt."}`,
+                    `${parseFloat(item.totalMaterialCost).toFixed(2)} PLN`,
+                    `${parseFloat(item.attributedRevenue).toFixed(2)} PLN`,
+                    `${parseFloat(item.profitLoss) >= 0 ? "+" : ""}${parseFloat(item.profitLoss).toFixed(2)} PLN`,
+                    `${item.profitMargin}%`,
+                  ]),
+                  footerRow: [
+                    "RAZEM",
+                    "",
+                    `${parseFloat(reportData.totals.totalMaterialCost).toFixed(2)} PLN`,
+                    `${parseFloat(reportData.totals.totalRevenue).toFixed(2)} PLN`,
+                    `${parseFloat(reportData.totals.totalProfitLoss) >= 0 ? "+" : ""}${parseFloat(reportData.totals.totalProfitLoss).toFixed(2)} PLN`,
+                    `${reportData.totals.profitMargin}%`,
+                  ],
+                },
+              ]
+            : []),
+          ...(reportData.details.length > 0
+            ? [
+                {
+                  title: "Szczegolowe zuzycie z zyskiem/strata",
+                  headers: ["Data", "Produkt", "Usluga", "Pracownik", "Zuzycie", "Koszt", "Przychod", "Zysk/Strata"],
+                  rows: reportData.details.map((record) => [
+                    new Date(record.date).toLocaleDateString("pl-PL", {
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                    }),
+                    record.product.name,
+                    record.service || "-",
+                    record.employee || "-",
+                    `${parseFloat(record.quantityUsed).toFixed(2)} ${record.product.unit || "szt."}`,
+                    `${parseFloat(record.materialCost).toFixed(2)} PLN`,
+                    `${parseFloat(record.attributedRevenue).toFixed(2)} PLN`,
+                    `${parseFloat(record.profitLoss) >= 0 ? "+" : ""}${parseFloat(record.profitLoss).toFixed(2)} PLN`,
+                  ]),
+                  footerRow: [
+                    "RAZEM",
+                    "",
+                    "",
+                    "",
+                    "",
+                    `${parseFloat(reportData.totals.totalMaterialCost).toFixed(2)} PLN`,
+                    `${parseFloat(reportData.totals.totalRevenue).toFixed(2)} PLN`,
+                    `${parseFloat(reportData.totals.totalProfitLoss) >= 0 ? "+" : ""}${parseFloat(reportData.totals.totalProfitLoss).toFixed(2)} PLN`,
+                  ],
+                },
+              ]
+            : []),
+        ],
+        filename: `raport-zysk-strata-materialow-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
+      });
+      toast.success("Raport wyeksportowany do PDF");
+    } catch (err) {
+      console.error("[Materials Profit/Loss Report] PDF export error:", err);
+      toast.error("Nie udalo sie wyeksportowac raportu do PDF");
+    }
+  };
+
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString("pl-PL", {
       year: "numeric",
@@ -239,14 +321,24 @@ export default function MaterialsProfitLossPage() {
             produktow
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={handleExportCSV}
-          disabled={!reportData || reportData.summary.length === 0}
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Eksport CSV
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExportPDF}
+            disabled={!reportData || reportData.summary.length === 0}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Eksport PDF
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleExportCSV}
+            disabled={!reportData || reportData.summary.length === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Eksport CSV
+          </Button>
+        </div>
       </div>
 
       {/* Date range filter */}

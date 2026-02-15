@@ -19,6 +19,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { FileText } from "lucide-react";
+import { generateReportPDF } from "@/lib/pdf-export";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -149,6 +151,83 @@ export default function MaterialsReportPage() {
     }
   };
 
+  const handleExportPDF = () => {
+    if (!reportData) return;
+    try {
+      generateReportPDF({
+        title: "Raport zuzycia materialow",
+        subtitle: "Analiza zuzycia produktow w wybranym okresie",
+        dateRange: dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined,
+        summaryCards: [
+          { label: "Calkowity koszt", value: `${parseFloat(reportData.totals.totalCost).toFixed(2)} PLN` },
+          { label: "Liczba uzyc", value: `${reportData.totals.totalUsages}` },
+          { label: "Unikalne produkty", value: `${reportData.totals.uniqueProducts}` },
+        ],
+        tables: [
+          ...(reportData.summary.length > 0
+            ? [
+                {
+                  title: "Zuzycie wg produktu",
+                  headers: ["Produkt", "Kategoria", "Zuzycie", "Cena/jedn.", "Koszt", "Aktualny stan", "Liczba uzyc"],
+                  rows: reportData.summary.map((item) => [
+                    item.productName,
+                    item.category || "-",
+                    `${item.totalUsed.toFixed(2)} ${item.unit || "szt."}`,
+                    `${parseFloat(item.pricePerUnit || "0").toFixed(2)} PLN`,
+                    `${item.totalCost.toFixed(2)} PLN`,
+                    `${parseFloat(item.currentStock || "0").toFixed(2)} ${item.unit || "szt."}`,
+                    `${item.usageCount}`,
+                  ]),
+                  footerRow: [
+                    "RAZEM",
+                    "",
+                    "",
+                    "",
+                    `${parseFloat(reportData.totals.totalCost).toFixed(2)} PLN`,
+                    "",
+                    `${reportData.totals.totalUsages}`,
+                  ],
+                },
+              ]
+            : []),
+          ...(reportData.details.length > 0
+            ? [
+                {
+                  title: "Szczegolowe zuzycie",
+                  headers: ["Data", "Produkt", "Usluga", "Pracownik", "Zuzycie", "Koszt"],
+                  rows: reportData.details.map((record) => [
+                    new Date(record.date).toLocaleDateString("pl-PL", {
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                    }),
+                    record.product.name,
+                    record.service || "-",
+                    record.employee || "-",
+                    `${parseFloat(record.quantityUsed).toFixed(2)} ${record.product.unit || "szt."}`,
+                    `${parseFloat(record.cost).toFixed(2)} PLN`,
+                  ]),
+                  footerRow: [
+                    "RAZEM",
+                    "",
+                    "",
+                    "",
+                    "",
+                    `${parseFloat(reportData.totals.totalCost).toFixed(2)} PLN`,
+                  ],
+                },
+              ]
+            : []),
+        ],
+        filename: `raport-zuzycie-materialow-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
+      });
+      toast.success("Raport wyeksportowany do PDF");
+    } catch (err) {
+      console.error("[Materials Report] PDF export error:", err);
+      toast.error("Nie udalo sie wyeksportowac raportu do PDF");
+    }
+  };
+
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString("pl-PL", {
       year: "numeric",
@@ -185,14 +264,24 @@ export default function MaterialsReportPage() {
             Analiza zuzycia produktow w wybranym okresie
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={handleExportCSV}
-          disabled={!reportData || reportData.summary.length === 0}
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Eksport CSV
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExportPDF}
+            disabled={!reportData || reportData.summary.length === 0}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Eksport PDF
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleExportCSV}
+            disabled={!reportData || reportData.summary.length === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Eksport CSV
+          </Button>
+        </div>
       </div>
 
       {/* Date range filter */}

@@ -5,20 +5,18 @@ import Link from "next/link";
 import {
   ArrowLeft,
   Download,
-  Calendar,
   TrendingUp,
   DollarSign,
   Users,
   Scissors,
-  Search,
   RefreshCw,
   BarChart3,
   Percent,
   FileSpreadsheet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
