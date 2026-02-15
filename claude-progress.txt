@@ -1,5 +1,47 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #135 - Revenue report generation) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #135: "Revenue report generation" - Revenue report with breakdowns and trends
+- Category: Reports
+
+### Changes Made
+**API Endpoint (src/app/api/reports/revenue/route.ts):**
+- NEW FILE: Revenue report API endpoint
+- Queries completed appointments with service/employee/client joins
+- Calculates total revenue, discounts, average per appointment
+- Service breakdown with revenue, count, avg price, share %
+- Employee breakdown with revenue, count, avg price, share %
+- Daily trend aggregation sorted chronologically
+- CSV export with BOM for Polish Excel compatibility
+- Date range filtering (dateFrom/dateTo)
+
+**UI Page (src/app/dashboard/reports/revenue/page.tsx):**
+- NEW FILE: Revenue report dashboard page
+- Date range filter (default last 30 days)
+- 4 summary cards: total revenue, appointments, avg per visit, discounts
+- 3 tabs: By Service, By Employee, Daily Trend
+- Tables with share percentage progress bars
+- Bar chart visualization for trend using CSS
+- CSV export button
+
+**Dashboard (src/app/dashboard/page.tsx):**
+- Updated Reports card with dual buttons: revenue (primary) + materials (outline)
+
+### Verification
+- Browser tested at /dashboard/reports/revenue
+- Real PostgreSQL data: 810.00 PLN, 9 appointments (30-day default)
+- Service breakdown: 2 services with correct percentages
+- Employee breakdown: Anna Kowalska 100%
+- Trend: daily bar chart with 8+ data points
+- Date range change tested: expanded to Jan-Feb showed 1450 PLN, 15 appts, 3 services
+- Full page refresh: data persists from PostgreSQL
+- Zero console errors
+- No mock data in code
+
+---
+
 ## Session: 2026-02-15 (Feature #134 - Redeem points for rewards) *** SUCCESS ***
 
 ### Feature Assigned
