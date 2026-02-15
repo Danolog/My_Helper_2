@@ -1,5 +1,77 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #129 - Generate promo codes) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #129: "Generate promo codes" - Create discount codes
+- Category: Promotions
+- Steps: Navigate to promo codes, Click generate code, Set code or auto-generate, Link to promotion, Set usage limit, Set expiry date, Save code, Verify code created
+
+### Implementation
+New files created:
+- **src/app/api/promo-codes/route.ts** - GET (list with JOIN to promotions) + POST (create with auto-generate)
+- **src/app/api/promo-codes/[id]/route.ts** - GET (single), PUT (update), DELETE
+- **src/app/api/promo-codes/validate/route.ts** - POST (validate code, check expiry/usage/promotion status)
+- **src/app/dashboard/promo-codes/page.tsx** - Full management UI page
+
+Modified files:
+- **src/app/dashboard/promotions/page.tsx** - Added "Kody promocyjne" link button in header
+- **src/app/dashboard/page.tsx** - Added "Kody promocyjne" dashboard card with Ticket icon
+
+### Key Architecture Decisions
+- `promoCodes` table already existed in schema (from migration 0002) - no schema changes needed
+- Auto-generate feature: 8-char random uppercase alphanumeric code using crypto.getRandomValues
+- Codes normalized to uppercase for case-insensitive matching
+- LEFT JOIN with promotions table to show linked promotion info
+- Validate endpoint returns 200 with {valid: false, reason} for invalid codes (not HTTP error)
+- Code uniqueness enforced per salon (same code can exist in different salons)
+
+### Verification (browser automation via Playwright)
+1. Registered test user f129brow2@test.com
+2. Navigated to /dashboard/promo-codes - page loaded with existing codes
+3. Opened "Generuj kod" dialog - form with auto-generate checkbox, code input, promotion dropdown, usage limit, expiry date
+4. Unchecked auto-generate, entered "SUMMER2026" with limit 10, expiry 2026-12-31
+5. Submitted - toast "Kod promocyjny SUMMER2026 zostal utworzony", code appeared in list
+6. Created second auto-generated code (8 random chars) - both codes visible
+7. Page refresh - all codes persisted (PostgreSQL)
+8. Edit dialog opened - showed code pre-filled, "Zapisz zmiany" button
+9. Delete dialog opened - confirmation "Usunac kod promocyjny?" with code name
+10. Copy button clicked - toast "Kod ... skopiowany do schowka"
+11. Navigated to /dashboard/promotions - "Kody promocyjne" link visible in header
+12. Clicked link - navigated to promo codes page, SUMMER2026 visible
+
+### Additional API Testing
+- POST /api/promo-codes - auto-generate (no code param) returns random 8-char code
+- POST /api/promo-codes - custom code "TESTCODE" with usageLimit=10, expiresAt
+- POST /api/promo-codes/validate - valid code returns discount info from linked promotion
+- DELETE /api/promo-codes/:id - confirmed deletion
+- Server restart persistence test: created RESTART_129, killed server, restarted, code still present
+
+### Mock Data Check
+- grep for globalThis/devStore/mockDb/fakeData/etc in src/app/api/promo-codes/ and src/app/dashboard/promo-codes/ - ZERO hits
+- All data from real PostgreSQL database via Drizzle ORM
+
+### Console Errors
+- ZERO relevant console errors during browser testing
+
+### Screenshots
+- f129-01-promo-codes-page.png (initial page with RESTART_129)
+- f129-02-create-dialog.png (create dialog open)
+- f129-03-form-filled.png (SUMMER2026, limit 10, expiry 2026-12-31)
+- f129-04-code-created.png (success toast, 2 codes in list)
+- f129-05-two-codes.png (auto-generated + SUMMER2026)
+- f129-06-after-refresh.png (3 codes persisted after refresh)
+- f129-07-edit-dialog.png (edit dialog with code pre-filled)
+- f129-08-delete-dialog.png (delete confirmation dialog)
+- f129-09-copy-toast.png (copy to clipboard)
+- f129-10-promotions-link.png (promotions page with "Kody promocyjne" button)
+- f129-11-navigated-from-promotions.png (navigated from promotions to promo codes)
+
+### Commit: 53dbbeb
+Stats: 96/253 features passing (37.9%)
+
+---
+
 ## Session: 2026-02-15 (Feature #128 - Time-limited promotions) *** SUCCESS ***
 
 ### Feature Assigned
