@@ -156,6 +156,7 @@ export const employees = pgTable(
     role: text("role").default("employee").notNull(), // 'owner', 'employee', 'receptionist'
     isActive: boolean("is_active").default(true).notNull(),
     color: text("color").default("#3b82f6"), // Color for calendar display
+    commissionRate: numeric("commission_rate", { precision: 5, scale: 2 }).default("50"), // Default commission percentage
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
