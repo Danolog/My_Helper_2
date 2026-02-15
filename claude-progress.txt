@@ -1,5 +1,47 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #142 - Service profit margins) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #142: "Service profit margins" (Reports category)
+- Description: Revenue minus costs per service
+- Steps: Navigate to financial reports, Select service profitability, Verify revenue per service, Verify material costs, Verify labor costs, Verify profit margin calculated
+
+### Implementation
+- **API**: src/app/api/reports/service-profitability/route.ts
+  - Queries completed appointments joined with services/employees for revenue
+  - Queries appointmentMaterials joined with products for material costs (using inArray)
+  - Queries employeeCommissions for labor costs (using inArray)
+  - Aggregates by service: totalRevenue, totalMaterialCost, totalLaborCost, totalProfit, profitMargin
+  - Calculates averages and revenue share percentages
+  - Supports date range filtering and CSV export with BOM
+- **UI**: src/app/dashboard/reports/service-profitability/page.tsx
+  - 6 summary cards: Revenue, Material Costs, Labor Costs, Profit, Margin, Visits
+  - Two tabs: "Podsumowanie" (stacked bar chart) and "Szczegoly kosztow" (detailed table)
+  - Stacked bars: green=profit, orange=materials, blue=labor per service
+  - Margin classification badges: Wysoka (>=70%), Dobra (>=50%), Srednia (>=30%), Niska (>=0%), Strata (<0%)
+  - CSV export button, date range filter
+- **Dashboard**: Added "Rentownosc uslug" link in Raporty section
+
+### Verification (browser automation)
+1. Registered user feature142@test.com on /register
+2. Navigated Dashboard -> Raporty -> "Rentownosc uslug"
+3. Report loaded with real PostgreSQL data:
+   - Revenue: 555.00 PLN, Material Costs: 37.50 PLN, Labor Costs: 92.50 PLN
+   - Profit: 425.00 PLN, Margin: 76.6%, Visits: 6
+   - Service 1: Manicure hybrydowy (3 visits, 83.3% margin, "Wysoka")
+   - Service 2: Strzyzenie damskie EDITED (3 visits, 68.6% margin, "Dobra")
+4. Verified both tabs render correctly with screenshots
+5. Page refresh confirmed data persistence
+6. 0 console errors
+7. TypeScript check passed (fixed unused maxRevenue variable)
+8. Mock data grep checks: clean (DEMO_SALON_ID is established project pattern)
+
+### Commit
+- `feat: add service profitability report with cost breakdown (Feature #142)`
+
+---
+
 ## Session: 2026-02-15 (Feature #139 - Employee popularity ranking) *** SUCCESS ***
 
 ### Feature Assigned
