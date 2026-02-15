@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointments, services, employees, clients } from "@/lib/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 
 // GET /api/reports/revenue - Revenue report with breakdowns by service/employee and trends
 export async function GET(request: Request) {
@@ -10,7 +11,7 @@ export async function GET(request: Request) {
     const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
-    const format = searchParams.get("format"); // 'json' or 'csv'
+    const format = searchParams.get("format"); // 'json', 'csv', or 'xlsx'
 
     if (!salonId) {
       return NextResponse.json(
@@ -227,6 +228,79 @@ export async function GET(request: Request) {
           "Content-Type": "text/csv; charset=utf-8",
           "Content-Disposition": `attachment; filename="raport-przychodow-${dateFrom || "all"}-${dateTo || "all"}.csv"`,
         },
+      });
+    }
+
+    // Excel (XLSX) export
+    if (format === "xlsx") {
+      const sheets = [
+        {
+          name: "Podsumowanie",
+          headers: ["Metryka", "Wartosc"],
+          rows: [
+            ["Okres od", dateFrom || "poczatek"],
+            ["Okres do", dateTo || "koniec"],
+            ["Calkowity przychod (PLN)", totalRevenue.toFixed(2)],
+            ["Laczna liczba wizyt", totalAppointments],
+            ["Sredni przychod na wizyte (PLN)", avgRevenuePerAppointment.toFixed(2)],
+            ["Laczna kwota znizek (PLN)", totalDiscount.toFixed(2)],
+          ] as (string | number)[][],
+        },
+        {
+          name: "Wg uslugi",
+          headers: ["Usluga", "Liczba wizyt", "Przychod (PLN)", "Srednia cena (PLN)", "Udzial (%)"],
+          rows: [
+            ...serviceArray.map((svc) => {
+              const share =
+                totalRevenue > 0
+                  ? ((svc.revenue / totalRevenue) * 100).toFixed(1)
+                  : "0.0";
+              return [
+                svc.serviceName,
+                svc.count,
+                svc.revenue.toFixed(2),
+                svc.avgPrice.toFixed(2),
+                share,
+              ];
+            }),
+            ["RAZEM", totalAppointments, totalRevenue.toFixed(2), avgRevenuePerAppointment.toFixed(2), "100.0"],
+          ] as (string | number)[][],
+        },
+        {
+          name: "Wg pracownika",
+          headers: ["Pracownik", "Liczba wizyt", "Przychod (PLN)", "Srednia cena (PLN)", "Udzial (%)"],
+          rows: [
+            ...employeeArray.map((emp) => {
+              const share =
+                totalRevenue > 0
+                  ? ((emp.revenue / totalRevenue) * 100).toFixed(1)
+                  : "0.0";
+              return [
+                emp.employeeName,
+                emp.count,
+                emp.revenue.toFixed(2),
+                emp.avgPrice.toFixed(2),
+                share,
+              ];
+            }),
+            ["RAZEM", totalAppointments, totalRevenue.toFixed(2), avgRevenuePerAppointment.toFixed(2), "100.0"],
+          ] as (string | number)[][],
+        },
+        {
+          name: "Trend dzienny",
+          headers: ["Data", "Przychod (PLN)", "Liczba wizyt"],
+          rows: [
+            ...trendArray.map((t) => [t.date, t.revenue.toFixed(2), t.count]),
+            ["RAZEM", totalRevenue.toFixed(2), totalAppointments],
+          ] as (string | number)[][],
+        },
+      ];
+
+      const buf = createExcelWorkbook(sheets);
+      const filename = `raport-przychodow-${dateFrom || "all"}-${dateTo || "all"}.xlsx`;
+      return new Response(Buffer.from(buf), {
+        status: 200,
+        headers: excelResponseHeaders(filename),
       });
     }
 

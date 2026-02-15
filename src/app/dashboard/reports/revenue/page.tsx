@@ -14,6 +14,7 @@ import {
   RefreshCw,
   BarChart3,
   Percent,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { FileText } from "lucide-react";
+import { generateReportPDF } from "@/lib/pdf-export";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -115,11 +118,11 @@ export default function RevenueReportPage() {
     fetchReport();
   }, [fetchReport]);
 
-  const handleExportCSV = async () => {
+  const handleExport = async (format: "csv" | "xlsx") => {
     try {
       const params = new URLSearchParams({
         salonId: DEMO_SALON_ID,
-        format: "csv",
+        format,
       });
       if (dateFrom) params.append("dateFrom", dateFrom);
       if (dateTo) params.append("dateTo", dateTo);
@@ -133,16 +136,112 @@ export default function RevenueReportPage() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `raport-przychodow-${dateFrom || "all"}-${dateTo || "all"}.csv`;
+      const ext = format === "xlsx" ? "xlsx" : "csv";
+      a.download = `raport-przychodow-${dateFrom || "all"}-${dateTo || "all"}.${ext}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
 
-      toast.success("Raport wyeksportowany do CSV");
+      toast.success(
+        format === "xlsx"
+          ? "Raport wyeksportowany do Excel"
+          : "Raport wyeksportowany do CSV"
+      );
     } catch (err) {
       console.error("[Revenue Report] Export error:", err);
       toast.error("Nie udalo sie wyeksportowac raportu");
+    }
+  };
+
+  const handleExportPDF = () => {
+    if (!reportData) return;
+    try {
+      generateReportPDF({
+        title: "Raport przychodow",
+        subtitle: "Analiza przychodow salonu w wybranym okresie",
+        dateRange: dateFrom && dateTo ? { from: dateFrom, to: dateTo } : undefined,
+        summaryCards: [
+          { label: "Calkowity przychod", value: `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN` },
+          { label: "Liczba wizyt", value: `${reportData.summary.totalAppointments}` },
+          { label: "Sredni przychod / wizyte", value: `${parseFloat(reportData.summary.avgRevenuePerAppointment).toFixed(2)} PLN` },
+          { label: "Znizki", value: `${parseFloat(reportData.summary.totalDiscount).toFixed(2)} PLN` },
+        ],
+        tables: [
+          ...(reportData.byService.length > 0
+            ? [
+                {
+                  title: "Przychod wg uslugi",
+                  headers: ["Usluga", "Liczba wizyt", "Przychod", "Srednia cena", "Udzial"],
+                  rows: reportData.byService.map((svc) => [
+                    svc.serviceName,
+                    `${svc.count}`,
+                    `${parseFloat(svc.revenue).toFixed(2)} PLN`,
+                    `${parseFloat(svc.avgPrice).toFixed(2)} PLN`,
+                    `${svc.share}%`,
+                  ]),
+                  footerRow: [
+                    "RAZEM",
+                    `${reportData.summary.totalAppointments}`,
+                    `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN`,
+                    `${parseFloat(reportData.summary.avgRevenuePerAppointment).toFixed(2)} PLN`,
+                    "100%",
+                  ],
+                },
+              ]
+            : []),
+          ...(reportData.byEmployee.length > 0
+            ? [
+                {
+                  title: "Przychod wg pracownika",
+                  headers: ["Pracownik", "Liczba wizyt", "Przychod", "Srednia cena", "Udzial"],
+                  rows: reportData.byEmployee.map((emp) => [
+                    emp.employeeName,
+                    `${emp.count}`,
+                    `${parseFloat(emp.revenue).toFixed(2)} PLN`,
+                    `${parseFloat(emp.avgPrice).toFixed(2)} PLN`,
+                    `${emp.share}%`,
+                  ]),
+                  footerRow: [
+                    "RAZEM",
+                    `${reportData.summary.totalAppointments}`,
+                    `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN`,
+                    `${parseFloat(reportData.summary.avgRevenuePerAppointment).toFixed(2)} PLN`,
+                    "100%",
+                  ],
+                },
+              ]
+            : []),
+          ...(reportData.trend.length > 0
+            ? [
+                {
+                  title: "Trend dzienny",
+                  headers: ["Data", "Przychod", "Liczba wizyt"],
+                  rows: reportData.trend.map((point) => [
+                    new Date(point.date + "T12:00:00").toLocaleDateString("pl-PL", {
+                      weekday: "short",
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                    }),
+                    `${parseFloat(point.revenue).toFixed(2)} PLN`,
+                    `${point.count}`,
+                  ]),
+                  footerRow: [
+                    "RAZEM",
+                    `${parseFloat(reportData.summary.totalRevenue).toFixed(2)} PLN`,
+                    `${reportData.summary.totalAppointments}`,
+                  ],
+                },
+              ]
+            : []),
+        ],
+        filename: `raport-przychodow-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
+      });
+      toast.success("Raport wyeksportowany do PDF");
+    } catch (err) {
+      console.error("[Revenue Report] PDF export error:", err);
+      toast.error("Nie udalo sie wyeksportowac raportu do PDF");
     }
   };
 
@@ -177,14 +276,32 @@ export default function RevenueReportPage() {
             Analiza przychodow salonu w wybranym okresie
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={handleExportCSV}
-          disabled={!reportData || reportData.summary.totalAppointments === 0}
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Eksport CSV
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExportPDF}
+            disabled={!reportData || reportData.summary.totalAppointments === 0}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Eksport PDF
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => handleExport("xlsx")}
+            disabled={!reportData || reportData.summary.totalAppointments === 0}
+          >
+            <FileSpreadsheet className="h-4 w-4 mr-2" />
+            Eksport Excel
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => handleExport("csv")}
+            disabled={!reportData || reportData.summary.totalAppointments === 0}
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Eksport CSV
+          </Button>
+        </div>
       </div>
 
       {/* Date range filter */}
