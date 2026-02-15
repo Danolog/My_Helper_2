@@ -39,7 +39,8 @@ export async function POST(request: Request) {
         success: true,
         data: {
           valid: false,
-          reason: "Promo code not found",
+          errorType: "not_found",
+          reason: "Kod promocyjny nie istnieje. Sprawdz, czy wpisales go poprawnie.",
         },
       });
     }
@@ -53,7 +54,8 @@ export async function POST(request: Request) {
         success: true,
         data: {
           valid: false,
-          reason: "Promo code has expired",
+          errorType: "expired",
+          reason: "Ten kod promocyjny stracil waznosc i nie moze byc juz uzywany.",
           code: promoCode.code,
         },
       });
@@ -69,7 +71,8 @@ export async function POST(request: Request) {
         success: true,
         data: {
           valid: false,
-          reason: "Promo code usage limit has been reached",
+          errorType: "usage_limit",
+          reason: `Limit uzycia tego kodu zostal wyczerpany (${promoCode.usedCount}/${promoCode.usageLimit}).`,
           code: promoCode.code,
         },
       });
@@ -82,7 +85,8 @@ export async function POST(request: Request) {
           success: true,
           data: {
             valid: false,
-            reason: "The linked promotion is no longer active",
+            errorType: "promotion_inactive",
+            reason: "Powiazana promocja nie jest juz aktywna.",
             code: promoCode.code,
           },
         });
@@ -93,7 +97,8 @@ export async function POST(request: Request) {
           success: true,
           data: {
             valid: false,
-            reason: "The linked promotion has not started yet",
+            errorType: "promotion_not_started",
+            reason: "Powiazana promocja jeszcze sie nie rozpoczela.",
             code: promoCode.code,
           },
         });
@@ -104,7 +109,8 @@ export async function POST(request: Request) {
           success: true,
           data: {
             valid: false,
-            reason: "The linked promotion has ended",
+            errorType: "promotion_ended",
+            reason: "Powiazana promocja juz sie zakonczyla.",
             code: promoCode.code,
           },
         });
