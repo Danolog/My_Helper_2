@@ -8488,3 +8488,31 @@ All code was already fully implemented:
 9. 0 console errors throughout the flow
 - No code changes needed - feature was already fully implemented
 - Stats: 89/253 passing (35.2%)
+
+## Session: Feature #140 - Cancellation rate analysis (2026-02-15)
+
+### Feature Details
+- **Feature**: #140 - Cancellation rate analysis - Track no-shows and cancels
+- **Status**: PASSING ✅
+- **Code changes needed**: None - feature was already fully implemented
+
+### Files Verified
+- **src/app/api/reports/cancellations/route.ts** - Full cancellation report API with date range filtering, CSV export, breakdowns by reason/employee/service/day/trend
+- **src/app/dashboard/reports/cancellations/page.tsx** - Complete UI with summary cards, tabs for breakdowns, date range picker, CSV export
+
+### Test Data Setup
+- Changed 6 existing appointments to cancelled/no_show status via PUT /api/appointments/[id]:
+  - 3 appointments → "cancelled" status
+  - 3 appointments → "no_show" status
+
+### Verification (browser automation)
+1. Registered test user feature140@test.com on /register
+2. Navigated to /dashboard → clicked "Analiza anulacji" link
+3. Default 30-day range (Jan 16 - Feb 15): 32 total, 3 cancellations, 9.4% rate, 255.00 PLN lost
+4. Changed date range to Jan 1 - Feb 15: 36 total, 6 cancellations, 16.7% rate, 510.00 PLN lost
+5. Reasons breakdown verified: Anulowane 3 (50.0%), Nieobecnosc 3 (50.0%)
+6. All tabs visible: Wg powodu, Wg pracownika, Wg uslugi, Wg dnia tygodnia, Trend dzienny
+7. 0 console errors
+8. No mock data patterns in source code
+9. Data persists after full server restart (PostgreSQL confirmed)
+- Stats: 108/253 passing (42.7%)
