@@ -1,5 +1,43 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #137 - Employee occupancy report) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #137: "Employee occupancy report" - Staff utilization metrics
+- Category: Reports
+
+### Changes Made
+**API Endpoint (src/app/api/reports/employee-occupancy/route.ts):**
+- NEW FILE: Employee occupancy/utilization report API endpoint
+- Calculates per-employee: available hours (from work schedules minus time blocks), appointment hours, occupancy %, revenue, completed count
+- Iterates day-by-day through date range to compute available hours from dayOfWeek-based work schedules
+- Subtracts time block overlaps (vacations, breaks)
+- Revenue only from completed appointments (base price - discount)
+- Sorts by occupancy descending
+- CSV export with BOM for Polish Excel compatibility
+- Date range filtering (dateFrom/dateTo), defaults to current month
+
+**UI Page (src/app/dashboard/reports/employee-occupancy/page.tsx):**
+- NEW FILE: Full report UI with shadcn/ui components
+- Summary cards: Pracownicy (count), Srednie obciazenie (%), Godziny dostepne, Godziny wizyt, Przychod (PLN)
+- Data table with employee color dots, hours, appointments, revenue, and color-coded occupancy progress bars
+- Color coding: green >=80%, blue >=50%, yellow >=25%, red <25%
+- RAZEM/SREDNIA footer row with totals
+- "Porownanie pracownikow" section with per-employee comparison cards
+- CSV export button with blob download
+- Date range filter with "Generuj raport" button
+
+**Dashboard navigation (src/app/dashboard/page.tsx):**
+- Added "Obciazenie pracownikow" link in Raporty section (committed in earlier session)
+
+### Verification
+- API tested with curl: returns 9 employees with real PostgreSQL data
+- Browser automation: page loads, generates report, shows all data correctly
+- No console errors, no mock data patterns found
+- TypeScript compilation: zero errors
+
+---
+
 ## Session: 2026-02-15 (Feature #138 - Promotion effectiveness report) *** SUCCESS ***
 
 ### Feature Assigned
