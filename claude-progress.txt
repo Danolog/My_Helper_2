@@ -1,5 +1,53 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #144 - Monthly comparison) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #144: "Monthly comparison" - Compare metrics month over month
+- Category: Reports
+- Steps: Navigate to reports, Select comparison view, Select two months, Generate comparison, Verify metrics side by side, Verify trends indicated
+
+### What was accomplished:
+1. Created API endpoint: `src/app/api/reports/monthly-comparison/route.ts`
+   - Accepts salonId, month1, month2 (YYYY-MM format)
+   - Queries completed appointments per month with service/employee joins
+   - Computes 9 metrics: totalRevenue, totalAppointments, avgRevenuePerAppointment, totalCancellations, cancellationRate, uniqueClients, newClients, topService, topEmployee
+   - Pre-computes global first-appointment map for accurate "new clients" metric
+   - Returns side-by-side data + computed changes (value, percent, direction)
+
+2. Created UI page: `src/app/dashboard/reports/monthly-comparison/page.tsx`
+   - Month selectors (input type="month") defaulting to previous + current month
+   - "Generuj porownanie" button
+   - 7 metric comparison cards in responsive grid
+   - Color-coded change indicators (green=good, red=bad, with inverse logic for cancellations)
+   - Top performers section: most popular service + busiest employee per month
+   - Empty state for no data
+
+3. Added dashboard navigation link in reports section
+
+### Verification (browser automation):
+- Registered test user feature144@test.com
+- Navigated Dashboard → Raporty → Porownanie miesieczne
+- Default months: 2026-01 vs 2026-02, clicked "Generuj porownanie"
+- All 7 metrics displayed with real DB data:
+  - Przychod: 255.00 vs 685.00 PLN (+168.6%)
+  - Wizyty: 3 vs 6 (+100.0%)
+  - Srednia/wizyte: 85.00 vs 114.17 PLN (+34.3%)
+  - Anulacje: 5 vs 1 (-80.0%, green = improvement)
+  - Wskaznik anulacji: 62.5% vs 14.3% (-77.1%, green = improvement)
+  - Unikalnych klientow: 2 vs 1 (-50.0%)
+  - Nowi klienci: 2 vs 1 (-50.0%)
+- Top service: Strzyzenie damskie EDITED (3) → Manicure hybrydowy (3)
+- Top employee: Anna Kowalska (3) → Anna Kowalska (6)
+- 0 console errors
+- No mock/fake data patterns in source code
+- Screenshot: feature144-monthly-comparison.png
+
+### Commit: 6c24c0c
+- Stats: 111/253 passing (43.9%)
+
+---
+
 ## Session: 2026-02-15 (Feature #143 - Material profit/loss report) *** SUCCESS ***
 
 ### Feature Assigned
