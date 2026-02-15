@@ -1,5 +1,30 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #154 - Invoice for individual) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #154: "Invoice for individual" - Generate personal invoice
+- Category: Finance
+
+### What was accomplished:
+- Feature #154 shares the same codebase as Feature #155 (company invoice)
+- The invoice API (/api/appointments/[id]/invoice) and UI were built to support both types:
+  - "paragon" (Osoba fizyczna / individual) - requires clientName
+  - "faktura" (Firma / company) - requires companyName + companyNip
+- Individual invoice uses PAR/ prefix (e.g. PAR/2026/02/00002)
+- Client name is auto-filled from appointment data
+
+### Testing:
+- Browser tested on appointment 280137a4 (Test Client98, Strzyzenie damskie EDITED)
+- Selected "Osoba fizyczna (rachunek)" type, client name pre-filled
+- Invoice generated: PAR/2026/02/00002, 85.00 PLN, VAT 23%
+- Invoice card displayed with "Osoba fizyczna" badge
+- Persistence verified: page refresh shows invoice data intact
+- API verification: type=paragon, clientName=Test Client98, netAmount=69.11, vatAmount=15.89
+- No mock data found in code, no console errors
+
+---
+
 ## Session: 2026-02-15 (Feature #155 - Invoice for company) *** SUCCESS ***
 
 ### Feature Assigned
