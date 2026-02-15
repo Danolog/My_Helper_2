@@ -1,5 +1,55 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #131 - Invalid promo code handling) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #131: "Invalid promo code handling" - Reject bad codes gracefully
+- Category: Promotions
+
+### Changes Made
+**Backend (src/app/api/promo-codes/validate/route.ts):**
+- Changed English error messages to Polish
+- Added `errorType` field to responses: 'not_found', 'expired', 'usage_limit', 'promotion_inactive', 'promotion_not_started', 'promotion_ended'
+- Each errorType has specific Polish error message with helpful context
+
+**Frontend (src/app/dashboard/booking/page.tsx):**
+- Updated error display to show specific headers based on errorType:
+  - not_found → "Nieprawidlowy kod"
+  - expired → "Kod wygasl"
+  - usage_limit → "Limit uzycia wyczerpany"
+  - promotion_inactive → "Promocja nieaktywna"
+  - promotion_not_started → "Promocja jeszcze nie rozpoczeta"
+  - promotion_ended → "Promocja zakonczona"
+- Added data-testid attributes for error title and reason elements
+
+### Test Data Created
+- Promotion: TEST_F131_Promo (15% off, active 2026)
+- EXPIRED131: expired 2025-06-01 (tests expired code path)
+- MAXED131: usedCount=3, usageLimit=3 (tests overused code path)
+- VALID131: valid, 0/100 used (comparison test)
+
+### Verification (browser automation)
+1. Registered feature131@test.com, set as salon owner
+2. Navigated to /dashboard/booking
+3. Entered "INVALIDXYZ" → "Nieprawidlowy kod" + "Kod promocyjny nie istnieje..."
+4. Entered "EXPIRED131" → "Kod wygasl" + "Ten kod promocyjny stracil waznosc..."
+5. Entered "MAXED131" → "Limit uzycia wyczerpany" + "Limit uzycia tego kodu zostal wyczerpany (3/3)."
+6. All three error types show distinct headers and detailed Polish messages
+7. Toast notifications show the same reason messages
+8. Zero console errors
+9. No mock data patterns found in source code
+10. Page refresh works correctly
+
+### Screenshots
+- f131-01-invalid-code.png (not found scenario)
+- f131-02-expired-code.png (expired code scenario)
+- f131-03-overused-code.png (usage limit scenario)
+
+### Commit: c5fd901
+### Stats: 98/253 features passing (38.7%)
+
+---
+
 ## Session: 2026-02-15 (Feature #129 - Generate promo codes) *** SUCCESS ***
 
 ### Feature Assigned
