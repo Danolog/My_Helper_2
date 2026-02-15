@@ -239,6 +239,8 @@ export const appointments = pgTable(
     reminder1hSentAt: timestamp("reminder_1h_sent_at"), // When the 1h SMS reminder was sent
     reminderPushSentAt: timestamp("reminder_push_sent_at"), // When the 24h push notification was sent
     reminderPush1hSentAt: timestamp("reminder_push_1h_sent_at"), // When the 1h push notification was sent
+    promoCodeId: uuid("promo_code_id"), // Applied promo code (no FK to allow code deletion without affecting history)
+    discountAmount: numeric("discount_amount", { precision: 10, scale: 2 }), // Discount amount applied via promo code
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
       .defaultNow()
