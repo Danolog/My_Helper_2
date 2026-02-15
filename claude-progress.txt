@@ -1,5 +1,50 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #138 - Promotion effectiveness report) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #138: "Promotion effectiveness report" - ROI on promotions
+- Category: Reports
+
+### Changes Made
+**API Endpoint (src/app/api/reports/promotions/route.ts):**
+- NEW FILE: Promotion effectiveness report API endpoint
+- Queries promotions, promo codes, and appointments with promo codes applied
+- Aggregates per-promotion: usage count, completed/cancelled counts, discount given, revenue generated, unique clients
+- Also queries non-promo appointments for comparison metrics
+- Calculates ROI per promotion: (revenue - discount) / discount * 100
+- CSV export with BOM for Polish Excel compatibility
+- Date range filtering (dateFrom/dateTo)
+- Maps promo codes to their parent promotions via promoCodeToPromotion lookup
+
+**UI Page (src/app/dashboard/reports/promotions/page.tsx):**
+- NEW FILE: Promotion effectiveness report dashboard page
+- Date range filter (default last 90 days)
+- 4 summary cards: total discounts, revenue from promos, usage count + completed, ROI + active count
+- Usage bar chart with active/inactive badges per promotion
+- Detailed table: promotion name, type (color-coded badges), usage, completed, cancelled, discount cost, revenue, ROI, unique clients
+- Promo codes shown inline per promotion
+- Totals row (RAZEM)
+- Comparison section: with promo vs without promo (visits, revenue, avg price)
+- CSV export button
+- Helper functions: getPromoTypeBadge() for type labels, formatROI() for colored ROI display
+
+**Dashboard (src/app/dashboard/page.tsx):**
+- Added "Efektywnosc promocji" button to Reports section
+
+### Verification
+- Browser automation: Registered f138@test.com, navigated to dashboard, clicked report link
+- Page loaded showing 6 real promotions from DB with correct promo codes
+- Summary cards, bar chart, detailed table, and comparison section all render correctly
+- No mock data patterns found (grep clean)
+- Full-page screenshot captured
+- 0 console errors
+
+### Stats
+- Features: 105/253 passing (41.5%)
+
+---
+
 ## Session: 2026-02-15 (Feature #136 - Service popularity report) *** SUCCESS ***
 
 ### Feature Assigned
