@@ -261,6 +261,9 @@ export default function DashboardPage() {
             <Button variant="outline" asChild>
               <Link href="/dashboard/reports/service-profitability">Rentownosc uslug</Link>
             </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/reports/materials-profitloss">Zysk/Strata materialow</Link>
+            </Button>
           </div>
         </div>
 
