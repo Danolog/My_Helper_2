@@ -243,6 +243,9 @@ export default function DashboardPage() {
             <Button variant="outline" asChild>
               <Link href="/dashboard/reports/materials">Raport materialow</Link>
             </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/reports/services-popularity">Popularnosc uslug</Link>
+            </Button>
           </div>
         </div>
 
