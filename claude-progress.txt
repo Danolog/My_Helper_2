@@ -1,5 +1,60 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #153 - Fiscal receipt printing) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #153: "Fiscal receipt printing" - Print fiscal receipts for completed appointments
+- Category: Appointments / Fiscal
+
+### What was accomplished:
+1. Added `fiscalReceipts` table to schema.ts
+   - Fields: id, appointmentId, salonId, receiptNumber, nip, client/employee/service names,
+     servicePrice, materialsCost, totalAmount, vatRate, vatAmount, netAmount, paymentMethod,
+     printerModel, printedAt, printStatus, receiptDataJson
+   - Indexes on appointmentId, salonId, receiptNumber
+   - Pushed via drizzle-kit
+
+2. Created API: /api/appointments/[id]/fiscal-receipt/route.ts
+   - GET: Check if receipt exists for appointment, return it
+   - POST: Generate and store receipt for completed appointments
+     - Validates appointment is completed, prevents duplicates
+     - Fetches client, employee, service, materials data
+     - Calculates Polish VAT (23%) and net/gross amounts
+     - Generates sequential receipt number (FV/YYYY/MM/NNNNN)
+     - Builds complete receipt data structure for thermal printer
+     - Saves to database, logs print command
+
+3. Modified /app/dashboard/appointments/[id]/page.tsx
+   - Added "Drukuj paragon" button for completed appointments
+   - Receipt print dialog with payment method selection (cash/card/transfer)
+   - Receipt preview dialog with thermal-printer-style formatting
+   - Fiscal receipt card showing receipt number, amount, print date
+   - Auto-fetches existing receipt on page load
+
+4. Added "Drukarka fiskalna" card to dashboard page
+5. Fixed auth-client baseURL to use window.location.origin
+6. Added trustedOrigins for localhost in auth config
+
+### Browser verification results:
+- Registered test user, navigated to completed appointment
+- "Drukuj paragon" button visible for completed appointments ✅
+- Print dialog opens with service summary and payment method selection ✅
+- Receipt created successfully (FV/2026/02/00001) ✅
+- Toast notification shown on success ✅
+- Receipt card appears with correct data ✅
+- Receipt preview shows thermal-printer-styled content ✅
+- Data persists after full page refresh ✅
+
+### Files changed:
+- src/lib/schema.ts (added fiscalReceipts table)
+- src/app/api/appointments/[id]/fiscal-receipt/route.ts (new)
+- src/app/dashboard/appointments/[id]/page.tsx (receipt UI)
+- src/app/dashboard/page.tsx (fiscal printer card)
+- src/lib/auth-client.ts (baseURL fix)
+- src/lib/auth.ts (trustedOrigins)
+
+---
+
 ## Session: 2026-02-15 (Feature #150 - Employee commission tracking) *** SUCCESS ***
 
 ### Feature Assigned
