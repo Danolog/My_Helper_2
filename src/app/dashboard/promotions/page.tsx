@@ -33,6 +33,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import Link from "next/link";
 import {
   Lock,
   Plus,
@@ -47,6 +48,7 @@ import {
   Scissors,
   Clock,
   UserPlus,
+  Ticket,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -453,10 +455,18 @@ export default function PromotionsPage() {
             Zarzadzaj promocjami i rabatami salonu
           </p>
         </div>
-        <Button onClick={openCreateDialog}>
-          <Plus className="w-4 h-4 mr-2" />
-          Nowa promocja
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" asChild>
+            <Link href="/dashboard/promo-codes">
+              <Ticket className="w-4 h-4 mr-2" />
+              Kody promocyjne
+            </Link>
+          </Button>
+          <Button onClick={openCreateDialog}>
+            <Plus className="w-4 h-4 mr-2" />
+            Nowa promocja
+          </Button>
+        </div>
       </div>
 
       {/* Summary cards */}
