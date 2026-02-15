@@ -1,5 +1,47 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #149 - Filter reports by employee) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #149: "Filter reports by employee" - Staff-specific metrics
+- Category: Reports
+- Steps: Navigate to report, Open employee filter, Select specific employee, Apply filter, Verify data only for that employee, Select multiple employees, Verify combined data
+
+### What was accomplished:
+1. Created src/components/reports/employee-filter.tsx - Reusable multi-select employee filter:
+   - Fetches employees from /api/employees?salonId=...&activeOnly=true
+   - Multi-select dropdown with checkboxes via Popover (Radix UI)
+   - Shows selected employee badges with X to remove individual selections
+   - "Zaznacz wszystkich" (Select all) and "Wyczysc" (Clear) buttons
+   - Helper text when filter is active
+   - "Wyczysc filtr" (Clear filter) button for quick reset
+2. Installed shadcn Popover component (src/components/ui/popover.tsx)
+3. Added employeeIds query parameter to 4 report APIs:
+   - /api/reports/revenue/route.ts - inArray(appointments.employeeId, employeeIds)
+   - /api/reports/cancellations/route.ts - inArray filter in fetchAppointments()
+   - /api/reports/services-popularity/route.ts - inArray filter
+   - /api/reports/materials/route.ts - inArray filter
+4. Added EmployeeFilter component UI to report pages:
+   - Revenue report page - with selectedEmployeeIds state, auto-refetch on change
+   - Cancellations report page - with selectedEmployeeIds state, auto-refetch on change
+
+### Verification (browser automation):
+- Logged in as feature149@test.com
+- Revenue report (/dashboard/reports/revenue):
+  - Page loaded with employee filter visible ("Filtruj wg pracownika:" / "Wszyscy pracownicy")
+  - Dropdown opened showing employee list with checkboxes
+  - Single employee selected (Anna Kowalska) - badge appeared, data refreshed
+  - Second employee added (Marta Nowak) - both badges shown, combined data displayed
+  - Helper text: "Raport pokazuje dane tylko dla wybranych pracownikow..."
+- Cancellations report (/dashboard/reports/cancellations):
+  - Page loaded with employee filter visible
+  - Data: 32 total, 3 cancelled/no-shows, 9.4% rate, 255 PLN lost
+  - Zero console errors on both pages
+
+### Stats after: 117/253 passing (46.2%)
+
+---
+
 ## Session: 2026-02-15 (Feature #146 - Export report to PDF) *** SUCCESS ***
 
 ### Feature Assigned
