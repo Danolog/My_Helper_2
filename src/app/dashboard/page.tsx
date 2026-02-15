@@ -264,6 +264,12 @@ export default function DashboardPage() {
             <Button variant="outline" asChild>
               <Link href="/dashboard/reports/materials-profitloss">Zysk/Strata materialow</Link>
             </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/reports/monthly-comparison">Porownanie miesieczne</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/reports/yearly-comparison">Porownanie roczne</Link>
+            </Button>
           </div>
         </div>
 
