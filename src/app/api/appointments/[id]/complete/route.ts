@@ -4,6 +4,7 @@ import {
   appointments,
   treatmentHistory,
   employeeCommissions,
+  employees,
   services,
   employeeServicePrices,
   serviceProducts,
@@ -170,10 +171,22 @@ export async function POST(
 
     // 3. Calculate and record commission
     let commission = null;
-    const commPct =
-      commissionPercentage !== undefined && commissionPercentage !== null
-        ? parseFloat(commissionPercentage)
-        : 50; // Default 50% commission
+
+    // Determine commission percentage: use provided value, or employee's default, or 50%
+    let commPct = 50;
+    if (commissionPercentage !== undefined && commissionPercentage !== null) {
+      commPct = parseFloat(commissionPercentage);
+    } else if (appointment.employeeId) {
+      // Look up employee's default commission rate
+      const [emp] = await db
+        .select({ commissionRate: employees.commissionRate })
+        .from(employees)
+        .where(eq(employees.id, appointment.employeeId))
+        .limit(1);
+      if (emp?.commissionRate) {
+        commPct = parseFloat(emp.commissionRate);
+      }
+    }
 
     if (service && appointment.employeeId) {
       // Determine effective service price
