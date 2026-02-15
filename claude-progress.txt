@@ -1,5 +1,43 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #134 - Redeem points for rewards) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #134: "Redeem points for rewards" - Loyalty points redemption
+- Category: Loyalty Program
+
+### Changes Made
+**New API: src/app/api/clients/[id]/loyalty/redeem/route.ts**
+- POST endpoint: Validates reward tier, checks sufficient points, deducts points, creates negative transaction record, returns updated balance
+- GET endpoint: Returns all reward tiers with canRedeem flag and pointsNeeded for each based on client's current balance
+- Imports RewardTier/LoyaltySettings types from loyalty-settings route
+- Full error handling for missing salon, disabled loyalty, insufficient points
+
+**Modified UI: src/app/dashboard/clients/[id]/page.tsx**
+- Added RewardItem/RewardsData interfaces for type safety
+- Added state variables: rewardsData, loadingRewards, redeemingReward, redeemDialogOpen, selectedReward
+- fetchRewardsData() loads rewards when loyalty tab is selected
+- handleRedeemReward() calls POST API, refreshes loyalty data and rewards on success
+- "Dostepne nagrody" card with badge showing count of available rewards
+- Reward items display icon per type (ShoppingBag/Percent/Scissors), points cost, description
+- "Wymien"/"Niedostepna" buttons with "Brakuje X pkt" for unavailable rewards
+- AlertDialog confirmation with point balance breakdown (cost, current, after)
+- Toast notification on successful redemption
+
+### Verification
+- Browser automation: Logged in, navigated to Joanna Lewandowska profile (80 pts)
+- Loyalty tab shows 3 reward tiers: Darmowy produkt (25 pkt), Rabat 10% (50 pkt), Darmowa usluga (100 pkt - unavailable)
+- Clicked "Wymien" on Darmowy produkt, confirmation dialog appeared with correct balance breakdown
+- Confirmed redemption: points updated 80→55, new -25 transaction appeared, toast shown
+- API persistence verified: curl confirms 55 points and 4 transactions in database
+- No mock/hardcoded data found in codebase
+- 0 console errors
+
+### Stats After
+- Features passing: 101/253 (39.9%)
+
+---
+
 ## Session: 2026-02-15 (Feature #130 - Validate promo code) *** SUCCESS ***
 
 ### Feature Assigned
