@@ -246,6 +246,12 @@ export default function DashboardPage() {
             <Button variant="outline" asChild>
               <Link href="/dashboard/reports/services-popularity">Popularnosc uslug</Link>
             </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/reports/employee-occupancy">Obciazenie pracownikow</Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/reports/promotions">Efektywnosc promocji</Link>
+            </Button>
           </div>
         </div>
 
