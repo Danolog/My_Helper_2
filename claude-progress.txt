@@ -1,5 +1,56 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #147 - Export report to Excel) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #147: "Export report to Excel" - Download spreadsheet
+- Category: Reports
+- Steps: Generate any report, Click export to Excel, Verify download starts, Open Excel file, Verify data matches, Verify columns correct
+
+### What was accomplished:
+1. Installed xlsx (SheetJS) library v0.18.5 for Excel file generation
+2. Created src/lib/excel-export.ts - Reusable utility:
+   - createExcelWorkbook() - Creates multi-sheet .xlsx workbook from ExcelSheet[] array
+   - excelResponseHeaders() - Returns proper Content-Type and Content-Disposition headers
+   - Auto-sizes columns based on content
+3. Added format=xlsx support to /api/reports/revenue/route.ts:
+   - Generates 4 sheets: Podsumowanie, Wg uslugi, Wg pracownika, Trend dzienny
+   - Each sheet has Polish headers, data rows, and RAZEM totals row
+4. Updated /dashboard/reports/revenue/page.tsx:
+   - Refactored handleExportCSV → handleExport(format) for code reuse
+   - Added "Eksport Excel" button with FileSpreadsheet icon between PDF and CSV buttons
+   - Success toast: "Raport wyeksportowany do Excel"
+
+### Verification (browser automation):
+1. Registered test user feature147@test.com
+2. Navigated to /dashboard/reports/revenue
+3. Report loaded with real data: 555.00 PLN total, 6 visits, 2 services
+4. All three export buttons visible: Eksport PDF, Eksport Excel, Eksport CSV
+5. Clicked "Eksport Excel" → download started immediately
+6. Toast notification: "Raport wyeksportowany do Excel"
+7. Downloaded file: raport-przychodow-2026-01-16-2026-02-15.xlsx (22,372 bytes)
+8. Verified Excel content with Node.js script:
+   - 4 sheets: Podsumowanie, Wg uslugi, Wg pracownika, Trend dzienny
+   - Summary: 555.00 PLN, 6 visits, 92.50 avg, 0.00 discounts
+   - By service: Manicure hybrydowy (3, 300 PLN, 54.1%), Strzyzenie damskie EDITED (3, 255 PLN, 45.9%)
+   - By employee: Anna Kowalska (6, 555 PLN, 100%)
+   - Trend: 6 daily data points with RAZEM totals
+   - All columns correct and matching UI data
+9. 0 console errors
+10. No mock/fake data patterns in source code
+
+### Files created/modified:
+- NEW: src/lib/excel-export.ts (reusable Excel export utility)
+- MODIFIED: src/app/api/reports/revenue/route.ts (added xlsx format support)
+- MODIFIED: src/app/dashboard/reports/revenue/page.tsx (added Excel export button)
+- MODIFIED: package.json (added xlsx dependency)
+- MODIFIED: pnpm-lock.yaml
+
+### Commit: 06cf06b
+### Stats: 114/253 passing (45.1%)
+
+---
+
 ## Session: 2026-02-15 (Feature #144 - Monthly comparison) *** SUCCESS ***
 
 ### Feature Assigned
