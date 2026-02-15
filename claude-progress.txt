@@ -1,5 +1,50 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #141 - Lost revenue from cancellations) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #141: "Lost revenue from cancellations" (Reports category)
+- Description: Calculate unfilled slot value
+- Steps: Navigate to cancellation report, Verify lost revenue calculated, Verify based on service prices, Verify considers replacements, Compare periods
+
+### Implementation
+- **API Enhanced**: src/app/api/reports/cancellations/route.ts
+  - Added `checkReplacement()` function: detects if a cancelled appointment's time slot was filled by another non-cancelled appointment for the same employee (50% overlap threshold)
+  - Added `calculateReportMetrics()` helper for reuse (current + comparison periods)
+  - New fields: grossLostRevenue, replacedRevenue, netLostRevenue, replacedCount
+  - Period comparison support via compareDateFrom/compareDateTo query params
+  - Comparison response includes deltas: netLostRevenue change, percentage, rate change, count change
+  - CSV export updated with replacement and comparison data
+- **UI Enhanced**: src/app/dashboard/reports/cancellations/page.tsx
+  - New default "Utracony przychod" (Lost Revenue) tab
+  - Three-card breakdown: gross lost (red), recovered via replacements (green), net loss (orange)
+  - Visual stacked bar showing proportion of real loss vs recovered
+  - Per-service lost revenue table with Odzyskane (recovered) column
+  - "Porownaj z innym okresem" toggle with comparison date inputs
+  - Period comparison card showing deltas with trend indicators
+  - Delta indicators (arrows up/down with color coding) on all summary cards
+
+### Verification (browser automation)
+1. Registered user feature141@test.com
+2. Created test data: 2 cancelled appointments (1 replaced, 1 unfilled) via setup script
+3. API verified: grossLostRevenue=200, replacedRevenue=100, netLostRevenue=100, replacedCount=1
+4. Comparison API verified: deltas correctly calculated between periods
+5. Browser verified full report page with extended date range:
+   - Summary: 38 appointments, 5 cancellations, 13.2% rate, 355.00 PLN net loss
+   - "Po uwzglednieniu 1 zastepstw" shown on summary card
+   - Lost revenue breakdown: 455.00 gross, -100.00 recovered, 355.00 net
+   - Bar chart: 78% real loss, 22% recovered
+   - Per-service table: Manicure hybrydowy shows -100.00 PLN recovered
+6. Comparison toggle verified: shows delta indicators, comparison card with period stats
+7. Mock data checks: no mock/fake/hardcoded patterns in src/
+8. Persistence test: data persists correctly after server restart
+9. Test data cleaned up (3 REPLACEMENT_TEST_141 appointments deleted)
+
+### Stats After
+- Features passing: 108/253 (42.7%)
+
+---
+
 ## Session: 2026-02-15 (Feature #142 - Service profit margins) *** SUCCESS ***
 
 ### Feature Assigned
