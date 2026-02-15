@@ -1,5 +1,40 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #143 - Material profit/loss report) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #143: "Material profit/loss report" (Reports category)
+- Description: Product cost tracking
+- Steps: Navigate to reports, Select materials report, Verify product costs tracked, Verify usage value calculated, Verify profit/loss shown
+
+### Implementation
+- **New API**: src/app/api/reports/materials-profitloss/route.ts
+  - Joins appointmentMaterials → products → appointments → services → employees
+  - Revenue attribution: proportionally splits service revenue among materials based on material cost share per appointment
+  - Handles edge case where all materials have 0 cost (equal split)
+  - Per-product aggregation: totalMaterialCost, attributedRevenue, profitLoss, profitMargin, usageCount
+  - Grand totals with profitableProducts/lossProducts counts
+  - Detail records with per-usage profit/loss
+  - CSV export with Polish headers
+- **New UI**: src/app/dashboard/reports/materials-profitloss/page.tsx
+  - Date range filter (default last 30 days)
+  - 4 summary cards: Koszt materialow, Przychod z uslug, Zysk/Strata, Marza zysku
+  - 4 secondary stats: Unikalne produkty, Liczba uzyc, Zyskowne, Stratne
+  - Two tabs: "Zysk/Strata wg produktu" (visual bars + table), "Szczegolowe zuzycie" (detailed records)
+  - Color-coded profit/loss indicators, margin badges
+- **Dashboard**: Added "Zysk/Strata materialow" navigation link in Raporty section
+
+### Verification
+- Browser-tested with real PostgreSQL data: 2 products, 5 usages
+- Summary: 90.00 PLN cost, 490.00 PLN revenue, 400.00 PLN profit, 81.6% margin
+- Both tabs verified (summary + details)
+- Full page refresh confirmed data persistence
+- No mock data patterns found
+
+### Status
+- Feature #143: PASSING
+- Commit: d8c05b4
+
 ## Session: 2026-02-15 (Feature #141 - Lost revenue from cancellations) *** SUCCESS ***
 
 ### Feature Assigned
