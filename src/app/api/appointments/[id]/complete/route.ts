@@ -10,8 +10,12 @@ import {
   products,
   productUsage,
   notifications,
+  loyaltyPoints,
+  loyaltyTransactions,
+  salons,
 } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
+import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/route";
 
 /**
  * Check if a product has low stock and create a notification if needed.
@@ -313,6 +317,135 @@ export async function POST(
       }
     }
 
+    // 5. Award loyalty points if loyalty program is enabled
+    let loyaltyResult: {
+      pointsAwarded: number;
+      totalPoints: number;
+      loyaltyId: string;
+      transactionId: string;
+    } | null = null;
+
+    if (appointment.clientId && service) {
+      try {
+        // Fetch salon loyalty settings
+        const [salon] = await db
+          .select({ id: salons.id, settingsJson: salons.settingsJson })
+          .from(salons)
+          .where(eq(salons.id, appointment.salonId))
+          .limit(1);
+
+        if (salon) {
+          const settings = salon.settingsJson as Record<string, unknown> | null;
+          const loyaltySettings = settings?.loyalty as LoyaltySettings | undefined;
+
+          if (loyaltySettings?.enabled) {
+            // Calculate effective price for points
+            let priceForPoints = parseFloat(service.basePrice);
+
+            // Check for employee-specific pricing
+            if (appointment.employeeId) {
+              const [empPrice] = await db
+                .select()
+                .from(employeeServicePrices)
+                .where(
+                  and(
+                    eq(employeeServicePrices.employeeId, appointment.employeeId),
+                    eq(employeeServicePrices.serviceId, service.id)
+                  )
+                )
+                .limit(1);
+
+              if (empPrice) {
+                priceForPoints = parseFloat(empPrice.customPrice);
+              }
+            }
+
+            // Apply discount if any
+            if (appointment.discountAmount) {
+              priceForPoints = Math.max(0, priceForPoints - parseFloat(appointment.discountAmount));
+            }
+
+            // Calculate points: (price / currencyUnit) * pointsPerCurrencyUnit
+            const currencyUnit = loyaltySettings.currencyUnit || 1;
+            const pointsPerUnit = loyaltySettings.pointsPerCurrencyUnit || 1;
+            const pointsToAward = Math.floor((priceForPoints / currencyUnit) * pointsPerUnit);
+
+            if (pointsToAward > 0) {
+              // Get or create loyalty points record for this client+salon
+              const existingRecords = await db
+                .select()
+                .from(loyaltyPoints)
+                .where(
+                  and(
+                    eq(loyaltyPoints.clientId, appointment.clientId),
+                    eq(loyaltyPoints.salonId, appointment.salonId)
+                  )
+                )
+                .limit(1);
+
+              let loyaltyRecord = existingRecords[0];
+
+              if (!loyaltyRecord) {
+                // Create new loyalty record
+                const created = await db
+                  .insert(loyaltyPoints)
+                  .values({
+                    clientId: appointment.clientId,
+                    salonId: appointment.salonId,
+                    points: 0,
+                  })
+                  .returning();
+                loyaltyRecord = created[0];
+              }
+
+              if (!loyaltyRecord) {
+                throw new Error("Failed to create or fetch loyalty record");
+              }
+
+              // Update points balance
+              const newBalance = loyaltyRecord.points + pointsToAward;
+              await db
+                .update(loyaltyPoints)
+                .set({
+                  points: newBalance,
+                  lastUpdated: new Date(),
+                })
+                .where(eq(loyaltyPoints.id, loyaltyRecord.id));
+
+              // Log the transaction
+              const transactionResult = await db
+                .insert(loyaltyTransactions)
+                .values({
+                  loyaltyId: loyaltyRecord.id,
+                  pointsChange: pointsToAward,
+                  reason: `Wizyta: ${service.name} (${priceForPoints.toFixed(2)} PLN)`,
+                  appointmentId: id,
+                })
+                .returning();
+
+              const transaction = transactionResult[0];
+              if (!transaction) {
+                throw new Error("Failed to create loyalty transaction");
+              }
+
+              loyaltyResult = {
+                pointsAwarded: pointsToAward,
+                totalPoints: newBalance,
+                loyaltyId: loyaltyRecord.id,
+                transactionId: transaction.id,
+              };
+
+              console.log(
+                `[Complete API] Loyalty: Awarded ${pointsToAward} points for ${priceForPoints.toFixed(2)} PLN service. New balance: ${newBalance} points (client: ${appointment.clientId})`
+              );
+            }
+          }
+        }
+      } catch (loyaltyError) {
+        console.error("[Complete API] Loyalty points error (non-blocking):", loyaltyError);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       data: {
@@ -320,6 +453,7 @@ export async function POST(
         treatment,
         commission,
         stockDeductions,
+        loyalty: loyaltyResult,
       },
       message: "Wizyta zakonczona pomyslnie",
     });
