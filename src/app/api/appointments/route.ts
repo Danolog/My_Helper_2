@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { db } from "@/lib/db";
-import { appointments, clients, employees, services, timeBlocks } from "@/lib/schema";
-import { eq, and, gte, lte, or, not, lt, gt } from "drizzle-orm";
+import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
+import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 
 // GET /api/appointments - List appointments with optional date range filter
@@ -75,7 +75,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId } = body;
+    const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId, promoCodeId, discountAmount } = body;
 
     // Try to get logged-in user ID from session (for client portal bookings)
     let bookedByUserId: string | null = bodyUserId || null;
@@ -156,7 +156,61 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(`[Appointments API] Creating appointment for employee ${employeeId}, bookedBy: ${bookedByUserId}`);
+    // Validate promo code if provided
+    let validatedPromoCodeId: string | null = null;
+    let validatedDiscountAmount: string | null = null;
+
+    if (promoCodeId) {
+      // Verify the promo code exists and is valid
+      const [promoCode] = await db
+        .select({
+          promoCode: promoCodes,
+          promotion: promotions,
+        })
+        .from(promoCodes)
+        .leftJoin(promotions, eq(promoCodes.promotionId, promotions.id))
+        .where(eq(promoCodes.id, promoCodeId))
+        .limit(1);
+
+      if (!promoCode) {
+        return NextResponse.json(
+          { success: false, error: "Nieprawidlowy kod promocyjny" },
+          { status: 400 }
+        );
+      }
+
+      const now = new Date();
+      const pc = promoCode.promoCode;
+
+      // Check expiry
+      if (pc.expiresAt && new Date(pc.expiresAt) < now) {
+        return NextResponse.json(
+          { success: false, error: "Kod promocyjny wygasl" },
+          { status: 400 }
+        );
+      }
+
+      // Check usage limit
+      if (pc.usageLimit != null && pc.usedCount != null && pc.usedCount >= pc.usageLimit) {
+        return NextResponse.json(
+          { success: false, error: "Limit uzycia kodu promocyjnego zostal wyczerpany" },
+          { status: 400 }
+        );
+      }
+
+      // Check linked promotion is active
+      if (promoCode.promotion && !promoCode.promotion.isActive) {
+        return NextResponse.json(
+          { success: false, error: "Promocja powiazana z kodem jest nieaktywna" },
+          { status: 400 }
+        );
+      }
+
+      validatedPromoCodeId = promoCodeId;
+      validatedDiscountAmount = discountAmount ? String(discountAmount) : null;
+    }
+
+    console.log(`[Appointments API] Creating appointment for employee ${employeeId}, bookedBy: ${bookedByUserId}, promoCode: ${validatedPromoCodeId}`);
     const [newAppointment] = await db
       .insert(appointments)
       .values({
@@ -169,9 +223,20 @@ export async function POST(request: Request) {
         endTime: new Date(endTime),
         notes: notes || null,
         depositAmount: depositAmount || null,
+        promoCodeId: validatedPromoCodeId,
+        discountAmount: validatedDiscountAmount,
         status: "scheduled",
       })
       .returning();
+
+    // Increment promo code usage count
+    if (validatedPromoCodeId) {
+      await db
+        .update(promoCodes)
+        .set({ usedCount: sql`COALESCE(${promoCodes.usedCount}, 0) + 1` })
+        .where(eq(promoCodes.id, validatedPromoCodeId));
+      console.log(`[Appointments API] Incremented usage count for promo code ${validatedPromoCodeId}`);
+    }
 
     console.log(`[Appointments API] Created appointment with id: ${newAppointment?.id}`);
 
