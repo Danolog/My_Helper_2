@@ -1,5 +1,54 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-15 (Feature #150 - Employee commission tracking) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #150: "Employee commission tracking" - Calculate staff earnings
+- Category: Finance
+
+### What was accomplished:
+1. Added `commissionRate` column to employees table in schema.ts
+   - numeric(5,2) with default 50%, pushed via drizzle-kit
+2. Created API: /api/finance/commissions/route.ts (GET)
+   - Lists all commissions with employee/appointment/service/client details
+   - Employee totals with SUM, COUNT, AVG aggregations
+   - Date range and employee ID filtering
+3. Created API: /api/employees/commission-rate/route.ts (GET/PUT)
+   - GET: Returns all active employees with commission rates
+   - PUT: Updates employee default commission rate (0-100 validation)
+4. Modified /api/appointments/[id]/complete/route.ts
+   - Looks up employee's default commissionRate when no explicit percentage provided
+   - Falls back to 50% if no rate configured
+5. Created finance page: /dashboard/finance/page.tsx
+   - Overview tab: summary cards (total, count, employees) + per-employee table
+   - Details tab: individual commission records with employee filter and date range
+   - Settings tab: commission rate management with edit dialog
+6. Dashboard link already existed from previous session
+
+### Verification (browser automation):
+- Registered test user feature150@test.com
+- Navigated to /dashboard/finance via dashboard card "Finanse - Prowizje"
+- Overview tab: 242.50 PLN total, 4 commissions, 1 employee (Anna Kowalska at 50%)
+- Details tab: All 4 records shown (Koloryzacja 75 PLN x2, Manicure 50 PLN, Strzyzenie 42.50 PLN)
+- Settings tab: 10 employees listed (duplicates from prior test sessions - data issue, not code bug)
+- Changed Kasia Wisniewska's rate from 50% to 40% - saved successfully
+- Toast notification confirmed: "Prowizja dla Kasia Wisniewska ustawiona na 40%"
+- API verification: commissionRate "40.00" persisted in database
+- No mock data detected (grep clean)
+
+### Files changed:
+- src/lib/schema.ts (added commissionRate field)
+- src/app/api/appointments/[id]/complete/route.ts (employee default rate lookup)
+- src/app/api/employees/commission-rate/route.ts (NEW)
+- src/app/api/finance/commissions/route.ts (NEW)
+- src/app/dashboard/finance/page.tsx (NEW)
+
+### Notes:
+- Duplicate employees in Settings tab are pre-existing database entries from multiple test session seedings
+- Pre-existing build error in employee-payroll/page.tsx (not related to this feature)
+
+---
+
 ## Session: 2026-02-15 (Feature #151 - Employee payroll report) *** SUCCESS ***
 
 ### Feature Assigned
