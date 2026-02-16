@@ -1,5 +1,33 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-16 (Feature #157 - Invoice preview) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #157: "Invoice preview" - View invoice before sending
+- Category: Finance
+- Steps: Select invoice, Click preview, Verify PDF viewer opens, Verify content correct, Verify formatting proper
+
+### What was accomplished:
+- Verification-only feature - all code was already fully implemented
+- Existing implementation includes:
+  - `/dashboard/invoices` - Invoice list with "Podglad" (Preview) button per invoice
+  - `/dashboard/invoices/[id]` - Full A4-like invoice preview page
+  - `/api/invoices/[id]` - API endpoint with joined client, appointment, employee, service data
+
+### Verification (browser automation):
+1. Logged in, navigated to /dashboard/invoices - 2 invoices visible
+2. Tested Rachunek preview (PAR/2026/02/00002): RACHUNEK title, seller/buyer, items table, summary, payment info
+3. Tested Faktura VAT preview (FV/2026/02/00001): FAKTURA VAT title, company buyer with NIP, correct formatting
+4. Both previews show: document type, invoice number, issue date, seller/buyer details, items table, financial summary, payment method, appointment details, employee, and print/PDF button
+5. 0 console errors, no mock data patterns, all data from PostgreSQL
+6. Print-optimized CSS with @media print styles
+
+### Feature Status:
+- Feature #157: PASSED - No code changes needed
+- Stats: 124/253 passing (49.0%)
+
+---
+
 ## Session: 2026-02-16 (Feature #156 - Invoice history) *** SUCCESS ***
 
 ### Feature Assigned
