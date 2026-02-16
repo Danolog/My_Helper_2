@@ -1,5 +1,57 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-16 (Feature #156 - Invoice history) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #156: "Invoice history" - View all invoices
+- Category: Finance
+- Steps: Navigate to invoices, Verify list displayed, Verify date/number/amount shown, Click invoice, Verify details expand
+
+### What was accomplished:
+- Verification-only feature - all code was already fully implemented
+- Invoice list page at /dashboard/invoices with:
+  - Filter by date range, type (Rachunek/Faktura VAT), search by number/client/company
+  - Summary cards: total invoices, gross amount, net amount, VAT
+  - Invoice rows showing: type icon, invoice number, client/company name, type badge, date, amount
+  - Clickable rows that expand to show full invoice preview
+- Invoice detail page at /dashboard/invoices/[id] with print/PDF support
+- API endpoints: GET /api/invoices (list with filters), GET /api/invoices/[id] (single invoice)
+- Dashboard has "Faktury" card linking to /dashboard/invoices
+
+### Verification (browser automation):
+1. Registered/logged in as feature156@test.com
+2. Navigated Dashboard → Faktury → Historia faktur
+3. Invoice list displayed: 2 invoices (1 rachunek, 1 faktura VAT)
+4. Date shown: "15.02.2026" for both invoices ✓
+5. Invoice numbers shown: "PAR/2026/02/00002" and "FV/2026/02/00001" ✓
+6. Amounts shown: "85.00 PLN" for both ✓
+7. Clicked first invoice → details expanded with:
+   - RACHUNEK header, invoice number, date
+   - Seller (Beauty Studio Demo) and Buyer (Test Client98)
+   - Items table with service name, quantity, prices, VAT
+   - Summary: Netto 69.11, VAT 23% 15.89, Brutto 85.00
+   - Payment method, employee, appointment date/time
+   - "Przejdz do wizyty" link
+8. Zero console errors
+9. No mock/fake data patterns in source code
+10. All data from PostgreSQL via Drizzle ORM
+
+### Files verified (no changes needed):
+- src/app/api/invoices/route.ts (list API with filters)
+- src/app/api/invoices/[id]/route.ts (single invoice API)
+- src/app/dashboard/invoices/page.tsx (invoice list UI)
+- src/app/dashboard/invoices/[id]/page.tsx (invoice detail/print UI)
+
+### Screenshots:
+- feature156-invoice-list.png - Invoice list with 2 invoices
+- feature156-invoice-expanded.png - Expanded invoice details
+
+### Completion status:
+- Feature #156 marked as passing
+- Stats: 124/253 passing (49.0%)
+
+---
+
 ## Session: 2026-02-15 (Feature #154 - Invoice for individual) *** SUCCESS ***
 
 ### Feature Assigned
