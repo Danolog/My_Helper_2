@@ -231,7 +231,7 @@ export default function PricingPage() {
 
                 <div className="mt-8">
                   <Button asChild className="w-full" size="lg" variant="outline">
-                    <Link href="/register">
+                    <Link href="/register?plan=basic">
                       Zacznij za darmo
                       <ArrowRight className="h-4 w-4 ml-2" />
                     </Link>
@@ -293,7 +293,7 @@ export default function PricingPage() {
 
                 <div className="mt-8">
                   <Button asChild className="w-full" size="lg">
-                    <Link href="/register">
+                    <Link href="/register?plan=pro">
                       Wybierz Pro
                       <ArrowRight className="h-4 w-4 ml-2" />
                     </Link>
@@ -436,12 +436,12 @@ export default function PricingPage() {
           </p>
           <div className="flex items-center justify-center gap-4">
             <Button asChild size="lg" variant="outline">
-              <Link href="/register">
+              <Link href="/register?plan=basic">
                 Zacznij z Basic
               </Link>
             </Button>
             <Button asChild size="lg">
-              <Link href="/register">
+              <Link href="/register?plan=pro">
                 Wybierz Pro
                 <Crown className="h-4 w-4 ml-2" />
               </Link>
