@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock, Cake, Package, BarChart3, Percent, Ticket, Gift, DollarSign, Printer } from "lucide-react";
+import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock, Cake, Package, BarChart3, Percent, Ticket, Gift, DollarSign, Printer, FileText, Crown } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
 import { useDiagnostics } from "@/hooks/use-diagnostics";
@@ -338,6 +338,32 @@ export default function DashboardPage() {
           </p>
           <Button asChild>
             <Link href="/dashboard/settings/fiscal">Ustawienia fiskalne</Link>
+          </Button>
+        </div>
+
+        <div className="p-6 border border-border rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <FileText className="w-5 h-5 text-primary" />
+            <h2 className="text-xl font-semibold">Faktury</h2>
+          </div>
+          <p className="text-muted-foreground mb-4">
+            Historia wystawionych faktur i rachunkow
+          </p>
+          <Button asChild>
+            <Link href="/dashboard/invoices">Historia faktur</Link>
+          </Button>
+        </div>
+
+        <div className="p-6 border border-border rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <Crown className="w-5 h-5 text-primary" />
+            <h2 className="text-xl font-semibold">Subskrypcja</h2>
+          </div>
+          <p className="text-muted-foreground mb-4">
+            Zarzadzaj planem subskrypcji i platnosciami
+          </p>
+          <Button asChild>
+            <Link href="/dashboard/subscription">Zarzadzaj subskrypcja</Link>
           </Button>
         </div>
 
