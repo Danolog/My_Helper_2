@@ -165,7 +165,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check if salon already has an active subscription
+    // Check if salon already has an active subscription for the same plan
     const existingSubscriptions = await db
       .select()
       .from(salonSubscriptions)
@@ -176,14 +176,51 @@ export async function POST(request: Request) {
         ),
       );
 
-    if (existingSubscriptions.length > 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Salon posiada juz aktywna subskrypcje. Anuluj obecna przed zmiana planu.",
-        },
-        { status: 409 },
+    if (existingSubscriptions.length > 0 && existingSubscriptions[0]) {
+      const existingSub = existingSubscriptions[0];
+      if (existingSub.planId === plan.id) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Salon posiada juz aktywna subskrypcje tego planu.",
+          },
+          { status: 409 },
+        );
+      }
+      // Different plan → upgrade: update the existing subscription's planId
+      // and record a new payment for the upgrade
+      const now = new Date();
+      const periodEnd = new Date(now);
+      periodEnd.setMonth(periodEnd.getMonth() + 1);
+
+      await db
+        .update(salonSubscriptions)
+        .set({
+          planId: plan.id,
+          currentPeriodStart: now,
+          currentPeriodEnd: periodEnd,
+        })
+        .where(eq(salonSubscriptions.id, existingSub.id));
+
+      await db.insert(subscriptionPayments).values({
+        subscriptionId: existingSub.id,
+        salonId: DEMO_SALON_ID,
+        amount: plan.priceMonthly,
+        currency: "PLN",
+        stripePaymentIntentId: `sim_upgrade_pi_${Date.now()}`,
+        status: "succeeded",
+        paidAt: now,
+      });
+
+      // eslint-disable-next-line no-console
+      console.log(
+        `[Subscriptions API] Upgraded subscription ${existingSub.id} to plan ${plan.slug}`,
       );
+
+      return NextResponse.json({
+        success: true,
+        url: "/dashboard/subscription?activated=true",
+      });
     }
 
     // Attempt to create a real Stripe Checkout Session
