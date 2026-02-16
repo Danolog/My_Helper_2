@@ -1,5 +1,46 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-16 (Feature #159 - Pricing page displays plans) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #159: "Pricing page displays plans" - Show Basic and Pro options
+- Category: Subscriptions
+- Steps: Navigate to pricing page, Verify Basic plan visible, Verify Pro plan visible, Verify features listed for each, Verify prices shown, Verify comparison table available
+
+### What was accomplished:
+1. Created API endpoint `/api/subscription-plans` (GET)
+   - Auto-seeds Basic (49 PLN/mies) and Pro (149 PLN/mies) plans to PostgreSQL if table empty
+   - Returns plans with features, prices, and active status from database
+   - Real Drizzle ORM queries, no mock data
+2. Created pricing page at `/pricing`
+   - Header with "Cennik" badge and "Wybierz plan dla siebie" heading
+   - Two plan cards: Basic (outline) and Pro (primary border, "Najpopularniejszy" badge)
+   - Each card shows price, description, feature list with checkmarks, and CTA button
+   - Feature highlights section (Kalendarz, Rezerwacje, Raporty, Asystent AI icons)
+   - Full comparison table with 6 categories and 27 features
+   - Check/X marks for Basic vs Pro availability
+   - CTA section with "Gotowy, zeby zaczac?" and both plan buttons
+3. Fixed React key warning in comparison table (Fragment keys)
+
+### Verification (browser automation):
+- Navigated to /pricing - page loads with all content
+- Basic plan visible: 49 PLN/mies., 14 features listed
+- Pro plan visible: 149 PLN/mies., 12 features, "Najpopularniejszy" badge
+- Comparison table: 6 categories, 27 feature rows, correct check/X marks
+- API returns real PostgreSQL UUIDs (630213ce-..., 5de64a42-...)
+- 0 console errors
+- No mock/fake/dummy data patterns found in code
+- Screenshots: pricing-page-verified.png
+
+### Files created:
+- NEW: src/app/api/subscription-plans/route.ts
+- NEW: src/app/pricing/page.tsx
+
+### Commit: 07371c6
+### Stats: 126/253 features passing (49.8%)
+
+---
+
 ## Session: 2026-02-16 (Feature #157 - Invoice preview) *** SUCCESS ***
 
 ### Feature Assigned
