@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import Link from "next/link";
+import React, { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Check,
   X,
@@ -16,7 +16,11 @@ import {
   Star,
   ArrowRight,
   Sparkles,
+  Loader2,
 } from "lucide-react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -24,8 +28,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { useSession } from "@/lib/auth-client";
 
 type Plan = {
   id: string;
@@ -119,6 +122,10 @@ export default function PricingPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+
+  const { data: session } = useSession();
+  const router = useRouter();
 
   useEffect(() => {
     async function fetchPlans() {
@@ -139,6 +146,49 @@ export default function PricingPage() {
     }
     fetchPlans();
   }, []);
+
+  /**
+   * Initiates the checkout flow for the given plan.
+   * Redirects unauthenticated users to registration, then
+   * calls the checkout API and navigates to the Stripe session
+   * URL (or the dev-mode fallback redirect).
+   */
+  const handleCheckout = useCallback(
+    async (planSlug: string) => {
+      if (!session?.user) {
+        // Not authenticated -- redirect to register with plan preselected
+        router.push(`/register?plan=${planSlug}`);
+        return;
+      }
+
+      setCheckoutLoading(planSlug);
+
+      try {
+        const res = await fetch("/api/subscriptions/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ planSlug }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          toast.error(data.error || "Nie udalo sie rozpoczac platnosci");
+          return;
+        }
+
+        // Navigate to the checkout URL (Stripe or dev fallback)
+        if (data.url) {
+          window.location.href = data.url;
+        }
+      } catch {
+        toast.error("Wystapil blad podczas laczenia z systemem platnosci");
+      } finally {
+        setCheckoutLoading(null);
+      }
+    },
+    [session, router],
+  );
 
   const basicPlan = plans.find((p) => p.slug === "basic");
   const proPlan = plans.find((p) => p.slug === "pro");
@@ -230,11 +280,24 @@ export default function PricingPage() {
                 </div>
 
                 <div className="mt-8">
-                  <Button asChild className="w-full" size="lg" variant="outline">
-                    <Link href="/register?plan=basic">
-                      Zacznij za darmo
-                      <ArrowRight className="h-4 w-4 ml-2" />
-                    </Link>
+                  <Button
+                    className="w-full"
+                    size="lg"
+                    variant="outline"
+                    disabled={checkoutLoading !== null}
+                    onClick={() => handleCheckout("basic")}
+                  >
+                    {checkoutLoading === "basic" ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Przetwarzanie...
+                      </>
+                    ) : (
+                      <>
+                        Zacznij za darmo
+                        <ArrowRight className="h-4 w-4 ml-2" />
+                      </>
+                    )}
                   </Button>
                   <p className="text-xs text-center text-muted-foreground mt-2">
                     14 dni okresu probnego bez zobowiazan
@@ -292,11 +355,23 @@ export default function PricingPage() {
                 </div>
 
                 <div className="mt-8">
-                  <Button asChild className="w-full" size="lg">
-                    <Link href="/register?plan=pro">
-                      Wybierz Pro
-                      <ArrowRight className="h-4 w-4 ml-2" />
-                    </Link>
+                  <Button
+                    className="w-full"
+                    size="lg"
+                    disabled={checkoutLoading !== null}
+                    onClick={() => handleCheckout("pro")}
+                  >
+                    {checkoutLoading === "pro" ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Przetwarzanie...
+                      </>
+                    ) : (
+                      <>
+                        Wybierz Pro
+                        <ArrowRight className="h-4 w-4 ml-2" />
+                      </>
+                    )}
                   </Button>
                   <p className="text-xs text-center text-muted-foreground mt-2">
                     14 dni okresu probnego bez zobowiazan
@@ -435,16 +510,27 @@ export default function PricingPage() {
             14-dniowym okresem probnym - bez zobowiazan.
           </p>
           <div className="flex items-center justify-center gap-4">
-            <Button asChild size="lg" variant="outline">
-              <Link href="/register?plan=basic">
-                Zacznij z Basic
-              </Link>
+            <Button
+              size="lg"
+              variant="outline"
+              disabled={checkoutLoading !== null}
+              onClick={() => handleCheckout("basic")}
+            >
+              {checkoutLoading === "basic" ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : null}
+              Zacznij z Basic
             </Button>
-            <Button asChild size="lg">
-              <Link href="/register?plan=pro">
-                Wybierz Pro
-                <Crown className="h-4 w-4 ml-2" />
-              </Link>
+            <Button
+              size="lg"
+              disabled={checkoutLoading !== null}
+              onClick={() => handleCheckout("pro")}
+            >
+              {checkoutLoading === "pro" ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : null}
+              Wybierz Pro
+              <Crown className="h-4 w-4 ml-2" />
             </Button>
           </div>
         </div>
