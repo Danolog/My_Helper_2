@@ -746,6 +746,8 @@ export const invoices = pgTable(
     invoiceDataJson: jsonb("invoice_data_json"),
     issuedAt: timestamp("issued_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    emailSentAt: timestamp("email_sent_at"),
+    emailSentTo: text("email_sent_to"),
   },
   (table) => [
     index("invoices_salon_id_idx").on(table.salonId),
