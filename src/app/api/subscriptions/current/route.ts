@@ -12,15 +12,16 @@ const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
  * demo salon, joined with plan details so the UI can display plan
  * name, features, and pricing without a second request.
  *
- * Includes both "active" and "trialing" subscriptions, since both
- * represent a valid, usable plan.
+ * Includes "active", "trialing", and "canceled" subscriptions so the
+ * UI can show the current plan state (including canceled status with
+ * reactivation option).
  *
  * Response shape:
  *   { subscription: {...} | null, plan: {...} | null }
  */
 export async function GET() {
   try {
-    // Find the most recent active or trialing subscription for the salon
+    // Find the most recent subscription for the salon (active, trialing, or canceled)
     const results = await db
       .select({
         subscription: salonSubscriptions,
@@ -34,7 +35,7 @@ export async function GET() {
       .where(
         and(
           eq(salonSubscriptions.salonId, DEMO_SALON_ID),
-          inArray(salonSubscriptions.status, ["active", "trialing"]),
+          inArray(salonSubscriptions.status, ["active", "trialing", "canceled"]),
         ),
       )
       .orderBy(desc(salonSubscriptions.createdAt))

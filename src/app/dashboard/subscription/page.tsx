@@ -14,6 +14,10 @@ import {
   Check,
   ArrowUpRight,
   XCircle,
+  ArrowDownRight,
+  AlertTriangle,
+  ArrowUp,
+  Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +30,17 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 type SubscriptionData = {
   id: string;
@@ -49,6 +64,8 @@ type PlanData = {
   features: string[];
   isActive: boolean;
 };
+
+type AllPlansMap = Record<string, PlanData>;
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "-";
@@ -100,16 +117,21 @@ function statusColor(status: string): string {
 function ActivationToast() {
   const searchParams = useSearchParams();
   const activated = searchParams.get("activated");
+  const upgraded = searchParams.get("upgraded");
 
   useEffect(() => {
-    if (activated === "true") {
+    if (upgraded === "true") {
+      toast.success("Plan zmieniony na Pro!", {
+        description: "Twoj plan zostal pomyslnie zmieniony. Funkcje Pro sa juz dostepne.",
+      });
+      window.history.replaceState(null, "", "/dashboard/subscription");
+    } else if (activated === "true") {
       toast.success("Subskrypcja aktywowana!", {
         description: "Twoj plan zostal pomyslnie aktywowany.",
       });
-      // Clean the URL param without navigation
       window.history.replaceState(null, "", "/dashboard/subscription");
     }
-  }, [activated]);
+  }, [activated, upgraded]);
 
   return null;
 }
@@ -119,21 +141,37 @@ export default function SubscriptionPage() {
     null,
   );
   const [plan, setPlan] = useState<PlanData | null>(null);
+  const [allPlans, setAllPlans] = useState<AllPlansMap>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [changePlanLoading, setChangePlanLoading] = useState(false);
 
   const fetchSubscription = useCallback(async () => {
     try {
       setError(null);
-      const res = await fetch("/api/subscriptions/current");
-      const data = await res.json();
+      const [subRes, plansRes] = await Promise.all([
+        fetch("/api/subscriptions/current"),
+        fetch("/api/subscription-plans"),
+      ]);
+      const subData = await subRes.json();
+      const plansData = await plansRes.json();
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Nie udalo sie pobrac subskrypcji");
+      if (!subRes.ok || !subData.success) {
+        throw new Error(subData.error || "Nie udalo sie pobrac subskrypcji");
       }
 
-      setSubscription(data.subscription ?? null);
-      setPlan(data.plan ?? null);
+      setSubscription(subData.subscription ?? null);
+      setPlan(subData.plan ?? null);
+
+      // Build a map of all plans by slug for price comparison
+      if (plansData.success && Array.isArray(plansData.data)) {
+        const map: AllPlansMap = {};
+        for (const p of plansData.data) {
+          map[p.slug] = p;
+        }
+        setAllPlans(map);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Wystapil blad");
     } finally {
@@ -144,6 +182,75 @@ export default function SubscriptionPage() {
   useEffect(() => {
     fetchSubscription();
   }, [fetchSubscription]);
+
+  /**
+   * Cancel the current subscription.
+   */
+  const handleCancel = useCallback(async () => {
+    setCancelLoading(true);
+    try {
+      const res = await fetch("/api/subscriptions/cancel", {
+        method: "POST",
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        toast.error(data.error || "Nie udalo sie anulowac subskrypcji");
+        return;
+      }
+
+      toast.success("Subskrypcja anulowana", {
+        description: "Twoja subskrypcja zostala pomyslnie anulowana.",
+      });
+
+      // Refresh subscription data
+      setLoading(true);
+      await fetchSubscription();
+    } catch {
+      toast.error("Wystapil blad podczas anulowania subskrypcji");
+    } finally {
+      setCancelLoading(false);
+    }
+  }, [fetchSubscription]);
+
+  /**
+   * Change the plan (upgrade or downgrade).
+   * Uses the checkout API which handles both new subscriptions and plan changes.
+   */
+  const handleChangePlan = useCallback(
+    async (targetSlug: string) => {
+      setChangePlanLoading(true);
+      try {
+        const res = await fetch("/api/subscriptions/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ planSlug: targetSlug }),
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          toast.error(data.error || "Nie udalo sie zmienic planu");
+          return;
+        }
+
+        // Navigate to checkout URL or refresh if dev fallback
+        if (data.url) {
+          if (data.url.startsWith("/")) {
+            // Dev fallback - local redirect with upgraded param
+            window.location.href = data.url;
+          } else {
+            // Stripe checkout URL
+            window.location.href = data.url;
+          }
+        }
+      } catch {
+        toast.error("Wystapil blad podczas zmiany planu");
+      } finally {
+        setChangePlanLoading(false);
+      }
+    },
+    [fetchSubscription],
+  );
 
   return (
     <div className="container mx-auto p-6 max-w-4xl">
@@ -291,6 +398,24 @@ export default function SubscriptionPage() {
                 </div>
               </div>
 
+              {/* Canceled notice */}
+              {subscription.status === "canceled" && (
+                <div className="flex items-start gap-3 p-4 rounded-lg bg-red-50 border border-red-200 dark:bg-red-950/20 dark:border-red-800">
+                  <AlertTriangle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-red-800 dark:text-red-200">
+                      Subskrypcja anulowana
+                    </p>
+                    <p className="text-sm text-red-600 dark:text-red-300">
+                      {subscription.canceledAt
+                        ? `Anulowano: ${formatDate(subscription.canceledAt)}`
+                        : "Twoja subskrypcja zostala anulowana."}
+                      {" "}Mozesz w kazdej chwili ponownie aktywowac plan.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Plan Features */}
               <div>
                 <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-3">
@@ -308,18 +433,187 @@ export default function SubscriptionPage() {
 
               {/* Actions */}
               <div className="flex flex-wrap gap-3 pt-4 border-t">
-                {plan.slug === "basic" && (
+                {/* Upgrade: Basic → Pro */}
+                {subscription.status === "active" && plan.slug === "basic" && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button disabled={changePlanLoading}>
+                        {changePlanLoading ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Crown className="h-4 w-4 mr-2" />
+                        )}
+                        Zmien na Pro
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="max-w-lg">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle className="flex items-center gap-2">
+                          <ArrowUp className="h-5 w-5 text-primary" />
+                          Upgrade do planu Pro
+                        </AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                          <div className="space-y-4">
+                            <p>
+                              Przejdz na plan Pro i odblokuj wszystkie funkcje AI,
+                              w tym asystenta glosowego, biznesowego i content
+                              marketingowego.
+                            </p>
+
+                            {/* Price comparison */}
+                            <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="flex items-center gap-2">
+                                  <Zap className="h-4 w-4 text-blue-600" />
+                                  <span className="font-medium">Obecny plan: Basic</span>
+                                </span>
+                                <span className="font-semibold">
+                                  {parseFloat(plan.priceMonthly).toFixed(0)} PLN / mies.
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="flex items-center gap-2">
+                                  <Crown className="h-4 w-4 text-primary" />
+                                  <span className="font-medium">Nowy plan: Pro</span>
+                                </span>
+                                <span className="font-semibold">
+                                  {allPlans["pro"]
+                                    ? `${parseFloat(allPlans["pro"].priceMonthly).toFixed(0)} PLN / mies.`
+                                    : "149 PLN / mies."}
+                                </span>
+                              </div>
+                              <div className="border-t pt-2 flex items-center justify-between text-sm">
+                                <span className="font-medium text-primary">Roznica w cenie</span>
+                                <span className="font-bold text-primary">
+                                  {allPlans["pro"]
+                                    ? `+${(parseFloat(allPlans["pro"].priceMonthly) - parseFloat(plan.priceMonthly)).toFixed(0)} PLN / mies.`
+                                    : "+100 PLN / mies."}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Extra features gained */}
+                            {allPlans["pro"] && (
+                              <div className="space-y-2">
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                  Dodatkowe funkcje w planie Pro
+                                </p>
+                                <div className="grid gap-1.5">
+                                  {allPlans["pro"].features
+                                    .filter((f) => !plan.features.includes(f) && f !== "Wszystko z planu Basic")
+                                    .map((feature, idx) => (
+                                      <div key={idx} className="flex items-start gap-2 text-sm">
+                                        <Sparkles className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                                        <span>{feature}</span>
+                                      </div>
+                                    ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Anuluj</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() => handleChangePlan("pro")}
+                          disabled={changePlanLoading}
+                        >
+                          {changePlanLoading ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <Crown className="h-4 w-4 mr-2" />
+                          )}
+                          Potwierdz upgrade do Pro
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+
+                {/* Downgrade: Pro → Basic */}
+                {subscription.status === "active" && plan.slug === "pro" && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="outline"
+                        disabled={changePlanLoading}
+                      >
+                        {changePlanLoading ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <ArrowDownRight className="h-4 w-4 mr-2" />
+                        )}
+                        Zmien na Basic
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Zmiana na plan Basic?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Po zmianie na plan Basic stracisz dostep do funkcji AI,
+                          w tym asystenta glosowego, biznesowego i content
+                          marketingowego. Czy na pewno chcesz kontynuowac?
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Anuluj</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => handleChangePlan("basic")}>
+                          Zmien na Basic
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+
+                {/* Cancel subscription */}
+                {subscription.status === "active" && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="destructive"
+                        disabled={cancelLoading}
+                      >
+                        {cancelLoading ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <XCircle className="h-4 w-4 mr-2" />
+                        )}
+                        Anuluj subskrypcje
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Anulowac subskrypcje?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Po anulowaniu subskrypcji stracisz dostep do funkcji
+                          planu {plan.name}. Mozesz ponownie aktywowac
+                          subskrypcje w dowolnym momencie.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Nie, zachowaj</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={handleCancel}
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                          Tak, anuluj subskrypcje
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+
+                {/* Reactivate subscription if canceled */}
+                {subscription.status === "canceled" && (
                   <Button asChild>
                     <Link href="/pricing">
-                      <Crown className="h-4 w-4 mr-2" />
-                      Zmien na Pro
+                      <ArrowUpRight className="h-4 w-4 mr-2" />
+                      Aktywuj ponownie
                     </Link>
                   </Button>
                 )}
-                <Button variant="outline" disabled>
-                  <Loader2 className="h-4 w-4 mr-2 hidden" />
-                  Anuluj subskrypcje
-                </Button>
+
                 <Button
                   variant="ghost"
                   size="sm"

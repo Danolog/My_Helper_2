@@ -1,5 +1,40 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-16 (Feature #163 - Subscription activation after payment) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #163: "Subscription activation after payment" (Subscriptions)
+- Description: Complete subscription payment, verify salon has active plan, plan type correct, features unlocked, subscription status in settings
+- Steps: Complete subscription payment, Verify salon has active plan, Verify plan type correct, Verify features unlocked, Check subscription status in settings
+
+### What was accomplished:
+1. Fixed /api/subscriptions/current to include "trialing" subscriptions (not just "active") using `inArray`
+2. Enhanced /api/subscriptions/checkout with plan upgrade logic:
+   - Same plan → returns 409 "already subscribed to this plan"
+   - Different plan → upgrades existing subscription (updates planId, resets period, records payment)
+3. Updated `createSimulatedSubscription` to detect existing trialing subscriptions and upgrade them to "active" instead of creating duplicates
+4. Added Subskrypcja card to dashboard page with Crown icon linking to /dashboard/subscription
+
+### Verification (browser automation):
+- Registered new user (feature163@test.com) with Pro plan
+- Navigated to /pricing as authenticated user
+- Clicked "Wybierz Pro" → triggered plan upgrade from Basic to Pro
+- Redirected to /dashboard/subscription?activated=true
+- Subscription page showed: Plan Pro, 149 PLN/miesiac, status "Aktywna"
+- Period: 16 lutego 2026 - 16 marca 2026, Kwota: 149.00 PLN / mies.
+- All 12 Pro features listed (AI assistants, recommendations, marketing tools, etc.)
+- Technical info: sim_sub_* and sim_cus_* IDs
+- Data persisted after full page refresh (PostgreSQL confirmed)
+
+### Files modified:
+- `src/app/api/subscriptions/checkout/route.ts` - Plan upgrade logic + trialing subscription handling
+- `src/app/api/subscriptions/current/route.ts` - Include trialing subscriptions (committed in earlier session)
+- `src/app/dashboard/page.tsx` - Added subscription management card (committed in earlier session)
+
+### Progress: 131/253 features passing (51.8%)
+
+---
+
 ## Session: 2026-02-16 (Feature #162 - Stripe checkout for subscription) *** SUCCESS ***
 
 ### Feature Assigned
@@ -9376,6 +9411,52 @@ Date: 2026-02-15
 ### Completion status:
 - Feature #145 marked as passing
 - Stats: 112/253 passing (44.3%)
+
+### What should be worked on next:
+- Continue with next ready features from the backlog
+- Check feature_get_ready for next available features
+
+## Session: Feature #164 - Subscription Management Panel
+Date: 2026-02-17
+
+### What was accomplished:
+- Verified Feature #164 "Subscription management panel" - View and manage subscription
+- No code changes needed - the subscription management page was already fully implemented
+- Full browser automation verification of all 6 feature steps
+
+### Existing infrastructure verified:
+- **Page**: src/app/dashboard/subscription/page.tsx (664 lines, complete)
+  - Current plan display (name, icon, price, status badge)
+  - Billing dates (period start, next payment, amount)
+  - Upgrade dialog (Basic→Pro) with price comparison and feature diff
+  - Downgrade option (Pro→Basic)
+  - Cancel subscription with confirmation AlertDialog
+  - Loading skeletons, error states, empty state
+- **API routes**:
+  - /api/subscriptions/current - GET current subscription with plan details (Drizzle ORM)
+  - /api/subscriptions/cancel - POST cancel active subscription
+  - /api/subscriptions/checkout - POST create/upgrade subscription (Stripe + dev fallback)
+  - /api/subscription-plans - GET all active plans (auto-seeds Basic/Pro)
+- **Schema**: subscriptionPlans, salonSubscriptions, subscriptionPayments tables
+- **Dashboard link**: "Zarzadzaj subskrypcja" card on main dashboard
+
+### Verification results (all 6 steps PASS):
+1. ✅ Navigate to settings - Dashboard has "Zarzadzaj subskrypcja" link to /dashboard/subscription
+2. ✅ Find subscription section - Full subscription panel with heading "Subskrypcja"
+3. ✅ Current plan shown - "Plan Basic" with Zap icon, 49 PLN/miesiac, "Aktywna" badge
+4. ✅ Billing date shown - Period start: 16 lutego 2026, Next payment: 16 marca 2026, Amount: 49.00 PLN/mies.
+5. ✅ Upgrade/downgrade options - "Zmien na Pro" button with dialog showing price diff (+100 PLN) and 11 Pro features
+6. ✅ Cancel option - "Anuluj subskrypcje" red button present with confirmation dialog
+
+### Additional checks:
+- Mock data patterns: CLEAN (no globalThis, devStore, mockDb patterns found)
+- Data persistence: CONFIRMED (data survives full page refresh, stored in PostgreSQL)
+- Console errors: 0 (only 2 resource preloading warnings)
+- Screenshots: feature164-subscription-panel.png, feature164-upgrade-dialog.png
+
+### Completion status:
+- Feature #164 marked as passing
+- Stats: 132/253 passing (52.2%)
 
 ### What should be worked on next:
 - Continue with next ready features from the backlog
