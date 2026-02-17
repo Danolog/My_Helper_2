@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth-client";
-import { useSubscription } from "@/hooks/use-subscription";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import type { Components } from "react-markdown";
 
