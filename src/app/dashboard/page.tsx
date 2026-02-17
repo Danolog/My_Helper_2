@@ -1,15 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock, Cake, Package, BarChart3, Percent, Ticket, Gift, DollarSign, Printer, FileText, Crown } from "lucide-react";
+import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock, Cake, Package, BarChart3, Percent, Ticket, Gift, DollarSign, Printer, FileText, Crown, Bot, Lightbulb, PenTool } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
-import { useDiagnostics } from "@/hooks/use-diagnostics";
+import { Badge } from "@/components/ui/badge";
+import { useSubscription } from "@/hooks/use-subscription";
 import { useSession } from "@/lib/auth-client";
 
 export default function DashboardPage() {
   const { data: session, isPending } = useSession();
-  const { isAiReady, loading: diagnosticsLoading } = useDiagnostics();
+  const { isProPlan } = useSubscription();
 
   if (isPending) {
     return (
@@ -109,19 +110,60 @@ export default function DashboardPage() {
         </div>
 
         <div className="p-6 border border-border rounded-lg">
-          <h2 className="text-xl font-semibold mb-2">AI Chat</h2>
+          <div className="flex items-center gap-2 mb-2">
+            <Bot className="w-5 h-5 text-primary" />
+            <h2 className="text-xl font-semibold">Asystent AI</h2>
+            {!isProPlan && (
+              <Badge variant="secondary" className="gap-1 ml-auto">
+                <Crown className="h-3 w-3" />
+                Pro
+              </Badge>
+            )}
+          </div>
           <p className="text-muted-foreground mb-4">
-            Start a conversation with AI using the Vercel AI SDK
+            Asystent glosowy, analiza biznesowa i chat AI
           </p>
-          {(diagnosticsLoading || !isAiReady) ? (
-            <Button disabled={true}>
-              Go to Chat
-            </Button>
-          ) : (
-            <Button asChild>
-              <Link href="/chat">Go to Chat</Link>
-            </Button>
-          )}
+          <Button asChild>
+            <Link href="/dashboard/ai-assistant">Asystent AI</Link>
+          </Button>
+        </div>
+
+        <div className="p-6 border border-border rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <Lightbulb className="w-5 h-5 text-primary" />
+            <h2 className="text-xl font-semibold">Rekomendacje AI</h2>
+            {!isProPlan && (
+              <Badge variant="secondary" className="gap-1 ml-auto">
+                <Crown className="h-3 w-3" />
+                Pro
+              </Badge>
+            )}
+          </div>
+          <p className="text-muted-foreground mb-4">
+            Inteligentne rekomendacje oparte na danych salonu
+          </p>
+          <Button asChild>
+            <Link href="/dashboard/ai-recommendations">Rekomendacje AI</Link>
+          </Button>
+        </div>
+
+        <div className="p-6 border border-border rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <PenTool className="w-5 h-5 text-primary" />
+            <h2 className="text-xl font-semibold">Generator tresci</h2>
+            {!isProPlan && (
+              <Badge variant="secondary" className="gap-1 ml-auto">
+                <Crown className="h-3 w-3" />
+                Pro
+              </Badge>
+            )}
+          </div>
+          <p className="text-muted-foreground mb-4">
+            Tworzenie postow, opisow uslug i newsletterow z AI
+          </p>
+          <Button asChild>
+            <Link href="/dashboard/content-generator">Generator tresci</Link>
+          </Button>
         </div>
 
         <div className="p-6 border border-border rounded-lg">

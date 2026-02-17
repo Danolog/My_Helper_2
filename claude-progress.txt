@@ -1,5 +1,80 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-17 (Feature #171 - AI features accessible for Pro) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #171: "AI features accessible for Pro" - Pro users have full AI access
+- Category: Subscriptions
+- Steps: Login as Pro plan salon, Navigate to AI assistant, Verify access granted, Navigate to AI recommendations, Verify visible, Navigate to content generator, Verify accessible
+
+### What was accomplished:
+- Verified all 3 AI pages are accessible for Pro plan users via browser automation
+- Added Pro plan gating to chat API endpoint and chat page
+- Added 3 AI dashboard cards with conditional Pro badges (shown only for Basic users)
+- All AI pages already had ProPlanGate wrapping from previous sessions
+
+### Modified files:
+- **src/app/api/chat/route.ts** - Added isProPlan() check returning 403 for non-Pro users
+- **src/app/chat/page.tsx** - Wrapped ChatContent in ProPlanGate component with Polish descriptions
+- **src/app/dashboard/page.tsx** - Replaced old AI chat card with 3 AI feature cards (Asystent AI, Rekomendacje AI, Generator tresci) with conditional Pro badges using useSubscription hook
+
+### Verification (browser automation):
+- ✅ Registered Pro plan user (feature171pro@test.com)
+- ✅ Upgraded demo salon to Pro plan via checkout API
+- ✅ AI Assistant page: Full content visible (Asystent glosowy, Analiza biznesowa, Chat AI)
+- ✅ AI Recommendations page: Full content visible (Analiza trendow, Optymalizacja cen, Prognoza przychodow)
+- ✅ Content Generator page: Full content visible (Posty social media, Opisy uslug, Newslettery)
+- ✅ No upgrade prompts shown (ProPlanGate rendered children, not gate)
+- ✅ Console: 0 errors
+- ✅ No mock data (grep clean)
+
+### Stats: 138/253 passing (54.5%)
+
+---
+
+## Session: 2026-02-17 (Feature #169 - Subscription expiration warning) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #169: "Subscription expiration warning" - Notify before expiry
+- Category: Subscriptions
+- Steps: Configure notification, Simulate near expiration, Verify warning sent, Verify days remaining shown, Verify renewal options in notification
+
+### What was accomplished:
+- Created full subscription expiration warning system with real DB persistence
+- New API endpoint with GET (status check) and POST (send warnings/simulate)
+- Integrated expiration warning card into subscription management page
+- Dev mode simulation moves currentPeriodEnd to 3 days from now in PostgreSQL
+
+### New files:
+- **src/app/api/subscriptions/expiration-warning/route.ts**
+  - GET: Returns expiration status (daysRemaining, warningThreshold, isNearExpiry, recentWarnings)
+  - POST: Checks/creates warning notifications, optional simulate mode
+  - Creates email + push notification records in notifications table
+  - Simulation mode adjusts currentPeriodEnd in salonSubscriptions
+
+### Modified files:
+- **src/app/dashboard/subscription/page.tsx**
+  - Added "Expiration Warning Card" between Current Plan and Automatic Renewal cards
+  - Days remaining with color coding: red (≤3 days), amber (≤7 days), green (>7 days)
+  - Near-expiry warning banner with "Sprawdz metode platnosci" and "Odnow teraz" buttons
+  - "Ostatnie ostrzezenia" section showing recent notification history with type badges
+  - Dev mode controls: "Symuluj wygasniecie (3 dni)" and "Wyslij ostrzezenie" buttons
+
+### Verification (browser automation):
+- ✅ Initial state: 59 days remaining (green), proper date and amount display
+- ✅ Simulation: Clicked "Symuluj wygasniecie (3 dni)" → period end moved to 3 days
+- ✅ Warning UI: Card changed to amber "Ostrzezenie o wygasnieciu" with "Wygasa wkrotce" badge
+- ✅ Days remaining: "3 dni" in red, with warning banner
+- ✅ Notifications created: 2 notifications (Email + Push) with "Wyslano" status
+- ✅ Renewal options: "Sprawdz metode platnosci" and "Odnow teraz" action buttons visible
+- ✅ Persistence: Full page refresh confirmed all data persists from PostgreSQL
+- ✅ Console: 0 errors
+- ✅ No mock data (grep clean)
+
+### Stats: 137/253 passing (54.2%)
+
+---
+
 ## Session: 2026-02-17 (Feature #168 - Automatic subscription renewal) *** SUCCESS ***
 
 ### Feature Assigned

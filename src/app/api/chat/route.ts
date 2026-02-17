@@ -3,6 +3,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { streamText, UIMessage, convertToModelMessages } from "ai";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
+import { isProPlan } from "@/lib/subscription";
 
 // Zod schema for message validation
 const messagePartSchema = z.object({
@@ -29,6 +30,21 @@ export async function POST(req: Request) {
       status: 401,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // Check Pro plan requirement - AI features are Pro-only
+  const hasPro = await isProPlan();
+  if (!hasPro) {
+    return new Response(
+      JSON.stringify({
+        error: "Funkcje AI sa dostepne tylko w Planie Pro. Przejdz na Plan Pro, aby korzystac z asystenta AI.",
+        code: "PLAN_UPGRADE_REQUIRED",
+      }),
+      {
+        status: 403,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
   }
 
   // Parse and validate request body

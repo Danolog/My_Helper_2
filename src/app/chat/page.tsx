@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth-client";
+import { useSubscription } from "@/hooks/use-subscription";
+import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import type { Components } from "react-markdown";
 
 const H1: React.FC<React.HTMLAttributes<HTMLHeadingElement>> = (props) => (
@@ -188,7 +190,7 @@ function ThinkingIndicator() {
 
 const STORAGE_KEY = "chat-messages";
 
-export default function ChatPage() {
+function ChatContent() {
   const { data: session, isPending } = useSession();
   const { messages, sendMessage, status, error, setMessages } = useChat({
     onError: (err) => {
@@ -344,5 +346,22 @@ export default function ChatPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <ProPlanGate
+      featureName="Chat AI"
+      featureDescription="Rozmawiaj z asystentem AI o swoim biznesie - analizuj dane, planuj i optymalizuj dzialanie salonu."
+      proBenefits={[
+        "Rozmowa z AI w kontekscie danych Twojego salonu",
+        "Analiza trendow i rekomendacje",
+        "Pomoc w planowaniu marketingu",
+        "Optymalizacja harmonogramu i cen",
+      ]}
+    >
+      <ChatContent />
+    </ProPlanGate>
   );
 }
