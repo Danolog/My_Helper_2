@@ -18,6 +18,10 @@ import {
   AlertTriangle,
   ArrowUp,
   Sparkles,
+  Clock,
+  Bell,
+  ShieldAlert,
+  Timer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -165,6 +169,35 @@ export default function SubscriptionPage() {
   const [changePlanLoading, setChangePlanLoading] = useState(false);
   const [downgradeLoading, setDowngradeLoading] = useState(false);
   const [cancelDowngradeLoading, setCancelDowngradeLoading] = useState(false);
+  const [renewLoading, setRenewLoading] = useState(false);
+  const [expirationData, setExpirationData] = useState<{
+    daysRemaining: number | null;
+    warningThreshold: number;
+    isNearExpiry: boolean;
+    renewalAmount: string | null;
+    recentWarnings: Array<{
+      id: string;
+      type: string;
+      message: string;
+      status: string;
+      sentAt: string | null;
+      createdAt: string;
+    }>;
+  } | null>(null);
+  const [simulateLoading, setSimulateLoading] = useState(false);
+  const [sendWarningLoading, setSendWarningLoading] = useState(false);
+
+  const fetchExpirationWarning = useCallback(async () => {
+    try {
+      const res = await fetch("/api/subscriptions/expiration-warning");
+      const data = await res.json();
+      if (res.ok && data.success && data.data) {
+        setExpirationData(data.data);
+      }
+    } catch {
+      // Non-critical, silently fail
+    }
+  }, []);
 
   const fetchSubscription = useCallback(async () => {
     try {
@@ -201,7 +234,8 @@ export default function SubscriptionPage() {
 
   useEffect(() => {
     fetchSubscription();
-  }, [fetchSubscription]);
+    fetchExpirationWarning();
+  }, [fetchSubscription, fetchExpirationWarning]);
 
   /**
    * Cancel the current subscription.
@@ -338,6 +372,107 @@ export default function SubscriptionPage() {
       toast.error("Wystapil blad podczas anulowania obnizenia planu");
     } finally {
       setCancelDowngradeLoading(false);
+    }
+  }, [fetchSubscription]);
+
+  /**
+   * Simulate near-expiry by moving period end to 3 days from now (dev mode).
+   */
+  const handleSimulateNearExpiry = useCallback(async () => {
+    setSimulateLoading(true);
+    try {
+      const res = await fetch("/api/subscriptions/expiration-warning", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ simulate: true }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        toast.error(data.error || "Nie udalo sie zasymulowac wygasniecia");
+        return;
+      }
+
+      toast.success("Symulacja wygasniecia aktywowana!", {
+        description: `Subskrypcja wygasa za ${data.daysRemaining} dni. Ostrzezenie zostalo wyslane.`,
+      });
+
+      // Refresh all data
+      setLoading(true);
+      await Promise.all([fetchSubscription(), fetchExpirationWarning()]);
+    } catch {
+      toast.error("Wystapil blad podczas symulacji wygasniecia");
+    } finally {
+      setSimulateLoading(false);
+    }
+  }, [fetchSubscription, fetchExpirationWarning]);
+
+  /**
+   * Manually send expiration warning notification.
+   */
+  const handleSendWarning = useCallback(async () => {
+    setSendWarningLoading(true);
+    try {
+      const res = await fetch("/api/subscriptions/expiration-warning", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ warningDays: 30 }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        toast.error(data.error || "Nie udalo sie wyslac ostrzezenia");
+        return;
+      }
+
+      if (data.warnings && data.warnings.length > 0) {
+        toast.success("Ostrzezenie wyslane!", {
+          description: `Wyslano ${data.warnings.length} powiadomien. Subskrypcja wygasa za ${data.daysRemaining} dni.`,
+        });
+      } else {
+        toast.info("Brak potrzeby ostrzezenia", {
+          description: data.message,
+        });
+      }
+
+      await fetchExpirationWarning();
+    } catch {
+      toast.error("Wystapil blad podczas wysylania ostrzezenia");
+    } finally {
+      setSendWarningLoading(false);
+    }
+  }, [fetchExpirationWarning]);
+
+  /**
+   * Simulate automatic subscription renewal (dev mode).
+   * In production, this is handled by Stripe webhooks (invoice.paid).
+   */
+  const handleSimulateRenewal = useCallback(async () => {
+    setRenewLoading(true);
+    try {
+      const res = await fetch("/api/subscriptions/renew", {
+        method: "POST",
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        toast.error(data.error || "Nie udalo sie odnowic subskrypcji");
+        return;
+      }
+
+      toast.success("Subskrypcja odnowiona!", {
+        description: data.planChanged
+          ? `Plan zmieniony z ${data.previousPlan} na ${data.newPlan}. Nowy okres do ${formatDate(data.subscription?.currentPeriodEnd)}.`
+          : `Nowy okres rozliczeniowy do ${formatDate(data.subscription?.currentPeriodEnd)}. Oplata: ${data.subscription?.amount} PLN.`,
+      });
+
+      // Refresh subscription data
+      setLoading(true);
+      await fetchSubscription();
+    } catch {
+      toast.error("Wystapil blad podczas odnawiania subskrypcji");
+    } finally {
+      setRenewLoading(false);
     }
   }, [fetchSubscription]);
 
@@ -881,6 +1016,305 @@ export default function SubscriptionPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Expiration Warning Card */}
+          {subscription.status === "active" && expirationData && (
+            <Card className={expirationData.isNearExpiry ? "border-amber-300 dark:border-amber-700" : ""}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`flex items-center justify-center w-10 h-10 rounded-lg ${
+                      expirationData.isNearExpiry
+                        ? "bg-amber-100 dark:bg-amber-950/30"
+                        : "bg-blue-100 dark:bg-blue-950/30"
+                    }`}>
+                      {expirationData.isNearExpiry ? (
+                        <ShieldAlert className="h-5 w-5 text-amber-600" />
+                      ) : (
+                        <Timer className="h-5 w-5 text-blue-600" />
+                      )}
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg">
+                        {expirationData.isNearExpiry
+                          ? "Ostrzezenie o wygasnieciu"
+                          : "Status subskrypcji"}
+                      </CardTitle>
+                      <CardDescription>
+                        {expirationData.isNearExpiry
+                          ? "Twoja subskrypcja wkrotce wygasa"
+                          : "Informacje o terminie odnowienia"}
+                      </CardDescription>
+                    </div>
+                  </div>
+                  {expirationData.isNearExpiry && (
+                    <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 border-amber-200">
+                      <Clock className="h-3 w-3 mr-1" />
+                      Wygasa wkrotce
+                    </Badge>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Days remaining display */}
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Dni do odnowienia</span>
+                    <span className={`font-bold text-lg ${
+                      expirationData.daysRemaining !== null && expirationData.daysRemaining <= 3
+                        ? "text-red-600"
+                        : expirationData.isNearExpiry
+                          ? "text-amber-600"
+                          : "text-green-600"
+                    }`}>
+                      {expirationData.daysRemaining !== null
+                        ? `${expirationData.daysRemaining} ${expirationData.daysRemaining === 1 ? "dzien" : "dni"}`
+                        : "-"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Data odnowienia</span>
+                    <span className="font-medium">
+                      {formatDate(subscription.currentPeriodEnd)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Kwota odnowienia</span>
+                    <span className="font-medium">
+                      {expirationData.renewalAmount
+                        ? `${parseFloat(expirationData.renewalAmount).toFixed(2)} PLN`
+                        : "-"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Prog ostrzezenia</span>
+                    <span className="font-medium">
+                      {expirationData.warningThreshold} dni przed wygasnieciem
+                    </span>
+                  </div>
+                </div>
+
+                {/* Near expiry warning banner */}
+                {expirationData.isNearExpiry && (
+                  <div className="flex items-start gap-3 p-4 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800">
+                    <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                        Subskrypcja wygasa za {expirationData.daysRemaining}{" "}
+                        {expirationData.daysRemaining === 1 ? "dzien" : "dni"}!
+                      </p>
+                      <p className="text-sm text-amber-600 dark:text-amber-300 mt-1">
+                        Upewnij sie, ze Twoja metoda platnosci jest aktualna, aby uniknac
+                        przerwy w dostepie do uslug. Kwota odnowienia:{" "}
+                        <span className="font-semibold">
+                          {expirationData.renewalAmount
+                            ? `${parseFloat(expirationData.renewalAmount).toFixed(2)} PLN`
+                            : "-"}
+                        </span>.
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <Button size="sm" variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-100">
+                          <CreditCard className="h-3 w-3 mr-2" />
+                          Sprawdz metode platnosci
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleSimulateRenewal}
+                          disabled={renewLoading}
+                        >
+                          {renewLoading ? (
+                            <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-3 w-3 mr-2" />
+                          )}
+                          Odnow teraz
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Recent warnings */}
+                {expirationData.recentWarnings.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <Bell className="h-3.5 w-3.5" />
+                      Ostatnie ostrzezenia
+                    </h4>
+                    <div className="space-y-2">
+                      {expirationData.recentWarnings.map((warning) => (
+                        <div
+                          key={warning.id}
+                          className="flex items-start gap-3 p-3 rounded-lg border text-sm"
+                        >
+                          <div className={`mt-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${
+                            warning.type === "email"
+                              ? "bg-blue-100 text-blue-700"
+                              : warning.type === "push"
+                                ? "bg-purple-100 text-purple-700"
+                                : "bg-gray-100 text-gray-700"
+                          }`}>
+                            {warning.type === "email" ? "Email" : warning.type === "push" ? "Push" : warning.type.toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-muted-foreground line-clamp-2">
+                              {warning.message}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {warning.sentAt ? formatDate(warning.sentAt) : formatDate(warning.createdAt)}
+                            </p>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className={
+                              warning.status === "sent"
+                                ? "bg-green-50 text-green-700 border-green-200"
+                                : warning.status === "pending"
+                                  ? "bg-amber-50 text-amber-700 border-amber-200"
+                                  : "bg-red-50 text-red-700 border-red-200"
+                            }
+                          >
+                            {warning.status === "sent"
+                              ? "Wyslano"
+                              : warning.status === "pending"
+                                ? "Oczekuje"
+                                : "Blad"}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Dev mode: Simulation controls */}
+                <div className="pt-2 border-t">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+                    Tryb deweloperski
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSimulateNearExpiry}
+                      disabled={simulateLoading}
+                    >
+                      {simulateLoading ? (
+                        <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                      ) : (
+                        <ShieldAlert className="h-3 w-3 mr-2" />
+                      )}
+                      Symuluj wygasniecie (3 dni)
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSendWarning}
+                      disabled={sendWarningLoading}
+                    >
+                      {sendWarningLoading ? (
+                        <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                      ) : (
+                        <Bell className="h-3 w-3 mr-2" />
+                      )}
+                      Wyslij ostrzezenie
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Automatic Renewal Card */}
+          {subscription.status === "active" && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-green-100 dark:bg-green-950/30">
+                    <RefreshCw className="h-5 w-5 text-green-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">
+                      Automatyczne odnowienie
+                    </CardTitle>
+                    <CardDescription>
+                      Subskrypcja odnawia sie automatycznie co miesiac
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Status odnowienia</span>
+                    <Badge className="bg-green-100 text-green-800 hover:bg-green-100 border-green-200">
+                      Aktywne
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Nastepne odnowienie</span>
+                    <span className="font-medium">
+                      {formatDate(subscription.currentPeriodEnd)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Kwota odnowienia</span>
+                    <span className="font-medium">
+                      {scheduledPlan
+                        ? `${parseFloat(scheduledPlan.priceMonthly).toFixed(2)} PLN (plan ${scheduledPlan.name})`
+                        : `${parseFloat(plan.priceMonthly).toFixed(2)} PLN`}
+                    </span>
+                  </div>
+                  {scheduledPlan && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Zmiana planu</span>
+                      <span className="font-medium text-amber-600">
+                        {plan.name} → {scheduledPlan.name}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                  <CalendarDays className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>
+                    Twoja subskrypcja zostanie automatycznie odnowiona{" "}
+                    {formatDate(subscription.currentPeriodEnd)}. Oplata{" "}
+                    {scheduledPlan
+                      ? `${parseFloat(scheduledPlan.priceMonthly).toFixed(2)} PLN`
+                      : `${parseFloat(plan.priceMonthly).toFixed(2)} PLN`}{" "}
+                    zostanie pobrana automatycznie z Twojej metody platnosci.
+                  </span>
+                </div>
+
+                {/* Dev mode: Simulate renewal button */}
+                <div className="pt-2 border-t">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                        Tryb deweloperski
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Symuluj automatyczne odnowienie subskrypcji
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSimulateRenewal}
+                      disabled={renewLoading}
+                    >
+                      {renewLoading ? (
+                        <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3 w-3 mr-2" />
+                      )}
+                      Symuluj odnowienie
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Subscription ID info (dev info) */}
           {subscription.stripeSubscriptionId && (
