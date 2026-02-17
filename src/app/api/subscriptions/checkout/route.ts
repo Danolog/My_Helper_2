@@ -34,21 +34,22 @@ async function createSimulatedSubscription(
   const periodEnd = new Date(now);
   periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-  // Check if there is an existing trialing subscription to upgrade
-  const existingTrialing = await db
+  // Check if there is an existing trialing or canceled subscription to reactivate
+  const { inArray } = await import("drizzle-orm");
+  const existingReusable = await db
     .select()
     .from(salonSubscriptions)
     .where(
       and(
         eq(salonSubscriptions.salonId, _salonId),
-        eq(salonSubscriptions.status, "trialing"),
+        inArray(salonSubscriptions.status, ["trialing", "canceled"]),
       ),
     );
 
   let subscription;
 
-  if (existingTrialing.length > 0 && existingTrialing[0]) {
-    // Upgrade existing trialing subscription to active
+  if (existingReusable.length > 0 && existingReusable[0]) {
+    // Reactivate existing subscription (trialing or canceled)
     const [updated] = await db
       .update(salonSubscriptions)
       .set({
@@ -59,14 +60,15 @@ async function createSimulatedSubscription(
         currentPeriodStart: now,
         currentPeriodEnd: periodEnd,
         trialEndsAt: null,
+        canceledAt: null,
       })
-      .where(eq(salonSubscriptions.id, existingTrialing[0].id))
+      .where(eq(salonSubscriptions.id, existingReusable[0].id))
       .returning();
 
     subscription = updated;
     // eslint-disable-next-line no-console
     console.log(
-      `[Subscriptions API] Upgraded trialing subscription ${existingTrialing[0].id} to active`,
+      `[Subscriptions API] Reactivated ${existingReusable[0].status} subscription ${existingReusable[0].id} to active`,
     );
   } else {
     // Create new active subscription
@@ -219,7 +221,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         success: true,
-        url: "/dashboard/subscription?activated=true",
+        url: `/dashboard/subscription?upgraded=true`,
       });
     }
 
