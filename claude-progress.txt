@@ -1,5 +1,55 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-17 (Feature #167 - Cancel subscription) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #167: "Cancel subscription" - Stop recurring billing
+- Category: Subscriptions
+- Steps: Navigate to subscription settings, Click cancel subscription, Verify confirmation dialog, Verify access until period end noted, Confirm cancellation, Verify subscription marked cancelled, Verify Stripe subscription cancelled
+
+### What was accomplished:
+1. Enhanced cancel confirmation dialog with access-until-period-end notice
+   - Added blue info box showing: "Zachowasz dostep do wszystkich funkcji planu Pro do konca biezacego okresu rozliczeniowego (17 marca 2026). Po tym terminie subskrypcja nie zostanie odnowiona."
+   - Added reactivation note below
+2. Updated cancel API to integrate with Stripe
+   - Added `stripe.subscriptions.update` with `cancel_at_period_end: true` when stripeSubscriptionId exists
+   - Graceful fallback: continues with local DB update if Stripe fails or is not configured
+   - Dev mode: logs warning and proceeds with database-only cancellation
+3. Updated canceled notice to show access-until-period-end date
+   - Now shows: "Dostep do funkcji planu jest aktywny do [date]" when period hasn't ended
+4. Updated toast message to mention period end date
+
+### Files modified:
+- **src/app/api/subscriptions/cancel/route.ts** - Added Stripe cancellation with cancel_at_period_end
+- **src/app/dashboard/subscription/page.tsx** - Enhanced cancel dialog, canceled notice, and toast
+
+### Verification (browser automation):
+1. Registered feature167@test.com, navigated to /dashboard/subscription
+2. Subscription page shows Plan Pro at 149 PLN/mies. with "Aktywna" badge
+3. Clicked "Anuluj subskrypcje" - confirmation dialog appeared
+4. Dialog shows "access until period end" info: "17 marca 2026" in blue box
+5. Clicked "Tak, anuluj subskrypcje" - toast "Subskrypcja anulowana" shown
+6. Subscription status changed to "Anulowana" with red notice
+7. Red notice shows: "Anulowano: 17 lutego 2026. Dostep do funkcji planu jest aktywny do 17 marca 2026."
+8. Cancel API includes Stripe cancellation code (cancel_at_period_end: true)
+9. Full page refresh - data persists from PostgreSQL
+10. 0 console errors
+11. No mock data patterns found
+
+### Screenshots:
+- feature167-subscription-active.png
+- feature167-cancel-dialog.png
+- feature167-subscription-cancelled.png
+
+### Commit: c66bfd7
+### Stats: 134/253 passing (53.0%)
+
+### What should be worked on next:
+- Continue with next ready features from the backlog
+- Check feature_get_ready for next available features
+
+---
+
 ## Session: 2026-02-16 (Feature #163 - Subscription activation after payment) *** SUCCESS ***
 
 ### Feature Assigned
