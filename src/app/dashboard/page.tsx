@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock, Cake, Package, BarChart3, Percent, Ticket, Gift, DollarSign, Printer, FileText, Crown, Bot, Lightbulb, PenTool } from "lucide-react";
+import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock, Cake, Package, BarChart3, Percent, Ticket, Gift, DollarSign, Printer, FileText, Crown, Bot, Lightbulb, PenTool, Timer, AlertTriangle } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +10,7 @@ import { useSession } from "@/lib/auth-client";
 
 export default function DashboardPage() {
   const { data: session, isPending } = useSession();
-  const { isProPlan } = useSubscription();
+  const { isProPlan, isTrialing, trialDaysRemaining } = useSubscription();
 
   if (isPending) {
     return (
@@ -42,6 +42,49 @@ export default function DashboardPage() {
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Dashboard</h1>
       </div>
+
+      {/* Trial period banner */}
+      {isTrialing && trialDaysRemaining !== null && (
+        <div className={`flex items-center gap-3 p-4 rounded-lg border mb-6 ${
+          trialDaysRemaining <= 3
+            ? "bg-amber-50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-800"
+            : "bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-800"
+        }`}>
+          {trialDaysRemaining <= 3 ? (
+            <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
+          ) : (
+            <Timer className="h-5 w-5 text-blue-600 shrink-0" />
+          )}
+          <div className="flex-1">
+            <p className={`text-sm font-medium ${
+              trialDaysRemaining <= 3
+                ? "text-amber-800 dark:text-amber-200"
+                : "text-blue-800 dark:text-blue-200"
+            }`}>
+              {trialDaysRemaining <= 3
+                ? `Okres probny konczy sie za ${trialDaysRemaining} ${trialDaysRemaining === 1 ? "dzien" : "dni"}!`
+                : `Okres probny - pozostalo ${trialDaysRemaining} ${trialDaysRemaining === 1 ? "dzien" : "dni"}`
+              }
+            </p>
+            <p className={`text-xs mt-0.5 ${
+              trialDaysRemaining <= 3
+                ? "text-amber-600 dark:text-amber-300"
+                : "text-blue-600 dark:text-blue-300"
+            }`}>
+              {trialDaysRemaining <= 3
+                ? "Wykup subskrypcje, aby zachowac dostep do wszystkich funkcji."
+                : "Korzystasz z pelnych funkcji w ramach 14-dniowego okresu probnego."
+              }
+            </p>
+          </div>
+          <Button asChild size="sm" variant={trialDaysRemaining <= 3 ? "default" : "outline"}>
+            <Link href="/dashboard/subscription">
+              <CreditCard className="h-3 w-3 mr-2" />
+              {trialDaysRemaining <= 3 ? "Wykup teraz" : "Zarzadzaj"}
+            </Link>
+          </Button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <div className="p-6 border border-border rounded-lg">
