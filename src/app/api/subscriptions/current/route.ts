@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
+import { alias } from "drizzle-orm/pg-core";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -51,6 +52,26 @@ export async function GET() {
       });
     }
 
+    // If there's a scheduled plan change (downgrade), fetch the target plan details
+    let scheduledPlan: { id: string; name: string; slug: string; priceMonthly: string; features: string[] } | null = null;
+    if (row.subscription.scheduledPlanId) {
+      const scheduledPlanAlias = alias(subscriptionPlans, "scheduled_plan");
+      const [targetPlan] = await db
+        .select()
+        .from(scheduledPlanAlias)
+        .where(eq(scheduledPlanAlias.id, row.subscription.scheduledPlanId));
+
+      if (targetPlan) {
+        scheduledPlan = {
+          id: targetPlan.id,
+          name: targetPlan.name,
+          slug: targetPlan.slug,
+          priceMonthly: targetPlan.priceMonthly,
+          features: targetPlan.featuresJson as string[],
+        };
+      }
+    }
+
     return NextResponse.json({
       success: true,
       subscription: {
@@ -64,6 +85,8 @@ export async function GET() {
         currentPeriodStart: row.subscription.currentPeriodStart,
         currentPeriodEnd: row.subscription.currentPeriodEnd,
         canceledAt: row.subscription.canceledAt,
+        scheduledPlanId: row.subscription.scheduledPlanId,
+        scheduledChangeAt: row.subscription.scheduledChangeAt,
         createdAt: row.subscription.createdAt,
       },
       plan: {
@@ -74,6 +97,7 @@ export async function GET() {
         features: row.plan.featuresJson as string[],
         isActive: row.plan.isActive,
       },
+      scheduledPlan,
     });
   } catch (error) {
     console.error("[Subscriptions API] Error fetching current subscription:", error);
