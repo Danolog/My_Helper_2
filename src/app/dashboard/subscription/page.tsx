@@ -53,6 +53,8 @@ type SubscriptionData = {
   currentPeriodStart: string | null;
   currentPeriodEnd: string | null;
   canceledAt: string | null;
+  scheduledPlanId: string | null;
+  scheduledChangeAt: string | null;
   createdAt: string;
 };
 
@@ -64,6 +66,14 @@ type PlanData = {
   features: string[];
   isActive: boolean;
 };
+
+type ScheduledPlanData = {
+  id: string;
+  name: string;
+  slug: string;
+  priceMonthly: string;
+  features: string[];
+} | null;
 
 type AllPlansMap = Record<string, PlanData>;
 
@@ -118,6 +128,7 @@ function ActivationToast() {
   const searchParams = useSearchParams();
   const activated = searchParams.get("activated");
   const upgraded = searchParams.get("upgraded");
+  const downgraded = searchParams.get("downgraded");
 
   useEffect(() => {
     if (upgraded === "true") {
@@ -130,8 +141,13 @@ function ActivationToast() {
         description: "Twoj plan zostal pomyslnie aktywowany.",
       });
       window.history.replaceState(null, "", "/dashboard/subscription");
+    } else if (downgraded === "true") {
+      toast.success("Obnizenie planu zaplanowane!", {
+        description: "Plan zostanie zmieniony na Basic po zakonczeniu biezacego okresu rozliczeniowego.",
+      });
+      window.history.replaceState(null, "", "/dashboard/subscription");
     }
-  }, [activated, upgraded]);
+  }, [activated, upgraded, downgraded]);
 
   return null;
 }
@@ -142,10 +158,13 @@ export default function SubscriptionPage() {
   );
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [allPlans, setAllPlans] = useState<AllPlansMap>({});
+  const [scheduledPlan, setScheduledPlan] = useState<ScheduledPlanData>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [changePlanLoading, setChangePlanLoading] = useState(false);
+  const [downgradeLoading, setDowngradeLoading] = useState(false);
+  const [cancelDowngradeLoading, setCancelDowngradeLoading] = useState(false);
 
   const fetchSubscription = useCallback(async () => {
     try {
@@ -163,6 +182,7 @@ export default function SubscriptionPage() {
 
       setSubscription(subData.subscription ?? null);
       setPlan(subData.plan ?? null);
+      setScheduledPlan(subData.scheduledPlan ?? null);
 
       // Build a map of all plans by slug for price comparison
       if (plansData.success && Array.isArray(plansData.data)) {
@@ -200,7 +220,9 @@ export default function SubscriptionPage() {
       }
 
       toast.success("Subskrypcja anulowana", {
-        description: "Twoja subskrypcja zostala pomyslnie anulowana.",
+        description: subscription?.currentPeriodEnd
+          ? `Dostep do planu jest aktywny do ${formatDate(subscription.currentPeriodEnd)}. Subskrypcja nie zostanie odnowiona.`
+          : "Twoja subskrypcja zostala pomyslnie anulowana.",
       });
 
       // Refresh subscription data
@@ -214,8 +236,8 @@ export default function SubscriptionPage() {
   }, [fetchSubscription]);
 
   /**
-   * Change the plan (upgrade or downgrade).
-   * Uses the checkout API which handles both new subscriptions and plan changes.
+   * Change the plan (upgrade only).
+   * Uses the checkout API which handles new subscriptions and upgrades.
    */
   const handleChangePlan = useCallback(
     async (targetSlug: string) => {
@@ -251,6 +273,73 @@ export default function SubscriptionPage() {
     },
     [fetchSubscription],
   );
+
+  /**
+   * Schedule a downgrade to a lower plan.
+   * The change takes effect at the end of the current billing period.
+   */
+  const handleDowngrade = useCallback(
+    async (targetSlug: string) => {
+      setDowngradeLoading(true);
+      try {
+        const res = await fetch("/api/subscriptions/downgrade", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetPlanSlug: targetSlug }),
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          toast.error(data.error || "Nie udalo sie zaplanowac obnizenia planu");
+          return;
+        }
+
+        toast.success("Obnizenie planu zaplanowane", {
+          description:
+            "Plan zostanie zmieniony na Basic po zakonczeniu biezacego okresu rozliczeniowego.",
+        });
+
+        // Refresh subscription data
+        setLoading(true);
+        await fetchSubscription();
+      } catch {
+        toast.error("Wystapil blad podczas obnizania planu");
+      } finally {
+        setDowngradeLoading(false);
+      }
+    },
+    [fetchSubscription],
+  );
+
+  /**
+   * Cancel a scheduled downgrade.
+   */
+  const handleCancelDowngrade = useCallback(async () => {
+    setCancelDowngradeLoading(true);
+    try {
+      const res = await fetch("/api/subscriptions/downgrade", {
+        method: "DELETE",
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        toast.error(data.error || "Nie udalo sie anulowac obnizenia planu");
+        return;
+      }
+
+      toast.success("Obnizenie planu anulowane", {
+        description: "Twoj plan Pro pozostaje aktywny.",
+      });
+
+      // Refresh subscription data
+      setLoading(true);
+      await fetchSubscription();
+    } catch {
+      toast.error("Wystapil blad podczas anulowania obnizenia planu");
+    } finally {
+      setCancelDowngradeLoading(false);
+    }
+  }, [fetchSubscription]);
 
   return (
     <div className="container mx-auto p-6 max-w-4xl">
@@ -408,10 +497,69 @@ export default function SubscriptionPage() {
                     </p>
                     <p className="text-sm text-red-600 dark:text-red-300">
                       {subscription.canceledAt
-                        ? `Anulowano: ${formatDate(subscription.canceledAt)}`
-                        : "Twoja subskrypcja zostala anulowana."}
+                        ? `Anulowano: ${formatDate(subscription.canceledAt)}. `
+                        : "Twoja subskrypcja zostala anulowana. "}
+                      {subscription.currentPeriodEnd && new Date(subscription.currentPeriodEnd) > new Date()
+                        ? `Dostep do funkcji planu jest aktywny do ${formatDate(subscription.currentPeriodEnd)}.`
+                        : "Dostep do funkcji planu zakonczyl sie."
+                      }
                       {" "}Mozesz w kazdej chwili ponownie aktywowac plan.
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Pending downgrade notice */}
+              {subscription.scheduledPlanId && scheduledPlan && (
+                <div className="flex items-start gap-3 p-4 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                      Zaplanowane obnizenie planu
+                    </p>
+                    <p className="text-sm text-amber-600 dark:text-amber-300">
+                      Twoj plan zostanie zmieniony na{" "}
+                      <span className="font-semibold">{scheduledPlan.name}</span>{" "}
+                      ({parseFloat(scheduledPlan.priceMonthly).toFixed(0)} PLN / mies.)
+                      {subscription.scheduledChangeAt
+                        ? ` dnia ${formatDate(subscription.scheduledChangeAt)}`
+                        : " po zakonczeniu biezacego okresu rozliczeniowego"}
+                      . Do tego czasu zachowujesz pelny dostep do funkcji Pro.
+                    </p>
+                    <div className="mt-3">
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={cancelDowngradeLoading}
+                            className="border-amber-300 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:text-amber-300 dark:hover:bg-amber-950"
+                          >
+                            {cancelDowngradeLoading ? (
+                              <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                            ) : (
+                              <XCircle className="h-3 w-3 mr-2" />
+                            )}
+                            Anuluj obnizenie planu
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Anulowac obnizenie planu?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Twoj plan Pro pozostanie aktywny bez zmian. Zaplanowane
+                              obnizenie do planu {scheduledPlan.name} zostanie anulowane.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Nie, zachowaj obnizenie</AlertDialogCancel>
+                            <AlertDialogAction onClick={handleCancelDowngrade}>
+                              Tak, anuluj obnizenie
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
                   </div>
                 </div>
               )}
@@ -531,15 +679,15 @@ export default function SubscriptionPage() {
                   </AlertDialog>
                 )}
 
-                {/* Downgrade: Pro → Basic */}
-                {subscription.status === "active" && plan.slug === "pro" && (
+                {/* Downgrade: Pro → Basic (only if no pending downgrade) */}
+                {subscription.status === "active" && plan.slug === "pro" && !subscription.scheduledPlanId && (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button
                         variant="outline"
-                        disabled={changePlanLoading}
+                        disabled={downgradeLoading}
                       >
-                        {changePlanLoading ? (
+                        {downgradeLoading ? (
                           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         ) : (
                           <ArrowDownRight className="h-4 w-4 mr-2" />
@@ -547,19 +695,107 @@ export default function SubscriptionPage() {
                         Zmien na Basic
                       </Button>
                     </AlertDialogTrigger>
-                    <AlertDialogContent>
+                    <AlertDialogContent className="max-w-lg">
                       <AlertDialogHeader>
-                        <AlertDialogTitle>Zmiana na plan Basic?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Po zmianie na plan Basic stracisz dostep do funkcji AI,
-                          w tym asystenta glosowego, biznesowego i content
-                          marketingowego. Czy na pewno chcesz kontynuowac?
+                        <AlertDialogTitle className="flex items-center gap-2">
+                          <ArrowDownRight className="h-5 w-5 text-amber-600" />
+                          Obnizenie do planu Basic
+                        </AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                          <div className="space-y-4">
+                            <p>
+                              Czy na pewno chcesz obnizyc plan do Basic? Po zakonczeniu
+                              biezacego okresu rozliczeniowego stracisz dostep do:
+                            </p>
+
+                            {/* AI features that will be lost */}
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-4 space-y-2">
+                              <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                                Funkcje AI, ktore stracisz
+                              </p>
+                              <div className="grid gap-1.5">
+                                <div className="flex items-start gap-2 text-sm">
+                                  <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
+                                  <span>Asystent glosowy AI</span>
+                                </div>
+                                <div className="flex items-start gap-2 text-sm">
+                                  <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
+                                  <span>Asystent biznesowy AI</span>
+                                </div>
+                                <div className="flex items-start gap-2 text-sm">
+                                  <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
+                                  <span>Content marketing AI</span>
+                                </div>
+                                <div className="flex items-start gap-2 text-sm">
+                                  <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
+                                  <span>Automatyczne odpowiedzi na opinie</span>
+                                </div>
+                                <div className="flex items-start gap-2 text-sm">
+                                  <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
+                                  <span>Analiza sentymentu opinii</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Price comparison */}
+                            <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="flex items-center gap-2">
+                                  <Crown className="h-4 w-4 text-primary" />
+                                  <span className="font-medium">Obecny plan: Pro</span>
+                                </span>
+                                <span className="font-semibold">
+                                  {parseFloat(plan.priceMonthly).toFixed(0)} PLN / mies.
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-sm">
+                                <span className="flex items-center gap-2">
+                                  <Zap className="h-4 w-4 text-blue-600" />
+                                  <span className="font-medium">Nowy plan: Basic</span>
+                                </span>
+                                <span className="font-semibold">
+                                  {allPlans["basic"]
+                                    ? `${parseFloat(allPlans["basic"].priceMonthly).toFixed(0)} PLN / mies.`
+                                    : "49 PLN / mies."}
+                                </span>
+                              </div>
+                              <div className="border-t pt-2 flex items-center justify-between text-sm">
+                                <span className="font-medium text-green-600">Oszczedzasz</span>
+                                <span className="font-bold text-green-600">
+                                  {allPlans["basic"]
+                                    ? `${(parseFloat(plan.priceMonthly) - parseFloat(allPlans["basic"].priceMonthly)).toFixed(0)} PLN / mies.`
+                                    : "100 PLN / mies."}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* When it takes effect */}
+                            <div className="flex items-start gap-2 text-sm text-muted-foreground">
+                              <CalendarDays className="h-4 w-4 shrink-0 mt-0.5" />
+                              <span>
+                                Zmiana wejdzie w zycie po zakonczeniu biezacego okresu
+                                rozliczeniowego{subscription.currentPeriodEnd
+                                  ? ` (${formatDate(subscription.currentPeriodEnd)})`
+                                  : ""}.
+                                Do tego czasu zachowasz pelny dostep do funkcji Pro.
+                              </span>
+                            </div>
+                          </div>
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
                         <AlertDialogCancel>Anuluj</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => handleChangePlan("basic")}>
-                          Zmien na Basic
+                        <AlertDialogAction
+                          onClick={() => handleDowngrade("basic")}
+                          disabled={downgradeLoading}
+                          className="bg-amber-600 text-white hover:bg-amber-700"
+                        >
+                          {downgradeLoading ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <ArrowDownRight className="h-4 w-4 mr-2" />
+                          )}
+                          Potwierdz obnizenie planu
                         </AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>
@@ -585,10 +821,27 @@ export default function SubscriptionPage() {
                     <AlertDialogContent>
                       <AlertDialogHeader>
                         <AlertDialogTitle>Anulowac subskrypcje?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          Po anulowaniu subskrypcji stracisz dostep do funkcji
-                          planu {plan.name}. Mozesz ponownie aktywowac
-                          subskrypcje w dowolnym momencie.
+                        <AlertDialogDescription asChild>
+                          <div className="space-y-3">
+                            <p>
+                              Czy na pewno chcesz anulowac subskrypcje planu{" "}
+                              <span className="font-semibold">{plan.name}</span>?
+                            </p>
+                            <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-950/20 dark:border-blue-800">
+                              <CalendarDays className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+                              <p className="text-sm text-blue-700 dark:text-blue-300">
+                                Zachowasz dostep do wszystkich funkcji planu {plan.name} do
+                                konca biezacego okresu rozliczeniowego
+                                {subscription.currentPeriodEnd
+                                  ? ` (${formatDate(subscription.currentPeriodEnd)})`
+                                  : ""}
+                                . Po tym terminie subskrypcja nie zostanie odnowiona.
+                              </p>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              Mozesz ponownie aktywowac subskrypcje w dowolnym momencie.
+                            </p>
+                          </div>
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>

@@ -893,6 +893,8 @@ export const salonSubscriptions = pgTable(
     currentPeriodStart: timestamp("current_period_start"),
     currentPeriodEnd: timestamp("current_period_end"),
     canceledAt: timestamp("canceled_at"),
+    scheduledPlanId: uuid("scheduled_plan_id"), // Plan to switch to at period end (for downgrades)
+    scheduledChangeAt: timestamp("scheduled_change_at"), // When the scheduled plan change takes effect
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
