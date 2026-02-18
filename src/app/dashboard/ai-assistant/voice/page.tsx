@@ -143,6 +143,32 @@ type BookingResult = {
   conversationId: string | null;
 };
 
+type RescheduleResult = {
+  success: boolean;
+  appointment: {
+    id: string;
+    startTime: string;
+    endTime: string;
+    status: string;
+  };
+  details: {
+    appointmentId: string;
+    serviceName: string;
+    employeeName: string;
+    oldDate: string;
+    oldTime: string;
+    newDate: string;
+    newTime: string;
+    duration: number;
+    availableSlots: string[];
+  };
+  smsConfirmation: {
+    sent: boolean;
+    phone: string;
+  };
+  conversationId: string | null;
+};
+
 const DEFAULT_CONFIG: VoiceAiConfig = {
   enabled: false,
   greeting:
@@ -184,6 +210,15 @@ function VoiceAiContent() {
   const [bookingInProgress, setBookingInProgress] = useState(false);
   const [bookingResult, setBookingResult] = useState<BookingResult | null>(null);
   const [showBookingForm, setShowBookingForm] = useState(false);
+
+  // Voice reschedule flow state
+  const [reschedulePhone, setReschedulePhone] = useState("+48 123 456 789");
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleTime, setRescheduleTime] = useState("");
+  const [rescheduleAppointmentId, setRescheduleAppointmentId] = useState("");
+  const [rescheduleInProgress, setRescheduleInProgress] = useState(false);
+  const [rescheduleResult, setRescheduleResult] = useState<RescheduleResult | null>(null);
+  const [showRescheduleForm, setShowRescheduleForm] = useState(false);
 
   // Escalation message form state
   const [msgName, setMsgName] = useState("");
@@ -320,6 +355,11 @@ function VoiceAiContent() {
           setShowBookingForm(true);
           setBookingResult(null);
         }
+        // Auto-show reschedule form when reschedule intent is detected
+        if (data.intent === "reschedule") {
+          setShowRescheduleForm(true);
+          setRescheduleResult(null);
+        }
       } else {
         const data = await res.json();
         toast.error("Blad symulacji", {
@@ -438,6 +478,58 @@ function VoiceAiContent() {
       });
     } finally {
       setSendingMessage(false);
+    }
+  };
+
+  const handleVoiceReschedule = async () => {
+    if (!reschedulePhone.trim()) {
+      toast.error("Numer telefonu", {
+        description: "Prosze podac numer telefonu klienta.",
+      });
+      return;
+    }
+
+    if (!rescheduleDate) {
+      toast.error("Nowy termin", {
+        description: "Prosze podac nowa preferowana date.",
+      });
+      return;
+    }
+
+    setRescheduleInProgress(true);
+    setRescheduleResult(null);
+    try {
+      const res = await fetch("/api/ai/voice/reschedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          callerPhone: reschedulePhone.trim(),
+          appointmentId: rescheduleAppointmentId.trim() || undefined,
+          preferredDate: rescheduleDate || undefined,
+          preferredTime: rescheduleTime || undefined,
+          notes: "Zmiana terminu przez asystenta glosowego AI",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setRescheduleResult(data);
+        toast.success("Termin zmieniony!", {
+          description: `${data.details.serviceName}: ${data.details.oldDate} ${data.details.oldTime} → ${data.details.newDate} o ${data.details.newTime}`,
+        });
+        loadCallLog();
+      } else {
+        toast.error("Nie udalo sie zmienic terminu", {
+          description: data.error || "Prosze sprobowac inny termin.",
+        });
+      }
+    } catch {
+      toast.error("Blad", {
+        description: "Nie udalo sie polaczyc z serwerem.",
+      });
+    } finally {
+      setRescheduleInProgress(false);
     }
   };
 
@@ -1399,6 +1491,214 @@ function VoiceAiContent() {
                   >
                     <PhoneCall className="h-4 w-4" />
                     Nowa rezerwacja
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Voice Reschedule Flow */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calendar className="h-5 w-5 text-orange-600" />
+                Zmiana terminu przez telefon
+              </CardTitle>
+              <CardDescription>
+                Symuluj proces zmiany terminu wizyty przez asystenta glosowego
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!showRescheduleForm && !rescheduleResult && (
+                <Button
+                  onClick={() => {
+                    setShowRescheduleForm(true);
+                    setRescheduleResult(null);
+                  }}
+                  variant="outline"
+                  className="w-full gap-2"
+                >
+                  <Calendar className="h-4 w-4" />
+                  Rozpocznij zmiane terminu
+                </Button>
+              )}
+
+              {showRescheduleForm && !rescheduleResult && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 p-3 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm text-orange-800 dark:text-orange-200">
+                    <PhoneIncoming className="h-4 w-4 shrink-0" />
+                    Klient dzwoni i chce zmienic termin wizyty. Podaj numer telefonu i nowy preferowany termin.
+                  </div>
+
+                  {/* Caller Phone */}
+                  <div className="space-y-2">
+                    <Label htmlFor="reschedule-phone">
+                      <Phone className="inline h-3 w-3 mr-1" />
+                      Numer telefonu klienta *
+                    </Label>
+                    <Input
+                      id="reschedule-phone"
+                      value={reschedulePhone}
+                      onChange={(e) => setReschedulePhone(e.target.value)}
+                      placeholder="+48 123 456 789"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      System znajdzie najblizszą wizyty klienta po numerze telefonu
+                    </p>
+                  </div>
+
+                  {/* Optional: Direct appointment ID */}
+                  <div className="space-y-2">
+                    <Label htmlFor="reschedule-appt-id">
+                      ID wizyty (opcjonalnie)
+                    </Label>
+                    <Input
+                      id="reschedule-appt-id"
+                      value={rescheduleAppointmentId}
+                      onChange={(e) => setRescheduleAppointmentId(e.target.value)}
+                      placeholder="np. abc-123-def..."
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Zostaw puste - system automatycznie znajdzie najblizszą wizyte
+                    </p>
+                  </div>
+
+                  {/* New Date and Time */}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="reschedule-date">
+                        <Calendar className="inline h-3 w-3 mr-1" />
+                        Nowa data *
+                      </Label>
+                      <Input
+                        id="reschedule-date"
+                        type="date"
+                        value={rescheduleDate}
+                        onChange={(e) => setRescheduleDate(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="reschedule-time">
+                        <Clock className="inline h-3 w-3 mr-1" />
+                        Preferowana godzina
+                      </Label>
+                      <Input
+                        id="reschedule-time"
+                        type="time"
+                        value={rescheduleTime}
+                        onChange={(e) => setRescheduleTime(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Zostaw puste - system wybierze najblizszy wolny termin
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowRescheduleForm(false);
+                        setRescheduleResult(null);
+                      }}
+                    >
+                      Anuluj
+                    </Button>
+                    <Button
+                      onClick={handleVoiceReschedule}
+                      disabled={rescheduleInProgress || !rescheduleDate || !reschedulePhone.trim()}
+                      className="gap-2"
+                    >
+                      {rescheduleInProgress ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Calendar className="h-4 w-4" />
+                      )}
+                      Zmien termin
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Reschedule Result */}
+              {rescheduleResult && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-green-800 dark:text-green-200">
+                        Termin zmieniony pomyslnie!
+                      </p>
+                      <p className="text-sm text-green-700 dark:text-green-300">
+                        Asystent AI dokonal zmiany terminu przez telefon
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 p-4 border rounded-lg">
+                    <div>
+                      <span className="text-xs text-muted-foreground">Usluga:</span>
+                      <p className="font-medium">{rescheduleResult.details.serviceName}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Pracownik:</span>
+                      <p className="font-medium">{rescheduleResult.details.employeeName}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Poprzedni termin:</span>
+                      <p className="font-medium text-muted-foreground line-through">
+                        {rescheduleResult.details.oldDate} {rescheduleResult.details.oldTime}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Nowy termin:</span>
+                      <p className="font-medium text-primary">
+                        {rescheduleResult.details.newDate} o {rescheduleResult.details.newTime}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Czas trwania:</span>
+                      <p className="font-medium">{rescheduleResult.details.duration} min</p>
+                    </div>
+                  </div>
+
+                  {/* SMS Confirmation Status */}
+                  <div className="flex items-center gap-2 p-3 border rounded-lg">
+                    <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">
+                      SMS z nowym terminem:{" "}
+                      {rescheduleResult.smsConfirmation.sent ? (
+                        <Badge variant="default" className="bg-green-600 text-xs">
+                          Wyslany na {rescheduleResult.smsConfirmation.phone}
+                        </Badge>
+                      ) : (
+                        <Badge variant="destructive" className="text-xs">
+                          Nie udalo sie wyslac
+                        </Badge>
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="text-xs text-muted-foreground">
+                    ID wizyty:{" "}
+                    <code className="bg-muted px-1 py-0.5 rounded">
+                      {rescheduleResult.details.appointmentId}
+                    </code>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowRescheduleForm(false);
+                      setRescheduleResult(null);
+                      setRescheduleDate("");
+                      setRescheduleTime("");
+                      setRescheduleAppointmentId("");
+                    }}
+                    className="w-full gap-2"
+                  >
+                    <Calendar className="h-4 w-4" />
+                    Nowa zmiana terminu
                   </Button>
                 </div>
               )}

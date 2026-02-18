@@ -641,6 +641,119 @@ async function generateVoiceResponse(
 ): Promise<VoiceResponse> {
   const msg = callerMessage.toLowerCase();
 
+  // --- Escalation detection: complex requests the AI cannot handle ---
+
+  // Complaints and issues
+  const isComplaint = matchesIntent(msg, [
+    "reklamacj",
+    "skarg",
+    "problem",
+    "zly",
+    "zle",
+    "niezadowolon",
+    "zwrot",
+    "odszkodowan",
+    "complaint",
+  ]);
+
+  // Medical or health concerns
+  const isMedical = matchesIntent(msg, [
+    "alergi",
+    "uczulen",
+    "podrazn",
+    "bol",
+    "zranien",
+    "krew",
+    "medical",
+  ]);
+
+  // Financial disputes
+  const isFinancial = matchesIntent(msg, [
+    "faktur",
+    "rachun",
+    "rozliczen",
+    "blad platnosci",
+    "nadplat",
+    "refund",
+  ]);
+
+  // Legal or complex data privacy requests
+  const isLegal = matchesIntent(msg, [
+    "prawnik",
+    "umow",
+    "regulamin",
+    "rodo",
+    "ochrona danych",
+    "dane osobowe",
+  ]);
+
+  // Multi-intent complex: detect when the message contains multiple distinct intents
+  const intentSignals = [
+    matchesIntent(msg, ["umowic", "wizyta", "rezerwac", "termin", "zarezerwow"]),
+    matchesIntent(msg, ["odwolac", "anulowac", "rezygnuj"]),
+    matchesIntent(msg, ["cena", "ceny", "cennik", "ile kosztuje", "koszt"]),
+    matchesIntent(msg, ["reklamacj", "skarg", "problem"]),
+    matchesIntent(msg, ["faktur", "rachun"]),
+    matchesIntent(msg, ["przeniesc", "zmienic termin", "przesun", "przeloz"]),
+  ];
+  const detectedIntentCount = intentSignals.filter(Boolean).length;
+  const isMultiIntent = detectedIntentCount >= 2;
+
+  if (isComplaint || isMedical || isFinancial || isLegal || isMultiIntent) {
+    let escalationReason: string;
+    let responseMessage: string;
+
+    if (isMedical) {
+      escalationReason = "Zgloszenie dotyczace zdrowia lub reakcji alergicznej";
+      responseMessage =
+        "Bardzo przepraszam i rozumiem Pana/Pani niepokoj. Kwestie zdrowotne sa dla nas priorytetem. Ta sprawa wymaga bezposredniej rozmowy z naszym specjalista.";
+    } else if (isComplaint) {
+      escalationReason = "Reklamacja lub skarga klienta";
+      responseMessage =
+        "Przepraszam za niedogodnosci. Chce sie upewnic, ze Pana/Pani sprawa zostanie odpowiednio rozpatrzona. Przekazuje do osoby, ktora bedzie mogla pomoc.";
+    } else if (isFinancial) {
+      escalationReason = "Sprawa finansowa wymagajaca weryfikacji";
+      responseMessage =
+        "Rozumiem, ze chodzi o kwestie finansowa. Tego typu sprawy wymagaja dostepu do systemu rozliczen. Lacze z osoba, ktora bedzie mogla to sprawdzic.";
+    } else if (isLegal) {
+      escalationReason = "Kwestia prawna lub ochrony danych osobowych";
+      responseMessage =
+        "Rozumiem. Kwestie prawne i dotyczace ochrony danych wymagaja kontaktu z upowaznionym pracownikiem.";
+    } else {
+      escalationReason = "Zlozony wniosek obejmujacy wiele spraw jednoczesnie";
+      responseMessage =
+        "Widze, ze Pana/Pani zapytanie dotyczy kilku spraw naraz. Aby sprawnie wszystko zalatwic, najlepiej bedzie polaczyc Pana/Pania z naszym pracownikiem.";
+    }
+
+    if (config.transferToHumanEnabled) {
+      responseMessage += config.transferPhoneNumber
+        ? ` Przekierowuje do recepcji... Numer: ${config.transferPhoneNumber}.`
+        : " Przekierowuje do recepcji...";
+
+      return {
+        message: responseMessage,
+        intent: "escalate_to_human",
+        intentLabel: "Eskalacja do czlowieka",
+        suggestedAction: "transfer_call",
+        transferToHuman: true,
+        escalationReason,
+      };
+    } else {
+      responseMessage +=
+        " Niestety, w tej chwili nie moge polaczyc z pracownikiem. Prosze zostawic wiadomosc, a skontaktujemy sie z Panem/Pania najszybciej jak to mozliwe.";
+
+      return {
+        message: responseMessage,
+        intent: "escalate_to_human",
+        intentLabel: "Eskalacja do czlowieka",
+        suggestedAction: "take_message",
+        transferToHuman: false,
+        escalationReason,
+        messageTaken: true,
+      };
+    }
+  }
+
   // Detect intent - booking / appointment
   if (
     matchesIntent(msg, [
@@ -960,9 +1073,207 @@ async function generateVoiceResponse(
       };
     }
 
+    // Try to detect new preferred date/time from the message
+    const parsedDate = parseDateFromMessage(msg);
+    const parsedTime = parseTimeFromMessage(msg);
+    const matchedEmployee = matchEmployeeFromMessage(msg, employeesList);
+
+    // If we have a date, offer availability for the new time
+    if (parsedDate && matchedEmployee) {
+      const dateStr = parsedDate.date.toISOString().split("T")[0]!;
+      const duration = 60; // Default duration, will be overridden in actual reschedule
+
+      const availability = await queryAvailability(
+        matchedEmployee.id,
+        dateStr,
+        duration
+      );
+
+      const empName = `${matchedEmployee.firstName} ${matchedEmployee.lastName}`;
+      const availableOnly = availability.availableSlots.filter(
+        (s) => s.available
+      );
+
+      if (availability.dayOff) {
+        return {
+          message: `Chce Pan/Pani zmienic termin wizyty. Niestety, ${empName} nie pracuje w dniu ${parsedDate.dateLabel}. Prosze podac inny dzien.`,
+          intent: "reschedule",
+          intentLabel: "Zmiana terminu",
+          suggestedAction: "check_availability",
+          transferToHuman: false,
+          availabilityData: {
+            date: dateStr,
+            dateFormatted: parsedDate.dateLabel,
+            employeeId: matchedEmployee.id,
+            employeeName: empName,
+            serviceName: null,
+            duration,
+            dayOff: true,
+            workStart: null,
+            workEnd: null,
+            availableSlots: [],
+            requestedTime: parsedTime,
+            requestedTimeAvailable: null,
+            alternativeTimes: [],
+          },
+        };
+      }
+
+      if (parsedTime) {
+        const requestedSlot = availability.availableSlots.find(
+          (s) => s.time === parsedTime
+        );
+
+        if (requestedSlot && requestedSlot.available) {
+          return {
+            message: `Swietnie! Termin ${parsedDate.dateLabel} o ${parsedTime} u ${empName} jest dostepny. Czy potwierdzam zmiane terminu wizyty na ten termin?`,
+            intent: "reschedule",
+            intentLabel: "Zmiana terminu",
+            suggestedAction: "confirm_reschedule",
+            transferToHuman: false,
+            availabilityData: {
+              date: dateStr,
+              dateFormatted: parsedDate.dateLabel,
+              employeeId: matchedEmployee.id,
+              employeeName: empName,
+              serviceName: null,
+              duration,
+              dayOff: false,
+              workStart: availability.workStart,
+              workEnd: availability.workEnd,
+              availableSlots: availability.availableSlots,
+              requestedTime: parsedTime,
+              requestedTimeAvailable: true,
+              alternativeTimes: [],
+            },
+          };
+        } else {
+          const alternatives = availableOnly
+            .filter((s) => {
+              const reqMinutes =
+                parseInt(parsedTime.split(":")[0]!) * 60 +
+                parseInt(parsedTime.split(":")[1]!);
+              const slotMinutes =
+                parseInt(s.time.split(":")[0]!) * 60 +
+                parseInt(s.time.split(":")[1]!);
+              return Math.abs(slotMinutes - reqMinutes) <= 120;
+            })
+            .slice(0, 5)
+            .map((s) => s.time);
+
+          const altText =
+            alternatives.length > 0
+              ? `Moge zaproponowac: ${alternatives.join(", ")}.`
+              : availableOnly.length > 0
+                ? `Dostepne godziny: ${availableOnly.slice(0, 6).map((s) => s.time).join(", ")}.`
+                : "Niestety, tego dnia nie ma juz wolnych terminow.";
+
+          return {
+            message: `Chce Pan/Pani przeniesc wizyte na ${parsedDate.dateLabel} o ${parsedTime}. Niestety, ten termin u ${empName} jest zajety. ${altText}`,
+            intent: "reschedule",
+            intentLabel: "Zmiana terminu",
+            suggestedAction: "suggest_alternatives",
+            transferToHuman: false,
+            availabilityData: {
+              date: dateStr,
+              dateFormatted: parsedDate.dateLabel,
+              employeeId: matchedEmployee.id,
+              employeeName: empName,
+              serviceName: null,
+              duration,
+              dayOff: false,
+              workStart: availability.workStart,
+              workEnd: availability.workEnd,
+              availableSlots: availability.availableSlots,
+              requestedTime: parsedTime,
+              requestedTimeAvailable: false,
+              alternativeTimes: alternatives,
+            },
+          };
+        }
+      } else {
+        // Have date and employee but no time
+        const slotsText =
+          availableOnly.length > 0
+            ? availableOnly
+                .slice(0, 8)
+                .map((s) => s.time)
+                .join(", ")
+            : "brak wolnych terminow";
+
+        return {
+          message: `Rozumiem, chce Pan/Pani zmienic termin wizyty na ${parsedDate.dateLabel} u ${empName}. Dostepne godziny: ${slotsText}. O ktorej godzinie Pan/Pani preferuje?`,
+          intent: "reschedule",
+          intentLabel: "Zmiana terminu",
+          suggestedAction: "show_available_slots",
+          transferToHuman: false,
+          availabilityData: {
+            date: dateStr,
+            dateFormatted: parsedDate.dateLabel,
+            employeeId: matchedEmployee.id,
+            employeeName: empName,
+            serviceName: null,
+            duration,
+            dayOff: false,
+            workStart: availability.workStart,
+            workEnd: availability.workEnd,
+            availableSlots: availability.availableSlots,
+            requestedTime: null,
+            requestedTimeAvailable: null,
+            alternativeTimes: [],
+          },
+        };
+      }
+    }
+
+    if (parsedDate && employeesList.length > 0) {
+      const dateStr = parsedDate.date.toISOString().split("T")[0]!;
+      const defaultEmp = employeesList[0]!;
+      const availability = await queryAvailability(defaultEmp.id, dateStr, 60);
+      const empName = `${defaultEmp.firstName} ${defaultEmp.lastName}`;
+      const availableOnly = availability.availableSlots.filter(
+        (s) => s.available
+      );
+
+      const employeesText = employeesList
+        .slice(0, 5)
+        .map((e) => `${e.firstName} ${e.lastName}`)
+        .join(", ");
+
+      let slotsInfo = "";
+      if (!availability.dayOff && availableOnly.length > 0) {
+        slotsInfo = ` U ${empName} dostepne: ${availableOnly.slice(0, 5).map((s) => s.time).join(", ")}.`;
+      }
+
+      return {
+        message: `Rozumiem, chce Pan/Pani przeniesc wizyte na ${parsedDate.dateLabel}. Nasi pracownicy: ${employeesText}.${slotsInfo} Prosze podac preferowanego pracownika i godzine.`,
+        intent: "reschedule",
+        intentLabel: "Zmiana terminu",
+        suggestedAction: "show_available_slots",
+        transferToHuman: false,
+        availabilityData: availability.dayOff
+          ? undefined
+          : {
+              date: dateStr,
+              dateFormatted: parsedDate.dateLabel,
+              employeeId: defaultEmp.id,
+              employeeName: empName,
+              serviceName: null,
+              duration: 60,
+              dayOff: false,
+              workStart: availability.workStart,
+              workEnd: availability.workEnd,
+              availableSlots: availability.availableSlots,
+              requestedTime: parsedTime,
+              requestedTimeAvailable: null,
+              alternativeTimes: [],
+            },
+      };
+    }
+
     return {
       message:
-        "Oczywiscie! Pomoge zmienic termin wizyty. Prosze podac swoje dane oraz preferowany nowy termin, a sprawdze dostepnosc.",
+        "Oczywiscie! Pomoge zmienic termin wizyty. Prosze podac swoje dane oraz preferowany nowy termin (dzien i godzine), a sprawdze dostepnosc.",
       intent: "reschedule",
       intentLabel: "Zmiana terminu",
       suggestedAction: "check_availability",
@@ -1252,119 +1563,6 @@ async function generateVoiceResponse(
       suggestedAction: "show_pricing",
       transferToHuman: false,
     };
-  }
-
-  // --- Escalation detection: complex requests the AI cannot handle ---
-
-  // Complaints and issues
-  const isComplaint = matchesIntent(msg, [
-    "reklamacj",
-    "skarg",
-    "problem",
-    "zly",
-    "zle",
-    "niezadowolon",
-    "zwrot",
-    "odszkodowan",
-    "complaint",
-  ]);
-
-  // Medical or health concerns
-  const isMedical = matchesIntent(msg, [
-    "alergi",
-    "uczulen",
-    "podrazn",
-    "bol",
-    "zranien",
-    "krew",
-    "medical",
-  ]);
-
-  // Financial disputes
-  const isFinancial = matchesIntent(msg, [
-    "faktur",
-    "rachun",
-    "rozliczen",
-    "blad platnosci",
-    "nadplat",
-    "refund",
-  ]);
-
-  // Legal or complex data privacy requests
-  const isLegal = matchesIntent(msg, [
-    "prawnik",
-    "umow",
-    "regulamin",
-    "rodo",
-    "ochrona danych",
-    "dane osobowe",
-  ]);
-
-  // Multi-intent complex: detect when the message contains multiple distinct intents
-  const intentSignals = [
-    matchesIntent(msg, ["umowic", "wizyta", "rezerwac", "termin", "zarezerwow"]),
-    matchesIntent(msg, ["odwolac", "anulowac", "rezygnuj"]),
-    matchesIntent(msg, ["cena", "ceny", "cennik", "ile kosztuje", "koszt"]),
-    matchesIntent(msg, ["reklamacj", "skarg", "problem"]),
-    matchesIntent(msg, ["faktur", "rachun"]),
-    matchesIntent(msg, ["przeniesc", "zmienic termin", "przesun", "przeloz"]),
-  ];
-  const detectedIntentCount = intentSignals.filter(Boolean).length;
-  const isMultiIntent = detectedIntentCount >= 2;
-
-  if (isComplaint || isMedical || isFinancial || isLegal || isMultiIntent) {
-    let escalationReason: string;
-    let responseMessage: string;
-
-    if (isMedical) {
-      escalationReason = "Zgloszenie dotyczace zdrowia lub reakcji alergicznej";
-      responseMessage =
-        "Bardzo przepraszam i rozumiem Pana/Pani niepokoj. Kwestie zdrowotne sa dla nas priorytetem. Ta sprawa wymaga bezposredniej rozmowy z naszym specjalista.";
-    } else if (isComplaint) {
-      escalationReason = "Reklamacja lub skarga klienta";
-      responseMessage =
-        "Przepraszam za niedogodnosci. Chce sie upewnic, ze Pana/Pani sprawa zostanie odpowiednio rozpatrzona. Przekazuje do osoby, ktora bedzie mogla pomoc.";
-    } else if (isFinancial) {
-      escalationReason = "Sprawa finansowa wymagajaca weryfikacji";
-      responseMessage =
-        "Rozumiem, ze chodzi o kwestie finansowa. Tego typu sprawy wymagaja dostepu do systemu rozliczen. Lacze z osoba, ktora bedzie mogla to sprawdzic.";
-    } else if (isLegal) {
-      escalationReason = "Kwestia prawna lub ochrony danych osobowych";
-      responseMessage =
-        "Rozumiem. Kwestie prawne i dotyczace ochrony danych wymagaja kontaktu z upowaznionym pracownikiem.";
-    } else {
-      escalationReason = "Zlozony wniosek obejmujacy wiele spraw jednoczesnie";
-      responseMessage =
-        "Widze, ze Pana/Pani zapytanie dotyczy kilku spraw naraz. Aby sprawnie wszystko zalatwic, najlepiej bedzie polaczyc Pana/Pania z naszym pracownikiem.";
-    }
-
-    if (config.transferToHumanEnabled) {
-      responseMessage += config.transferPhoneNumber
-        ? ` Przekierowuje do recepcji... Numer: ${config.transferPhoneNumber}.`
-        : " Przekierowuje do recepcji...";
-
-      return {
-        message: responseMessage,
-        intent: "escalate_to_human",
-        intentLabel: "Eskalacja do czlowieka",
-        suggestedAction: "transfer_call",
-        transferToHuman: true,
-        escalationReason,
-      };
-    } else {
-      responseMessage +=
-        " Niestety, w tej chwili nie moge polaczyc z pracownikiem. Prosze zostawic wiadomosc, a skontaktujemy sie z Panem/Pania najszybciej jak to mozliwe.";
-
-      return {
-        message: responseMessage,
-        intent: "escalate_to_human",
-        intentLabel: "Eskalacja do czlowieka",
-        suggestedAction: "take_message",
-        transferToHuman: false,
-        escalationReason,
-        messageTaken: true,
-      };
-    }
   }
 
   if (
