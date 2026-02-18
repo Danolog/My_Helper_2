@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import { validatePhone } from "@/lib/validations";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -221,6 +222,12 @@ export default function ClientsPage() {
     if (formEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formEmail.trim())) {
       errors.email = "Wprowadz poprawny adres email";
     }
+    if (formPhone.trim()) {
+      const phoneError = validatePhone(formPhone);
+      if (phoneError) {
+        errors.phone = phoneError;
+      }
+    }
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -392,9 +399,19 @@ export default function ClientsPage() {
                   type="tel"
                   placeholder="np. +48 600 123 456"
                   value={formPhone}
-                  onChange={(e) => setFormPhone(e.target.value)}
+                  onChange={(e) => {
+                    setFormPhone(e.target.value);
+                    clearFieldError("phone");
+                  }}
+                  aria-invalid={!!formErrors.phone}
+                  className={formErrors.phone ? "border-destructive" : ""}
                   data-testid="client-phone-input"
                 />
+                {formErrors.phone && (
+                  <p className="text-sm text-destructive" data-testid="error-phone">
+                    {formErrors.phone}
+                  </p>
+                )}
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="client-email">Adres email</Label>
