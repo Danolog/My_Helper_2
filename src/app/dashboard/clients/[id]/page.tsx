@@ -77,6 +77,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import { validatePhone } from "@/lib/validations";
 
 interface ClientData {
   id: string;
@@ -688,6 +689,12 @@ export default function ClientProfilePage() {
     if (formEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formEmail.trim())) {
       errors.email = "Wprowadz poprawny adres email";
     }
+    if (formPhone.trim()) {
+      const phoneError = validatePhone(formPhone);
+      if (phoneError) {
+        errors.phone = phoneError;
+      }
+    }
     setFormErrors(errors);
     if (Object.keys(errors).length > 0) {
       toast.error("Wypelnij wszystkie wymagane pola");
@@ -1041,9 +1048,17 @@ export default function ClientProfilePage() {
                     type="tel"
                     placeholder="np. +48 123 456 789"
                     value={formPhone}
-                    onChange={(e) => setFormPhone(e.target.value)}
+                    onChange={(e) => {
+                      setFormPhone(e.target.value);
+                      clearFieldError("phone");
+                    }}
+                    aria-invalid={!!formErrors.phone}
+                    className={formErrors.phone ? "border-destructive" : ""}
                     data-testid="client-phone-input"
                   />
+                  {formErrors.phone && (
+                    <p className="text-sm text-destructive mt-1">{formErrors.phone}</p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="client-email" className="text-sm font-medium flex items-center gap-1.5 mb-1.5">

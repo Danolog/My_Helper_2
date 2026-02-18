@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ArrowLeft, Lock, UserPlus, Palette } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import { validatePhone } from "@/lib/validations";
 
 // Demo salon ID - in production this would come from user's session
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
@@ -71,6 +72,12 @@ export default function AddEmployeePage() {
     }
     if (formData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
       errors.email = "Wprowadz poprawny adres email";
+    }
+    if (formData.phone.trim()) {
+      const phoneError = validatePhone(formData.phone);
+      if (phoneError) {
+        errors.phone = phoneError;
+      }
     }
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
@@ -229,7 +236,11 @@ export default function AddEmployeePage() {
                 value={formData.phone}
                 onChange={handleChange}
                 placeholder="+48 123 456 789"
+                aria-invalid={!!fieldErrors.phone}
               />
+              {fieldErrors.phone && (
+                <p className="text-sm text-destructive">{fieldErrors.phone}</p>
+              )}
             </div>
 
             <div className="space-y-2">

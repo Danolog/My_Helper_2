@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { signUp } from "@/lib/auth-client"
+import { validatePhone } from "@/lib/validations"
 
 interface SignUpFormProps {
   /** Where to redirect after successful signup */
@@ -29,20 +30,50 @@ export function SignUpForm({
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState("")
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [isPending, setIsPending] = useState(false)
   const [showVerificationMessage, setShowVerificationMessage] = useState(false)
+
+  const clearFieldError = (field: string) => {
+    setFieldErrors((prev) => {
+      const next = { ...prev }
+      delete next[field]
+      return next
+    })
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
 
-    if (password !== confirmPassword) {
-      setError("Passwords do not match")
-      return
+    // Validate required fields
+    const errors: Record<string, string> = {}
+    if (!name.trim()) {
+      errors.name = "Imie jest wymagane"
     }
-
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters")
+    if (!email.trim()) {
+      errors.email = "Email jest wymagany"
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = "Wprowadz poprawny adres email"
+    }
+    if (!password) {
+      errors.password = "Haslo jest wymagane"
+    } else if (password.length < 8) {
+      errors.password = "Haslo musi miec co najmniej 8 znakow"
+    }
+    if (!confirmPassword) {
+      errors.confirmPassword = "Potwierdzenie hasla jest wymagane"
+    } else if (password !== confirmPassword) {
+      errors.confirmPassword = "Hasla nie sa identyczne"
+    }
+    if (showPhone && phone.trim()) {
+      const phoneError = validatePhone(phone)
+      if (phoneError) {
+        errors.phone = phoneError
+      }
+    }
+    setFieldErrors(errors)
+    if (Object.keys(errors).length > 0) {
       return
     }
 
@@ -115,7 +146,7 @@ export function SignUpForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 w-full max-w-sm">
+    <form onSubmit={handleSubmit} noValidate className="space-y-4 w-full max-w-sm">
       <div className="space-y-2">
         <Label htmlFor="name">Name</Label>
         <Input
@@ -123,10 +154,17 @@ export function SignUpForm({
           type="text"
           placeholder="Your name"
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setName(e.target.value)
+            clearFieldError("name")
+          }}
           required
+          aria-invalid={!!fieldErrors.name}
           disabled={isPending}
         />
+        {fieldErrors.name && (
+          <p className="text-sm text-destructive">{fieldErrors.name}</p>
+        )}
       </div>
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
@@ -135,10 +173,17 @@ export function SignUpForm({
           type="email"
           placeholder="you@example.com"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value)
+            clearFieldError("email")
+          }}
           required
+          aria-invalid={!!fieldErrors.email}
           disabled={isPending}
         />
+        {fieldErrors.email && (
+          <p className="text-sm text-destructive">{fieldErrors.email}</p>
+        )}
       </div>
       {showPhone && (
         <div className="space-y-2">
@@ -148,9 +193,16 @@ export function SignUpForm({
             type="tel"
             placeholder="+48 123 456 789"
             value={phone}
-            onChange={(e) => setPhone(e.target.value)}
+            onChange={(e) => {
+              setPhone(e.target.value)
+              clearFieldError("phone")
+            }}
+            aria-invalid={!!fieldErrors.phone}
             disabled={isPending}
           />
+          {fieldErrors.phone && (
+            <p className="text-sm text-destructive">{fieldErrors.phone}</p>
+          )}
         </div>
       )}
       <div className="space-y-2">
@@ -160,10 +212,17 @@ export function SignUpForm({
           type="password"
           placeholder="Create a password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value)
+            clearFieldError("password")
+          }}
           required
+          aria-invalid={!!fieldErrors.password}
           disabled={isPending}
         />
+        {fieldErrors.password && (
+          <p className="text-sm text-destructive">{fieldErrors.password}</p>
+        )}
       </div>
       <div className="space-y-2">
         <Label htmlFor="confirmPassword">Confirm Password</Label>
@@ -172,10 +231,17 @@ export function SignUpForm({
           type="password"
           placeholder="Confirm your password"
           value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
+          onChange={(e) => {
+            setConfirmPassword(e.target.value)
+            clearFieldError("confirmPassword")
+          }}
           required
+          aria-invalid={!!fieldErrors.confirmPassword}
           disabled={isPending}
         />
+        {fieldErrors.confirmPassword && (
+          <p className="text-sm text-destructive">{fieldErrors.confirmPassword}</p>
+        )}
       </div>
       {error && (
         <p className="text-sm text-destructive">{error}</p>
