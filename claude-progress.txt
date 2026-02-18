@@ -1,5 +1,40 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-18 (Feature #179 - Voice AI handles reschedules) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #179: "Voice AI handles reschedules"
+- Category: AI
+- Description: Change existing appointment via voice AI
+
+### Verification Steps Completed
+1. Client calls about existing appointment - Phone lookup finds client and their upcoming appointment
+2. Says wants to reschedule - Intent detection identifies "Zmiana terminu" from "Chce zmienic termin wizyty"
+3. AI finds appointment - Automatically finds next upcoming appointment by client phone number
+4. AI offers new times - Checks employee schedule, generates available slots, finds best match
+5. AI updates appointment - Updates DB, sends SMS confirmation, logs conversation
+
+### Key Findings
+- Reschedule API at POST /api/ai/voice/reschedule was already fully implemented (510 lines)
+- Intent detection in incoming route correctly identifies reschedule keywords
+- UI has dedicated reschedule form that auto-appears when reschedule intent detected
+- API properly validates: employee day off, no slots available, date format, missing fields
+- Successfully rescheduled appointment from 11:00 to 14:00 via browser UI
+- SMS confirmation sent to client phone number
+- Conversation logged in aiConversations table
+
+### Technical Details
+- API route: src/app/api/ai/voice/reschedule/route.ts
+- UI page: src/app/dashboard/ai-assistant/voice/page.tsx (lines 530-580 for handler, 1546-1752 for UI)
+- No mock data - uses real DB queries (appointments, clients, employees, workSchedules, timeBlocks)
+- Pro plan gating enforced
+
+### Stats After
+- 148/253 features passing (58.5%)
+- Commit: 7b20c08
+
+---
+
 ## Session: 2026-02-18 (Feature #178 - Voice AI escalates to human) *** SUCCESS ***
 
 ### Feature Assigned
