@@ -108,6 +108,13 @@ export function NewAppointmentDialog({
   const [loadingEmployees, setLoadingEmployees] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Field-level validation errors
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // Today's date string for min constraint on date picker
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
   // Client search
   const [clientSearch, setClientSearch] = useState("");
 
@@ -256,21 +263,41 @@ export function NewAppointmentDialog({
     setNotes("");
     setClientSearch("");
     setVariants([]);
+    setFormErrors({});
+  };
+
+  // Clear individual field error on user interaction
+  const clearFieldError = (field: string) => {
+    setFormErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  // Validate all required fields, returning true if valid
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    if (!selectedEmployeeId) {
+      errors.employee = "Wybierz pracownika";
+    }
+    if (!appointmentDate) {
+      errors.date = "Wybierz datę wizyty";
+    } else if (appointmentDate < todayStr) {
+      errors.date = "Nie można wybrać daty z przeszłości";
+    }
+    if (!appointmentTime) {
+      errors.time = "Wybierz godzinę wizyty";
+    }
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   // Handle form submit
   const handleSubmit = async () => {
     // Validate required fields
-    if (!selectedEmployeeId) {
-      toast.error("Wybierz pracownika");
-      return;
-    }
-    if (!appointmentDate) {
-      toast.error("Wybierz datę wizyty");
-      return;
-    }
-    if (!appointmentTime) {
-      toast.error("Wybierz godzinę wizyty");
+    if (!validateForm()) {
+      toast.error("Wypełnij wszystkie wymagane pola");
       return;
     }
 
@@ -462,9 +489,9 @@ export function NewAppointmentDialog({
             </Label>
             <Select
               value={selectedEmployeeId}
-              onValueChange={setSelectedEmployeeId}
+              onValueChange={(v) => { setSelectedEmployeeId(v); clearFieldError("employee"); }}
             >
-              <SelectTrigger data-testid="employee-select">
+              <SelectTrigger data-testid="employee-select" aria-invalid={!!formErrors.employee} className={formErrors.employee ? "border-destructive" : ""}>
                 <SelectValue placeholder={loadingEmployees ? "Ładowanie pracowników..." : "Wybierz pracownika"} />
               </SelectTrigger>
               <SelectContent>
@@ -483,6 +510,9 @@ export function NewAppointmentDialog({
                 ))}
               </SelectContent>
             </Select>
+            {formErrors.employee && (
+              <p className="text-sm text-destructive mt-1">{formErrors.employee}</p>
+            )}
           </div>
 
           {/* Date */}
@@ -492,19 +522,34 @@ export function NewAppointmentDialog({
               Data i godzina *
             </Label>
             <div className="grid grid-cols-2 gap-3">
-              <Input
-                type="date"
-                value={appointmentDate}
-                onChange={(e) => setAppointmentDate(e.target.value)}
-                data-testid="appointment-date-input"
-              />
-              <Input
-                type="time"
-                value={appointmentTime}
-                onChange={(e) => setAppointmentTime(e.target.value)}
-                step="900"
-                data-testid="appointment-time-input"
-              />
+              <div>
+                <Input
+                  type="date"
+                  value={appointmentDate}
+                  min={todayStr}
+                  onChange={(e) => { setAppointmentDate(e.target.value); clearFieldError("date"); }}
+                  aria-invalid={!!formErrors.date}
+                  className={formErrors.date ? "border-destructive" : ""}
+                  data-testid="appointment-date-input"
+                />
+                {formErrors.date && (
+                  <p className="text-sm text-destructive mt-1">{formErrors.date}</p>
+                )}
+              </div>
+              <div>
+                <Input
+                  type="time"
+                  value={appointmentTime}
+                  onChange={(e) => { setAppointmentTime(e.target.value); clearFieldError("time"); }}
+                  step="900"
+                  aria-invalid={!!formErrors.time}
+                  className={formErrors.time ? "border-destructive" : ""}
+                  data-testid="appointment-time-input"
+                />
+                {formErrors.time && (
+                  <p className="text-sm text-destructive mt-1">{formErrors.time}</p>
+                )}
+              </div>
             </div>
           </div>
 
