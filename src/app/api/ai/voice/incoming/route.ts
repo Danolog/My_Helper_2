@@ -688,13 +688,16 @@ async function generateVoiceResponse(
   ]);
 
   // Multi-intent complex: detect when the message contains multiple distinct intents
+  // Note: "termin" alone could be booking or rescheduling, so we exclude it from booking
+  // when "zmienic" is also present to avoid false multi-intent detection.
+  const hasRescheduleTermin = matchesIntent(msg, ["zmienic termin", "przeniesc", "przesun", "przeloz", "reschedule", "inny termin"]);
   const intentSignals = [
-    matchesIntent(msg, ["umowic", "wizyta", "rezerwac", "termin", "zarezerwow"]),
+    !hasRescheduleTermin && matchesIntent(msg, ["umowic", "wizyta", "rezerwac", "termin", "zarezerwow"]),
     matchesIntent(msg, ["odwolac", "anulowac", "rezygnuj"]),
     matchesIntent(msg, ["cena", "ceny", "cennik", "ile kosztuje", "koszt"]),
     matchesIntent(msg, ["reklamacj", "skarg", "problem"]),
     matchesIntent(msg, ["faktur", "rachun"]),
-    matchesIntent(msg, ["przeniesc", "zmienic termin", "przesun", "przeloz"]),
+    hasRescheduleTermin,
   ];
   const detectedIntentCount = intentSignals.filter(Boolean).length;
   const isMultiIntent = detectedIntentCount >= 2;
@@ -752,6 +755,236 @@ async function generateVoiceResponse(
         messageTaken: true,
       };
     }
+  }
+
+  // Detect intent - reschedule (MUST come before booking to avoid false matches on "termin"/"wizyta")
+  if (
+    matchesIntent(msg, [
+      "przeniesc",
+      "zmienic termin",
+      "przesun",
+      "reschedule",
+      "inny termin",
+      "przeloz",
+    ])
+  ) {
+    if (!config.capabilities.rescheduleAppointments) {
+      return {
+        message:
+          "Rozumiem, ze chce Pan/Pani zmienic termin wizyty. Prosze skontaktowac sie bezposrednio z salonem.",
+        intent: "reschedule",
+        intentLabel: "Zmiana terminu",
+        suggestedAction: null,
+        transferToHuman: config.transferToHumanEnabled,
+      };
+    }
+
+    // Try to detect new preferred date/time from the message
+    const parsedDate = parseDateFromMessage(msg);
+    const parsedTime = parseTimeFromMessage(msg);
+    const matchedEmployee = matchEmployeeFromMessage(msg, employeesList);
+
+    // If we have a date, offer availability for the new time
+    if (parsedDate && matchedEmployee) {
+      const dateStr = parsedDate.date.toISOString().split("T")[0]!;
+      const duration = 60; // Default duration, will be overridden in actual reschedule
+
+      const availability = await queryAvailability(
+        matchedEmployee.id,
+        dateStr,
+        duration
+      );
+
+      const empName = `${matchedEmployee.firstName} ${matchedEmployee.lastName}`;
+      const availableOnly = availability.availableSlots.filter(
+        (s) => s.available
+      );
+
+      if (availability.dayOff) {
+        return {
+          message: `Chce Pan/Pani zmienic termin wizyty. Niestety, ${empName} nie pracuje w dniu ${parsedDate.dateLabel}. Prosze podac inny dzien.`,
+          intent: "reschedule",
+          intentLabel: "Zmiana terminu",
+          suggestedAction: "check_availability",
+          transferToHuman: false,
+          availabilityData: {
+            date: dateStr,
+            dateFormatted: parsedDate.dateLabel,
+            employeeId: matchedEmployee.id,
+            employeeName: empName,
+            serviceName: null,
+            duration,
+            dayOff: true,
+            workStart: null,
+            workEnd: null,
+            availableSlots: [],
+            requestedTime: parsedTime,
+            requestedTimeAvailable: null,
+            alternativeTimes: [],
+          },
+        };
+      }
+
+      if (parsedTime) {
+        const requestedSlot = availability.availableSlots.find(
+          (s) => s.time === parsedTime
+        );
+
+        if (requestedSlot && requestedSlot.available) {
+          return {
+            message: `Swietnie! Termin ${parsedDate.dateLabel} o ${parsedTime} u ${empName} jest dostepny. Czy potwierdzam zmiane terminu wizyty na ten termin?`,
+            intent: "reschedule",
+            intentLabel: "Zmiana terminu",
+            suggestedAction: "confirm_reschedule",
+            transferToHuman: false,
+            availabilityData: {
+              date: dateStr,
+              dateFormatted: parsedDate.dateLabel,
+              employeeId: matchedEmployee.id,
+              employeeName: empName,
+              serviceName: null,
+              duration,
+              dayOff: false,
+              workStart: availability.workStart,
+              workEnd: availability.workEnd,
+              availableSlots: availability.availableSlots,
+              requestedTime: parsedTime,
+              requestedTimeAvailable: true,
+              alternativeTimes: [],
+            },
+          };
+        } else {
+          const alternatives = availableOnly
+            .filter((s) => {
+              const reqMinutes =
+                parseInt(parsedTime.split(":")[0]!) * 60 +
+                parseInt(parsedTime.split(":")[1]!);
+              const slotMinutes =
+                parseInt(s.time.split(":")[0]!) * 60 +
+                parseInt(s.time.split(":")[1]!);
+              return Math.abs(slotMinutes - reqMinutes) <= 120;
+            })
+            .slice(0, 5)
+            .map((s) => s.time);
+
+          const altText =
+            alternatives.length > 0
+              ? `Moge zaproponowac: ${alternatives.join(", ")}.`
+              : availableOnly.length > 0
+                ? `Dostepne godziny: ${availableOnly.slice(0, 6).map((s) => s.time).join(", ")}.`
+                : "Niestety, tego dnia nie ma juz wolnych terminow.";
+
+          return {
+            message: `Chce Pan/Pani przeniesc wizyte na ${parsedDate.dateLabel} o ${parsedTime}. Niestety, ten termin u ${empName} jest zajety. ${altText}`,
+            intent: "reschedule",
+            intentLabel: "Zmiana terminu",
+            suggestedAction: "suggest_alternatives",
+            transferToHuman: false,
+            availabilityData: {
+              date: dateStr,
+              dateFormatted: parsedDate.dateLabel,
+              employeeId: matchedEmployee.id,
+              employeeName: empName,
+              serviceName: null,
+              duration,
+              dayOff: false,
+              workStart: availability.workStart,
+              workEnd: availability.workEnd,
+              availableSlots: availability.availableSlots,
+              requestedTime: parsedTime,
+              requestedTimeAvailable: false,
+              alternativeTimes: alternatives,
+            },
+          };
+        }
+      } else {
+        // Have date and employee but no time
+        const slotsText =
+          availableOnly.length > 0
+            ? availableOnly
+                .slice(0, 8)
+                .map((s) => s.time)
+                .join(", ")
+            : "brak wolnych terminow";
+
+        return {
+          message: `Rozumiem, chce Pan/Pani zmienic termin wizyty na ${parsedDate.dateLabel} u ${empName}. Dostepne godziny: ${slotsText}. O ktorej godzinie Pan/Pani preferuje?`,
+          intent: "reschedule",
+          intentLabel: "Zmiana terminu",
+          suggestedAction: "show_available_slots",
+          transferToHuman: false,
+          availabilityData: {
+            date: dateStr,
+            dateFormatted: parsedDate.dateLabel,
+            employeeId: matchedEmployee.id,
+            employeeName: empName,
+            serviceName: null,
+            duration,
+            dayOff: false,
+            workStart: availability.workStart,
+            workEnd: availability.workEnd,
+            availableSlots: availability.availableSlots,
+            requestedTime: null,
+            requestedTimeAvailable: null,
+            alternativeTimes: [],
+          },
+        };
+      }
+    }
+
+    if (parsedDate && employeesList.length > 0) {
+      const dateStr = parsedDate.date.toISOString().split("T")[0]!;
+      const defaultEmp = employeesList[0]!;
+      const availability = await queryAvailability(defaultEmp.id, dateStr, 60);
+      const empName = `${defaultEmp.firstName} ${defaultEmp.lastName}`;
+      const availableOnly = availability.availableSlots.filter(
+        (s) => s.available
+      );
+
+      const employeesText = employeesList
+        .slice(0, 5)
+        .map((e) => `${e.firstName} ${e.lastName}`)
+        .join(", ");
+
+      let slotsInfo = "";
+      if (!availability.dayOff && availableOnly.length > 0) {
+        slotsInfo = ` U ${empName} dostepne: ${availableOnly.slice(0, 5).map((s) => s.time).join(", ")}.`;
+      }
+
+      return {
+        message: `Rozumiem, chce Pan/Pani przeniesc wizyte na ${parsedDate.dateLabel}. Nasi pracownicy: ${employeesText}.${slotsInfo} Prosze podac preferowanego pracownika i godzine.`,
+        intent: "reschedule",
+        intentLabel: "Zmiana terminu",
+        suggestedAction: "show_available_slots",
+        transferToHuman: false,
+        availabilityData: availability.dayOff
+          ? undefined
+          : {
+              date: dateStr,
+              dateFormatted: parsedDate.dateLabel,
+              employeeId: defaultEmp.id,
+              employeeName: empName,
+              serviceName: null,
+              duration: 60,
+              dayOff: false,
+              workStart: availability.workStart,
+              workEnd: availability.workEnd,
+              availableSlots: availability.availableSlots,
+              requestedTime: parsedTime,
+              requestedTimeAvailable: null,
+              alternativeTimes: [],
+            },
+      };
+    }
+
+    return {
+      message:
+        "Oczywiscie! Pomoge zmienic termin wizyty. Prosze podac swoje dane oraz preferowany nowy termin (dzien i godzine), a sprawdze dostepnosc.",
+      intent: "reschedule",
+      intentLabel: "Zmiana terminu",
+      suggestedAction: "check_availability",
+      transferToHuman: false,
+    };
   }
 
   // Detect intent - booking / appointment
@@ -1042,241 +1275,25 @@ async function generateVoiceResponse(
       };
     }
 
+    // Try to identify context from the cancellation message
+    const cancelEmployee = matchEmployeeFromMessage(msg, employeesList);
+    const cancelDate = parseDateFromMessage(msg);
+
+    let contextInfo = "";
+    if (cancelEmployee && cancelDate) {
+      contextInfo = ` Czy chodzi o wizyte u ${cancelEmployee.firstName} ${cancelEmployee.lastName} w dniu ${cancelDate.dateLabel}?`;
+    } else if (cancelEmployee) {
+      contextInfo = ` Czy chodzi o wizyte u ${cancelEmployee.firstName} ${cancelEmployee.lastName}?`;
+    } else if (cancelDate) {
+      contextInfo = ` Czy chodzi o wizyte w dniu ${cancelDate.dateLabel}?`;
+    }
+
     return {
       message:
-        "Rozumiem, ze chce Pan/Pani odwolac wizyte. Prosze podac imie i nazwisko oraz przyblizony termin wizyty, a sprawdze to w systemie.",
+        `Rozumiem, ze chce Pan/Pani odwolac wizyte.${contextInfo} Prosze podac numer telefonu, a znajde najblizszа wizyte w systemie i przeprowadze proces anulacji. Informuje, ze w przypadku anulacji mniej niz 24 godziny przed wizyta, wplacony zadatek nie podlega zwrotowi.`,
       intent: "cancel_appointment",
       intentLabel: "Odwolanie wizyty",
       suggestedAction: "lookup_appointment",
-      transferToHuman: false,
-    };
-  }
-
-  if (
-    matchesIntent(msg, [
-      "przeniesc",
-      "zmienic termin",
-      "przesun",
-      "reschedule",
-      "inny termin",
-      "przeloz",
-    ])
-  ) {
-    if (!config.capabilities.rescheduleAppointments) {
-      return {
-        message:
-          "Rozumiem, ze chce Pan/Pani zmienic termin wizyty. Prosze skontaktowac sie bezposrednio z salonem.",
-        intent: "reschedule",
-        intentLabel: "Zmiana terminu",
-        suggestedAction: null,
-        transferToHuman: config.transferToHumanEnabled,
-      };
-    }
-
-    // Try to detect new preferred date/time from the message
-    const parsedDate = parseDateFromMessage(msg);
-    const parsedTime = parseTimeFromMessage(msg);
-    const matchedEmployee = matchEmployeeFromMessage(msg, employeesList);
-
-    // If we have a date, offer availability for the new time
-    if (parsedDate && matchedEmployee) {
-      const dateStr = parsedDate.date.toISOString().split("T")[0]!;
-      const duration = 60; // Default duration, will be overridden in actual reschedule
-
-      const availability = await queryAvailability(
-        matchedEmployee.id,
-        dateStr,
-        duration
-      );
-
-      const empName = `${matchedEmployee.firstName} ${matchedEmployee.lastName}`;
-      const availableOnly = availability.availableSlots.filter(
-        (s) => s.available
-      );
-
-      if (availability.dayOff) {
-        return {
-          message: `Chce Pan/Pani zmienic termin wizyty. Niestety, ${empName} nie pracuje w dniu ${parsedDate.dateLabel}. Prosze podac inny dzien.`,
-          intent: "reschedule",
-          intentLabel: "Zmiana terminu",
-          suggestedAction: "check_availability",
-          transferToHuman: false,
-          availabilityData: {
-            date: dateStr,
-            dateFormatted: parsedDate.dateLabel,
-            employeeId: matchedEmployee.id,
-            employeeName: empName,
-            serviceName: null,
-            duration,
-            dayOff: true,
-            workStart: null,
-            workEnd: null,
-            availableSlots: [],
-            requestedTime: parsedTime,
-            requestedTimeAvailable: null,
-            alternativeTimes: [],
-          },
-        };
-      }
-
-      if (parsedTime) {
-        const requestedSlot = availability.availableSlots.find(
-          (s) => s.time === parsedTime
-        );
-
-        if (requestedSlot && requestedSlot.available) {
-          return {
-            message: `Swietnie! Termin ${parsedDate.dateLabel} o ${parsedTime} u ${empName} jest dostepny. Czy potwierdzam zmiane terminu wizyty na ten termin?`,
-            intent: "reschedule",
-            intentLabel: "Zmiana terminu",
-            suggestedAction: "confirm_reschedule",
-            transferToHuman: false,
-            availabilityData: {
-              date: dateStr,
-              dateFormatted: parsedDate.dateLabel,
-              employeeId: matchedEmployee.id,
-              employeeName: empName,
-              serviceName: null,
-              duration,
-              dayOff: false,
-              workStart: availability.workStart,
-              workEnd: availability.workEnd,
-              availableSlots: availability.availableSlots,
-              requestedTime: parsedTime,
-              requestedTimeAvailable: true,
-              alternativeTimes: [],
-            },
-          };
-        } else {
-          const alternatives = availableOnly
-            .filter((s) => {
-              const reqMinutes =
-                parseInt(parsedTime.split(":")[0]!) * 60 +
-                parseInt(parsedTime.split(":")[1]!);
-              const slotMinutes =
-                parseInt(s.time.split(":")[0]!) * 60 +
-                parseInt(s.time.split(":")[1]!);
-              return Math.abs(slotMinutes - reqMinutes) <= 120;
-            })
-            .slice(0, 5)
-            .map((s) => s.time);
-
-          const altText =
-            alternatives.length > 0
-              ? `Moge zaproponowac: ${alternatives.join(", ")}.`
-              : availableOnly.length > 0
-                ? `Dostepne godziny: ${availableOnly.slice(0, 6).map((s) => s.time).join(", ")}.`
-                : "Niestety, tego dnia nie ma juz wolnych terminow.";
-
-          return {
-            message: `Chce Pan/Pani przeniesc wizyte na ${parsedDate.dateLabel} o ${parsedTime}. Niestety, ten termin u ${empName} jest zajety. ${altText}`,
-            intent: "reschedule",
-            intentLabel: "Zmiana terminu",
-            suggestedAction: "suggest_alternatives",
-            transferToHuman: false,
-            availabilityData: {
-              date: dateStr,
-              dateFormatted: parsedDate.dateLabel,
-              employeeId: matchedEmployee.id,
-              employeeName: empName,
-              serviceName: null,
-              duration,
-              dayOff: false,
-              workStart: availability.workStart,
-              workEnd: availability.workEnd,
-              availableSlots: availability.availableSlots,
-              requestedTime: parsedTime,
-              requestedTimeAvailable: false,
-              alternativeTimes: alternatives,
-            },
-          };
-        }
-      } else {
-        // Have date and employee but no time
-        const slotsText =
-          availableOnly.length > 0
-            ? availableOnly
-                .slice(0, 8)
-                .map((s) => s.time)
-                .join(", ")
-            : "brak wolnych terminow";
-
-        return {
-          message: `Rozumiem, chce Pan/Pani zmienic termin wizyty na ${parsedDate.dateLabel} u ${empName}. Dostepne godziny: ${slotsText}. O ktorej godzinie Pan/Pani preferuje?`,
-          intent: "reschedule",
-          intentLabel: "Zmiana terminu",
-          suggestedAction: "show_available_slots",
-          transferToHuman: false,
-          availabilityData: {
-            date: dateStr,
-            dateFormatted: parsedDate.dateLabel,
-            employeeId: matchedEmployee.id,
-            employeeName: empName,
-            serviceName: null,
-            duration,
-            dayOff: false,
-            workStart: availability.workStart,
-            workEnd: availability.workEnd,
-            availableSlots: availability.availableSlots,
-            requestedTime: null,
-            requestedTimeAvailable: null,
-            alternativeTimes: [],
-          },
-        };
-      }
-    }
-
-    if (parsedDate && employeesList.length > 0) {
-      const dateStr = parsedDate.date.toISOString().split("T")[0]!;
-      const defaultEmp = employeesList[0]!;
-      const availability = await queryAvailability(defaultEmp.id, dateStr, 60);
-      const empName = `${defaultEmp.firstName} ${defaultEmp.lastName}`;
-      const availableOnly = availability.availableSlots.filter(
-        (s) => s.available
-      );
-
-      const employeesText = employeesList
-        .slice(0, 5)
-        .map((e) => `${e.firstName} ${e.lastName}`)
-        .join(", ");
-
-      let slotsInfo = "";
-      if (!availability.dayOff && availableOnly.length > 0) {
-        slotsInfo = ` U ${empName} dostepne: ${availableOnly.slice(0, 5).map((s) => s.time).join(", ")}.`;
-      }
-
-      return {
-        message: `Rozumiem, chce Pan/Pani przeniesc wizyte na ${parsedDate.dateLabel}. Nasi pracownicy: ${employeesText}.${slotsInfo} Prosze podac preferowanego pracownika i godzine.`,
-        intent: "reschedule",
-        intentLabel: "Zmiana terminu",
-        suggestedAction: "show_available_slots",
-        transferToHuman: false,
-        availabilityData: availability.dayOff
-          ? undefined
-          : {
-              date: dateStr,
-              dateFormatted: parsedDate.dateLabel,
-              employeeId: defaultEmp.id,
-              employeeName: empName,
-              serviceName: null,
-              duration: 60,
-              dayOff: false,
-              workStart: availability.workStart,
-              workEnd: availability.workEnd,
-              availableSlots: availability.availableSlots,
-              requestedTime: parsedTime,
-              requestedTimeAvailable: null,
-              alternativeTimes: [],
-            },
-      };
-    }
-
-    return {
-      message:
-        "Oczywiscie! Pomoge zmienic termin wizyty. Prosze podac swoje dane oraz preferowany nowy termin (dzien i godzine), a sprawdze dostepnosc.",
-      intent: "reschedule",
-      intentLabel: "Zmiana terminu",
-      suggestedAction: "check_availability",
       transferToHuman: false,
     };
   }
