@@ -32,6 +32,9 @@ function AiAssistantContent() {
           <p className="text-sm text-muted-foreground">
             Automatyczne odbieranie polaczen i umawianie wizyt przez telefon
           </p>
+          <Button asChild size="sm">
+            <Link href="/dashboard/ai-assistant/voice">Konfiguruj</Link>
+          </Button>
         </div>
         <div className="p-6 border rounded-lg space-y-3">
           <Brain className="h-8 w-8 text-primary" />
