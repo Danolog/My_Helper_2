@@ -1,5 +1,73 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-18 (Feature #178 - Voice AI escalates to human) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #178: "Voice AI escalates to human"
+- Steps: Simulate complex request, verify AI recognizes limitation, verify AI offers human transfer, verify call transferred/message taken
+
+### Changes Made
+1. **`src/app/api/ai/voice/incoming/route.ts`** - Added escalation detection logic with 5 categories:
+   - Complaints (reklamacja, skarga, etc.)
+   - Medical concerns (alergia, uczulenie, ból, etc.)
+   - Financial disputes (faktura, rachunek, refundacja, etc.)
+   - Legal/data privacy (prawnik, RODO, dane osobowe, etc.)
+   - Multi-intent complex requests (2+ detected intents)
+   - IMPORTANT: Moved escalation block BEFORE booking intent check to prevent "zabieg" keyword from matching booking first
+   - When transferToHumanEnabled: sets transferToHuman=true, suggestedAction="transfer_call"
+   - When disabled: sets messageTaken=true, suggestedAction="take_message"
+
+2. **`src/app/api/ai/voice/message/route.ts`** (NEW) - Message-taking endpoint for when human transfer unavailable
+   - Generates reference number MSG-YYYYMMDD-XXXX
+   - Stores in aiConversations table
+
+3. **`src/app/dashboard/ai-assistant/voice/page.tsx`** - UI additions:
+   - 4 new quick test buttons for escalation scenarios
+   - Amber alert box showing escalation reason
+   - Green transfer animation when transferToHuman=true
+   - Leave-message form when messageTaken=true
+   - Escalation badge in call log
+
+### Bug Fixed
+- Escalation detection was placed AFTER booking intent check, so "Mialem reakcje alergiczna po zabiegu" matched booking (via "zabieg" keyword) instead of escalation (via "alergi" keyword). Fixed by moving escalation block before all other intent handlers.
+
+### Verification
+- Complaint test: "Mam reklamacje dotyczaca ostatniej wizyty" → Eskalacja do czlowieka ✅
+- Medical test: "Mialem reakcje alergiczna po zabiegu" → Health concern escalation ✅
+- Multi-intent test: "Potrzebuje fakture i chce zmienic termin i ile kosztuje manicure" → Financial escalation ✅
+- Transfer animation and escalation reason UI display correctly ✅
+
+## Session: 2026-02-18 (Feature #176 - Voice AI checks availability) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #176: "Voice AI checks availability"
+- Category: AI Features
+- Steps: During AI call, Client requests specific time, Verify AI checks calendar, If available confirms, If unavailable suggests alternatives
+
+### What was accomplished:
+- Enhanced Voice AI API to query real database (workSchedules, appointments, timeBlocks) for availability
+- Added Polish NLP date parsing (jutro, dzisiaj, Polish day names, DD.MM.YYYY, relative dates)
+- Added Polish NLP time parsing (o 15:00, o piatnastej, na 10)
+- Added employee and service name matching from database
+- Built queryAvailability() function that calculates real available slots (15-min intervals)
+- When time is available: AI confirms and suggests booking
+- When time is unavailable: AI suggests alternatives within 2 hours
+- Updated UI with rich availability data display: color-coded time grid, requested time badge, alternative suggestions
+- Added 2 new quick test buttons for availability checking scenarios
+
+### Modified files:
+- **src/app/api/ai/voice/incoming/route.ts** - Complete rewrite: added parseDateFromMessage, parseTimeFromMessage, matchServiceFromMessage, matchEmployeeFromMessage, queryAvailability functions; made generateVoiceResponse async; enhanced check_availability and book_appointment intents to query real calendar
+- **src/app/dashboard/ai-assistant/voice/page.tsx** - Added AvailabilityData/AvailabilitySlot types, availability display section with slots grid, 2 new quick test buttons, requested time status badge
+
+### Verification (browser automation):
+- Tested "Czy Anna Kowalska jest dostepna jutro o 10?" → AI queried real calendar, returned 29/29 available slots for Anna Kowalska, work hours 09:00-17:00
+- Tested "Chce umowic wizyte u Anna jutro o 15:00 na strzyzenie" → AI matched employee, service, date, time; returned "Dostepny" badge for 15:00, suggested confirm_booking action
+- UI displayed rich calendar data: date, employee, service, duration, work hours, color-coded slot grid with highlighted requested time
+- 0 console errors confirmed
+- Screenshots: feature176-availability-check.png, feature176-booking-intent.png
+
+---
+
 ## Session: 2026-02-18 (Feature #174 - Voice AI answers calls Pro only) *** SUCCESS ***
 
 ### Feature Assigned
