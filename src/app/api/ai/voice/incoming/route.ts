@@ -174,6 +174,8 @@ export async function POST(req: Request) {
       language: config.language,
       transferToHuman: aiResponse.transferToHuman,
       availabilityData: aiResponse.availabilityData ?? null,
+      escalationReason: aiResponse.escalationReason ?? null,
+      messageTaken: aiResponse.messageTaken ?? false,
     });
   } catch (error) {
     console.error("[Voice AI Incoming] Error:", error);
@@ -220,6 +222,8 @@ type VoiceResponse = {
   suggestedAction: string | null;
   transferToHuman: boolean;
   availabilityData?: AvailabilityData | undefined;
+  escalationReason?: string; // Why AI decided to escalate to a human
+  messageTaken?: boolean; // True when human transfer is unavailable and a message form should be shown
 };
 
 /**
@@ -1248,6 +1252,119 @@ async function generateVoiceResponse(
       suggestedAction: "show_pricing",
       transferToHuman: false,
     };
+  }
+
+  // --- Escalation detection: complex requests the AI cannot handle ---
+
+  // Complaints and issues
+  const isComplaint = matchesIntent(msg, [
+    "reklamacj",
+    "skarg",
+    "problem",
+    "zly",
+    "zle",
+    "niezadowolon",
+    "zwrot",
+    "odszkodowan",
+    "complaint",
+  ]);
+
+  // Medical or health concerns
+  const isMedical = matchesIntent(msg, [
+    "alergi",
+    "uczulen",
+    "podrazn",
+    "bol",
+    "zranien",
+    "krew",
+    "medical",
+  ]);
+
+  // Financial disputes
+  const isFinancial = matchesIntent(msg, [
+    "faktur",
+    "rachun",
+    "rozliczen",
+    "blad platnosci",
+    "nadplat",
+    "refund",
+  ]);
+
+  // Legal or complex data privacy requests
+  const isLegal = matchesIntent(msg, [
+    "prawnik",
+    "umow",
+    "regulamin",
+    "rodo",
+    "ochrona danych",
+    "dane osobowe",
+  ]);
+
+  // Multi-intent complex: detect when the message contains multiple distinct intents
+  const intentSignals = [
+    matchesIntent(msg, ["umowic", "wizyta", "rezerwac", "termin", "zarezerwow"]),
+    matchesIntent(msg, ["odwolac", "anulowac", "rezygnuj"]),
+    matchesIntent(msg, ["cena", "ceny", "cennik", "ile kosztuje", "koszt"]),
+    matchesIntent(msg, ["reklamacj", "skarg", "problem"]),
+    matchesIntent(msg, ["faktur", "rachun"]),
+    matchesIntent(msg, ["przeniesc", "zmienic termin", "przesun", "przeloz"]),
+  ];
+  const detectedIntentCount = intentSignals.filter(Boolean).length;
+  const isMultiIntent = detectedIntentCount >= 2;
+
+  if (isComplaint || isMedical || isFinancial || isLegal || isMultiIntent) {
+    let escalationReason: string;
+    let responseMessage: string;
+
+    if (isMedical) {
+      escalationReason = "Zgloszenie dotyczace zdrowia lub reakcji alergicznej";
+      responseMessage =
+        "Bardzo przepraszam i rozumiem Pana/Pani niepokoj. Kwestie zdrowotne sa dla nas priorytetem. Ta sprawa wymaga bezposredniej rozmowy z naszym specjalista.";
+    } else if (isComplaint) {
+      escalationReason = "Reklamacja lub skarga klienta";
+      responseMessage =
+        "Przepraszam za niedogodnosci. Chce sie upewnic, ze Pana/Pani sprawa zostanie odpowiednio rozpatrzona. Przekazuje do osoby, ktora bedzie mogla pomoc.";
+    } else if (isFinancial) {
+      escalationReason = "Sprawa finansowa wymagajaca weryfikacji";
+      responseMessage =
+        "Rozumiem, ze chodzi o kwestie finansowa. Tego typu sprawy wymagaja dostepu do systemu rozliczen. Lacze z osoba, ktora bedzie mogla to sprawdzic.";
+    } else if (isLegal) {
+      escalationReason = "Kwestia prawna lub ochrony danych osobowych";
+      responseMessage =
+        "Rozumiem. Kwestie prawne i dotyczace ochrony danych wymagaja kontaktu z upowaznionym pracownikiem.";
+    } else {
+      escalationReason = "Zlozony wniosek obejmujacy wiele spraw jednoczesnie";
+      responseMessage =
+        "Widze, ze Pana/Pani zapytanie dotyczy kilku spraw naraz. Aby sprawnie wszystko zalatwic, najlepiej bedzie polaczyc Pana/Pania z naszym pracownikiem.";
+    }
+
+    if (config.transferToHumanEnabled) {
+      responseMessage += config.transferPhoneNumber
+        ? ` Przekierowuje do recepcji... Numer: ${config.transferPhoneNumber}.`
+        : " Przekierowuje do recepcji...";
+
+      return {
+        message: responseMessage,
+        intent: "escalate_to_human",
+        intentLabel: "Eskalacja do czlowieka",
+        suggestedAction: "transfer_call",
+        transferToHuman: true,
+        escalationReason,
+      };
+    } else {
+      responseMessage +=
+        " Niestety, w tej chwili nie moge polaczyc z pracownikiem. Prosze zostawic wiadomosc, a skontaktujemy sie z Panem/Pania najszybciej jak to mozliwe.";
+
+      return {
+        message: responseMessage,
+        intent: "escalate_to_human",
+        intentLabel: "Eskalacja do czlowieka",
+        suggestedAction: "take_message",
+        transferToHuman: false,
+        escalationReason,
+        messageTaken: true,
+      };
+    }
   }
 
   if (

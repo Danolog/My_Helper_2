@@ -3,9 +3,11 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import {
+  AlertTriangle,
   ArrowLeft,
   Mic,
   Phone,
+  PhoneForwarded,
   PhoneIncoming,
   PhoneOff,
   Settings2,
@@ -98,6 +100,8 @@ type CallSimulationResult = {
   language: string;
   transferToHuman: boolean;
   availabilityData: AvailabilityData | null;
+  escalationReason: string | null;
+  messageTaken: boolean;
 };
 
 type CallLogEntry = {
@@ -180,6 +184,16 @@ function VoiceAiContent() {
   const [bookingInProgress, setBookingInProgress] = useState(false);
   const [bookingResult, setBookingResult] = useState<BookingResult | null>(null);
   const [showBookingForm, setShowBookingForm] = useState(false);
+
+  // Escalation message form state
+  const [msgName, setMsgName] = useState("");
+  const [msgPhone, setMsgPhone] = useState("+48 123 456 789");
+  const [msgText, setMsgText] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [messageResult, setMessageResult] = useState<{
+    success: boolean;
+    referenceNumber: string;
+  } | null>(null);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -283,6 +297,8 @@ function VoiceAiContent() {
 
     setSimulating(true);
     setCallResult(null);
+    setMessageResult(null);
+    setMsgText("");
     try {
       const res = await fetch("/api/ai/voice/incoming", {
         method: "POST",
@@ -370,6 +386,58 @@ function VoiceAiContent() {
       });
     } finally {
       setBookingInProgress(false);
+    }
+  };
+
+  const handleLeaveMessage = async () => {
+    if (!msgText.trim()) {
+      toast.error("Wiadomosc wymagana", {
+        description: "Prosze wpisac tresc wiadomosci.",
+      });
+      return;
+    }
+    if (!msgPhone.trim()) {
+      toast.error("Numer telefonu wymagany", {
+        description: "Prosze podac numer telefonu do kontaktu zwrotnego.",
+      });
+      return;
+    }
+
+    setSendingMessage(true);
+    setMessageResult(null);
+    try {
+      const res = await fetch("/api/ai/voice/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          callerPhone: msgPhone.trim(),
+          callerName: msgName.trim() || undefined,
+          message: msgText.trim(),
+          conversationId: callResult?.conversationId || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setMessageResult({
+          success: true,
+          referenceNumber: data.referenceNumber,
+        });
+        toast.success("Wiadomosc zapisana", {
+          description: `Numer referencyjny: ${data.referenceNumber}`,
+        });
+        loadCallLog();
+      } else {
+        toast.error("Blad", {
+          description: data.error || "Nie udalo sie zapisac wiadomosci.",
+        });
+      }
+    } catch {
+      toast.error("Blad", {
+        description: "Nie udalo sie polaczyc z serwerem.",
+      });
+    } finally {
+      setSendingMessage(false);
     }
   };
 
@@ -786,6 +854,10 @@ function VoiceAiContent() {
                     "Chce odwolac wizyte",
                     "Chce zmienic termin wizyty",
                     "Polacz mnie z recepcja",
+                    "Mam reklamacje dotyczaca ostatniej wizyty",
+                    "Mialem reakcje alergiczna po zabiegu",
+                    "Chce zlozyc skarge na pracownika",
+                    "Potrzebuje fakture i chce zmienic termin i ile kosztuje manicure",
                   ].map((msg) => (
                     <Button
                       key={msg}
@@ -859,6 +931,141 @@ function VoiceAiContent() {
                     <code className="bg-muted px-1 py-0.5 rounded">
                       {callResult.suggestedAction}
                     </code>
+                  </div>
+                )}
+
+                {/* Escalation Display */}
+                {callResult.intent === "escalate_to_human" && (
+                  <div className="space-y-4">
+                    {/* Escalation reason alert */}
+                    <div className="flex items-start gap-3 p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-700 rounded-lg">
+                      <AlertTriangle className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-amber-800 dark:text-amber-200 text-sm">
+                          AI wykryl potrzebe eskalacji
+                        </p>
+                        <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                          Powod: {callResult.escalationReason || "Zapytanie wymaga interwencji czlowieka"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Transfer animation or message form */}
+                    {callResult.transferToHuman ? (
+                      <div className="p-4 border border-green-300 dark:border-green-700 rounded-lg bg-green-50 dark:bg-green-950/20 space-y-3">
+                        <div className="flex items-center gap-3">
+                          <div className="relative">
+                            <PhoneForwarded className="h-6 w-6 text-green-600 dark:text-green-400 animate-pulse" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-green-800 dark:text-green-200">
+                              Przekierowywanie do recepcji...
+                            </p>
+                            <p className="text-sm text-green-700 dark:text-green-300">
+                              Polaczenie jest przekazywane do pracownika salonu
+                            </p>
+                          </div>
+                        </div>
+                        {config.transferPhoneNumber && (
+                          <Badge variant="outline" className="gap-1 text-green-700 dark:text-green-300 border-green-400">
+                            <Phone className="h-3 w-3" />
+                            {config.transferPhoneNumber}
+                          </Badge>
+                        )}
+                        {/* Simulated transfer progress */}
+                        <div className="space-y-1">
+                          <div className="h-2 bg-green-200 dark:bg-green-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-green-500 rounded-full animate-[pulse_2s_ease-in-out_infinite] w-3/4" />
+                          </div>
+                          <p className="text-xs text-green-600 dark:text-green-400">
+                            Lacze z recepcja...
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-4 border border-amber-300 dark:border-amber-700 rounded-lg bg-amber-50/50 dark:bg-amber-950/10 space-y-4">
+                        <div className="flex items-center gap-2">
+                          <MessageSquare className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                          <p className="font-semibold text-amber-800 dark:text-amber-200 text-sm">
+                            Zostaw wiadomosc
+                          </p>
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Przekierowanie do recepcji jest niedostepne. Zostaw wiadomosc, a skontaktujemy sie z Toba.
+                        </p>
+
+                        {messageResult ? (
+                          <div className="flex items-start gap-2 p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                            <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0 mt-0.5" />
+                            <div>
+                              <p className="font-semibold text-green-800 dark:text-green-200 text-sm">
+                                Wiadomosc zapisana
+                              </p>
+                              <p className="text-sm text-green-700 dark:text-green-300">
+                                Numer referencyjny:{" "}
+                                <code className="bg-green-100 dark:bg-green-900 px-1 py-0.5 rounded font-mono">
+                                  {messageResult.referenceNumber}
+                                </code>
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div className="space-y-1">
+                                <Label htmlFor="msg-name" className="text-xs">
+                                  Imie i nazwisko
+                                </Label>
+                                <Input
+                                  id="msg-name"
+                                  value={msgName}
+                                  onChange={(e) => setMsgName(e.target.value)}
+                                  placeholder="Jan Kowalski"
+                                  className="h-9"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label htmlFor="msg-phone" className="text-xs">
+                                  Telefon *
+                                </Label>
+                                <Input
+                                  id="msg-phone"
+                                  value={msgPhone}
+                                  onChange={(e) => setMsgPhone(e.target.value)}
+                                  placeholder="+48 123 456 789"
+                                  className="h-9"
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor="msg-text" className="text-xs">
+                                Tresc wiadomosci *
+                              </Label>
+                              <Textarea
+                                id="msg-text"
+                                value={msgText}
+                                onChange={(e) => setMsgText(e.target.value)}
+                                placeholder="Opisz swoja sprawe..."
+                                rows={3}
+                              />
+                            </div>
+                            <Button
+                              onClick={handleLeaveMessage}
+                              disabled={sendingMessage || !msgText.trim() || !msgPhone.trim()}
+                              className="w-full gap-2"
+                              size="sm"
+                            >
+                              {sendingMessage ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Send className="h-4 w-4" />
+                              )}
+                              Wyslij wiadomosc
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1240,6 +1447,15 @@ function VoiceAiContent() {
                           <Badge variant="outline" className="text-xs">
                             {entry.intent}
                           </Badge>
+                          {entry.intent === "escalate_to_human" && (
+                            <Badge
+                              variant="destructive"
+                              className="gap-1 text-xs"
+                            >
+                              <AlertTriangle className="h-3 w-3" />
+                              Eskalacja
+                            </Badge>
+                          )}
                         </div>
                         <span className="text-xs text-muted-foreground flex items-center gap-1">
                           <Clock className="h-3 w-3" />
