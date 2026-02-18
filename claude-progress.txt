@@ -1,5 +1,124 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-18 (Feature #192 - Content AI creates social posts) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #192: "Content AI creates social posts" - Generate social media content
+- Category: AI
+- Steps: Navigate to content generator, Select social media post, Provide context, Generate post, Verify engaging content, Verify hashtags included
+
+### What was accomplished:
+1. Created API endpoint at `/api/ai/content/social-post/route.ts` (~280 lines)
+   - Supports 3 platforms: Instagram, Facebook, TikTok (with platform-specific constraints)
+   - 7 post types: promotion, service_highlight, tips_and_tricks, behind_the_scenes, client_transformation, seasonal, engagement
+   - 5 tones: professional, casual, fun, luxurious, educational
+   - Fetches real salon data (name, industry), services (with prices), and active promotions from DB
+   - Polish-language system prompts tailored for beauty/wellness/medical industry
+   - Platform-specific max lengths, hashtag guides, and format instructions
+   - Returns: post content, platform, postType, extracted hashtags, characterCount, maxLength
+   - Auth check + Pro plan gating + Zod request validation
+2. Created social posts UI page at `/dashboard/content-generator/social-posts/page.tsx` (~490 lines)
+   - Two-column layout: configuration (left) and generated post preview (right)
+   - Platform selector with icon buttons (Instagram, Facebook, TikTok with custom SVG)
+   - Post type dropdown with descriptions, tone dropdown, context textarea with char counter
+   - Emoji and hashtag checkboxes
+   - Generated post display with platform/type/character count badges
+   - Extracted hashtags displayed as Badge components
+   - Copy to clipboard and regenerate buttons
+   - Loading states with Loader2 spinner
+   - Wrapped in ProPlanGate for Pro plan access
+3. Updated content generator hub page to make social posts card clickable with navigation
+   - Added Link to `/dashboard/content-generator/social-posts`
+   - ArrowRight icon with hover opacity transition
+
+### Browser verification:
+- Registered test user with Pro plan, navigated to social posts page
+- Configured: Instagram + Promocja + Profesjonalny tone + spring promotion context
+- AI generated a full Polish promotional post with:
+  - Real service prices from database (Zabieg na twarz 200 PLN, Manicure 100 PLN, etc.)
+  - 20 relevant hashtags extracted and displayed
+  - Character count 1409/2200
+  - Engaging content with emoji
+- Copy to clipboard and regenerate buttons visible and functional
+- 0 console errors, 0 mock data patterns detected
+
+### Commit: b4bdc5c
+
+---
+
+## Session: 2026-02-18 (Feature #189 - Business AI weekly recommendations) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #189: "Business AI weekly recommendations" - Weekly planning widget
+- Category: AI
+- Steps: Navigate to dashboard (Pro), View weekly recommendations, Verify covers upcoming week, Verify strategic suggestions
+
+### What was accomplished:
+1. Created API endpoint at `/api/ai/business/weekly-recommendations/route.ts` (~700 lines)
+   - Runs 14 parallel PostgreSQL queries via Drizzle ORM for comprehensive week data
+   - Analyzes: appointments, previous week comparison, time blocks, work schedules, low stock, ratings, cancellations, revenue trends, top services, active promotions, client activity
+   - Generates up to 11 recommendation types: empty week, week overview, empty days, vacation impact, workload balance, revenue strategy, cancellation risk, client reactivation, inventory prep, service strategy, rating improvement, active promotions
+   - Returns: summary (WeeklySummary), recommendations (WeeklyRecommendation[]), dayBreakdown
+   - Auth check + Pro plan gating
+   - Fixed nullable promotion dates with SQL template conditions
+2. Added WeeklyRecommendations component to dashboard page (~200 lines)
+   - Indigo gradient color scheme (distinct from daily recommendations)
+   - Summary bar: total appointments, estimated revenue, busiest day, days without appointments
+   - Day-by-day mini bar chart with dynamic height calculation
+   - Expandable recommendation list (3 visible by default, "Pokaz wszystkie" button)
+   - Each recommendation: icon, title, priority badge, metric badge, description, action link
+   - 6 recommendation types with unique icons: strategy, staffing, marketing, revenue, preparation, warning
+   - Loading state, error state with retry button
+   - Pro plan gating (component hidden for non-Pro users)
+
+### Verification (browser automation):
+1. ✅ Navigate to dashboard (Pro) - Dashboard loads with Pro badge
+2. ✅ View weekly recommendations - "Plan tygodnia AI" widget visible with summary, chart, 9 recommendations
+3. ✅ Verify covers upcoming week - Date range "19 lutego - 25 lutego 2026" (7-day period)
+4. ✅ Verify strategic suggestions - 9 strategic suggestions covering: week overview, empty days, staffing conflicts, rating improvement, cancellation forecast, client reactivation, revenue trends, service promotion, active promotions
+- Mock data check: CLEAN (no globalThis, devStore, mockDb patterns)
+- Console errors: 0
+- Data persistence: Confirmed (page refresh shows same data from PostgreSQL)
+
+### Commit: c7b2890 (included with Feature #190 commit)
+
+---
+
+## Session: 2026-02-18 (Feature #190 - Content AI generates descriptions) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #190: "Content AI generates descriptions" - AI writes service copy
+- Category: AI
+- Steps: Navigate to service, Click generate description, Verify AI creates text, Verify relevant to service, Verify professional quality
+
+### What was accomplished:
+1. Created API endpoint at `/api/ai/content/generate-description/route.ts`
+   - POST endpoint accepting serviceName (required), categoryName, basePrice, baseDuration (optional)
+   - Auth check + Pro plan gating via `isProPlan()`
+   - Fetches salon info (name, industry type) for context-aware generation
+   - Uses OpenRouter `generateText` with customized system prompt for Polish marketing copy
+   - Industry-specific labels (hair_salon, beauty_salon, medical, barber, spa, nail_salon)
+   - Zod validation, proper error handling, maxOutputTokens: 500
+2. Modified service detail page (`/dashboard/services/[id]/page.tsx`)
+   - Added "Generuj opis AI" button with Sparkles icon next to description label in edit dialog
+   - Loading state with spinner animation during generation
+   - Button disabled when no service name or while generating
+   - Success toast "Opis wygenerowany przez AI" on completion
+   - Error handling with toast for Pro plan requirement, API errors
+   - `data-testid="generate-description-btn"` for testing
+
+### Verification:
+- Browser automation: navigated to service "Strzyzenie damskie", opened edit dialog
+- Clicked "Generuj opis AI" button - AI generated professional Polish description
+- Generated text: professional 4-sentence marketing copy about women's haircut
+- Text is relevant to the service (mentions stylists, hairstyles, consultations)
+- Professional quality with marketing tone and client benefits
+- Success toast notification displayed correctly
+
+### Commit: c7b2890
+
+---
+
 ## Session: 2026-02-18 (Feature #188 - Business AI daily recommendations) *** SUCCESS ***
 
 ### Feature Assigned
