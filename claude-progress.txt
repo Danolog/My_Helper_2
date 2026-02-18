@@ -1,5 +1,31 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-18 (Feature #204 - Date picker constraints) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #204: "Date picker constraints" - Past/future date limits
+- Category: FormValidation
+
+### What was accomplished:
+Added min date constraints and past-date validation to appointment date pickers:
+1. **new-appointment-dialog.tsx** - Added `min={todayStr}` HTML attribute + JS validation "Nie można wybrać daty z przeszłości"
+2. **edit-appointment-dialog.tsx** - Added `min={todayStr}` HTML attribute + JS validation + field-level error display
+
+Note: booking/page.tsx and client booking page already had min constraints.
+
+### Verification (browser automation):
+- Past date (2025-01-15): Form blocked with error "Nie można wybrać daty z przeszłości" ✅
+- Valid future date (2026-03-01): Appointment created successfully with toast "Wizyta została utworzona" ✅
+- HTML min attribute confirmed set to 2026-02-18 via JS evaluation ✅
+
+### Files modified:
+- src/components/appointments/new-appointment-dialog.tsx
+- src/components/appointments/edit-appointment-dialog.tsx
+
+### Commit: e0a6645
+
+---
+
 ## Session: 2026-02-18 (Feature #201 - Email format validation) *** SUCCESS ***
 
 ### Feature Assigned
@@ -10500,3 +10526,23 @@ Feature #185: Business AI proactive suggestions - AI recommends actions based on
 ### What should be worked on next:
 - Continue with next ready features from the backlog
 - Check feature_get_ready for next available features
+
+---
+
+## Session: Feature #203 - Numeric field validation
+### Date: 2026-02-18
+
+### Verification results (all 4 steps PASS):
+1. Navigate to price field - opened Dodaj usluge dialog on /dashboard/services
+2. Enter abc - rejected by HTML input type=number native validation + form shows Cena jest wymagana
+3. Enter -10 - rejected with Cena nie moze byc ujemna error message
+4. Enter 100 - accepted, service NumericValidationTest created (100.00 PLN, 30 min)
+
+### Additional checks:
+- Mock data grep: CLEAN
+- Data persistence: CONFIRMED after full page reload
+- Console errors: 0
+
+### Completion status:
+- Feature #203 marked as passing
+- Current stats: 172/253 features passing (68.0%)
