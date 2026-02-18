@@ -133,6 +133,10 @@ export default function InvoicePreviewPage() {
       toast.error("Podaj adres email odbiorcy");
       return;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTo.trim())) {
+      toast.error("Wprowadz poprawny adres email");
+      return;
+    }
 
     setSending(true);
     try {

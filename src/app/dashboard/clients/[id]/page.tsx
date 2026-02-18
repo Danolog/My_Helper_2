@@ -302,6 +302,9 @@ export default function ClientProfilePage() {
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
 
+  // Form validation errors
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
   // Editable contact fields
   const [formFirstName, setFormFirstName] = useState("");
   const [formLastName, setFormLastName] = useState("");
@@ -663,12 +666,31 @@ export default function ClientProfilePage() {
     }
   };
 
+  const clearFieldError = (field: string) => {
+    setFormErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
   const handleSave = async () => {
     if (!client) return;
 
-    // Validate required fields
-    if (!formFirstName.trim() || !formLastName.trim()) {
-      toast.error("Imie i nazwisko sa wymagane");
+    // Validate required fields with inline errors
+    const errors: Record<string, string> = {};
+    if (!formFirstName.trim()) {
+      errors.firstName = "Imie jest wymagane";
+    }
+    if (!formLastName.trim()) {
+      errors.lastName = "Nazwisko jest wymagane";
+    }
+    if (formEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formEmail.trim())) {
+      errors.email = "Wprowadz poprawny adres email";
+    }
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      toast.error("Wypelnij wszystkie wymagane pola");
       return;
     }
 
@@ -976,28 +998,38 @@ export default function ClientProfilePage() {
                 <div>
                   <Label htmlFor="client-firstName" className="text-sm font-medium flex items-center gap-1.5 mb-1.5">
                     <User className="h-3.5 w-3.5 text-muted-foreground" />
-                    Imie
+                    Imie *
                   </Label>
                   <Input
                     id="client-firstName"
                     placeholder="Imie klienta"
                     value={formFirstName}
-                    onChange={(e) => setFormFirstName(e.target.value)}
+                    onChange={(e) => { setFormFirstName(e.target.value); clearFieldError("firstName"); }}
+                    aria-invalid={!!formErrors.firstName}
+                    className={formErrors.firstName ? "border-destructive" : ""}
                     data-testid="client-firstName-input"
                   />
+                  {formErrors.firstName && (
+                    <p className="text-sm text-destructive mt-1">{formErrors.firstName}</p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="client-lastName" className="text-sm font-medium flex items-center gap-1.5 mb-1.5">
                     <User className="h-3.5 w-3.5 text-muted-foreground" />
-                    Nazwisko
+                    Nazwisko *
                   </Label>
                   <Input
                     id="client-lastName"
                     placeholder="Nazwisko klienta"
                     value={formLastName}
-                    onChange={(e) => setFormLastName(e.target.value)}
+                    onChange={(e) => { setFormLastName(e.target.value); clearFieldError("lastName"); }}
+                    aria-invalid={!!formErrors.lastName}
+                    className={formErrors.lastName ? "border-destructive" : ""}
                     data-testid="client-lastName-input"
                   />
+                  {formErrors.lastName && (
+                    <p className="text-sm text-destructive mt-1">{formErrors.lastName}</p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="client-phone" className="text-sm font-medium flex items-center gap-1.5 mb-1.5">
@@ -1023,9 +1055,16 @@ export default function ClientProfilePage() {
                     type="email"
                     placeholder="np. klient@example.com"
                     value={formEmail}
-                    onChange={(e) => setFormEmail(e.target.value)}
+                    onChange={(e) => {
+                      setFormEmail(e.target.value);
+                      clearFieldError("email");
+                    }}
+                    aria-invalid={!!formErrors.email}
                     data-testid="client-email-input"
                   />
+                  {formErrors.email && (
+                    <p className="text-sm text-destructive mt-1">{formErrors.email}</p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="client-birthday" className="text-sm font-medium flex items-center gap-1.5 mb-1.5">
