@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, PenTool, Instagram, Mail, FileText } from "lucide-react";
+import { ArrowLeft, PenTool, Instagram, Mail, FileText, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 
@@ -26,13 +26,19 @@ function ContentGeneratorContent() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <div className="p-6 border rounded-lg space-y-3">
+        <Link
+          href="/dashboard/content-generator/social-posts"
+          className="p-6 border rounded-lg space-y-3 hover:border-primary hover:shadow-md transition-all group cursor-pointer"
+        >
           <Instagram className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold">Posty social media</h3>
+          <h3 className="font-semibold flex items-center gap-2">
+            Posty social media
+            <ArrowRight className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </h3>
           <p className="text-sm text-muted-foreground">
             Generowanie angazujacych postow na Instagram, Facebook i TikTok
           </p>
-        </div>
+        </Link>
         <div className="p-6 border rounded-lg space-y-3">
           <FileText className="h-8 w-8 text-primary" />
           <h3 className="font-semibold">Opisy uslug</h3>
