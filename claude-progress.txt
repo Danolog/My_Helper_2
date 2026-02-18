@@ -9921,3 +9921,45 @@ Date: 2026-02-17
 ### What should be worked on next:
 - Continue with next ready features from the backlog
 - Check feature_get_ready for next available features
+
+---
+
+## Session: Feature #185 - Business AI proactive suggestions (2026-02-18)
+
+### What was implemented:
+Feature #185: Business AI proactive suggestions - AI recommends actions based on real salon data analysis.
+
+### Files created:
+- **src/app/api/ai/business/suggestions/route.ts** (NEW)
+  - Rule-based analysis API endpoint (no LLM needed)
+  - Runs 14 parallel PostgreSQL queries via Drizzle ORM
+  - Applies 10 analysis rules generating typed suggestions
+  - Each suggestion has: id, type (warning/opportunity/action/insight), priority (high/medium/low), title, description, metric, actionLabel, actionHref
+  - Analysis rules: cancellation rate, revenue trends, appointment volume, low stock, negative reviews, rating quality, inactive clients, upcoming appointments, top services, employee workload balance
+  - Auth + Pro plan checks included
+
+### Files modified:
+- **src/app/dashboard/ai-assistant/business/page.tsx**
+  - Added ProactiveSuggestions component with loading/error/empty states
+  - Added Suggestion interface and styling constants (icons, colors, badges per type/priority)
+  - Changed default tab from chat to suggestions
+  - Changed tab layout from 2 columns to 3 columns: Sugestie AI | Asystent AI | Dane salonu
+
+### Verification results (all 4 steps PASS):
+1. Open AI assistant - Business assistant page loads with 3-tab layout
+2. View proactive suggestions - Sugestie AI tab is default, 5 suggestions displayed
+3. Verify relevant to current data - All suggestions based on real PostgreSQL data
+4. Verify actionable recommendations - Each suggestion has action buttons linking to relevant pages
+
+### Additional checks:
+- Mock data patterns: CLEAN (no globalThis, devStore, mockDb patterns found)
+- Data persistence: CONFIRMED (data survives full page refresh, stored in PostgreSQL)
+- Console errors: 0
+- Screenshot: feature185-proactive-suggestions.png
+
+### Completion status:
+- Feature #185 marked as passing
+
+### What should be worked on next:
+- Continue with next ready features from the backlog
+- Check feature_get_ready for next available features
