@@ -373,18 +373,46 @@ function TrendsContent() {
         { id: assistantId, role: "assistant", text: "", timestamp: new Date() },
       ]);
 
+      // Buffer for partial lines across chunks
+      let buffer = "";
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        // Parse SSE-style stream - extract text parts
-        const lines = chunk.split("\n");
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
         for (const line of lines) {
-          // The AI SDK stream format sends text as: 0:"text content"
-          if (line.startsWith("0:")) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          // UI Message Stream Protocol: data: {"type":"text","text":"..."}
+          if (trimmed.startsWith("data: ")) {
+            const payload = trimmed.slice(6);
+            if (payload === "[DONE]") continue;
             try {
-              const textContent = JSON.parse(line.slice(2));
+              const parsed = JSON.parse(payload);
+              if (parsed.type === "text" && typeof parsed.text === "string") {
+                fullText += parsed.text;
+              } else if (parsed.type === "error" && parsed.errorText) {
+                throw new Error(parsed.errorText);
+              }
+            } catch (parseErr) {
+              if (
+                parseErr instanceof Error &&
+                !parseErr.message.includes("Unexpected") &&
+                !parseErr.message.includes("JSON")
+              ) {
+                throw parseErr;
+              }
+            }
+          }
+          // Also support legacy Data Stream Protocol: 0:"text content"
+          else if (trimmed.startsWith("0:")) {
+            try {
+              const textContent = JSON.parse(trimmed.slice(2));
               if (typeof textContent === "string") {
                 fullText += textContent;
               }
