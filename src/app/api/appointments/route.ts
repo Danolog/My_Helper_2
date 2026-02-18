@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
 import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { validateBody, createAppointmentSchema } from "@/lib/api-validation";
 
 // GET /api/appointments - List appointments with optional date range filter
 export async function GET(request: Request) {
@@ -90,11 +91,10 @@ export async function POST(request: Request) {
       }
     }
 
-    if (!salonId || !employeeId || !startTime || !endTime) {
-      return NextResponse.json(
-        { success: false, error: "salonId, employeeId, startTime, and endTime are required" },
-        { status: 400 }
-      );
+    // Server-side validation with Zod schema
+    const validationError = validateBody(createAppointmentSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
 
     // Check for overlapping appointments for this employee

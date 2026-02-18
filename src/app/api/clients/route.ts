@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { clients, appointments } from "@/lib/schema";
 import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
+import { validateBody, createClientSchema } from "@/lib/api-validation";
 
 // GET /api/clients - List all clients with optional filtering
 // Supported query params:
@@ -107,14 +108,14 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { salonId, firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
 
-    if (!salonId || !firstName || !lastName) {
-      return NextResponse.json(
-        { success: false, error: "salonId, firstName, and lastName are required" },
-        { status: 400 }
-      );
+    // Server-side validation with Zod schema
+    const validationError = validateBody(createClientSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const { salonId, firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
 
     console.log(`[Clients API] Executing: INSERT INTO clients (salon_id, first_name, last_name, phone, email, notes, preferences, allergies, favorite_employee_id)`);
     const [newClient] = await db

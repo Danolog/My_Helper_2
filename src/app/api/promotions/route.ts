@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { promotions } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
+import { validateBody, createPromotionSchema } from "@/lib/api-validation";
 
 // GET /api/promotions - List promotions with optional salonId filter
 export async function GET(request: Request) {
@@ -37,20 +38,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { salonId, name, type, value, startDate, endDate, conditionsJson, isActive } = body;
 
-    if (!salonId || !name || !type || value === undefined || value === null) {
-      return NextResponse.json(
-        { success: false, error: "salonId, name, type, and value are required" },
-        { status: 400 }
-      );
-    }
-
-    // Validate type
-    const validTypes = ["percentage", "fixed", "package", "buy2get1", "happy_hours", "first_visit"];
-    if (!validTypes.includes(type)) {
-      return NextResponse.json(
-        { success: false, error: `Invalid type. Must be one of: ${validTypes.join(", ")}` },
-        { status: 400 }
-      );
+    // Server-side validation with Zod schema
+    const validationError = validateBody(createPromotionSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
 
     // Validate percentage value (0-100)
