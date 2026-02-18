@@ -169,6 +169,45 @@ type RescheduleResult = {
   conversationId: string | null;
 };
 
+type CancelResult = {
+  success: boolean;
+  appointment: {
+    id: string;
+    startTime: string;
+    endTime: string;
+    status: string;
+  };
+  details: {
+    appointmentId: string;
+    serviceName: string;
+    employeeName: string;
+    date: string;
+    time: string;
+    clientName: string | null;
+  };
+  depositInfo: {
+    hasDeposit: boolean;
+    depositPaid: boolean;
+    depositAmount: number;
+    depositPolicy: string; // "none" | "refund" | "forfeit"
+    depositRefunded: boolean;
+    depositForfeited: boolean;
+    hoursUntilAppointment: number;
+    isMoreThan24h: boolean;
+    refund: {
+      processed: boolean;
+      refundId: string;
+      amount: number;
+      message: string;
+    } | null;
+  };
+  smsConfirmation: {
+    sent: boolean;
+    phone: string;
+  };
+  conversationId: string | null;
+};
+
 const DEFAULT_CONFIG: VoiceAiConfig = {
   enabled: false,
   greeting:
@@ -219,6 +258,13 @@ function VoiceAiContent() {
   const [rescheduleInProgress, setRescheduleInProgress] = useState(false);
   const [rescheduleResult, setRescheduleResult] = useState<RescheduleResult | null>(null);
   const [showRescheduleForm, setShowRescheduleForm] = useState(false);
+
+  // Voice cancellation flow state
+  const [cancelPhone, setCancelPhone] = useState("+48 123 456 789");
+  const [cancelAppointmentId, setCancelAppointmentId] = useState("");
+  const [cancelInProgress, setCancelInProgress] = useState(false);
+  const [cancelResult, setCancelResult] = useState<CancelResult | null>(null);
+  const [showCancelForm, setShowCancelForm] = useState(false);
 
   // Escalation message form state
   const [msgName, setMsgName] = useState("");
@@ -359,6 +405,11 @@ function VoiceAiContent() {
         if (data.intent === "reschedule") {
           setShowRescheduleForm(true);
           setRescheduleResult(null);
+        }
+        // Auto-show cancel form when cancel intent is detected
+        if (data.intent === "cancel_appointment") {
+          setShowCancelForm(true);
+          setCancelResult(null);
         }
       } else {
         const data = await res.json();
@@ -530,6 +581,49 @@ function VoiceAiContent() {
       });
     } finally {
       setRescheduleInProgress(false);
+    }
+  };
+
+  const handleVoiceCancel = async () => {
+    if (!cancelPhone.trim()) {
+      toast.error("Numer telefonu", {
+        description: "Prosze podac numer telefonu klienta.",
+      });
+      return;
+    }
+
+    setCancelInProgress(true);
+    setCancelResult(null);
+    try {
+      const res = await fetch("/api/ai/voice/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          callerPhone: cancelPhone.trim(),
+          appointmentId: cancelAppointmentId.trim() || undefined,
+          notes: "Anulacja wizyty przez asystenta glosowego AI",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setCancelResult(data);
+        toast.success("Wizyta anulowana!", {
+          description: `${data.details.serviceName} u ${data.details.employeeName}, ${data.details.date} o ${data.details.time}`,
+        });
+        loadCallLog();
+      } else {
+        toast.error("Nie udalo sie anulowac wizyty", {
+          description: data.error || "Prosze sprobowac ponownie.",
+        });
+      }
+    } catch {
+      toast.error("Blad", {
+        description: "Nie udalo sie polaczyc z serwerem.",
+      });
+    } finally {
+      setCancelInProgress(false);
     }
   };
 
@@ -1699,6 +1793,245 @@ function VoiceAiContent() {
                   >
                     <Calendar className="h-4 w-4" />
                     Nowa zmiana terminu
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Voice Cancellation Flow */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <PhoneOff className="h-5 w-5 text-red-600" />
+                Anulacja wizyty przez telefon
+              </CardTitle>
+              <CardDescription>
+                Symuluj proces odwolania wizyty przez asystenta glosowego
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!showCancelForm && !cancelResult && (
+                <Button
+                  onClick={() => {
+                    setShowCancelForm(true);
+                    setCancelResult(null);
+                  }}
+                  variant="outline"
+                  className="w-full gap-2"
+                >
+                  <PhoneOff className="h-4 w-4" />
+                  Rozpocznij anulacje wizyty
+                </Button>
+              )}
+
+              {showCancelForm && !cancelResult && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-800 dark:text-red-200">
+                    <PhoneIncoming className="h-4 w-4 shrink-0" />
+                    Klient dzwoni i chce odwolac wizyte. Podaj numer telefonu, a system znajdzie najblizszа wizyte.
+                  </div>
+
+                  {/* Caller Phone */}
+                  <div className="space-y-2">
+                    <Label htmlFor="cancel-phone">
+                      <Phone className="inline h-3 w-3 mr-1" />
+                      Numer telefonu klienta *
+                    </Label>
+                    <Input
+                      id="cancel-phone"
+                      value={cancelPhone}
+                      onChange={(e) => setCancelPhone(e.target.value)}
+                      placeholder="+48 123 456 789"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      System znajdzie najblizszа wizyte klienta po numerze telefonu
+                    </p>
+                  </div>
+
+                  {/* Optional: Direct appointment ID */}
+                  <div className="space-y-2">
+                    <Label htmlFor="cancel-appt-id">
+                      ID wizyty (opcjonalnie)
+                    </Label>
+                    <Input
+                      id="cancel-appt-id"
+                      value={cancelAppointmentId}
+                      onChange={(e) => setCancelAppointmentId(e.target.value)}
+                      placeholder="np. abc-123-def..."
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Zostaw puste - system automatycznie znajdzie najblizszа wizyte
+                    </p>
+                  </div>
+
+                  {/* Deposit Policy Info */}
+                  <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-800 dark:text-amber-200">
+                    <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Polityka zadatku</p>
+                      <p>Anulacja wiecej niz 24h przed wizyta: zadatek zwracany. Anulacja mniej niz 24h przed wizyta: zadatek zatrzymany przez salon.</p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowCancelForm(false);
+                        setCancelResult(null);
+                      }}
+                    >
+                      Anuluj
+                    </Button>
+                    <Button
+                      onClick={handleVoiceCancel}
+                      disabled={cancelInProgress || !cancelPhone.trim()}
+                      className="gap-2"
+                      variant="destructive"
+                    >
+                      {cancelInProgress ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <PhoneOff className="h-4 w-4" />
+                      )}
+                      Odwolaj wizyte
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Cancel Result */}
+              {cancelResult && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-green-800 dark:text-green-200">
+                        Wizyta anulowana pomyslnie!
+                      </p>
+                      <p className="text-sm text-green-700 dark:text-green-300">
+                        Asystent AI dokonal anulacji wizyty przez telefon
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 p-4 border rounded-lg">
+                    <div>
+                      <span className="text-xs text-muted-foreground">Usluga:</span>
+                      <p className="font-medium">{cancelResult.details.serviceName}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Pracownik:</span>
+                      <p className="font-medium">{cancelResult.details.employeeName}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Data:</span>
+                      <p className="font-medium">{cancelResult.details.date}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Godzina:</span>
+                      <p className="font-medium">{cancelResult.details.time}</p>
+                    </div>
+                    {cancelResult.details.clientName && (
+                      <div className="col-span-2">
+                        <span className="text-xs text-muted-foreground">Klient:</span>
+                        <p className="font-medium">{cancelResult.details.clientName}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Deposit Policy Info */}
+                  <div className={`p-4 border rounded-lg space-y-2 ${
+                    cancelResult.depositInfo.depositPolicy === "refund"
+                      ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800"
+                      : cancelResult.depositInfo.depositPolicy === "forfeit"
+                        ? "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800"
+                        : "bg-muted/30"
+                  }`}>
+                    <p className="text-xs font-semibold flex items-center gap-1">
+                      <Shield className="h-3 w-3" />
+                      Informacja o zadatku
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-muted-foreground">Zadatek wplacony:</span>{" "}
+                        <span className="font-medium">
+                          {cancelResult.depositInfo.hasDeposit && cancelResult.depositInfo.depositPaid
+                            ? `${cancelResult.depositInfo.depositAmount.toFixed(2)} PLN`
+                            : "Nie"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Godzin do wizyty:</span>{" "}
+                        <span className="font-medium">
+                          {cancelResult.depositInfo.hoursUntilAppointment.toFixed(1)}h
+                        </span>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-muted-foreground">Polityka:</span>{" "}
+                        {cancelResult.depositInfo.depositPolicy === "refund" && (
+                          <Badge variant="default" className="bg-green-600 text-xs gap-1">
+                            <CheckCircle2 className="h-3 w-3" />
+                            Zwrot zadatku ({cancelResult.depositInfo.depositAmount.toFixed(2)} PLN)
+                          </Badge>
+                        )}
+                        {cancelResult.depositInfo.depositPolicy === "forfeit" && (
+                          <Badge variant="destructive" className="text-xs gap-1">
+                            <XCircle className="h-3 w-3" />
+                            Zadatek zatrzymany ({cancelResult.depositInfo.depositAmount.toFixed(2)} PLN)
+                          </Badge>
+                        )}
+                        {cancelResult.depositInfo.depositPolicy === "none" && (
+                          <Badge variant="secondary" className="text-xs">
+                            Brak zadatku
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    {cancelResult.depositInfo.depositRefunded && cancelResult.depositInfo.refund && (
+                      <div className="flex items-center gap-1 text-xs text-green-700 dark:text-green-300">
+                        <CheckCircle2 className="h-3 w-3" />
+                        Zwrot przetworzony: {cancelResult.depositInfo.refund.message}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* SMS Confirmation Status */}
+                  <div className="flex items-center gap-2 p-3 border rounded-lg">
+                    <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">
+                      SMS z potwierdzeniem anulacji:{" "}
+                      {cancelResult.smsConfirmation.sent ? (
+                        <Badge variant="default" className="bg-green-600 text-xs">
+                          Wyslany na {cancelResult.smsConfirmation.phone}
+                        </Badge>
+                      ) : (
+                        <Badge variant="destructive" className="text-xs">
+                          Nie udalo sie wyslac
+                        </Badge>
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="text-xs text-muted-foreground">
+                    ID wizyty:{" "}
+                    <code className="bg-muted px-1 py-0.5 rounded">
+                      {cancelResult.details.appointmentId}
+                    </code>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowCancelForm(false);
+                      setCancelResult(null);
+                      setCancelAppointmentId("");
+                    }}
+                    className="w-full gap-2"
+                  >
+                    <PhoneOff className="h-4 w-4" />
+                    Nowa anulacja
                   </Button>
                 </div>
               )}
