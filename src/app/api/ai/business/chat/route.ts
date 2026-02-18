@@ -476,10 +476,11 @@ ${salonData}`;
 
   const result = streamText({
     model: openrouter(
-      process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4-5-20250929"
+      process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4"
     ),
     system: systemPrompt,
     messages: convertToModelMessages(messages),
+    maxTokens: 2000,
   });
 
   return (

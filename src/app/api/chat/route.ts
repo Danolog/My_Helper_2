@@ -86,8 +86,9 @@ export async function POST(req: Request) {
   const openrouter = createOpenRouter({ apiKey });
 
   const result = streamText({
-    model: openrouter(process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4-5-20250929"),
+    model: openrouter(process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4"),
     messages: convertToModelMessages(messages),
+    maxTokens: 2000,
   });
 
   return (

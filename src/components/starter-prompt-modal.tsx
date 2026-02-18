@@ -64,11 +64,11 @@ The only things to preserve are:
 
 \`\`\`typescript
 // ✓ Correct - Use environment variable
-const model = process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4-5-20250929";
+const model = process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4";
 model: openrouter(model)
 
 // ✗ Incorrect - Don't hardcode model names
-model: openrouter("anthropic/claude-sonnet-4-5-20250929")
+model: openrouter("anthropic/claude-sonnet-4")
 \`\`\`
 
 This allows for easy model switching without code changes and ensures consistency across the application.
