@@ -20,6 +20,9 @@ import {
   Send,
   History,
   Shield,
+  CalendarPlus,
+  Calendar,
+  PhoneCall,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +66,27 @@ type VoiceAiConfig = {
   };
 };
 
+type AvailabilitySlot = {
+  time: string;
+  available: boolean;
+};
+
+type AvailabilityData = {
+  date: string;
+  dateFormatted: string;
+  employeeId: string;
+  employeeName: string;
+  serviceName: string | null;
+  duration: number;
+  dayOff: boolean;
+  workStart: string | null;
+  workEnd: string | null;
+  availableSlots: AvailabilitySlot[];
+  requestedTime: string | null;
+  requestedTimeAvailable: boolean | null;
+  alternativeTimes: string[];
+};
+
 type CallSimulationResult = {
   conversationId: string;
   greeting: string;
@@ -73,6 +97,7 @@ type CallSimulationResult = {
   voiceStyle: string;
   language: string;
   transferToHuman: boolean;
+  availabilityData: AvailabilityData | null;
 };
 
 type CallLogEntry = {
@@ -82,6 +107,36 @@ type CallLogEntry = {
   aiResponse: string;
   intent: string;
   timestamp: string;
+};
+
+type ServiceOption = {
+  id: string;
+  name: string;
+  price: string;
+  duration: number;
+};
+
+type BookingResult = {
+  success: boolean;
+  appointment: {
+    id: string;
+    startTime: string;
+    endTime: string;
+    status: string;
+  };
+  details: {
+    serviceName: string;
+    employeeName: string;
+    date: string;
+    time: string;
+    duration: number;
+    price: string;
+  };
+  smsConfirmation: {
+    sent: boolean;
+    phone: string;
+  };
+  conversationId: string | null;
 };
 
 const DEFAULT_CONFIG: VoiceAiConfig = {
@@ -115,6 +170,17 @@ function VoiceAiContent() {
   const [callLog, setCallLog] = useState<CallLogEntry[]>([]);
   const [loadingLog, setLoadingLog] = useState(false);
 
+  // Voice booking flow state
+  const [availableServices, setAvailableServices] = useState<ServiceOption[]>([]);
+  const [selectedServiceId, setSelectedServiceId] = useState("");
+  const [bookingDate, setBookingDate] = useState("");
+  const [bookingTime, setBookingTime] = useState("");
+  const [bookingPhone, setBookingPhone] = useState("+48 123 456 789");
+  const [bookingName, setBookingName] = useState("");
+  const [bookingInProgress, setBookingInProgress] = useState(false);
+  const [bookingResult, setBookingResult] = useState<BookingResult | null>(null);
+  const [showBookingForm, setShowBookingForm] = useState(false);
+
   const loadConfig = useCallback(async () => {
     try {
       const res = await fetch("/api/ai/voice/config", { cache: "no-store" });
@@ -144,10 +210,39 @@ function VoiceAiContent() {
     }
   }, []);
 
+  const loadServices = useCallback(async () => {
+    try {
+      const res = await fetch("/api/services?salonId=00000000-0000-0000-0000-000000000001", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        const svcList = (data.data || data || []) as Array<{
+          id: string;
+          name: string;
+          basePrice: string;
+          baseDuration: number;
+          isActive?: boolean;
+        }>;
+        setAvailableServices(
+          svcList
+            .filter((s) => s.isActive !== false)
+            .map((s) => ({
+              id: s.id,
+              name: s.name,
+              price: s.basePrice,
+              duration: s.baseDuration,
+            }))
+        );
+      }
+    } catch (err) {
+      console.error("Failed to load services:", err);
+    }
+  }, []);
+
   useEffect(() => {
     loadConfig();
     loadCallLog();
-  }, [loadConfig, loadCallLog]);
+    loadServices();
+  }, [loadConfig, loadCallLog, loadServices]);
 
   const saveConfig = async () => {
     setSaving(true);
@@ -204,6 +299,11 @@ function VoiceAiContent() {
         setCallerMessage("");
         // Reload call log after successful simulation
         loadCallLog();
+        // Auto-show booking form when booking intent is detected
+        if (data.intent === "book_appointment") {
+          setShowBookingForm(true);
+          setBookingResult(null);
+        }
       } else {
         const data = await res.json();
         toast.error("Blad symulacji", {
@@ -216,6 +316,60 @@ function VoiceAiContent() {
       });
     } finally {
       setSimulating(false);
+    }
+  };
+
+  const handleVoiceBooking = async () => {
+    if (!selectedServiceId) {
+      toast.error("Wybierz usluge", {
+        description: "Prosze wybrac usluge do rezerwacji.",
+      });
+      return;
+    }
+
+    if (!bookingPhone.trim()) {
+      toast.error("Numer telefonu", {
+        description: "Prosze podac numer telefonu dzwoniacego.",
+      });
+      return;
+    }
+
+    setBookingInProgress(true);
+    setBookingResult(null);
+    try {
+      const res = await fetch("/api/ai/voice/book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          serviceId: selectedServiceId,
+          preferredDate: bookingDate || undefined,
+          preferredTime: bookingTime || undefined,
+          callerPhone: bookingPhone.trim(),
+          callerName: bookingName.trim() || undefined,
+          notes: "Rezerwacja przez asystenta glosowego AI",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        setBookingResult(data);
+        toast.success("Wizyta zarezerwowana!", {
+          description: `${data.details.serviceName} u ${data.details.employeeName}, ${data.details.date} o ${data.details.time}`,
+        });
+        // Reload call log to show the booking conversation
+        loadCallLog();
+      } else {
+        toast.error("Nie udalo sie zarezerwowac", {
+          description: data.error || "Prosze sprobowac inny termin.",
+        });
+      }
+    } catch {
+      toast.error("Blad", {
+        description: "Nie udalo sie polaczyc z serwerem.",
+      });
+    } finally {
+      setBookingInProgress(false);
     }
   };
 
@@ -627,6 +781,8 @@ function VoiceAiContent() {
                     "Chce umowic wizyte na strzyzenie",
                     "Jakie macie ceny?",
                     "Czy jest wolny termin w piatek?",
+                    "Czy Anna Kowalska jest dostepna jutro o 10?",
+                    "Chce umowic wizyte u Anna jutro o 15:00 na strzyzenie",
                     "Chce odwolac wizyte",
                     "Chce zmienic termin wizyty",
                     "Polacz mnie z recepcja",
@@ -705,9 +861,342 @@ function VoiceAiContent() {
                     </code>
                   </div>
                 )}
+
+                {/* Availability Data Display */}
+                {callResult.availabilityData && (
+                  <div className="p-4 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800 space-y-3">
+                    <p className="text-xs font-semibold text-blue-700 dark:text-blue-300 flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      Dane z kalendarza (sprawdzenie dostepnosci)
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-muted-foreground">Data:</span>{" "}
+                        <span className="font-medium">
+                          {callResult.availabilityData.dateFormatted} ({callResult.availabilityData.date})
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Pracownik:</span>{" "}
+                        <span className="font-medium">
+                          {callResult.availabilityData.employeeName}
+                        </span>
+                      </div>
+                      {callResult.availabilityData.serviceName && (
+                        <div>
+                          <span className="text-muted-foreground">Usluga:</span>{" "}
+                          <span className="font-medium">
+                            {callResult.availabilityData.serviceName}
+                          </span>
+                        </div>
+                      )}
+                      <div>
+                        <span className="text-muted-foreground">Czas trwania:</span>{" "}
+                        <span className="font-medium">
+                          {callResult.availabilityData.duration} min
+                        </span>
+                      </div>
+                    </div>
+
+                    {callResult.availabilityData.dayOff ? (
+                      <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
+                        <XCircle className="h-3 w-3" />
+                        Pracownik nie pracuje w tym dniu
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-xs text-muted-foreground">
+                          Godziny pracy: {callResult.availabilityData.workStart} - {callResult.availabilityData.workEnd}
+                        </div>
+
+                        {callResult.availabilityData.requestedTime && (
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="text-muted-foreground">Zapytany termin: {callResult.availabilityData.requestedTime}</span>
+                            {callResult.availabilityData.requestedTimeAvailable === true && (
+                              <Badge variant="default" className="bg-green-600 gap-1 text-xs">
+                                <CheckCircle2 className="h-3 w-3" />
+                                Dostepny
+                              </Badge>
+                            )}
+                            {callResult.availabilityData.requestedTimeAvailable === false && (
+                              <Badge variant="destructive" className="gap-1 text-xs">
+                                <XCircle className="h-3 w-3" />
+                                Zajety
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+
+                        {callResult.availabilityData.alternativeTimes.length > 0 && (
+                          <div className="text-xs">
+                            <span className="text-muted-foreground">Alternatywne terminy: </span>
+                            <span className="font-medium">
+                              {callResult.availabilityData.alternativeTimes.join(", ")}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Slots grid */}
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-2">
+                            Dostepne terminy ({callResult.availabilityData.availableSlots.filter(s => s.available).length} wolnych / {callResult.availabilityData.availableSlots.length} wszystkich):
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {callResult.availabilityData.availableSlots.map((slot) => (
+                              <span
+                                key={slot.time}
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                                  slot.available
+                                    ? slot.time === callResult.availabilityData?.requestedTime
+                                      ? "bg-green-200 dark:bg-green-800 text-green-800 dark:text-green-200 ring-1 ring-green-400"
+                                      : "bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300"
+                                    : slot.time === callResult.availabilityData?.requestedTime
+                                      ? "bg-red-200 dark:bg-red-800 text-red-800 dark:text-red-200 ring-1 ring-red-400"
+                                      : "bg-red-100/50 dark:bg-red-900/20 text-red-400 dark:text-red-500 line-through"
+                                }`}
+                              >
+                                {slot.time}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
+
+          {/* Voice Booking Flow */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CalendarPlus className="h-5 w-5 text-blue-600" />
+                Rezerwacja przez telefon
+              </CardTitle>
+              <CardDescription>
+                Symuluj kompletny proces rezerwacji wizyty przez asystenta glosowego
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!showBookingForm && !bookingResult && (
+                <Button
+                  onClick={() => {
+                    setShowBookingForm(true);
+                    setBookingResult(null);
+                  }}
+                  variant="outline"
+                  className="w-full gap-2"
+                >
+                  <PhoneCall className="h-4 w-4" />
+                  Rozpocznij rezerwacje telefoniczna
+                </Button>
+              )}
+
+              {showBookingForm && !bookingResult && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-800 dark:text-blue-200">
+                    <PhoneIncoming className="h-4 w-4 shrink-0" />
+                    Klient dzwoni i chce umowic wizyte. Wybierz usluge i termin, a AI dokona rezerwacji.
+                  </div>
+
+                  {/* Service Selection */}
+                  <div className="space-y-2">
+                    <Label>Usluga *</Label>
+                    <Select
+                      value={selectedServiceId}
+                      onValueChange={setSelectedServiceId}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Wybierz usluge..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableServices.map((svc) => (
+                          <SelectItem key={svc.id} value={svc.id}>
+                            {svc.name} ({svc.price} PLN, {svc.duration} min)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Date and Time */}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="booking-date">
+                        <Calendar className="inline h-3 w-3 mr-1" />
+                        Preferowana data
+                      </Label>
+                      <Input
+                        id="booking-date"
+                        type="date"
+                        value={bookingDate}
+                        onChange={(e) => setBookingDate(e.target.value)}
+                        placeholder="YYYY-MM-DD"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Zostaw puste - system wybierze jutrzejszy dzien
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="booking-time">
+                        <Clock className="inline h-3 w-3 mr-1" />
+                        Preferowana godzina
+                      </Label>
+                      <Input
+                        id="booking-time"
+                        type="time"
+                        value={bookingTime}
+                        onChange={(e) => setBookingTime(e.target.value)}
+                        placeholder="HH:MM"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Zostaw puste - system wybierze pierwszy wolny termin
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Caller Details */}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="booking-phone">
+                        <Phone className="inline h-3 w-3 mr-1" />
+                        Numer telefonu *
+                      </Label>
+                      <Input
+                        id="booking-phone"
+                        value={bookingPhone}
+                        onChange={(e) => setBookingPhone(e.target.value)}
+                        placeholder="+48 123 456 789"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="booking-name">
+                        <User className="inline h-3 w-3 mr-1" />
+                        Imie i nazwisko klienta
+                      </Label>
+                      <Input
+                        id="booking-name"
+                        value={bookingName}
+                        onChange={(e) => setBookingName(e.target.value)}
+                        placeholder="Jan Kowalski"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 justify-end">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setShowBookingForm(false);
+                        setBookingResult(null);
+                      }}
+                    >
+                      Anuluj
+                    </Button>
+                    <Button
+                      onClick={handleVoiceBooking}
+                      disabled={bookingInProgress || !selectedServiceId}
+                      className="gap-2"
+                    >
+                      {bookingInProgress ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <CalendarPlus className="h-4 w-4" />
+                      )}
+                      Zarezerwuj wizyte
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Booking Result */}
+              {bookingResult && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 p-4 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
+                    <div>
+                      <p className="font-semibold text-green-800 dark:text-green-200">
+                        Wizyta zarezerwowana pomyslnie!
+                      </p>
+                      <p className="text-sm text-green-700 dark:text-green-300">
+                        Asystent AI dokonal rezerwacji przez telefon
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 p-4 border rounded-lg">
+                    <div>
+                      <span className="text-xs text-muted-foreground">Usluga:</span>
+                      <p className="font-medium">{bookingResult.details.serviceName}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Pracownik:</span>
+                      <p className="font-medium">{bookingResult.details.employeeName}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Data:</span>
+                      <p className="font-medium">{bookingResult.details.date}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Godzina:</span>
+                      <p className="font-medium">{bookingResult.details.time}</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Czas trwania:</span>
+                      <p className="font-medium">{bookingResult.details.duration} min</p>
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Cena:</span>
+                      <p className="font-medium">{bookingResult.details.price} PLN</p>
+                    </div>
+                  </div>
+
+                  {/* SMS Confirmation Status */}
+                  <div className="flex items-center gap-2 p-3 border rounded-lg">
+                    <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">
+                      SMS potwierdzajacy:{" "}
+                      {bookingResult.smsConfirmation.sent ? (
+                        <Badge variant="default" className="bg-green-600 text-xs">
+                          Wyslany na {bookingResult.smsConfirmation.phone}
+                        </Badge>
+                      ) : (
+                        <Badge variant="destructive" className="text-xs">
+                          Nie udalo sie wyslac
+                        </Badge>
+                      )}
+                    </span>
+                  </div>
+
+                  <div className="text-xs text-muted-foreground">
+                    ID wizyty:{" "}
+                    <code className="bg-muted px-1 py-0.5 rounded">
+                      {bookingResult.appointment.id}
+                    </code>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowBookingForm(false);
+                      setBookingResult(null);
+                      setSelectedServiceId("");
+                      setBookingDate("");
+                      setBookingTime("");
+                      setBookingName("");
+                    }}
+                    className="w-full gap-2"
+                  >
+                    <PhoneCall className="h-4 w-4" />
+                    Nowa rezerwacja
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Call Log Tab */}
