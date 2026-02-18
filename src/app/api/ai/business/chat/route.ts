@@ -12,6 +12,7 @@ import {
   services,
   reviews,
   products,
+  salons,
 } from "@/lib/schema";
 import { eq, and, gte, sql, count, desc } from "drizzle-orm";
 
@@ -34,12 +35,122 @@ const chatRequestSchema = z.object({
   messages: z.array(messageSchema).max(100, "Too many messages"),
 });
 
-async function gatherSalonData(): Promise<string> {
+// ────────────────────────────────────────────────────────────
+// Industry-specific context for AI assistant
+// ────────────────────────────────────────────────────────────
+
+const INDUSTRY_CONTEXT: Record<string, {
+  label: string;
+  description: string;
+  insights: string;
+}> = {
+  hair_salon: {
+    label: "Salon fryzjerski",
+    description: "salon specjalizujacy sie w uslugach fryzjerskich",
+    insights: `KONTEKST BRANZOWY - SALON FRYZJERSKI:
+- Kluczowe trendy: koloryzacja, baleyage, keratynowe prostowanie, regeneracja wlosow
+- Sezonowosc: wzmozony ruch przed swietami, sylwestrem, sezonem slubnym (maj-wrzesien)
+- Sredni czas wizyty: 30-120 min w zaleznosci od uslugi
+- Kluczowe wskazniki: sredni przychod na fotel, wskaznik powrotow klientow, zuzycie produktow koloryzacyjnych
+- Typowe wyzwania: wysoka rotacja pracownikow, zarzadzanie czasem przy zlozonych zabiegach, sezonowe spadki
+- Rekomendacje: cross-selling (odzywki, szampony), pakiety lojalnosciowe, rezerwacje online redukuja no-show
+- Popularne dodatkowe uslugi: stylizacja brody, zabiegi regeneracyjne, konsultacje kolorystyczne
+- Konkurencja: inne salony fryzjerskie, barber shopy, salony kosmetyczne z oferta fryzjerska`,
+  },
+  beauty_salon: {
+    label: "Salon kosmetyczny / beauty",
+    description: "salon kosmetyczny oferujacy zabiegi pielegnacyjne i upieksajace",
+    insights: `KONTEKST BRANZOWY - SALON KOSMETYCZNY:
+- Kluczowe trendy: zabiegi anti-aging, lifting bezigowy, kwas hialuronowy, mezoterapia igowa, peeling chemiczny
+- Sezonowosc: wiosna (przygotowanie do lata), jesien (regeneracja po lecie), przedswiateczny boom
+- Sredni czas wizyty: 30-90 min
+- Kluczowe wskazniki: przychod na stanowisko, srednia wartosc koszyka, wskaznik powrotow, zuzycie materialow zabiegowych
+- Typowe wyzwania: koniecznosc ciagego szkolenia (nowe technologie), koszt sprzetu, regulacje prawne, sezonowe wahania
+- Rekomendacje: programy pielegnacyjne (serie zabiegow), pakiety prezentowe, sprzedaz kosmetykow profesjonalnych
+- Popularne zabiegi: oczyszczanie twarzy, manicure/pedicure, depilacja laserowa, makijaz permanentny
+- Konkurencja: inne salony beauty, kliniki medycyny estetycznej, salony SPA`,
+  },
+  medical: {
+    label: "Gabinet medyczny / klinika",
+    description: "gabinet medyczny lub klinika medycyny estetycznej",
+    insights: `KONTEKST BRANZOWY - GABINET MEDYCZNY / KLINIKA:
+- Kluczowe trendy: medycyna estetyczna, telemedycyna, diagnostyka, medycyna prewencyjna
+- Sezonowosc: mniejsze wahania niz w branzy beauty, ale wiecej wizyt sezonowych (alergie wiosna, przeziebienia zima)
+- Sredni czas wizyty: 15-60 min w zaleznosci od specjalizacji
+- Kluczowe wskazniki: liczba pacjentow dziennie, sredni czas oczekiwania, wskaznik powrotow, zgodnosc z regulacjami
+- Typowe wyzwania: regulacje prawne, RODO, dokumentacja medyczna, ubezpieczenia, kolejki
+- Rekomendacje: system przypomnien o badaniach kontrolnych, pacjenci VIP, pakiety badań profilaktycznych
+- Popularne uslugi: konsultacje, USG, badania laboratoryjne, zabiegi estetyczne pod nadzorem lekarskim
+- Konkurencja: inne gabinety prywatne, przychodnie NFZ, telemedycyna`,
+  },
+  barber: {
+    label: "Barber shop",
+    description: "barber shop specjalizujacy sie w meskiej stylizacji",
+    insights: `KONTEKST BRANZOWY - BARBER SHOP:
+- Kluczowe trendy: fade, undercut, stylizacja brody, golenie brzywa, pielegnacja meska
+- Sezonowosc: stabilniejszy ruch niz salony damskie, lekki wzrost przed swietami i eventami
+- Sredni czas wizyty: 20-45 min
+- Kluczowe wskazniki: liczba klientow dziennie, sredni bilet, lojalnosc klientow, obroty na stanowisko
+- Typowe wyzwania: budowanie spolecznosci, utrzymanie jakosci przy duzym ruchu, konkurencja cenowa
+- Rekomendacje: karta lojalnosciowa, produkty do stylizacji w sprzedazy, social media (Instagram, TikTok)
+- Popularne uslugi: strzyzenie + broda, golenie brzywa, pielegnacja twarzy, farbowanie
+- Konkurencja: inne barber shopy, salony fryzjerskie, mobilni fryzjerzy`,
+  },
+  spa: {
+    label: "Salon SPA / Wellness",
+    description: "salon SPA i wellness z zabiegami relaksacyjnymi",
+    insights: `KONTEKST BRANZOWY - SALON SPA / WELLNESS:
+- Kluczowe trendy: holistyczne podejscie do zdrowia, masaze orientalne, aromaterapia, sauna, krioterapia
+- Sezonowosc: zimowe miesiace (relaks), wiosna (detox), przed swietami (vouchery prezentowe)
+- Sredni czas wizyty: 60-180 min
+- Kluczowe wskazniki: przychod na klienta, sprzedaz voucherow, wskaznik powrotow, zuzycie olejkow/kosmetykow
+- Typowe wyzwania: utrzymanie atmosfery premium, koszt utrzymania infrastruktury (sauna, jacuzzi), sezonowe wahania
+- Rekomendacje: vouchery prezentowe, pakiety wellness, programy czlonkowskie, cross-selling z hotelem/restauracja
+- Popularne uslugi: masaz relaksacyjny, zabieg na twarz, rytualy SPA, sauna, basen
+- Konkurencja: inne SPA, hotele wellness, centra fitness z SPA`,
+  },
+  nail_salon: {
+    label: "Salon paznokci / manicure",
+    description: "salon specjalizujacy sie w stylizacji paznokci",
+    insights: `KONTEKST BRANZOWY - SALON PAZNOKCI:
+- Kluczowe trendy: manicure hybrydowy, zelowy, akrylowy, nail art, paznokcie press-on
+- Sezonowosc: wiosna-lato (pedicure), przed swietami i sylwestrem, sezon slubny
+- Sredni czas wizyty: 30-90 min
+- Kluczowe wskazniki: liczba klientek dziennie, zuzycie materialow, wskaznik powrotow (co 2-4 tygodnie)
+- Typowe wyzwania: konkurencja cenowa, higiena i sterylizacja, rotacja klientek miedzy salonami
+- Rekomendacje: subskrypcja miesieczna, pakiety (manicure + pedicure), sprzedaz odzywek i olejkow
+- Popularne uslugi: manicure hybrydowy, pedicure, przedluzanie paznokci, zdobienia
+- Konkurencja: inne salony paznokci, salony kosmetyczne, mobilne stylizacje`,
+  },
+};
+
+const DEFAULT_INDUSTRY_CONTEXT = {
+  label: "Salon uslugowy",
+  description: "salon uslugowy z branzy beauty/wellness/medycznej",
+  insights: `KONTEKST BRANZOWY - OGOLNY SALON USLUGOWY:
+- Kluczowe wskazniki: przychod miesieczny, liczba wizyt, wskaznik powrotow klientow, wskaznik anulacji
+- Typowe wyzwania: pozyskiwanie nowych klientow, utrzymanie stalych, zarzadzanie grafikiem, no-show
+- Rekomendacje: system rezerwacji online, programy lojalnosciowe, marketing w social media
+- Sezonowosc: zwroc uwage na wzorce sezonowe w danych i dostosuj strategie
+- Konkurencja: monitoruj lokalna konkurencje i oferuj unikalne wartosci`,
+};
+
+async function gatherSalonData(): Promise<{ data: string; industryType: string | null; salonName: string }> {
   const now = new Date();
   const thirtyDaysAgo = new Date(now);
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   try {
+    // Fetch salon info first
+    const salonInfo = await db
+      .select({
+        name: salons.name,
+        industryType: salons.industryType,
+      })
+      .from(salons)
+      .where(eq(salons.id, DEMO_SALON_ID))
+      .then((r) => r[0] ?? { name: "Salon", industryType: null });
+
     const [
       totalClients,
       totalEmployees,
@@ -218,8 +329,9 @@ async function gatherSalonData(): Promise<string> {
       .map(([status, cnt]) => `  - ${status}: ${cnt}`)
       .join("\n");
 
-    return `
-DANE SALONU (aktualizacja: ${now.toLocaleDateString("pl-PL")}):
+    const dataStr = `
+DANE SALONU "${salonInfo.name}" (aktualizacja: ${now.toLocaleDateString("pl-PL")}):
+Typ dzialalnosci: ${salonInfo.industryType ? (INDUSTRY_CONTEXT[salonInfo.industryType]?.label ?? salonInfo.industryType) : "Nie okreslono"}
 
 PODSUMOWANIE:
 - Liczba klientow: ${totalClients}
@@ -245,9 +357,19 @@ OPINIE KLIENTOW:
 MAGAZYN - NISKI STAN:
 ${lowStockStr}
 `.trim();
+
+    return {
+      data: dataStr,
+      industryType: salonInfo.industryType,
+      salonName: salonInfo.name,
+    };
   } catch (error) {
     console.error("[AI Business] Error gathering salon data:", error);
-    return "Nie udalo sie pobrac danych salonu. Prosze sprobowac ponownie.";
+    return {
+      data: "Nie udalo sie pobrac danych salonu. Prosze sprobowac ponownie.",
+      industryType: null,
+      salonName: "Salon",
+    };
   }
 }
 
@@ -317,27 +439,38 @@ export async function POST(req: Request) {
     );
   }
 
-  // Gather real salon data for context
-  const salonData = await gatherSalonData();
+  // Gather real salon data for context (includes industry type)
+  const { data: salonData, industryType, salonName } = await gatherSalonData();
+
+  // Get industry-specific context
+  const industryCtx = industryType
+    ? (INDUSTRY_CONTEXT[industryType] ?? DEFAULT_INDUSTRY_CONTEXT)
+    : DEFAULT_INDUSTRY_CONTEXT;
 
   const openrouter = createOpenRouter({ apiKey });
 
-  const systemPrompt = `Jestes inteligentnym asystentem biznesowym salonu kosmetycznego/fryzjerskiego "MyHelper". Pomagasz wlascicielowi analizowac dane i podejmowac lepsze decyzje biznesowe.
+  const systemPrompt = `Jestes inteligentnym asystentem biznesowym dla "${salonName}" - ${industryCtx.description}. Dzialasz w ramach platformy "MyHelper". Pomagasz wlascicielowi analizowac dane i podejmowac lepsze decyzje biznesowe, wykorzystujac swoja wiedze o specyfice branzy.
 
 Twoje mozliwosci:
 - Analizujesz dane dotyczace wizyt, przychodow, klientow i pracownikow
-- Sugerujesz usprawnienia i optymalizacje
-- Pomagasz identyfikowac trendy i wzorce
+- Sugerujesz usprawnienia i optymalizacje DOSTOSOWANE do typu dzialalnosci (${industryCtx.label})
+- Pomagasz identyfikowac trendy i wzorce specyficzne dla branzy
 - Ostrzegasz o potencjalnych problemach (np. niski stan magazynowy, wysoki wskaznik anulacji)
-- Dajesz rekomendacje dotyczace marketingu, cenowania i obslugi klienta
+- Dajesz rekomendacje dotyczace marketingu, cenowania i obslugi klienta w kontekscie branzy
+- Znasz specyfike branzy i potrafisz udzielic porad branżowych (sezonowosc, trendy, konkurencja, najlepsze praktyki)
+- Gdy uzytkownik pyta o branże, trendy rynkowe lub porownania z konkurencja, korzystasz ze swojej wiedzy branzowej
 
 Zasady:
 - Odpowiadaj TYLKO po polsku
-- Bazuj WYLACZNIE na dostarczonych danych - nie wymyslaj statystyk
+- Bazuj na dostarczonych danych salonu - nie wymyslaj statystyk
+- Mozesz jednak dzielic sie ogolna wiedza branzowa (trendy, benchmarki, najlepsze praktyki) zaznaczajac ze to informacje ogolnobrazowe
 - Jezeli dane sa ograniczone, powiedz o tym wprost
 - Uzywaj konkretnych liczb z danych
-- Formatuj odpowiedzi czytelnie (uzywaj naglowkow, list, pogubien)
+- Formatuj odpowiedzi czytelnie (uzywaj naglowkow, list, pogrubien)
 - Badz proaktywny - zwracaj uwage na potencjalne problemy i szanse
+- Przy pytaniach o branże, dostarczaj kontekst rynkowy i porownania z branza
+
+${industryCtx.insights}
 
 ${salonData}`;
 
