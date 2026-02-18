@@ -46,13 +46,19 @@ function ContentGeneratorContent() {
             Profesjonalne opisy uslug przyciagajace nowych klientow
           </p>
         </div>
-        <div className="p-6 border rounded-lg space-y-3">
+        <Link
+          href="/dashboard/content-generator/newsletters"
+          className="p-6 border rounded-lg space-y-3 hover:border-primary hover:shadow-md transition-all group cursor-pointer"
+        >
           <Mail className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold">Newslettery</h3>
+          <h3 className="font-semibold flex items-center gap-2">
+            Newslettery
+            <ArrowRight className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </h3>
           <p className="text-sm text-muted-foreground">
             Tworzenie newsletterow promocyjnych i informacyjnych
           </p>
-        </div>
+        </Link>
       </div>
     </div>
   );
