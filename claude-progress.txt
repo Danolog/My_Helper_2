@@ -1,5 +1,67 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-18 (Feature #201 - Email format validation) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #201: "Email format validation" - Reject invalid emails
+- Category: FormValidation
+
+### What was accomplished:
+Added email format validation (regex: `/^[^\s@]+@[^\s@]+\.[^\s@]+$/`) across all forms with email input:
+1. **Sign-in form** (src/components/auth/sign-in-button.tsx) - Added format check after empty check
+2. **Forgot-password form** (src/components/auth/forgot-password-form.tsx) - Added format check after empty check
+3. **Clients add form** (src/app/dashboard/clients/page.tsx) - Added optional email format validation + error display
+4. **Client detail edit form** (src/app/dashboard/clients/[id]/page.tsx) - Added optional email format validation + error display
+5. **Employee add form** (src/app/employees/add/page.tsx) - Added optional email format validation + error display
+6. **Invoice send email dialog** (src/app/dashboard/invoices/[id]/page.tsx) - Added format check with toast error
+
+Note: Sign-up form and registration flow already had this validation pre-existing.
+
+### Verification (browser automation):
+1. ✅ Navigate to form with email - Login page at /login
+2. ✅ Enter 'not-an-email' - Typed into email field
+3. ✅ Try to submit - Clicked Sign in button
+4. ✅ Verify format error shown - "Wprowadz poprawny adres email" displayed in red
+5. ✅ Enter 'user@domain.com' - Replaced email field value
+6. ✅ Verify accepted - Form submitted to server (got "Invalid email or password" auth error, not format error)
+7. ✅ Forgot-password form also tested - same validation error shown for invalid email
+
+### Additional checks:
+- TypeScript: 0 new errors in modified files
+- Mock data patterns: CLEAN (no globalThis, devStore, mockDb patterns found)
+- Console errors: 0
+- Screenshots: feature201-invalid-email-error.png, feature201-valid-email-accepted.png, feature201-forgot-password-invalid-email.png
+
+### Completion status:
+- Feature #201 marked as passing
+- Commit: 0e389a2
+
+---
+
+## Session: 2026-02-18 (Feature #198 - Edit AI generated content) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #198: "Edit AI generated content" - Modify before publishing
+- Steps: Generate content with AI, Verify editable, Make modifications, Save changes, Verify changes preserved
+
+### Verification (No code changes needed - all editing already implemented)
+1. **Social posts** (`social-posts/page.tsx`): Click-to-edit on generated post, textarea editing with character count, Save/Cancel buttons, toast "Zmiany zapisane!"
+2. **Newsletters** (`newsletters/page.tsx`): Edit subject and content separately, save preserves edits in database
+3. **Gallery captions** (`gallery/page.tsx`): Edit AI-generated captions before saving
+4. **Review responses** (`reviews/page.tsx`): AI generates into editable textarea, user modifies before saving
+5. **Service descriptions** (`services/[id]/page.tsx`): AI generates into form field that is already editable
+
+### Browser Verification
+- Registered test user f198user@test.com, logged in via browser
+- Navigated to /dashboard/content-generator/social-posts
+- Generated Instagram post via AI (1212 chars, 20 hashtags)
+- Clicked "Edytuj" → textarea appeared with content
+- Modified content to custom text (169 chars)
+- Clicked "Zapisz zmiany" → toast "Zmiany zapisane!" appeared
+- Verified edited content preserved in display with updated character count
+
+### Result: PASSED (verification only, no code changes)
+
 ## Session: 2026-02-18 (Feature #197 - Content templates available) *** SUCCESS ***
 
 ### Feature Assigned
