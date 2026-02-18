@@ -144,6 +144,7 @@ export default function PromotionsPage() {
   const [formHappyHoursEnd, setFormHappyHoursEnd] = useState("16:00");
   const [formHappyHoursDays, setFormHappyHoursDays] = useState<number[]>([1, 2, 3, 4, 5]); // Mon-Fri
   const [saving, setSaving] = useState(false);
+  const [formValueError, setFormValueError] = useState("");
 
   // Delete dialog state
   const [deleteTarget, setDeleteTarget] = useState<Promotion | null>(null);
@@ -190,6 +191,7 @@ export default function PromotionsPage() {
     setFormName("");
     setFormType("percentage");
     setFormValue("");
+    setFormValueError("");
     setFormStartDate("");
     setFormEndDate("");
     setFormIsActive(true);
@@ -205,6 +207,7 @@ export default function PromotionsPage() {
     setFormName(promo.name);
     setFormType(promo.type);
     setFormValue(promo.value);
+    setFormValueError("");
     setFormStartDate(promo.startDate ? promo.startDate.slice(0, 10) : "");
     setFormEndDate(promo.endDate ? promo.endDate.slice(0, 10) : "");
     setFormIsActive(promo.isActive);
@@ -249,6 +252,12 @@ export default function PromotionsPage() {
       setFormValue("");
       setFormSelectedServiceIds([]);
     }
+    // Re-validate current value with new type (max constraint may change)
+    if (formValue) {
+      setFormValueError(validateValueField(formValue, newType));
+    } else {
+      setFormValueError("");
+    }
   };
 
   const toggleHappyHoursDay = (day: number) => {
@@ -265,17 +274,46 @@ export default function PromotionsPage() {
     );
   };
 
+  const validateValueField = (value: string, type: string): string => {
+    if (!value || value.trim() === "") {
+      return "Wartosc rabatu jest wymagana";
+    }
+    const numVal = parseFloat(value);
+    if (isNaN(numVal)) {
+      return "Podaj prawidlowa wartosc liczbowa";
+    }
+    if (numVal < 0) {
+      return "Wartosc nie moze byc ujemna";
+    }
+    if (numVal === 0) {
+      return "Wartosc musi byc wieksza od zera";
+    }
+    const isPercentageType = type === "percentage" || type === "buy2get1" || type === "happy_hours" || type === "first_visit";
+    if (isPercentageType && numVal > 100) {
+      return "Rabat procentowy nie moze przekraczac 100%";
+    }
+    return "";
+  };
+
+  const handleValueChange = (newValue: string) => {
+    setFormValue(newValue);
+    if (newValue) {
+      const error = validateValueField(newValue, formType);
+      setFormValueError(error);
+    } else {
+      setFormValueError("");
+    }
+  };
+
   const handleSave = async () => {
     if (!formName.trim()) {
       toast.error("Nazwa promocji jest wymagana");
       return;
     }
-    if (!formValue || isNaN(parseFloat(formValue)) || parseFloat(formValue) <= 0) {
-      toast.error("Podaj prawidlowa wartosc rabatu");
-      return;
-    }
-    if ((formType === "percentage" || formType === "buy2get1" || formType === "happy_hours" || formType === "first_visit") && parseFloat(formValue) > 100) {
-      toast.error("Rabat procentowy nie moze przekraczac 100%");
+    const valueError = validateValueField(formValue, formType);
+    if (valueError) {
+      setFormValueError(valueError);
+      toast.error(valueError);
       return;
     }
     if (formType === "buy2get1" && formSelectedServiceIds.length === 0) {
@@ -810,7 +848,9 @@ export default function PromotionsPage() {
                 max={(formType === "percentage" || formType === "buy2get1" || formType === "happy_hours" || formType === "first_visit") ? "100" : undefined}
                 step={formType === "percentage" || formType === "buy2get1" || formType === "happy_hours" || formType === "first_visit" ? "1" : "0.01"}
                 value={formValue}
-                onChange={(e) => setFormValue(e.target.value)}
+                onChange={(e) => handleValueChange(e.target.value)}
+                aria-invalid={!!formValueError}
+                className={formValueError ? "border-destructive" : ""}
                 placeholder={
                   formType === "buy2get1"
                     ? "100 = calkowicie gratis"
@@ -825,7 +865,10 @@ export default function PromotionsPage() {
                             : "np. 50.00"
                 }
               />
-              {formType === "buy2get1" && (
+              {formValueError && (
+                <p className="text-sm text-destructive mt-1">{formValueError}</p>
+              )}
+              {formType === "buy2get1" && !formValueError && (
                 <p className="text-xs text-muted-foreground mt-1">
                   100 = 3. wizyta calkowicie za darmo, 50 = 50% znizki na 3. wizyte
                 </p>
