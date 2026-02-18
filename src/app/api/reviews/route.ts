@@ -61,6 +61,8 @@ export async function GET(request: Request) {
       id: row.review.id,
       rating: row.review.rating,
       comment: row.review.comment,
+      ownerResponse: row.review.ownerResponse,
+      ownerResponseAt: row.review.ownerResponseAt,
       status: row.review.status,
       createdAt: row.review.createdAt,
       appointmentId: row.review.appointmentId,
