@@ -1,5 +1,107 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-18 (Feature #195 - Newsletter sending) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #195: "Newsletter sending" - Send to consenting clients
+
+### Verification (no code changes needed - all infrastructure already existed)
+1. **API endpoints verified**:
+   - `POST /api/newsletters/[id]/send` - Sends newsletter to consented email recipients
+   - `GET /api/newsletters/[id]/recipients` - Lists eligible recipients with consent
+   - `POST /api/ai/content/newsletter` - AI newsletter generation with save option
+   - `PUT /api/clients/[id]/consents` - Marketing consent management
+
+2. **Test data setup**:
+   - Granted email marketing consent for 3 clients: Test ClientF99, Maria Testowa, Jan Kowalski
+   - Used existing saved newsletter in database
+
+3. **End-to-end browser testing**:
+   - ✅ Newsletter page loads with "Zapisane (1)" showing saved newsletter
+   - ✅ SendNewsletterDialog opens with 3 consented recipients (out of 11 with email)
+   - ✅ All recipients checked by default with "Zaznacz wszystkich (3)"
+   - ✅ "Wyslij do 3 odbiorcow" sends successfully
+   - ✅ Success dialog: "Newsletter wyslany! Wyslano do 3 odbiorcow"
+   - ✅ Toast notification: "Newsletter wyslany do 3 odbiorcow!"
+   - ✅ Newsletter status changes from "Wersja robocza" to "Wyslany"
+   - ✅ Recipients count displayed: "3 odbiorcow"
+   - ✅ Button changes to "Wyslij ponownie" (resend capability)
+
+4. **Database persistence verified**:
+   - ✅ `sentAt`: "2026-02-18T15:17:34.809Z" (timestamp set)
+   - ✅ `recipientsCount`: 3 (matches sent count)
+   - ✅ Notifications table populated with 3 "sent" entries
+   - ✅ Page survives full refresh - data persists
+
+5. **Mock data check**: ✅ No mock/fake/hardcoded/dummy patterns in newsletter code
+
+### Stats: 164/253 passing (64.8%)
+
+## Session: 2026-02-18 (Feature #196 - Marketing consent management) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #196: "Marketing consent management" - Track client consents for marketing channels
+
+### Implementation
+1. **API endpoint** (`src/app/api/clients/[id]/consents/route.ts`):
+   - GET: Returns consent status for email, SMS, phone channels per client+salon
+   - PUT: Grants new consent (insert) or revokes existing (set revokedAt)
+   - Auth-protected, follows grant/revoke audit pattern with timestamps
+
+2. **UI consent section** (added to `src/app/dashboard/clients/[id]/page.tsx`):
+   - Card with Shield icon and "Zgody marketingowe" header + RODO subtitle
+   - 3 consent rows (email/SMS/phone) each with toggle switch, badge, and date
+   - Real-time toggle with optimistic UI and toast notifications
+   - RODO compliance notice at bottom
+
+### Verification
+- ✅ Consent section renders on client profile with 3 channels
+- ✅ Toggle email consent ON → Badge "Aktywna", date shown, toast confirms
+- ✅ Persistence verified: page reload preserves consent from PostgreSQL
+- ✅ Newsletter targeting: only clients with consent+email appear as recipients (3/11)
+- ✅ Revoke flow: removing consent immediately removes from recipients (3→2)
+- ✅ No mock data (grep clean), TypeScript errors only in pre-existing scripts/
+- Commit: a64154f
+
+### Stats: 163/253 passing (64.4%)
+
+---
+
+## Session: 2026-02-18 (Feature #194 - Content AI creates newsletters) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #194: "Content AI creates newsletters" - Generate email content
+- Category: AI
+- Steps: Navigate to newsletters, Click create with AI, Provide topic/goals, Verify AI generates content, Verify appropriate format
+
+### Implementation & Fixes
+- **API fix**: src/app/api/ai/content/newsletter/route.ts
+  - Reduced maxOutputTokens from 2000 to 1500 (OpenRouter credit limit issue)
+  - Improved error handling: added `details` field with actual error message
+- **UI link fix**: src/app/dashboard/content-generator/page.tsx
+  - Made newsletter card clickable (converted from div to Link component)
+
+### Verification (browser automation)
+1. Registered user feature194@test.com with Pro plan
+2. Navigated: Dashboard → Content Generator → Newsletters
+3. Page loaded correctly with configuration form (topic, goal, tone, length, CTA)
+4. Filled topic: "Promocja wiosenna -20% na zabiegi pielegnacyjne w naszym salonie"
+5. Clicked "Wygeneruj newsletter" → Loading state shown → Content generated
+6. Generated newsletter verified:
+   - Subject: "Wiosenna odnowa już tu! -20% na wszystkie zabiegi pielęgnacyjne w Beauty Studio Demo"
+   - Content: Professional Polish newsletter with greeting, body, CTA, salon details
+   - Badges: Promocja, Profesjonalny, 200 slow
+   - Buttons: Kopiuj, Zapisz, Generuj ponownie
+7. Clicked "Zapisz" → Newsletter saved to PostgreSQL → "Newsletter zapisany!" toast
+8. Saved tab shows "Zapisane (1)" with newsletter entry, date, draft status
+9. Full page reload: "Zapisane (1)" still visible → Data persists in database ✅
+10. Mock data check: No globalThis/devStore/mockDb patterns found ✅
+
+### Commit
+- eef3a7b: feat: add AI-powered newsletter generation (Feature #194)
+
+---
+
 ## Session: 2026-02-18 (Feature #193 - Content AI posts from photos) *** SUCCESS ***
 
 ### Feature Assigned
