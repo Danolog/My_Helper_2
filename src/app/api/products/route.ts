@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { products, notifications } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
+import { validateBody, createProductSchema } from "@/lib/api-validation";
 
 /**
  * Check if a product has low stock and create a notification if needed.
@@ -93,14 +94,14 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { salonId, name, category, quantity, minQuantity, unit, pricePerUnit } = body;
 
-    if (!salonId || !name) {
-      return NextResponse.json(
-        { success: false, error: "salonId and name are required" },
-        { status: 400 }
-      );
+    // Server-side validation with Zod schema
+    const validationError = validateBody(createProductSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const { salonId, name, category, quantity, minQuantity, unit, pricePerUnit } = body;
 
     const [newProduct] = await db
       .insert(products)

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { services, serviceCategories } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { validateBody, createServiceSchema } from "@/lib/api-validation";
 
 // GET /api/services - List all services
 export async function GET(request: Request) {
@@ -52,14 +53,16 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { salonId, categoryId, name, description, basePrice, baseDuration } = body;
 
-    if (!salonId || !name || !basePrice || !baseDuration) {
-      return NextResponse.json(
-        { success: false, error: "salonId, name, basePrice, and baseDuration are required" },
-        { status: 400 }
-      );
+    // Server-side validation with Zod schema
+    const validationError = validateBody(createServiceSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const { salonId, categoryId, name, description, basePrice, baseDuration } = body;
+    const parsedPrice = parseFloat(basePrice);
+    const parsedDuration = parseInt(baseDuration, 10);
 
     console.log(`[Services API] Creating service: ${name}`);
     const [newService] = await db
@@ -69,8 +72,8 @@ export async function POST(request: Request) {
         categoryId: categoryId || null,
         name,
         description: description || null,
-        basePrice: basePrice.toString(),
-        baseDuration: parseInt(baseDuration, 10),
+        basePrice: parsedPrice.toString(),
+        baseDuration: parsedDuration,
         isActive: true,
       })
       .returning();

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { validateBody, createEmployeeSchema } from "@/lib/api-validation";
 
 // Predefined palette of distinct colors for employees
 const EMPLOYEE_COLORS = [
@@ -93,14 +94,14 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { salonId, userId, firstName, lastName, phone, email, photoUrl, role, color } = body;
 
-    if (!salonId || !firstName || !lastName) {
-      return NextResponse.json(
-        { success: false, error: "salonId, firstName, and lastName are required" },
-        { status: 400 }
-      );
+    // Server-side validation with Zod schema
+    const validationError = validateBody(createEmployeeSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const { salonId, userId, firstName, lastName, phone, email, photoUrl, role, color } = body;
 
     // Get next available color if not provided
     const employeeColor = color || await getNextAvailableColor(salonId);
