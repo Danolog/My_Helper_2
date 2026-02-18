@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Bot, Mic, Brain, MessageSquare } from "lucide-react";
+import { ArrowLeft, Bot, Mic, Brain, MessageSquare, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 
@@ -38,10 +38,23 @@ function AiAssistantContent() {
         </div>
         <div className="p-6 border rounded-lg space-y-3">
           <Brain className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold">Analiza biznesowa</h3>
+          <h3 className="font-semibold">Asystent biznesowy</h3>
           <p className="text-sm text-muted-foreground">
-            Proaktywne sugestie na podstawie danych salonu
+            Analizuj dane salonu i pytaj AI o wyniki biznesowe
           </p>
+          <Button asChild size="sm">
+            <Link href="/dashboard/ai-assistant/business">Otworz asystenta</Link>
+          </Button>
+        </div>
+        <div className="p-6 border rounded-lg space-y-3">
+          <TrendingUp className="h-8 w-8 text-primary" />
+          <h3 className="font-semibold">Analiza trendow</h3>
+          <p className="text-sm text-muted-foreground">
+            Identyfikuj wzorce i trendy w danych salonu - porownania miesieczne i tygodniowe
+          </p>
+          <Button asChild size="sm">
+            <Link href="/dashboard/ai-assistant/trends">Analizuj trendy</Link>
+          </Button>
         </div>
         <div className="p-6 border rounded-lg space-y-3">
           <MessageSquare className="h-8 w-8 text-primary" />
