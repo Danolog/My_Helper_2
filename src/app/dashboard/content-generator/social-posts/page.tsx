@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Instagram,
@@ -12,6 +13,8 @@ import {
   Sparkles,
   Hash,
   RefreshCw,
+  X,
+  BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -33,6 +36,7 @@ import {
 } from "@/components/ui/select";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { toast } from "sonner";
+import { getTemplateById } from "@/lib/content-templates";
 
 type Platform = "instagram" | "facebook" | "tiktok";
 type PostType =
@@ -118,6 +122,21 @@ const TONES: { value: Tone; label: string }[] = [
   { value: "educational", label: "Edukacyjny" },
 ];
 
+/** Helper to validate whether a raw string is a recognised Platform value. */
+function isValidPlatform(v: string): v is Platform {
+  return (["instagram", "facebook", "tiktok"] as string[]).includes(v);
+}
+
+/** Helper to validate whether a raw string is a recognised PostType value. */
+function isValidPostType(v: string): v is PostType {
+  return POST_TYPES.some((pt) => pt.value === v);
+}
+
+/** Helper to validate whether a raw string is a recognised Tone value. */
+function isValidTone(v: string): v is Tone {
+  return TONES.some((t) => t.value === v);
+}
+
 type GeneratedPost = {
   post: string;
   platform: Platform;
@@ -128,6 +147,13 @@ type GeneratedPost = {
 };
 
 function SocialPostsContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const templateId = searchParams.get("template");
+  const template = templateId ? getTemplateById(templateId) : undefined;
+  const preset = template?.socialPreset;
+
   const [platform, setPlatform] = useState<Platform>("instagram");
   const [postType, setPostType] = useState<PostType>("service_highlight");
   const [tone, setTone] = useState<Tone>("professional");
@@ -139,6 +165,29 @@ function SocialPostsContent() {
     null
   );
   const [copied, setCopied] = useState(false);
+
+  // Apply template preset values on mount (or when template changes)
+  useEffect(() => {
+    if (!preset) return;
+    if (isValidPlatform(preset.platform)) setPlatform(preset.platform);
+    if (isValidPostType(preset.postType)) setPostType(preset.postType);
+    if (isValidTone(preset.tone)) setTone(preset.tone);
+    setContext(preset.context);
+    setIncludeEmoji(preset.includeEmoji);
+    setIncludeHashtags(preset.includeHashtags);
+  }, [preset]);
+
+  /** Remove the template query param and reset form to defaults. */
+  const handleClearTemplate = () => {
+    router.replace("/dashboard/content-generator/social-posts");
+    setPlatform("instagram");
+    setPostType("service_highlight");
+    setTone("professional");
+    setContext("");
+    setIncludeEmoji(true);
+    setIncludeHashtags(true);
+    setGeneratedPost(null);
+  };
 
   const handleGenerate = async () => {
     setIsGenerating(true);
@@ -212,6 +261,25 @@ function SocialPostsContent() {
           </p>
         </div>
       </div>
+
+      {/* Template banner - shown when a template is active */}
+      {template && (
+        <div className="flex items-center gap-3 mb-6 p-3 rounded-lg border border-primary/30 bg-primary/5">
+          <BookOpen className="h-4 w-4 text-primary flex-shrink-0" />
+          <span className="text-sm font-medium flex-1">
+            Szablon: {template.name}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleClearTemplate}
+            className="h-7 px-2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3.5 w-3.5 mr-1" />
+            Wyczysc
+          </Button>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Left column - Configuration */}
@@ -483,7 +551,9 @@ export default function SocialPostsPage() {
         "Kontekst salonu i uslug wbudowany w AI",
       ]}
     >
-      <SocialPostsContent />
+      <Suspense fallback={<div className="container mx-auto p-6"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+        <SocialPostsContent />
+      </Suspense>
     </ProPlanGate>
   );
 }
