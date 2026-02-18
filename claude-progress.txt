@@ -1,5 +1,124 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-18 (Feature #174 - Voice AI answers calls Pro only) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #174: "Voice AI answers calls (Pro only)"
+- Category: AI Features
+- Steps: Verify Pro plan active, Configure voice AI, Simulate incoming call, Verify AI answers, Verify natural voice response
+
+### What was accomplished:
+- Fixed toast syntax in voice AI page (sonner uses toast.success/toast.error, not toast({title, variant}))
+- Fixed Drizzle ORM column mapping: services.price → services.basePrice, services.duration → services.baseDuration
+- Added "ceny" keyword to pricing intent detection (plural form was missing)
+- Verified Pro plan gating works (page wrapped in ProPlanGate component)
+- Verified configuration persistence (enabled toggle, greeting, voice style, capabilities)
+- Verified call simulation with multiple intents (booking, pricing)
+- Verified call history logging with timestamps, phone numbers, intents, transcripts
+- All data persists after page refresh
+
+### Modified files:
+- **src/app/dashboard/ai-assistant/voice/page.tsx** - Fixed 6 toast calls from wrong object syntax to correct sonner syntax
+- **src/app/api/ai/voice/incoming/route.ts** - Fixed services.price→basePrice, services.duration→baseDuration, added "ceny" keyword
+
+### Verification (browser automation):
+- Registered new user (voice174@test.com) with Pro plan (149 PLN/mies.)
+- Navigated to /dashboard/ai-assistant/voice - page loaded with ProPlanGate allowing access
+- Enabled voice AI switch → badge changed to "Aktywny"
+- Saved config → toast.success("Zapisano") displayed correctly
+- Simulated booking call: "Chce umowic wizyte na strzyzenie" → detected "Rezerwacja wizyty" intent
+- AI response listed real salon services with prices (Pedicure 120 PLN, Koloryzacja 150 PLN, etc.)
+- Simulated pricing query: "Jakie macie ceny?" → detected "Pytanie o ceny" intent
+- AI response showed full price list with all salon services
+- Call history tab showed 5 logged conversations with correct data
+- Screenshot: feature174-call-history.png
+
+### Bugs fixed:
+1. Toast syntax: sonner library uses toast.success()/toast.error(), not toast({title, description, variant})
+2. Schema mismatch: services.price/duration don't exist, actual columns are basePrice/baseDuration
+3. Missing keyword: "ceny" (plural) wasn't in pricing intent keywords, causing "Jakie macie ceny?" to misclassify
+
+---
+
+## Session: 2026-02-18 (Feature #175 - Voice AI understands intent) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #175: "Voice AI understands intent"
+- Category: AI Features
+- Steps: Simulate call, Client says "I want to book a haircut", Verify AI recognizes booking intent, Verify AI asks for date/time, Verify AI asks for service confirmation
+
+### What was accomplished:
+- Enhanced booking intent keyword detection with English keywords ("book", "haircut") and Polish service terms ("strzyz", "fryzj", "koloryz", "manicure", "pedicure", "masaz", "zabieg")
+- Updated AI response to explicitly ask for both service selection AND preferred date/time
+- Fixed Drizzle ORM column mapping: services.price → services.basePrice, services.duration → services.baseDuration
+- Complete Voice AI system: config API, incoming call simulation, call history logging
+- Voice AI page with 3 tabs: Configuration, Call Simulation, Call History
+
+### Modified files:
+- **src/app/api/ai/voice/incoming/route.ts** - Fixed column references (basePrice/baseDuration), enhanced booking keywords, improved response message
+- **src/app/api/ai/voice/config/route.ts** - Voice AI configuration GET/PUT endpoint
+- **src/app/api/ai/voice/call-log/route.ts** - Call history endpoint
+- **src/app/dashboard/ai-assistant/voice/page.tsx** - Voice AI UI with config, simulation, history tabs
+- **src/app/dashboard/ai-assistant/page.tsx** - Updated AI assistant hub
+
+### Verification (browser automation):
+- Registered new user (voice175@test.com) with Pro plan
+- Enabled Voice AI assistant in config (toggled to "Aktywny")
+- Saved configuration successfully
+- Sent "I want to book a haircut" via call simulation
+- AI correctly detected "Rezerwacja wizyty" (booking) intent
+- AI listed salon services with prices and durations
+- AI asked "Ktora usluge Pan/Pani wybiera?" (service confirmation)
+- AI asked "Prosze tez podac preferowany dzien i godzine" (date/time)
+- Suggested action: show_services
+- Screenshot: voice-ai-booking-intent-feature-175.png
+
+### Bug fixed:
+- services.price and services.duration didn't exist in Drizzle schema (actual columns: basePrice, baseDuration)
+- This caused "Cannot convert undefined or null to object" error on the API
+
+---
+
+## Session: 2026-02-17 (Feature #173 - Trial period for new users) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #173: "Trial period for new users"
+- Category: Subscriptions
+- Steps: Register new salon, Verify trial period starts, Verify trial end date shown, Verify full features during trial, Verify prompt to subscribe before trial ends
+
+### What was accomplished:
+- Extended use-subscription hook with isTrialing, trialEndsAt, trialDaysRemaining fields
+- Added trial banner to dashboard page (blue for normal, amber for <=3 days remaining)
+- Added trial progress section to subscription page with progress bar, dates, days counter
+- Updated subscription page labels for trialing (Koniec okresu probnego, Cena po okresie probnym)
+- Enabled upgrade/downgrade/cancel buttons for trialing status (previously only "active")
+- Added "Wykup subskrypcje" CTA button with price display
+
+### Modified files:
+- **src/hooks/use-subscription.ts** - Added isTrialing, trialEndsAt, trialDaysRemaining to hook state
+- **src/app/dashboard/page.tsx** - Added trial banner with Timer/AlertTriangle icons and "Zarzadzaj" link
+- **src/app/dashboard/subscription/page.tsx** - Added trial progress section, updated labels, enabled buttons for trialing
+
+### Verification (browser automation):
+- Registered new user (trial173@test.com) with Basic plan
+- Verified subscription created with status "trialing" via API
+- Set demo salon to trialing status for UI testing
+- Screenshot: subscription page shows "Plan Pro" with "Okres probny" badge
+- "Koniec okresu probnego: 3 marca 2026" displayed
+- "Cena po okresie probnym: 149.00 PLN / mies." displayed
+- Trial progress bar: "1 z 15 dni wykorzystanych"
+- "Wykup subskrypcje" button with "149 PLN / miesiac po okresie probnym"
+- "Zmien na Basic" and "Anuluj subskrypcje" buttons visible
+- Dashboard trial banner: "Okres probny - pozostalo 14 dni" with "Zarzadzaj" link
+- Data persists after page refresh
+- Console: 0 errors
+- No mock data patterns found (grep clean)
+
+### Commit:
+- 597c7e6 feat: add trial period UI for new users (Feature #173)
+
+---
+
 ## Session: 2026-02-17 (Feature #171 - AI features accessible for Pro) *** SUCCESS ***
 
 ### Feature Assigned
