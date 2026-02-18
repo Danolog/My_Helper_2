@@ -35,6 +35,7 @@ export default function AddEmployeePage() {
   const { data: session, isPending } = useSession();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [assignedColor, setAssignedColor] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -44,16 +45,36 @@ export default function AddEmployeePage() {
     role: "employee",
   });
 
+  const clearFieldError = (field: string) => {
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+    clearFieldError(name);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.firstName || !formData.lastName) {
-      toast.error("Imie i nazwisko sa wymagane");
+    const errors: Record<string, string> = {};
+    if (!formData.firstName.trim()) {
+      errors.firstName = "Imie jest wymagane";
+    }
+    if (!formData.lastName.trim()) {
+      errors.lastName = "Nazwisko jest wymagane";
+    }
+    if (formData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
+      errors.email = "Wprowadz poprawny adres email";
+    }
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      toast.error("Wypelnij wymagane pola");
       return;
     }
 
@@ -149,7 +170,7 @@ export default function AddEmployeePage() {
           </div>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} noValidate className="space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="firstName">Imie *</Label>
@@ -160,7 +181,11 @@ export default function AddEmployeePage() {
                   onChange={handleChange}
                   placeholder="Jan"
                   required
+                  aria-invalid={!!fieldErrors.firstName}
                 />
+                {fieldErrors.firstName && (
+                  <p className="text-sm text-destructive">{fieldErrors.firstName}</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="lastName">Nazwisko *</Label>
@@ -171,7 +196,11 @@ export default function AddEmployeePage() {
                   onChange={handleChange}
                   placeholder="Kowalski"
                   required
+                  aria-invalid={!!fieldErrors.lastName}
                 />
+                {fieldErrors.lastName && (
+                  <p className="text-sm text-destructive">{fieldErrors.lastName}</p>
+                )}
               </div>
             </div>
 
@@ -184,7 +213,11 @@ export default function AddEmployeePage() {
                 value={formData.email}
                 onChange={handleChange}
                 placeholder="jan.kowalski@example.com"
+                aria-invalid={!!fieldErrors.email}
               />
+              {fieldErrors.email && (
+                <p className="text-sm text-destructive">{fieldErrors.email}</p>
+              )}
             </div>
 
             <div className="space-y-2">

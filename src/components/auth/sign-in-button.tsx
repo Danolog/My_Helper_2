@@ -14,7 +14,16 @@ export function SignInButton() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [isPending, setIsPending] = useState(false)
+
+  const clearFieldError = (field: string) => {
+    setFieldErrors((prev) => {
+      const next = { ...prev }
+      delete next[field]
+      return next
+    })
+  }
 
   if (sessionPending) {
     return <Button disabled>Loading...</Button>
@@ -27,6 +36,22 @@ export function SignInButton() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+
+    // Validate required fields
+    const errors: Record<string, string> = {}
+    if (!email.trim()) {
+      errors.email = "Email jest wymagany"
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = "Wprowadz poprawny adres email"
+    }
+    if (!password) {
+      errors.password = "Haslo jest wymagane"
+    }
+    setFieldErrors(errors)
+    if (Object.keys(errors).length > 0) {
+      return
+    }
+
     setIsPending(true)
 
     try {
@@ -50,7 +75,7 @@ export function SignInButton() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 w-full max-w-sm">
+    <form onSubmit={handleSubmit} noValidate className="space-y-4 w-full max-w-sm">
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input
@@ -58,22 +83,36 @@ export function SignInButton() {
           type="email"
           placeholder="you@example.com"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value)
+            clearFieldError("email")
+          }}
           required
+          aria-invalid={!!fieldErrors.email}
           disabled={isPending}
         />
+        {fieldErrors.email && (
+          <p className="text-sm text-destructive">{fieldErrors.email}</p>
+        )}
       </div>
       <div className="space-y-2">
-        <Label htmlFor="password">Password</Label>
+        <Label htmlFor="password">Haslo</Label>
         <Input
           id="password"
           type="password"
-          placeholder="Your password"
+          placeholder="Twoje haslo"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value)
+            clearFieldError("password")
+          }}
           required
+          aria-invalid={!!fieldErrors.password}
           disabled={isPending}
         />
+        {fieldErrors.password && (
+          <p className="text-sm text-destructive">{fieldErrors.password}</p>
+        )}
       </div>
       {error && (
         <p className="text-sm text-destructive">{error}</p>

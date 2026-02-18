@@ -87,6 +87,9 @@ export default function ClientsPage() {
   const [formEmail, setFormEmail] = useState("");
   const [formNotes, setFormNotes] = useState("");
 
+  // Form validation errors
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
   const hasActiveFilters =
     appliedFilters.dateAddedFrom !== "" ||
     appliedFilters.dateAddedTo !== "" ||
@@ -196,15 +199,35 @@ export default function ClientsPage() {
     setFormPhone("");
     setFormEmail("");
     setFormNotes("");
+    setFormErrors({});
+  };
+
+  const clearFieldError = (field: string) => {
+    setFormErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const validateClientForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    if (!formFirstName.trim()) {
+      errors.firstName = "Imie jest wymagane";
+    }
+    if (!formLastName.trim()) {
+      errors.lastName = "Nazwisko jest wymagane";
+    }
+    if (formEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formEmail.trim())) {
+      errors.email = "Wprowadz poprawny adres email";
+    }
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const handleSaveClient = async () => {
-    if (!formFirstName.trim()) {
-      toast.error("Imie jest wymagane");
-      return;
-    }
-    if (!formLastName.trim()) {
-      toast.error("Nazwisko jest wymagane");
+    if (!validateClientForm()) {
+      toast.error("Wypelnij wymagane pola");
       return;
     }
 
@@ -325,9 +348,20 @@ export default function ClientsPage() {
                     id="client-first-name"
                     placeholder="np. Jan"
                     value={formFirstName}
-                    onChange={(e) => setFormFirstName(e.target.value)}
+                    onChange={(e) => {
+                      setFormFirstName(e.target.value);
+                      if (e.target.value.trim()) clearFieldError("firstName");
+                    }}
+                    required
+                    aria-invalid={!!formErrors.firstName}
+                    className={formErrors.firstName ? "border-destructive" : ""}
                     data-testid="client-first-name-input"
                   />
+                  {formErrors.firstName && (
+                    <p className="text-sm text-destructive" data-testid="error-first-name">
+                      {formErrors.firstName}
+                    </p>
+                  )}
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="client-last-name">Nazwisko *</Label>
@@ -335,9 +369,20 @@ export default function ClientsPage() {
                     id="client-last-name"
                     placeholder="np. Kowalski"
                     value={formLastName}
-                    onChange={(e) => setFormLastName(e.target.value)}
+                    onChange={(e) => {
+                      setFormLastName(e.target.value);
+                      if (e.target.value.trim()) clearFieldError("lastName");
+                    }}
+                    required
+                    aria-invalid={!!formErrors.lastName}
+                    className={formErrors.lastName ? "border-destructive" : ""}
                     data-testid="client-last-name-input"
                   />
+                  {formErrors.lastName && (
+                    <p className="text-sm text-destructive" data-testid="error-last-name">
+                      {formErrors.lastName}
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="grid gap-2">
@@ -358,9 +403,16 @@ export default function ClientsPage() {
                   type="email"
                   placeholder="np. jan.kowalski@example.com"
                   value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
+                  onChange={(e) => {
+                    setFormEmail(e.target.value);
+                    clearFieldError("email");
+                  }}
+                  aria-invalid={!!formErrors.email}
                   data-testid="client-email-input"
                 />
+                {formErrors.email && (
+                  <p className="text-sm text-destructive">{formErrors.email}</p>
+                )}
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="client-notes">Notatki</Label>

@@ -10,12 +10,26 @@ import { requestPasswordReset } from "@/lib/auth-client"
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("")
   const [error, setError] = useState("")
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [success, setSuccess] = useState(false)
   const [isPending, setIsPending] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+
+    // Validate required fields
+    const errors: Record<string, string> = {}
+    if (!email.trim()) {
+      errors.email = "Email jest wymagany"
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = "Wprowadz poprawny adres email"
+    }
+    setFieldErrors(errors)
+    if (Object.keys(errors).length > 0) {
+      return
+    }
+
     setIsPending(true)
 
     try {
@@ -53,7 +67,7 @@ export function ForgotPasswordForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 w-full max-w-sm">
+    <form onSubmit={handleSubmit} noValidate className="space-y-4 w-full max-w-sm">
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input
@@ -61,10 +75,17 @@ export function ForgotPasswordForm() {
           type="email"
           placeholder="you@example.com"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value)
+            setFieldErrors({})
+          }}
           required
+          aria-invalid={!!fieldErrors.email}
           disabled={isPending}
         />
+        {fieldErrors.email && (
+          <p className="text-sm text-destructive">{fieldErrors.email}</p>
+        )}
       </div>
       {error && (
         <p className="text-sm text-destructive">{error}</p>
