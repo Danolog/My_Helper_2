@@ -1,5 +1,53 @@
 # MyHelper Development Progress
 
+## Session: 2026-02-18 (Feature #197 - Content templates available) *** SUCCESS ***
+
+### Feature Assigned
+- Feature #197: "Content templates available" - Pre-built content formats
+- Steps: Navigate to content generator, View template library, See available templates, Select template, Verify format applied
+
+### Implementation
+1. **Template data module** (`src/lib/content-templates.ts`):
+   - 12 pre-built templates: 6 social media + 6 newsletter
+   - TypeScript interfaces: ContentTemplate, SocialPreset, NewsletterPreset
+   - Helper functions: getTemplateById(), getTemplatesByCategory()
+   - Templates tailored for beauty/wellness salons
+
+2. **Template library page** (`src/app/dashboard/content-generator/templates/page.tsx`):
+   - Grid layout with search and category filters (All / Social / Newsletter)
+   - Color-coded badges (pink for social, blue for newsletter)
+   - "Uzyj szablonu" button navigates to generator with ?template=id query param
+   - Wrapped in ProPlanGate
+
+3. **Content generator main page** (modified `page.tsx`):
+   - Added "Szablony tresci" card with BookOpen icon linking to templates
+
+4. **Social posts generator** (modified `social-posts/page.tsx`):
+   - Template pre-filling via useSearchParams() + Suspense boundary
+   - Applies: platform, postType, tone, context, includeEmoji, includeHashtags
+   - Template banner with "Wyczysc" (clear) button
+
+5. **Newsletter generator** (modified `newsletters/page.tsx`):
+   - Template pre-filling via useSearchParams() + Suspense boundary
+   - Applies: topic, goals, tone, length, includeCallToAction
+   - Template banner with "Wyczysc" (clear) button
+
+### Verification
+- ✅ Content generator shows "Szablony tresci" card with navigation
+- ✅ Templates library page shows 12 templates with search/filter
+- ✅ Clicking "Uzyj szablonu" on social template → redirects to social posts with pre-filled form
+- ✅ Template banner "Szablon: Promocja weekendowa" displayed with clear button
+- ✅ Form fields correctly pre-filled (platform, type, tone, context, toggles)
+- ✅ Newsletter templates also pre-fill correctly
+- ✅ TypeScript: 0 errors in new/modified files
+- ✅ Mock data check: 0 mock/fake/hardcoded patterns
+- ✅ 0 console errors
+- Commit: 0b52f9c
+
+### Stats: 165/253 passing (65.2%)
+
+---
+
 ## Session: 2026-02-18 (Feature #195 - Newsletter sending) *** SUCCESS ***
 
 ### Feature Assigned
