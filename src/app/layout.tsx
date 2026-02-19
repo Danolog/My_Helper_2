@@ -1,5 +1,6 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { OfflineBanner } from "@/components/offline-banner";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -97,6 +98,7 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          <OfflineBanner />
           <SiteHeader />
           <main id="main-content">{children}</main>
           <SiteFooter />

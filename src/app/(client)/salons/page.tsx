@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Search, MapPin, Phone, Star, Heart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NetworkErrorHandler } from "@/components/network-error-handler";
+import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 import {
   Card,
   CardContent,
@@ -30,6 +32,7 @@ export default function SalonsListPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean } | null>(null);
 
   useEffect(() => {
     fetchSalons();
@@ -59,6 +62,7 @@ export default function SalonsListPage() {
 
   async function fetchSalons() {
     try {
+      setFetchError(null);
       const res = await fetch("/api/salons");
       const json = await res.json();
       if (json.success) {
@@ -66,6 +70,8 @@ export default function SalonsListPage() {
       }
     } catch (error) {
       console.error("Failed to fetch salons:", error);
+      const errInfo = getNetworkErrorMessage(error);
+      setFetchError(errInfo);
     } finally {
       setLoading(false);
     }
@@ -139,6 +145,22 @@ export default function SalonsListPage() {
       nails: "Paznokcie",
     };
     return labels[type] || type;
+  }
+
+  if (fetchError) {
+    return (
+      <div className="container mx-auto p-6">
+        <NetworkErrorHandler
+          message={fetchError.message}
+          isNetworkError={fetchError.isNetwork}
+          onRetry={async () => {
+            setLoading(true);
+            await fetchSalons();
+          }}
+          isRetrying={loading}
+        />
+      </div>
+    );
   }
 
   if (loading) {

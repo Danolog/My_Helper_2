@@ -49,6 +49,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { NetworkErrorHandler } from "@/components/network-error-handler";
+import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -104,15 +106,24 @@ export default function ServicesPage() {
   const [formPrice, setFormPrice] = useState("");
   const [formDuration, setFormDuration] = useState("");
 
+  // Form validation errors
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // Network error state
+  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean } | null>(null);
+
   const fetchServices = useCallback(async () => {
     try {
       const res = await fetch(`/api/services?salonId=${DEMO_SALON_ID}`);
       const data = await res.json();
       if (data.success) {
         setServices(data.data);
+        setFetchError(null);
       }
     } catch (error) {
       console.error("Failed to fetch services:", error);
+      const errInfo = getNetworkErrorMessage(error);
+      setFetchError(errInfo);
     }
   }, []);
 
@@ -145,19 +156,43 @@ export default function ServicesPage() {
     setFormCategoryId("");
     setFormPrice("");
     setFormDuration("");
+    setFormErrors({});
+  };
+
+  const clearFieldError = (field: string) => {
+    setFormErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const validateServiceForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    if (!formName.trim()) {
+      errors.name = "Wpisz nazwe uslugi, np. Strzyzenie damskie";
+    }
+    if (!formPrice) {
+      errors.price = "Podaj cene uslugi w PLN, np. 50.00";
+    } else if (isNaN(parseFloat(formPrice)) || isNaN(Number(formPrice))) {
+      errors.price = "Cena musi byc liczba. Wpisz wartosc, np. 50.00";
+    } else if (parseFloat(formPrice) < 0) {
+      errors.price = "Cena nie moze byc ujemna. Wpisz wartosc wieksza lub rowna 0";
+    }
+    if (!formDuration) {
+      errors.duration = "Podaj czas trwania w minutach, np. 30";
+    } else if (isNaN(parseInt(formDuration, 10)) || isNaN(Number(formDuration))) {
+      errors.duration = "Czas trwania musi byc liczba minut, np. 30 lub 60";
+    } else if (parseInt(formDuration, 10) <= 0) {
+      errors.duration = "Czas trwania musi byc wiekszy niz 0 minut";
+    }
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const handleSaveService = async () => {
-    if (!formName.trim()) {
-      toast.error("Nazwa uslugi jest wymagana");
-      return;
-    }
-    if (!formPrice || parseFloat(formPrice) < 0) {
-      toast.error("Podaj prawidlowa cene");
-      return;
-    }
-    if (!formDuration || parseInt(formDuration, 10) <= 0) {
-      toast.error("Podaj prawidlowy czas trwania");
+    if (!validateServiceForm()) {
+      toast.error("Popraw zaznaczone pola formularza");
       return;
     }
 
@@ -188,7 +223,15 @@ export default function ServicesPage() {
       }
     } catch (error) {
       console.error("Failed to save service:", error);
-      toast.error("Blad podczas zapisywania uslugi");
+      const errInfo = getNetworkErrorMessage(error);
+      toast.error(errInfo.isNetwork
+        ? "Brak polaczenia z serwerem. Sprawdz internet i sprobuj ponownie."
+        : "Blad podczas zapisywania uslugi", {
+        action: {
+          label: "Sprobuj ponownie",
+          onClick: () => handleSaveService(),
+        },
+      });
     } finally {
       setSaving(false);
     }
@@ -237,7 +280,7 @@ export default function ServicesPage() {
 
   const handleSaveCategory = async () => {
     if (!categoryFormName.trim()) {
-      toast.error("Nazwa kategorii jest wymagana");
+      toast.error("Wpisz nazwe kategorii, np. Fryzjerstwo lub Kosmetyka");
       return;
     }
 
@@ -509,9 +552,20 @@ export default function ServicesPage() {
                   id="service-name"
                   placeholder="np. Strzyzenie meskie"
                   value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
+                  onChange={(e) => {
+                    setFormName(e.target.value);
+                    if (e.target.value.trim()) clearFieldError("name");
+                  }}
+                  required
+                  aria-invalid={!!formErrors.name}
+                  className={formErrors.name ? "border-destructive" : ""}
                   data-testid="service-name-input"
                 />
+                {formErrors.name && (
+                  <p className="text-sm text-destructive" data-testid="error-service-name">
+                    {formErrors.name}
+                  </p>
+                )}
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="service-description">Opis</Label>
@@ -561,9 +615,41 @@ export default function ServicesPage() {
                     step="0.01"
                     placeholder="0.00"
                     value={formPrice}
-                    onChange={(e) => setFormPrice(e.target.value)}
+                    onChange={(e) => {
+                      setFormPrice(e.target.value);
+                      const val = e.target.value;
+                      if (val && !isNaN(Number(val)) && parseFloat(val) >= 0) {
+                        clearFieldError("price");
+                      } else if (val && (isNaN(Number(val)))) {
+                        setFormErrors((prev) => ({ ...prev, price: "Cena musi byc liczba" }));
+                      } else if (val && parseFloat(val) < 0) {
+                        setFormErrors((prev) => ({ ...prev, price: "Cena nie moze byc ujemna" }));
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      // Block letters and special chars except numeric input helpers
+                      if (
+                        !/[0-9]/.test(e.key) &&
+                        !["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", ".", ",", "-"].includes(e.key) &&
+                        !e.ctrlKey && !e.metaKey
+                      ) {
+                        e.preventDefault();
+                      }
+                      // Block minus key for price (no negatives)
+                      if (e.key === "-") {
+                        e.preventDefault();
+                      }
+                    }}
+                    required
+                    aria-invalid={!!formErrors.price}
+                    className={formErrors.price ? "border-destructive" : ""}
                     data-testid="service-price-input"
                   />
+                  {formErrors.price && (
+                    <p className="text-sm text-destructive" data-testid="error-service-price">
+                      {formErrors.price}
+                    </p>
+                  )}
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="service-duration">
@@ -576,9 +662,36 @@ export default function ServicesPage() {
                     step="5"
                     placeholder="30"
                     value={formDuration}
-                    onChange={(e) => setFormDuration(e.target.value)}
+                    onChange={(e) => {
+                      setFormDuration(e.target.value);
+                      const val = e.target.value;
+                      if (val && !isNaN(Number(val)) && parseInt(val, 10) > 0) {
+                        clearFieldError("duration");
+                      } else if (val && isNaN(Number(val))) {
+                        setFormErrors((prev) => ({ ...prev, duration: "Czas trwania musi byc liczba" }));
+                      } else if (val && parseInt(val, 10) <= 0) {
+                        setFormErrors((prev) => ({ ...prev, duration: "Czas trwania musi byc wiekszy niz 0" }));
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (
+                        !/[0-9]/.test(e.key) &&
+                        !["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(e.key) &&
+                        !e.ctrlKey && !e.metaKey
+                      ) {
+                        e.preventDefault();
+                      }
+                    }}
+                    required
+                    aria-invalid={!!formErrors.duration}
+                    className={formErrors.duration ? "border-destructive" : ""}
                     data-testid="service-duration-input"
                   />
+                  {formErrors.duration && (
+                    <p className="text-sm text-destructive" data-testid="error-service-duration">
+                      {formErrors.duration}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -618,7 +731,20 @@ export default function ServicesPage() {
 
         {/* Services Tab */}
         <TabsContent value="services">
-          {loading ? (
+          {fetchError ? (
+            <NetworkErrorHandler
+              message={fetchError.message}
+              isNetworkError={fetchError.isNetwork}
+              onRetry={async () => {
+                setFetchError(null);
+                setLoading(true);
+                await fetchServices();
+                await fetchCategories();
+                setLoading(false);
+              }}
+              isRetrying={loading}
+            />
+          ) : loading ? (
             <div className="flex justify-center items-center h-48">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
             </div>
