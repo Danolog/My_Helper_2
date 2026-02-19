@@ -48,6 +48,8 @@ import {
   FolderOpen,
 } from "lucide-react";
 import { toast } from "sonner";
+import { NetworkErrorHandler } from "@/components/network-error-handler";
+import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 
 interface Product {
   id: string;
@@ -93,6 +95,7 @@ export default function ProductsPage() {
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
   const [categoryFormName, setCategoryFormName] = useState("");
   const [savingCategory, setSavingCategory] = useState(false);
+  const [categoryFormErrors, setCategoryFormErrors] = useState<Record<string, string>>({});
   const [deleteCategoryDialogOpen, setDeleteCategoryDialogOpen] = useState(false);
   const [categoryToDelete, setCategoryToDelete] = useState<ProductCategory | null>(null);
 
@@ -109,6 +112,9 @@ export default function ProductsPage() {
   const [formUnit, setFormUnit] = useState("");
   const [formPricePerUnit, setFormPricePerUnit] = useState("");
 
+  // Form validation errors
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
   // Delete dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
@@ -121,6 +127,7 @@ export default function ProductsPage() {
     createdAt: string;
   }
   const [lowStockNotifications, setLowStockNotifications] = useState<LowStockNotification[]>([]);
+  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean } | null>(null);
 
   const fetchProducts = useCallback(async () => {
     try {
@@ -128,10 +135,12 @@ export default function ProductsPage() {
       const data = await res.json();
       if (data.success) {
         setProductsData(data.data);
+        setFetchError(null);
       }
     } catch (error) {
       console.error("Failed to fetch products:", error);
-      toast.error("Blad podczas ladowania produktow");
+      const errInfo = getNetworkErrorMessage(error);
+      setFetchError(errInfo);
     } finally {
       setLoading(false);
     }
@@ -179,6 +188,44 @@ export default function ProductsPage() {
   // Category names from DB for product category select
   const categoryNames = categories.map((c) => c.name);
 
+  const clearFieldError = (field: string) => {
+    setFormErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const validateProductForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    if (!formName.trim()) {
+      errors.name = "Wpisz nazwe produktu, np. Szampon nawilzajacy";
+    }
+    if (formQuantity) {
+      if (isNaN(Number(formQuantity)) || isNaN(parseFloat(formQuantity))) {
+        errors.quantity = "Ilosc musi byc liczba calkowita, np. 10";
+      } else if (parseFloat(formQuantity) < 0) {
+        errors.quantity = "Ilosc nie moze byc ujemna. Wpisz wartosc 0 lub wieksza";
+      }
+    }
+    if (formMinQuantity) {
+      if (isNaN(Number(formMinQuantity)) || isNaN(parseFloat(formMinQuantity))) {
+        errors.minQuantity = "Minimalny stan musi byc liczba, np. 5";
+      } else if (parseFloat(formMinQuantity) < 0) {
+        errors.minQuantity = "Minimalny stan nie moze byc ujemny. Wpisz wartosc 0 lub wieksza";
+      }
+    }
+    if (formPricePerUnit) {
+      if (isNaN(Number(formPricePerUnit)) || isNaN(parseFloat(formPricePerUnit))) {
+        errors.pricePerUnit = "Cena jednostkowa musi byc liczba, np. 25.00";
+      } else if (parseFloat(formPricePerUnit) < 0) {
+        errors.pricePerUnit = "Cena jednostkowa nie moze byc ujemna. Wpisz wartosc 0 lub wieksza";
+      }
+    }
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const openAddDialog = () => {
     setEditingProduct(null);
     setFormName("");
@@ -187,6 +234,7 @@ export default function ProductsPage() {
     setFormMinQuantity("");
     setFormUnit("szt.");
     setFormPricePerUnit("");
+    setFormErrors({});
     setDialogOpen(true);
   };
 
@@ -198,12 +246,13 @@ export default function ProductsPage() {
     setFormMinQuantity(product.minQuantity || "");
     setFormUnit(product.unit || "szt.");
     setFormPricePerUnit(product.pricePerUnit || "");
+    setFormErrors({});
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
-    if (!formName.trim()) {
-      toast.error("Podaj nazwe produktu");
+    if (!validateProductForm()) {
+      toast.error("Popraw zaznaczone pola formularza");
       return;
     }
 
@@ -257,7 +306,15 @@ export default function ProductsPage() {
       }
     } catch (error) {
       console.error("Failed to save product:", error);
-      toast.error("Blad podczas zapisywania produktu");
+      const errInfo = getNetworkErrorMessage(error);
+      toast.error(errInfo.isNetwork
+        ? "Brak polaczenia z serwerem. Sprawdz internet i sprobuj ponownie."
+        : "Blad podczas zapisywania produktu", {
+        action: {
+          label: "Sprobuj ponownie",
+          onClick: () => handleSave(),
+        },
+      });
     } finally {
       setSaving(false);
     }
@@ -288,21 +345,36 @@ export default function ProductsPage() {
   };
 
   // Category CRUD handlers
+  const clearCategoryFieldError = (field: string) => {
+    setCategoryFormErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
   const openAddCategoryDialog = () => {
     setEditingCategory(null);
     setCategoryFormName("");
+    setCategoryFormErrors({});
     setCategoryDialogOpen(true);
   };
 
   const openEditCategoryDialog = (category: ProductCategory) => {
     setEditingCategory(category);
     setCategoryFormName(category.name);
+    setCategoryFormErrors({});
     setCategoryDialogOpen(true);
   };
 
   const handleSaveCategory = async () => {
+    const errors: Record<string, string> = {};
     if (!categoryFormName.trim()) {
-      toast.error("Podaj nazwe kategorii");
+      errors.categoryName = "Wpisz nazwe kategorii, np. Kosmetyki lub Narzedzia";
+    }
+    setCategoryFormErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      toast.error("Popraw zaznaczone pola formularza");
       return;
     }
 
@@ -468,6 +540,17 @@ export default function ProductsPage() {
 
         {/* ==================== PRODUCTS TAB ==================== */}
         <TabsContent value="products">
+          {fetchError ? (
+            <NetworkErrorHandler
+              message={fetchError.message}
+              isNetworkError={fetchError.isNetwork}
+              onRetry={async () => {
+                setFetchError(null);
+                setLoading(true);
+                await fetchProducts();
+              }}
+            />
+          ) : (<>
           <div className="flex items-center justify-end mb-4">
             <Button onClick={openAddDialog} data-testid="add-product-btn">
               <Plus className="h-4 w-4 mr-2" />
@@ -723,6 +806,7 @@ export default function ProductsPage() {
               })}
             </div>
           )}
+          </>)}
         </TabsContent>
 
         {/* ==================== CATEGORIES TAB ==================== */}
@@ -820,15 +904,26 @@ export default function ProductsPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div>
+            <div className="grid gap-2">
               <Label htmlFor="product-name">Nazwa produktu *</Label>
               <Input
                 id="product-name"
                 value={formName}
-                onChange={(e) => setFormName(e.target.value)}
+                onChange={(e) => {
+                  setFormName(e.target.value);
+                  if (e.target.value.trim()) clearFieldError("name");
+                }}
                 placeholder="np. Farba Wella Koleston 6/0"
+                required
+                aria-invalid={!!formErrors.name}
+                className={formErrors.name ? "border-destructive" : ""}
                 data-testid="product-name-input"
               />
+              {formErrors.name && (
+                <p className="text-sm text-destructive" data-testid="error-product-name">
+                  {formErrors.name}
+                </p>
+              )}
             </div>
             <div>
               <Label htmlFor="product-category">Kategoria</Label>
@@ -860,10 +955,37 @@ export default function ProductsPage() {
                   step="0.01"
                   min="0"
                   value={formQuantity}
-                  onChange={(e) => setFormQuantity(e.target.value)}
+                  onChange={(e) => {
+                    setFormQuantity(e.target.value);
+                    const val = e.target.value;
+                    if (val === "" || (!isNaN(Number(val)) && parseFloat(val) >= 0)) {
+                      clearFieldError("quantity");
+                    } else if (val && isNaN(Number(val))) {
+                      setFormErrors((prev) => ({ ...prev, quantity: "Ilosc musi byc liczba" }));
+                    } else if (val && parseFloat(val) < 0) {
+                      setFormErrors((prev) => ({ ...prev, quantity: "Ilosc nie moze byc ujemna" }));
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (
+                      !/[0-9]/.test(e.key) &&
+                      !["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", ".", ","].includes(e.key) &&
+                      !e.ctrlKey && !e.metaKey
+                    ) {
+                      e.preventDefault();
+                    }
+                    if (e.key === "-") e.preventDefault();
+                  }}
                   placeholder="0"
+                  aria-invalid={!!formErrors.quantity}
+                  className={formErrors.quantity ? "border-destructive" : ""}
                   data-testid="product-quantity-input"
                 />
+                {formErrors.quantity && (
+                  <p className="text-sm text-destructive mt-1" data-testid="error-product-quantity">
+                    {formErrors.quantity}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="product-unit">Jednostka</Label>
@@ -893,10 +1015,37 @@ export default function ProductsPage() {
                   step="0.01"
                   min="0"
                   value={formMinQuantity}
-                  onChange={(e) => setFormMinQuantity(e.target.value)}
+                  onChange={(e) => {
+                    setFormMinQuantity(e.target.value);
+                    const val = e.target.value;
+                    if (val === "" || (!isNaN(Number(val)) && parseFloat(val) >= 0)) {
+                      clearFieldError("minQuantity");
+                    } else if (val && isNaN(Number(val))) {
+                      setFormErrors((prev) => ({ ...prev, minQuantity: "Minimalny stan musi byc liczba" }));
+                    } else if (val && parseFloat(val) < 0) {
+                      setFormErrors((prev) => ({ ...prev, minQuantity: "Minimalny stan nie moze byc ujemny" }));
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (
+                      !/[0-9]/.test(e.key) &&
+                      !["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", ".", ","].includes(e.key) &&
+                      !e.ctrlKey && !e.metaKey
+                    ) {
+                      e.preventDefault();
+                    }
+                    if (e.key === "-") e.preventDefault();
+                  }}
                   placeholder="opcjonalnie"
+                  aria-invalid={!!formErrors.minQuantity}
+                  className={formErrors.minQuantity ? "border-destructive" : ""}
                   data-testid="product-min-quantity-input"
                 />
+                {formErrors.minQuantity && (
+                  <p className="text-sm text-destructive mt-1" data-testid="error-product-min-quantity">
+                    {formErrors.minQuantity}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="product-price">Cena za jedn. (PLN)</Label>
@@ -906,10 +1055,37 @@ export default function ProductsPage() {
                   step="0.01"
                   min="0"
                   value={formPricePerUnit}
-                  onChange={(e) => setFormPricePerUnit(e.target.value)}
+                  onChange={(e) => {
+                    setFormPricePerUnit(e.target.value);
+                    const val = e.target.value;
+                    if (val === "" || (!isNaN(Number(val)) && parseFloat(val) >= 0)) {
+                      clearFieldError("pricePerUnit");
+                    } else if (val && isNaN(Number(val))) {
+                      setFormErrors((prev) => ({ ...prev, pricePerUnit: "Cena musi byc liczba" }));
+                    } else if (val && parseFloat(val) < 0) {
+                      setFormErrors((prev) => ({ ...prev, pricePerUnit: "Cena nie moze byc ujemna" }));
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (
+                      !/[0-9]/.test(e.key) &&
+                      !["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", ".", ","].includes(e.key) &&
+                      !e.ctrlKey && !e.metaKey
+                    ) {
+                      e.preventDefault();
+                    }
+                    if (e.key === "-") e.preventDefault();
+                  }}
                   placeholder="opcjonalnie"
+                  aria-invalid={!!formErrors.pricePerUnit}
+                  className={formErrors.pricePerUnit ? "border-destructive" : ""}
                   data-testid="product-price-input"
                 />
+                {formErrors.pricePerUnit && (
+                  <p className="text-sm text-destructive mt-1" data-testid="error-product-price">
+                    {formErrors.pricePerUnit}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -966,10 +1142,20 @@ export default function ProductsPage() {
               <Input
                 id="category-name"
                 value={categoryFormName}
-                onChange={(e) => setCategoryFormName(e.target.value)}
+                onChange={(e) => {
+                  setCategoryFormName(e.target.value);
+                  if (e.target.value.trim()) clearCategoryFieldError("categoryName");
+                }}
                 placeholder="np. Farby do wlosow"
+                aria-invalid={!!categoryFormErrors.categoryName}
+                className={categoryFormErrors.categoryName ? "border-destructive" : ""}
                 data-testid="category-name-input"
               />
+              {categoryFormErrors.categoryName && (
+                <p className="text-sm text-destructive mt-1" data-testid="error-category-name">
+                  {categoryFormErrors.categoryName}
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>
