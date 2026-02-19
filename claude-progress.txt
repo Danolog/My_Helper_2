@@ -1,5 +1,39 @@
 # MyHelper Development Progress
 
+## Session: Feature #211 - 404 page for missing routes (2026-02-19) *** SUCCESS ***
+
+### Feature Details
+- **Feature**: #211 - 404 page for missing routes - Handle non-existent pages
+- **Category**: ErrorHandling
+- **Status**: PASSING
+
+### What was accomplished:
+- Improved existing not-found.tsx with Polish text and better design
+- Updated from English to Polish language (consistent with rest of app)
+- Added Lucide icons (Home, LayoutDashboard) to navigation buttons
+- Improved visual design with rounded icon background and centered layout
+
+### Files modified:
+- **src/app/not-found.tsx** - Improved 404 page with Polish text and navigation icons
+
+### Verification (browser automation - all 4 steps PASS):
+1. Navigate to /nonexistent-route - 404 page displayed correctly
+2. Verify 404 page displayed - Shows "404" heading, "Strona nie znaleziona" subtitle, descriptive text
+3. Verify navigation options shown - Two buttons: "Strona glowna" (Home) and "Panel zarzadzania" (Dashboard)
+4. Verify can return to home - Clicked "Strona glowna" -> navigated to home page (/) successfully
+- Also tested with deeply nested route /this/path/does/not/exist - same 404 page shown
+
+### Additional checks:
+- Mock data patterns: CLEAN (no globalThis, devStore, mockDb, etc.)
+- Console errors: 0
+- Screenshots: feature211-404-page.png, feature211-home-after-404.png
+
+### Completion status:
+- Feature #211 marked as passing
+- Stats: 178/253 passing (70.4%)
+
+---
+
 ## Session: 2026-02-18 (Feature #204 - Date picker constraints) *** SUCCESS ***
 
 ### Feature Assigned
@@ -10581,3 +10615,35 @@ Feature #185: Business AI proactive suggestions - AI recommends actions based on
 ### Completion status:
 - Feature #206 marked as passing
 - Current stats: 173/253 features passing (68.4%)
+
+---
+
+## Session: Feature #210 - API error display (2026-02-19) *** SUCCESS ***
+
+### Feature Details
+- Feature: #210 - API error display - Show server errors to user
+- Category: ErrorHandling
+- Status: PASSING
+
+### What was accomplished:
+1. Updated global error boundary (src/app/error.tsx) - Polish messages, hidden technical details
+2. Created dashboard-specific error boundary (src/app/dashboard/error.tsx)
+3. Created test API endpoint (src/app/api/test/error/route.ts) for simulating errors
+4. Created test errors page (src/app/dashboard/test-errors/page.tsx)
+5. Improved products page error handling with NetworkErrorHandler and retry actions
+
+### Verification results (all 4 steps PASS):
+1. Trigger server error - Used test endpoint at /api/test/error?type=500, returned 500 status
+2. User-friendly error shown - Toast: "Wystapil blad serwera. Sprobuj ponownie pozniej." (Polish)
+3. Technical details hidden - No stack traces, error objects, or digest shown in UI; 0 console errors
+4. Retry option - All toast errors have "Sprobuj ponownie" button, NetworkErrorHandler has retry
+
+### Additional checks:
+- Mock data patterns: CLEAN (no globalThis, devStore, mockDb, etc.)
+- Console errors: 0
+- TypeScript: All modified files pass type check
+- Screenshots: feature210-test-errors-page.png, feature210-500-error-toast.png, feature210-post-error-toast.png
+
+### Completion status:
+- Feature #210 marked as passing
+- Stats: 177/253 passing (69.9%)
