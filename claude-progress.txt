@@ -1,5 +1,52 @@
 # MyHelper Development Progress
 
+## Session: Feature #212 - 500 error handling (2026-02-19) *** SUCCESS ***
+
+### Feature Details
+- **Feature**: #212 - 500 error handling - Server error page
+- **Category**: ErrorHandling
+- **Status**: PASSING
+
+### Files Created
+- **src/app/global-error.tsx** (NEW) - Global error boundary for root layout errors
+  - Inline styles (no CSS dependencies since it replaces root layout)
+  - Polish UI: "Blad serwera", "Przepraszamy za niedogodnosc..."
+  - Retry button (↻ Sprobuj ponownie) and Home button (🏠 Strona glowna)
+  - 500 error code displayed prominently
+- **src/app/dashboard/test-errors/server-crash/page.tsx** (NEW) - Server-side error test page
+  - Server component that throws on `?crash=true` query parameter
+  - Triggers nearest error.tsx boundary (dashboard/error.tsx)
+  - Development-only test tool
+
+### Pre-existing Error Infrastructure (verified working)
+- **src/app/error.tsx** - Root-level error boundary with AlertCircle icon, Polish apology message, retry + home buttons
+- **src/app/dashboard/error.tsx** - Dashboard-specific error boundary with AlertTriangle icon, Card layout, retry + Panel glowny buttons
+- **src/app/chat/error.tsx** - Chat-specific error boundary
+- **src/app/api/test/error/route.ts** - API error simulation endpoint (500, 400, timeout, crash)
+- **src/app/dashboard/test-errors/page.tsx** - API error testing page with toast-based error display
+
+### Verification (browser automation - all 4 steps PASS)
+1. ✅ **Trigger server error** - Navigated to `/dashboard/test-errors/server-crash?crash=true`, server component threw Error
+2. ✅ **Verify error page shown** - DashboardError boundary renders Card with AlertTriangle icon and "Blad ladowania strony" heading
+3. ✅ **Verify apology message** - "Wystapil problem z zaladowaniem tej strony. Moze to byc chwilowy problem z serwerem. Sprobuj odswiezyc strone lub wroc do panelu glownego."
+4. ✅ **Verify retry option** - "Sprobuj ponownie" button (calls reset()) and "Panel glowny" navigation button
+
+### Additional Checks
+- Console errors: Only expected error boundary logs (React error boundary handler + our useEffect console.error)
+- Mock data patterns: CLEAN (no globalThis, devStore, mockDb, etc.)
+- No technical details exposed to user (stack traces logged to console only)
+- Screenshots: feature212-test-page.png, feature212-after-crash.png, feature212-500-error-page.png
+
+### Completion Status
+- Feature #212 marked as passing
+- Commit: d11cb88
+- Stats: 179/253 passing (70.8%)
+
+### What should be worked on next
+- Continue with next ready features from the backlog
+
+---
+
 ## Session: Feature #211 - 404 page for missing routes (2026-02-19) *** SUCCESS ***
 
 ### Feature Details
