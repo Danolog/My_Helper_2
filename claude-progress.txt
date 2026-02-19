@@ -1,5 +1,35 @@
 # MyHelper Development Progress
 
+## Session: Feature #41 - Holiday and vacation management (2026-02-19) *** SUCCESS ***
+
+### Feature Details
+- **Feature**: #41 - Holiday and vacation management - Mark days off and vacations
+- **Category**: Calendar
+- **Status**: PASSING (verification only - no code changes needed)
+
+### What was accomplished:
+- Verified existing vacation management implementation works correctly
+- Tested adding vacation via employee schedule UI (Anna Kowalska, Apr 1-7, 2026)
+- Confirmed available-slots API blocks all slots during vacation (blockedRanges with type:"vacation")
+- Confirmed appointment creation returns 409 Conflict during vacation with message including reason
+- Confirmed non-vacation days still allow bookings (201 Created on Apr 9)
+- No mock data patterns found in source code
+- Data persists in PostgreSQL (verified via API re-fetch)
+
+### Key files (pre-existing, no changes):
+- `src/lib/schema.ts` - timeBlocks table (lines 260-278)
+- `src/app/api/time-blocks/route.ts` - CRUD for time blocks
+- `src/app/api/available-slots/route.ts` - Integrates time blocks into availability
+- `src/app/api/appointments/route.ts` - Conflict detection with time blocks (lines 131-157)
+- `src/app/dashboard/employees/[id]/schedule/page.tsx` - Schedule management UI
+
+### Test user:
+- Email: vacation41test@test.com / TestPass123! (Basic plan)
+- Employee tested: Anna Kowalska (f6c19a6e-c977-4e51-b20a-b56fe22af2ee)
+- Salon: Beauty Studio Demo (00000000-0000-0000-0000-000000000001)
+
+---
+
 ## Session: Feature #212 - 500 error handling (2026-02-19) *** SUCCESS ***
 
 ### Feature Details
