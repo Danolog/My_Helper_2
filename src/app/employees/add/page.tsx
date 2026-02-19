@@ -65,13 +65,13 @@ export default function AddEmployeePage() {
 
     const errors: Record<string, string> = {};
     if (!formData.firstName.trim()) {
-      errors.firstName = "Imie jest wymagane";
+      errors.firstName = "Wpisz imie pracownika, np. Anna";
     }
     if (!formData.lastName.trim()) {
-      errors.lastName = "Nazwisko jest wymagane";
+      errors.lastName = "Wpisz nazwisko pracownika, np. Kowalska";
     }
     if (formData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
-      errors.email = "Wprowadz poprawny adres email";
+      errors.email = "Nieprawidlowy format email. Wpisz adres w formacie: nazwa@domena.pl";
     }
     if (formData.phone.trim()) {
       const phoneError = validatePhone(formData.phone);
@@ -81,7 +81,7 @@ export default function AddEmployeePage() {
     }
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      toast.error("Wypelnij wymagane pola");
+      toast.error("Popraw zaznaczone pola formularza");
       return;
     }
 

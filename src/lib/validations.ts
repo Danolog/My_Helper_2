@@ -29,7 +29,7 @@ export function validatePhone(phone: string): string | null {
 
   // Check for invalid characters (only allow digits, spaces, +, -, (, ))
   if (/[^0-9\s+\-().]/.test(trimmed)) {
-    return "Numer telefonu moze zawierac tylko cyfry, spacje i znaki +, -, (, )"
+    return "Numer telefonu moze zawierac tylko cyfry, spacje i znaki +, -, (, ). Przyklad: +48 123 456 789"
   }
 
   // Extract just the digits
@@ -37,12 +37,12 @@ export function validatePhone(phone: string): string | null {
 
   // Must have at least 7 digits
   if (digits.length < 7) {
-    return "Numer telefonu musi miec co najmniej 7 cyfr"
+    return "Numer telefonu jest za krotki - wpisz co najmniej 7 cyfr, np. 123 456 789"
   }
 
   // Must not exceed 15 digits (E.164 standard)
   if (digits.length > 15) {
-    return "Numer telefonu moze miec maksymalnie 15 cyfr"
+    return "Numer telefonu jest za dlugi - maksymalnie 15 cyfr (standard E.164)"
   }
 
   return null
@@ -59,7 +59,7 @@ export function validateEmail(email: string): string | null {
   }
 
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-    return "Wprowadz poprawny adres email"
+    return "Nieprawidlowy format email. Wpisz adres w formacie: nazwa@domena.pl"
   }
 
   return null

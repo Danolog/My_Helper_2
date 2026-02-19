@@ -681,13 +681,13 @@ export default function ClientProfilePage() {
     // Validate required fields with inline errors
     const errors: Record<string, string> = {};
     if (!formFirstName.trim()) {
-      errors.firstName = "Imie jest wymagane";
+      errors.firstName = "Wpisz imie klienta, np. Anna";
     }
     if (!formLastName.trim()) {
-      errors.lastName = "Nazwisko jest wymagane";
+      errors.lastName = "Wpisz nazwisko klienta, np. Kowalska";
     }
     if (formEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formEmail.trim())) {
-      errors.email = "Wprowadz poprawny adres email";
+      errors.email = "Nieprawidlowy format email. Wpisz adres w formacie: nazwa@domena.pl";
     }
     if (formPhone.trim()) {
       const phoneError = validatePhone(formPhone);
