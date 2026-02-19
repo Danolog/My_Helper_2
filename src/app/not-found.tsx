@@ -1,25 +1,34 @@
 import Link from "next/link";
-import { FileQuestion } from "lucide-react";
+import { FileQuestion, Home, LayoutDashboard, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function NotFound() {
   return (
-    <div className="container mx-auto px-4 py-16">
-      <div className="max-w-md mx-auto text-center">
+    <div className="flex items-center justify-center min-h-[60vh] px-4 py-16">
+      <div className="max-w-md w-full text-center">
         <div className="flex justify-center mb-6">
-          <FileQuestion className="h-16 w-16 text-muted-foreground" />
+          <div className="rounded-full bg-muted p-4">
+            <FileQuestion className="h-12 w-12 text-muted-foreground" />
+          </div>
         </div>
-        <h1 className="text-4xl font-bold mb-4">404</h1>
-        <h2 className="text-xl font-semibold mb-4">Page Not Found</h2>
-        <p className="text-muted-foreground mb-6">
-          The page you&apos;re looking for doesn&apos;t exist or has been moved.
+        <h1 className="text-6xl font-bold text-muted-foreground mb-2">404</h1>
+        <h2 className="text-xl font-semibold mb-3">Strona nie znaleziona</h2>
+        <p className="text-muted-foreground mb-8">
+          Strona, ktorej szukasz, nie istnieje lub zostala przeniesiona.
+          Sprawdz adres URL lub skorzystaj z ponizszych opcji nawigacji.
         </p>
-        <div className="flex gap-4 justify-center">
-          <Button asChild>
-            <Link href="/">Go home</Link>
+        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          <Button asChild className="gap-2">
+            <Link href="/">
+              <Home className="h-4 w-4" />
+              Strona glowna
+            </Link>
           </Button>
-          <Button variant="outline" asChild>
-            <Link href="/dashboard">Dashboard</Link>
+          <Button variant="outline" asChild className="gap-2">
+            <Link href="/dashboard">
+              <LayoutDashboard className="h-4 w-4" />
+              Panel zarzadzania
+            </Link>
           </Button>
         </div>
       </div>
