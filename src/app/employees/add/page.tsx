@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,10 @@ import { ArrowLeft, Lock, UserPlus, Palette } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
 import { validatePhone } from "@/lib/validations";
+import { useFormRecovery } from "@/hooks/use-form-recovery";
+import { FormRecoveryBanner } from "@/components/form-recovery-banner";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 
 // Demo salon ID - in production this would come from user's session
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
@@ -45,6 +49,66 @@ export default function AddEmployeePage() {
     phone: "",
     role: "employee",
   });
+
+  // Form recovery after page refresh
+  const {
+    wasRecovered,
+    getRecoveredState,
+    saveFormState,
+    clearSavedForm,
+    setDirty,
+  } = useFormRecovery<{
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    role: string;
+  }>({
+    storageKey: "add-employee-form",
+    warnOnUnload: true,
+  });
+
+  // Track whether form has unsaved changes
+  const formIsDirty =
+    !!formData.firstName ||
+    !!formData.lastName ||
+    !!formData.email ||
+    !!formData.phone;
+
+  // Unsaved changes warning when navigating away with dirty form
+  const {
+    showDialog: showUnsavedDialog,
+    confirmNavigation,
+    cancelNavigation,
+  } = useUnsavedChanges({
+    isDirty: formIsDirty,
+    warnOnUnload: false, // useFormRecovery already handles beforeunload
+  });
+
+  // Recovery handler: restores form fields from localStorage
+  const handleRestoreForm = () => {
+    const saved = getRecoveredState();
+    if (saved) {
+      setFormData({
+        firstName: saved.firstName || "",
+        lastName: saved.lastName || "",
+        email: saved.email || "",
+        phone: saved.phone || "",
+        role: saved.role || "employee",
+      });
+    }
+  };
+
+  // Save form state on every change (debounced inside hook)
+  useEffect(() => {
+    const hasData =
+      !!formData.firstName ||
+      !!formData.lastName ||
+      !!formData.email ||
+      !!formData.phone;
+    saveFormState(formData);
+    setDirty(hasData);
+  }, [formData, saveFormState, setDirty]);
 
   const clearFieldError = (field: string) => {
     setFieldErrors((prev) => {
@@ -107,6 +171,8 @@ export default function AddEmployeePage() {
       const data = await response.json();
 
       if (data.success) {
+        // Clear saved form data on success
+        clearSavedForm();
         // Show the assigned color
         const assignedColor = data.data.color;
         setAssignedColor(assignedColor);
@@ -119,7 +185,7 @@ export default function AddEmployeePage() {
 
         // Redirect to calendar after a short delay
         setTimeout(() => {
-          router.push("/calendar/all");
+          router.replace("/calendar/all");
         }, 2000);
       } else {
         toast.error("Nie udalo sie dodac pracownika", {
@@ -177,6 +243,12 @@ export default function AddEmployeePage() {
           </div>
         </CardHeader>
         <CardContent>
+          {wasRecovered && (
+            <FormRecoveryBanner
+              onRestore={handleRestoreForm}
+              onDismiss={clearSavedForm}
+            />
+          )}
           <form onSubmit={handleSubmit} noValidate className="space-y-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -322,6 +394,13 @@ export default function AddEmployeePage() {
           </form>
         </CardContent>
       </Card>
+
+      {/* Unsaved changes warning dialog */}
+      <UnsavedChangesDialog
+        open={showUnsavedDialog}
+        onConfirm={confirmNavigation}
+        onCancel={cancelNavigation}
+      />
     </div>
   );
 }
