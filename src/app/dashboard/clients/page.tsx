@@ -37,6 +37,8 @@ import {
 import { toast } from "sonner";
 import Link from "next/link";
 import { validatePhone } from "@/lib/validations";
+import { NetworkErrorHandler } from "@/components/network-error-handler";
+import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -91,6 +93,9 @@ export default function ClientsPage() {
   // Form validation errors
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
+  // Network error state
+  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean } | null>(null);
+
   const hasActiveFilters =
     appliedFilters.dateAddedFrom !== "" ||
     appliedFilters.dateAddedTo !== "" ||
@@ -142,9 +147,12 @@ export default function ClientsPage() {
         const data = await res.json();
         if (data.success) {
           setClients(data.data);
+          setFetchError(null);
         }
       } catch (error) {
         console.error("Failed to fetch clients:", error);
+        const errInfo = getNetworkErrorMessage(error);
+        setFetchError(errInfo);
       }
     },
     [appliedFilters]
@@ -214,13 +222,13 @@ export default function ClientsPage() {
   const validateClientForm = (): boolean => {
     const errors: Record<string, string> = {};
     if (!formFirstName.trim()) {
-      errors.firstName = "Imie jest wymagane";
+      errors.firstName = "Wpisz imie klienta, np. Anna";
     }
     if (!formLastName.trim()) {
-      errors.lastName = "Nazwisko jest wymagane";
+      errors.lastName = "Wpisz nazwisko klienta, np. Kowalska";
     }
     if (formEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formEmail.trim())) {
-      errors.email = "Wprowadz poprawny adres email";
+      errors.email = "Nieprawidlowy format email. Wpisz adres w formacie: nazwa@domena.pl";
     }
     if (formPhone.trim()) {
       const phoneError = validatePhone(formPhone);
@@ -234,7 +242,7 @@ export default function ClientsPage() {
 
   const handleSaveClient = async () => {
     if (!validateClientForm()) {
-      toast.error("Wypelnij wymagane pola");
+      toast.error("Popraw zaznaczone pola formularza");
       return;
     }
 
@@ -267,7 +275,15 @@ export default function ClientsPage() {
       }
     } catch (error) {
       console.error("Failed to save client:", error);
-      toast.error("Blad podczas zapisywania klienta");
+      const errInfo = getNetworkErrorMessage(error);
+      toast.error(errInfo.isNetwork
+        ? "Brak polaczenia z serwerem. Sprawdz internet i sprobuj ponownie."
+        : "Blad podczas zapisywania klienta", {
+        action: {
+          label: "Sprobuj ponownie",
+          onClick: () => handleSaveClient(),
+        },
+      });
     } finally {
       setSaving(false);
     }
@@ -649,7 +665,19 @@ export default function ClientsPage() {
       )}
 
       {/* Clients list */}
-      {loading ? (
+      {fetchError ? (
+        <NetworkErrorHandler
+          message={fetchError.message}
+          isNetworkError={fetchError.isNetwork}
+          onRetry={async () => {
+            setFetchError(null);
+            setLoading(true);
+            await fetchClients();
+            setLoading(false);
+          }}
+          isRetrying={loading}
+        />
+      ) : loading ? (
         <div className="flex justify-center items-center h-48">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
         </div>

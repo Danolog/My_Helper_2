@@ -40,12 +40,12 @@ export function SignInButton() {
     // Validate required fields
     const errors: Record<string, string> = {}
     if (!email.trim()) {
-      errors.email = "Email jest wymagany"
+      errors.email = "Wpisz adres email powiazany z kontem, np. jan@example.com"
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errors.email = "Wprowadz poprawny adres email"
+      errors.email = "Nieprawidlowy format email. Wpisz adres w formacie: nazwa@domena.pl"
     }
     if (!password) {
-      errors.password = "Haslo jest wymagane"
+      errors.password = "Wpisz haslo do logowania. Jesli nie pamietasz, uzyj opcji 'Nie pamietam hasla'"
     }
     setFieldErrors(errors)
     if (Object.keys(errors).length > 0) {

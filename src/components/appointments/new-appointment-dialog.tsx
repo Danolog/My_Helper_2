@@ -279,15 +279,15 @@ export function NewAppointmentDialog({
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
     if (!selectedEmployeeId) {
-      errors.employee = "Wybierz pracownika";
+      errors.employee = "Wybierz pracownika z listy dostepnych";
     }
     if (!appointmentDate) {
-      errors.date = "Wybierz datę wizyty";
+      errors.date = "Wybierz date wizyty z kalendarza";
     } else if (appointmentDate < todayStr) {
-      errors.date = "Nie można wybrać daty z przeszłości";
+      errors.date = "Data nie moze byc z przeszlosci. Wybierz dzisiejsza lub przyszla date";
     }
     if (!appointmentTime) {
-      errors.time = "Wybierz godzinę wizyty";
+      errors.time = "Wybierz godzine rozpoczecia wizyty, np. 10:00";
     }
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
