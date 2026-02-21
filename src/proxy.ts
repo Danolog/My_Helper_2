@@ -14,12 +14,30 @@ export async function proxy(request: NextRequest) {
   // Optimistic redirect - cookie existence check only
   // Full validation happens in page components via auth.api.getSession()
   if (!sessionCookie) {
-    return NextResponse.redirect(new URL("/", request.url));
+    const pathname = request.nextUrl.pathname;
+    const search = request.nextUrl.search;
+
+    // Build the returnTo parameter from the original URL path + search params
+    const returnTo = pathname + search;
+
+    // All protected routes redirect to login page with returnTo param
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("returnTo", returnTo);
+    return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/dashboard", "/chat", "/profile"], // Protected routes
+  matcher: [
+    "/dashboard",
+    "/dashboard/:path*",
+    "/chat",
+    "/chat/:path*",
+    "/profile",
+    "/profile/:path*",
+    "/admin",
+    "/admin/:path*",
+  ],
 };

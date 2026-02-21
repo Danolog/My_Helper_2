@@ -114,7 +114,7 @@ export default function EmployeePayrollReportPage() {
       setReportData(json.data);
     } catch (err) {
       console.error("[Employee Payroll Report] Error:", err);
-      setError(err instanceof Error ? err.message : "Failed to load report");
+      setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
     }

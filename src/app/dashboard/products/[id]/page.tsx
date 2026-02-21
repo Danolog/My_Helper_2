@@ -106,7 +106,7 @@ export default function ProductDetailPage() {
         setTotalUsed(data.data.totalUsed);
       } else {
         toast.error("Nie znaleziono produktu");
-        router.push("/dashboard/products");
+        router.replace("/dashboard/products");
       }
     } catch (error) {
       console.error("Failed to fetch usage history:", error);

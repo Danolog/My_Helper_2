@@ -1,6 +1,30 @@
 /**
- * Shared validation utilities for form fields
+ * Shared validation utilities for form fields and API parameters
  */
+
+/**
+ * UUID v4 regex pattern for validating route parameters.
+ */
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Validate that a string is a valid UUID v4.
+ * @param id - The string to validate
+ * @returns true if the string is a valid UUID, false otherwise
+ */
+export function isValidUuid(id: string): boolean {
+  return UUID_REGEX.test(id);
+}
+
+/**
+ * Validate that a date string can be parsed into a valid Date object.
+ * @param dateStr - The date string to validate
+ * @returns true if the string produces a valid Date, false otherwise
+ */
+export function isValidDateString(dateStr: string): boolean {
+  const d = new Date(dateStr);
+  return !isNaN(d.getTime());
+}
 
 /**
  * Validate a phone number.

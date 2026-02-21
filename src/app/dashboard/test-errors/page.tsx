@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { NetworkErrorHandler } from "@/components/network-error-handler";
 import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
+import { isTimeoutError } from "@/hooks/use-network-status";
 
 type ErrorResult = {
   type: "success" | "error";
@@ -35,6 +36,7 @@ export default function TestErrorsPage() {
   const [fetchError, setFetchError] = useState<{
     message: string;
     isNetwork: boolean;
+    isTimeout: boolean;
   } | null>(null);
 
   const triggerError = useCallback(
@@ -76,21 +78,13 @@ export default function TestErrorsPage() {
           });
         }
       } catch (error) {
-        // Network/timeout error - use getNetworkErrorMessage for user-friendly messages
+        // Network/timeout error - use centralized getNetworkErrorMessage
         console.error(`Failed API call (${label}):`, error);
         const errInfo = getNetworkErrorMessage(error);
-
-        // Check for timeout
-        const isTimeout =
-          error instanceof DOMException && error.name === "TimeoutError";
-        const userMessage = isTimeout
-          ? "Serwer nie odpowiedzial w wymaganym czasie. Sprobuj ponownie pozniej."
-          : errInfo.isNetwork
-            ? "Brak polaczenia z serwerem. Sprawdz internet i sprobuj ponownie."
-            : "Wystapil nieoczekiwany blad. Sprobuj ponownie.";
+        const timeout = isTimeoutError(error);
 
         // Show toast with retry
-        toast.error(userMessage, {
+        toast.error(errInfo.message, {
           action: {
             label: "Sprobuj ponownie",
             onClick: () => triggerError(errorType, label),
@@ -99,13 +93,14 @@ export default function TestErrorsPage() {
 
         // Also set inline error state for NetworkErrorHandler demo
         setFetchError({
-          message: userMessage,
-          isNetwork: errInfo.isNetwork || isTimeout,
+          message: errInfo.message,
+          isNetwork: errInfo.isNetwork,
+          isTimeout: timeout,
         });
 
         setLastResult({
           type: "error",
-          message: userMessage,
+          message: errInfo.message,
           retryable: true,
         });
       } finally {
@@ -148,7 +143,7 @@ export default function TestErrorsPage() {
       const errInfo = getNetworkErrorMessage(error);
       toast.error(
         errInfo.isNetwork
-          ? "Brak polaczenia z serwerem. Sprawdz internet i sprobuj ponownie."
+          ? errInfo.message
           : "Blad podczas zapisywania danych",
         {
           action: {
@@ -312,6 +307,7 @@ export default function TestErrorsPage() {
           <NetworkErrorHandler
             message={fetchError.message}
             isNetworkError={fetchError.isNetwork}
+            isTimeout={fetchError.isTimeout}
             onRetry={() => {
               setFetchError(null);
               setLastResult(null);

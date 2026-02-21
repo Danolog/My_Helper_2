@@ -6,13 +6,22 @@ import { Button } from "@/components/ui/button";
 import { TimeGrid } from "@/components/calendar/time-grid";
 import { RescheduleDialog } from "@/components/calendar/reschedule-dialog";
 import { CalendarLegend } from "@/components/calendar/calendar-legend";
-import { ChevronLeft, ChevronRight, Calendar, Lock, Palette, Users, Plus } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar, Lock, Palette, Users, Plus, Ban } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { NewAppointmentDialog } from "@/components/appointments/new-appointment-dialog";
 import { CancelAppointmentDialog } from "@/components/appointments/cancel-appointment-dialog";
 import { CompleteAppointmentDialog } from "@/components/appointments/complete-appointment-dialog";
-import type { Appointment, CalendarEvent, Employee, WorkSchedule } from "@/types/calendar";
+import { BlockTimeDialog } from "@/components/calendar/block-time-dialog";
+import type { Appointment, CalendarEvent, Employee, TimeBlock, WorkSchedule } from "@/types/calendar";
+import { useTabSync } from "@/hooks/use-tab-sync";
 
 // Demo salon ID - in production this would come from user's session
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
@@ -23,7 +32,14 @@ export default function CalendarPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [workSchedules, setWorkSchedules] = useState<WorkSchedule[]>([]);
+  const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Employee filter: "all" shows all employees, or a specific employee ID
+  const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string>("all");
+
+  // Block time dialog state
+  const [blockTimeDialogOpen, setBlockTimeDialogOpen] = useState(false);
 
   // Color mode: "status" for status-based colors, "employee" for employee-based colors
   const [colorMode, setColorMode] = useState<"status" | "employee">("status");
@@ -87,6 +103,37 @@ export default function CalendarPage() {
     }
   }, []);
 
+  // Fetch time blocks (vacations, breaks, etc.) for the current date
+  const fetchTimeBlocks = useCallback(async () => {
+    try {
+      const startOfDay = new Date(currentDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(currentDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const params = new URLSearchParams({
+        startDate: startOfDay.toISOString(),
+        endDate: endOfDay.toISOString(),
+      });
+
+      const response = await fetch(`/api/time-blocks?${params}`);
+      const data = await response.json();
+
+      if (data.success) {
+        // Parse date strings into Date objects
+        const blocks: TimeBlock[] = data.data.map((block: TimeBlock) => ({
+          ...block,
+          startTime: new Date(block.startTime),
+          endTime: new Date(block.endTime),
+          createdAt: new Date(block.createdAt),
+        }));
+        setTimeBlocks(blocks);
+      }
+    } catch (error) {
+      console.error("Failed to fetch time blocks:", error);
+    }
+  }, [currentDate]);
+
   // Fetch appointments for current date
   const fetchAppointments = useCallback(async () => {
     try {
@@ -133,7 +180,24 @@ export default function CalendarPage() {
 
   useEffect(() => {
     fetchAppointments();
-  }, [fetchAppointments]);
+    fetchTimeBlocks();
+  }, [fetchAppointments, fetchTimeBlocks]);
+
+  // Cross-tab sync: refetch when another tab modifies appointments
+  const { notifyChange: notifyCalendarChanged } = useTabSync("appointments", fetchAppointments);
+
+  // Filtered data based on employee selection (Feature #33: individual calendar view)
+  const filteredEmployees = selectedEmployeeFilter === "all"
+    ? employees
+    : employees.filter((emp) => emp.id === selectedEmployeeFilter);
+
+  const filteredEvents = selectedEmployeeFilter === "all"
+    ? events
+    : events.filter((event) => event.employeeId === selectedEmployeeFilter);
+
+  const filteredTimeBlocks = selectedEmployeeFilter === "all"
+    ? timeBlocks
+    : timeBlocks.filter((block) => block.employeeId === selectedEmployeeFilter);
 
   // Navigation handlers
   const goToPreviousDay = () => {
@@ -322,6 +386,7 @@ export default function CalendarPage() {
         });
         // Refresh appointments
         fetchAppointments();
+        notifyCalendarChanged();
       } else {
         toast.error("Nie udalo sie przeniesc wizyty", {
           description: data.error,
@@ -402,6 +467,43 @@ export default function CalendarPage() {
             Nowa wizyta
           </Button>
 
+          {/* Block Time button (Feature #36) */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setBlockTimeDialogOpen(true)}
+            data-testid="block-time-btn"
+          >
+            <Ban className="h-4 w-4 mr-1" />
+            Zablokuj czas
+          </Button>
+
+          {/* Employee filter (Feature #33: individual calendar view) */}
+          <Select
+            value={selectedEmployeeFilter}
+            onValueChange={setSelectedEmployeeFilter}
+          >
+            <SelectTrigger className="w-[180px] h-8 text-sm" data-testid="employee-filter">
+              <SelectValue placeholder="Filtruj pracownika" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Wszyscy pracownicy</SelectItem>
+              {employees.map((emp) => (
+                <SelectItem key={emp.id} value={emp.id}>
+                  <span className="flex items-center gap-2">
+                    {emp.color && (
+                      <span
+                        className="inline-block w-2.5 h-2.5 rounded-full"
+                        style={{ backgroundColor: emp.color }}
+                      />
+                    )}
+                    {emp.firstName} {emp.lastName}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           {/* Employees link */}
           <Button variant="outline" size="sm" asChild>
             <Link href="/dashboard/employees">
@@ -460,9 +562,10 @@ export default function CalendarPage() {
       ) : (
         <TimeGrid
           date={currentDate}
-          employees={employees}
-          events={events}
+          employees={filteredEmployees}
+          events={filteredEvents}
           workSchedules={workSchedules}
+          timeBlocks={filteredTimeBlocks}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           onDrop={handleDrop}
@@ -511,6 +614,17 @@ export default function CalendarPage() {
         onOpenChange={setCancelDialogOpen}
         appointmentId={cancelAppointmentId}
         onAppointmentCancelled={fetchAppointments}
+      />
+
+      {/* Block time dialog (Feature #36) */}
+      <BlockTimeDialog
+        open={blockTimeDialogOpen}
+        onOpenChange={setBlockTimeDialogOpen}
+        employees={employees}
+        defaultDate={currentDate}
+        onBlockCreated={() => {
+          fetchTimeBlocks();
+        }}
       />
 
       {/* Complete appointment dialog */}

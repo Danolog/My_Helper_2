@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { signUp } from "@/lib/auth-client"
 import { validatePhone } from "@/lib/validations"
+import { sanitizeAuthError } from "@/lib/error-messages"
 
 interface SignUpFormProps {
   /** Where to redirect after successful signup */
@@ -49,22 +50,22 @@ export function SignUpForm({
     // Validate required fields
     const errors: Record<string, string> = {}
     if (!name.trim()) {
-      errors.name = "Imie jest wymagane"
+      errors.name = "Wpisz swoje imie i nazwisko, np. Jan Kowalski"
     }
     if (!email.trim()) {
-      errors.email = "Email jest wymagany"
+      errors.email = "Podaj adres email, np. jan@example.com"
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errors.email = "Wprowadz poprawny adres email"
+      errors.email = "Nieprawidlowy format email. Wpisz adres w formacie: nazwa@domena.pl"
     }
     if (!password) {
-      errors.password = "Haslo jest wymagane"
+      errors.password = "Podaj haslo (minimum 8 znakow)"
     } else if (password.length < 8) {
-      errors.password = "Haslo musi miec co najmniej 8 znakow"
+      errors.password = "Haslo jest za krotkie. Wpisz co najmniej 8 znakow"
     }
     if (!confirmPassword) {
-      errors.confirmPassword = "Potwierdzenie hasla jest wymagane"
+      errors.confirmPassword = "Wpisz haslo ponownie w celu potwierdzenia"
     } else if (password !== confirmPassword) {
-      errors.confirmPassword = "Hasla nie sa identyczne"
+      errors.confirmPassword = "Hasla nie sa identyczne. Upewnij sie, ze oba pola zawieraja to samo haslo"
     }
     if (showPhone && phone.trim()) {
       const phoneError = validatePhone(phone)
@@ -89,13 +90,13 @@ export function SignUpForm({
       })
 
       if (result.error) {
-        setError(result.error.message || "Failed to create account")
+        setError(sanitizeAuthError(result.error.message, "Nie udalo sie utworzyc konta. Sprobuj ponownie."))
       } else {
         // Show verification message instead of immediately redirecting
         setShowVerificationMessage(true)
       }
     } catch {
-      setError("An unexpected error occurred")
+      setError("Wystapil nieoczekiwany blad. Sprobuj ponownie pozniej.")
     } finally {
       setIsPending(false)
     }
@@ -106,25 +107,25 @@ export function SignUpForm({
       <div className="space-y-4 w-full max-w-sm text-center">
         <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950 p-4">
           <h3 className="font-semibold text-green-800 dark:text-green-200 mb-2">
-            Account created successfully!
+            Konto zostalo utworzone!
           </h3>
           <p className="text-sm text-green-700 dark:text-green-300">
-            We&apos;ve sent a verification email to <strong>{email}</strong>.
-            Please check your inbox and click the verification link to activate your account.
+            Wyslalismy email weryfikacyjny na adres <strong>{email}</strong>.
+            Sprawdz skrzynke pocztowa i kliknij link, aby aktywowac konto.
           </p>
         </div>
         <Button
           variant="outline"
           className="w-full"
           onClick={() => {
-            router.push(redirectTo)
+            router.replace(redirectTo)
             router.refresh()
           }}
         >
-          Continue to app
+          Przejdz do aplikacji
         </Button>
         <div className="text-center text-sm text-muted-foreground">
-          Didn&apos;t receive the email?{" "}
+          Nie otrzymales emaila?{" "}
           <button
             type="button"
             className="text-primary hover:underline"
@@ -134,11 +135,11 @@ export function SignUpForm({
                 await sendVerificationEmail({ email, callbackURL: redirectTo })
                 setError("")
               } catch {
-                setError("Failed to resend verification email")
+                setError("Nie udalo sie wyslac ponownie emaila weryfikacyjnego. Sprobuj pozniej.")
               }
             }}
           >
-            Resend verification
+            Wyslij ponownie
           </button>
         </div>
       </div>
@@ -148,11 +149,11 @@ export function SignUpForm({
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-4 w-full max-w-sm">
       <div className="space-y-2">
-        <Label htmlFor="name">Name</Label>
+        <Label htmlFor="name">Imie i nazwisko</Label>
         <Input
           id="name"
           type="text"
-          placeholder="Your name"
+          placeholder="Twoje imie i nazwisko"
           value={name}
           onChange={(e) => {
             setName(e.target.value)
@@ -187,7 +188,7 @@ export function SignUpForm({
       </div>
       {showPhone && (
         <div className="space-y-2">
-          <Label htmlFor="phone">Phone</Label>
+          <Label htmlFor="phone">Telefon</Label>
           <Input
             id="phone"
             type="tel"
@@ -206,11 +207,11 @@ export function SignUpForm({
         </div>
       )}
       <div className="space-y-2">
-        <Label htmlFor="password">Password</Label>
+        <Label htmlFor="password">Haslo</Label>
         <Input
           id="password"
           type="password"
-          placeholder="Create a password"
+          placeholder="Utworz haslo"
           value={password}
           onChange={(e) => {
             setPassword(e.target.value)
@@ -225,11 +226,11 @@ export function SignUpForm({
         )}
       </div>
       <div className="space-y-2">
-        <Label htmlFor="confirmPassword">Confirm Password</Label>
+        <Label htmlFor="confirmPassword">Potwierdz haslo</Label>
         <Input
           id="confirmPassword"
           type="password"
-          placeholder="Confirm your password"
+          placeholder="Potwierdz haslo"
           value={confirmPassword}
           onChange={(e) => {
             setConfirmPassword(e.target.value)
@@ -247,12 +248,12 @@ export function SignUpForm({
         <p className="text-sm text-destructive">{error}</p>
       )}
       <Button type="submit" className="w-full" disabled={isPending}>
-        {isPending ? "Creating account..." : "Create account"}
+        {isPending ? "Tworzenie konta..." : "Utworz konto"}
       </Button>
       <div className="text-center text-sm text-muted-foreground">
-        Already have an account?{" "}
+        Masz juz konto?{" "}
         <Link href={loginHref} className="text-primary hover:underline">
-          Sign in
+          Zaloguj sie
         </Link>
       </div>
     </form>

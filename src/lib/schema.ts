@@ -1016,3 +1016,33 @@ export const pushSubscriptions = pgTable(
     index("push_subscriptions_endpoint_idx").on(table.endpoint),
   ]
 );
+
+// Scheduled posts - content publication scheduling
+export const scheduledPosts = pgTable(
+  "scheduled_posts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull(), // 'instagram', 'facebook', 'tiktok'
+    postType: text("post_type").notNull(), // 'promotion', 'service_highlight', etc.
+    content: text("content").notNull(), // The generated post text
+    hashtags: jsonb("hashtags").default([]), // Array of hashtags
+    tone: text("tone"), // 'professional', 'casual', etc.
+    status: text("status").default("scheduled").notNull(), // 'scheduled', 'published', 'cancelled', 'failed'
+    scheduledAt: timestamp("scheduled_at").notNull(), // When the post should be published
+    publishedAt: timestamp("published_at"), // When the post was actually published
+    cancelledAt: timestamp("cancelled_at"), // When the post was cancelled
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("scheduled_posts_salon_id_idx").on(table.salonId),
+    index("scheduled_posts_status_idx").on(table.status),
+    index("scheduled_posts_scheduled_at_idx").on(table.scheduledAt),
+  ]
+);

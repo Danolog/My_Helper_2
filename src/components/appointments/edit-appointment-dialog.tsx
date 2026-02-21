@@ -289,19 +289,19 @@ export function EditAppointmentDialog({
     // Validate required fields
     const errors: Record<string, string> = {};
     if (!selectedEmployeeId) {
-      errors.employee = "Wybierz pracownika";
+      errors.employee = "Wybierz pracownika z listy";
     }
     if (!appointmentDate) {
-      errors.date = "Wybierz date wizyty";
+      errors.date = "Wybierz date wizyty z kalendarza";
     } else if (appointmentDate < todayStr) {
-      errors.date = "Nie można wybrać daty z przeszłości";
+      errors.date = "Data nie moze byc z przeszlosci. Wybierz dzisiejsza lub przyszla date";
     }
     if (!appointmentTime) {
-      errors.time = "Wybierz godzine wizyty";
+      errors.time = "Wybierz godzine rozpoczecia wizyty";
     }
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      toast.error("Wypelnij wymagane pola");
+      toast.error("Popraw zaznaczone pola formularza");
       return;
     }
 

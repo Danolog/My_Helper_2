@@ -5,6 +5,7 @@ import { appointments, clients, employees, services, timeBlocks, promoCodes, pro
 import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { validateBody, createAppointmentSchema } from "@/lib/api-validation";
+import { isValidUuid, isValidDateString } from "@/lib/validations";
 
 // GET /api/appointments - List appointments with optional date range filter
 export async function GET(request: Request) {
@@ -16,6 +17,34 @@ export async function GET(request: Request) {
     const employeeId = searchParams.get("employeeId");
 
     console.log("[Appointments API] GET with params:", { startDate, endDate, salonId, employeeId });
+
+    // Validate date parameters
+    if (startDate && !isValidDateString(startDate)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid startDate format. Use ISO 8601 format (e.g., 2026-01-15T00:00:00Z)" },
+        { status: 400 }
+      );
+    }
+    if (endDate && !isValidDateString(endDate)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid endDate format. Use ISO 8601 format (e.g., 2026-01-15T23:59:59Z)" },
+        { status: 400 }
+      );
+    }
+
+    // Validate UUID parameters
+    if (salonId && !isValidUuid(salonId)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid salonId format" },
+        { status: 400 }
+      );
+    }
+    if (employeeId && !isValidUuid(employeeId)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid employeeId format" },
+        { status: 400 }
+      );
+    }
 
     let query = db.select({
       appointment: appointments,

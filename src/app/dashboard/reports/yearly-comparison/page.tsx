@@ -208,19 +208,16 @@ export default function YearlyComparisonPage() {
         `/api/reports/yearly-comparison?${params.toString()}`
       );
       if (!res.ok) {
-        throw new Error("Failed to fetch comparison");
+        throw new Error("Nie udalo sie pobrac porownania");
       }
       const json = await res.json();
       if (!json.success) {
-        throw new Error(
-          (json.error as string) || "Failed to fetch comparison"
-        );
+        throw new Error("Nie udalo sie pobrac porownania. Sprobuj ponownie pozniej.");
       }
       setComparisonData(json.data as ComparisonData);
     } catch (err) {
       console.error("[Yearly Comparison] Error:", err);
-      const message =
-        err instanceof Error ? err.message : "Failed to load comparison";
+      const message = "Nie udalo sie zaladowac porownania. Sprobuj ponownie pozniej.";
       setError(message);
       toast.error(message);
     } finally {

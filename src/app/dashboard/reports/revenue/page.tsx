@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
   ArrowLeft,
   Download,
@@ -70,6 +71,9 @@ interface ReportData {
 
 export default function RevenueReportPage() {
   const { data: _session } = useSession();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,14 +83,35 @@ export default function RevenueReportPage() {
   const thirtyDaysAgo = new Date(today);
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
+  // Initialize filters from URL search params, falling back to defaults
   const [dateFrom, setDateFrom] = useState(
-    thirtyDaysAgo.toISOString().split("T")[0]
+    searchParams.get("dateFrom") || thirtyDaysAgo.toISOString().split("T")[0]
   );
-  const [dateTo, setDateTo] = useState(today.toISOString().split("T")[0]);
-  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [dateTo, setDateTo] = useState(
+    searchParams.get("dateTo") || today.toISOString().split("T")[0]
+  );
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>(
+    searchParams.get("employeeIds")
+      ? searchParams.get("employeeIds")!.split(",").filter(Boolean)
+      : []
+  );
   const [activeTab, setActiveTab] = useState<
     "service" | "employee" | "trend"
-  >("service");
+  >((searchParams.get("tab") as "service" | "employee" | "trend") || "service");
+
+  // Sync filter state to URL search params so the URL is shareable
+  const updateUrlParams = useCallback(
+    (from: string | undefined, to: string | undefined, empIds: string[], tab: string) => {
+      const params = new URLSearchParams();
+      if (from) params.set("dateFrom", from);
+      if (to) params.set("dateTo", to);
+      if (empIds.length > 0) params.set("employeeIds", empIds.join(","));
+      if (tab && tab !== "service") params.set("tab", tab);
+      const qs = params.toString();
+      router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+    },
+    [router, pathname]
+  );
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
@@ -103,16 +128,16 @@ export default function RevenueReportPage() {
 
       const res = await fetch(`/api/reports/revenue?${params.toString()}`);
       if (!res.ok) {
-        throw new Error("Failed to fetch report");
+        throw new Error("Nie udalo sie pobrac raportu");
       }
       const json = await res.json();
       if (!json.success) {
-        throw new Error(json.error || "Failed to fetch report");
+        throw new Error("Nie udalo sie pobrac raportu. Sprobuj ponownie pozniej.");
       }
       setReportData(json.data);
     } catch (err) {
       console.error("[Revenue Report] Error:", err);
-      setError(err instanceof Error ? err.message : "Failed to load report");
+      setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
     }
@@ -121,6 +146,11 @@ export default function RevenueReportPage() {
   useEffect(() => {
     fetchReport();
   }, [fetchReport]);
+
+  // Sync filter state to browser URL for shareable links
+  useEffect(() => {
+    updateUrlParams(dateFrom, dateTo, selectedEmployeeIds, activeTab);
+  }, [dateFrom, dateTo, selectedEmployeeIds, activeTab, updateUrlParams]);
 
   const handleExport = async (format: "csv" | "xlsx") => {
     try {

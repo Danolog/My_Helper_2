@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { appointments, employees, services, salons, treatmentHistory, depositPayments, serviceVariants } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { isValidUuid } from "@/lib/validations";
 
 // GET /api/client/appointments/[id] - Get appointment detail for the authenticated client user
 export async function GET(
@@ -21,6 +22,13 @@ export async function GET(
 
     const userId = session.user.id;
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid appointment ID format" },
+        { status: 400 }
+      );
+    }
 
     // Fetch appointment with joins, ensuring it belongs to this user
     const result = await db

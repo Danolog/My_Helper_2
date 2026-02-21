@@ -181,7 +181,7 @@ export default function SubscriptionPaymentHistoryPage() {
       setSummary(data.data.summary);
       setPagination(data.data.pagination);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Wystapil blad");
+      setError("Nie udalo sie zaladowac historii platnosci. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
     }

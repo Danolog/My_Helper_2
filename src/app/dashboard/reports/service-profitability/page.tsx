@@ -100,7 +100,7 @@ export default function ServiceProfitabilityPage() {
       setReportData(json.data);
     } catch (err) {
       console.error("[Service Profitability Report] Error:", err);
-      setError(err instanceof Error ? err.message : "Failed to load report");
+      setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
     }

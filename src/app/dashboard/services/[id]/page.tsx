@@ -51,6 +51,8 @@ import {
   Users,
   Image as ImageIcon,
   Package,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -156,6 +158,7 @@ export default function ServiceDetailPage() {
   const [variantPriceModifier, setVariantPriceModifier] = useState("0");
   const [variantDurationModifier, setVariantDurationModifier] = useState("0");
   const [savingVariant, setSavingVariant] = useState(false);
+  const [variantErrors, setVariantErrors] = useState<Record<string, string>>({});
 
   // Employee assignment state
   const [assignedEmployeeIds, setAssignedEmployeeIds] = useState<Set<string>>(new Set());
@@ -178,6 +181,9 @@ export default function ServiceDetailPage() {
   const [editServiceIsActive, setEditServiceIsActive] = useState(true);
   const [savingService, setSavingService] = useState(false);
 
+  // Edit service field errors
+  const [editServiceErrors, setEditServiceErrors] = useState<Record<string, string>>({});
+
   // Delete service state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingService, setDeletingService] = useState(false);
@@ -193,6 +199,9 @@ export default function ServiceDetailPage() {
   // Gallery photos state
   const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>([]);
 
+  // AI description generation state
+  const [generatingDescription, setGeneratingDescription] = useState(false);
+
   const fetchService = useCallback(async () => {
     try {
       const res = await fetch(`/api/services/${serviceId}`);
@@ -201,7 +210,7 @@ export default function ServiceDetailPage() {
         setService(data.data);
       } else {
         toast.error("Nie znaleziono uslugi");
-        router.push("/dashboard/services");
+        router.replace("/dashboard/services");
       }
     } catch (error) {
       console.error("Failed to fetch service:", error);
@@ -344,11 +353,20 @@ export default function ServiceDetailPage() {
     }
   };
 
+  const clearVariantError = (field: string) => {
+    setVariantErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
   const resetVariantForm = () => {
     setVariantName("");
     setVariantPriceModifier("0");
     setVariantDurationModifier("0");
     setEditingVariant(null);
+    setVariantErrors({});
   };
 
   const openEditVariant = (variant: ServiceVariant) => {
@@ -360,8 +378,19 @@ export default function ServiceDetailPage() {
   };
 
   const handleSaveVariant = async () => {
+    const errors: Record<string, string> = {};
     if (!variantName.trim()) {
-      toast.error("Nazwa wariantu jest wymagana");
+      errors.variantName = "Wpisz nazwe wariantu, np. Krotkie wlosy";
+    }
+    if (variantPriceModifier && isNaN(Number(variantPriceModifier))) {
+      errors.variantPriceModifier = "Modyfikator ceny musi byc liczba, np. 10.00 lub -5.00";
+    }
+    if (variantDurationModifier && isNaN(Number(variantDurationModifier))) {
+      errors.variantDurationModifier = "Modyfikator czasu musi byc liczba minut, np. 15 lub -10";
+    }
+    setVariantErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      toast.error("Popraw zaznaczone pola formularza");
       return;
     }
 
@@ -431,6 +460,14 @@ export default function ServiceDetailPage() {
   };
 
   // Edit service handlers
+  const clearEditServiceError = (field: string) => {
+    setEditServiceErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
   const openEditServiceDialog = () => {
     if (!service) return;
     setEditServiceName(service.name);
@@ -438,20 +475,24 @@ export default function ServiceDetailPage() {
     setEditServicePrice(parseFloat(service.basePrice).toString());
     setEditServiceDuration(service.baseDuration.toString());
     setEditServiceIsActive(service.isActive);
+    setEditServiceErrors({});
     setEditServiceDialogOpen(true);
   };
 
   const handleSaveService = async () => {
+    const errors: Record<string, string> = {};
     if (!editServiceName.trim()) {
-      toast.error("Nazwa uslugi jest wymagana");
-      return;
+      errors.name = "Wpisz nazwe uslugi, np. Strzyzenie damskie";
     }
     if (!editServicePrice || parseFloat(editServicePrice) < 0) {
-      toast.error("Podaj prawidlowa cene bazowa");
-      return;
+      errors.price = "Podaj cene bazowa w PLN (wartosc >= 0), np. 50.00";
     }
     if (!editServiceDuration || parseInt(editServiceDuration, 10) <= 0) {
-      toast.error("Podaj prawidlowy czas trwania");
+      errors.duration = "Podaj czas trwania w minutach (> 0), np. 30";
+    }
+    setEditServiceErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      toast.error("Popraw zaznaczone pola formularza");
       return;
     }
 
@@ -497,7 +538,7 @@ export default function ServiceDetailPage() {
 
       if (data.success) {
         toast.success(`Usluga "${service?.name}" zostala usunieta`);
-        router.push("/dashboard/services");
+        router.replace("/dashboard/services");
       } else {
         toast.error(data.error || "Nie udalo sie usunac uslugi");
       }
@@ -507,6 +548,44 @@ export default function ServiceDetailPage() {
     } finally {
       setDeletingService(false);
       setDeleteDialogOpen(false);
+    }
+  };
+
+  // AI description generation handler
+  const handleGenerateDescription = async () => {
+    if (!service) return;
+    setGeneratingDescription(true);
+    try {
+      const res = await fetch("/api/ai/content/generate-description", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          serviceName: editServiceName || service.name,
+          categoryName: service.category?.name || undefined,
+          basePrice: parseFloat(editServicePrice || service.basePrice),
+          baseDuration: parseInt(editServiceDuration || service.baseDuration.toString(), 10),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.status === 403 && data.code === "PLAN_UPGRADE_REQUIRED") {
+        toast.error("Generowanie opisow AI wymaga Planu Pro");
+        return;
+      }
+
+      if (!res.ok || !data.success) {
+        toast.error(data.error || "Nie udalo sie wygenerowac opisu");
+        return;
+      }
+
+      setEditServiceDescription(data.description);
+      toast.success("Opis wygenerowany przez AI");
+    } catch (error) {
+      console.error("Failed to generate AI description:", error);
+      toast.error("Blad podczas generowania opisu AI");
+    } finally {
+      setGeneratingDescription(false);
     }
   };
 
@@ -521,8 +600,16 @@ export default function ServiceDetailPage() {
       toast.error("Wybierz pracownika");
       return;
     }
-    if (!empPriceCustomPrice || parseFloat(empPriceCustomPrice) < 0) {
-      toast.error("Podaj prawidlowa cene");
+    if (!empPriceCustomPrice) {
+      toast.error("Cena jest wymagana");
+      return;
+    }
+    if (isNaN(Number(empPriceCustomPrice)) || isNaN(parseFloat(empPriceCustomPrice))) {
+      toast.error("Cena musi byc liczba");
+      return;
+    }
+    if (parseFloat(empPriceCustomPrice) < 0) {
+      toast.error("Cena nie moze byc ujemna");
       return;
     }
 
@@ -866,9 +953,19 @@ export default function ServiceDetailPage() {
                     id="variant-name"
                     placeholder="np. Krotkie wlosy"
                     value={variantName}
-                    onChange={(e) => setVariantName(e.target.value)}
+                    onChange={(e) => {
+                      setVariantName(e.target.value);
+                      if (e.target.value.trim()) clearVariantError("variantName");
+                    }}
+                    aria-invalid={!!variantErrors.variantName}
+                    className={variantErrors.variantName ? "border-destructive" : ""}
                     data-testid="variant-name-input"
                   />
+                  {variantErrors.variantName && (
+                    <p className="text-sm text-destructive" data-testid="error-variant-name">
+                      {variantErrors.variantName}
+                    </p>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
@@ -881,9 +978,35 @@ export default function ServiceDetailPage() {
                       step="0.01"
                       placeholder="0.00"
                       value={variantPriceModifier}
-                      onChange={(e) => setVariantPriceModifier(e.target.value)}
+                      onChange={(e) => {
+                        setVariantPriceModifier(e.target.value);
+                        const val = e.target.value;
+                        if (val === "" || !isNaN(Number(val))) {
+                          setVariantErrors((prev) => {
+                            const next = { ...prev };
+                            delete next.variantPriceModifier;
+                            return next;
+                          });
+                        } else {
+                          setVariantErrors((prev) => ({ ...prev, variantPriceModifier: "Modyfikator ceny musi byc liczba" }));
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (
+                          !/[0-9]/.test(e.key) &&
+                          !["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", ".", ",", "-"].includes(e.key) &&
+                          !e.ctrlKey && !e.metaKey
+                        ) {
+                          e.preventDefault();
+                        }
+                      }}
+                      aria-invalid={!!variantErrors.variantPriceModifier}
+                      className={variantErrors.variantPriceModifier ? "border-destructive" : ""}
                       data-testid="variant-price-modifier-input"
                     />
+                    {variantErrors.variantPriceModifier && (
+                      <p className="text-sm text-destructive">{variantErrors.variantPriceModifier}</p>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       Dodatnia wartosc podwyzsza cene, ujemna obniza
                     </p>
@@ -898,7 +1021,30 @@ export default function ServiceDetailPage() {
                       step="5"
                       placeholder="0"
                       value={variantDurationModifier}
-                      onChange={(e) => setVariantDurationModifier(e.target.value)}
+                      onChange={(e) => {
+                        setVariantDurationModifier(e.target.value);
+                        const val = e.target.value;
+                        if (val === "" || !isNaN(Number(val))) {
+                          setVariantErrors((prev) => {
+                            const next = { ...prev };
+                            delete next.variantDurationModifier;
+                            return next;
+                          });
+                        } else {
+                          setVariantErrors((prev) => ({ ...prev, variantDurationModifier: "Modyfikator czasu musi byc liczba" }));
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (
+                          !/[0-9]/.test(e.key) &&
+                          !["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "-"].includes(e.key) &&
+                          !e.ctrlKey && !e.metaKey
+                        ) {
+                          e.preventDefault();
+                        }
+                      }}
+                      aria-invalid={!!variantErrors.variantDurationModifier}
+                      className={variantErrors.variantDurationModifier ? "border-destructive" : ""}
                       data-testid="variant-duration-modifier-input"
                     />
                     <p className="text-xs text-muted-foreground">
@@ -1178,6 +1324,16 @@ export default function ServiceDetailPage() {
                     placeholder={service.basePrice}
                     value={empPriceCustomPrice}
                     onChange={(e) => setEmpPriceCustomPrice(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (
+                        !/[0-9]/.test(e.key) &&
+                        !["Backspace", "Delete", "Tab", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", ".", ","].includes(e.key) &&
+                        !e.ctrlKey && !e.metaKey
+                      ) {
+                        e.preventDefault();
+                      }
+                      if (e.key === "-") e.preventDefault();
+                    }}
                     data-testid="employee-price-input"
                   />
                   <p className="text-xs text-muted-foreground">
@@ -1597,18 +1753,52 @@ export default function ServiceDetailPage() {
                 id="edit-service-name"
                 placeholder="np. Strzyzenie meskie"
                 value={editServiceName}
-                onChange={(e) => setEditServiceName(e.target.value)}
+                onChange={(e) => {
+                  setEditServiceName(e.target.value);
+                  if (e.target.value.trim()) clearEditServiceError("name");
+                }}
+                aria-invalid={!!editServiceErrors.name}
+                className={editServiceErrors.name ? "border-destructive" : ""}
                 data-testid="edit-service-name-input"
               />
+              {editServiceErrors.name && (
+                <p className="text-sm text-destructive" data-testid="error-edit-service-name">
+                  {editServiceErrors.name}
+                </p>
+              )}
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="edit-service-description">Opis</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="edit-service-description">Opis</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGenerateDescription}
+                  disabled={generatingDescription || !editServiceName.trim()}
+                  data-testid="generate-description-btn"
+                  className="text-xs gap-1.5"
+                >
+                  {generatingDescription ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Generowanie...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Generuj opis AI
+                    </>
+                  )}
+                </Button>
+              </div>
               <Textarea
                 id="edit-service-description"
-                placeholder="Opis uslugi (opcjonalny)"
+                placeholder="Opis uslugi (opcjonalny) - uzyj AI, aby wygenerowac profesjonalny opis"
                 value={editServiceDescription}
                 onChange={(e) => setEditServiceDescription(e.target.value)}
                 data-testid="edit-service-description-input"
+                rows={4}
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -1621,9 +1811,19 @@ export default function ServiceDetailPage() {
                   step="0.01"
                   placeholder="0.00"
                   value={editServicePrice}
-                  onChange={(e) => setEditServicePrice(e.target.value)}
+                  onChange={(e) => {
+                    setEditServicePrice(e.target.value);
+                    if (e.target.value && parseFloat(e.target.value) >= 0) clearEditServiceError("price");
+                  }}
+                  aria-invalid={!!editServiceErrors.price}
+                  className={editServiceErrors.price ? "border-destructive" : ""}
                   data-testid="edit-service-price-input"
                 />
+                {editServiceErrors.price && (
+                  <p className="text-sm text-destructive" data-testid="error-edit-service-price">
+                    {editServiceErrors.price}
+                  </p>
+                )}
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="edit-service-duration">Czas trwania (min) *</Label>
@@ -1634,9 +1834,19 @@ export default function ServiceDetailPage() {
                   step="5"
                   placeholder="30"
                   value={editServiceDuration}
-                  onChange={(e) => setEditServiceDuration(e.target.value)}
+                  onChange={(e) => {
+                    setEditServiceDuration(e.target.value);
+                    if (e.target.value && parseInt(e.target.value, 10) > 0) clearEditServiceError("duration");
+                  }}
+                  aria-invalid={!!editServiceErrors.duration}
+                  className={editServiceErrors.duration ? "border-destructive" : ""}
                   data-testid="edit-service-duration-input"
                 />
+                {editServiceErrors.duration && (
+                  <p className="text-sm text-destructive" data-testid="error-edit-service-duration">
+                    {editServiceErrors.duration}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-2">

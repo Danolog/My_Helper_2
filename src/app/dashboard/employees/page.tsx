@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSession } from "@/lib/auth-client";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Lock, Users, Clock, UserPlus, Settings } from "lucide-react";
+import { useTabSync } from "@/hooks/use-tab-sync";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -26,22 +27,26 @@ export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function fetchEmployees() {
-      try {
-        const res = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}`);
-        const data = await res.json();
-        if (data.success) {
-          setEmployees(data.data);
-        }
-      } catch (error) {
-        console.error("Failed to fetch employees:", error);
-      } finally {
-        setLoading(false);
+  const fetchEmployees = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}`);
+      const data = await res.json();
+      if (data.success) {
+        setEmployees(data.data);
       }
+    } catch (error) {
+      console.error("Failed to fetch employees:", error);
+    } finally {
+      setLoading(false);
     }
-    fetchEmployees();
   }, []);
+
+  useEffect(() => {
+    fetchEmployees();
+  }, [fetchEmployees]);
+
+  // Cross-tab sync: refetch when another tab modifies employees
+  useTabSync("employees", fetchEmployees);
 
   if (isPending) {
     return (

@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { verifyPassword } from "better-auth/crypto";
+import { isValidUuid } from "@/lib/validations";
 
 // GET /api/clients/[id] - Get a single client by ID
 export async function GET(
@@ -13,6 +14,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid client ID format" },
+        { status: 400 }
+      );
+    }
 
     console.log(`[Clients API] Executing: SELECT * FROM clients WHERE id = '${id}'`);
     const [client] = await db
@@ -50,6 +58,14 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid client ID format" },
+        { status: 400 }
+      );
+    }
+
     const body = await request.json();
     const { firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
 
@@ -104,6 +120,13 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid client ID format" },
+        { status: 400 }
+      );
+    }
 
     // 1. Verify the user is authenticated
     const session = await auth.api.getSession({ headers: await headers() });

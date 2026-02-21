@@ -1,11 +1,63 @@
 "use client";
 
 import Link from "next/link";
-import { Shield, Database, Palette, Bot } from "lucide-react";
+import {
+  Shield,
+  Database,
+  Palette,
+  Bot,
+  Zap,
+  Crown,
+  Check,
+  ArrowRight,
+  Star,
+} from "lucide-react";
 import { SetupChecklist } from "@/components/setup-checklist";
 import { StarterPromptModal } from "@/components/starter-prompt-modal";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { useDiagnostics } from "@/hooks/use-diagnostics";
+
+/**
+ * Static plan data for the homepage pricing preview.
+ * These values are hardcoded to avoid an API call on the landing page.
+ * The full pricing page at /pricing fetches dynamic data from the API.
+ */
+const PLANS_PREVIEW = {
+  basic: {
+    name: "Basic",
+    price: 49,
+    description:
+      "Pelne zarzadzanie salonem bez narzedzi AI. Idealny na start.",
+    features: [
+      "Kalendarz pracownikow i grafiki",
+      "Rezerwacje online i platnosci",
+      "Kartoteka klientow",
+      "Raporty i statystyki",
+      "Powiadomienia SMS i email",
+    ],
+  },
+  pro: {
+    name: "Pro",
+    price: 149,
+    description:
+      "Pelna funkcjonalnosc z asystentem AI glosowym, biznesowym i content marketingowym.",
+    features: [
+      "Wszystko z planu Basic",
+      "Asystent glosowy AI",
+      "Asystent biznesowy AI",
+      "Generowanie tresci marketingowych",
+      "Proaktywne sugestie i analizy",
+    ],
+  },
+} as const;
 
 export default function Home() {
   const { isAuthReady, isAiReady, loading } = useDiagnostics();
@@ -68,6 +120,137 @@ export default function Home() {
             </p>
           </div>
         </div>
+
+        {/* Pricing Preview Section */}
+        <section className="mt-16 space-y-8" aria-labelledby="pricing-heading">
+          <div className="text-center space-y-3">
+            <Badge variant="secondary" className="text-sm px-4 py-1">
+              <Star className="h-3.5 w-3.5 mr-1.5" />
+              Cennik
+            </Badge>
+            <h3 id="pricing-heading" className="text-3xl font-bold tracking-tight">
+              Wybierz plan dla siebie
+            </h3>
+            <p className="text-muted-foreground max-w-xl mx-auto">
+              Zacznij od 14-dniowego okresu probnego. Bez zobowiazan.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
+            {/* Basic Plan Card */}
+            <Card className="relative flex flex-col border-2 hover:shadow-lg transition-shadow">
+              <CardHeader className="pb-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-950">
+                    <Zap className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <CardTitle className="text-xl">
+                    {PLANS_PREVIEW.basic.name}
+                  </CardTitle>
+                </div>
+                <CardDescription>
+                  {PLANS_PREVIEW.basic.description}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex-1 flex flex-col">
+                <div className="mb-4">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-3xl font-bold">
+                      {PLANS_PREVIEW.basic.price}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      PLN / mies.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 flex-1">
+                  {PLANS_PREVIEW.basic.features.map((feature) => (
+                    <div key={feature} className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
+                      <span className="text-sm">{feature}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-6">
+                  <Button
+                    asChild
+                    className="w-full"
+                    variant="outline"
+                  >
+                    <Link href="/register?plan=basic">
+                      Zacznij za darmo
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </Link>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Pro Plan Card */}
+            <Card className="relative flex flex-col border-2 border-primary hover:shadow-lg transition-shadow">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                <Badge className="px-3 py-0.5 text-xs shadow-sm">
+                  <Star className="h-3 w-3 mr-1" />
+                  Najpopularniejszy
+                </Badge>
+              </div>
+              <CardHeader className="pb-4 pt-8">
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10">
+                    <Crown className="h-5 w-5 text-primary" />
+                  </div>
+                  <CardTitle className="text-xl">
+                    {PLANS_PREVIEW.pro.name}
+                  </CardTitle>
+                </div>
+                <CardDescription>
+                  {PLANS_PREVIEW.pro.description}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex-1 flex flex-col">
+                <div className="mb-4">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-3xl font-bold">
+                      {PLANS_PREVIEW.pro.price}
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      PLN / mies.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 flex-1">
+                  {PLANS_PREVIEW.pro.features.map((feature) => (
+                    <div key={feature} className="flex items-start gap-2">
+                      <Check className="h-4 w-4 text-green-600 shrink-0 mt-0.5" />
+                      <span className="text-sm font-medium">{feature}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-6">
+                  <Button asChild className="w-full">
+                    <Link href="/register?plan=pro">
+                      Wybierz Pro
+                      <ArrowRight className="h-4 w-4 ml-2" />
+                    </Link>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="text-center">
+            <Button asChild variant="link" className="text-sm">
+              <Link href="/pricing">
+                Zobacz pelny cennik
+                <ArrowRight className="h-3.5 w-3.5 ml-1" />
+              </Link>
+            </Button>
+          </div>
+        </section>
 
         <div className="space-y-6 mt-12">
           <SetupChecklist />

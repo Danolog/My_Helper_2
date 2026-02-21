@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import {
   ArrowLeft,
   Download,
@@ -141,6 +142,9 @@ interface ReportData {
 
 export default function CancellationReportPage() {
   const { data: _session } = useSession();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -150,26 +154,51 @@ export default function CancellationReportPage() {
   const thirtyDaysAgo = new Date(today);
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
+  // Initialize filters from URL search params, falling back to defaults
   const [dateFrom, setDateFrom] = useState(
-    thirtyDaysAgo.toISOString().split("T")[0]
+    searchParams.get("dateFrom") || thirtyDaysAgo.toISOString().split("T")[0]
   );
-  const [dateTo, setDateTo] = useState(today.toISOString().split("T")[0]);
+  const [dateTo, setDateTo] = useState(
+    searchParams.get("dateTo") || today.toISOString().split("T")[0]
+  );
 
   // Comparison period (previous 30 days by default when enabled)
-  const [showComparison, setShowComparison] = useState(false);
+  const [showComparison, setShowComparison] = useState(
+    searchParams.get("compare") === "true"
+  );
   const sixtyDaysAgo = new Date(today);
   sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
   const [compareDateFrom, setCompareDateFrom] = useState(
-    sixtyDaysAgo.toISOString().split("T")[0]
+    searchParams.get("compareDateFrom") || sixtyDaysAgo.toISOString().split("T")[0]
   );
   const [compareDateTo, setCompareDateTo] = useState(
-    thirtyDaysAgo.toISOString().split("T")[0]
+    searchParams.get("compareDateTo") || thirtyDaysAgo.toISOString().split("T")[0]
   );
 
-  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>(
+    searchParams.get("employeeIds")
+      ? searchParams.get("employeeIds")!.split(",").filter(Boolean)
+      : []
+  );
   const [activeTab, setActiveTab] = useState<
     "lostrevenue" | "reason" | "employee" | "service" | "dayofweek" | "trend"
-  >("lostrevenue");
+  >((searchParams.get("tab") as "lostrevenue" | "reason" | "employee" | "service" | "dayofweek" | "trend") || "lostrevenue");
+
+  // Sync filter state to browser URL for shareable links
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    if (selectedEmployeeIds.length > 0) params.set("employeeIds", selectedEmployeeIds.join(","));
+    if (showComparison) {
+      params.set("compare", "true");
+      if (compareDateFrom) params.set("compareDateFrom", compareDateFrom);
+      if (compareDateTo) params.set("compareDateTo", compareDateTo);
+    }
+    if (activeTab && activeTab !== "lostrevenue") params.set("tab", activeTab);
+    const qs = params.toString();
+    router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+  }, [dateFrom, dateTo, selectedEmployeeIds, activeTab, showComparison, compareDateFrom, compareDateTo, router, pathname]);
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
@@ -201,7 +230,7 @@ export default function CancellationReportPage() {
       setReportData(json.data);
     } catch (err) {
       console.error("[Cancellation Report] Error:", err);
-      setError(err instanceof Error ? err.message : "Failed to load report");
+      setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
     }

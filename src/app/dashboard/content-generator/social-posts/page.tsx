@@ -15,10 +15,15 @@ import {
   RefreshCw,
   X,
   BookOpen,
+  Pencil,
+  Calendar,
+  Clock,
+  CalendarClock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -34,6 +39,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { toast } from "sonner";
 import { getTemplateById } from "@/lib/content-templates";
@@ -146,6 +160,15 @@ type GeneratedPost = {
   maxLength: number;
 };
 
+/** Get a default date string for the schedule picker (tomorrow at 10:00) */
+function getDefaultScheduleDate(): string {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(10, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T${pad(tomorrow.getHours())}:${pad(tomorrow.getMinutes())}`;
+}
+
 function SocialPostsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -165,6 +188,13 @@ function SocialPostsContent() {
     null
   );
   const [copied, setCopied] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedPost, setEditedPost] = useState("");
+
+  // Scheduling state
+  const [showScheduleDialog, setShowScheduleDialog] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState(getDefaultScheduleDate());
+  const [isScheduling, setIsScheduling] = useState(false);
 
   // Apply template preset values on mount (or when template changes)
   useEffect(() => {
@@ -187,6 +217,8 @@ function SocialPostsContent() {
     setIncludeEmoji(true);
     setIncludeHashtags(true);
     setGeneratedPost(null);
+    setIsEditing(false);
+    setEditedPost("");
   };
 
   const handleGenerate = async () => {
@@ -215,6 +247,8 @@ function SocialPostsContent() {
       }
 
       setGeneratedPost(data);
+      setEditedPost(data.post);
+      setIsEditing(false);
       toast.success("Post wygenerowany pomyslnie!");
     } catch (error) {
       console.error("Error generating post:", error);
@@ -227,7 +261,8 @@ function SocialPostsContent() {
   const handleCopy = async () => {
     if (!generatedPost) return;
     try {
-      await navigator.clipboard.writeText(generatedPost.post);
+      const textToCopy = isEditing || editedPost !== generatedPost.post ? editedPost : generatedPost.post;
+      await navigator.clipboard.writeText(textToCopy);
       setCopied(true);
       toast.success("Skopiowano do schowka!");
       setTimeout(() => setCopied(false), 2000);
@@ -236,8 +271,78 @@ function SocialPostsContent() {
     }
   };
 
+  const handleToggleEdit = () => {
+    if (!isEditing && generatedPost) {
+      setEditedPost(editedPost || generatedPost.post);
+    }
+    setIsEditing(!isEditing);
+  };
+
+  const handleSaveEdit = () => {
+    if (generatedPost) {
+      setGeneratedPost({
+        ...generatedPost,
+        post: editedPost,
+        characterCount: editedPost.length,
+      });
+      setIsEditing(false);
+      toast.success("Zmiany zapisane!");
+    }
+  };
+
   const handleRegenerate = () => {
     handleGenerate();
+  };
+
+  const handleSchedule = async () => {
+    if (!generatedPost) return;
+
+    const scheduledDateTime = new Date(scheduleDate);
+    if (scheduledDateTime <= new Date()) {
+      toast.error("Data publikacji musi byc w przyszlosci");
+      return;
+    }
+
+    setIsScheduling(true);
+
+    try {
+      const response = await fetch("/api/scheduled-posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform: generatedPost.platform,
+          postType: generatedPost.postType,
+          content: generatedPost.post,
+          hashtags: generatedPost.hashtags,
+          tone,
+          scheduledAt: scheduledDateTime.toISOString(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        toast.error(data.error || "Blad podczas planowania posta");
+        return;
+      }
+
+      toast.success(
+        `Post zaplanowany na ${scheduledDateTime.toLocaleDateString("pl-PL", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`
+      );
+      setShowScheduleDialog(false);
+      setScheduleDate(getDefaultScheduleDate());
+    } catch (error) {
+      console.error("Error scheduling post:", error);
+      toast.error("Nie udalo sie zaplanowac posta. Sprobuj ponownie.");
+    } finally {
+      setIsScheduling(false);
+    }
   };
 
   const selectedPostType = POST_TYPES.find((pt) => pt.value === postType);
@@ -251,7 +356,7 @@ function SocialPostsContent() {
             <ArrowLeft className="h-4 w-4" />
           </Link>
         </Button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Instagram className="h-6 w-6 text-primary" />
             Posty social media
@@ -260,6 +365,12 @@ function SocialPostsContent() {
             Generuj angazujace posty na Instagram, Facebook i TikTok
           </p>
         </div>
+        <Button variant="outline" asChild>
+          <Link href="/dashboard/content-generator/scheduled">
+            <CalendarClock className="h-4 w-4 mr-2" />
+            Zaplanowane posty
+          </Link>
+        </Button>
       </div>
 
       {/* Template banner - shown when a template is active */}
@@ -434,7 +545,7 @@ function SocialPostsContent() {
               Wygenerowany post
             </CardTitle>
             <CardDescription>
-              Podglad wygenerowanej tresci - skopiuj i opublikuj
+              Podglad wygenerowanej tresci - skopiuj lub zaplanuj publikacje
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -472,10 +583,62 @@ function SocialPostsContent() {
                   </Badge>
                 </div>
 
-                {/* Post content */}
-                <div className="bg-muted/50 rounded-lg p-4 whitespace-pre-wrap text-sm leading-relaxed border">
-                  {generatedPost.post}
-                </div>
+                {/* Post content - editable */}
+                {isEditing ? (
+                  <div className="space-y-2">
+                    <Textarea
+                      value={editedPost}
+                      onChange={(e) => setEditedPost(e.target.value)}
+                      rows={8}
+                      className="text-sm leading-relaxed resize-y min-h-[120px]"
+                      data-testid="edit-post-textarea"
+                    />
+                    <div className="flex items-center justify-between">
+                      <Badge
+                        variant={
+                          editedPost.length > generatedPost.maxLength
+                            ? "destructive"
+                            : "secondary"
+                        }
+                      >
+                        {editedPost.length}/{generatedPost.maxLength} znakow
+                      </Badge>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditedPost(generatedPost.post);
+                            setIsEditing(false);
+                          }}
+                        >
+                          Anuluj
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleSaveEdit}
+                        >
+                          <Check className="h-3.5 w-3.5 mr-1" />
+                          Zapisz zmiany
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className="bg-muted/50 rounded-lg p-4 whitespace-pre-wrap text-sm leading-relaxed border cursor-pointer hover:border-primary/50 transition-colors group relative"
+                    onClick={handleToggleEdit}
+                    data-testid="post-content-display"
+                  >
+                    {generatedPost.post}
+                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Badge variant="secondary" className="text-xs">
+                        <Pencil className="h-3 w-3 mr-1" />
+                        Kliknij aby edytowac
+                      </Badge>
+                    </div>
+                  </div>
+                )}
 
                 {/* Hashtags extracted */}
                 {generatedPost.hashtags.length > 0 && (
@@ -514,6 +677,13 @@ function SocialPostsContent() {
                   </Button>
                   <Button
                     variant="outline"
+                    onClick={handleToggleEdit}
+                  >
+                    <Pencil className="h-4 w-4 mr-2" />
+                    Edytuj
+                  </Button>
+                  <Button
+                    variant="outline"
                     onClick={handleRegenerate}
                     disabled={isGenerating}
                   >
@@ -521,6 +691,105 @@ function SocialPostsContent() {
                     Generuj ponownie
                   </Button>
                 </div>
+
+                {/* Schedule button */}
+                <Dialog open={showScheduleDialog} onOpenChange={setShowScheduleDialog}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() => {
+                        setScheduleDate(getDefaultScheduleDate());
+                        setShowScheduleDialog(true);
+                      }}
+                    >
+                      <Calendar className="h-4 w-4 mr-2" />
+                      Zaplanuj publikacje
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle className="flex items-center gap-2">
+                        <CalendarClock className="h-5 w-5" />
+                        Zaplanuj publikacje posta
+                      </DialogTitle>
+                      <DialogDescription>
+                        Wybierz date i godzine, kiedy post ma zostac opublikowany
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      {/* Post preview */}
+                      <div className="flex items-center gap-2 mb-2">
+                        <Badge variant="secondary" className="flex items-center gap-1">
+                          {PLATFORMS.find((p) => p.value === generatedPost.platform)?.icon}
+                          {PLATFORMS.find((p) => p.value === generatedPost.platform)?.label}
+                        </Badge>
+                        <Badge variant="outline">
+                          {POST_TYPES.find((pt) => pt.value === generatedPost.postType)?.label}
+                        </Badge>
+                      </div>
+                      <div className="bg-muted/50 rounded-lg p-3 text-sm max-h-32 overflow-y-auto border">
+                        {generatedPost.post.substring(0, 200)}
+                        {generatedPost.post.length > 200 && "..."}
+                      </div>
+
+                      {/* Date/time picker */}
+                      <div className="space-y-2">
+                        <Label htmlFor="schedule-date" className="flex items-center gap-2">
+                          <Clock className="h-4 w-4" />
+                          Data i godzina publikacji
+                        </Label>
+                        <Input
+                          id="schedule-date"
+                          type="datetime-local"
+                          value={scheduleDate}
+                          onChange={(e) => setScheduleDate(e.target.value)}
+                          min={new Date().toISOString().slice(0, 16)}
+                        />
+                      </div>
+
+                      {scheduleDate && (
+                        <p className="text-sm text-muted-foreground">
+                          Post zostanie opublikowany:{" "}
+                          <span className="font-medium text-foreground">
+                            {new Date(scheduleDate).toLocaleDateString("pl-PL", {
+                              weekday: "long",
+                              day: "numeric",
+                              month: "long",
+                              year: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowScheduleDialog(false)}
+                      >
+                        Anuluj
+                      </Button>
+                      <Button
+                        onClick={handleSchedule}
+                        disabled={isScheduling || !scheduleDate}
+                      >
+                        {isScheduling ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Planowanie...
+                          </>
+                        ) : (
+                          <>
+                            <Calendar className="h-4 w-4 mr-2" />
+                            Potwierdz planowanie
+                          </>
+                        )}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
@@ -549,6 +818,7 @@ export default function SocialPostsPage() {
         "5 tonow komunikacji do wyboru",
         "Automatyczne hashtagi i emoji",
         "Kontekst salonu i uslug wbudowany w AI",
+        "Planowanie publikacji na przyszlosc",
       ]}
     >
       <Suspense fallback={<div className="container mx-auto p-6"><Loader2 className="h-6 w-6 animate-spin" /></div>}>

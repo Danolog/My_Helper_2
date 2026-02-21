@@ -26,6 +26,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
+import { getUserFriendlyMessage } from "@/lib/error-messages";
 
 // Types for trends API response
 type TrendDirection = "up" | "down" | "stable";
@@ -282,7 +283,7 @@ function TrendsContent() {
       const json = await res.json();
       setData(json.data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Wystapil blad");
+      setError("Nie udalo sie zaladowac danych. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
     }
@@ -430,7 +431,7 @@ function TrendsContent() {
       const errorMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        text: `Blad: ${e instanceof Error ? e.message : "Wystapil nieoczekiwany blad"}`,
+        text: getUserFriendlyMessage(e, "Wystapil blad podczas komunikacji z asystentem AI. Sprobuj ponownie."),
         timestamp: new Date(),
       };
       setChatMessages((prev) => [...prev, errorMsg]);

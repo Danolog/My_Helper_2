@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,6 +50,9 @@ import {
 import { toast } from "sonner";
 import { NetworkErrorHandler } from "@/components/network-error-handler";
 import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
+import { useFormRecovery } from "@/hooks/use-form-recovery";
+import { FormRecoveryBanner } from "@/components/form-recovery-banner";
+import { useTabSync } from "@/hooks/use-tab-sync";
 
 interface Product {
   id: string;
@@ -80,13 +83,25 @@ const UNITS = ["ml", "g", "szt.", "opak.", "l", "kg"];
 
 export default function ProductsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
   const { data: session, isPending } = useSession();
   const [productsData, setProductsData] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [sortBy, setSortBy] = useState<string>("name-asc");
+  const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
+  const [categoryFilter, setCategoryFilter] = useState<string>(searchParams.get("category") || "all");
+  const [sortBy, setSortBy] = useState<string>(searchParams.get("sort") || "name-asc");
   const [activeTab, setActiveTab] = useState("products");
+
+  // Sync search/filter state to URL for persistence
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (searchQuery.trim()) params.set("q", searchQuery.trim());
+    if (categoryFilter && categoryFilter !== "all") params.set("category", categoryFilter);
+    if (sortBy && sortBy !== "name-asc") params.set("sort", sortBy);
+    const qs = params.toString();
+    router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+  }, [searchQuery, categoryFilter, sortBy, router, pathname]);
 
   // Categories state
   const [categories, setCategories] = useState<ProductCategory[]>([]);
@@ -115,6 +130,63 @@ export default function ProductsPage() {
   // Form validation errors
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
+  // Form recovery for product creation dialog
+  const {
+    wasRecovered: productWasRecovered,
+    getRecoveredState: getProductRecoveredState,
+    saveFormState: saveProductFormState,
+    clearSavedForm: clearProductSavedForm,
+    setDirty: setProductDirty,
+  } = useFormRecovery<{
+    name: string;
+    category: string;
+    quantity: string;
+    minQuantity: string;
+    unit: string;
+    pricePerUnit: string;
+  }>({
+    storageKey: "add-product-form",
+    warnOnUnload: true,
+  });
+
+  // Auto-open dialog when recovered data is found
+  useEffect(() => {
+    if (productWasRecovered) {
+      setDialogOpen(true);
+    }
+  }, [productWasRecovered]);
+
+  // Save product form state on changes (debounced inside hook)
+  useEffect(() => {
+    if (dialogOpen && !editingProduct) {
+      const hasData = !!formName || !!formCategory || !!formQuantity || !!formMinQuantity || !!formPricePerUnit;
+      if (hasData) {
+        saveProductFormState({
+          name: formName,
+          category: formCategory,
+          quantity: formQuantity,
+          minQuantity: formMinQuantity,
+          unit: formUnit,
+          pricePerUnit: formPricePerUnit,
+        });
+      }
+      setProductDirty(hasData);
+    }
+  }, [formName, formCategory, formQuantity, formMinQuantity, formUnit, formPricePerUnit, dialogOpen, editingProduct, saveProductFormState, setProductDirty]);
+
+  // Recovery handler: restores product form fields from localStorage
+  const handleRestoreProductForm = () => {
+    const saved = getProductRecoveredState();
+    if (saved) {
+      setFormName(saved.name || "");
+      setFormCategory(saved.category || "");
+      setFormQuantity(saved.quantity || "");
+      setFormMinQuantity(saved.minQuantity || "");
+      setFormUnit(saved.unit || "szt.");
+      setFormPricePerUnit(saved.pricePerUnit || "");
+    }
+  };
+
   // Delete dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
@@ -127,7 +199,7 @@ export default function ProductsPage() {
     createdAt: string;
   }
   const [lowStockNotifications, setLowStockNotifications] = useState<LowStockNotification[]>([]);
-  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean } | null>(null);
+  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean; isTimeout: boolean } | null>(null);
 
   const fetchProducts = useCallback(async () => {
     try {
@@ -184,6 +256,9 @@ export default function ProductsPage() {
     fetchCategories();
     fetchLowStockNotifications();
   }, [fetchProducts, fetchCategories, fetchLowStockNotifications]);
+
+  // Cross-tab sync: refetch when another tab modifies products
+  const { notifyChange: notifyProductsChanged } = useTabSync("products", fetchProducts);
 
   // Category names from DB for product category select
   const categoryNames = categories.map((c) => c.name);
@@ -298,9 +373,11 @@ export default function ProductsPage() {
           );
         }
         setDialogOpen(false);
+        clearProductSavedForm();
         fetchProducts();
         fetchCategories();
         fetchLowStockNotifications();
+        notifyProductsChanged();
       } else {
         toast.error(data.error || "Nie udalo sie zapisac produktu");
       }
@@ -308,7 +385,7 @@ export default function ProductsPage() {
       console.error("Failed to save product:", error);
       const errInfo = getNetworkErrorMessage(error);
       toast.error(errInfo.isNetwork
-        ? "Brak polaczenia z serwerem. Sprawdz internet i sprobuj ponownie."
+        ? errInfo.message
         : "Blad podczas zapisywania produktu", {
         action: {
           label: "Sprobuj ponownie",
@@ -332,6 +409,7 @@ export default function ProductsPage() {
         toast.success(`Produkt "${productToDelete.name}" usuniety`);
         fetchProducts();
         fetchCategories();
+        notifyProductsChanged();
       } else {
         toast.error(data.error || "Nie udalo sie usunac produktu");
       }
@@ -445,10 +523,11 @@ export default function ProductsPage() {
   // Filter and sort products
   const filteredProducts = productsData
     .filter((p) => {
+      const trimmedQuery = searchQuery.trim().toLowerCase();
       const matchesSearch =
-        !searchQuery ||
-        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (p.category && p.category.toLowerCase().includes(searchQuery.toLowerCase()));
+        !trimmedQuery ||
+        p.name.toLowerCase().includes(trimmedQuery) ||
+        (p.category && p.category.toLowerCase().includes(trimmedQuery));
       const matchesCategory =
         categoryFilter === "all" || p.category === categoryFilter;
       return matchesSearch && matchesCategory;
@@ -544,6 +623,7 @@ export default function ProductsPage() {
             <NetworkErrorHandler
               message={fetchError.message}
               isNetworkError={fetchError.isNetwork}
+              isTimeout={fetchError.isTimeout}
               onRetry={async () => {
                 setFetchError(null);
                 setLoading(true);
@@ -585,6 +665,7 @@ export default function ProductsPage() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9"
+                maxLength={200}
                 data-testid="product-search"
               />
             </div>
@@ -903,6 +984,12 @@ export default function ProductsPage() {
               {editingProduct ? "Edytuj produkt" : "Dodaj produkt"}
             </DialogTitle>
           </DialogHeader>
+          {productWasRecovered && !editingProduct && (
+            <FormRecoveryBanner
+              onRestore={handleRestoreProductForm}
+              onDismiss={clearProductSavedForm}
+            />
+          )}
           <div className="space-y-4">
             <div className="grid gap-2">
               <Label htmlFor="product-name">Nazwa produktu *</Label>

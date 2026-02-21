@@ -50,6 +50,7 @@ import {
 import { toast } from "sonner";
 import { EditAppointmentDialog } from "@/components/appointments/edit-appointment-dialog";
 import { CompleteAppointmentDialog } from "@/components/appointments/complete-appointment-dialog";
+import { useTabSync } from "@/hooks/use-tab-sync";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -331,7 +332,7 @@ export default function AppointmentDetailPage() {
         setAppointment(data.data);
       } else {
         toast.error("Nie znaleziono wizyty");
-        router.push("/dashboard/calendar");
+        router.replace("/dashboard/calendar");
       }
     } catch (error) {
       console.error("Failed to fetch appointment:", error);
@@ -511,6 +512,9 @@ export default function AppointmentDetailPage() {
     fetchFiscalReceipt();
     fetchInvoice();
   }, [fetchAppointment, fetchMaterials, fetchProducts, fetchTreatment, fetchCommission, fetchRefundStatus, fetchFiscalReceipt, fetchInvoice]);
+
+  // Cross-tab sync: refetch when another tab modifies appointments
+  const { notifyChange: notifyAppointmentsChanged } = useTabSync("appointments", fetchAppointment);
 
   const handleAddMaterial = async () => {
     if (!selectedProductId) {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointmentMaterials, products, appointments, clients, employees, services } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
+import { isValidUuid } from "@/lib/validations";
 
 // GET /api/products/[id]/usage-history - Get usage history for a product
 export async function GET(
@@ -10,6 +11,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid product ID format" },
+        { status: 400 }
+      );
+    }
 
     // Verify product exists
     const [product] = await db

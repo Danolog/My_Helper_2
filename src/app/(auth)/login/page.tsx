@@ -13,15 +13,16 @@ import { auth } from "@/lib/auth"
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reset?: string }>
+  searchParams: Promise<{ reset?: string; returnTo?: string }>
 }) {
   const session = await auth.api.getSession({ headers: await headers() })
 
-  if (session) {
-    redirect("/dashboard")
-  }
+  const { reset, returnTo } = await searchParams
 
-  const { reset } = await searchParams
+  if (session) {
+    // If already logged in, redirect to returnTo or dashboard
+    redirect(returnTo && returnTo.startsWith("/") ? returnTo : "/dashboard")
+  }
 
   return (
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-4">
@@ -36,7 +37,7 @@ export default async function LoginPage({
               Password reset successfully. Please sign in with your new password.
             </p>
           )}
-          <SignInButton />
+          <SignInButton returnTo={returnTo} />
         </CardContent>
       </Card>
     </div>

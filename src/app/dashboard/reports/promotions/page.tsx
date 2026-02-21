@@ -116,16 +116,16 @@ export default function PromotionsReportPage() {
 
       const res = await fetch(`/api/reports/promotions?${params.toString()}`);
       if (!res.ok) {
-        throw new Error("Failed to fetch report");
+        throw new Error("Nie udalo sie pobrac raportu");
       }
       const json = await res.json();
       if (!json.success) {
-        throw new Error(json.error || "Failed to fetch report");
+        throw new Error("Nie udalo sie pobrac raportu. Sprobuj ponownie pozniej.");
       }
       setReportData(json.data);
     } catch (err) {
       console.error("[Promotions Report] Error:", err);
-      setError(err instanceof Error ? err.message : "Failed to load report");
+      setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
     }
