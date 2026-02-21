@@ -51,7 +51,15 @@ nul
 # test artifacts
 *.png
 *.jpeg
-/scripts/
+/scripts/*
+!scripts/generate-pwa-icons.ts
+
+# PWA icons (unignore)
+!public/icon-192.png
+!public/icon-512.png
+!public/icon-maskable-192.png
+!public/icon-maskable-512.png
+!public/apple-touch-icon.png
 /venv/
 features.db
 claude-progress.txt

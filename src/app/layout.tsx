@@ -1,6 +1,9 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { OfflineBanner } from "@/components/offline-banner";
+import { InstallPrompt } from "@/components/pwa/install-prompt";
+import { SwRegister } from "@/components/pwa/sw-register";
+import { SwUpdateToast } from "@/components/pwa/sw-update-toast";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -38,7 +41,7 @@ export const metadata: Metadata = {
   creator: "MyHelper Team",
   openGraph: {
     type: "website",
-    locale: "en_US",
+    locale: "pl_PL",
     siteName: "MyHelper",
     title: "MyHelper",
     description:
@@ -54,6 +57,18 @@ export const metadata: Metadata = {
     index: true,
     follow: true,
   },
+  applicationName: "MyHelper",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "MyHelper",
+  },
+  formatDetection: {
+    telephone: false,
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
+  },
 };
 
 // JSON-LD structured data for SEO
@@ -62,13 +77,13 @@ const jsonLd = {
   "@type": "WebApplication",
   name: "MyHelper",
   description:
-    "Complete agentic coding boilerplate with authentication, database, AI integration, and modern tooling",
+    "MyHelper - aplikacja do zarzadzania salonem uslugowym z asystentem AI",
   applicationCategory: "BusinessApplication",
   operatingSystem: "Any",
   offers: {
     "@type": "Offer",
     price: "0",
-    priceCurrency: "USD",
+    priceCurrency: "PLN",
   },
   author: {
     "@type": "Person",
@@ -82,8 +97,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="pl" suppressHydrationWarning>
       <head>
+        <meta name="theme-color" content="#000000" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+        <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
@@ -104,6 +123,9 @@ export default function RootLayout({
           <SiteFooter />
           <Toaster richColors position="top-right" />
         </ThemeProvider>
+        <SwRegister />
+        <InstallPrompt />
+        <SwUpdateToast />
       </body>
     </html>
   );
