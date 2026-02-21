@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock, Cake, Package, BarChart3, Percent, Ticket, Gift, DollarSign, Printer, FileText, Crown, Bot, Lightbulb, PenTool, Timer, AlertTriangle, Loader2, RefreshCw, ExternalLink, Sunrise, CalendarDays, ShieldAlert, Zap, Info, CalendarRange, TrendingUp, Megaphone, ChevronDown, ChevronUp, XCircle, UserCheck, UserX, ArrowRight } from "lucide-react";
+import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock, Cake, Package, BarChart3, Percent, Ticket, Gift, DollarSign, Printer, FileText, Crown, Bot, Lightbulb, PenTool, Timer, AlertTriangle, Loader2, RefreshCw, ExternalLink, Sunrise, CalendarDays, ShieldAlert, Zap, Info, CalendarRange, TrendingUp, Megaphone, ChevronDown, ChevronUp, XCircle, UserCheck, UserX, ArrowRight, Building2 } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -577,7 +577,10 @@ function WeeklyRecommendations() {
 // Dashboard Stats Types
 // ────────────────────────────────────────────────────────────
 
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+interface UserSalon {
+  id: string;
+  name: string;
+}
 
 interface TodayAppointment {
   id: string;
@@ -662,18 +665,39 @@ const STATUS_LABELS: Record<string, string> = {
 export default function DashboardPage() {
   const { data: session, isPending } = useSession();
   const { isProPlan, isTrialing, trialDaysRemaining } = useSubscription();
+  const [salon, setSalon] = useState<UserSalon | null>(null);
+  const [noSalon, setNoSalon] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState<string | null>(null);
 
-  // Fetch dashboard stats when session is available
+  // Fetch the user's salon, then dashboard stats
   useEffect(() => {
-    async function fetchStats() {
+    async function fetchSalonAndStats() {
       try {
         setStatsLoading(true);
         setStatsError(null);
+
+        // Step 1: Fetch the user's salon
+        const salonRes = await fetch("/api/salons/mine");
+        if (!salonRes.ok) {
+          const err = await salonRes.json().catch(() => ({ error: "Blad serwera" }));
+          throw new Error(err.error || "Nie udalo sie pobrac salonu");
+        }
+        const salonJson = await salonRes.json();
+
+        if (!salonJson.salon) {
+          // User has no salon yet
+          setNoSalon(true);
+          setStatsLoading(false);
+          return;
+        }
+
+        setSalon({ id: salonJson.salon.id, name: salonJson.salon.name });
+
+        // Step 2: Fetch dashboard stats using the salon ID
         const res = await fetch(
-          `/api/dashboard/stats?salonId=${DEMO_SALON_ID}`
+          `/api/dashboard/stats?salonId=${salonJson.salon.id}`
         );
         if (!res.ok) {
           const err = await res.json().catch(() => ({ error: "Blad serwera" }));
@@ -693,7 +717,7 @@ export default function DashboardPage() {
     }
 
     if (session) {
-      fetchStats();
+      fetchSalonAndStats();
     }
   }, [session]);
 
@@ -718,6 +742,37 @@ export default function DashboardPage() {
           </div>
           <UserProfile />
         </div>
+      </div>
+    );
+  }
+
+  // User has no salon yet -- show a prompt to create one
+  if (noSalon && !statsLoading) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+        </div>
+        <Card className="max-w-lg mx-auto">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+              <Building2 className="h-8 w-8 text-muted-foreground" />
+            </div>
+            <CardTitle>Utworz swoj salon</CardTitle>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <p className="text-muted-foreground">
+              Nie masz jeszcze przypisanego salonu. Zarejestruj swoj salon, aby
+              korzystac z pelnych funkcji panelu.
+            </p>
+            <Button asChild>
+              <Link href="/register">
+                <Building2 className="h-4 w-4 mr-2" />
+                Zarejestruj salon
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
