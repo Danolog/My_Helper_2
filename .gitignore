@@ -47,3 +47,11 @@ next-env.d.ts
 public/uploads
 
 nul
+
+# test artifacts
+*.png
+*.jpeg
+/scripts/
+/venv/
+features.db
+claude-progress.txt
