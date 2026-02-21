@@ -81,8 +81,11 @@ export function PushNotificationManager() {
         return;
       }
 
-      // Register service worker
-      const registration = await navigator.serviceWorker.register("/sw.js");
+      // Reuse existing registration (e.g. from SwRegister) or register fresh.
+      let registration = await navigator.serviceWorker.getRegistration();
+      if (!registration) {
+        registration = await navigator.serviceWorker.register("/sw.js");
+      }
       await navigator.serviceWorker.ready;
 
       // Subscribe to push

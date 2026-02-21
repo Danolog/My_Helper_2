@@ -20,6 +20,8 @@ export function SignOutButton() {
     <Button
       variant="outline"
       onClick={async () => {
+        // Clear SW caches before sign-out so no user-specific data persists
+        navigator.serviceWorker?.controller?.postMessage({ type: "CLEAR_CACHES" });
         await signOut();
         router.replace("/");
         router.refresh();
