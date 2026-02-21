@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionCookie } from "better-auth/cookies";
 
 /**
+ * Validate returnTo URL to prevent open redirects.
+ * Only allows relative paths that start with "/" but not "//".
+ */
+function isSafeReturnTo(url: string | null | undefined): string {
+  if (!url) return "/dashboard";
+  if (url.startsWith("/") && !url.startsWith("//")) return url;
+  return "/dashboard";
+}
+
+/**
  * Next.js 16 Proxy for auth protection.
  * Uses cookie-based checks for fast, optimistic redirects.
  *
@@ -18,7 +28,8 @@ export async function proxy(request: NextRequest) {
     const search = request.nextUrl.search;
 
     // Build the returnTo parameter from the original URL path + search params
-    const returnTo = pathname + search;
+    // Validate to prevent open redirect via protocol-relative URLs
+    const returnTo = isSafeReturnTo(pathname + search);
 
     // All protected routes redirect to login page with returnTo param
     const loginUrl = new URL("/login", request.url);

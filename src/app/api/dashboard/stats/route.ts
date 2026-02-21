@@ -5,14 +5,61 @@ import {
   clients,
   employees,
   services,
+  salons,
   workSchedules,
 } from "@/lib/schema";
 import { eq, and, gte, lte, not, inArray } from "drizzle-orm";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+
+/**
+ * Compute date boundaries in the Europe/Warsaw timezone.
+ * This ensures correct "today" boundaries regardless of the server's local timezone.
+ */
+function getWarsawDateBoundaries() {
+  const now = new Date();
+
+  // Get current date parts in Warsaw timezone
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Warsaw",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const warsawDateStr = formatter.format(now); // "YYYY-MM-DD"
+  const parts = warsawDateStr.split("-");
+  const year = parseInt(parts[0] ?? "2026", 10);
+  const month = parseInt(parts[1] ?? "1", 10) - 1; // 0-indexed
+  const day = parseInt(parts[2] ?? "1", 10);
+
+  // Create date boundaries using Warsaw date parts
+  // These Date objects represent midnight in the server's local time for the Warsaw calendar date
+  const todayStart = new Date(year, month, day, 0, 0, 0, 0);
+  const todayEnd = new Date(year, month, day, 23, 59, 59, 999);
+
+  const thirtyDaysAgo = new Date(year, month, day - 30, 0, 0, 0, 0);
+  const monthStart = new Date(year, month, 1, 0, 0, 0, 0);
+  const monthEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+
+  // Get day of week for Warsaw's "today"
+  const todayDow = todayStart.getDay();
+
+  return { now, todayStart, todayEnd, thirtyDaysAgo, monthStart, monthEnd, todayDow };
+}
 
 // GET /api/dashboard/stats - Dashboard overview data
 // Returns: today's appointments, employees working today, cancellation stats, and 30-day stats
 export async function GET(request: Request) {
   try {
+    // Verify authentication
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Wymagane logowanie" },
+        { status: 401 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -23,69 +70,118 @@ export async function GET(request: Request) {
       );
     }
 
-    // Date boundaries
-    const now = new Date();
-    const todayStart = new Date(now);
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(now);
-    todayEnd.setHours(23, 59, 59, 999);
+    // Verify the authenticated user owns the requested salon
+    const [salon] = await db
+      .select({ id: salons.id })
+      .from(salons)
+      .where(and(eq(salons.id, salonId), eq(salons.ownerId, session.user.id)))
+      .limit(1);
 
-    const thirtyDaysAgo = new Date(now);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    thirtyDaysAgo.setHours(0, 0, 0, 0);
-
-    // ─── Today's appointments ───────────────────────────────
-    const todayAppointments = await db
-      .select({
-        id: appointments.id,
-        startTime: appointments.startTime,
-        endTime: appointments.endTime,
-        status: appointments.status,
-        notes: appointments.notes,
-        clientFirstName: clients.firstName,
-        clientLastName: clients.lastName,
-        clientPhone: clients.phone,
-        employeeId: employees.id,
-        employeeFirstName: employees.firstName,
-        employeeLastName: employees.lastName,
-        employeeColor: employees.color,
-        serviceName: services.name,
-        servicePrice: services.basePrice,
-        serviceDuration: services.baseDuration,
-      })
-      .from(appointments)
-      .leftJoin(clients, eq(appointments.clientId, clients.id))
-      .leftJoin(employees, eq(appointments.employeeId, employees.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(
-        and(
-          eq(appointments.salonId, salonId),
-          gte(appointments.startTime, todayStart),
-          lte(appointments.startTime, todayEnd),
-          not(eq(appointments.status, "cancelled"))
-        )
-      )
-      .orderBy(appointments.startTime);
-
-    // ─── Employees working today ────────────────────────────
-    // Get today's day of week (0=Sunday, 1=Monday, ...)
-    const todayDow = now.getDay();
-
-    // Get all active employees for this salon
-    const salonEmployees = await db
-      .select({
-        id: employees.id,
-        firstName: employees.firstName,
-        lastName: employees.lastName,
-        color: employees.color,
-        role: employees.role,
-      })
-      .from(employees)
-      .where(
-        and(eq(employees.salonId, salonId), eq(employees.isActive, true))
+    if (!salon) {
+      return NextResponse.json(
+        { success: false, error: "Brak dostepu do tego salonu" },
+        { status: 403 }
       );
+    }
 
-    // Get work schedules for today's day of week
+    // Date boundaries using Europe/Warsaw timezone
+    const { todayStart, todayEnd, thirtyDaysAgo, monthStart, monthEnd, todayDow } =
+      getWarsawDateBoundaries();
+
+    // ─── Run independent queries in parallel ──────────────────
+    const [todayAppointments, salonEmployees, monthAppointments, last30Appointments, newClients30d] =
+      await Promise.all([
+        // Today's appointments
+        db
+          .select({
+            id: appointments.id,
+            startTime: appointments.startTime,
+            endTime: appointments.endTime,
+            status: appointments.status,
+            notes: appointments.notes,
+            clientFirstName: clients.firstName,
+            clientLastName: clients.lastName,
+            clientPhone: clients.phone,
+            employeeId: employees.id,
+            employeeFirstName: employees.firstName,
+            employeeLastName: employees.lastName,
+            employeeColor: employees.color,
+            serviceName: services.name,
+            servicePrice: services.basePrice,
+            serviceDuration: services.baseDuration,
+          })
+          .from(appointments)
+          .leftJoin(clients, eq(appointments.clientId, clients.id))
+          .leftJoin(employees, eq(appointments.employeeId, employees.id))
+          .leftJoin(services, eq(appointments.serviceId, services.id))
+          .where(
+            and(
+              eq(appointments.salonId, salonId),
+              gte(appointments.startTime, todayStart),
+              lte(appointments.startTime, todayEnd),
+              not(eq(appointments.status, "cancelled"))
+            )
+          )
+          .orderBy(appointments.startTime),
+
+        // Active employees for this salon
+        db
+          .select({
+            id: employees.id,
+            firstName: employees.firstName,
+            lastName: employees.lastName,
+            color: employees.color,
+            role: employees.role,
+          })
+          .from(employees)
+          .where(
+            and(eq(employees.salonId, salonId), eq(employees.isActive, true))
+          ),
+
+        // Cancellation statistics (this month)
+        db
+          .select({
+            status: appointments.status,
+          })
+          .from(appointments)
+          .where(
+            and(
+              eq(appointments.salonId, salonId),
+              gte(appointments.startTime, monthStart),
+              lte(appointments.startTime, monthEnd)
+            )
+          ),
+
+        // Last 30 days statistics
+        db
+          .select({
+            status: appointments.status,
+            servicePrice: services.basePrice,
+            discountAmount: appointments.discountAmount,
+          })
+          .from(appointments)
+          .leftJoin(services, eq(appointments.serviceId, services.id))
+          .where(
+            and(
+              eq(appointments.salonId, salonId),
+              gte(appointments.startTime, thirtyDaysAgo),
+              lte(appointments.startTime, todayEnd)
+            )
+          ),
+
+        // New clients last 30 days
+        db
+          .select({ id: clients.id })
+          .from(clients)
+          .where(
+            and(
+              eq(clients.salonId, salonId),
+              gte(clients.createdAt, thirtyDaysAgo)
+            )
+          ),
+      ]);
+
+    // ─── Employees working today (depends on salonEmployees) ──
     const employeeIds = salonEmployees.map((e) => e.id);
     let todaySchedules: { employeeId: string; startTime: string; endTime: string }[] = [];
     if (employeeIds.length > 0) {
@@ -123,23 +219,7 @@ export async function GET(request: Request) {
       };
     });
 
-    // ─── Cancellation statistics (this month) ───────────────
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-
-    const monthAppointments = await db
-      .select({
-        status: appointments.status,
-      })
-      .from(appointments)
-      .where(
-        and(
-          eq(appointments.salonId, salonId),
-          gte(appointments.startTime, monthStart),
-          lte(appointments.startTime, monthEnd)
-        )
-      );
-
+    // ─── Process cancellation statistics ──────────────────────
     const totalThisMonth = monthAppointments.length;
     const cancelledThisMonth = monthAppointments.filter(
       (a) => a.status === "cancelled"
@@ -152,23 +232,7 @@ export async function GET(request: Request) {
         ? ((cancelledThisMonth + noShowThisMonth) / totalThisMonth) * 100
         : 0;
 
-    // ─── Last 30 days statistics ────────────────────────────
-    const last30Appointments = await db
-      .select({
-        status: appointments.status,
-        servicePrice: services.basePrice,
-        discountAmount: appointments.discountAmount,
-      })
-      .from(appointments)
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(
-        and(
-          eq(appointments.salonId, salonId),
-          gte(appointments.startTime, thirtyDaysAgo),
-          lte(appointments.startTime, todayEnd)
-        )
-      );
-
+    // ─── Process last 30 days statistics ──────────────────────
     const total30d = last30Appointments.length;
     const completed30d = last30Appointments.filter(
       (a) => a.status === "completed"
@@ -189,17 +253,6 @@ export async function GET(request: Request) {
 
     // Average per day (last 30 days)
     const avgPerDay = total30d > 0 ? Math.round(total30d / 30) : 0;
-
-    // ─── New clients last 30 days ───────────────────────────
-    const newClients30d = await db
-      .select({ id: clients.id })
-      .from(clients)
-      .where(
-        and(
-          eq(clients.salonId, salonId),
-          gte(clients.createdAt, thirtyDaysAgo)
-        )
-      );
 
     return NextResponse.json({
       success: true,

@@ -10,6 +10,16 @@ import {
 } from "@/components/ui/card"
 import { auth } from "@/lib/auth"
 
+/**
+ * Validate returnTo URL to prevent open redirects.
+ * Only allows relative paths that start with "/" but not "//".
+ */
+function isSafeReturnTo(url: string | null | undefined): string {
+  if (!url) return "/dashboard"
+  if (url.startsWith("/") && !url.startsWith("//")) return url
+  return "/dashboard"
+}
+
 export default async function LoginPage({
   searchParams,
 }: {
@@ -20,8 +30,8 @@ export default async function LoginPage({
   const { reset, returnTo } = await searchParams
 
   if (session) {
-    // If already logged in, redirect to returnTo or dashboard
-    redirect(returnTo && returnTo.startsWith("/") ? returnTo : "/dashboard")
+    // If already logged in, redirect to returnTo or dashboard (with open-redirect protection)
+    redirect(isSafeReturnTo(returnTo))
   }
 
   return (

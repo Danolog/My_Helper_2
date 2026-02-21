@@ -9,6 +9,16 @@ import { Label } from "@/components/ui/label"
 import { signIn, useSession } from "@/lib/auth-client"
 import { sanitizeAuthError } from "@/lib/error-messages"
 
+/**
+ * Validate returnTo URL to prevent open redirects.
+ * Only allows relative paths that start with "/" but not "//".
+ */
+function isSafeReturnTo(url: string | null | undefined): string {
+  if (!url) return "/dashboard"
+  if (url.startsWith("/") && !url.startsWith("//")) return url
+  return "/dashboard"
+}
+
 interface SignInButtonProps {
   returnTo?: string | undefined
 }
@@ -16,8 +26,8 @@ interface SignInButtonProps {
 export function SignInButton({ returnTo }: SignInButtonProps) {
   const { data: session, isPending: sessionPending } = useSession()
   const router = useRouter()
-  // Determine the redirect destination after login
-  const redirectTo = returnTo && returnTo.startsWith("/") ? returnTo : "/dashboard"
+  // Determine the redirect destination after login, with open-redirect protection
+  const redirectTo = isSafeReturnTo(returnTo)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")

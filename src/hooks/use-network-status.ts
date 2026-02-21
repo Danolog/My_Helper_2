@@ -13,14 +13,13 @@ interface NetworkStatus {
  * Provides current status and tracks if user was recently offline.
  */
 export function useNetworkStatus(): NetworkStatus {
-  const [isOnline, setIsOnline] = useState(true);
+  const [isOnline, setIsOnline] = useState(() =>
+    typeof navigator !== "undefined" ? navigator.onLine : true
+  );
   const [wasOffline, setWasOffline] = useState(false);
   const [lastOfflineAt, setLastOfflineAt] = useState<Date | null>(null);
 
   useEffect(() => {
-    // Set initial state from browser
-    setIsOnline(navigator.onLine);
-
     const handleOnline = () => {
       setIsOnline(true);
       // Mark that user was offline (for recovery messages)

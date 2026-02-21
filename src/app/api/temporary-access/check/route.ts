@@ -53,7 +53,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("[Temporary Access Check] Error:", error);
     return NextResponse.json(
-      { success: false, error: "Failed to check temporary access" },
+      { success: false, error: "Nie udało się sprawdzić uprawnień tymczasowych" },
       { status: 500 }
     );
   }
