@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { temporaryAccess, employees, salons } from "@/lib/schema";
-import { eq, and, gt, lt } from "drizzle-orm";
+import { eq, and, gt, lt, inArray } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 
@@ -60,15 +60,22 @@ export async function GET(request: Request) {
     // Clean up expired entries first
     await cleanupExpiredAccess();
 
+    // Resolve the caller's salon to scope results
+    const [callerSalon] = await db
+      .select({ id: salons.id })
+      .from(salons)
+      .where(eq(salons.ownerId, session.user.id))
+      .limit(1);
+
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId");
 
     const now = new Date();
 
-    // Build query for active (non-expired) grants only
-    let query;
+    // Build query for active (non-expired) grants only, scoped to caller's salon
+    let grants: (typeof temporaryAccess.$inferSelect)[];
     if (userId) {
-      query = db
+      grants = await db
         .select()
         .from(temporaryAccess)
         .where(
@@ -77,14 +84,34 @@ export async function GET(request: Request) {
             gt(temporaryAccess.expiresAt, now)
           )
         );
-    } else {
-      query = db
-        .select()
-        .from(temporaryAccess)
-        .where(gt(temporaryAccess.expiresAt, now));
-    }
+    } else if (callerSalon) {
+      // Scope to only employees belonging to the caller's salon
+      const salonEmployeeIds = await db
+        .select({ userId: employees.userId })
+        .from(employees)
+        .where(eq(employees.salonId, callerSalon.id));
 
-    const grants = await query;
+      const userIds = salonEmployeeIds
+        .map((e) => e.userId)
+        .filter((id): id is string => id !== null);
+
+      if (userIds.length === 0) {
+        grants = [];
+      } else {
+        grants = await db
+          .select()
+          .from(temporaryAccess)
+          .where(
+            and(
+              inArray(temporaryAccess.userId, userIds),
+              gt(temporaryAccess.expiresAt, now)
+            )
+          );
+      }
+    } else {
+      // No salon found - return empty results
+      grants = [];
+    }
 
     console.log(
       `[Temporary Access] Found ${grants.length} active grants${userId ? ` for user ${userId}` : ""}`
@@ -98,7 +125,7 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("[Temporary Access] Database error:", error);
     return NextResponse.json(
-      { success: false, error: "Failed to fetch temporary access grants" },
+      { success: false, error: "Nie udało się pobrać uprawnień tymczasowych" },
       { status: 500 }
     );
   }
@@ -152,7 +179,7 @@ export async function POST(request: Request) {
       body = await request.json();
     } catch {
       return NextResponse.json(
-        { success: false, error: "Invalid request body" },
+        { success: false, error: "Nieprawidłowe dane żądania" },
         { status: 400 }
       );
     }
@@ -186,7 +213,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!durationMinutes || durationMinutes < 1 || durationMinutes > 43200) {
+    if (!durationMinutes || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 43200) {
       // Max 30 days (43200 minutes)
       return NextResponse.json(
         {
@@ -285,7 +312,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("[Temporary Access] Database error:", error);
     return NextResponse.json(
-      { success: false, error: "Failed to grant temporary access" },
+      { success: false, error: "Nie udało się nadać uprawnień tymczasowych" },
       { status: 500 }
     );
   }
@@ -345,6 +372,41 @@ export async function DELETE(request: Request) {
       );
     }
 
+    // Fetch the grant first to verify ownership
+    const [grant] = await db
+      .select()
+      .from(temporaryAccess)
+      .where(eq(temporaryAccess.id, grantId))
+      .limit(1);
+
+    if (!grant) {
+      return NextResponse.json(
+        { success: false, error: "Nie znaleziono uprawnienia" },
+        { status: 404 }
+      );
+    }
+
+    // Verify the grant's userId belongs to an employee of the caller's salon
+    if (salon) {
+      const [employee] = await db
+        .select({ id: employees.id })
+        .from(employees)
+        .where(
+          and(
+            eq(employees.userId, grant.userId),
+            eq(employees.salonId, salon.id)
+          )
+        )
+        .limit(1);
+
+      if (!employee) {
+        return NextResponse.json(
+          { success: false, error: "To uprawnienie nie nalezy do pracownika Twojego salonu" },
+          { status: 403 }
+        );
+      }
+    }
+
     const [deleted] = await db
       .delete(temporaryAccess)
       .where(eq(temporaryAccess.id, grantId))
@@ -352,7 +414,7 @@ export async function DELETE(request: Request) {
 
     if (!deleted) {
       return NextResponse.json(
-        { success: false, error: "Grant not found" },
+        { success: false, error: "Nie znaleziono uprawnienia" },
         { status: 404 }
       );
     }
@@ -369,7 +431,7 @@ export async function DELETE(request: Request) {
   } catch (error) {
     console.error("[Temporary Access] Database error:", error);
     return NextResponse.json(
-      { success: false, error: "Failed to revoke temporary access" },
+      { success: false, error: "Nie udało się cofnąć uprawnień tymczasowych" },
       { status: 500 }
     );
   }

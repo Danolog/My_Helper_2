@@ -13,15 +13,14 @@ import { cleanupExpiredTemporaryAccess } from "@/lib/temporary-access";
  */
 export async function POST(request: Request) {
   try {
-    // Optional: verify cron secret for production security
-    const { searchParams } = new URL(request.url);
-    const cronSecret = searchParams.get("secret");
+    // Verify cron secret via Authorization header (Bearer token)
+    const authHeader = request.headers.get("authorization");
     const expectedSecret = process.env.CRON_SECRET;
 
     // In production, verify the cron secret. In dev, allow without secret.
-    if (expectedSecret && cronSecret !== expectedSecret) {
+    if (expectedSecret && authHeader !== `Bearer ${expectedSecret}`) {
       return NextResponse.json(
-        { success: false, error: "Unauthorized" },
+        { success: false, error: "Brak autoryzacji" },
         { status: 401 }
       );
     }
@@ -30,13 +29,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message: `Cleaned up ${removedCount} expired temporary access entries`,
+      message: `Wyczyszczono ${removedCount} wygaslych uprawnien tymczasowych`,
       removedCount,
     });
   } catch (error) {
     console.error("[Cron] Cleanup temporary access error:", error);
     return NextResponse.json(
-      { success: false, error: "Failed to clean up temporary access" },
+      { success: false, error: "Nie udało się wyczyścić uprawnień tymczasowych" },
       { status: 500 }
     );
   }

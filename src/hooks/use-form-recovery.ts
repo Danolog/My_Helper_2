@@ -127,8 +127,11 @@ export function useFormRecovery<T extends Record<string, unknown>>(
       debounceTimerRef.current = setTimeout(() => {
         try {
           localStorage.setItem(fullKey, JSON.stringify(state));
-        } catch {
-          // localStorage full or unavailable, silently fail
+        } catch (e) {
+          // Warn when localStorage is full or unavailable so the user knows
+          // form recovery will not work. This is intentionally not silent
+          // because a user could lose data on refresh without knowing.
+          console.warn("Form recovery: nie udalo sie zapisac stanu formularza (localStorage moze byc pelny)", e);
         }
       }, debounceMs);
     },

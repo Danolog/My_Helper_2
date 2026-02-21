@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -151,6 +152,9 @@ export function BlockTimeDialog({
             <Ban className="h-5 w-5 text-destructive" />
             Zablokuj czas
           </DialogTitle>
+          <DialogDescription>
+            Wybierz pracownika, typ blokady oraz zakres czasowy.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5">

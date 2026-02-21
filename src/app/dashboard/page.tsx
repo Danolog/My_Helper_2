@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock, Cake, Package, BarChart3, Percent, Ticket, Gift, DollarSign, Printer, FileText, Crown, Bot, Lightbulb, PenTool, Timer, AlertTriangle, Loader2, RefreshCw, ExternalLink, Sunrise, CalendarDays, ShieldAlert, Zap, Info, CalendarRange, TrendingUp, Megaphone, ChevronDown, ChevronUp, XCircle, UserCheck, UserX, ArrowRight } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
@@ -79,7 +79,7 @@ function DailyRecommendations() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchRecommendations = async () => {
+  const fetchRecommendations = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -97,18 +97,16 @@ function DailyRecommendations() {
       setSummary(json.summary || null);
       setRecommendations(json.recommendations || []);
     } catch (e) {
-      if (error !== "not-pro") {
-        setError(e instanceof Error ? e.message : "Wystapil nieoczekiwany blad");
-      }
+      // Use functional updater to avoid stale closure over error state
+      setError(prev => prev === "not-pro" ? prev : (e instanceof Error ? e.message : "Wystapil nieoczekiwany blad"));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchRecommendations();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchRecommendations]);
 
   // If not pro plan or error, don't render
   if (error === "not-pro") return null;
@@ -337,7 +335,7 @@ function WeeklyRecommendations() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
-  const fetchWeeklyRecommendations = async () => {
+  const fetchWeeklyRecommendations = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -355,18 +353,16 @@ function WeeklyRecommendations() {
       setRecommendations(json.recommendations || []);
       setDayBreakdown(json.dayBreakdown || []);
     } catch (e) {
-      if (error !== "not-pro") {
-        setError(e instanceof Error ? e.message : "Wystapil nieoczekiwany blad");
-      }
+      // Use functional updater to avoid stale closure over error state
+      setError(prev => prev === "not-pro" ? prev : (e instanceof Error ? e.message : "Wystapil nieoczekiwany blad"));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchWeeklyRecommendations();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchWeeklyRecommendations]);
 
   if (error === "not-pro") return null;
 

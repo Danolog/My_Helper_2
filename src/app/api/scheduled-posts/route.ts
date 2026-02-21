@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
 import { db } from "@/lib/db";
 import { scheduledPosts } from "@/lib/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";

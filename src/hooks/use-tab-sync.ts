@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 
 const CHANNEL_NAME = "myhelper-tab-sync";
 
@@ -25,12 +25,6 @@ interface TabSyncMessage {
   tabId: string;
 }
 
-// Generate a unique ID for this tab
-const TAB_ID =
-  typeof window !== "undefined"
-    ? `tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    : "ssr";
-
 /**
  * Hook for cross-tab data synchronization.
  *
@@ -53,9 +47,15 @@ export function useTabSync(
   resource: TabSyncResource,
   onRefetch: () => void | Promise<void>
 ) {
+  // Generate a unique ID for this tab instance, stable across re-renders
+  const [tabId] = useState(() => `tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
   const channelRef = useRef<BroadcastChannel | null>(null);
   const onRefetchRef = useRef(onRefetch);
-  const lastFetchRef = useRef<number>(Date.now());
+  const lastFetchRef = useRef<number>(0);
+  // Lazily initialize lastFetchRef on first render
+  if (lastFetchRef.current === 0) {
+    lastFetchRef.current = Date.now();
+  }
 
   // Keep onRefetch ref up to date
   useEffect(() => {
@@ -76,7 +76,7 @@ export function useTabSync(
         if (
           msg.type === "data-changed" &&
           msg.resource === resource &&
-          msg.tabId !== TAB_ID
+          msg.tabId !== tabId
         ) {
           lastFetchRef.current = Date.now();
           onRefetchRef.current();
@@ -91,7 +91,7 @@ export function useTabSync(
       // BroadcastChannel not supported or blocked
       return;
     }
-  }, [resource]);
+  }, [resource, tabId]);
 
   // Refetch on tab focus (visibility change)
   useEffect(() => {
@@ -121,14 +121,14 @@ export function useTabSync(
           type: "data-changed",
           resource,
           timestamp: Date.now(),
-          tabId: TAB_ID,
+          tabId,
         };
         channelRef.current.postMessage(message);
       }
     } catch {
       // Channel might be closed or errored
     }
-  }, [resource]);
+  }, [resource, tabId]);
 
   return { notifyChange };
 }

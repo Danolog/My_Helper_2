@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { invoices, clients, appointments, employees, services } from "@/lib/schema";
+import { invoices, clients, appointments, employees, services, salons } from "@/lib/schema";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
 
 /**
  * GET /api/invoices
@@ -18,6 +18,31 @@ const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
  */
 export async function GET(request: NextRequest) {
   try {
+    // Verify authentication
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Wymagane logowanie" },
+        { status: 401 }
+      );
+    }
+
+    // Resolve salon from authenticated user
+    const [salon] = await db
+      .select({ id: salons.id })
+      .from(salons)
+      .where(eq(salons.ownerId, session.user.id))
+      .limit(1);
+
+    if (!salon) {
+      return NextResponse.json(
+        { success: false, error: "Nie znaleziono salonu dla tego uzytkownika" },
+        { status: 403 }
+      );
+    }
+
+    const salonId = salon.id;
+
     const { searchParams } = new URL(request.url);
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
@@ -25,7 +50,7 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get("search");
 
     // Build conditions
-    const conditions = [eq(invoices.salonId, DEMO_SALON_ID)];
+    const conditions = [eq(invoices.salonId, salonId)];
 
     if (dateFrom) {
       conditions.push(gte(invoices.issuedAt, new Date(dateFrom)));
@@ -40,7 +65,9 @@ export async function GET(request: NextRequest) {
       conditions.push(eq(invoices.type, type));
     }
     if (search) {
-      const searchLower = `%${search.toLowerCase()}%`;
+      // Escape LIKE wildcard characters to prevent injection of search patterns
+      const sanitized = search.replace(/[%_]/g, "\\$&");
+      const searchLower = `%${sanitized.toLowerCase()}%`;
       conditions.push(
         sql`(
           LOWER(${invoices.invoiceNumber}) LIKE ${searchLower} OR

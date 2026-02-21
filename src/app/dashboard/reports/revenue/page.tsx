@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import { useSearchParams, usePathname } from "next/navigation";
 import {
   ArrowLeft,
   Download,
@@ -72,7 +72,6 @@ interface ReportData {
 export default function RevenueReportPage() {
   const { data: _session } = useSession();
   const searchParams = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -98,20 +97,6 @@ export default function RevenueReportPage() {
   const [activeTab, setActiveTab] = useState<
     "service" | "employee" | "trend"
   >((searchParams.get("tab") as "service" | "employee" | "trend") || "service");
-
-  // Sync filter state to URL search params so the URL is shareable
-  const updateUrlParams = useCallback(
-    (from: string | undefined, to: string | undefined, empIds: string[], tab: string) => {
-      const params = new URLSearchParams();
-      if (from) params.set("dateFrom", from);
-      if (to) params.set("dateTo", to);
-      if (empIds.length > 0) params.set("employeeIds", empIds.join(","));
-      if (tab && tab !== "service") params.set("tab", tab);
-      const qs = params.toString();
-      router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
-    },
-    [router, pathname]
-  );
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
@@ -148,9 +133,17 @@ export default function RevenueReportPage() {
   }, [fetchReport]);
 
   // Sync filter state to browser URL for shareable links
+  // Uses window.history.replaceState to avoid triggering Next.js re-renders
   useEffect(() => {
-    updateUrlParams(dateFrom, dateTo, selectedEmployeeIds, activeTab);
-  }, [dateFrom, dateTo, selectedEmployeeIds, activeTab, updateUrlParams]);
+    const params = new URLSearchParams();
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    if (selectedEmployeeIds.length > 0) params.set("employeeIds", selectedEmployeeIds.join(","));
+    if (activeTab && activeTab !== "service") params.set("tab", activeTab);
+    const qs = params.toString();
+    const newUrl = `${pathname}${qs ? `?${qs}` : ""}`;
+    window.history.replaceState(null, "", newUrl);
+  }, [dateFrom, dateTo, selectedEmployeeIds, activeTab, pathname]);
 
   const handleExport = async (format: "csv" | "xlsx") => {
     try {

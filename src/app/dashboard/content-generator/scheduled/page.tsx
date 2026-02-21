@@ -20,9 +20,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   AlertDialog,
@@ -373,9 +370,9 @@ function PostCard({
   onPublish: (id: string) => void;
   isLoading: boolean;
 }) {
-  const platformCfg = PLATFORM_CONFIG[post.platform] || PLATFORM_CONFIG.instagram;
-  const statusCfg = STATUS_CONFIG[post.status] || STATUS_CONFIG.scheduled;
-  const postTypeLabel = POST_TYPE_LABELS[post.postType] || post.postType;
+  const platformCfg = PLATFORM_CONFIG[post.platform];
+  const statusCfg = STATUS_CONFIG[post.status];
+  const postTypeLabel = POST_TYPE_LABELS[post.postType] ?? post.postType;
 
   const scheduledDate = new Date(post.scheduledAt);
   const now = new Date();
@@ -387,24 +384,24 @@ function PostCard({
         <div className="flex items-start gap-4">
           {/* Platform icon */}
           <div
-            className={`p-2 rounded-lg flex-shrink-0 ${platformCfg.color}`}
+            className={`p-2 rounded-lg flex-shrink-0 ${platformCfg?.color ?? "bg-gray-100 text-gray-700"}`}
           >
-            {platformCfg.icon}
+            {platformCfg?.icon}
           </div>
 
           {/* Content */}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap mb-1">
-              <span className="font-medium text-sm">{platformCfg.label}</span>
+              <span className="font-medium text-sm">{platformCfg?.label ?? post.platform}</span>
               <Badge variant="outline" className="text-xs">
                 {postTypeLabel}
               </Badge>
               <Badge
-                variant={statusCfg.variant}
+                variant={statusCfg?.variant ?? "secondary"}
                 className="flex items-center gap-1 text-xs"
               >
-                {statusCfg.icon}
-                {statusCfg.label}
+                {statusCfg?.icon}
+                {statusCfg?.label ?? post.status}
               </Badge>
             </div>
 
@@ -492,7 +489,7 @@ function PostCard({
                   <AlertDialogHeader>
                     <AlertDialogTitle>Anulowac zaplanowany post?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Post na {platformCfg.label} zaplanowany na{" "}
+                      Post na {platformCfg?.label ?? post.platform} zaplanowany na{" "}
                       {scheduledDate.toLocaleDateString("pl-PL", {
                         day: "numeric",
                         month: "long",

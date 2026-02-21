@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import { useSearchParams, usePathname } from "next/navigation";
 import {
   ArrowLeft,
   Download,
@@ -143,7 +143,6 @@ interface ReportData {
 export default function CancellationReportPage() {
   const { data: _session } = useSession();
   const searchParams = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -185,6 +184,7 @@ export default function CancellationReportPage() {
   >((searchParams.get("tab") as "lostrevenue" | "reason" | "employee" | "service" | "dayofweek" | "trend") || "lostrevenue");
 
   // Sync filter state to browser URL for shareable links
+  // Uses window.history.replaceState to avoid triggering Next.js re-renders
   useEffect(() => {
     const params = new URLSearchParams();
     if (dateFrom) params.set("dateFrom", dateFrom);
@@ -197,8 +197,9 @@ export default function CancellationReportPage() {
     }
     if (activeTab && activeTab !== "lostrevenue") params.set("tab", activeTab);
     const qs = params.toString();
-    router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
-  }, [dateFrom, dateTo, selectedEmployeeIds, activeTab, showComparison, compareDateFrom, compareDateTo, router, pathname]);
+    const newUrl = `${pathname}${qs ? `?${qs}` : ""}`;
+    window.history.replaceState(null, "", newUrl);
+  }, [dateFrom, dateTo, selectedEmployeeIds, activeTab, showComparison, compareDateFrom, compareDateTo, pathname]);
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
