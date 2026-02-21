@@ -32,7 +32,7 @@ export default function SalonsListPage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
-  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean } | null>(null);
+  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean; isTimeout: boolean } | null>(null);
 
   useEffect(() => {
     fetchSalons();
@@ -153,6 +153,7 @@ export default function SalonsListPage() {
         <NetworkErrorHandler
           message={fetchError.message}
           isNetworkError={fetchError.isNetwork}
+          isTimeout={fetchError.isTimeout}
           onRetry={async () => {
             setLoading(true);
             await fetchSalons();

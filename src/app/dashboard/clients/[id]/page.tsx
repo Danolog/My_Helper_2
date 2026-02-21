@@ -366,7 +366,7 @@ export default function ClientProfilePage() {
         setFormDepositValue(clientData.depositValue || "");
       } else {
         toast.error("Nie znaleziono klienta");
-        router.push("/dashboard/clients");
+        router.replace("/dashboard/clients");
       }
     } catch (error) {
       console.error("Failed to fetch client:", error);
@@ -771,7 +771,7 @@ export default function ClientProfilePage() {
           `Klient "${client?.firstName} ${client?.lastName}" zostal usuniety`
         );
         setDeleteDialogOpen(false);
-        router.push("/dashboard/clients");
+        router.replace("/dashboard/clients");
       } else {
         if (res.status === 403) {
           setDeleteError("Nieprawidlowe haslo. Sprobuj ponownie.");

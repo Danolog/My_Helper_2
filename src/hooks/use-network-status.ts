@@ -47,7 +47,30 @@ export function useNetworkStatus(): NetworkStatus {
 }
 
 /**
- * Checks if an error is a network-related error.
+ * Checks if an error is specifically a timeout error.
+ * Detects AbortSignal.timeout() errors and DOMException AbortError from timeout controllers.
+ */
+export function isTimeoutError(error: unknown): boolean {
+  // AbortSignal.timeout() throws DOMException with name "TimeoutError"
+  if (error instanceof DOMException && error.name === "TimeoutError") {
+    return true;
+  }
+  // Some browsers throw TypeError with "timeout" in the message
+  if (error instanceof TypeError) {
+    const message = error.message.toLowerCase();
+    return message.includes("timeout") || message.includes("timed out");
+  }
+  // AbortController.abort() can throw DOMException with name "AbortError"
+  // When used with a timeout pattern, check the message
+  if (error instanceof DOMException && error.name === "AbortError") {
+    const message = error.message.toLowerCase();
+    return message.includes("timeout") || message.includes("timed out");
+  }
+  return false;
+}
+
+/**
+ * Checks if an error is a network-related error (including timeouts).
  */
 export function isNetworkError(error: unknown): boolean {
   if (error instanceof TypeError) {
@@ -62,7 +85,7 @@ export function isNetworkError(error: unknown): boolean {
       message.includes("connection refused")
     );
   }
-  if (error instanceof DOMException && error.name === "AbortError") {
+  if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
     return true;
   }
   return false;

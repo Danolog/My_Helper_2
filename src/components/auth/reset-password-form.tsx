@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { resetPassword } from "@/lib/auth-client"
+import { sanitizeAuthError } from "@/lib/error-messages"
 
 export function ResetPasswordForm() {
   const router = useRouter()
@@ -17,19 +18,28 @@ export function ResetPasswordForm() {
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [formError, setFormError] = useState("")
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [isPending, setIsPending] = useState(false)
+
+  const clearFieldError = (field: string) => {
+    setFieldErrors((prev) => {
+      const next = { ...prev }
+      delete next[field]
+      return next
+    })
+  }
 
   if (error === "invalid_token" || !token) {
     return (
       <div className="space-y-4 w-full max-w-sm text-center">
         <p className="text-sm text-destructive">
           {error === "invalid_token"
-            ? "This password reset link is invalid or has expired."
-            : "No reset token provided."}
+            ? "Ten link do resetowania hasla jest nieprawidlowy lub wygasl."
+            : "Brak tokenu resetowania. Uzyj linku z wiadomosci email."}
         </p>
         <Link href="/forgot-password">
           <Button variant="outline" className="w-full">
-            Request a new link
+            Wyslij nowy link
           </Button>
         </Link>
       </div>
@@ -40,13 +50,20 @@ export function ResetPasswordForm() {
     e.preventDefault()
     setFormError("")
 
-    if (password !== confirmPassword) {
-      setFormError("Passwords do not match")
-      return
+    // Validate required fields
+    const errors: Record<string, string> = {}
+    if (!password) {
+      errors.password = "Podaj nowe haslo (minimum 8 znakow)"
+    } else if (password.length < 8) {
+      errors.password = "Haslo jest za krotkie. Wpisz co najmniej 8 znakow"
     }
-
-    if (password.length < 8) {
-      setFormError("Password must be at least 8 characters")
+    if (!confirmPassword) {
+      errors.confirmPassword = "Wpisz haslo ponownie w celu potwierdzenia"
+    } else if (password !== confirmPassword) {
+      errors.confirmPassword = "Hasla nie sa identyczne. Upewnij sie, ze oba pola zawieraja to samo haslo"
+    }
+    setFieldErrors(errors)
+    if (Object.keys(errors).length > 0) {
       return
     }
 
@@ -59,48 +76,62 @@ export function ResetPasswordForm() {
       })
 
       if (result.error) {
-        setFormError(result.error.message || "Failed to reset password")
+        setFormError(sanitizeAuthError(result.error.message, "Nie udalo sie zresetowac hasla. Sprobuj ponownie."))
       } else {
-        router.push("/login?reset=success")
+        router.replace("/login?reset=success")
       }
     } catch {
-      setFormError("An unexpected error occurred")
+      setFormError("Wystapil nieoczekiwany blad. Sprobuj ponownie pozniej.")
     } finally {
       setIsPending(false)
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 w-full max-w-sm">
+    <form onSubmit={handleSubmit} noValidate className="space-y-4 w-full max-w-sm">
       <div className="space-y-2">
-        <Label htmlFor="password">New Password</Label>
+        <Label htmlFor="password">Nowe haslo</Label>
         <Input
           id="password"
           type="password"
-          placeholder="Enter new password"
+          placeholder="Wprowadz nowe haslo"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value)
+            clearFieldError("password")
+          }}
           required
+          aria-invalid={!!fieldErrors.password}
           disabled={isPending}
         />
+        {fieldErrors.password && (
+          <p className="text-sm text-destructive">{fieldErrors.password}</p>
+        )}
       </div>
       <div className="space-y-2">
-        <Label htmlFor="confirmPassword">Confirm New Password</Label>
+        <Label htmlFor="confirmPassword">Potwierdz nowe haslo</Label>
         <Input
           id="confirmPassword"
           type="password"
-          placeholder="Confirm new password"
+          placeholder="Potwierdz nowe haslo"
           value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
+          onChange={(e) => {
+            setConfirmPassword(e.target.value)
+            clearFieldError("confirmPassword")
+          }}
           required
+          aria-invalid={!!fieldErrors.confirmPassword}
           disabled={isPending}
         />
+        {fieldErrors.confirmPassword && (
+          <p className="text-sm text-destructive">{fieldErrors.confirmPassword}</p>
+        )}
       </div>
       {formError && (
         <p className="text-sm text-destructive">{formError}</p>
       )}
       <Button type="submit" className="w-full" disabled={isPending}>
-        {isPending ? "Resetting..." : "Reset password"}
+        {isPending ? "Resetowanie..." : "Zresetuj haslo"}
       </Button>
     </form>
   )

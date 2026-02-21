@@ -51,6 +51,9 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { NetworkErrorHandler } from "@/components/network-error-handler";
 import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
+import { useFormRecovery } from "@/hooks/use-form-recovery";
+import { FormRecoveryBanner } from "@/components/form-recovery-banner";
+import { useTabSync } from "@/hooks/use-tab-sync";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -109,8 +112,60 @@ export default function ServicesPage() {
   // Form validation errors
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
+  // Form recovery for service creation dialog
+  const {
+    wasRecovered: serviceWasRecovered,
+    getRecoveredState: getServiceRecoveredState,
+    saveFormState: saveServiceFormState,
+    clearSavedForm: clearServiceSavedForm,
+    setDirty: setServiceDirty,
+  } = useFormRecovery<{
+    name: string;
+    description: string;
+    categoryId: string;
+    price: string;
+    duration: string;
+  }>({
+    storageKey: "add-service-form",
+    warnOnUnload: true,
+  });
+
+  // Auto-open dialog when recovered data is found
+  useEffect(() => {
+    if (serviceWasRecovered) {
+      setDialogOpen(true);
+    }
+  }, [serviceWasRecovered]);
+
+  // Save service form state on changes (debounced inside hook)
+  useEffect(() => {
+    const hasData = !!formName || !!formDescription || !!formPrice || !!formDuration;
+    if (hasData) {
+      saveServiceFormState({
+        name: formName,
+        description: formDescription,
+        categoryId: formCategoryId,
+        price: formPrice,
+        duration: formDuration,
+      });
+    }
+    setServiceDirty(hasData);
+  }, [formName, formDescription, formCategoryId, formPrice, formDuration, saveServiceFormState, setServiceDirty]);
+
+  // Recovery handler: restores service form fields from localStorage
+  const handleRestoreServiceForm = () => {
+    const saved = getServiceRecoveredState();
+    if (saved) {
+      setFormName(saved.name || "");
+      setFormDescription(saved.description || "");
+      setFormCategoryId(saved.categoryId || "");
+      setFormPrice(saved.price || "");
+      setFormDuration(saved.duration || "");
+    }
+  };
+
   // Network error state
-  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean } | null>(null);
+  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean; isTimeout: boolean } | null>(null);
 
   const fetchServices = useCallback(async () => {
     try {
@@ -150,6 +205,12 @@ export default function ServicesPage() {
     loadData();
   }, [fetchServices, fetchCategories]);
 
+  // Cross-tab sync: refetch when another tab modifies services
+  const { notifyChange: notifyServicesChanged } = useTabSync("services", () => {
+    fetchServices();
+    fetchCategories();
+  });
+
   const resetForm = () => {
     setFormName("");
     setFormDescription("");
@@ -157,6 +218,7 @@ export default function ServicesPage() {
     setFormPrice("");
     setFormDuration("");
     setFormErrors({});
+    clearServiceSavedForm();
   };
 
   const clearFieldError = (field: string) => {
@@ -215,9 +277,11 @@ export default function ServicesPage() {
 
       if (data.success) {
         toast.success(`Usluga "${formName}" zostala dodana`);
+        clearServiceSavedForm();
         resetForm();
         setDialogOpen(false);
         await fetchServices();
+        notifyServicesChanged();
       } else {
         toast.error(data.error || "Nie udalo sie dodac uslugi");
       }
@@ -225,7 +289,7 @@ export default function ServicesPage() {
       console.error("Failed to save service:", error);
       const errInfo = getNetworkErrorMessage(error);
       toast.error(errInfo.isNetwork
-        ? "Brak polaczenia z serwerem. Sprawdz internet i sprobuj ponownie."
+        ? errInfo.message
         : "Blad podczas zapisywania uslugi", {
         action: {
           label: "Sprobuj ponownie",
@@ -249,6 +313,7 @@ export default function ServicesPage() {
       if (data.success) {
         toast.success(`Usluga "${serviceToDelete.name}" zostala usunieta`);
         await fetchServices();
+        notifyServicesChanged();
       } else {
         toast.error(data.error || "Nie udalo sie usunac uslugi");
       }
@@ -545,6 +610,12 @@ export default function ServicesPage() {
                 Wypelnij formularz, aby dodac nowa usluge do oferty salonu.
               </DialogDescription>
             </DialogHeader>
+            {serviceWasRecovered && (
+              <FormRecoveryBanner
+                onRestore={handleRestoreServiceForm}
+                onDismiss={clearServiceSavedForm}
+              />
+            )}
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
                 <Label htmlFor="service-name">Nazwa uslugi *</Label>
@@ -735,6 +806,7 @@ export default function ServicesPage() {
             <NetworkErrorHandler
               message={fetchError.message}
               isNetworkError={fetchError.isNetwork}
+              isTimeout={fetchError.isTimeout}
               onRetry={async () => {
                 setFetchError(null);
                 setLoading(true);

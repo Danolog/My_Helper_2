@@ -123,10 +123,7 @@ export function PushNotificationManager() {
       setState((s) => ({
         ...s,
         isLoading: false,
-        error:
-          err instanceof Error
-            ? err.message
-            : "Nie udalo sie wlaczyc powiadomien push",
+        error: "Nie udalo sie wlaczyc powiadomien push. Sprawdz ustawienia przegladarki i sprobuj ponownie.",
       }));
     }
   };

@@ -30,7 +30,7 @@ export async function GET(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: "Validation failed",
+          error: "Walidacja nie powiodla sie. Sprawdz zaznaczone pola.",
           details: {
             name: "Pole jest wymagane",
             email: "Nieprawidlowy format adresu email",

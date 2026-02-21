@@ -23,6 +23,9 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { signUp, sendVerificationEmail } from "@/lib/auth-client"
+import { sanitizeAuthError } from "@/lib/error-messages"
+import { useFormRecovery } from "@/hooks/use-form-recovery"
+import { FormRecoveryBanner } from "@/components/form-recovery-banner"
 
 type Plan = {
   id: string
@@ -56,8 +59,44 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState("")
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [isPending, setIsPending] = useState(false)
   const [showVerificationMessage, setShowVerificationMessage] = useState(false)
+
+  // Form recovery after page refresh
+  const {
+    wasRecovered,
+    getRecoveredState,
+    saveFormState,
+    clearSavedForm,
+    setDirty,
+  } = useFormRecovery<{
+    step: number
+    selectedPlan: string | null
+    name: string
+    email: string
+  }>({
+    storageKey: "registration-form",
+    warnOnUnload: true,
+  })
+
+  // Recovery handler: restores form fields from localStorage
+  const handleRestoreForm = () => {
+    const saved = getRecoveredState()
+    if (saved) {
+      if (saved.name) setName(saved.name)
+      if (saved.email) setEmail(saved.email)
+      if (saved.selectedPlan) setSelectedPlan(saved.selectedPlan)
+      if (saved.step) setStep(saved.step)
+    }
+  }
+
+  // Save form state on every change (debounced inside hook)
+  useEffect(() => {
+    const hasData = !!name || !!email || !!selectedPlan
+    saveFormState({ step, selectedPlan, name, email })
+    setDirty(hasData)
+  }, [step, selectedPlan, name, email, saveFormState, setDirty])
 
   // Fetch subscription plans
   useEffect(() => {
@@ -96,17 +135,45 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
     setStep(1)
   }
 
+  const clearFieldError = (field: string) => {
+    setFieldErrors((prev) => {
+      const next = { ...prev }
+      delete next[field]
+      return next
+    })
+  }
+
+  const validateFields = (): boolean => {
+    const errors: Record<string, string> = {}
+
+    if (!name.trim()) {
+      errors.name = "Wpisz swoje imie i nazwisko, np. Jan Kowalski"
+    }
+    if (!email.trim()) {
+      errors.email = "Podaj adres email, np. jan@example.com"
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      errors.email = "Nieprawidlowy format email. Wpisz adres w formacie: nazwa@domena.pl"
+    }
+    if (!password) {
+      errors.password = "Podaj haslo (minimum 8 znakow)"
+    } else if (password.length < 8) {
+      errors.password = "Haslo jest za krotkie. Wpisz co najmniej 8 znakow"
+    }
+    if (!confirmPassword) {
+      errors.confirmPassword = "Wpisz haslo ponownie w celu potwierdzenia"
+    } else if (password !== confirmPassword) {
+      errors.confirmPassword = "Hasla nie sa identyczne. Upewnij sie, ze oba pola zawieraja to samo haslo"
+    }
+
+    setFieldErrors(errors)
+    return Object.keys(errors).length === 0
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
 
-    if (password !== confirmPassword) {
-      setError("Hasla nie sa identyczne")
-      return
-    }
-
-    if (password.length < 8) {
-      setError("Haslo musi miec co najmniej 8 znakow")
+    if (!validateFields()) {
       return
     }
 
@@ -121,7 +188,7 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
       })
 
       if (result.error) {
-        setError(result.error.message || "Nie udalo sie utworzyc konta")
+        setError(sanitizeAuthError(result.error.message, "Nie udalo sie utworzyc konta"))
       } else {
         // After signup, create salon subscription with selected plan
         if (selectedPlan) {
@@ -140,6 +207,7 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
           }
         }
 
+        clearSavedForm()
         setShowVerificationMessage(true)
       }
     } catch {
@@ -194,7 +262,7 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
           <Button
             className="w-full"
             onClick={() => {
-              router.push("/dashboard")
+              router.replace("/dashboard")
               router.refresh()
             }}
           >
@@ -467,7 +535,15 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
         <CardDescription>Wypelnij dane, aby rozpoczac</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col items-center">
-        <form onSubmit={handleSubmit} className="space-y-4 w-full max-w-sm">
+        {wasRecovered && (
+          <div className="w-full max-w-sm">
+            <FormRecoveryBanner
+              onRestore={handleRestoreForm}
+              onDismiss={clearSavedForm}
+            />
+          </div>
+        )}
+        <form onSubmit={handleSubmit} noValidate className="space-y-4 w-full max-w-sm">
           <div className="space-y-2">
             <Label htmlFor="name">Imie i nazwisko</Label>
             <Input
@@ -475,10 +551,17 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
               type="text"
               placeholder="Jan Kowalski"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value)
+                clearFieldError("name")
+              }}
               required
+              aria-invalid={!!fieldErrors.name}
               disabled={isPending}
             />
+            {fieldErrors.name && (
+              <p className="text-sm text-destructive">{fieldErrors.name}</p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
@@ -487,10 +570,17 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
               type="email"
               placeholder="jan@example.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value)
+                clearFieldError("email")
+              }}
               required
+              aria-invalid={!!fieldErrors.email}
               disabled={isPending}
             />
+            {fieldErrors.email && (
+              <p className="text-sm text-destructive">{fieldErrors.email}</p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">Haslo</Label>
@@ -499,10 +589,17 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
               type="password"
               placeholder="Minimum 8 znakow"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value)
+                clearFieldError("password")
+              }}
               required
+              aria-invalid={!!fieldErrors.password}
               disabled={isPending}
             />
+            {fieldErrors.password && (
+              <p className="text-sm text-destructive">{fieldErrors.password}</p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="confirmPassword">Powtorz haslo</Label>
@@ -511,10 +608,17 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
               type="password"
               placeholder="Powtorz haslo"
               value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+              onChange={(e) => {
+                setConfirmPassword(e.target.value)
+                clearFieldError("confirmPassword")
+              }}
               required
+              aria-invalid={!!fieldErrors.confirmPassword}
               disabled={isPending}
             />
+            {fieldErrors.confirmPassword && (
+              <p className="text-sm text-destructive">{fieldErrors.confirmPassword}</p>
+            )}
           </div>
           {error && (
             <p className="text-sm text-destructive">{error}</p>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock, Cake, Package, BarChart3, Percent, Ticket, Gift, DollarSign, Printer, FileText, Crown, Bot, Lightbulb, PenTool, Timer, AlertTriangle, Loader2, RefreshCw, ExternalLink, Sunrise, CalendarDays, ShieldAlert, Zap, Info, CalendarRange, TrendingUp, Megaphone, ChevronDown, ChevronUp } from "lucide-react";
+import { Lock, Calendar, Users, Scissors, CalendarPlus, Contact, CreditCard, Receipt, MessageSquare, Image, Star, Clock, Cake, Package, BarChart3, Percent, Ticket, Gift, DollarSign, Printer, FileText, Crown, Bot, Lightbulb, PenTool, Timer, AlertTriangle, Loader2, RefreshCw, ExternalLink, Sunrise, CalendarDays, ShieldAlert, Zap, Info, CalendarRange, TrendingUp, Megaphone, ChevronDown, ChevronUp, XCircle, UserCheck, UserX, ArrowRight } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -577,9 +577,129 @@ function WeeklyRecommendations() {
   );
 }
 
+// ────────────────────────────────────────────────────────────
+// Dashboard Stats Types
+// ────────────────────────────────────────────────────────────
+
+const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+
+interface TodayAppointment {
+  id: string;
+  startTime: string;
+  endTime: string;
+  status: string;
+  notes: string | null;
+  clientName: string;
+  clientPhone: string | null;
+  employeeId: string;
+  employeeName: string;
+  employeeColor: string | null;
+  serviceName: string;
+  servicePrice: number;
+  serviceDuration: number;
+}
+
+interface EmployeeToday {
+  id: string;
+  firstName: string;
+  lastName: string;
+  color: string | null;
+  role: string;
+  isWorkingToday: boolean;
+  workStart: string | null;
+  workEnd: string | null;
+  appointmentCount: number;
+}
+
+interface CancellationStats {
+  totalThisMonth: number;
+  cancelledThisMonth: number;
+  noShowThisMonth: number;
+  cancellationRate: number;
+}
+
+interface Last30DaysStats {
+  totalAppointments: number;
+  completedAppointments: number;
+  cancelledAppointments: number;
+  revenue: number;
+  avgPerDay: number;
+  newClients: number;
+}
+
+interface DashboardStats {
+  todayAppointments: TodayAppointment[];
+  employeesToday: EmployeeToday[];
+  cancellationStats: CancellationStats;
+  last30Days: Last30DaysStats;
+}
+
+// ────────────────────────────────────────────────────────────
+// Helper: format time from ISO string
+// ────────────────────────────────────────────────────────────
+
+function formatTime(isoString: string): string {
+  const d = new Date(isoString);
+  return d.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+}
+
+// ────────────────────────────────────────────────────────────
+// Status badge color mapping
+// ────────────────────────────────────────────────────────────
+
+const STATUS_STYLES: Record<string, string> = {
+  scheduled: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
+  confirmed: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
+  completed: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+  cancelled: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
+  no_show: "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  scheduled: "Zaplanowana",
+  confirmed: "Potwierdzona",
+  completed: "Zakonczona",
+  cancelled: "Anulowana",
+  no_show: "Nieobecnosc",
+};
+
 export default function DashboardPage() {
   const { data: session, isPending } = useSession();
   const { isProPlan, isTrialing, trialDaysRemaining } = useSubscription();
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState<string | null>(null);
+
+  // Fetch dashboard stats when session is available
+  useEffect(() => {
+    async function fetchStats() {
+      try {
+        setStatsLoading(true);
+        setStatsError(null);
+        const res = await fetch(
+          `/api/dashboard/stats?salonId=${DEMO_SALON_ID}`
+        );
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: "Blad serwera" }));
+          throw new Error(err.error || "Nie udalo sie pobrac statystyk");
+        }
+        const json = await res.json();
+        if (json.success) {
+          setStats(json.data);
+        }
+      } catch (e) {
+        setStatsError(
+          e instanceof Error ? e.message : "Wystapil nieoczekiwany blad"
+        );
+      } finally {
+        setStatsLoading(false);
+      }
+    }
+
+    if (session) {
+      fetchStats();
+    }
+  }, [session]);
 
   if (isPending) {
     return (
@@ -655,12 +775,345 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Daily AI Recommendations - shown for Pro plan users */}
+      {/* Daily AI Recommendations - shown for Pro plan users (Feature #32) */}
       {isProPlan && <DailyRecommendations />}
 
-      {/* Weekly AI Recommendations - shown for Pro plan users */}
+      {/* Weekly AI Recommendations - shown for Pro plan users (Feature #32) */}
       {isProPlan && <WeeklyRecommendations />}
 
+      {/* ─── Quick Actions (Feature #29) ──────────────────────── */}
+      <Card className="mb-6" data-testid="quick-actions">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Zap className="h-5 w-5 text-primary" />
+            Szybkie akcje
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-3">
+            <Button asChild>
+              <Link href="/dashboard/calendar">
+                <CalendarPlus className="h-4 w-4 mr-2" />
+                Nowa wizyta
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/clients">
+                <Contact className="h-4 w-4 mr-2" />
+                Dodaj klienta
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/services">
+                <Scissors className="h-4 w-4 mr-2" />
+                Zarzadzaj uslugami
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/employees">
+                <Users className="h-4 w-4 mr-2" />
+                Pracownicy
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/reports/revenue">
+                <BarChart3 className="h-4 w-4 mr-2" />
+                Raporty
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/products">
+                <Package className="h-4 w-4 mr-2" />
+                Magazyn
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ─── Statistics Row: 30-day stats + Cancellation stats (Features #30, #31) ─── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* Last 30 Days Statistics (Feature #31) */}
+        <Card data-testid="last-30-days-stats">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <TrendingUp className="h-5 w-5 text-primary" />
+              Statystyki - ostatnie 30 dni
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {statsLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
+                <span className="text-sm text-muted-foreground">Ladowanie...</span>
+              </div>
+            ) : statsError ? (
+              <p className="text-sm text-destructive py-4">{statsError}</p>
+            ) : stats ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <div className="text-2xl font-bold text-primary">
+                    {stats.last30Days.totalAppointments}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">Wszystkich wizyt</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                    {stats.last30Days.completedAppointments}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">Zrealizowanych</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                    {stats.last30Days.revenue.toFixed(0)} PLN
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">Przychod</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <div className="text-2xl font-bold">
+                    {stats.last30Days.avgPerDay}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">Sr. wizyt/dzien</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                    {stats.last30Days.newClients}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">Nowych klientow</div>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-muted/50">
+                  <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+                    {stats.last30Days.cancelledAppointments}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">Anulowanych</div>
+                </div>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        {/* Cancellation Statistics (Feature #30) */}
+        <Card data-testid="cancellation-stats">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <XCircle className="h-5 w-5 text-red-500" />
+              Statystyki anulacji - ten miesiac
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {statsLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
+                <span className="text-sm text-muted-foreground">Ladowanie...</span>
+              </div>
+            ) : statsError ? (
+              <p className="text-sm text-destructive py-4">{statsError}</p>
+            ) : stats ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="text-center p-3 rounded-lg bg-muted/50">
+                    <div className="text-2xl font-bold">
+                      {stats.cancellationStats.totalThisMonth}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Wizyt ogolem</div>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-muted/50">
+                    <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+                      {stats.cancellationStats.cancelledThisMonth}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Anulowanych</div>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-muted/50">
+                    <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
+                      {stats.cancellationStats.noShowThisMonth}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Nieobecnosci</div>
+                  </div>
+                  <div className="text-center p-3 rounded-lg bg-muted/50">
+                    <div className={`text-2xl font-bold ${
+                      stats.cancellationStats.cancellationRate > 10
+                        ? "text-red-600 dark:text-red-400"
+                        : stats.cancellationStats.cancellationRate > 5
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-green-600 dark:text-green-400"
+                    }`}>
+                      {stats.cancellationStats.cancellationRate}%
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Wskaznik anulacji</div>
+                  </div>
+                </div>
+                <div className="text-center">
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/dashboard/reports/cancellations">
+                      Szczegolowy raport
+                      <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                    </Link>
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ─── Today's Appointments (Feature #27) ──────────────── */}
+      <Card className="mb-6" data-testid="today-appointments">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <Calendar className="h-5 w-5 text-primary" />
+              Dzisiejsze wizyty
+              {stats && (
+                <Badge variant="secondary" className="text-xs">
+                  {stats.todayAppointments.length}
+                </Badge>
+              )}
+            </CardTitle>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/dashboard/calendar">
+                Otworz kalendarz
+                <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+              </Link>
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {statsLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
+              <span className="text-sm text-muted-foreground">Ladowanie wizyt...</span>
+            </div>
+          ) : statsError ? (
+            <p className="text-sm text-destructive py-4">{statsError}</p>
+          ) : stats && stats.todayAppointments.length === 0 ? (
+            <div className="text-center py-8">
+              <Calendar className="h-10 w-10 text-muted-foreground/40 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">
+                Brak zaplanowanych wizyt na dzisiaj
+              </p>
+            </div>
+          ) : stats ? (
+            <div className="space-y-2">
+              {stats.todayAppointments.map((appt) => (
+                <div
+                  key={appt.id}
+                  className="flex items-center gap-3 p-3 rounded-lg border bg-card hover:bg-muted/30 transition-colors"
+                >
+                  {/* Employee color indicator */}
+                  <div
+                    className="w-1 h-10 rounded-full shrink-0"
+                    style={{ backgroundColor: appt.employeeColor || "#3b82f6" }}
+                  />
+                  {/* Time */}
+                  <div className="shrink-0 text-center min-w-[60px]">
+                    <div className="text-sm font-semibold">
+                      {formatTime(appt.startTime)}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">
+                      {appt.serviceDuration} min
+                    </div>
+                  </div>
+                  {/* Details */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm truncate">
+                        {appt.clientName}
+                      </span>
+                      <Badge
+                        variant="secondary"
+                        className={`text-[10px] px-1.5 py-0 ${STATUS_STYLES[appt.status] || ""}`}
+                      >
+                        {STATUS_LABELS[appt.status] || appt.status}
+                      </Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {appt.serviceName} - {appt.employeeName}
+                    </div>
+                  </div>
+                  {/* Price */}
+                  <div className="shrink-0 text-right">
+                    <div className="text-sm font-semibold">
+                      {appt.servicePrice.toFixed(0)} PLN
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {/* ─── Employees Working Today (Feature #28) ───────────── */}
+      <Card className="mb-6" data-testid="employees-today">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Users className="h-5 w-5 text-primary" />
+            Pracownicy dzisiaj
+            {stats && (
+              <Badge variant="secondary" className="text-xs">
+                {stats.employeesToday.filter((e) => e.isWorkingToday).length} / {stats.employeesToday.length}
+              </Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {statsLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
+              <span className="text-sm text-muted-foreground">Ladowanie...</span>
+            </div>
+          ) : statsError ? (
+            <p className="text-sm text-destructive py-4">{statsError}</p>
+          ) : stats && stats.employeesToday.length === 0 ? (
+            <div className="text-center py-6">
+              <Users className="h-10 w-10 text-muted-foreground/40 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">
+                Brak pracownikow w systemie
+              </p>
+            </div>
+          ) : stats ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {stats.employeesToday.map((emp) => (
+                <div
+                  key={emp.id}
+                  className={`flex items-center gap-3 p-3 rounded-lg border transition-colors ${
+                    emp.isWorkingToday
+                      ? "bg-green-50/50 border-green-200 dark:bg-green-950/10 dark:border-green-800"
+                      : "bg-muted/30 border-border opacity-60"
+                  }`}
+                >
+                  {/* Color dot */}
+                  <div
+                    className="w-3 h-3 rounded-full shrink-0"
+                    style={{ backgroundColor: emp.color || "#3b82f6" }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm truncate">
+                      {emp.firstName} {emp.lastName}
+                    </div>
+                    {emp.isWorkingToday ? (
+                      <div className="text-xs text-muted-foreground flex items-center gap-1">
+                        <UserCheck className="h-3 w-3 text-green-600" />
+                        {emp.workStart} - {emp.workEnd}
+                        {emp.appointmentCount > 0 && (
+                          <span className="ml-1">({emp.appointmentCount} wizyt)</span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-muted-foreground flex items-center gap-1">
+                        <UserX className="h-3 w-3" />
+                        Wolne
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      {/* ─── Navigation Cards (existing) ─────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <div className="p-6 border border-border rounded-lg">
           <div className="flex items-center gap-2 mb-2">

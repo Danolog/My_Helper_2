@@ -139,7 +139,7 @@ export default function PricingPage() {
           throw new Error(data.error || "Unknown error");
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load plans");
+        setError("Nie udalo sie zaladowac planow cenowych. Sprobuj ponownie pozniej.");
       } finally {
         setLoading(false);
       }

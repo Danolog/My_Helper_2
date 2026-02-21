@@ -9,6 +9,7 @@ import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth-client";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
+import { getUserFriendlyMessage } from "@/lib/error-messages";
 import type { Components } from "react-markdown";
 
 const H1: React.FC<React.HTMLAttributes<HTMLHeadingElement>> = (props) => (
@@ -156,10 +157,10 @@ function CopyButton({ text }: { text: string }) {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      toast.success("Copied to clipboard");
+      toast.success("Skopiowano do schowka");
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error("Failed to copy");
+      toast.error("Nie udalo sie skopiowac tekstu");
     }
   };
 
@@ -193,7 +194,7 @@ function ChatContent() {
   const { data: session, isPending } = useSession();
   const { messages, sendMessage, status, error, setMessages } = useChat({
     onError: (err) => {
-      toast.error(err.message || "Failed to send message");
+      toast.error(getUserFriendlyMessage(err, "Nie udalo sie wyslac wiadomosci. Sprobuj ponownie."));
     },
   });
   const [input, setInput] = useState("");
@@ -264,7 +265,7 @@ function ChatContent() {
         {error && (
           <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
             <p className="text-sm text-destructive">
-              Error: {error.message || "Something went wrong"}
+              {getUserFriendlyMessage(error, "Wystapil blad. Sprobuj ponownie.")}
             </p>
           </div>
         )}

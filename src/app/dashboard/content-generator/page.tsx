@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, PenTool, Instagram, Mail, FileText, ArrowRight, BookOpen } from "lucide-react";
+import { ArrowLeft, PenTool, Instagram, Mail, FileText, ArrowRight, BookOpen, CalendarClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 
@@ -70,6 +70,19 @@ function ContentGeneratorContent() {
           </h3>
           <p className="text-sm text-muted-foreground">
             Gotowe szablony do szybkiego tworzenia tresci
+          </p>
+        </Link>
+        <Link
+          href="/dashboard/content-generator/scheduled"
+          className="p-6 border rounded-lg space-y-3 hover:border-primary hover:shadow-md transition-all group cursor-pointer"
+        >
+          <CalendarClock className="h-8 w-8 text-primary" />
+          <h3 className="font-semibold flex items-center gap-2">
+            Zaplanowane posty
+            <ArrowRight className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Zarzadzaj zaplanowanymi publikacjami na social media
           </p>
         </Link>
       </div>

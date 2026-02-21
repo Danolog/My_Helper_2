@@ -2,13 +2,36 @@
 
 import { useMemo } from "react";
 import { CalendarEventComponent } from "./calendar-event";
-import type { CalendarEvent, Employee, TimeSlot, WorkSchedule } from "@/types/calendar";
+import type { CalendarEvent, Employee, TimeBlock, TimeSlot, WorkSchedule } from "@/types/calendar";
+
+// Labels and colors for time block types
+interface BlockTypeStyle {
+  label: string;
+  bg: string;
+  border: string;
+  stripe: string;
+}
+
+const BLOCK_TYPE_CONFIG: Record<string, BlockTypeStyle> = {
+  vacation: { label: "Urlop", bg: "rgba(249, 115, 22, 0.15)", border: "#f97316", stripe: "rgba(249, 115, 22, 0.25)" },
+  break: { label: "Przerwa", bg: "rgba(59, 130, 246, 0.15)", border: "#3b82f6", stripe: "rgba(59, 130, 246, 0.25)" },
+  personal: { label: "Osobiste", bg: "rgba(168, 85, 247, 0.15)", border: "#a855f7", stripe: "rgba(168, 85, 247, 0.25)" },
+  holiday: { label: "Swięto", bg: "rgba(239, 68, 68, 0.15)", border: "#ef4444", stripe: "rgba(239, 68, 68, 0.25)" },
+  other: { label: "Zablokowane", bg: "rgba(107, 114, 128, 0.15)", border: "#6b7280", stripe: "rgba(107, 114, 128, 0.25)" },
+};
+
+const DEFAULT_BLOCK_STYLE: BlockTypeStyle = BLOCK_TYPE_CONFIG["other"]!;
+
+function getBlockStyle(blockType: string): BlockTypeStyle {
+  return BLOCK_TYPE_CONFIG[blockType] ?? DEFAULT_BLOCK_STYLE;
+}
 
 interface TimeGridProps {
   date: Date;
   employees: Employee[];
   events: CalendarEvent[];
   workSchedules?: WorkSchedule[];
+  timeBlocks?: TimeBlock[];
   onDragStart: (event: CalendarEvent) => void;
   onDragEnd: () => void;
   onDrop: (employeeId: string, time: Date) => void;
@@ -27,6 +50,7 @@ export function TimeGrid({
   employees,
   events,
   workSchedules = [],
+  timeBlocks = [],
   onDragStart,
   onDragEnd,
   onDrop,
@@ -105,6 +129,44 @@ export function TimeGrid({
     return events.filter((event) => event.employeeId === employeeId);
   };
 
+  // Get time blocks for a specific employee
+  const getEmployeeTimeBlocks = (employeeId: string) => {
+    return timeBlocks.filter((block) => block.employeeId === employeeId);
+  };
+
+  // Check if a slot overlaps with any time block for an employee
+  const isBlockedByTimeBlock = (employeeId: string, slotTime: Date): boolean => {
+    const slotEnd = new Date(slotTime.getTime() + slotDuration * 60 * 1000);
+    return timeBlocks.some(
+      (block) =>
+        block.employeeId === employeeId &&
+        new Date(block.startTime) < slotEnd &&
+        new Date(block.endTime) > slotTime
+    );
+  };
+
+  // Calculate time block overlay position and height (same approach as events)
+  const getTimeBlockPosition = (block: TimeBlock) => {
+    const blockStart = new Date(block.startTime);
+    const blockEnd = new Date(block.endTime);
+    const dayStart = new Date(date);
+    dayStart.setHours(startHour, 0, 0, 0);
+    const dayEnd = new Date(date);
+    dayEnd.setHours(endHour, 0, 0, 0);
+
+    // Clamp to visible range so blocks spanning outside the grid still render correctly
+    const visibleStart = blockStart < dayStart ? dayStart : blockStart;
+    const visibleEnd = blockEnd > dayEnd ? dayEnd : blockEnd;
+
+    const minutesFromStart = (visibleStart.getTime() - dayStart.getTime()) / (1000 * 60);
+    const durationMinutes = (visibleEnd.getTime() - visibleStart.getTime()) / (1000 * 60);
+
+    const top = (minutesFromStart / slotDuration) * slotHeight;
+    const height = (durationMinutes / slotDuration) * slotHeight;
+
+    return { top, height };
+  };
+
   // Calculate event position
   const getEventPosition = (event: CalendarEvent) => {
     const eventStart = new Date(event.start);
@@ -174,6 +236,7 @@ export function TimeGrid({
         {/* Employee columns */}
         {employees.map((employee) => {
           const employeeEvents = getEmployeeEvents(employee.id);
+          const employeeBlocks = getEmployeeTimeBlocks(employee.id);
           const empDayOff = isDayOff(employee.id);
 
           return (
@@ -184,6 +247,9 @@ export function TimeGrid({
               {/* Time slots */}
               {timeSlots.map((slot, index) => {
                 const outsideHours = empDayOff || isOutsideWorkingHours(employee.id, slot.time);
+                const blocked = isBlockedByTimeBlock(employee.id, slot.time);
+                // Prevent drag-drop on both outside-hours and time-blocked slots
+                const isDropDisabled = outsideHours || blocked;
                 return (
                   <div
                     key={index}
@@ -191,18 +257,19 @@ export function TimeGrid({
                       border-b border-border last:border-b-0 relative
                       ${outsideHours
                         ? "bg-muted/40"
-                        : draggedEvent
+                        : draggedEvent && !blocked
                           ? "hover:bg-primary/10"
                           : ""
                       }
                       transition-colors
                     `}
                     style={{ height: slotHeight }}
-                    onDragOver={outsideHours ? undefined : handleDragOver}
-                    onDrop={outsideHours ? undefined : (e) => handleDrop(e, employee.id, slot)}
+                    onDragOver={isDropDisabled ? undefined : handleDragOver}
+                    onDrop={isDropDisabled ? undefined : (e) => handleDrop(e, employee.id, slot)}
                     data-employee-id={employee.id}
                     data-time={slot.time.toISOString()}
                     data-outside-hours={outsideHours ? "true" : undefined}
+                    data-time-blocked={blocked ? "true" : undefined}
                   >
                     {outsideHours && (
                       <div className="absolute inset-0 flex items-center justify-center">
@@ -219,13 +286,55 @@ export function TimeGrid({
                 );
               })}
 
+              {/* Time block overlays - rendered below events so events still show on top */}
+              {employeeBlocks.map((block) => {
+                const { top, height } = getTimeBlockPosition(block);
+                const config = getBlockStyle(block.blockType);
+                // Skip rendering if the block has no visible height (fully outside grid range)
+                if (height <= 0) return null;
+                return (
+                  <div
+                    key={`block-${block.id}`}
+                    className="absolute left-0 right-0 pointer-events-none z-[1]"
+                    style={{ top, height }}
+                    data-testid="time-block-overlay"
+                    data-block-type={block.blockType}
+                  >
+                    <div
+                      className="h-full mx-0.5 rounded-sm border-l-4 overflow-hidden"
+                      style={{
+                        backgroundColor: config.bg,
+                        borderLeftColor: config.border,
+                        backgroundImage: `repeating-linear-gradient(
+                          135deg,
+                          transparent,
+                          transparent 6px,
+                          ${config.stripe} 6px,
+                          ${config.stripe} 12px
+                        )`,
+                      }}
+                    >
+                      <div
+                        className="px-2 py-1 text-xs font-medium truncate"
+                        style={{ color: config.border }}
+                      >
+                        {config.label}
+                        {block.reason && (
+                          <span className="font-normal opacity-80"> - {block.reason}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
               {/* Events overlay */}
               {employeeEvents.map((event) => {
                 const { top } = getEventPosition(event);
                 return (
                   <div
                     key={event.id}
-                    className="absolute left-0 right-0"
+                    className="absolute left-0 right-0 z-[2]"
                     style={{ top }}
                   >
                     <CalendarEventComponent

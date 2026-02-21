@@ -70,7 +70,7 @@ export default function VerifyEmailPage() {
               <Button
                 className="w-full"
                 onClick={() => {
-                  router.push("/dashboard")
+                  router.replace("/dashboard")
                   router.refresh()
                 }}
               >

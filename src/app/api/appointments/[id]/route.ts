@@ -4,6 +4,7 @@ import { appointments, clients, employees, services, notifications, depositPayme
 import { eq, and, not, or, lte, gte } from "drizzle-orm";
 import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
 import { notifyWaitingList } from "@/lib/waiting-list";
+import { isValidUuid } from "@/lib/validations";
 
 // GET /api/appointments/[id] - Get a single appointment
 export async function GET(
@@ -12,6 +13,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid appointment ID format" },
+        { status: 400 }
+      );
+    }
 
     const result = await db.select({
       appointment: appointments,
@@ -61,6 +69,14 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid appointment ID format" },
+        { status: 400 }
+      );
+    }
+
     const body = await request.json();
     const { startTime, endTime, employeeId, clientId, serviceId, notes, status, depositAmount, depositPaid } = body;
 

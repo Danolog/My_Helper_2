@@ -226,7 +226,7 @@ export default function SubscriptionPage() {
         setAllPlans(map);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Wystapil blad");
+      setError("Nie udalo sie zaladowac informacji o subskrypcji. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
     }

@@ -20,6 +20,7 @@ import {
   AlertCircle,
   X,
   BookOpen,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -433,6 +434,9 @@ function NewslettersContent() {
   const [loadingSaved, setLoadingSaved] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<"create" | "saved">("create");
+  const [isEditingNewsletter, setIsEditingNewsletter] = useState(false);
+  const [editedSubject, setEditedSubject] = useState("");
+  const [editedContent, setEditedContent] = useState("");
 
   // Send dialog state
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
@@ -458,6 +462,9 @@ function NewslettersContent() {
     setLength("medium");
     setIncludeCallToAction(true);
     setGeneratedNewsletter(null);
+    setIsEditingNewsletter(false);
+    setEditedSubject("");
+    setEditedContent("");
   };
 
   // Load saved newsletters
@@ -510,6 +517,9 @@ function NewslettersContent() {
       }
 
       setGeneratedNewsletter(data);
+      setEditedSubject(data.subject);
+      setEditedContent(data.content);
+      setIsEditingNewsletter(false);
       toast.success("Newsletter wygenerowany pomyslnie!");
     } catch (error) {
       console.error("Error generating newsletter:", error);
@@ -524,18 +534,18 @@ function NewslettersContent() {
   const handleSave = async () => {
     if (!generatedNewsletter) return;
 
+    // Save the currently displayed (possibly edited) content
+    const subjectToSave = editedSubject || generatedNewsletter.subject;
+    const contentToSave = editedContent || generatedNewsletter.content;
+
     setIsSaving(true);
     try {
-      const response = await fetch("/api/ai/content/newsletter", {
+      const response = await fetch("/api/newsletters", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          topic: topic.trim(),
-          goals,
-          tone,
-          length,
-          includeCallToAction,
-          save: true,
+          subject: subjectToSave,
+          content: contentToSave,
         }),
       });
 
@@ -547,10 +557,14 @@ function NewslettersContent() {
       }
 
       if (data.savedId) {
+        // Apply edited values to the generated newsletter state
         setGeneratedNewsletter({
           ...generatedNewsletter,
+          subject: subjectToSave,
+          content: contentToSave,
           savedId: data.savedId,
         });
+        setIsEditingNewsletter(false);
         toast.success("Newsletter zapisany!");
         // Refresh saved list
         fetchSavedNewsletters();
@@ -565,7 +579,9 @@ function NewslettersContent() {
 
   const handleCopy = async () => {
     if (!generatedNewsletter) return;
-    const fullText = `Temat: ${generatedNewsletter.subject}\n\n${generatedNewsletter.content}`;
+    const subjectToCopy = editedSubject || generatedNewsletter.subject;
+    const contentToCopy = editedContent || generatedNewsletter.content;
+    const fullText = `Temat: ${subjectToCopy}\n\n${contentToCopy}`;
     try {
       await navigator.clipboard.writeText(fullText);
       setCopied(true);
@@ -573,6 +589,27 @@ function NewslettersContent() {
       setTimeout(() => setCopied(false), 2000);
     } catch {
       toast.error("Nie udalo sie skopiowac");
+    }
+  };
+
+  const handleToggleNewsletterEdit = () => {
+    if (!isEditingNewsletter && generatedNewsletter) {
+      setEditedSubject(editedSubject || generatedNewsletter.subject);
+      setEditedContent(editedContent || generatedNewsletter.content);
+    }
+    setIsEditingNewsletter(!isEditingNewsletter);
+  };
+
+  const handleSaveNewsletterEdit = () => {
+    if (generatedNewsletter) {
+      setGeneratedNewsletter({
+        ...generatedNewsletter,
+        subject: editedSubject,
+        content: editedContent,
+        wordCount: editedContent.split(/\s+/).filter(Boolean).length,
+      });
+      setIsEditingNewsletter(false);
+      toast.success("Zmiany zapisane!");
     }
   };
 
@@ -841,9 +878,22 @@ function NewslettersContent() {
                     <Label className="text-xs text-muted-foreground">
                       Temat emaila
                     </Label>
-                    <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 font-medium">
-                      {generatedNewsletter.subject}
-                    </div>
+                    {isEditingNewsletter ? (
+                      <input
+                        type="text"
+                        value={editedSubject}
+                        onChange={(e) => setEditedSubject(e.target.value)}
+                        className="w-full bg-primary/5 border border-primary/40 rounded-lg p-3 font-medium text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        data-testid="edit-newsletter-subject"
+                      />
+                    ) : (
+                      <div
+                        className="bg-primary/5 border border-primary/20 rounded-lg p-3 font-medium cursor-pointer hover:border-primary/50 transition-colors"
+                        onClick={handleToggleNewsletterEdit}
+                      >
+                        {generatedNewsletter.subject}
+                      </div>
+                    )}
                   </div>
 
                   {/* Content */}
@@ -851,9 +901,56 @@ function NewslettersContent() {
                     <Label className="text-xs text-muted-foreground">
                       Tresc newslettera
                     </Label>
-                    <div className="bg-muted/50 rounded-lg p-4 whitespace-pre-wrap text-sm leading-relaxed border max-h-[400px] overflow-y-auto">
-                      {generatedNewsletter.content}
-                    </div>
+                    {isEditingNewsletter ? (
+                      <div className="space-y-2">
+                        <Textarea
+                          value={editedContent}
+                          onChange={(e) => setEditedContent(e.target.value)}
+                          rows={12}
+                          className="text-sm leading-relaxed resize-y min-h-[200px]"
+                          data-testid="edit-newsletter-content"
+                        />
+                        <div className="flex items-center justify-between">
+                          <Badge variant="secondary">
+                            {editedContent.split(/\s+/).filter(Boolean).length} slow
+                          </Badge>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setEditedSubject(generatedNewsletter.subject);
+                                setEditedContent(generatedNewsletter.content);
+                                setIsEditingNewsletter(false);
+                              }}
+                            >
+                              Anuluj
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={handleSaveNewsletterEdit}
+                            >
+                              <Check className="h-3.5 w-3.5 mr-1" />
+                              Zapisz zmiany
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        className="bg-muted/50 rounded-lg p-4 whitespace-pre-wrap text-sm leading-relaxed border max-h-[400px] overflow-y-auto cursor-pointer hover:border-primary/50 transition-colors group relative"
+                        onClick={handleToggleNewsletterEdit}
+                        data-testid="newsletter-content-display"
+                      >
+                        {generatedNewsletter.content}
+                        <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Badge variant="secondary" className="text-xs">
+                            <Pencil className="h-3 w-3 mr-1" />
+                            Kliknij aby edytowac
+                          </Badge>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}
@@ -874,6 +971,13 @@ function NewslettersContent() {
                           Kopiuj
                         </>
                       )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={handleToggleNewsletterEdit}
+                    >
+                      <Pencil className="h-4 w-4 mr-2" />
+                      Edytuj
                     </Button>
                     {!generatedNewsletter.savedId && (
                       <Button

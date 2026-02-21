@@ -85,4 +85,15 @@ export interface WorkSchedule {
   createdAt: Date;
 }
 
+export interface TimeBlock {
+  id: string;
+  employeeId: string;
+  startTime: Date;
+  endTime: Date;
+  blockType: "break" | "vacation" | "personal" | "holiday" | "other";
+  reason: string | null;
+  createdAt: Date;
+  employee?: Employee | null;
+}
+
 export type CalendarView = "day" | "week" | "month";

@@ -7,6 +7,22 @@ export const auth = betterAuth({
     provider: "pg",
   }),
   trustedOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"],
+  session: {
+    /**
+     * Session expires after 15 minutes of inactivity.
+     * Per spec: "15 minut bezczynnosci" (15 minutes of inactivity).
+     * updateAge: 0 means every request refreshes the session expiration,
+     * so the 15-minute window resets on each authenticated request.
+     */
+    expiresIn: 15 * 60, // 15 minutes in seconds
+    updateAge: 0, // Refresh session expiration on every request
+  },
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID || "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+    },
+  },
   user: {
     additionalFields: {
       phone: {
@@ -23,6 +39,8 @@ export const auth = betterAuth({
   },
   emailAndPassword: {
     enabled: true,
+    minPasswordLength: 8, // Minimum 8 characters per spec
+    requireEmailVerification: true,
     sendResetPassword: async ({ user, url }) => {
       // Log password reset URL to terminal (no email integration yet)
       // eslint-disable-next-line no-console

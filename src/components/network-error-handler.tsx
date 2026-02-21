@@ -1,6 +1,6 @@
 "use client";
 
-import { WifiOff, RefreshCw, AlertTriangle } from "lucide-react";
+import { WifiOff, RefreshCw, AlertTriangle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,11 +19,14 @@ interface NetworkErrorProps {
   isRetrying?: boolean;
   /** Whether the error is specifically a network error */
   isNetworkError?: boolean;
+  /** Whether the error is specifically a timeout error */
+  isTimeout?: boolean;
 }
 
 /**
  * Inline error component shown when a network request fails.
  * Displays the error message with a retry button.
+ * Distinguishes between timeout, network, and general errors.
  * Can be used in place of content that failed to load.
  */
 export function NetworkErrorHandler({
@@ -31,16 +34,29 @@ export function NetworkErrorHandler({
   onRetry,
   isRetrying = false,
   isNetworkError = true,
+  isTimeout = false,
 }: NetworkErrorProps) {
-  const defaultMessage = isNetworkError
-    ? "Brak polaczenia z serwerem. Sprawdz polaczenie internetowe i sprobuj ponownie."
-    : "Wystapil blad podczas ladowania danych. Sprobuj ponownie.";
+  const defaultMessage = isTimeout
+    ? "Serwer nie odpowiedzial w wymaganym czasie. Sprobuj ponownie pozniej."
+    : isNetworkError
+      ? "Brak polaczenia z serwerem. Sprawdz polaczenie internetowe i sprobuj ponownie."
+      : "Wystapil blad podczas ladowania danych. Sprobuj ponownie.";
+
+  const title = isTimeout
+    ? "Przekroczony czas oczekiwania"
+    : isNetworkError
+      ? "Brak polaczenia"
+      : "Blad ladowania";
 
   return (
     <Card className="border-destructive/50 bg-destructive/5 max-w-lg mx-auto my-8">
       <CardHeader className="text-center pb-2">
         <div className="flex justify-center mb-3">
-          {isNetworkError ? (
+          {isTimeout ? (
+            <div className="rounded-full bg-orange-500/10 p-3">
+              <Clock className="h-8 w-8 text-orange-500" />
+            </div>
+          ) : isNetworkError ? (
             <div className="rounded-full bg-destructive/10 p-3">
               <WifiOff className="h-8 w-8 text-destructive" />
             </div>
@@ -50,9 +66,7 @@ export function NetworkErrorHandler({
             </div>
           )}
         </div>
-        <CardTitle className="text-lg">
-          {isNetworkError ? "Brak polaczenia" : "Blad ladowania"}
-        </CardTitle>
+        <CardTitle className="text-lg">{title}</CardTitle>
       </CardHeader>
       <CardContent className="text-center">
         <p className="text-sm text-muted-foreground">

@@ -1,4 +1,4 @@
-import { isNetworkError } from "@/hooks/use-network-status";
+import { isNetworkError, isTimeoutError } from "@/hooks/use-network-status";
 
 interface FetchWithRetryOptions extends RequestInit {
   /** Maximum number of retry attempts (default: 2) */
@@ -13,6 +13,7 @@ interface FetchResult<T> {
   data: T | null;
   error: string | null;
   isNetworkError: boolean;
+  isTimeout?: boolean;
   retry: () => Promise<FetchResult<T>>;
 }
 
@@ -82,15 +83,19 @@ export async function fetchWithRetry<T = unknown>(
   }
 
   const networkErr = isNetworkError(lastError);
+  const timeoutErr = isTimeoutError(lastError);
 
   return {
     data: null,
-    error: networkErr
-      ? "Brak polaczenia z serwerem. Sprawdz polaczenie internetowe i sprobuj ponownie."
-      : lastError instanceof Error
-        ? lastError.message
-        : "Wystapil nieznany blad",
+    error: timeoutErr
+      ? "Serwer nie odpowiedzial w wymaganym czasie. Sprobuj ponownie pozniej."
+      : networkErr
+        ? "Brak polaczenia z serwerem. Sprawdz polaczenie internetowe i sprobuj ponownie."
+        : lastError instanceof Error
+          ? lastError.message
+          : "Wystapil nieznany blad",
     isNetworkError: networkErr,
+    isTimeout: timeoutErr,
     retry: () => fetchWithRetry<T>(url, options),
   };
 }
@@ -98,16 +103,28 @@ export async function fetchWithRetry<T = unknown>(
 /**
  * Returns a user-friendly error message for network failures.
  * Use this in catch blocks of existing fetch calls.
+ * Distinguishes between timeout errors and other network errors.
  */
 export function getNetworkErrorMessage(error: unknown): {
   message: string;
   isNetwork: boolean;
+  isTimeout: boolean;
 } {
+  if (isTimeoutError(error)) {
+    return {
+      message:
+        "Serwer nie odpowiedzial w wymaganym czasie. Sprobuj ponownie pozniej.",
+      isNetwork: true,
+      isTimeout: true,
+    };
+  }
+
   if (isNetworkError(error)) {
     return {
       message:
         "Brak polaczenia z serwerem. Sprawdz polaczenie internetowe i sprobuj ponownie.",
       isNetwork: true,
+      isTimeout: false,
     };
   }
 
@@ -115,5 +132,6 @@ export function getNetworkErrorMessage(error: unknown): {
     message:
       error instanceof Error ? error.message : "Wystapil nieznany blad",
     isNetwork: false,
+    isTimeout: false,
   };
 }

@@ -51,6 +51,9 @@ import {
   Ticket,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useTabSync } from "@/hooks/use-tab-sync";
+import { useFormRecovery } from "@/hooks/use-form-recovery";
+import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 
 interface Promotion {
   id: string;
@@ -146,6 +149,75 @@ export default function PromotionsPage() {
   const [saving, setSaving] = useState(false);
   const [formValueError, setFormValueError] = useState("");
 
+  // Form recovery for promotion creation dialog
+  const {
+    wasRecovered: promoWasRecovered,
+    getRecoveredState: getPromoRecoveredState,
+    saveFormState: savePromoFormState,
+    clearSavedForm: clearPromoSavedForm,
+    setDirty: setPromoDirty,
+  } = useFormRecovery<{
+    name: string;
+    type: string;
+    value: string;
+    startDate: string;
+    endDate: string;
+    isActive: boolean;
+    selectedServiceIds: string[];
+    happyHoursStart: string;
+    happyHoursEnd: string;
+    happyHoursDays: number[];
+  }>({
+    storageKey: "add-promotion-form",
+    warnOnUnload: true,
+  });
+
+  // Auto-open dialog when recovered data is found
+  useEffect(() => {
+    if (promoWasRecovered) {
+      setDialogOpen(true);
+    }
+  }, [promoWasRecovered]);
+
+  // Save promotion form state on changes (debounced inside hook)
+  useEffect(() => {
+    if (dialogOpen && !editingPromotion) {
+      const hasData = !!formName || !!formValue || !!formStartDate || !!formEndDate;
+      if (hasData) {
+        savePromoFormState({
+          name: formName,
+          type: formType,
+          value: formValue,
+          startDate: formStartDate,
+          endDate: formEndDate,
+          isActive: formIsActive,
+          selectedServiceIds: formSelectedServiceIds,
+          happyHoursStart: formHappyHoursStart,
+          happyHoursEnd: formHappyHoursEnd,
+          happyHoursDays: formHappyHoursDays,
+        });
+      }
+      setPromoDirty(hasData);
+    }
+  }, [formName, formType, formValue, formStartDate, formEndDate, formIsActive, formSelectedServiceIds, formHappyHoursStart, formHappyHoursEnd, formHappyHoursDays, dialogOpen, editingPromotion, savePromoFormState, setPromoDirty]);
+
+  // Recovery handler: restores promotion form fields from localStorage
+  const handleRestorePromoForm = () => {
+    const saved = getPromoRecoveredState();
+    if (saved) {
+      setFormName(saved.name || "");
+      setFormType(saved.type || "percentage");
+      setFormValue(saved.value || "");
+      setFormStartDate(saved.startDate || "");
+      setFormEndDate(saved.endDate || "");
+      setFormIsActive(saved.isActive !== undefined ? saved.isActive : true);
+      setFormSelectedServiceIds(saved.selectedServiceIds || []);
+      setFormHappyHoursStart(saved.happyHoursStart || "14:00");
+      setFormHappyHoursEnd(saved.happyHoursEnd || "16:00");
+      setFormHappyHoursDays(saved.happyHoursDays || [1, 2, 3, 4, 5]);
+    }
+  };
+
   // Delete dialog state
   const [deleteTarget, setDeleteTarget] = useState<Promotion | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -185,6 +257,9 @@ export default function PromotionsPage() {
       fetchServices();
     }
   }, [session, fetchPromotions, fetchServices]);
+
+  // Cross-tab sync: refetch when another tab modifies promotions
+  const { notifyChange: notifyPromotionsChanged } = useTabSync("promotions", fetchPromotions);
 
   const openCreateDialog = () => {
     setEditingPromotion(null);
@@ -276,21 +351,21 @@ export default function PromotionsPage() {
 
   const validateValueField = (value: string, type: string): string => {
     if (!value || value.trim() === "") {
-      return "Wartosc rabatu jest wymagana";
+      return "Podaj wartosc rabatu, np. 10 (dla 10% lub 10 PLN)";
     }
     const numVal = parseFloat(value);
     if (isNaN(numVal)) {
-      return "Podaj prawidlowa wartosc liczbowa";
+      return "Wartosc musi byc liczba. Wpisz np. 10 lub 25.50";
     }
     if (numVal < 0) {
-      return "Wartosc nie moze byc ujemna";
+      return "Wartosc rabatu nie moze byc ujemna. Wpisz liczbe wieksza od 0";
     }
     if (numVal === 0) {
-      return "Wartosc musi byc wieksza od zera";
+      return "Wartosc musi byc wieksza od zera. Wpisz np. 5, 10 lub 20";
     }
     const isPercentageType = type === "percentage" || type === "buy2get1" || type === "happy_hours" || type === "first_visit";
     if (isPercentageType && numVal > 100) {
-      return "Rabat procentowy nie moze przekraczac 100%";
+      return "Rabat procentowy nie moze przekraczac 100%. Wpisz wartosc od 1 do 100";
     }
     return "";
   };
@@ -307,7 +382,7 @@ export default function PromotionsPage() {
 
   const handleSave = async () => {
     if (!formName.trim()) {
-      toast.error("Nazwa promocji jest wymagana");
+      toast.error("Wpisz nazwe promocji, np. Rabat letni");
       return;
     }
     const valueError = validateValueField(formValue, formType);
@@ -396,6 +471,7 @@ export default function PromotionsPage() {
         );
         setDialogOpen(false);
         fetchPromotions();
+        notifyPromotionsChanged();
       } else {
         toast.error(data.error || "Nie udalo sie zapisac promocji");
       }
@@ -418,6 +494,7 @@ export default function PromotionsPage() {
         toast.success(`Promocja "${deleteTarget.name}" usunieta`);
         setDeleteTarget(null);
         fetchPromotions();
+        notifyPromotionsChanged();
       } else {
         toast.error(data.error || "Nie udalo sie usunac promocji");
       }
@@ -443,6 +520,7 @@ export default function PromotionsPage() {
             : `Promocja "${promo.name}" dezaktywowana`
         );
         fetchPromotions();
+        notifyPromotionsChanged();
       } else {
         toast.error("Nie udalo sie zmienic statusu");
       }
@@ -780,6 +858,12 @@ export default function PromotionsPage() {
               {editingPromotion ? "Edytuj promocje" : "Nowa promocja"}
             </DialogTitle>
           </DialogHeader>
+          {promoWasRecovered && !editingPromotion && (
+            <FormRecoveryBanner
+              onRestore={handleRestorePromoForm}
+              onDismiss={clearPromoSavedForm}
+            />
+          )}
           <div className="space-y-4 py-4">
             <div>
               <Label htmlFor="promo-name">Nazwa promocji *</Label>

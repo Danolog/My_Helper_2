@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Plus, X, Loader2, Pencil, Check, Filter, Users, Scissors, SlidersHorizontal, Link2, Eye, EyeOff, FolderPlus, FolderOpen, Folder, MoreVertical, FolderMinus } from "lucide-react";
+import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Plus, X, Loader2, Pencil, Check, Filter, Users, Scissors, SlidersHorizontal, Link2, Eye, EyeOff, FolderPlus, FolderOpen, Folder, FolderMinus, Sparkles, Copy, Instagram, Facebook, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,7 +22,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
+import { toast } from "sonner";
+
+type CaptionPlatform = "instagram" | "facebook" | "tiktok";
 
 const SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -229,6 +233,92 @@ export default function GalleryPage() {
   const [linkUploading, setLinkUploading] = useState(false);
   const linkInputRef = useRef<HTMLInputElement>(null);
 
+  // Generate post caption state
+  const [captionDialogOpen, setCaptionDialogOpen] = useState(false);
+  const [captionPhoto, setCaptionPhoto] = useState<GalleryPhoto | null>(null);
+  const [captionPlatform, setCaptionPlatform] = useState<CaptionPlatform>("instagram");
+  const [captionLoading, setCaptionLoading] = useState(false);
+  const [generatedCaption, setGeneratedCaption] = useState<string | null>(null);
+  const [captionHashtags, setCaptionHashtags] = useState<string[]>([]);
+  const [captionCopied, setCaptionCopied] = useState(false);
+  const [isCaptionEditing, setIsCaptionEditing] = useState(false);
+  const [editedCaption, setEditedCaption] = useState("");
+
+  const openCaptionDialog = (photo: GalleryPhoto) => {
+    setCaptionPhoto(photo);
+    setCaptionDialogOpen(true);
+    setGeneratedCaption(null);
+    setCaptionHashtags([]);
+    setCaptionCopied(false);
+    setCaptionPlatform("instagram");
+    setIsCaptionEditing(false);
+    setEditedCaption("");
+  };
+
+  const handleGenerateCaption = async () => {
+    if (!captionPhoto) return;
+    setCaptionLoading(true);
+    setGeneratedCaption(null);
+    setCaptionHashtags([]);
+    setCaptionCopied(false);
+
+    try {
+      const res = await fetch("/api/ai/content/photo-caption", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          photoId: captionPhoto.id,
+          platform: captionPlatform,
+          includeEmoji: true,
+          includeHashtags: true,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setGeneratedCaption(data.caption);
+        setEditedCaption(data.caption);
+        setIsCaptionEditing(false);
+        setCaptionHashtags(data.hashtags || []);
+      } else {
+        toast.error(data.error || "Blad podczas generowania podpisu");
+      }
+    } catch (error) {
+      console.error("Caption generation error:", error);
+      toast.error("Blad podczas generowania podpisu");
+    } finally {
+      setCaptionLoading(false);
+    }
+  };
+
+  const handleCopyCaption = async () => {
+    if (!generatedCaption) return;
+    const textToCopy = editedCaption || generatedCaption;
+    try {
+      await navigator.clipboard.writeText(textToCopy);
+      setCaptionCopied(true);
+      toast.success("Skopiowano do schowka!");
+      setTimeout(() => setCaptionCopied(false), 2000);
+    } catch {
+      toast.error("Nie udalo sie skopiowac");
+    }
+  };
+
+  const handleToggleCaptionEdit = () => {
+    if (!isCaptionEditing && generatedCaption) {
+      setEditedCaption(editedCaption || generatedCaption);
+    }
+    setIsCaptionEditing(!isCaptionEditing);
+  };
+
+  const handleSaveCaptionEdit = () => {
+    if (generatedCaption) {
+      setGeneratedCaption(editedCaption);
+      setIsCaptionEditing(false);
+      toast.success("Zmiany zapisane!");
+    }
+  };
+
   const fetchPhotos = useCallback(async (employeeFilter?: string, serviceFilter?: string) => {
     try {
       let url = `/api/gallery?salonId=${SALON_ID}`;
@@ -324,11 +414,11 @@ export default function GalleryPage() {
         setNewAlbumCategory("");
         setCreateAlbumOpen(false);
       } else {
-        alert("Blad: " + data.error);
+        toast.error("Nie udalo sie utworzyc albumu. Sprobuj ponownie.");
       }
     } catch (error) {
       console.error("Create album error:", error);
-      alert("Blad przy tworzeniu albumu");
+      toast.error("Nie udalo sie utworzyc albumu. Sprawdz polaczenie i sprobuj ponownie.");
     } finally {
       setCreatingAlbum(false);
     }
@@ -371,7 +461,7 @@ export default function GalleryPage() {
           fetchAlbumPhotos(viewingAlbum.id);
         }
       } else {
-        alert("Blad: " + data.error);
+        toast.error("Nie udalo sie dodac zdjecia do albumu. Sprobuj ponownie.");
       }
     } catch (error) {
       console.error("Add to album error:", error);
@@ -498,7 +588,7 @@ export default function GalleryPage() {
       if (uploadFile) {
         afterUrl = await uploadFileToServer(uploadFile);
         if (!afterUrl) {
-          alert("Nie udalo sie przeslac zdjecia 'po'");
+          toast.error("Nie udalo sie przeslac zdjecia. Sprobuj ponownie.");
           return;
         }
       }
@@ -508,7 +598,7 @@ export default function GalleryPage() {
       if (beforeFile) {
         beforeUrl = await uploadFileToServer(beforeFile);
         if (!beforeUrl) {
-          alert("Nie udalo sie przeslac zdjecia 'przed'");
+          toast.error("Nie udalo sie przeslac zdjecia. Sprobuj ponownie.");
           return;
         }
       }
@@ -547,11 +637,11 @@ export default function GalleryPage() {
         // Refresh photos (respecting current filters)
         fetchPhotos(getActiveEmployeeFilter(), getActiveServiceFilter());
       } else {
-        alert("Blad przy dodawaniu zdjecia: " + data.error);
+        toast.error("Nie udalo sie dodac zdjecia. Sprobuj ponownie.");
       }
     } catch (error) {
       console.error("Upload error:", error);
-      alert("Blad przy przesylaniu zdjecia");
+      toast.error("Nie udalo sie przeslac zdjecia. Sprawdz polaczenie i sprobuj ponownie.");
     } finally {
       setUploading(false);
     }
@@ -565,7 +655,7 @@ export default function GalleryPage() {
     try {
       const url = await uploadFileToServer(linkFile);
       if (!url) {
-        alert("Nie udalo sie przeslac zdjecia");
+        toast.error("Nie udalo sie przeslac zdjecia. Sprobuj ponownie.");
         return;
       }
 
@@ -592,11 +682,11 @@ export default function GalleryPage() {
         setLinkPreview(null);
         setSelectedPhoto(null);
       } else {
-        alert("Blad przy laczeniu zdjecia: " + data.error);
+        toast.error("Nie udalo sie polaczyc zdjec. Sprobuj ponownie.");
       }
     } catch (error) {
       console.error("Link error:", error);
-      alert("Blad przy laczeniu zdjecia");
+      toast.error("Nie udalo sie polaczyc zdjec. Sprawdz polaczenie i sprobuj ponownie.");
     } finally {
       setLinkUploading(false);
     }
@@ -655,11 +745,11 @@ export default function GalleryPage() {
         );
         setEditingPhoto(null);
       } else {
-        alert("Blad przy zapisie: " + data.error);
+        toast.error("Nie udalo sie zapisac zmian. Sprobuj ponownie.");
       }
     } catch (error) {
       console.error("Edit error:", error);
-      alert("Blad przy zapisywaniu zmian");
+      toast.error("Nie udalo sie zapisac zmian. Sprawdz polaczenie i sprobuj ponownie.");
     } finally {
       setEditSaving(false);
     }
@@ -1564,7 +1654,19 @@ export default function GalleryPage() {
                 </p>
               </div>
 
-              <div className="flex gap-2 justify-end">
+              <div className="flex flex-wrap gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    openCaptionDialog(selectedPhoto);
+                    setSelectedPhoto(null);
+                  }}
+                  className="text-purple-600 border-purple-200 hover:bg-purple-50"
+                >
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Generuj post
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -2039,6 +2141,208 @@ export default function GalleryPage() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Generate Post Caption dialog */}
+      <Dialog open={captionDialogOpen} onOpenChange={(open) => { setCaptionDialogOpen(open); if (!open) { setCaptionPhoto(null); setGeneratedCaption(null); } }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-purple-600" />
+              Generuj post z galerii
+            </DialogTitle>
+          </DialogHeader>
+
+          {captionPhoto && (
+            <div className="space-y-4 mt-4">
+              {/* Photo preview */}
+              <div className="flex gap-4">
+                <div className="w-32 h-32 rounded-lg overflow-hidden border flex-shrink-0">
+                  <img
+                    src={captionPhoto.afterPhotoUrl || captionPhoto.beforePhotoUrl || ""}
+                    alt={captionPhoto.description || "Zdjecie"}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="flex-1 min-w-0 space-y-1">
+                  {captionPhoto.serviceName && (
+                    <p className="text-sm font-medium">{captionPhoto.serviceName}</p>
+                  )}
+                  {captionPhoto.employeeFirstName && (
+                    <p className="text-sm text-muted-foreground">
+                      {captionPhoto.employeeFirstName} {captionPhoto.employeeLastName}
+                    </p>
+                  )}
+                  {captionPhoto.techniques && (
+                    <p className="text-xs text-muted-foreground">
+                      <span className="font-medium">Techniki:</span> {captionPhoto.techniques}
+                    </p>
+                  )}
+                  {captionPhoto.description && (
+                    <p className="text-xs text-muted-foreground line-clamp-2">{captionPhoto.description}</p>
+                  )}
+                  {captionPhoto.beforePhotoUrl && captionPhoto.afterPhotoUrl && (
+                    <Badge variant="secondary" className="text-xs">
+                      <SlidersHorizontal className="w-3 h-3 mr-1" />
+                      Przed / Po
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              {/* Platform selection */}
+              <div>
+                <Label className="mb-2 block text-sm font-medium">Platforma</Label>
+                <div className="flex gap-2">
+                  <Button
+                    variant={captionPlatform === "instagram" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCaptionPlatform("instagram")}
+                    className="flex-1"
+                  >
+                    <Instagram className="w-4 h-4 mr-2" />
+                    Instagram
+                  </Button>
+                  <Button
+                    variant={captionPlatform === "facebook" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCaptionPlatform("facebook")}
+                    className="flex-1"
+                  >
+                    <Facebook className="w-4 h-4 mr-2" />
+                    Facebook
+                  </Button>
+                  <Button
+                    variant={captionPlatform === "tiktok" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCaptionPlatform("tiktok")}
+                    className="flex-1"
+                  >
+                    <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1 0-5.78 2.92 2.92 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 3 15.57 6.33 6.33 0 0 0 9.37 22a6.33 6.33 0 0 0 6.45-6.21V8.73a8.16 8.16 0 0 0 4.77 1.53v-3.4a4.85 4.85 0 0 1-1-.17z" />
+                    </svg>
+                    TikTok
+                  </Button>
+                </div>
+              </div>
+
+              {/* Generate button */}
+              <Button
+                onClick={handleGenerateCaption}
+                disabled={captionLoading}
+                className="w-full bg-purple-600 hover:bg-purple-700"
+              >
+                {captionLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Generowanie podpisu...
+                  </>
+                ) : generatedCaption ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Wygeneruj ponownie
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    Generuj podpis
+                  </>
+                )}
+              </Button>
+
+              {/* Generated caption */}
+              {generatedCaption && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">Wygenerowany podpis</Label>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-xs">
+                        {(isCaptionEditing ? editedCaption : generatedCaption).length} znakow
+                      </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleToggleCaptionEdit}
+                        className="h-7"
+                      >
+                        <Pencil className="w-3 h-3 mr-1" />
+                        {isCaptionEditing ? "Anuluj" : "Edytuj"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCopyCaption}
+                        className="h-7"
+                      >
+                        {captionCopied ? (
+                          <>
+                            <Check className="w-3 h-3 mr-1" />
+                            Skopiowano
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3 mr-1" />
+                            Kopiuj
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                  {isCaptionEditing ? (
+                    <div className="space-y-2">
+                      <Textarea
+                        value={editedCaption}
+                        onChange={(e) => setEditedCaption(e.target.value)}
+                        rows={6}
+                        className="text-sm leading-relaxed resize-y min-h-[100px]"
+                        data-testid="edit-caption-textarea"
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          size="sm"
+                          onClick={handleSaveCaptionEdit}
+                        >
+                          <Check className="h-3.5 w-3.5 mr-1" />
+                          Zapisz zmiany
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div
+                      className="p-4 bg-muted/50 rounded-lg border text-sm whitespace-pre-wrap leading-relaxed cursor-pointer hover:border-primary/50 transition-colors group relative"
+                      onClick={handleToggleCaptionEdit}
+                      data-testid="generated-caption"
+                    >
+                      {generatedCaption}
+                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Badge variant="secondary" className="text-xs">
+                          <Pencil className="h-3 w-3 mr-1" />
+                          Edytuj
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Hashtags */}
+                  {captionHashtags.length > 0 && (
+                    <div>
+                      <Label className="text-xs text-muted-foreground mb-1 block">
+                        Znalezione hashtagi ({captionHashtags.length})
+                      </Label>
+                      <div className="flex flex-wrap gap-1">
+                        {captionHashtags.map((tag, i) => (
+                          <Badge key={i} variant="secondary" className="text-xs">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

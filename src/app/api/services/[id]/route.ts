@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { services, serviceCategories, serviceVariants } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { isValidUuid } from "@/lib/validations";
 
 // GET /api/services/[id] - Get a single service with its variants
 export async function GET(
@@ -10,6 +11,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid service ID format" },
+        { status: 400 }
+      );
+    }
 
     const [serviceRow] = await db
       .select({
@@ -57,6 +65,14 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid service ID format" },
+        { status: 400 }
+      );
+    }
+
     const body = await request.json();
     const { name, description, basePrice, baseDuration, isActive, categoryId, depositRequired, depositPercentage } = body;
 
@@ -108,6 +124,13 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid service ID format" },
+        { status: 400 }
+      );
+    }
 
     const [deleted] = await db
       .delete(services)

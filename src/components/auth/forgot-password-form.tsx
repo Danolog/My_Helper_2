@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { requestPasswordReset } from "@/lib/auth-client"
+import { sanitizeAuthError } from "@/lib/error-messages"
 
 export function ForgotPasswordForm() {
   const [email, setEmail] = useState("")
@@ -21,9 +22,9 @@ export function ForgotPasswordForm() {
     // Validate required fields
     const errors: Record<string, string> = {}
     if (!email.trim()) {
-      errors.email = "Email jest wymagany"
+      errors.email = "Podaj adres email przypisany do konta"
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errors.email = "Wprowadz poprawny adres email"
+      errors.email = "Nieprawidlowy format email. Wpisz adres w formacie: nazwa@domena.pl"
     }
     setFieldErrors(errors)
     if (Object.keys(errors).length > 0) {
@@ -39,12 +40,12 @@ export function ForgotPasswordForm() {
       })
 
       if (result.error) {
-        setError(result.error.message || "Failed to send reset email")
+        setError(sanitizeAuthError(result.error.message, "Nie udalo sie wyslac linku resetowania hasla. Sprobuj ponownie."))
       } else {
         setSuccess(true)
       }
     } catch {
-      setError("An unexpected error occurred")
+      setError("Wystapil nieoczekiwany blad. Sprobuj ponownie pozniej.")
     } finally {
       setIsPending(false)
     }
@@ -54,12 +55,12 @@ export function ForgotPasswordForm() {
     return (
       <div className="space-y-4 w-full max-w-sm text-center">
         <p className="text-sm text-muted-foreground">
-          If an account exists with that email, a password reset link has been sent.
-          Check your terminal for the reset URL.
+          Jesli konto z tym adresem email istnieje, link do resetowania hasla zostal wyslany.
+          Sprawdz skrzynke pocztowa.
         </p>
         <Link href="/login">
           <Button variant="outline" className="w-full">
-            Back to sign in
+            Powrot do logowania
           </Button>
         </Link>
       </div>
@@ -91,12 +92,12 @@ export function ForgotPasswordForm() {
         <p className="text-sm text-destructive">{error}</p>
       )}
       <Button type="submit" className="w-full" disabled={isPending}>
-        {isPending ? "Sending..." : "Send reset link"}
+        {isPending ? "Wysylanie..." : "Wyslij link resetowania"}
       </Button>
       <div className="text-center text-sm text-muted-foreground">
-        Remember your password?{" "}
+        Pamietasz haslo?{" "}
         <Link href="/login" className="text-primary hover:underline">
-          Sign in
+          Zaloguj sie
         </Link>
       </div>
     </form>

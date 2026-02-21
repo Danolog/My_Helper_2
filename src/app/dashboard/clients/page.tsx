@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -39,6 +40,9 @@ import Link from "next/link";
 import { validatePhone } from "@/lib/validations";
 import { NetworkErrorHandler } from "@/components/network-error-handler";
 import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
+import { useFormRecovery } from "@/hooks/use-form-recovery";
+import { FormRecoveryBanner } from "@/components/form-recovery-banner";
+import { useTabSync } from "@/hooks/use-tab-sync";
 
 const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -60,11 +64,14 @@ interface Client {
 
 export default function ClientsPage() {
   const { data: session, isPending } = useSession();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
 
   // Filter state
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -93,8 +100,68 @@ export default function ClientsPage() {
   // Form validation errors
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
+  // Form recovery for client creation dialog
+  const {
+    wasRecovered: clientWasRecovered,
+    getRecoveredState: getClientRecoveredState,
+    saveFormState: saveClientFormState,
+    clearSavedForm: clearClientSavedForm,
+    setDirty: setClientDirty,
+  } = useFormRecovery<{
+    firstName: string;
+    lastName: string;
+    phone: string;
+    email: string;
+    notes: string;
+  }>({
+    storageKey: "add-client-form",
+    warnOnUnload: true,
+  });
+
+  // Auto-open dialog when recovered data is found
+  useEffect(() => {
+    if (clientWasRecovered) {
+      setDialogOpen(true);
+    }
+  }, [clientWasRecovered]);
+
+  // Save client form state on changes (debounced inside hook)
+  useEffect(() => {
+    const hasData = !!formFirstName || !!formLastName || !!formPhone || !!formEmail || !!formNotes;
+    if (hasData) {
+      saveClientFormState({
+        firstName: formFirstName,
+        lastName: formLastName,
+        phone: formPhone,
+        email: formEmail,
+        notes: formNotes,
+      });
+    }
+    setClientDirty(hasData);
+  }, [formFirstName, formLastName, formPhone, formEmail, formNotes, saveClientFormState, setClientDirty]);
+
+  // Recovery handler: restores client form fields from localStorage
+  const handleRestoreClientForm = () => {
+    const saved = getClientRecoveredState();
+    if (saved) {
+      setFormFirstName(saved.firstName || "");
+      setFormLastName(saved.lastName || "");
+      setFormPhone(saved.phone || "");
+      setFormEmail(saved.email || "");
+      setFormNotes(saved.notes || "");
+    }
+  };
+
   // Network error state
-  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean } | null>(null);
+  const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean; isTimeout: boolean } | null>(null);
+
+  // Sync search query to browser URL for shareable links
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (searchQuery.trim()) params.set("q", searchQuery.trim());
+    const qs = params.toString();
+    router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+  }, [searchQuery, router, pathname]);
 
   const hasActiveFilters =
     appliedFilters.dateAddedFrom !== "" ||
@@ -167,6 +234,9 @@ export default function ClientsPage() {
     loadData();
   }, [fetchClients]);
 
+  // Cross-tab sync: refetch when another tab modifies clients
+  const { notifyChange: notifyClientsChanged } = useTabSync("clients", fetchClients);
+
   const handleApplyFilters = async () => {
     const newFilters = {
       dateAddedFrom,
@@ -209,6 +279,7 @@ export default function ClientsPage() {
     setFormEmail("");
     setFormNotes("");
     setFormErrors({});
+    clearClientSavedForm();
   };
 
   const clearFieldError = (field: string) => {
@@ -267,9 +338,11 @@ export default function ClientsPage() {
         toast.success(
           `Klient "${formFirstName.trim()} ${formLastName.trim()}" zostal dodany`
         );
+        clearClientSavedForm();
         resetForm();
         setDialogOpen(false);
         await fetchClients();
+        notifyClientsChanged();
       } else {
         toast.error(data.error || "Nie udalo sie dodac klienta");
       }
@@ -277,7 +350,7 @@ export default function ClientsPage() {
       console.error("Failed to save client:", error);
       const errInfo = getNetworkErrorMessage(error);
       toast.error(errInfo.isNetwork
-        ? "Brak polaczenia z serwerem. Sprawdz internet i sprobuj ponownie."
+        ? errInfo.message
         : "Blad podczas zapisywania klienta", {
         action: {
           label: "Sprobuj ponownie",
@@ -363,6 +436,12 @@ export default function ClientsPage() {
                 Wypelnij formularz, aby dodac nowego klienta do bazy salonu.
               </DialogDescription>
             </DialogHeader>
+            {clientWasRecovered && (
+              <FormRecoveryBanner
+                onRestore={handleRestoreClientForm}
+                onDismiss={clearClientSavedForm}
+              />
+            )}
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
@@ -489,6 +568,7 @@ export default function ClientsPage() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-10"
+          maxLength={200}
           data-testid="client-search-input"
         />
       </div>
@@ -669,6 +749,7 @@ export default function ClientsPage() {
         <NetworkErrorHandler
           message={fetchError.message}
           isNetworkError={fetchError.isNetwork}
+          isTimeout={fetchError.isTimeout}
           onRetry={async () => {
             setFetchError(null);
             setLoading(true);

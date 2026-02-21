@@ -1,12 +1,20 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { salons } from "@/lib/schema";
+import { eq } from "drizzle-orm";
 
 /**
  * Protected routes that require authentication.
  * These are also configured in src/proxy.ts for optimistic redirects.
  */
-export const protectedRoutes = ["/chat", "/dashboard", "/profile"];
+export const protectedRoutes = ["/chat", "/dashboard", "/profile", "/admin"];
+
+/**
+ * Admin routes that require owner/admin role in addition to authentication.
+ */
+export const adminRoutes = ["/admin"];
 
 /**
  * Checks if the current request is authenticated.
@@ -23,6 +31,43 @@ export async function requireAuth() {
   }
 
   return session;
+}
+
+/**
+ * Checks if the current user is authenticated AND is a salon owner (admin).
+ * Should be called in Server Components for admin-only routes.
+ *
+ * A user is considered admin if:
+ * - Their user.role is "admin" or "owner", OR
+ * - They own a salon (salons.ownerId matches their user ID)
+ *
+ * @returns Object with session and isAdmin boolean
+ * @throws Redirects to login page if not authenticated
+ */
+export async function requireAdmin(): Promise<{
+  session: Awaited<ReturnType<typeof auth.api.getSession>>;
+  isAdmin: boolean;
+}> {
+  const session = await auth.api.getSession({ headers: await headers() });
+
+  if (!session) {
+    redirect("/login");
+  }
+
+  // Check user role
+  const userRole = (session.user as { role?: string }).role;
+  if (userRole === "admin" || userRole === "owner") {
+    return { session, isAdmin: true };
+  }
+
+  // Check salon ownership
+  const [salon] = await db
+    .select({ id: salons.id })
+    .from(salons)
+    .where(eq(salons.ownerId, session.user.id))
+    .limit(1);
+
+  return { session, isAdmin: !!salon };
 }
 
 /**
@@ -43,6 +88,18 @@ export async function getOptionalSession() {
  */
 export function isProtectedRoute(path: string): boolean {
   return protectedRoutes.some(
+    (route) => path === route || path.startsWith(`${route}/`)
+  );
+}
+
+/**
+ * Checks if a given path is an admin-only route.
+ *
+ * @param path - The path to check
+ * @returns True if the path requires admin access
+ */
+export function isAdminRoute(path: string): boolean {
+  return adminRoutes.some(
     (route) => path === route || path.startsWith(`${route}/`)
   );
 }

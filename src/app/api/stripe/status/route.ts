@@ -37,7 +37,7 @@ export async function GET() {
           publishableKeyConfigured: false,
           webhookConfigured: false,
           pricesConfigured: false,
-          error: error instanceof Error ? error.message : "Unknown error",
+          error: "Nie udalo sie polaczyc ze Stripe. Sprawdz konfiguracje kluczy API.",
         },
       },
       { status: 500 }

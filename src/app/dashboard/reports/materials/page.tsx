@@ -108,7 +108,7 @@ export default function MaterialsReportPage() {
       setReportData(json.data);
     } catch (err) {
       console.error("[Materials Report] Error:", err);
-      setError(err instanceof Error ? err.message : "Failed to load report");
+      setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
     }

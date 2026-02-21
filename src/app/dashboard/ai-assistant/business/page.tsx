@@ -48,6 +48,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { toast } from "sonner";
+import { getUserFriendlyMessage } from "@/lib/error-messages";
 import type { Components } from "react-markdown";
 
 // ────────────────────────────────────────────────────────────
@@ -683,7 +684,7 @@ function BusinessAlerts() {
       });
     } catch (e) {
       setError(
-        e instanceof Error ? e.message : "Wystapil nieoczekiwany blad"
+        getUserFriendlyMessage(e, "Wystapil nieoczekiwany blad. Sprobuj ponownie pozniej.")
       );
     } finally {
       setLoading(false);
@@ -857,7 +858,7 @@ function ProactiveSuggestions() {
       setSuggestions(json.suggestions || []);
     } catch (e) {
       setError(
-        e instanceof Error ? e.message : "Wystapil nieoczekiwany blad"
+        getUserFriendlyMessage(e, "Wystapil nieoczekiwany blad. Sprobuj ponownie pozniej.")
       );
     } finally {
       setLoading(false);
@@ -1197,7 +1198,7 @@ function ReviewAlerts() {
       setAlerts(json.alerts || []);
       setTotalNegative(json.totalNegativeReviews || 0);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Wystapil nieoczekiwany blad");
+      setError("Wystapil nieoczekiwany blad. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
     }
@@ -1336,7 +1337,7 @@ function BusinessAssistantContent() {
       setAnalytics(json.analytics);
     } catch (e) {
       setAnalyticsError(
-        e instanceof Error ? e.message : "Wystapil nieoczekiwany blad"
+        getUserFriendlyMessage(e, "Wystapil nieoczekiwany blad. Sprobuj ponownie pozniej.")
       );
     } finally {
       setAnalyticsLoading(false);
@@ -1479,7 +1480,7 @@ function BusinessAssistantContent() {
       const errorMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
-        text: `Blad: ${e instanceof Error ? e.message : "Wystapil nieoczekiwany blad"}`,
+        text: getUserFriendlyMessage(e, "Wystapil blad podczas komunikacji z asystentem AI. Sprobuj ponownie."),
         timestamp: new Date(),
       };
       setChatMessages((prev) => [...prev, errorMsg]);
