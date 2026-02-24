@@ -6,7 +6,13 @@ export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",
   }),
-  trustedOrigins: ["http://localhost:3000", "http://127.0.0.1:3000"],
+  trustedOrigins: [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    ...(process.env.BETTER_AUTH_URL && !process.env.BETTER_AUTH_URL.includes("localhost")
+      ? [process.env.BETTER_AUTH_URL]
+      : []),
+  ],
   session: {
     /**
      * Session expires after 15 minutes of inactivity.
