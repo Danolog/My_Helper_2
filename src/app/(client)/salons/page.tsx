@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Search, MapPin, Phone, Star, Heart, Scissors, ArrowRight, Sparkles } from "lucide-react";
+import { Search, MapPin, Phone, Star, Heart, Scissors, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NetworkErrorHandler } from "@/components/network-error-handler";
