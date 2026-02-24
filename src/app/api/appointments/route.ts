@@ -244,7 +244,7 @@ export async function POST(request: Request) {
       .insert(appointments)
       .values({
         salonId,
-        clientId: clientId || null,
+        clientId: clientId && clientId !== "none" ? clientId : null,
         employeeId,
         serviceId: serviceId || null,
         bookedByUserId,

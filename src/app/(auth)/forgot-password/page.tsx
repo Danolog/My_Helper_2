@@ -1,4 +1,3 @@
-import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { ForgotPasswordForm } from "@/components/auth/forgot-password-form"
 import {
@@ -8,12 +7,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { auth } from "@/lib/auth"
+import { hasActiveSession } from "@/lib/session"
 
 export default async function ForgotPasswordPage() {
-  const session = await auth.api.getSession({ headers: await headers() })
+  const isLoggedIn = await hasActiveSession()
 
-  if (session) {
+  if (isLoggedIn) {
     redirect("/dashboard")
   }
 

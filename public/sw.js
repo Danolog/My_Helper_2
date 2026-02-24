@@ -10,7 +10,7 @@ importScripts(
 // ---------------------------------------------------------------------------
 // 2. Cache version – bump this to invalidate all caches at once
 // ---------------------------------------------------------------------------
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v3";
 
 // ---------------------------------------------------------------------------
 // 3. Extract Workbox modules
@@ -119,11 +119,10 @@ registerRoute(
   })
 );
 
-// 6e. Safe GET /api/ requests (allowlist – only cache known public endpoints)
+// 6e. Safe GET /api/ requests (allowlist – only cache read-only list endpoints)
+// NOTE: Do NOT cache /api/services broadly – it would cache employee-assignments
+// which must stay fresh for the booking flow.
 const CACHEABLE_API_PREFIXES = [
-  "/api/salons",
-  "/api/services",
-  "/api/available-slots",
   "/api/health",
 ];
 

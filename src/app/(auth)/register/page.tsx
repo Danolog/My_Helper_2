@@ -1,6 +1,5 @@
-import { headers } from "next/headers"
 import { redirect } from "next/navigation"
-import { auth } from "@/lib/auth"
+import { hasActiveSession } from "@/lib/session"
 import { RegistrationFlow } from "@/components/auth/registration-flow"
 
 export default async function RegisterPage({
@@ -8,9 +7,9 @@ export default async function RegisterPage({
 }: {
   searchParams: Promise<{ plan?: string }>
 }) {
-  const session = await auth.api.getSession({ headers: await headers() })
+  const isLoggedIn = await hasActiveSession()
 
-  if (session) {
+  if (isLoggedIn) {
     redirect("/dashboard")
   }
 

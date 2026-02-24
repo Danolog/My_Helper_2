@@ -6,14 +6,14 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "MyHelper",
     description:
       "MyHelper - przystepna cenowo alternatywa dla Booksy z asystentem AI dla salonow uslugowych",
-    start_url: "/dashboard",
+    start_url: "/salons",
     scope: "/",
     display: "standalone",
     orientation: "portrait-primary",
     lang: "pl",
     dir: "ltr",
-    background_color: "#ffffff",
-    theme_color: "#000000",
+    background_color: "#FFFAF5",
+    theme_color: "#C4704B",
     categories: ["business", "productivity"],
     icons: [
       {

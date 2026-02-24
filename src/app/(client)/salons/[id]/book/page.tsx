@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -264,6 +264,12 @@ export default function ClientBookingPage() {
     reason?: string;
   } | null>(null);
 
+  // Step card refs for auto-scroll on progressive disclosure
+  const variantStepRef = useRef<HTMLDivElement>(null);
+  const employeeStepRef = useRef<HTMLDivElement>(null);
+  const dateStepRef = useRef<HTMLDivElement>(null);
+  const summaryStepRef = useRef<HTMLDivElement>(null);
+
   // ---------------------------------------------------------------------------
   // Derived values
   // ---------------------------------------------------------------------------
@@ -510,6 +516,48 @@ export default function ClientBookingPage() {
     }
     checkHappyHours();
   }, [selectedDate, selectedTimeSlot, salonId]);
+
+  // ---------------------------------------------------------------------------
+  // Auto-scroll to next step when a selection is made
+  // ---------------------------------------------------------------------------
+
+  // After selecting a service, scroll to the variant step (if variants exist)
+  // or the employee step (if no variants)
+  useEffect(() => {
+    if (!selectedServiceId) return;
+    const service = salon?.services.find((s) => s.id === selectedServiceId);
+    if (!service) return;
+
+    const hasServiceVariants = service.variants.length > 0;
+    const targetRef = hasServiceVariants ? variantStepRef : employeeStepRef;
+    setTimeout(() => {
+      targetRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 100);
+  }, [selectedServiceId, salon?.services]);
+
+  // After selecting a variant, scroll to the employee step
+  useEffect(() => {
+    if (!selectedVariantId) return;
+    setTimeout(() => {
+      employeeStepRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 100);
+  }, [selectedVariantId]);
+
+  // After selecting an employee, scroll to the date/time step
+  useEffect(() => {
+    if (!selectedEmployeeId) return;
+    setTimeout(() => {
+      dateStepRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 100);
+  }, [selectedEmployeeId]);
+
+  // After selecting a time slot, scroll to the summary step
+  useEffect(() => {
+    if (!selectedTimeSlot) return;
+    setTimeout(() => {
+      summaryStepRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 100);
+  }, [selectedTimeSlot]);
 
   // ---------------------------------------------------------------------------
   // Handlers
@@ -1043,7 +1091,7 @@ export default function ClientBookingPage() {
       {/* Step 2: Select Variant (only if service has variants)               */}
       {/* ------------------------------------------------------------------ */}
       {canShowVariantStep && (
-        <Card className="mb-6" data-testid="booking-step-variant">
+        <Card ref={variantStepRef} className="mb-6" data-testid="booking-step-variant">
           <CardHeader>
             <div className="flex items-center gap-2">
               <Badge
@@ -1124,7 +1172,7 @@ export default function ClientBookingPage() {
       {/* ------------------------------------------------------------------ */}
       {/* Step 3: Select Employee                                             */}
       {/* ------------------------------------------------------------------ */}
-      <Card className="mb-6" data-testid="booking-step-employee">
+      <Card ref={employeeStepRef} className="mb-6" data-testid="booking-step-employee">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Badge
@@ -1205,7 +1253,7 @@ export default function ClientBookingPage() {
       {/* ------------------------------------------------------------------ */}
       {/* Step 4: Select Date & Time                                          */}
       {/* ------------------------------------------------------------------ */}
-      <Card className="mb-6" data-testid="booking-step-datetime">
+      <Card ref={dateStepRef} className="mb-6" data-testid="booking-step-datetime">
         <CardHeader>
           <div className="flex items-center gap-2">
             <Badge
@@ -1402,6 +1450,7 @@ export default function ClientBookingPage() {
       {/* Step 5: Review & Confirm                                            */}
       {/* ------------------------------------------------------------------ */}
       <Card
+        ref={summaryStepRef}
         className={`mb-6 ${canShowSummaryStep ? "border-primary" : ""}`}
         data-testid="booking-step-summary"
       >
@@ -1674,7 +1723,6 @@ export default function ClientBookingPage() {
     const isSelected = selectedServiceId === service.id;
     const isExpanded = expandedServices.has(service.id);
     const hasServiceVariants = service.variants.length > 0;
-
     return (
       <div
         key={service.id}
@@ -1687,9 +1735,7 @@ export default function ClientBookingPage() {
       >
         <div
           className="flex items-center justify-between p-3 cursor-pointer"
-          onClick={() => {
-            handleServiceSelect(service.id);
-          }}
+          onClick={() => handleServiceSelect(service.id)}
         >
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">

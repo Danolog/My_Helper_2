@@ -20,7 +20,10 @@ const SW_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
  */
 export function SwRegister() {
   useEffect(() => {
-    if (!("serviceWorker" in navigator)) {
+    if (
+      !("serviceWorker" in navigator) ||
+      process.env.NODE_ENV !== "production"
+    ) {
       return undefined;
     }
 
