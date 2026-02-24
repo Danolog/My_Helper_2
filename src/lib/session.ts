@@ -96,7 +96,10 @@ export async function getOptionalSession() {
  */
 export async function hasActiveSession(): Promise<boolean> {
   const cookieStore = await cookies();
-  return cookieStore.has("better-auth.session_token");
+  return (
+    cookieStore.has("better-auth.session_token") ||
+    cookieStore.has("__Secure-better-auth.session_token")
+  );
 }
 
 /**
