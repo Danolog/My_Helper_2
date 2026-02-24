@@ -568,7 +568,7 @@ ${salonData}`;
     ),
     system: systemPrompt,
     messages: convertToModelMessages(messages),
-    maxTokens: 2000,
+    maxOutputTokens: 2000,
   });
 
   return (
