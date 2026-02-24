@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
@@ -79,6 +79,24 @@ export async function requireAdmin(): Promise<{
  */
 export async function getOptionalSession() {
   return await auth.api.getSession({ headers: await headers() });
+}
+
+/**
+ * Checks if a session cookie exists without calling auth.api.getSession().
+ *
+ * Workaround for Better Auth v1.4.x bug where auth.api.getSession() returns
+ * null in Next.js server components despite valid session cookies being present.
+ * This function checks cookie existence directly, which is sufficient for
+ * redirect-only guards on public pages (login, register, portal landing).
+ *
+ * NOTE: This does NOT validate the session against the database. Use
+ * requireAuth() for protected routes that need a verified session object.
+ *
+ * @returns True if a session cookie is present
+ */
+export async function hasActiveSession(): Promise<boolean> {
+  const cookieStore = await cookies();
+  return cookieStore.has("better-auth.session_token");
 }
 
 /**

@@ -17,6 +17,7 @@ import {
   X,
   Bot,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -131,13 +132,18 @@ function NavLink({
       className={cn(
         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
         active
-          ? "bg-sidebar-accent text-sidebar-accent-foreground"
-          : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
+          ? "bg-sidebar-accent text-sidebar-accent-foreground border-l-[3px] border-primary"
+          : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground border-l-[3px] border-transparent"
       )}
       aria-current={active ? "page" : undefined}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      <span>{item.label}</span>
+      <span className="flex-1">{item.label}</span>
+      {item.label === "Asystent AI" && (
+        <Badge variant="gold" className="text-[10px] px-1.5 py-0">
+          PRO
+        </Badge>
+      )}
     </Link>
   );
 }

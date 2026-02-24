@@ -1,19 +1,102 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { salons } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { salons, services, reviews } from "@/lib/schema";
+import { eq, and, isNotNull, ne, inArray, count, avg } from "drizzle-orm";
 
-// GET /api/salons - List all salons
+// GET /api/salons - List all salons (filtered to exclude test/incomplete salons)
 export async function GET() {
   try {
-    console.log("[Salons API] Executing: SELECT * FROM salons");
-    const allSalons = await db.select().from(salons);
-    console.log(`[Salons API] Query returned ${allSalons.length} rows`);
+    // Only return salons that have both address and phone set (filters out test salons)
+    const allSalons = await db
+      .select()
+      .from(salons)
+      .where(
+        and(
+          isNotNull(salons.address),
+          ne(salons.address, ""),
+          isNotNull(salons.phone),
+          ne(salons.phone, ""),
+          isNotNull(salons.industryType),
+          ne(salons.industryType, "")
+        )
+      );
+
+    if (allSalons.length === 0) {
+      return NextResponse.json({
+        success: true,
+        data: [],
+        count: 0,
+      });
+    }
+
+    const salonIds = allSalons.map((s) => s.id);
+
+    // Count active services per salon
+    const serviceCounts = await db
+      .select({
+        salonId: services.salonId,
+        serviceCount: count(services.id),
+      })
+      .from(services)
+      .where(
+        and(
+          inArray(services.salonId, salonIds),
+          eq(services.isActive, true)
+        )
+      )
+      .groupBy(services.salonId);
+
+    // Get average rating and review count per salon (only approved reviews)
+    const reviewStats = await db
+      .select({
+        salonId: reviews.salonId,
+        averageRating: avg(reviews.rating),
+        reviewCount: count(reviews.id),
+      })
+      .from(reviews)
+      .where(
+        and(
+          inArray(reviews.salonId, salonIds),
+          eq(reviews.status, "approved")
+        )
+      )
+      .groupBy(reviews.salonId);
+
+    // Build lookup maps for efficient merging
+    const serviceCountMap = new Map(
+      serviceCounts.map((sc) => [sc.salonId, Number(sc.serviceCount)])
+    );
+    const reviewStatsMap = new Map(
+      reviewStats.map((rs) => [
+        rs.salonId,
+        {
+          averageRating: rs.averageRating
+            ? Math.round(parseFloat(String(rs.averageRating)) * 10) / 10
+            : null,
+          reviewCount: Number(rs.reviewCount),
+        },
+      ])
+    );
+
+    // Merge aggregate data and filter out salons with no active services
+    const enrichedSalons = allSalons
+      .map((salon) => ({
+        id: salon.id,
+        name: salon.name,
+        phone: salon.phone,
+        email: salon.email,
+        address: salon.address,
+        industryType: salon.industryType,
+        serviceCount: serviceCountMap.get(salon.id) ?? 0,
+        averageRating: reviewStatsMap.get(salon.id)?.averageRating ?? null,
+        reviewCount: reviewStatsMap.get(salon.id)?.reviewCount ?? 0,
+      }))
+      .filter((salon) => salon.serviceCount > 0);
 
     return NextResponse.json({
       success: true,
-      data: allSalons,
-      count: allSalons.length,
+      data: enrichedSalons,
+      count: enrichedSalons.length,
     });
   } catch (error) {
     console.error("[Salons API] Database error:", error);

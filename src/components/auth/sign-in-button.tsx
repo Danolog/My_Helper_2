@@ -13,21 +13,23 @@ import { sanitizeAuthError } from "@/lib/error-messages"
  * Validate returnTo URL to prevent open redirects.
  * Only allows relative paths that start with "/" but not "//".
  */
-function isSafeReturnTo(url: string | null | undefined): string {
-  if (!url) return "/dashboard"
+function isSafeReturnTo(url: string | null | undefined, fallback: string = "/dashboard"): string {
+  if (!url) return fallback
   if (url.startsWith("/") && !url.startsWith("//")) return url
-  return "/dashboard"
+  return fallback
 }
 
 interface SignInButtonProps {
   returnTo?: string | undefined
+  defaultRedirect?: string
+  registerHref?: string
 }
 
-export function SignInButton({ returnTo }: SignInButtonProps) {
+export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registerHref = "/register" }: SignInButtonProps) {
   const { data: session, isPending: sessionPending } = useSession()
   const router = useRouter()
   // Determine the redirect destination after login, with open-redirect protection
-  const redirectTo = isSafeReturnTo(returnTo)
+  const redirectTo = isSafeReturnTo(returnTo, defaultRedirect)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
@@ -192,7 +194,7 @@ export function SignInButton({ returnTo }: SignInButtonProps) {
       </div>
       <div className="text-center text-sm text-muted-foreground">
         Nie masz konta?{" "}
-        <Link href="/register" className="text-primary hover:underline">
+        <Link href={registerHref} className="text-primary hover:underline">
           Zarejestruj sie
         </Link>
       </div>

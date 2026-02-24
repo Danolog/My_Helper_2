@@ -15,12 +15,12 @@ import { hasActiveSession } from "@/lib/session"
  * Only allows relative paths that start with "/" but not "//".
  */
 function isSafeReturnTo(url: string | null | undefined): string {
-  if (!url) return "/dashboard"
+  if (!url) return "/salons"
   if (url.startsWith("/") && !url.startsWith("//")) return url
-  return "/dashboard"
+  return "/salons"
 }
 
-export default async function LoginPage({
+export default async function ClientLoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ reset?: string; returnTo?: string }>
@@ -37,8 +37,8 @@ export default async function LoginPage({
     <div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle>Panel salonu</CardTitle>
-          <CardDescription>Zaloguj sie do panelu zarzadzania salonem</CardDescription>
+          <CardTitle>Konto klienta</CardTitle>
+          <CardDescription>Zaloguj sie, aby przegladac salony i rezerwowac wizyty</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center">
           {reset === "success" && (
@@ -46,10 +46,10 @@ export default async function LoginPage({
               Haslo zostalo zresetowane. Zaloguj sie nowym haslem.
             </p>
           )}
-          <SignInButton returnTo={returnTo} defaultRedirect="/dashboard" registerHref="/register" />
+          <SignInButton returnTo={returnTo} defaultRedirect="/salons" registerHref="/portal/register" />
           <p className="mt-4 text-center text-sm text-muted-foreground">
-            Jestes klientem?{" "}
-            <Link href="/portal/login" className="text-primary hover:underline">
+            Prowadzisz salon?{" "}
+            <Link href="/login" className="text-primary hover:underline">
               Zaloguj sie tutaj
             </Link>
           </p>

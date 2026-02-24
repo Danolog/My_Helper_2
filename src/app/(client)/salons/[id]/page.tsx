@@ -680,7 +680,7 @@ export default function SalonProfilePage() {
           Chcesz zarezerwowac wizyte w tym salonie?
         </p>
         <Button asChild size="lg">
-          <Link href="/dashboard/booking">Zarezerwuj wizyte</Link>
+          <Link href={`/salons/${salonId}/book`}>Zarezerwuj wizyte</Link>
         </Button>
       </div>
     </div>
