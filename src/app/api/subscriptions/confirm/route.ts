@@ -3,8 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { salonSubscriptions, subscriptionPayments, subscriptionPlans } from "@/lib/schema";
 import { getStripe } from "@/lib/stripe";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * POST /api/subscriptions/confirm
@@ -17,6 +16,14 @@ const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
  */
 export async function POST(request: Request) {
   try {
+    const currentSalonId = await getUserSalonId();
+    if (!currentSalonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 },
+      );
+    }
+
     const body: unknown = await request.json();
     if (
       !body ||
@@ -96,7 +103,7 @@ export async function POST(request: Request) {
     }
 
     // Extract metadata written during checkout creation
-    const salonId = checkoutSession.metadata?.salonId || DEMO_SALON_ID;
+    const salonId = checkoutSession.metadata?.salonId || currentSalonId;
     const planId = checkoutSession.metadata?.planId;
 
     if (!planId) {

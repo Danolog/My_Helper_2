@@ -17,6 +17,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
 import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/route";
+import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 
 /**
  * Check if a product has low stock and create a notification if needed.
@@ -172,8 +173,8 @@ export async function POST(
     // 3. Calculate and record commission
     let commission = null;
 
-    // Determine commission percentage: use provided value, or employee's default, or 50%
-    let commPct = 50;
+    // Determine commission percentage: use provided value, or employee's default, or fallback
+    let commPct = DEFAULT_COMMISSION_RATE;
     if (commissionPercentage !== undefined && commissionPercentage !== null) {
       commPct = parseFloat(commissionPercentage);
     } else if (appointment.employeeId) {

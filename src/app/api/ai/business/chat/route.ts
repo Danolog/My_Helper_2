@@ -1,9 +1,8 @@
-import { headers } from "next/headers";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { streamText, UIMessage, convertToModelMessages } from "ai";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { db } from "@/lib/db";
 import {
   appointments,
@@ -15,8 +14,6 @@ import {
   salons,
 } from "@/lib/schema";
 import { eq, and, gte, sql, count, desc } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 // Zod schema for message validation
 const messagePartSchema = z.object({
@@ -199,7 +196,7 @@ ANALIZA KONKURENCJI - OGOLNA:
 - Benchmarki branzowe: powracalnosc >50% to dobry wynik, anulacje <10%, srednia ocena >4.5/5`,
 };
 
-async function gatherSalonData(): Promise<{
+async function gatherSalonData(salonId: string): Promise<{
   data: string;
   industryType: string | null;
   salonName: string;
@@ -216,7 +213,7 @@ async function gatherSalonData(): Promise<{
         industryType: salons.industryType,
       })
       .from(salons)
-      .where(eq(salons.id, DEMO_SALON_ID))
+      .where(eq(salons.id, salonId))
       .then((r) => r[0] ?? { name: "Salon", industryType: null });
 
     const [
@@ -234,7 +231,7 @@ async function gatherSalonData(): Promise<{
       db
         .select({ count: count() })
         .from(clients)
-        .where(eq(clients.salonId, DEMO_SALON_ID))
+        .where(eq(clients.salonId, salonId))
         .then((r) => r[0]?.count ?? 0),
 
       db
@@ -242,7 +239,7 @@ async function gatherSalonData(): Promise<{
         .from(employees)
         .where(
           and(
-            eq(employees.salonId, DEMO_SALON_ID),
+            eq(employees.salonId, salonId),
             eq(employees.isActive, true),
           ),
         )
@@ -253,7 +250,7 @@ async function gatherSalonData(): Promise<{
         .from(services)
         .where(
           and(
-            eq(services.salonId, DEMO_SALON_ID),
+            eq(services.salonId, salonId),
             eq(services.isActive, true),
           ),
         )
@@ -264,7 +261,7 @@ async function gatherSalonData(): Promise<{
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, thirtyDaysAgo),
           ),
         )
@@ -278,7 +275,7 @@ async function gatherSalonData(): Promise<{
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, thirtyDaysAgo),
           ),
         )
@@ -294,7 +291,7 @@ async function gatherSalonData(): Promise<{
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, thirtyDaysAgo),
           ),
         )
@@ -312,7 +309,7 @@ async function gatherSalonData(): Promise<{
         .innerJoin(employees, eq(appointments.employeeId, employees.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, thirtyDaysAgo),
           ),
         )
@@ -328,7 +325,7 @@ async function gatherSalonData(): Promise<{
         .from(reviews)
         .where(
           and(
-            eq(reviews.salonId, DEMO_SALON_ID),
+            eq(reviews.salonId, salonId),
             sql`${reviews.rating} IS NOT NULL`,
           ),
         )
@@ -347,7 +344,7 @@ async function gatherSalonData(): Promise<{
         .from(products)
         .where(
           and(
-            eq(products.salonId, DEMO_SALON_ID),
+            eq(products.salonId, salonId),
             sql`CAST(${products.quantity} AS numeric) <= COALESCE(CAST(${products.minQuantity} AS numeric), 5)`,
           ),
         )
@@ -362,7 +359,7 @@ async function gatherSalonData(): Promise<{
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(appointments.startTime, thirtyDaysAgo),
           ),
@@ -455,11 +452,11 @@ ${lowStockStr}
 }
 
 export async function POST(req: Request) {
-  // Verify user is authenticated
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
+  // Verify authentication and resolve salon
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return new Response(JSON.stringify({ error: "Salon not found" }), {
+      status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
@@ -526,7 +523,7 @@ export async function POST(req: Request) {
     data: salonData,
     industryType,
     salonName,
-  } = await gatherSalonData();
+  } = await gatherSalonData(salonId);
 
   // Get industry-specific context
   const industryCtx = industryType

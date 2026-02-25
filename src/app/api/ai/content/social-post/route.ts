@@ -1,14 +1,11 @@
-import { headers } from "next/headers";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { db } from "@/lib/db";
 import { salons, services, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 const platformEnum = z.enum(["instagram", "facebook", "tiktok"]);
 
@@ -83,10 +80,10 @@ const TONE_DESCRIPTIONS: Record<string, string> = {
 };
 
 export async function POST(req: Request) {
-  // Verify authentication
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  // Verify authentication and resolve salon
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
   }
 
   // Check Pro plan
@@ -142,7 +139,7 @@ export async function POST(req: Request) {
     const salonInfo = await db
       .select({ name: salons.name, industryType: salons.industryType })
       .from(salons)
-      .where(eq(salons.id, DEMO_SALON_ID))
+      .where(eq(salons.id, salonId))
       .then((r) => r[0]);
 
     if (salonInfo) {
@@ -159,7 +156,7 @@ export async function POST(req: Request) {
       .from(services)
       .where(
         and(
-          eq(services.salonId, DEMO_SALON_ID),
+          eq(services.salonId, salonId),
           eq(services.isActive, true)
         )
       )
@@ -176,7 +173,7 @@ export async function POST(req: Request) {
         .from(promotions)
         .where(
           and(
-            eq(promotions.salonId, DEMO_SALON_ID),
+            eq(promotions.salonId, salonId),
             eq(promotions.isActive, true)
           )
         )

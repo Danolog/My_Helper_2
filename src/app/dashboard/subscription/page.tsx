@@ -45,6 +45,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { PLANS, TRIAL_DAYS } from "@/lib/constants";
 
 type SubscriptionData = {
   id: string;
@@ -668,7 +669,7 @@ export default function SubscriptionPage() {
                         }`}>
                           {isNearEnd
                             ? "Wykup subskrypcje, aby zachowac dostep do wszystkich funkcji po zakonczeniu okresu probnego."
-                            : `Korzystasz z pelnych funkcji planu ${plan.name} w ramach 14-dniowego okresu probnego. Okres probny konczy sie ${formatDate(subscription.trialEndsAt)}.`
+                            : `Korzystasz z pelnych funkcji planu ${plan.name} w ramach ${TRIAL_DAYS}-dniowego okresu probnego. Okres probny konczy sie ${formatDate(subscription.trialEndsAt)}.`
                           }
                         </p>
                       </div>
@@ -862,7 +863,7 @@ export default function SubscriptionPage() {
                                 <span className="font-semibold">
                                   {allPlans["pro"]
                                     ? `${parseFloat(allPlans["pro"].priceMonthly).toFixed(0)} PLN / mies.`
-                                    : "149 PLN / mies."}
+                                    : `${PLANS.pro.priceMonthly} PLN / mies.`}
                                 </span>
                               </div>
                               <div className="border-t pt-2 flex items-center justify-between text-sm">
@@ -870,7 +871,7 @@ export default function SubscriptionPage() {
                                 <span className="font-bold text-primary">
                                   {allPlans["pro"]
                                     ? `+${(parseFloat(allPlans["pro"].priceMonthly) - parseFloat(plan.priceMonthly)).toFixed(0)} PLN / mies.`
-                                    : "+100 PLN / mies."}
+                                    : `+${PLANS.pro.priceMonthly - PLANS.basic.priceMonthly} PLN / mies.`}
                                 </span>
                               </div>
                             </div>
@@ -991,7 +992,7 @@ export default function SubscriptionPage() {
                                 <span className="font-semibold">
                                   {allPlans["basic"]
                                     ? `${parseFloat(allPlans["basic"].priceMonthly).toFixed(0)} PLN / mies.`
-                                    : "49 PLN / mies."}
+                                    : `${PLANS.basic.priceMonthly} PLN / mies.`}
                                 </span>
                               </div>
                               <div className="border-t pt-2 flex items-center justify-between text-sm">

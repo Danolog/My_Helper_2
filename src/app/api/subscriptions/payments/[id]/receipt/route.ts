@@ -7,8 +7,8 @@ import {
   salons,
 } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { DEFAULT_VAT_RATE } from "@/lib/constants";
 
 /**
  * GET /api/subscriptions/payments/[id]/receipt
@@ -21,6 +21,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 },
+      );
+    }
+
     const { id } = await params;
 
     // Fetch payment with plan and salon data
@@ -60,7 +68,7 @@ export async function GET(
       .where(
         and(
           eq(subscriptionPayments.id, id),
-          eq(subscriptionPayments.salonId, DEMO_SALON_ID),
+          eq(subscriptionPayments.salonId, salonId),
         ),
       )
       .limit(1);
@@ -106,7 +114,7 @@ export async function GET(
     const shortId = payment.id.slice(0, 8).toUpperCase();
     const receiptNumber = `SUB/${year}/${month}/${shortId}`;
 
-    const netAmount = (parseFloat(payment.amount) / 1.23).toFixed(2);
+    const netAmount = (parseFloat(payment.amount) / (1 + DEFAULT_VAT_RATE / 100)).toFixed(2);
     const vatAmount = (
       parseFloat(payment.amount) - parseFloat(netAmount)
     ).toFixed(2);
@@ -164,10 +172,10 @@ export async function GET(
   <div class="parties">
     <div class="party">
       <h3>Sprzedawca</h3>
-      <p><strong>MyHelper Sp. z o.o.</strong></p>
-      <p>ul. Technologiczna 1</p>
-      <p>00-001 Warszawa</p>
-      <p>NIP: 000-000-00-00</p>
+      <p><strong>${process.env.COMPANY_NAME || "MyHelper"}</strong></p>
+      <p>${process.env.COMPANY_ADDRESS || ""}</p>
+      <p>${process.env.COMPANY_POSTAL_CITY || ""}</p>
+      <p>NIP: ${process.env.COMPANY_NIP || ""}</p>
     </div>
     <div class="party">
       <h3>Nabywca</h3>
@@ -207,7 +215,7 @@ export async function GET(
         <td class="text-right">${netAmount} ${payment.currency}</td>
       </tr>
       <tr>
-        <td>VAT (23%)</td>
+        <td>VAT (${DEFAULT_VAT_RATE}%)</td>
         <td class="text-right">${vatAmount} ${payment.currency}</td>
       </tr>
       <tr class="total-row">

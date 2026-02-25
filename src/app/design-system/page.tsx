@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import {
   Star,
   ChevronDown,
@@ -259,6 +260,10 @@ const RADIUS_SCALE = [
 // Page
 // ---------------------------------------------------------------------------
 export default function DesignSystemPage() {
+  if (process.env.NODE_ENV === "production") {
+    redirect("/");
+  }
+
   return (
     <div style={designSystemVars} className="min-h-screen">
       {/* ================================================================ */}

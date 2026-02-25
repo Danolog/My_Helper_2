@@ -1,11 +1,8 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { aiConversations } from "@/lib/schema";
 import { isProPlan } from "@/lib/subscription";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 interface MessageRequestBody {
   callerPhone: string;
@@ -20,9 +17,9 @@ interface MessageRequestBody {
  * Stores the message in the aiConversations table for later follow-up.
  */
 export async function POST(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   const hasPro = await isProPlan();
@@ -67,7 +64,7 @@ export async function POST(req: Request) {
     const conversationRows = await db
       .insert(aiConversations)
       .values({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         channel: "voice",
         transcript: JSON.stringify({
           type: "message_taken",

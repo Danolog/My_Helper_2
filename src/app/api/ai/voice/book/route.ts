@@ -1,6 +1,4 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
 import { db } from "@/lib/db";
 import {
@@ -16,8 +14,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, gte, lt, not } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /** Slot interval in minutes used when generating available time slots. */
 const SLOT_INTERVAL = 15;
@@ -44,10 +41,10 @@ interface BookingRequestBody {
  * 6. Logging the conversation for audit.
  */
 export async function POST(req: Request) {
-  // --- Authentication ---
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // --- Authentication & salon resolution ---
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   // --- Pro plan gate ---
@@ -91,7 +88,7 @@ export async function POST(req: Request) {
       .where(
         and(
           eq(services.id, body.serviceId),
-          eq(services.salonId, DEMO_SALON_ID),
+          eq(services.salonId, salonId),
           eq(services.isActive, true)
         )
       )
@@ -149,7 +146,7 @@ export async function POST(req: Request) {
         .where(
           and(
             eq(employeeServices.serviceId, body.serviceId),
-            eq(employees.salonId, DEMO_SALON_ID),
+            eq(employees.salonId, salonId),
             eq(employees.isActive, true)
           )
         )
@@ -172,7 +169,7 @@ export async function POST(req: Request) {
           )
           .where(
             and(
-              eq(employees.salonId, DEMO_SALON_ID),
+              eq(employees.salonId, salonId),
               eq(employees.isActive, true)
             )
           )
@@ -200,7 +197,7 @@ export async function POST(req: Request) {
       .where(
         and(
           eq(employees.id, employeeId),
-          eq(employees.salonId, DEMO_SALON_ID),
+          eq(employees.salonId, salonId),
           eq(employees.isActive, true)
         )
       )
@@ -373,7 +370,7 @@ export async function POST(req: Request) {
     const [newAppointment] = await db
       .insert(appointments)
       .values({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         employeeId: employeeId,
         serviceId: service.id,
         startTime: slotStartDate,
@@ -397,7 +394,7 @@ export async function POST(req: Request) {
       .from(clients)
       .where(
         and(
-          eq(clients.salonId, DEMO_SALON_ID),
+          eq(clients.salonId, salonId),
           eq(clients.phone, body.callerPhone)
         )
       )
@@ -414,7 +411,7 @@ export async function POST(req: Request) {
       const [newClient] = await db
         .insert(clients)
         .values({
-          salonId: DEMO_SALON_ID,
+          salonId: salonId,
           firstName,
           lastName,
           phone: body.callerPhone,
@@ -444,7 +441,7 @@ export async function POST(req: Request) {
     const salonRows = await db
       .select({ name: salons.name })
       .from(salons)
-      .where(eq(salons.id, DEMO_SALON_ID))
+      .where(eq(salons.id, salonId))
       .limit(1);
 
     const salonName = salonRows[0]?.name || "Nasz salon";
@@ -458,7 +455,7 @@ export async function POST(req: Request) {
       const smsResult = await sendSms({
         to: body.callerPhone,
         message: smsMessage,
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         clientId: clientRecord?.id,
       });
       smsSent = smsResult.success;
@@ -473,7 +470,7 @@ export async function POST(req: Request) {
     const [conversation] = await db
       .insert(aiConversations)
       .values({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         clientId: clientRecord?.id || null,
         channel: "voice",
         transcript: JSON.stringify({

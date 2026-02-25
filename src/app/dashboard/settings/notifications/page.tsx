@@ -745,7 +745,7 @@ export default function NotificationSettingsPage() {
                 {weMissYouSettings.includeBookingLink && (
                   <span className="text-amber-600">
                     {" "}
-                    Zarezerwuj teraz: http://localhost:3000/salons/example/book
+                    Zarezerwuj teraz: {process.env.NEXT_PUBLIC_APP_URL || ""}/salons/example/book
                   </span>
                 )}
               </div>

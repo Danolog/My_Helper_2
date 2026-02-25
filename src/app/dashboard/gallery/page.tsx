@@ -25,10 +25,9 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { useSalonId } from "@/hooks/use-salon-id";
 
 type CaptionPlatform = "instagram" | "facebook" | "tiktok";
-
-const SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 interface GalleryPhoto {
   id: string;
@@ -173,6 +172,7 @@ function ComparisonSlider({
 
 export default function GalleryPage() {
   const { data: session, isPending } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
   const [photos, setPhotos] = useState<GalleryPhoto[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -320,8 +320,9 @@ export default function GalleryPage() {
   };
 
   const fetchPhotos = useCallback(async (employeeFilter?: string, serviceFilter?: string) => {
+    if (!salonId) return;
     try {
-      let url = `/api/gallery?salonId=${SALON_ID}`;
+      let url = `/api/gallery?salonId=${salonId}`;
       if (employeeFilter) {
         url += `&employeeId=${employeeFilter}`;
       }
@@ -338,11 +339,12 @@ export default function GalleryPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchEmployees = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch(`/api/employees?salonId=${SALON_ID}`);
+      const res = await fetch(`/api/employees?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setEmployees(data.data);
@@ -350,11 +352,12 @@ export default function GalleryPage() {
     } catch (error) {
       console.error("Failed to fetch employees:", error);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchServices = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch(`/api/services?salonId=${SALON_ID}`);
+      const res = await fetch(`/api/services?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setServices(data.data);
@@ -362,12 +365,13 @@ export default function GalleryPage() {
     } catch (error) {
       console.error("Failed to fetch services:", error);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchAlbums = useCallback(async () => {
+    if (!salonId) return;
     setAlbumsLoading(true);
     try {
-      const res = await fetch(`/api/albums?salonId=${SALON_ID}`);
+      const res = await fetch(`/api/albums?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setAlbumsList(data.data);
@@ -377,7 +381,7 @@ export default function GalleryPage() {
     } finally {
       setAlbumsLoading(false);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchAlbumPhotos = useCallback(async (albumId: string) => {
     setAlbumPhotosLoading(true);
@@ -402,7 +406,7 @@ export default function GalleryPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          salonId: SALON_ID,
+          salonId: salonId!,
           name: newAlbumName.trim(),
           category: newAlbumCategory.trim() || null,
         }),
@@ -608,7 +612,7 @@ export default function GalleryPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          salonId: SALON_ID,
+          salonId: salonId!,
           employeeId: selectedEmployeeId || null,
           serviceId: selectedServiceId || null,
           afterPhotoUrl: afterUrl,
@@ -762,7 +766,7 @@ export default function GalleryPage() {
     setSelectedPhoto(null);
   };
 
-  if (isPending) {
+  if (isPending || salonLoading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <Loader2 className="w-6 h-6 animate-spin" />

@@ -1,12 +1,9 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
 import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 export type VoiceAiConfig = {
   enabled: boolean;
@@ -45,9 +42,9 @@ const DEFAULT_CONFIG: VoiceAiConfig = {
 };
 
 export async function GET() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   const hasPro = await isProPlan();
@@ -62,7 +59,7 @@ export async function GET() {
     const rows = await db
       .select({ settingsJson: salons.settingsJson })
       .from(salons)
-      .where(eq(salons.id, DEMO_SALON_ID))
+      .where(eq(salons.id, salonId))
       .limit(1);
 
     const settings = (rows[0]?.settingsJson || {}) as Record<string, unknown>;
@@ -76,9 +73,9 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   const hasPro = await isProPlan();
@@ -115,7 +112,7 @@ export async function PUT(req: Request) {
     const rows = await db
       .select({ settingsJson: salons.settingsJson })
       .from(salons)
-      .where(eq(salons.id, DEMO_SALON_ID))
+      .where(eq(salons.id, salonId))
       .limit(1);
 
     const currentSettings = (rows[0]?.settingsJson || {}) as Record<string, unknown>;
@@ -124,7 +121,7 @@ export async function PUT(req: Request) {
     await db
       .update(salons)
       .set({ settingsJson: updatedSettings, updatedAt: new Date() })
-      .where(eq(salons.id, DEMO_SALON_ID));
+      .where(eq(salons.id, salonId));
 
     return NextResponse.json({ config, message: "Konfiguracja zapisana" });
   } catch (error) {

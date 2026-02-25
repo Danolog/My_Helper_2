@@ -8,8 +8,8 @@ import {
   subscriptionPlans,
   notifications,
 } from "@/lib/schema";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 const DEFAULT_WARNING_DAYS = 7;
 
 /**
@@ -32,6 +32,14 @@ export async function GET() {
       );
     }
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     // Find the current active subscription
     const [activeSub] = await db
       .select({
@@ -45,7 +53,7 @@ export async function GET() {
       )
       .where(
         and(
-          eq(salonSubscriptions.salonId, DEMO_SALON_ID),
+          eq(salonSubscriptions.salonId, salonId),
           eq(salonSubscriptions.status, "active")
         )
       );
@@ -82,7 +90,7 @@ export async function GET() {
       .from(notifications)
       .where(
         and(
-          eq(notifications.salonId, DEMO_SALON_ID),
+          eq(notifications.salonId, salonId),
           sql`${notifications.message} LIKE '%wygasa%' OR ${notifications.message} LIKE '%odnowienia%' OR ${notifications.message} LIKE '%expir%'`
         )
       )
@@ -142,6 +150,14 @@ export async function POST(request: Request) {
       );
     }
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     let warningDays = DEFAULT_WARNING_DAYS;
     let simulate = false;
 
@@ -170,7 +186,7 @@ export async function POST(request: Request) {
       )
       .where(
         and(
-          eq(salonSubscriptions.salonId, DEMO_SALON_ID),
+          eq(salonSubscriptions.salonId, salonId),
           eq(salonSubscriptions.status, "active")
         )
       );
@@ -253,7 +269,7 @@ export async function POST(request: Request) {
     const emailResults = await db
       .insert(notifications)
       .values({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         clientId: null,
         type: "email",
         message: warningMessage,
@@ -271,7 +287,7 @@ export async function POST(request: Request) {
     const pushResults = await db
       .insert(notifications)
       .values({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         clientId: null,
         type: "push",
         message: pushMessage,

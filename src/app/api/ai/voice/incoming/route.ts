@@ -1,6 +1,4 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
 import { db } from "@/lib/db";
 import {
@@ -13,8 +11,7 @@ import {
   timeBlocks,
 } from "@/lib/schema";
 import { eq, and, gte, lt, not } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 type VoiceAiConfig = {
   enabled: boolean;
@@ -41,9 +38,9 @@ type VoiceAiConfig = {
  * For now, it simulates the voice AI processing a caller's message.
  */
 export async function POST(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   const hasPro = await isProPlan();
@@ -80,7 +77,7 @@ export async function POST(req: Request) {
         phone: salons.phone,
       })
       .from(salons)
-      .where(eq(salons.id, DEMO_SALON_ID))
+      .where(eq(salons.id, salonId))
       .limit(1);
 
     const salon = salonRows[0];
@@ -116,7 +113,7 @@ export async function POST(req: Request) {
         .from(services)
         .where(
           and(
-            eq(services.salonId, DEMO_SALON_ID),
+            eq(services.salonId, salonId),
             eq(services.isActive, true)
           )
         ),
@@ -129,7 +126,7 @@ export async function POST(req: Request) {
         .from(employees)
         .where(
           and(
-            eq(employees.salonId, DEMO_SALON_ID),
+            eq(employees.salonId, salonId),
             eq(employees.isActive, true)
           )
         ),
@@ -148,7 +145,7 @@ export async function POST(req: Request) {
     const conversationRows = await db
       .insert(aiConversations)
       .values({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         channel: "voice",
         transcript: JSON.stringify({
           callerPhone: body.callerPhone || "symulacja",

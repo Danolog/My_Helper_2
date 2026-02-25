@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSalonId } from "@/hooks/use-salon-id";
 import Link from "next/link";
 import { ArrowLeft, CreditCard, Clock, CheckCircle, XCircle, RefreshCw, Filter, DollarSign, TrendingUp, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,8 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 interface Transaction {
   id: string;
@@ -145,6 +144,7 @@ function formatDateShort(dateStr: string) {
 }
 
 export default function PaymentsPage() {
+  const { salonId, loading: salonLoading } = useSalonId();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState<PaymentSummary | null>(null);
   const [pagination, setPagination] = useState<PaginationInfo | null>(null);
@@ -159,12 +159,13 @@ export default function PaymentsPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   const fetchPayments = useCallback(async () => {
+    if (!salonId) return;
     setLoading(true);
     setError(null);
 
     try {
       const params = new URLSearchParams({
-        salonId: DEMO_SALON_ID,
+        salonId,
         page: String(currentPage),
         limit: "20",
       });
@@ -198,7 +199,7 @@ export default function PaymentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, typeFilter, statusFilter, dateFrom, dateTo]);
+  }, [salonId, currentPage, typeFilter, statusFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchPayments();

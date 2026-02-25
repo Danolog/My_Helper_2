@@ -29,6 +29,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useSession } from "@/lib/auth-client";
+import { TRIAL_DAYS } from "@/lib/constants";
 
 type Plan = {
   id: string;
@@ -507,7 +508,7 @@ export default function PricingPage() {
           </h2>
           <p className="text-muted-foreground max-w-lg mx-auto">
             Dolacz do grona salonow korzystajacych z MyHelper. Zacznij z
-            14-dniowym okresem probnym - bez zobowiazan.
+            {TRIAL_DAYS}-dniowym okresem probnym - bez zobowiazan.
           </p>
           <div className="flex items-center justify-center gap-4">
             <Button

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "@/lib/auth-client";
+import { useSalonId } from "@/hooks/use-salon-id";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,6 @@ import {
 import { Lock, CalendarPlus, Scissors, Users, User, Star, Clock, CalendarDays, Check, AlertCircle, ChevronLeft, ChevronRight, Gift, Package, Tag, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 const NO_CLIENT = "__no_client__";
 
 interface Service {
@@ -116,6 +116,7 @@ interface PromoCodeValidation {
 
 export default function BookingPage() {
   const { data: session, isPending } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
   const [services, setServices] = useState<Service[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState<string>("");
   const [availableEmployees, setAvailableEmployees] = useState<Employee[]>([]);
@@ -159,9 +160,10 @@ export default function BookingPage() {
   const [loadingAllEmployees, setLoadingAllEmployees] = useState(false);
 
   const fetchServices = useCallback(async () => {
+    if (!salonId) return;
     try {
       setLoadingServices(true);
-      const res = await fetch(`/api/services?salonId=${DEMO_SALON_ID}&activeOnly=true`);
+      const res = await fetch(`/api/services?salonId=${salonId}&activeOnly=true`);
       const data = await res.json();
       if (data.success) {
         setServices(data.data);
@@ -171,12 +173,13 @@ export default function BookingPage() {
     } finally {
       setLoadingServices(false);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchClients = useCallback(async () => {
+    if (!salonId) return;
     try {
       setLoadingClients(true);
-      const res = await fetch(`/api/clients?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/clients?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setClients(data.data);
@@ -186,11 +189,12 @@ export default function BookingPage() {
     } finally {
       setLoadingClients(false);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchPackages = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch(`/api/promotions/check-package?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/promotions/check-package?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setAvailablePackages(data.data);
@@ -198,12 +202,13 @@ export default function BookingPage() {
     } catch (error) {
       console.error("Failed to fetch packages:", error);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchAllEmployees = useCallback(async () => {
+    if (!salonId) return;
     setLoadingAllEmployees(true);
     try {
-      const res = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/employees?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setAllEmployees(data.data.filter((e: Employee) => e.isActive));
@@ -213,7 +218,7 @@ export default function BookingPage() {
     } finally {
       setLoadingAllEmployees(false);
     }
-  }, []);
+  }, [salonId]);
 
   useEffect(() => {
     fetchServices();
@@ -277,7 +282,7 @@ export default function BookingPage() {
 
   // Check for applicable promotions when client and service are selected
   const checkPromotions = useCallback(async (clientId: string, serviceId: string) => {
-    if (!clientId || !serviceId) {
+    if (!clientId || !serviceId || !salonId) {
       setPromoCheck(null);
       return;
     }
@@ -285,7 +290,7 @@ export default function BookingPage() {
     setLoadingPromo(true);
     try {
       const res = await fetch(
-        `/api/promotions/check?salonId=${DEMO_SALON_ID}&clientId=${clientId}&serviceId=${serviceId}`
+        `/api/promotions/check?salonId=${salonId}&clientId=${clientId}&serviceId=${serviceId}`
       );
       const data = await res.json();
       if (data.success) {
@@ -299,7 +304,7 @@ export default function BookingPage() {
     } finally {
       setLoadingPromo(false);
     }
-  }, []);
+  }, [salonId]);
 
   // Re-check promotions when client or service changes
   useEffect(() => {
@@ -325,7 +330,7 @@ export default function BookingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code,
-          salonId: DEMO_SALON_ID,
+          salonId: salonId,
         }),
       });
       const data = await res.json();
@@ -477,7 +482,7 @@ export default function BookingPage() {
       // Calculate promo code discount if applicable
       const promoDiscount = getPromoCodeDiscount();
       const appointmentBody: Record<string, unknown> = {
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         clientId: selectedClientId || null,
         employeeId: selectedEmployeeId,
         serviceId: selectedServiceId,

@@ -4,8 +4,7 @@ import { isProPlan } from "@/lib/subscription";
 import { db } from "@/lib/db";
 import { scheduledPosts } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 // POST - Manually publish a scheduled post (simulates publishing)
 export async function POST(
@@ -15,6 +14,11 @@ export async function POST(
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
   }
 
   const hasPro = await isProPlan();
@@ -32,7 +36,7 @@ export async function POST(
       .select()
       .from(scheduledPosts)
       .where(
-        and(eq(scheduledPosts.id, id), eq(scheduledPosts.salonId, DEMO_SALON_ID))
+        and(eq(scheduledPosts.id, id), eq(scheduledPosts.salonId, salonId))
       );
 
     if (!post) {

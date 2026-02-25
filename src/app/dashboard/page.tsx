@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useSession } from "@/lib/auth-client";
+import { PLANS, TRIAL_DAYS } from "@/lib/constants";
 
 // ────────────────────────────────────────────────────────────
 // Daily AI Recommendations Component (Pro plan only)
@@ -787,7 +788,7 @@ export default function DashboardPage() {
             }`}>
               {trialDaysRemaining <= 3
                 ? "Wykup subskrypcje, aby zachowac dostep do wszystkich funkcji."
-                : "Korzystasz z pelnych funkcji w ramach 14-dniowego okresu probnego."
+                : `Korzystasz z pelnych funkcji w ramach ${TRIAL_DAYS}-dniowego okresu probnego.`
               }
             </p>
           </div>
@@ -1554,9 +1555,9 @@ function CreateSalonPrompt({
 
   const plans = [
     {
-      slug: "basic",
-      name: "Basic",
-      price: "49 zl/mies.",
+      slug: PLANS.basic.slug,
+      name: PLANS.basic.name,
+      price: PLANS.basic.priceLabel,
       features: [
         "Zarzadzanie wizytami",
         "Kalendarz pracownikow",
@@ -1565,9 +1566,9 @@ function CreateSalonPrompt({
       ],
     },
     {
-      slug: "pro",
-      name: "Pro",
-      price: "99 zl/mies.",
+      slug: PLANS.pro.slug,
+      name: PLANS.pro.name,
+      price: PLANS.pro.priceLabel,
       features: [
         "Wszystko z Basic",
         "Asystent AI",
@@ -1618,7 +1619,7 @@ function CreateSalonPrompt({
             </div>
             <CardTitle>Utworz swoj salon</CardTitle>
             <p className="text-muted-foreground text-sm">
-              Wybierz plan i rozpocznij 14-dniowy okres probny
+              Wybierz plan i rozpocznij {TRIAL_DAYS}-dniowy okres probny
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -1669,7 +1670,7 @@ function CreateSalonPrompt({
               ) : (
                 <>
                   <Building2 className="h-4 w-4 mr-2" />
-                  Utworz salon z 14-dniowym trialem
+                  Utworz salon z {TRIAL_DAYS}-dniowym trialem
                 </>
               )}
             </Button>

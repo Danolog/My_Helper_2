@@ -8,8 +8,7 @@ import {
   subscriptionPayments,
   subscriptionPlans,
 } from "@/lib/schema";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * POST /api/subscriptions/renew
@@ -36,6 +35,14 @@ export async function POST() {
       );
     }
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     // Find the current active subscription
     const [activeSub] = await db
       .select({
@@ -49,7 +56,7 @@ export async function POST() {
       )
       .where(
         and(
-          eq(salonSubscriptions.salonId, DEMO_SALON_ID),
+          eq(salonSubscriptions.salonId, salonId),
           eq(salonSubscriptions.status, "active")
         )
       );
@@ -101,7 +108,7 @@ export async function POST() {
       .insert(subscriptionPayments)
       .values({
         subscriptionId: sub.id,
-        salonId: DEMO_SALON_ID,
+        salonId,
         amount: renewPlan.priceMonthly,
         currency: "PLN",
         stripePaymentIntentId: `sim_renewal_pi_${Date.now()}`,
@@ -184,6 +191,14 @@ export async function GET() {
       );
     }
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     // Find the current active subscription
     const [activeSub] = await db
       .select({
@@ -197,7 +212,7 @@ export async function GET() {
       )
       .where(
         and(
-          eq(salonSubscriptions.salonId, DEMO_SALON_ID),
+          eq(salonSubscriptions.salonId, salonId),
           eq(salonSubscriptions.status, "active")
         )
       );

@@ -1,6 +1,4 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
 import { db } from "@/lib/db";
 import {
@@ -17,8 +15,7 @@ import { eq, and, gte, not } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
 import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
 import { notifyWaitingList } from "@/lib/waiting-list";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 interface CancelRequestBody {
   appointmentId?: string; // Direct appointment ID if known
@@ -39,10 +36,10 @@ interface CancelRequestBody {
  * 6. Log the conversation.
  */
 export async function POST(req: Request) {
-  // --- Authentication ---
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // --- Authentication & salon resolution ---
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   // --- Pro plan gate ---
@@ -104,7 +101,7 @@ export async function POST(req: Request) {
         .where(
           and(
             eq(appointments.id, body.appointmentId),
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             not(eq(appointments.status, "cancelled")),
             not(eq(appointments.status, "completed"))
           )
@@ -130,7 +127,7 @@ export async function POST(req: Request) {
         .from(clients)
         .where(
           and(
-            eq(clients.salonId, DEMO_SALON_ID),
+            eq(clients.salonId, salonId),
             eq(clients.phone, body.callerPhone)
           )
         )
@@ -162,7 +159,7 @@ export async function POST(req: Request) {
         .where(
           and(
             eq(appointments.clientId, clientRecord.id),
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             not(eq(appointments.status, "cancelled")),
             not(eq(appointments.status, "completed")),
             gte(appointments.startTime, now)
@@ -352,7 +349,7 @@ export async function POST(req: Request) {
     const salonRows = await db
       .select({ name: salons.name })
       .from(salons)
-      .where(eq(salons.id, DEMO_SALON_ID))
+      .where(eq(salons.id, salonId))
       .limit(1);
 
     const salonName = salonRows[0]?.name || "Nasz salon";
@@ -381,7 +378,7 @@ export async function POST(req: Request) {
       const smsResult = await sendSms({
         to: body.callerPhone,
         message: smsMessage,
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         clientId: clientRecord?.id,
       });
       smsSent = smsResult.success;
@@ -395,7 +392,7 @@ export async function POST(req: Request) {
     const [conversation] = await db
       .insert(aiConversations)
       .values({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         clientId: clientRecord?.id || null,
         channel: "voice",
         transcript: JSON.stringify({

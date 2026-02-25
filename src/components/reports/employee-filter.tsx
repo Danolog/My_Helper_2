@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSalonId } from "@/hooks/use-salon-id";
 import { Users, X, Check, ChevronsUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,8 +10,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 interface Employee {
   id: string;
@@ -28,15 +27,17 @@ export function EmployeeFilter({
   selectedEmployeeIds,
   onSelectionChange,
 }: EmployeeFilterProps) {
+  const { salonId } = useSalonId();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
 
   const fetchEmployees = useCallback(async () => {
+    if (!salonId) return;
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/employees?salonId=${DEMO_SALON_ID}&activeOnly=true`
+        `/api/employees?salonId=${salonId}&activeOnly=true`
       );
       if (res.ok) {
         const json = await res.json();
@@ -49,7 +50,7 @@ export function EmployeeFilter({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [salonId]);
 
   useEffect(() => {
     fetchEmployees();

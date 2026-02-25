@@ -1,9 +1,8 @@
-import { headers } from "next/headers";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { db } from "@/lib/db";
 import {
   salons,
@@ -12,8 +11,6 @@ import {
   newsletters,
 } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 const requestSchema = z.object({
   topic: z.string().min(1).max(500),
@@ -69,10 +66,10 @@ const INDUSTRY_LABELS: Record<string, string> = {
 };
 
 export async function POST(req: Request) {
-  // Verify authentication
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  // Verify authentication and resolve salon
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
   }
 
   // Check Pro plan
@@ -135,7 +132,7 @@ export async function POST(req: Request) {
         phone: salons.phone,
       })
       .from(salons)
-      .where(eq(salons.id, DEMO_SALON_ID))
+      .where(eq(salons.id, salonId))
       .then((r) => r[0]);
 
     if (salonInfo) {
@@ -153,7 +150,7 @@ export async function POST(req: Request) {
       .select({ name: services.name, basePrice: services.basePrice })
       .from(services)
       .where(
-        and(eq(services.salonId, DEMO_SALON_ID), eq(services.isActive, true))
+        and(eq(services.salonId, salonId), eq(services.isActive, true))
       )
       .limit(10);
 
@@ -172,7 +169,7 @@ export async function POST(req: Request) {
         .from(promotions)
         .where(
           and(
-            eq(promotions.salonId, DEMO_SALON_ID),
+            eq(promotions.salonId, salonId),
             eq(promotions.isActive, true)
           )
         )
@@ -279,7 +276,7 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
         const [saved] = await db
           .insert(newsletters)
           .values({
-            salonId: DEMO_SALON_ID,
+            salonId: salonId,
             subject,
             content,
           })
@@ -316,16 +313,16 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
 
 // GET - list saved newsletters
 export async function GET() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
   }
 
   try {
     const result = await db
       .select()
       .from(newsletters)
-      .where(eq(newsletters.salonId, DEMO_SALON_ID))
+      .where(eq(newsletters.salonId, salonId))
       .orderBy(desc(newsletters.createdAt))
       .limit(20);
 

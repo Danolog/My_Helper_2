@@ -55,8 +55,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { useSalonId } from "@/hooks/use-salon-id";
 
 interface ServiceVariant {
   id: string;
@@ -148,6 +147,7 @@ export default function ServiceDetailPage() {
   const router = useRouter();
   const serviceId = params.id as string;
   const { data: session, isPending } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
   const [service, setService] = useState<ServiceDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -248,8 +248,9 @@ export default function ServiceDetailPage() {
   }, [serviceId]);
 
   const fetchEmployees = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}&activeOnly=true`);
+      const res = await fetch(`/api/employees?salonId=${salonId}&activeOnly=true`);
       const data = await res.json();
       if (data.success) {
         setAllEmployees(data.data);
@@ -257,7 +258,7 @@ export default function ServiceDetailPage() {
     } catch (error) {
       console.error("Failed to fetch employees:", error);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchServiceProductLinks = useCallback(async () => {
     try {
@@ -272,8 +273,9 @@ export default function ServiceDetailPage() {
   }, [serviceId]);
 
   const fetchAllProducts = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch(`/api/products?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/products?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setAllProducts(data.data);
@@ -281,11 +283,12 @@ export default function ServiceDetailPage() {
     } catch (error) {
       console.error("Failed to fetch products:", error);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchGalleryPhotos = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch(`/api/gallery?salonId=${DEMO_SALON_ID}&serviceId=${serviceId}`);
+      const res = await fetch(`/api/gallery?salonId=${salonId}&serviceId=${serviceId}`);
       const data = await res.json();
       if (data.success) {
         setGalleryPhotos(data.data);
@@ -293,7 +296,7 @@ export default function ServiceDetailPage() {
     } catch (error) {
       console.error("Failed to fetch gallery photos:", error);
     }
-  }, [serviceId]);
+  }, [salonId, serviceId]);
 
   useEffect(() => {
     async function loadData() {
@@ -774,7 +777,7 @@ export default function ServiceDetailPage() {
     return num > 0 ? `${prefix}+${num}${suffix}` : `${prefix}${num}${suffix}`;
   };
 
-  if (isPending || loading) {
+  if (isPending || salonLoading || loading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />

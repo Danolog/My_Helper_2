@@ -54,8 +54,7 @@ import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useTabSync } from "@/hooks/use-tab-sync";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { useSalonId } from "@/hooks/use-salon-id";
 
 interface ServiceCategory {
   id: string;
@@ -81,6 +80,7 @@ interface Service {
 
 export default function ServicesPage() {
   const { data: session, isPending } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
   const router = useRouter();
   const [services, setServices] = useState<Service[]>([]);
   const [categories, setCategories] = useState<ServiceCategory[]>([]);
@@ -168,8 +168,9 @@ export default function ServicesPage() {
   const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean; isTimeout: boolean } | null>(null);
 
   const fetchServices = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch(`/api/services?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/services?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setServices(data.data);
@@ -180,12 +181,13 @@ export default function ServicesPage() {
       const errInfo = getNetworkErrorMessage(error);
       setFetchError(errInfo);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchCategories = useCallback(async () => {
+    if (!salonId) return;
     try {
       const res = await fetch(
-        `/api/service-categories?salonId=${DEMO_SALON_ID}`
+        `/api/service-categories?salonId=${salonId}`
       );
       const data = await res.json();
       if (data.success) {
@@ -194,7 +196,7 @@ export default function ServicesPage() {
     } catch (error) {
       console.error("Failed to fetch categories:", error);
     }
-  }, []);
+  }, [salonId]);
 
   useEffect(() => {
     async function loadData() {
@@ -264,7 +266,7 @@ export default function ServicesPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          salonId: DEMO_SALON_ID,
+          salonId: salonId!,
           categoryId: formCategoryId || null,
           name: formName.trim(),
           description: formDescription.trim() || null,
@@ -374,7 +376,7 @@ export default function ServicesPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            salonId: DEMO_SALON_ID,
+            salonId: salonId!,
             name: categoryFormName.trim(),
             sortOrder: categories.length,
           }),
@@ -444,7 +446,7 @@ export default function ServicesPage() {
     }
   };
 
-  if (isPending) {
+  if (isPending || salonLoading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />

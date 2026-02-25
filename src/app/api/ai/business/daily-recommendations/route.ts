@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import {
   appointments,
@@ -12,10 +11,8 @@ import {
   reviews,
 } from "@/lib/schema";
 import { eq, and, gte, lte, sql, count, desc, asc } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 interface DailyRecommendation {
   id: string;
@@ -41,10 +38,10 @@ interface TomorrowSummary {
 }
 
 export async function GET(_request: Request) {
-  // Auth check
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Auth check and resolve salon
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   // Pro plan check
@@ -124,7 +121,7 @@ export async function GET(_request: Request) {
         .leftJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, tomorrowStart),
             lte(appointments.startTime, tomorrowEnd),
             sql`${appointments.status} NOT IN ('cancelled', 'no_show')`
@@ -142,7 +139,7 @@ export async function GET(_request: Request) {
         .from(employees)
         .where(
           and(
-            eq(employees.salonId, DEMO_SALON_ID),
+            eq(employees.salonId, salonId),
             eq(employees.isActive, true)
           )
         ),
@@ -162,7 +159,7 @@ export async function GET(_request: Request) {
         .innerJoin(employees, eq(timeBlocks.employeeId, employees.id))
         .where(
           and(
-            eq(employees.salonId, DEMO_SALON_ID),
+            eq(employees.salonId, salonId),
             lte(timeBlocks.startTime, tomorrowEnd),
             gte(timeBlocks.endTime, tomorrowStart)
           )
@@ -179,7 +176,7 @@ export async function GET(_request: Request) {
         .innerJoin(employees, eq(workSchedules.employeeId, employees.id))
         .where(
           and(
-            eq(employees.salonId, DEMO_SALON_ID),
+            eq(employees.salonId, salonId),
             eq(workSchedules.dayOfWeek, tomorrowDayOfWeek)
           )
         ),
@@ -195,7 +192,7 @@ export async function GET(_request: Request) {
         .from(products)
         .where(
           and(
-            eq(products.salonId, DEMO_SALON_ID),
+            eq(products.salonId, salonId),
             sql`CAST(${products.quantity} AS numeric) <= COALESCE(CAST(${products.minQuantity} AS numeric), 5)`
           )
         )
@@ -212,7 +209,7 @@ export async function GET(_request: Request) {
         .from(reviews)
         .where(
           and(
-            eq(reviews.salonId, DEMO_SALON_ID),
+            eq(reviews.salonId, salonId),
             sql`${reviews.rating} IS NOT NULL`
           )
         )

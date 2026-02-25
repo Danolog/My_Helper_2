@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { subscriptionPlans, salonSubscriptions, salons, user as userTable } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { TRIAL_DAYS } from "@/lib/constants";
 
 /**
  * POST /api/register-subscription
  *
  * Called after user registration to store the selected subscription plan.
- * Creates a salon subscription in 'trialing' status with a 14-day trial.
+ * Creates a salon subscription in 'trialing' status with a trial period.
  *
  * Body: { planSlug: "basic" | "pro", email: string }
  */
@@ -102,9 +103,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Create salon subscription with 14-day trial
+    // Create salon subscription with trial period
     const trialEnd = new Date();
-    trialEnd.setDate(trialEnd.getDate() + 14);
+    trialEnd.setDate(trialEnd.getDate() + TRIAL_DAYS);
 
     const [subscription] = await db
       .insert(salonSubscriptions)

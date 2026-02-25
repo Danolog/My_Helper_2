@@ -30,11 +30,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { PLANS, TRIAL_DAYS } from "@/lib/constants";
 
 const PLANS_PREVIEW = {
   basic: {
-    name: "Basic",
-    price: 49,
+    name: PLANS.basic.name,
+    price: PLANS.basic.priceMonthly,
     description:
       "Pelne zarzadzanie salonem bez narzedzi AI. Idealny na start.",
     features: [
@@ -46,8 +47,8 @@ const PLANS_PREVIEW = {
     ],
   },
   pro: {
-    name: "Pro",
-    price: 149,
+    name: PLANS.pro.name,
+    price: PLANS.pro.priceMonthly,
     description:
       "Pelna funkcjonalnosc z asystentem AI glosowym, biznesowym i content marketingowym.",
     features: [
@@ -100,29 +101,29 @@ const FEATURES = [
 ] as const;
 
 const TRUST_STATS = [
-  { value: "500+", label: "Salonow" },
-  { value: "10 000+", label: "Wizyt miesiecznie" },
-  { value: "99.9%", label: "Dostepnosc" },
-  { value: "4.9/5", label: "Ocena klientow" },
+  { value: "30+", label: "Funkcji" },
+  { value: "AI", label: "Asystent glosowy" },
+  { value: "24/7", label: "Rezerwacje online" },
+  { value: "100%", label: "Polski produkt" },
 ] as const;
 
 const TESTIMONIALS = [
   {
-    name: "Anna Kowalska",
+    name: "Tester Beta",
     role: "Wlascicielka salonu fryzjerskiego",
-    quote: "Od kiedy korzystam z MyHelper, moj salon dziala sprawniej niz kiedykolwiek. Klienci uwielbiaja rezerwacje online!",
+    quote: "MyHelper to swietne narzedzie do zarzadzania salonem. Rezerwacje online i kalendarz pracownikow dzialaja bezblednie.",
     rating: 5,
   },
   {
-    name: "Marta Nowak",
+    name: "Tester Beta",
     role: "Kosmetyczka",
-    quote: "Asystent AI pomaga mi planowac promocje i tworzyc posty na social media. Oszczedzam godziny tygodniowo.",
+    quote: "Asystent AI pomaga planowac promocje i tworzyc posty na social media. Duza oszczednosc czasu.",
     rating: 5,
   },
   {
-    name: "Karolina Wisniewski",
+    name: "Tester Beta",
     role: "Wlascicielka SPA",
-    quote: "Przeszlam z Booksy i nie zaluję. Nizsza cena, wiecej funkcji i swietna obsluga klienta.",
+    quote: "Konkurencyjna cena w porownaniu z innymi rozwiazaniami na rynku, a funkcjonalnosc na wysokim poziomie.",
     rating: 5,
   },
 ] as const;
@@ -444,7 +445,7 @@ export default function Home() {
               Wybierz odpowiedni pakiet
             </h2>
             <p className="text-muted-foreground/90 max-w-xl mx-auto text-xl font-light">
-              Przejrzyste zasady. 14-dniowy okres próbny.
+              Przejrzyste zasady. {TRIAL_DAYS}-dniowy okres próbny.
             </p>
           </motion.div>
 

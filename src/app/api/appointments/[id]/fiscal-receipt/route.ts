@@ -11,8 +11,8 @@ import {
   fiscalReceipts,
 } from "@/lib/schema";
 import { eq, and, count } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { DEFAULT_VAT_RATE } from "@/lib/constants";
 
 /**
  * GET /api/appointments/[id]/fiscal-receipt
@@ -24,6 +24,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userSalonId = await getUserSalonId();
+    if (!userSalonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     const receipts = await db
@@ -70,6 +78,14 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const userSalonId = await getUserSalonId();
+    if (!userSalonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json().catch(() => ({}));
     const paymentMethod = body.paymentMethod || "cash";
@@ -184,7 +200,7 @@ export async function POST(
     }, 0);
 
     // 5. Get salon fiscal settings
-    const salonId = appointment.salonId || DEMO_SALON_ID;
+    const salonId = appointment.salonId || userSalonId;
     const [salon] = await db
       .select({
         name: salons.name,
@@ -206,7 +222,7 @@ export async function POST(
 
     // 6. Calculate totals with VAT
     const totalAmount = parseFloat(servicePrice) + materialsCost;
-    const vatRate = 23; // Standard Polish VAT rate for services
+    const vatRate = DEFAULT_VAT_RATE;
     const netAmount = totalAmount / (1 + vatRate / 100);
     const vatAmount = totalAmount - netAmount;
 

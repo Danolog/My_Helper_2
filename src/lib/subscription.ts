@@ -1,8 +1,7 @@
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 export type PlanSlug = "basic" | "pro";
 
@@ -13,11 +12,16 @@ export type CurrentPlan = {
 };
 
 /**
- * Gets the current subscription plan for the demo salon.
+ * Gets the current subscription plan for the given salon (or the authenticated user's salon).
  * Returns the plan slug and name, or defaults to "basic" if no subscription found.
  */
-export async function getCurrentPlan(): Promise<CurrentPlan> {
+export async function getCurrentPlan(salonId?: string): Promise<CurrentPlan> {
   try {
+    const resolvedSalonId = salonId ?? (await getUserSalonId());
+    if (!resolvedSalonId) {
+      return { slug: "basic", name: "Basic", status: "active" };
+    }
+
     const results = await db
       .select({
         planSlug: subscriptionPlans.slug,
@@ -31,7 +35,7 @@ export async function getCurrentPlan(): Promise<CurrentPlan> {
       )
       .where(
         and(
-          eq(salonSubscriptions.salonId, DEMO_SALON_ID),
+          eq(salonSubscriptions.salonId, resolvedSalonId),
           inArray(salonSubscriptions.status, ["active", "trialing"])
         )
       )
@@ -55,10 +59,10 @@ export async function getCurrentPlan(): Promise<CurrentPlan> {
 }
 
 /**
- * Checks if the current salon has a Pro plan subscription.
+ * Checks if the given salon (or the authenticated user's salon) has a Pro plan.
  * Returns true if the plan is "pro", false otherwise.
  */
-export async function isProPlan(): Promise<boolean> {
-  const plan = await getCurrentPlan();
+export async function isProPlan(salonId?: string): Promise<boolean> {
+  const plan = await getCurrentPlan(salonId);
   return plan.slug === "pro";
 }

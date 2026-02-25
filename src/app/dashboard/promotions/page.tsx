@@ -54,6 +54,7 @@ import { toast } from "sonner";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { FormRecoveryBanner } from "@/components/form-recovery-banner";
+import { useSalonId } from "@/hooks/use-salon-id";
 
 interface Promotion {
   id: string;
@@ -75,8 +76,6 @@ interface Service {
   baseDuration: number;
   isActive: boolean;
 }
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 const TYPE_LABELS: Record<string, string> = {
   percentage: "Procentowa",
@@ -128,6 +127,7 @@ function isUpcoming(startDate: string | null): boolean {
 
 export default function PromotionsPage() {
   const { data: session, isPending } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
 
   const [promotionsList, setPromotionsList] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -223,9 +223,10 @@ export default function PromotionsPage() {
   const [deleting, setDeleting] = useState(false);
 
   const fetchPromotions = useCallback(async () => {
+    if (!salonId) return;
     try {
       setLoading(true);
-      const res = await fetch(`/api/promotions?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/promotions?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setPromotionsList(data.data);
@@ -237,11 +238,11 @@ export default function PromotionsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchServices = useCallback(async () => {
     try {
-      const res = await fetch(`/api/services?salonId=${DEMO_SALON_ID}&activeOnly=true`);
+      const res = await fetch(`/api/services?salonId=${salonId}&activeOnly=true`);
       const data = await res.json();
       if (data.success) {
         setServicesList(data.data);
@@ -417,7 +418,7 @@ export default function PromotionsPage() {
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         name: formName.trim(),
         type: formType,
         value: formValue,

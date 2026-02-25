@@ -5,8 +5,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { subscriptionPlans, salonSubscriptions, subscriptionPayments } from "@/lib/schema";
 import { getStripe, isStripePricesConfigured } from "@/lib/stripe";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * Map plan slugs to their corresponding Stripe price env variables.
@@ -127,6 +126,14 @@ export async function POST(request: Request) {
       );
     }
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 },
+      );
+    }
+
     const body: unknown = await request.json();
     if (
       !body ||
@@ -173,7 +180,7 @@ export async function POST(request: Request) {
       .from(salonSubscriptions)
       .where(
         and(
-          eq(salonSubscriptions.salonId, DEMO_SALON_ID),
+          eq(salonSubscriptions.salonId, salonId),
           eq(salonSubscriptions.status, "active"),
         ),
       );
@@ -206,7 +213,7 @@ export async function POST(request: Request) {
 
       await db.insert(subscriptionPayments).values({
         subscriptionId: existingSub.id,
-        salonId: DEMO_SALON_ID,
+        salonId: salonId,
         amount: plan.priceMonthly,
         currency: "PLN",
         stripePaymentIntentId: `sim_upgrade_pi_${Date.now()}`,
@@ -276,7 +283,7 @@ export async function POST(request: Request) {
           cancel_url: `${origin}/pricing`,
           customer_email: session.user.email,
           metadata: {
-            salonId: DEMO_SALON_ID,
+            salonId: salonId,
             planId: plan.id,
             planSlug: plan.slug,
             userId: session.user.id,
@@ -307,7 +314,7 @@ export async function POST(request: Request) {
       `[Subscriptions API] Creating simulated subscription for plan ${plan.slug} (dev fallback)`,
     );
 
-    await createSimulatedSubscription(plan.id, plan.priceMonthly, DEMO_SALON_ID);
+    await createSimulatedSubscription(plan.id, plan.priceMonthly, salonId);
 
     return NextResponse.json({
       success: true,

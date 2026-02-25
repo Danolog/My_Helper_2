@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PLANS } from "@/lib/constants";
 
 type PlanData = {
   slug: string;
@@ -46,7 +47,7 @@ export function useSubscription(): SubscriptionState {
           });
         } else {
           // No subscription found, default to basic
-          setPlan({ slug: "basic", name: "Basic", priceMonthly: "49.00", features: [] });
+          setPlan({ slug: PLANS.basic.slug, name: PLANS.basic.name, priceMonthly: String(PLANS.basic.priceMonthly) + ".00", features: [] });
         }
         // Extract trial info from subscription
         if (data.subscription) {
@@ -55,7 +56,7 @@ export function useSubscription(): SubscriptionState {
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : "Nie udalo sie pobrac planu");
-        setPlan({ slug: "basic", name: "Basic", priceMonthly: "49.00", features: [] });
+        setPlan({ slug: PLANS.basic.slug, name: PLANS.basic.name, priceMonthly: String(PLANS.basic.priceMonthly) + ".00", features: [] });
       } finally {
         setLoading(false);
       }

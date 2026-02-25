@@ -53,6 +53,7 @@ import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useTabSync } from "@/hooks/use-tab-sync";
+import { useSalonId } from "@/hooks/use-salon-id";
 
 interface Product {
   id: string;
@@ -76,7 +77,6 @@ interface ProductCategory {
   productCount: number;
 }
 
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 const NO_CATEGORY = "__none__";
 
 const UNITS = ["ml", "g", "szt.", "opak.", "l", "kg"];
@@ -86,6 +86,7 @@ export default function ProductsPage() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const { data: session, isPending } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
   const [productsData, setProductsData] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState(searchParams.get("q") || "");
@@ -202,8 +203,9 @@ export default function ProductsPage() {
   const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean; isTimeout: boolean } | null>(null);
 
   const fetchProducts = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch(`/api/products?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/products?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setProductsData(data.data);
@@ -216,12 +218,13 @@ export default function ProductsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchCategories = useCallback(async () => {
+    if (!salonId) return;
     try {
       setCategoriesLoading(true);
-      const res = await fetch(`/api/product-categories?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/product-categories?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setCategories(data.data);
@@ -231,12 +234,13 @@ export default function ProductsPage() {
     } finally {
       setCategoriesLoading(false);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchLowStockNotifications = useCallback(async () => {
+    if (!salonId) return;
     try {
       const res = await fetch(
-        `/api/notifications?salonId=${DEMO_SALON_ID}&type=system&limit=10`
+        `/api/notifications?salonId=${salonId}&type=system&limit=10`
       );
       const data = await res.json();
       if (data.success) {
@@ -249,7 +253,7 @@ export default function ProductsPage() {
     } catch (error) {
       console.error("Failed to fetch notifications:", error);
     }
-  }, []);
+  }, [salonId]);
 
   useEffect(() => {
     fetchProducts();
@@ -334,7 +338,7 @@ export default function ProductsPage() {
     setSaving(true);
     try {
       const payload = {
-        salonId: DEMO_SALON_ID,
+        salonId: salonId!,
         name: formName.trim(),
         category: formCategory || null,
         quantity: parseFloat(formQuantity) || 0,
@@ -470,7 +474,7 @@ export default function ProductsPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            salonId: DEMO_SALON_ID,
+            salonId: salonId!,
             name: categoryFormName.trim(),
           }),
         });
@@ -566,7 +570,7 @@ export default function ProductsPage() {
     return parseFloat(p.quantity || "0") <= parseFloat(p.minQuantity);
   });
 
-  if (isPending || loading) {
+  if (isPending || salonLoading || loading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />

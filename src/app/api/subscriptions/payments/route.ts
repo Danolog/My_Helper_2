@@ -6,8 +6,7 @@ import {
   subscriptionPlans,
 } from "@/lib/schema";
 import { eq, and, desc, gte, lte } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * GET /api/subscriptions/payments
@@ -23,6 +22,14 @@ const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
  */
 export async function GET(request: NextRequest) {
   try {
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 },
+      );
+    }
+
     const { searchParams } = request.nextUrl;
     const status = searchParams.get("status");
     const dateFrom = searchParams.get("dateFrom");
@@ -31,7 +38,7 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "20", 10);
 
     // Build conditions
-    const conditions = [eq(subscriptionPayments.salonId, DEMO_SALON_ID)];
+    const conditions = [eq(subscriptionPayments.salonId, salonId)];
 
     if (status) {
       conditions.push(eq(subscriptionPayments.status, status));

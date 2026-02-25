@@ -51,8 +51,7 @@ import { toast } from "sonner";
 import { EditAppointmentDialog } from "@/components/appointments/edit-appointment-dialog";
 import { CompleteAppointmentDialog } from "@/components/appointments/complete-appointment-dialog";
 import { useTabSync } from "@/hooks/use-tab-sync";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { useSalonId } from "@/hooks/use-salon-id";
 
 interface AppointmentDetail {
   id: string;
@@ -279,6 +278,7 @@ export default function AppointmentDetailPage() {
   const router = useRouter();
   const appointmentId = params.id as string;
   const { data: session, isPending } = useSession();
+  const { salonId } = useSalonId();
 
   const [appointment, setAppointment] = useState<AppointmentDetail | null>(null);
   const [materials, setMaterials] = useState<MaterialRecord[]>([]);
@@ -355,8 +355,9 @@ export default function AppointmentDetailPage() {
   }, [appointmentId]);
 
   const fetchProducts = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch(`/api/products?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/products?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setAvailableProducts(data.data);
@@ -364,7 +365,7 @@ export default function AppointmentDetailPage() {
     } catch (error) {
       console.error("Failed to fetch products:", error);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchTreatment = useCallback(async () => {
     try {
