@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import {
   appointments,
@@ -10,10 +9,8 @@ import {
   products,
 } from "@/lib/schema";
 import { eq, and, gte, lte, sql, count, desc } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 interface Suggestion {
   id: string;
@@ -27,10 +24,10 @@ interface Suggestion {
 }
 
 export async function GET(_request: Request) {
-  // Auth check
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Auth check and resolve salon
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   // Pro plan check
@@ -76,7 +73,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, thirtyDaysAgo),
             lte(appointments.startTime, now)
           )
@@ -89,7 +86,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, sixtyDaysAgo),
             lte(appointments.startTime, thirtyDaysAgo)
           )
@@ -105,7 +102,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, thirtyDaysAgo)
           )
         )
@@ -120,7 +117,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(appointments.startTime, thirtyDaysAgo),
             lte(appointments.startTime, now)
@@ -137,7 +134,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(appointments.startTime, sixtyDaysAgo),
             lte(appointments.startTime, thirtyDaysAgo)
@@ -156,7 +153,7 @@ export async function GET(_request: Request) {
         .from(products)
         .where(
           and(
-            eq(products.salonId, DEMO_SALON_ID),
+            eq(products.salonId, salonId),
             sql`CAST(${products.quantity} AS numeric) <= COALESCE(CAST(${products.minQuantity} AS numeric), 5)`
           )
         )
@@ -171,7 +168,7 @@ export async function GET(_request: Request) {
         .from(reviews)
         .where(
           and(
-            eq(reviews.salonId, DEMO_SALON_ID),
+            eq(reviews.salonId, salonId),
             sql`${reviews.rating} IS NOT NULL`
           )
         )
@@ -190,7 +187,7 @@ export async function GET(_request: Request) {
         .from(reviews)
         .where(
           and(
-            eq(reviews.salonId, DEMO_SALON_ID),
+            eq(reviews.salonId, salonId),
             lte(reviews.rating, 3),
             gte(reviews.createdAt, thirtyDaysAgo)
           )
@@ -202,7 +199,7 @@ export async function GET(_request: Request) {
       db
         .select({ count: count() })
         .from(clients)
-        .where(eq(clients.salonId, DEMO_SALON_ID))
+        .where(eq(clients.salonId, salonId))
         .then((r) => r[0]?.count ?? 0),
 
       // New clients this month
@@ -211,7 +208,7 @@ export async function GET(_request: Request) {
         .from(clients)
         .where(
           and(
-            eq(clients.salonId, DEMO_SALON_ID),
+            eq(clients.salonId, salonId),
             gte(
               clients.createdAt,
               new Date(now.getFullYear(), now.getMonth(), 1)
@@ -226,7 +223,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, now),
             lte(appointments.startTime, sevenDaysFromNow),
             sql`${appointments.status} NOT IN ('cancelled', 'no_show')`
@@ -244,7 +241,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, thirtyDaysAgo),
             sql`${appointments.status} NOT IN ('cancelled', 'no_show')`
           )
@@ -264,7 +261,7 @@ export async function GET(_request: Request) {
         .innerJoin(employees, eq(appointments.employeeId, employees.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, thirtyDaysAgo),
             sql`${appointments.status} NOT IN ('cancelled', 'no_show')`
           )
@@ -278,11 +275,11 @@ export async function GET(_request: Request) {
         .from(clients)
         .where(
           and(
-            eq(clients.salonId, DEMO_SALON_ID),
+            eq(clients.salonId, salonId),
             sql`${clients.id} NOT IN (
               SELECT DISTINCT ${appointments.clientId}
               FROM ${appointments}
-              WHERE ${appointments.salonId} = ${DEMO_SALON_ID}
+              WHERE ${appointments.salonId} = ${salonId}
               AND ${appointments.startTime} >= ${sixtyDaysAgo.toISOString()}
               AND ${appointments.clientId} IS NOT NULL
             )`

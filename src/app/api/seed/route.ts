@@ -4,6 +4,10 @@ import { salons, employees, services, clients, appointments } from "@/lib/schema
 
 // POST /api/seed - Seed test data for development
 export async function POST() {
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Seed route is disabled in production" }, { status: 403 });
+  }
+
   try {
     console.log("[Seed API] Starting seed process...");
 

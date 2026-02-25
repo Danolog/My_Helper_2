@@ -1,21 +1,18 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
 import { db } from "@/lib/db";
 import { aiConversations } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * GET /api/ai/voice/call-log
  * Returns recent voice AI call logs for the salon.
  */
 export async function GET() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   const hasPro = await isProPlan();
@@ -36,7 +33,7 @@ export async function GET() {
       .from(aiConversations)
       .where(
         and(
-          eq(aiConversations.salonId, DEMO_SALON_ID),
+          eq(aiConversations.salonId, salonId),
           eq(aiConversations.channel, "voice")
         )
       )

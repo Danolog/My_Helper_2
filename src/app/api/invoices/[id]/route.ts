@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { invoices, clients, appointments, employees, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * GET /api/invoices/[id]
@@ -16,6 +15,14 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     const rows = await db
@@ -54,7 +61,7 @@ export async function GET(
       .leftJoin(appointments, eq(invoices.appointmentId, appointments.id))
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(and(eq(invoices.id, id), eq(invoices.salonId, DEMO_SALON_ID)))
+      .where(and(eq(invoices.id, id), eq(invoices.salonId, salonId)))
       .limit(1);
 
     if (rows.length === 0) {

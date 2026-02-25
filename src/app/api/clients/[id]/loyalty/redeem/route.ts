@@ -3,8 +3,7 @@ import { db } from "@/lib/db";
 import { loyaltyPoints, loyaltyTransactions, salons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import type { LoyaltySettings, RewardTier } from "@/app/api/salons/[id]/loyalty-settings/route";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * POST /api/clients/[id]/loyalty/redeem
@@ -12,7 +11,6 @@ const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
  * Redeem loyalty points for a reward.
  * Body:
  *   - rewardTierId: string (the ID of the reward tier to redeem)
- *   - salonId: string (optional, defaults to DEMO_SALON_ID)
  *
  * Steps:
  *   1. Validate the salon's loyalty settings and find the reward tier
@@ -28,9 +26,15 @@ export async function POST(
   try {
     const { id: clientId } = await params;
     const body = await request.json();
-    const { rewardTierId, salonId: requestedSalonId } = body;
+    const { rewardTierId } = body;
 
-    const salonId = requestedSalonId || DEMO_SALON_ID;
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     if (!rewardTierId) {
       return NextResponse.json(
@@ -177,17 +181,22 @@ export async function POST(
  * GET /api/clients/[id]/loyalty/redeem
  *
  * Returns available rewards for redemption based on client's current points.
- * Query params:
- *   - salonId (optional, defaults to DEMO_SALON_ID)
+ * Uses the authenticated user's salon.
  */
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id: clientId } = await params;
-    const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId") || DEMO_SALON_ID;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     // 1. Fetch salon loyalty settings
     const [salon] = await db

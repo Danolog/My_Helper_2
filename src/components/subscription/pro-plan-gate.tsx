@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSubscription } from "@/hooks/use-subscription";
+import { PLANS } from "@/lib/constants";
 import { Skeleton } from "@/components/ui/skeleton";
 
 type ProPlanGateProps = {
@@ -107,7 +108,7 @@ export function ProPlanGate({
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Plan Pro: 149 PLN/miesiac — pelna funkcjonalnosc z AI
+                Plan Pro: {PLANS.pro.priceMonthly} PLN/miesiac — pelna funkcjonalnosc z AI
               </p>
             </div>
           </CardContent>

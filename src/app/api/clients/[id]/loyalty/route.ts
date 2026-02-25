@@ -2,15 +2,14 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { loyaltyPoints, loyaltyTransactions } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * GET /api/clients/[id]/loyalty
  *
  * Returns the loyalty points balance and transaction history for a client.
+ * Uses the authenticated user's salon.
  * Query params:
- *   - salonId (optional, defaults to DEMO_SALON_ID)
  *   - limit (optional, defaults to 50)
  */
 export async function GET(
@@ -20,8 +19,15 @@ export async function GET(
   try {
     const { id: clientId } = await params;
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId") || DEMO_SALON_ID;
     const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100);
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     // Get loyalty points record
     const [loyaltyRecord] = await db

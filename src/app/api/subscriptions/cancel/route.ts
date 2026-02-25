@@ -5,8 +5,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { salonSubscriptions } from "@/lib/schema";
 import { getStripe } from "@/lib/stripe";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * POST /api/subscriptions/cancel
@@ -32,13 +31,21 @@ export async function POST() {
       );
     }
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 },
+      );
+    }
+
     // Find the current active subscription
     const [activeSub] = await db
       .select()
       .from(salonSubscriptions)
       .where(
         and(
-          eq(salonSubscriptions.salonId, DEMO_SALON_ID),
+          eq(salonSubscriptions.salonId, salonId),
           eq(salonSubscriptions.status, "active"),
         ),
       );

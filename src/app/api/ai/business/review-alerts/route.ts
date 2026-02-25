@@ -1,14 +1,11 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { reviews, clients, employees, services, appointments } from "@/lib/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 /**
  * Severity classification for negative reviews.
@@ -107,10 +104,10 @@ async function generateResponseSuggestion(
 }
 
 export async function GET(_request: Request) {
-  // Auth check
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Auth check and resolve salon
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   // Pro plan check
@@ -150,7 +147,7 @@ export async function GET(_request: Request) {
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .where(
         and(
-          eq(reviews.salonId, DEMO_SALON_ID),
+          eq(reviews.salonId, salonId),
           lte(reviews.rating, 3),
           gte(reviews.createdAt, thirtyDaysAgo)
         )
@@ -165,7 +162,7 @@ export async function GET(_request: Request) {
       .from(reviews)
       .where(
         and(
-          eq(reviews.salonId, DEMO_SALON_ID),
+          eq(reviews.salonId, salonId),
           lte(reviews.rating, 3),
           gte(reviews.createdAt, thirtyDaysAgo)
         )

@@ -5,8 +5,7 @@ import { db } from "@/lib/db";
 import { scheduledPosts } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 const createSchema = z.object({
   platform: z.enum(["instagram", "facebook", "tiktok"]),
@@ -40,6 +39,11 @@ export async function GET() {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
+  }
+
   const hasPro = await isProPlan();
   if (!hasPro) {
     return Response.json(
@@ -52,7 +56,7 @@ export async function GET() {
     const posts = await db
       .select()
       .from(scheduledPosts)
-      .where(eq(scheduledPosts.salonId, DEMO_SALON_ID))
+      .where(eq(scheduledPosts.salonId, salonId))
       .orderBy(desc(scheduledPosts.scheduledAt));
 
     return Response.json({ posts });
@@ -67,6 +71,11 @@ export async function POST(req: Request) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
   }
 
   const hasPro = await isProPlan();
@@ -98,7 +107,7 @@ export async function POST(req: Request) {
     const [newPost] = await db
       .insert(scheduledPosts)
       .values({
-        salonId: DEMO_SALON_ID,
+        salonId,
         platform,
         postType,
         content,

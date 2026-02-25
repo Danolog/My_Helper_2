@@ -25,6 +25,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 import { toast } from "sonner";
+import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 
 interface MaterialRecord {
   id: string;
@@ -88,7 +89,7 @@ export function CompleteAppointmentDialog({
   const [recipe, setRecipe] = useState("");
   const [techniques, setTechniques] = useState("");
   const [notes, setNotes] = useState("");
-  const [commissionPercentage, setCommissionPercentage] = useState("50");
+  const [commissionPercentage, setCommissionPercentage] = useState(String(DEFAULT_COMMISSION_RATE));
   const [completing, setCompleting] = useState(false);
   const [completedSuccessfully, setCompletedSuccessfully] = useState(false);
 

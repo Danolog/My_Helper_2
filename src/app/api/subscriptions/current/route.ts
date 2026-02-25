@@ -3,15 +3,14 @@ import { eq, and, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 import { alias } from "drizzle-orm/pg-core";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * GET /api/subscriptions/current
  *
  * Returns the current active (or most recent) subscription for the
- * demo salon, joined with plan details so the UI can display plan
- * name, features, and pricing without a second request.
+ * authenticated user's salon, joined with plan details so the UI can
+ * display plan name, features, and pricing without a second request.
  *
  * Includes "active", "trialing", and "canceled" subscriptions so the
  * UI can show the current plan state (including canceled status with
@@ -22,6 +21,14 @@ const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
  */
 export async function GET() {
   try {
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 },
+      );
+    }
+
     // Find the most recent subscription for the salon (active, trialing, or canceled)
     const results = await db
       .select({
@@ -35,7 +42,7 @@ export async function GET() {
       )
       .where(
         and(
-          eq(salonSubscriptions.salonId, DEMO_SALON_ID),
+          eq(salonSubscriptions.salonId, salonId),
           inArray(salonSubscriptions.status, ["active", "trialing", "canceled"]),
         ),
       )

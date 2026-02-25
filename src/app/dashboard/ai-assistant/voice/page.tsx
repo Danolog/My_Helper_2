@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSalonId } from "@/hooks/use-salon-id";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -228,6 +229,7 @@ const DEFAULT_CONFIG: VoiceAiConfig = {
 };
 
 function VoiceAiContent() {
+  const { salonId, loading: salonLoading } = useSalonId();
   const [config, setConfig] = useState<VoiceAiConfig>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -244,14 +246,14 @@ function VoiceAiContent() {
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [bookingDate, setBookingDate] = useState("");
   const [bookingTime, setBookingTime] = useState("");
-  const [bookingPhone, setBookingPhone] = useState("+48 123 456 789");
+  const [bookingPhone, setBookingPhone] = useState("");
   const [bookingName, setBookingName] = useState("");
   const [bookingInProgress, setBookingInProgress] = useState(false);
   const [bookingResult, setBookingResult] = useState<BookingResult | null>(null);
   const [showBookingForm, setShowBookingForm] = useState(false);
 
   // Voice reschedule flow state
-  const [reschedulePhone, setReschedulePhone] = useState("+48 123 456 789");
+  const [reschedulePhone, setReschedulePhone] = useState("");
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [rescheduleTime, setRescheduleTime] = useState("");
   const [rescheduleAppointmentId, setRescheduleAppointmentId] = useState("");
@@ -260,7 +262,7 @@ function VoiceAiContent() {
   const [showRescheduleForm, setShowRescheduleForm] = useState(false);
 
   // Voice cancellation flow state
-  const [cancelPhone, setCancelPhone] = useState("+48 123 456 789");
+  const [cancelPhone, setCancelPhone] = useState("");
   const [cancelAppointmentId, setCancelAppointmentId] = useState("");
   const [cancelInProgress, setCancelInProgress] = useState(false);
   const [cancelResult, setCancelResult] = useState<CancelResult | null>(null);
@@ -268,7 +270,7 @@ function VoiceAiContent() {
 
   // Escalation message form state
   const [msgName, setMsgName] = useState("");
-  const [msgPhone, setMsgPhone] = useState("+48 123 456 789");
+  const [msgPhone, setMsgPhone] = useState("");
   const [msgText, setMsgText] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
   const [messageResult, setMessageResult] = useState<{
@@ -306,8 +308,9 @@ function VoiceAiContent() {
   }, []);
 
   const loadServices = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch("/api/services?salonId=00000000-0000-0000-0000-000000000001", { cache: "no-store" });
+      const res = await fetch(`/api/services?salonId=${salonId}`, { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         const svcList = (data.data || data || []) as Array<{
@@ -331,7 +334,7 @@ function VoiceAiContent() {
     } catch (err) {
       console.error("Failed to load services:", err);
     }
-  }, []);
+  }, [salonId]);
 
   useEffect(() => {
     loadConfig();
@@ -386,7 +389,7 @@ function VoiceAiContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           callerMessage: callerMessage.trim(),
-          callerPhone: "+48 123 456 789",
+          callerPhone: "+48 000 000 000",
         }),
       });
 

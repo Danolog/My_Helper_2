@@ -10,8 +10,7 @@ import {
   notifications,
 } from "@/lib/schema";
 import { eq, and, isNull, isNotNull } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 const sendSchema = z.object({
   // Optional: send only to specific client IDs. If not provided, send to all consented.
@@ -36,6 +35,11 @@ export async function POST(
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
   }
 
   const { id: newsletterId } = await params;
@@ -69,7 +73,7 @@ export async function POST(
       .where(
         and(
           eq(newsletters.id, newsletterId),
-          eq(newsletters.salonId, DEMO_SALON_ID)
+          eq(newsletters.salonId, salonId)
         )
       )
       .limit(1);
@@ -93,7 +97,7 @@ export async function POST(
       .innerJoin(clients, eq(marketingConsents.clientId, clients.id))
       .where(
         and(
-          eq(marketingConsents.salonId, DEMO_SALON_ID),
+          eq(marketingConsents.salonId, salonId),
           eq(marketingConsents.consentType, "email"),
           isNull(marketingConsents.revokedAt),
           isNotNull(clients.email)
@@ -154,7 +158,7 @@ export async function POST(
 
         // Save to notifications table
         await db.insert(notifications).values({
-          salonId: DEMO_SALON_ID,
+          salonId: salonId,
           clientId: recipient.clientId,
           type: "email",
           message: `Newsletter: ${newsletter.subject}`,
@@ -185,7 +189,7 @@ export async function POST(
         // Save failed notification
         try {
           await db.insert(notifications).values({
-            salonId: DEMO_SALON_ID,
+            salonId: salonId,
             clientId: recipient.clientId,
             type: "email",
             message: `Newsletter (failed): ${newsletter.subject}`,

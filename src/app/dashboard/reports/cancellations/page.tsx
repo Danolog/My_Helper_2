@@ -30,12 +30,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
+import { useSalonId } from "@/hooks/use-salon-id";
 import { EmployeeFilter } from "@/components/reports/employee-filter";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { generateReportPDF } from "@/lib/pdf-export";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 interface ReasonBreakdown {
   reason: string;
@@ -142,6 +141,7 @@ interface ReportData {
 
 export default function CancellationReportPage() {
   const { data: _session } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const [reportData, setReportData] = useState<ReportData | null>(null);
@@ -202,11 +202,12 @@ export default function CancellationReportPage() {
   }, [dateFrom, dateTo, selectedEmployeeIds, activeTab, showComparison, compareDateFrom, compareDateTo, pathname]);
 
   const fetchReport = useCallback(async () => {
+    if (!salonId) return;
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId!,
       });
       if (dateFrom) params.append("dateFrom", dateFrom);
       if (dateTo) params.append("dateTo", dateTo);
@@ -235,16 +236,17 @@ export default function CancellationReportPage() {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, selectedEmployeeIds, showComparison, compareDateFrom, compareDateTo]);
+  }, [salonId, dateFrom, dateTo, selectedEmployeeIds, showComparison, compareDateFrom, compareDateTo]);
 
   useEffect(() => {
     fetchReport();
   }, [fetchReport]);
 
   const handleExportCSV = async () => {
+    if (!salonId) return;
     try {
       const params = new URLSearchParams({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId!,
         format: "csv",
       });
       if (dateFrom) params.append("dateFrom", dateFrom);
@@ -575,7 +577,7 @@ export default function CancellationReportPage() {
       )}
 
       {/* Loading */}
-      {loading && (
+      {(salonLoading || loading) && (
         <div className="flex justify-center items-center py-12">
           <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
           <span className="ml-2 text-muted-foreground">
@@ -585,7 +587,7 @@ export default function CancellationReportPage() {
       )}
 
       {/* Report content */}
-      {reportData && !loading && (
+      {reportData && !loading && !salonLoading && (
         <>
           {/* Summary cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

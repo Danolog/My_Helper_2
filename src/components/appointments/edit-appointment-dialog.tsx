@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSalonId } from "@/hooks/use-salon-id";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,8 +23,6 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Pencil, User, Scissors, Clock, AlertTriangle, Bell } from "lucide-react";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 interface Client {
   id: string;
@@ -106,6 +105,8 @@ export function EditAppointmentDialog({
   appointment,
   onAppointmentUpdated,
 }: EditAppointmentDialogProps) {
+  const { salonId, loading: salonLoading } = useSalonId();
+
   // Form state
   const [selectedClientId, setSelectedClientId] = useState("");
   const [selectedServiceId, setSelectedServiceId] = useState("");
@@ -171,9 +172,10 @@ export function EditAppointmentDialog({
 
   // Fetch clients
   const fetchClients = useCallback(async () => {
+    if (!salonId) return;
     setLoadingClients(true);
     try {
-      const res = await fetch(`/api/clients?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/clients?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setClients(data.data);
@@ -183,13 +185,14 @@ export function EditAppointmentDialog({
     } finally {
       setLoadingClients(false);
     }
-  }, []);
+  }, [salonId]);
 
   // Fetch services
   const fetchServices = useCallback(async () => {
+    if (!salonId) return;
     setLoadingServices(true);
     try {
-      const res = await fetch(`/api/services?salonId=${DEMO_SALON_ID}&activeOnly=true`);
+      const res = await fetch(`/api/services?salonId=${salonId}&activeOnly=true`);
       const data = await res.json();
       if (data.success) {
         setAllServices(data.data);
@@ -199,13 +202,14 @@ export function EditAppointmentDialog({
     } finally {
       setLoadingServices(false);
     }
-  }, []);
+  }, [salonId]);
 
   // Fetch employees
   const fetchEmployees = useCallback(async () => {
+    if (!salonId) return;
     setLoadingEmployees(true);
     try {
-      const res = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}&activeOnly=true`);
+      const res = await fetch(`/api/employees?salonId=${salonId}&activeOnly=true`);
       const data = await res.json();
       if (data.success) {
         setEmployees(data.data);
@@ -215,16 +219,16 @@ export function EditAppointmentDialog({
     } finally {
       setLoadingEmployees(false);
     }
-  }, []);
+  }, [salonId]);
 
   // Load data when dialog opens
   useEffect(() => {
-    if (open) {
+    if (open && salonId) {
       fetchClients();
       fetchServices();
       fetchEmployees();
     }
-  }, [open, fetchClients, fetchServices, fetchEmployees]);
+  }, [open, salonId, fetchClients, fetchServices, fetchEmployees]);
 
   // Fetch variants when service changes
   useEffect(() => {

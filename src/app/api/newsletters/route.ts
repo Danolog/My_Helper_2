@@ -3,8 +3,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { newsletters } from "@/lib/schema";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 const saveSchema = z.object({
   subject: z.string().min(1, "Subject is required").max(500),
@@ -15,6 +14,11 @@ export async function POST(req: Request) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
   }
 
   let body: unknown;
@@ -38,7 +42,7 @@ export async function POST(req: Request) {
     const result = await db
       .insert(newsletters)
       .values({
-        salonId: DEMO_SALON_ID,
+        salonId,
         subject,
         content,
       })

@@ -4,8 +4,7 @@ import { isProPlan } from "@/lib/subscription";
 import { db } from "@/lib/db";
 import { scheduledPosts } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 // GET - Get a single scheduled post by ID
 export async function GET(
@@ -17,6 +16,11 @@ export async function GET(
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
+  }
+
   const { id } = await params;
 
   try {
@@ -24,7 +28,7 @@ export async function GET(
       .select()
       .from(scheduledPosts)
       .where(
-        and(eq(scheduledPosts.id, id), eq(scheduledPosts.salonId, DEMO_SALON_ID))
+        and(eq(scheduledPosts.id, id), eq(scheduledPosts.salonId, salonId))
       );
 
     if (!post) {
@@ -48,6 +52,11 @@ export async function DELETE(
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
+  }
+
   const hasPro = await isProPlan();
   if (!hasPro) {
     return Response.json(
@@ -63,7 +72,7 @@ export async function DELETE(
       .select()
       .from(scheduledPosts)
       .where(
-        and(eq(scheduledPosts.id, id), eq(scheduledPosts.salonId, DEMO_SALON_ID))
+        and(eq(scheduledPosts.id, id), eq(scheduledPosts.salonId, salonId))
       );
 
     if (!post) {

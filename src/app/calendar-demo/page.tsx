@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { TimeGrid } from "@/components/calendar/time-grid";
 import { CalendarLegend } from "@/components/calendar/calendar-legend";
@@ -131,6 +132,14 @@ function generateDemoEvents(date: Date): CalendarEvent[] {
 }
 
 export default function CalendarDemoPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") {
+      router.replace("/");
+    }
+  }, [router]);
+
   const [currentDate, setCurrentDate] = useState(new Date());
   const [colorMode, setColorMode] = useState<"status" | "employee">("status");
   const events = generateDemoEvents(currentDate);

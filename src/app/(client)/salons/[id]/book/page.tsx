@@ -38,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -311,7 +312,7 @@ export default function ClientBookingPage() {
 
   // Deposit calculation - client-level settings override service-level
   const serviceDepositRequired = selectedService?.depositRequired ?? false;
-  const serviceDepositPercentage = selectedService?.depositPercentage ?? 30;
+  const serviceDepositPercentage = selectedService?.depositPercentage ?? DEFAULT_DEPOSIT_PERCENTAGE;
 
   // Client deposit settings take priority over service settings
   const clientRequiresDeposit = clientDepositSettings?.requireDeposit ?? false;
@@ -1762,7 +1763,7 @@ export default function ClientBookingPage() {
                 <div className="flex items-center gap-1">
                   <CreditCard className="w-3 h-3 text-amber-500" />
                   <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-                    Zadatek {service.depositPercentage ?? 30}%
+                    Zadatek {service.depositPercentage ?? DEFAULT_DEPOSIT_PERCENTAGE}%
                   </span>
                 </div>
               )}

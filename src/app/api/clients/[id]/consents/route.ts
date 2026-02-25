@@ -4,8 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { marketingConsents, clients } from "@/lib/schema";
 import { eq, and, isNull } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 const VALID_CONSENT_TYPES = ["email", "sms", "phone"] as const;
 type ConsentType = (typeof VALID_CONSENT_TYPES)[number];
@@ -29,6 +28,11 @@ export async function GET(
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
   }
 
   const { id: clientId } = await params;
@@ -55,7 +59,7 @@ export async function GET(
       .where(
         and(
           eq(marketingConsents.clientId, clientId),
-          eq(marketingConsents.salonId, DEMO_SALON_ID),
+          eq(marketingConsents.salonId, salonId),
           isNull(marketingConsents.revokedAt)
         )
       );
@@ -104,6 +108,11 @@ export async function PUT(
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
+  }
+
   const { id: clientId } = await params;
 
   try {
@@ -139,7 +148,7 @@ export async function PUT(
       .where(
         and(
           eq(marketingConsents.clientId, clientId),
-          eq(marketingConsents.salonId, DEMO_SALON_ID),
+          eq(marketingConsents.salonId, salonId),
           isNull(marketingConsents.revokedAt)
         )
       );
@@ -162,7 +171,7 @@ export async function PUT(
         // Grant new consent
         await db.insert(marketingConsents).values({
           clientId,
-          salonId: DEMO_SALON_ID,
+          salonId: salonId,
           consentType: type,
           grantedAt: now,
         });
@@ -189,7 +198,7 @@ export async function PUT(
       .where(
         and(
           eq(marketingConsents.clientId, clientId),
-          eq(marketingConsents.salonId, DEMO_SALON_ID),
+          eq(marketingConsents.salonId, salonId),
           isNull(marketingConsents.revokedAt)
         )
       );

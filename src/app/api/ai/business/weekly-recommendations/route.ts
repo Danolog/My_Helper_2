@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import {
   appointments,
@@ -13,10 +12,8 @@ import {
   promotions,
 } from "@/lib/schema";
 import { eq, and, gte, lte, sql, count, desc, asc } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 interface WeeklyRecommendation {
   id: string;
@@ -54,10 +51,10 @@ const DAY_NAMES = [
 ];
 
 export async function GET(_request: Request) {
-  // Auth check
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Auth check and resolve salon
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   // Pro plan check
@@ -130,7 +127,7 @@ export async function GET(_request: Request) {
         .leftJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, weekStart),
             lte(appointments.startTime, weekEnd),
             sql`${appointments.status} NOT IN ('cancelled', 'no_show')`
@@ -144,7 +141,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, prevWeekStart),
             lte(appointments.startTime, now),
             sql`${appointments.status} NOT IN ('cancelled', 'no_show')`
@@ -167,7 +164,7 @@ export async function GET(_request: Request) {
         .innerJoin(employees, eq(timeBlocks.employeeId, employees.id))
         .where(
           and(
-            eq(employees.salonId, DEMO_SALON_ID),
+            eq(employees.salonId, salonId),
             lte(timeBlocks.startTime, weekEnd),
             gte(timeBlocks.endTime, weekStart)
           )
@@ -183,7 +180,7 @@ export async function GET(_request: Request) {
         .from(employees)
         .where(
           and(
-            eq(employees.salonId, DEMO_SALON_ID),
+            eq(employees.salonId, salonId),
             eq(employees.isActive, true)
           )
         ),
@@ -198,7 +195,7 @@ export async function GET(_request: Request) {
         })
         .from(workSchedules)
         .innerJoin(employees, eq(workSchedules.employeeId, employees.id))
-        .where(eq(employees.salonId, DEMO_SALON_ID)),
+        .where(eq(employees.salonId, salonId)),
 
       // Low stock products
       db
@@ -211,7 +208,7 @@ export async function GET(_request: Request) {
         .from(products)
         .where(
           and(
-            eq(products.salonId, DEMO_SALON_ID),
+            eq(products.salonId, salonId),
             sql`CAST(${products.quantity} AS numeric) <= COALESCE(CAST(${products.minQuantity} AS numeric), 5)`
           )
         )
@@ -226,7 +223,7 @@ export async function GET(_request: Request) {
         .from(reviews)
         .where(
           and(
-            eq(reviews.salonId, DEMO_SALON_ID),
+            eq(reviews.salonId, salonId),
             sql`${reviews.rating} IS NOT NULL`
           )
         )
@@ -241,7 +238,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, thirtyDaysAgo),
             sql`${appointments.status} IN ('cancelled', 'no_show')`
           )
@@ -257,7 +254,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(appointments.startTime, thirtyDaysAgo),
             lte(appointments.startTime, now)
@@ -274,7 +271,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(
               appointments.startTime,
@@ -295,7 +292,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, thirtyDaysAgo),
             sql`${appointments.status} NOT IN ('cancelled', 'no_show')`
           )
@@ -315,7 +312,7 @@ export async function GET(_request: Request) {
         .from(promotions)
         .where(
           and(
-            eq(promotions.salonId, DEMO_SALON_ID),
+            eq(promotions.salonId, salonId),
             eq(promotions.isActive, true),
             sql`(${promotions.startDate} IS NULL OR ${promotions.startDate} <= ${weekEnd.toISOString()})`,
             sql`(${promotions.endDate} IS NULL OR ${promotions.endDate} >= ${weekStart.toISOString()})`
@@ -327,7 +324,7 @@ export async function GET(_request: Request) {
       db
         .select({ count: count() })
         .from(clients)
-        .where(eq(clients.salonId, DEMO_SALON_ID))
+        .where(eq(clients.salonId, salonId))
         .then((r) => r[0]?.count ?? 0),
 
       // Inactive clients (no appointment in 60 days)
@@ -336,11 +333,11 @@ export async function GET(_request: Request) {
         .from(clients)
         .where(
           and(
-            eq(clients.salonId, DEMO_SALON_ID),
+            eq(clients.salonId, salonId),
             sql`${clients.id} NOT IN (
               SELECT DISTINCT ${appointments.clientId}
               FROM ${appointments}
-              WHERE ${appointments.salonId} = ${DEMO_SALON_ID}
+              WHERE ${appointments.salonId} = ${salonId}
               AND ${appointments.startTime} >= ${new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString()}
               AND ${appointments.clientId} IS NOT NULL
             )`

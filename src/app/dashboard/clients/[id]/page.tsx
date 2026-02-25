@@ -78,6 +78,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { validatePhone } from "@/lib/validations";
+import { useSalonId } from "@/hooks/use-salon-id";
 
 interface ClientData {
   id: string;
@@ -201,7 +202,6 @@ interface ConsentStatus {
   grantedAt: string | null;
 }
 
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 const NO_FAVORITE = "__none__";
 
 interface Employee {
@@ -280,6 +280,7 @@ export default function ClientProfilePage() {
   const router = useRouter();
   const clientId = params.id as string;
   const { data: session, isPending } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
 
   const [client, setClient] = useState<ClientData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -396,9 +397,10 @@ export default function ClientProfilePage() {
   }, [clientId]);
 
   const fetchLoyaltyData = useCallback(async () => {
+    if (!salonId) return;
     setLoadingLoyalty(true);
     try {
-      const res = await fetch(`/api/clients/${clientId}/loyalty?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/clients/${clientId}/loyalty?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setLoyaltyData(data.data as LoyaltyData);
@@ -410,12 +412,13 @@ export default function ClientProfilePage() {
     } finally {
       setLoadingLoyalty(false);
     }
-  }, [clientId]);
+  }, [salonId, clientId]);
 
   const fetchRewardsData = useCallback(async () => {
+    if (!salonId) return;
     setLoadingRewards(true);
     try {
-      const res = await fetch(`/api/clients/${clientId}/loyalty/redeem?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/clients/${clientId}/loyalty/redeem?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setRewardsData(data.data as RewardsData);
@@ -427,7 +430,7 @@ export default function ClientProfilePage() {
     } finally {
       setLoadingRewards(false);
     }
-  }, [clientId]);
+  }, [salonId, clientId]);
 
   const handleRedeemReward = async () => {
     if (!selectedReward) return;
@@ -438,7 +441,7 @@ export default function ClientProfilePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           rewardTierId: selectedReward.id,
-          salonId: DEMO_SALON_ID,
+          salonId: salonId!,
         }),
       });
       const data = await res.json();
@@ -517,9 +520,10 @@ export default function ClientProfilePage() {
   }, [fetchClient, fetchConsents]);
 
   useEffect(() => {
+    if (!salonId) return;
     async function fetchEmployees() {
       try {
-        const res = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}&activeOnly=true`);
+        const res = await fetch(`/api/employees?salonId=${salonId}&activeOnly=true`);
         const data = await res.json();
         if (data.success) {
           setEmployees(data.data);
@@ -529,7 +533,7 @@ export default function ClientProfilePage() {
       }
     }
     fetchEmployees();
-  }, []);
+  }, [salonId]);
 
   const handleTabChange = (value: string) => {
     if (value === "history" && visitHistory.length === 0 && !loadingHistory) {
@@ -793,7 +797,7 @@ export default function ClientProfilePage() {
     setDeleteDialogOpen(true);
   };
 
-  if (isPending || loading) {
+  if (isPending || salonLoading || loading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />

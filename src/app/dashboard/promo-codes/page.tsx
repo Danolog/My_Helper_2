@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "@/lib/auth-client";
+import { useSalonId } from "@/hooks/use-salon-id";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -67,8 +68,6 @@ interface PromoCode {
   promotion: Promotion | null;
 }
 
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
-
 const TYPE_LABELS: Record<string, string> = {
   percentage: "Procentowa",
   fixed: "Kwotowa",
@@ -103,6 +102,7 @@ function formatPromotionValue(type: string, value: string): string {
 
 export default function PromoCodesPage() {
   const { data: session, isPending } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
 
   const [codesList, setCodesList] = useState<PromoCode[]>([]);
   const [promotionsList, setPromotionsList] = useState<Promotion[]>([]);
@@ -123,9 +123,10 @@ export default function PromoCodesPage() {
   const [deleting, setDeleting] = useState(false);
 
   const fetchCodes = useCallback(async () => {
+    if (!salonId) return;
     try {
       setLoading(true);
-      const res = await fetch(`/api/promo-codes?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/promo-codes?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setCodesList(data.data);
@@ -137,11 +138,12 @@ export default function PromoCodesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [salonId]);
 
   const fetchPromotions = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch(`/api/promotions?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/promotions?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setPromotionsList(data.data.filter((p: Promotion) => p.isActive));
@@ -149,14 +151,14 @@ export default function PromoCodesPage() {
     } catch {
       console.error("Failed to fetch promotions for promo codes");
     }
-  }, []);
+  }, [salonId]);
 
   useEffect(() => {
-    if (session) {
+    if (session && salonId) {
       fetchCodes();
       fetchPromotions();
     }
-  }, [session, fetchCodes, fetchPromotions]);
+  }, [session, salonId, fetchCodes, fetchPromotions]);
 
   const openCreateDialog = () => {
     setEditingCode(null);
@@ -190,7 +192,7 @@ export default function PromoCodesPage() {
       const payload: Record<string, unknown> = {};
 
       if (!isEditing) {
-        payload.salonId = DEMO_SALON_ID;
+        payload.salonId = salonId;
       }
 
       // Code field

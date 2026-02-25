@@ -26,6 +26,7 @@ import { signUp, sendVerificationEmail } from "@/lib/auth-client"
 import { sanitizeAuthError } from "@/lib/error-messages"
 import { useFormRecovery } from "@/hooks/use-form-recovery"
 import { FormRecoveryBanner } from "@/components/form-recovery-banner"
+import { PLANS, TRIAL_DAYS } from "@/lib/constants"
 
 type Plan = {
   id: string
@@ -321,7 +322,7 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
             Wybierz plan dla siebie
           </h1>
           <p className="text-muted-foreground">
-            Zacznij od 14-dniowego okresu probnego bez zobowiazan
+            Zacznij od {TRIAL_DAYS}-dniowego okresu probnego bez zobowiazan
           </p>
         </div>
 

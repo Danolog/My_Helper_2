@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { subscriptionPlans } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { PLANS } from "@/lib/constants";
 
 /**
  * Default plan data - used to seed the database if no plans exist.
@@ -9,9 +10,9 @@ import { eq } from "drizzle-orm";
  */
 const DEFAULT_PLANS = [
   {
-    name: "Basic",
-    slug: "basic",
-    priceMonthly: "49.00",
+    name: PLANS.basic.name,
+    slug: PLANS.basic.slug,
+    priceMonthly: PLANS.basic.priceMonthly.toFixed(2),
     featuresJson: [
       "Pelne zarzadzanie salonem",
       "Kalendarz i grafiki pracownikow",
@@ -30,9 +31,9 @@ const DEFAULT_PLANS = [
     ],
   },
   {
-    name: "Pro",
-    slug: "pro",
-    priceMonthly: "149.00",
+    name: PLANS.pro.name,
+    slug: PLANS.pro.slug,
+    priceMonthly: PLANS.pro.priceMonthly.toFixed(2),
     featuresJson: [
       "Wszystko z planu Basic",
       "Asystent AI glosowy (odbieranie polaczen)",

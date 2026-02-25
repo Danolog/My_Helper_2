@@ -4,8 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * POST /api/subscriptions/downgrade
@@ -24,6 +23,14 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { success: false, error: "Wymagane logowanie" },
         { status: 401 },
+      );
+    }
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 },
       );
     }
 
@@ -55,7 +62,7 @@ export async function POST(request: Request) {
       )
       .where(
         and(
-          eq(salonSubscriptions.salonId, DEMO_SALON_ID),
+          eq(salonSubscriptions.salonId, salonId),
           eq(salonSubscriptions.status, "active"),
         ),
       );
@@ -159,13 +166,21 @@ export async function DELETE() {
       );
     }
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 },
+      );
+    }
+
     // Find the current active subscription with a scheduled downgrade
     const [activeSub] = await db
       .select()
       .from(salonSubscriptions)
       .where(
         and(
-          eq(salonSubscriptions.salonId, DEMO_SALON_ID),
+          eq(salonSubscriptions.salonId, salonId),
           eq(salonSubscriptions.status, "active"),
         ),
       );

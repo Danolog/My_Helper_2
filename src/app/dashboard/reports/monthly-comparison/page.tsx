@@ -30,11 +30,10 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
+import { useSalonId } from "@/hooks/use-salon-id";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { generateReportPDF } from "@/lib/pdf-export";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
 
 interface MetricData {
   totalRevenue: string;
@@ -199,6 +198,7 @@ function getMetricValue(metrics: MetricData, key: string): number | string {
 export default function MonthlyComparisonPage() {
   // Session is consumed to ensure auth context; prefixed to satisfy noUnusedLocals
   const { data: _session } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
   const [comparisonData, setComparisonData] =
     useState<ComparisonData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -208,11 +208,12 @@ export default function MonthlyComparisonPage() {
   const [month2, setMonth2] = useState(getCurrentMonth);
 
   const fetchComparison = useCallback(async () => {
+    if (!salonId) return;
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId!,
         month1,
         month2,
       });
@@ -236,7 +237,7 @@ export default function MonthlyComparisonPage() {
     } finally {
       setLoading(false);
     }
-  }, [month1, month2]);
+  }, [salonId, month1, month2]);
 
   const handleExportPDF = () => {
     if (!comparisonData) return;
@@ -376,7 +377,7 @@ export default function MonthlyComparisonPage() {
       )}
 
       {/* Loading */}
-      {loading && (
+      {(salonLoading || loading) && (
         <div className="flex justify-center items-center py-12">
           <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
           <span className="ml-2 text-muted-foreground">
@@ -386,7 +387,7 @@ export default function MonthlyComparisonPage() {
       )}
 
       {/* Comparison content */}
-      {comparisonData && !loading && (
+      {comparisonData && !loading && !salonLoading && (
         <>
           {/* Summary comparison cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

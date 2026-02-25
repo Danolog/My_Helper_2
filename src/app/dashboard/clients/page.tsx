@@ -43,8 +43,7 @@ import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useTabSync } from "@/hooks/use-tab-sync";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { useSalonId } from "@/hooks/use-salon-id";
 
 interface Client {
   id: string;
@@ -64,6 +63,7 @@ interface Client {
 
 export default function ClientsPage() {
   const { data: session, isPending } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -184,9 +184,10 @@ export default function ClientsPage() {
       lastVisitTo: string;
       hasAllergies: boolean;
     }) => {
+      if (!salonId) return;
       try {
         const params = new URLSearchParams({
-          salonId: DEMO_SALON_ID,
+          salonId: salonId,
         });
 
         const f = filters || appliedFilters;
@@ -222,7 +223,7 @@ export default function ClientsPage() {
         setFetchError(errInfo);
       }
     },
-    [appliedFilters]
+    [salonId, appliedFilters]
   );
 
   useEffect(() => {
@@ -323,7 +324,7 @@ export default function ClientsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          salonId: DEMO_SALON_ID,
+          salonId: salonId!,
           firstName: formFirstName.trim(),
           lastName: formLastName.trim(),
           phone: formPhone.trim() || null,
@@ -388,7 +389,7 @@ export default function ClientsPage() {
     }
   };
 
-  if (isPending) {
+  if (isPending || salonLoading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />

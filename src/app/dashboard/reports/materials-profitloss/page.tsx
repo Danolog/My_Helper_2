@@ -22,8 +22,7 @@ import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { generateReportPDF } from "@/lib/pdf-export";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { useSalonId } from "@/hooks/use-salon-id";
 
 interface ProductProfitSummary {
   productId: string;
@@ -87,6 +86,7 @@ interface ReportData {
 
 export default function MaterialsProfitLossPage() {
   const { data: _session } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,11 +105,12 @@ export default function MaterialsProfitLossPage() {
   );
 
   const fetchReport = useCallback(async () => {
+    if (!salonId) return;
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId!,
       });
       if (dateFrom) params.append("dateFrom", dateFrom);
       if (dateTo) params.append("dateTo", dateTo);
@@ -131,16 +132,17 @@ export default function MaterialsProfitLossPage() {
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, salonId]);
 
   useEffect(() => {
     fetchReport();
   }, [fetchReport]);
 
   const handleExportCSV = async () => {
+    if (!salonId) return;
     try {
       const params = new URLSearchParams({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId!,
         format: "csv",
       });
       if (dateFrom) params.append("dateFrom", dateFrom);
@@ -357,7 +359,7 @@ export default function MaterialsProfitLossPage() {
       )}
 
       {/* Loading */}
-      {loading && (
+      {(salonLoading || loading) && (
         <div className="flex justify-center items-center py-12">
           <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
           <span className="ml-2 text-muted-foreground">

@@ -1,0 +1,54 @@
+[    3808ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3002/design-system:0
+[    4799ms] [ERROR] %o
+
+%s Error: Event handlers cannot be passed to Client Component props.
+  <form className=... onSubmit={function onSubmit} children=...>
+                               ^^^^^^^^^^^^^^^^^^^
+If you need interactivity, consider converting part of this to a Client Component.
+    at stringify (<anonymous>:1:18)
+    at stringify (<anonymous>:1:18)
+    at stringify (<anonymous>:1:18)
+    at resolveErrorDev (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:1894:148)
+    at processFullStringRow (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2402:29)
+    at processFullBinaryRow (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2361:9)
+    at processBinaryChunk (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2470:221)
+    at progress (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2640:13) The above error occurred in the <form> component. It was handled by the <ErrorBoundaryHandler> error boundary. @ http://localhost:3002/_next/static/chunks/481e2_next_dist_client_6b8b273e._.js:1342
+[    4804ms] [ERROR] Application error: Error: Event handlers cannot be passed to Client Component props.
+  <form className=... onSubmit={function onSubmit} children=...>
+                               ^^^^^^^^^^^^^^^^^^^
+If you need interactivity, consider converting part of this to a Client Component.
+    at stringify (<anonymous>:1:18)
+    at stringify (<anonymous>:1:18)
+    at stringify (<anonymous>:1:18)
+    at resolveErrorDev (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:1894:148)
+    at processFullStringRow (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2402:29)
+    at processFullBinaryRow (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2361:9)
+    at processBinaryChunk (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2470:221)
+    at progress (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2640:13) @ http://localhost:3002/_next/static/chunks/481e2_next_dist_2dcbe81e._.js:3127
+[    8635ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://localhost:3002/design-system:0
+[    9212ms] [ERROR] %o
+
+%s Error: Event handlers cannot be passed to Client Component props.
+  <form className=... onSubmit={function onSubmit} children=...>
+                               ^^^^^^^^^^^^^^^^^^^
+If you need interactivity, consider converting part of this to a Client Component.
+    at stringify (<anonymous>:1:18)
+    at stringify (<anonymous>:1:18)
+    at stringify (<anonymous>:1:18)
+    at resolveErrorDev (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:1894:148)
+    at processFullStringRow (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2402:29)
+    at processFullBinaryRow (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2361:9)
+    at processBinaryChunk (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2470:221)
+    at progress (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2640:13) The above error occurred in the <form> component. It was handled by the <ErrorBoundaryHandler> error boundary. @ http://localhost:3002/_next/static/chunks/481e2_next_dist_client_6b8b273e._.js:1342
+[    9214ms] [ERROR] Application error: Error: Event handlers cannot be passed to Client Component props.
+  <form className=... onSubmit={function onSubmit} children=...>
+                               ^^^^^^^^^^^^^^^^^^^
+If you need interactivity, consider converting part of this to a Client Component.
+    at stringify (<anonymous>:1:18)
+    at stringify (<anonymous>:1:18)
+    at stringify (<anonymous>:1:18)
+    at resolveErrorDev (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:1894:148)
+    at processFullStringRow (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2402:29)
+    at processFullBinaryRow (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2361:9)
+    at processBinaryChunk (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2470:221)
+    at progress (http://localhost:3002/_next/static/chunks/481e2_next_dist_compiled_react-server-dom-turbopack_13064eeb._.js:2640:13) @ http://localhost:3002/_next/static/chunks/481e2_next_dist_2dcbe81e._.js:3127

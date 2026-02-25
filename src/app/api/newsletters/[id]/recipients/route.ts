@@ -4,8 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { clients, marketingConsents, newsletters } from "@/lib/schema";
 import { eq, and, isNull, isNotNull } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * GET /api/newsletters/[id]/recipients
@@ -24,6 +23,11 @@ export async function GET(
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return Response.json({ error: "Salon not found" }, { status: 404 });
+  }
+
   const { id: newsletterId } = await params;
 
   try {
@@ -38,7 +42,7 @@ export async function GET(
       .where(
         and(
           eq(newsletters.id, newsletterId),
-          eq(newsletters.salonId, DEMO_SALON_ID)
+          eq(newsletters.salonId, salonId)
         )
       )
       .limit(1);
@@ -64,7 +68,7 @@ export async function GET(
       .innerJoin(clients, eq(marketingConsents.clientId, clients.id))
       .where(
         and(
-          eq(marketingConsents.salonId, DEMO_SALON_ID),
+          eq(marketingConsents.salonId, salonId),
           eq(marketingConsents.consentType, "email"),
           isNull(marketingConsents.revokedAt),
           isNotNull(clients.email)
@@ -87,7 +91,7 @@ export async function GET(
       .from(clients)
       .where(
         and(
-          eq(clients.salonId, DEMO_SALON_ID),
+          eq(clients.salonId, salonId),
           isNotNull(clients.email)
         )
       );

@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { appointments, services, employees, clients, reviews } from "@/lib/schema";
 import { eq, and, gte, lte, sql, count, avg } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { isProPlan } from "@/lib/subscription";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /** Trend direction based on percentage change relative to a threshold. */
 function classifyTrend(
@@ -55,10 +52,10 @@ function formatYearMonth(date: Date): string {
 }
 
 export async function GET(_request: Request) {
-  // Auth check
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Auth check and resolve salon
+  const salonId = await getUserSalonId();
+  if (!salonId) {
+    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
   }
 
   // Pro plan check
@@ -165,7 +162,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(appointments.startTime, currentMonthStart),
             lte(appointments.startTime, now)
@@ -182,7 +179,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(appointments.startTime, previousMonthStart),
             lte(appointments.startTime, previousMonthEnd)
@@ -199,7 +196,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(appointments.startTime, currentWeekStart),
             lte(appointments.startTime, now)
@@ -216,7 +213,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(appointments.startTime, previousWeekStart),
             lte(appointments.startTime, previousWeekEnd)
@@ -234,7 +231,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(appointments.startTime, threeMonthsAgoStart),
             lte(appointments.startTime, now)
@@ -249,7 +246,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, currentMonthStart),
             lte(appointments.startTime, now)
           )
@@ -262,7 +259,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, previousMonthStart),
             lte(appointments.startTime, previousMonthEnd)
           )
@@ -275,7 +272,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, currentWeekStart),
             lte(appointments.startTime, now)
           )
@@ -288,7 +285,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, previousWeekStart),
             lte(appointments.startTime, previousWeekEnd)
           )
@@ -301,7 +298,7 @@ export async function GET(_request: Request) {
         .from(clients)
         .where(
           and(
-            eq(clients.salonId, DEMO_SALON_ID),
+            eq(clients.salonId, salonId),
             gte(clients.createdAt, currentMonthStart)
           )
         )
@@ -313,7 +310,7 @@ export async function GET(_request: Request) {
         .from(clients)
         .where(
           and(
-            eq(clients.salonId, DEMO_SALON_ID),
+            eq(clients.salonId, salonId),
             gte(clients.createdAt, previousMonthStart),
             lte(clients.createdAt, previousMonthEnd)
           )
@@ -324,7 +321,7 @@ export async function GET(_request: Request) {
       db
         .select({ count: count() })
         .from(clients)
-        .where(eq(clients.salonId, DEMO_SALON_ID))
+        .where(eq(clients.salonId, salonId))
         .then((r) => r[0]?.count ?? 0),
 
       // Returning clients this month: clients who booked this month AND had
@@ -337,13 +334,13 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, currentMonthStart),
             lte(appointments.startTime, now),
             sql`${appointments.clientId} IN (
               SELECT DISTINCT "client_id"
               FROM "appointments"
-              WHERE "salon_id" = ${DEMO_SALON_ID}
+              WHERE "salon_id" = ${salonId}
                 AND "status" = 'completed'
                 AND "start_time" < ${currentMonthStart.toISOString()}::timestamp
                 AND "client_id" IS NOT NULL
@@ -361,13 +358,13 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, previousMonthStart),
             lte(appointments.startTime, previousMonthEnd),
             sql`${appointments.clientId} IN (
               SELECT DISTINCT "client_id"
               FROM "appointments"
-              WHERE "salon_id" = ${DEMO_SALON_ID}
+              WHERE "salon_id" = ${salonId}
                 AND "status" = 'completed'
                 AND "start_time" < ${previousMonthStart.toISOString()}::timestamp
                 AND "client_id" IS NOT NULL
@@ -387,7 +384,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, currentMonthStart),
             lte(appointments.startTime, now)
           )
@@ -405,7 +402,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, previousMonthStart),
             lte(appointments.startTime, previousMonthEnd)
           )
@@ -425,7 +422,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(appointments.startTime, currentMonthStart),
             lte(appointments.startTime, now)
@@ -446,7 +443,7 @@ export async function GET(_request: Request) {
         .innerJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             eq(appointments.status, "completed"),
             gte(appointments.startTime, previousMonthStart),
             lte(appointments.startTime, previousMonthEnd)
@@ -460,7 +457,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, currentMonthStart),
             lte(appointments.startTime, now),
             sql`${appointments.status} IN ('cancelled', 'no_show')`
@@ -474,7 +471,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, previousMonthStart),
             lte(appointments.startTime, previousMonthEnd),
             sql`${appointments.status} IN ('cancelled', 'no_show')`
@@ -488,7 +485,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, currentMonthStart),
             lte(appointments.startTime, now)
           )
@@ -501,7 +498,7 @@ export async function GET(_request: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, DEMO_SALON_ID),
+            eq(appointments.salonId, salonId),
             gte(appointments.startTime, previousMonthStart),
             lte(appointments.startTime, previousMonthEnd)
           )
@@ -517,7 +514,7 @@ export async function GET(_request: Request) {
         .from(reviews)
         .where(
           and(
-            eq(reviews.salonId, DEMO_SALON_ID),
+            eq(reviews.salonId, salonId),
             gte(reviews.createdAt, currentMonthStart),
             sql`${reviews.rating} IS NOT NULL`
           )
@@ -536,7 +533,7 @@ export async function GET(_request: Request) {
         .from(reviews)
         .where(
           and(
-            eq(reviews.salonId, DEMO_SALON_ID),
+            eq(reviews.salonId, salonId),
             gte(reviews.createdAt, previousMonthStart),
             lte(reviews.createdAt, previousMonthEnd),
             sql`${reviews.rating} IS NOT NULL`

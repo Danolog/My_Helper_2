@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { invoices, clients } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * POST /api/invoices/[id]/send-email
@@ -26,6 +25,14 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     // Parse optional body for email override
@@ -66,7 +73,7 @@ export async function POST(
       })
       .from(invoices)
       .leftJoin(clients, eq(invoices.clientId, clients.id))
-      .where(and(eq(invoices.id, id), eq(invoices.salonId, DEMO_SALON_ID)))
+      .where(and(eq(invoices.id, id), eq(invoices.salonId, salonId)))
       .limit(1);
 
     if (rows.length === 0) {
