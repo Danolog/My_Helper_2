@@ -23,9 +23,6 @@ import { BlockTimeDialog } from "@/components/calendar/block-time-dialog";
 import type { Appointment, CalendarEvent, Employee, TimeBlock, WorkSchedule } from "@/types/calendar";
 import { useTabSync } from "@/hooks/use-tab-sync";
 
-// Demo salon ID - in production this would come from user's session
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
-
 export default function CalendarPage() {
   const { data: session, isPending } = useSession();
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -34,6 +31,28 @@ export default function CalendarPage() {
   const [workSchedules, setWorkSchedules] = useState<WorkSchedule[]>([]);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [loading, setLoading] = useState(true);
+  const [salonId, setSalonId] = useState<string | null>(null);
+
+  // Fetch the user's salon
+  useEffect(() => {
+    async function fetchSalon() {
+      try {
+        const res = await fetch("/api/salons/mine");
+        const data = await res.json();
+        if (data.success && data.salon) {
+          setSalonId(data.salon.id);
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to fetch salon:", err);
+        setLoading(false);
+      }
+    }
+    if (session?.user) {
+      fetchSalon();
+    }
+  }, [session]);
 
   // Employee filter: "all" shows all employees, or a specific employee ID
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string>("all");
@@ -78,8 +97,9 @@ export default function CalendarPage() {
 
   // Fetch employees
   const fetchEmployees = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const response = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}&activeOnly=true`);
+      const response = await fetch(`/api/employees?salonId=${salonId}&activeOnly=true`);
       const data = await response.json();
       if (data.success) {
         setEmployees(data.data);
@@ -88,12 +108,13 @@ export default function CalendarPage() {
       console.error("Failed to fetch employees:", error);
       toast.error("Nie udalo sie pobrac listy pracownikow");
     }
-  }, []);
+  }, [salonId]);
 
   // Fetch work schedules for all employees in the salon
   const fetchWorkSchedules = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const response = await fetch(`/api/work-schedules/by-salon?salonId=${DEMO_SALON_ID}`);
+      const response = await fetch(`/api/work-schedules/by-salon?salonId=${salonId}`);
       const data = await response.json();
       if (data.success) {
         setWorkSchedules(data.data);
@@ -101,7 +122,7 @@ export default function CalendarPage() {
     } catch (error) {
       console.error("Failed to fetch work schedules:", error);
     }
-  }, []);
+  }, [salonId]);
 
   // Fetch time blocks (vacations, breaks, etc.) for the current date
   const fetchTimeBlocks = useCallback(async () => {
@@ -136,6 +157,7 @@ export default function CalendarPage() {
 
   // Fetch appointments for current date
   const fetchAppointments = useCallback(async () => {
+    if (!salonId) return;
     try {
       const startOfDay = new Date(currentDate);
       startOfDay.setHours(0, 0, 0, 0);
@@ -143,7 +165,7 @@ export default function CalendarPage() {
       endOfDay.setHours(23, 59, 59, 999);
 
       const params = new URLSearchParams({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId!,
         startDate: startOfDay.toISOString(),
         endDate: endOfDay.toISOString(),
       });
@@ -170,18 +192,22 @@ export default function CalendarPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentDate]);
+  }, [currentDate, salonId]);
 
-  // Initial data load
+  // Initial data load - wait for salonId
   useEffect(() => {
-    fetchEmployees();
-    fetchWorkSchedules();
-  }, [fetchEmployees, fetchWorkSchedules]);
+    if (salonId) {
+      fetchEmployees();
+      fetchWorkSchedules();
+    }
+  }, [salonId, fetchEmployees, fetchWorkSchedules]);
 
   useEffect(() => {
-    fetchAppointments();
-    fetchTimeBlocks();
-  }, [fetchAppointments, fetchTimeBlocks]);
+    if (salonId) {
+      fetchAppointments();
+      fetchTimeBlocks();
+    }
+  }, [salonId, fetchAppointments, fetchTimeBlocks]);
 
   // Cross-tab sync: refetch when another tab modifies appointments
   const { notifyChange: notifyCalendarChanged } = useTabSync("appointments", fetchAppointments);

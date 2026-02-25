@@ -118,12 +118,19 @@ export default function EmployeeSchedulePage({
   useEffect(() => {
     async function fetchData() {
       try {
-        const empRes = await fetch(`/api/employees?salonId=00000000-0000-0000-0000-000000000001`);
-        const empData = await empRes.json();
-        if (empData.success) {
-          const emp = empData.data.find((e: Employee) => e.id === employeeId);
-          if (emp) {
-            setEmployee(emp);
+        // Fetch user's salon to get the real salon ID
+        const salonRes = await fetch("/api/salons/mine");
+        const salonData = await salonRes.json();
+        const userSalonId = salonData.success && salonData.salon ? salonData.salon.id : null;
+
+        if (userSalonId) {
+          const empRes = await fetch(`/api/employees?salonId=${userSalonId}`);
+          const empData = await empRes.json();
+          if (empData.success) {
+            const emp = empData.data.find((e: Employee) => e.id === employeeId);
+            if (emp) {
+              setEmployee(emp);
+            }
           }
         }
 
