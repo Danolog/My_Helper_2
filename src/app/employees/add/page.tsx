@@ -16,9 +16,6 @@ import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 
-// Demo salon ID - in production this would come from user's session
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
-
 // Employee color palette (same as API)
 const EMPLOYEE_COLORS = [
   { hex: "#3b82f6", name: "Niebieski" },
@@ -41,6 +38,25 @@ export default function AddEmployeePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [assignedColor, setAssignedColor] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [salonId, setSalonId] = useState<string | null>(null);
+
+  // Fetch the user's salon
+  useEffect(() => {
+    async function fetchSalon() {
+      try {
+        const res = await fetch("/api/salons/mine");
+        const data = await res.json();
+        if (data.success && data.salon) {
+          setSalonId(data.salon.id);
+        }
+      } catch (err) {
+        console.error("Failed to fetch salon:", err);
+      }
+    }
+    if (session?.user) {
+      fetchSalon();
+    }
+  }, [session]);
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -149,6 +165,11 @@ export default function AddEmployeePage() {
       return;
     }
 
+    if (!salonId) {
+      toast.error("Nie znaleziono salonu. Odswież strone.");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -158,13 +179,12 @@ export default function AddEmployeePage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          salonId: DEMO_SALON_ID,
+          salonId,
           firstName: formData.firstName,
           lastName: formData.lastName,
           email: formData.email || null,
           phone: formData.phone || null,
           role: formData.role,
-          // Color is automatically assigned by the API
         }),
       });
 
