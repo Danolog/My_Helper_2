@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Scissors } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
+import { HeaderNavLinks } from "@/components/header-nav-links";
 import { ModeToggle } from "./ui/mode-toggle";
 
 export function SiteHeader() {
@@ -35,17 +36,7 @@ export function SiteHeader() {
             </Link>
           </h1>
           <div className="flex items-center gap-6" role="group" aria-label="User actions">
-            <div className="hidden md:flex items-center gap-5 text-sm font-medium text-muted-foreground">
-              <Link href="/#features" className="hover:text-primary transition-colors">
-                Funkcje
-              </Link>
-              <Link href="/#pricing" className="hover:text-primary transition-colors">
-                Cennik
-              </Link>
-              <Link href="/salons" className="hover:text-primary transition-colors">
-                Salony
-              </Link>
-            </div>
+            <HeaderNavLinks />
             <div className="flex items-center gap-3">
               <UserProfile />
               <ModeToggle />

@@ -1,4 +1,6 @@
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
 import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";
@@ -168,6 +170,98 @@ export async function GET(
     console.error("[Salon Detail API] Error:", error);
     return NextResponse.json(
       { success: false, error: "Failed to fetch salon details" },
+      { status: 500 }
+    );
+  }
+}
+
+// PUT /api/salons/[id] - Update salon basic data
+const ALLOWED_INDUSTRY_TYPES = [
+  "hair_salon",
+  "beauty_salon",
+  "nails",
+  "barbershop",
+  "spa",
+  "medical",
+];
+
+export async function PUT(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Wymagane logowanie" },
+        { status: 401 }
+      );
+    }
+
+    const { id } = await params;
+
+    // Verify ownership
+    const [salon] = await db
+      .select({ id: salons.id, ownerId: salons.ownerId })
+      .from(salons)
+      .where(eq(salons.id, id));
+
+    if (!salon) {
+      return NextResponse.json(
+        { success: false, error: "Salon nie znaleziony" },
+        { status: 404 }
+      );
+    }
+
+    if (salon.ownerId !== session.user.id) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+
+    const body = await request.json();
+
+    // Validate name (required)
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name || name.length > 100) {
+      return NextResponse.json(
+        { success: false, error: "Nazwa salonu jest wymagana (maks. 100 znakow)" },
+        { status: 400 }
+      );
+    }
+
+    // Sanitize optional fields
+    const phone = typeof body.phone === "string" ? body.phone.trim().slice(0, 20) : null;
+    const email = typeof body.email === "string" ? body.email.trim().slice(0, 100) : null;
+    const address = typeof body.address === "string" ? body.address.trim().slice(0, 200) : null;
+    const industryType =
+      typeof body.industryType === "string" && ALLOWED_INDUSTRY_TYPES.includes(body.industryType)
+        ? body.industryType
+        : null;
+
+    const [updated] = await db
+      .update(salons)
+      .set({ name, phone, email, address, industryType })
+      .where(eq(salons.id, id))
+      .returning();
+
+    return NextResponse.json({
+      success: true,
+      message: "Dane salonu zaktualizowane",
+      data: {
+        id: updated.id,
+        name: updated.name,
+        phone: updated.phone,
+        email: updated.email,
+        address: updated.address,
+        industryType: updated.industryType,
+      },
+    });
+  } catch (error) {
+    console.error("[Salon Update API] Error:", error);
+    return NextResponse.json(
+      { success: false, error: "Nie udalo sie zaktualizowac danych salonu" },
       { status: 500 }
     );
   }
