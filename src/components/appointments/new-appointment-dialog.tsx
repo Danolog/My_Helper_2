@@ -21,8 +21,6 @@ import {
 import { toast } from "sonner";
 import { CalendarPlus, User, Scissors, Clock, AlertTriangle } from "lucide-react";
 
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
-
 interface Client {
   id: string;
   firstName: string;
@@ -111,6 +109,27 @@ export function NewAppointmentDialog({
   // Field-level validation errors
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
+  // Salon ID
+  const [salonId, setSalonId] = useState<string | null>(null);
+
+  // Fetch the user's salon
+  useEffect(() => {
+    if (open && !salonId) {
+      async function fetchSalon() {
+        try {
+          const res = await fetch("/api/salons/mine");
+          const data = await res.json();
+          if (data.success && data.salon) {
+            setSalonId(data.salon.id);
+          }
+        } catch (err) {
+          console.error("Failed to fetch salon:", err);
+        }
+      }
+      fetchSalon();
+    }
+  }, [open, salonId]);
+
   // Today's date string for min constraint on date picker
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -140,9 +159,10 @@ export function NewAppointmentDialog({
 
   // Fetch clients
   const fetchClients = useCallback(async () => {
+    if (!salonId) return;
     setLoadingClients(true);
     try {
-      const res = await fetch(`/api/clients?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/clients?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setClients(data.data);
@@ -152,13 +172,14 @@ export function NewAppointmentDialog({
     } finally {
       setLoadingClients(false);
     }
-  }, []);
+  }, [salonId]);
 
   // Fetch services
   const fetchServices = useCallback(async () => {
+    if (!salonId) return;
     setLoadingServices(true);
     try {
-      const res = await fetch(`/api/services?salonId=${DEMO_SALON_ID}&activeOnly=true`);
+      const res = await fetch(`/api/services?salonId=${salonId}&activeOnly=true`);
       const data = await res.json();
       if (data.success) {
         setAllServices(data.data);
@@ -168,13 +189,14 @@ export function NewAppointmentDialog({
     } finally {
       setLoadingServices(false);
     }
-  }, []);
+  }, [salonId]);
 
   // Fetch employees
   const fetchEmployees = useCallback(async () => {
+    if (!salonId) return;
     setLoadingEmployees(true);
     try {
-      const res = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}&activeOnly=true`);
+      const res = await fetch(`/api/employees?salonId=${salonId}&activeOnly=true`);
       const data = await res.json();
       if (data.success) {
         setEmployees(data.data);
@@ -184,16 +206,16 @@ export function NewAppointmentDialog({
     } finally {
       setLoadingEmployees(false);
     }
-  }, []);
+  }, [salonId]);
 
-  // Load data when dialog opens
+  // Load data when dialog opens and salonId is available
   useEffect(() => {
-    if (open) {
+    if (open && salonId) {
       fetchClients();
       fetchServices();
       fetchEmployees();
     }
-  }, [open, fetchClients, fetchServices, fetchEmployees]);
+  }, [open, salonId, fetchClients, fetchServices, fetchEmployees]);
 
   // Fetch variants when service changes
   useEffect(() => {
@@ -311,7 +333,7 @@ export function NewAppointmentDialog({
     setSubmitting(true);
     try {
       const body: Record<string, unknown> = {
-        salonId: DEMO_SALON_ID,
+        salonId: salonId!,
         employeeId: selectedEmployeeId,
         startTime: startTime.toISOString(),
         endTime: endTime.toISOString(),

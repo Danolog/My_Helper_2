@@ -11,15 +11,34 @@ import { toast } from "sonner";
 import type { Appointment, CalendarEvent, Employee } from "@/types/calendar";
 import Link from "next/link";
 
-// Demo salon ID - in production this would come from user's session
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
-
 export default function CalendarAllPage() {
   const { data: session, isPending } = useSession();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [salonId, setSalonId] = useState<string | null>(null);
+
+  // Fetch the user's salon
+  useEffect(() => {
+    async function fetchSalon() {
+      try {
+        const res = await fetch("/api/salons/mine");
+        const data = await res.json();
+        if (data.success && data.salon) {
+          setSalonId(data.salon.id);
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to fetch salon:", err);
+        setLoading(false);
+      }
+    }
+    if (session?.user) {
+      fetchSalon();
+    }
+  }, [session]);
 
   // Default to employee color mode for /calendar/all
   const [colorMode, setColorMode] = useState<"status" | "employee">("employee");
@@ -38,8 +57,9 @@ export default function CalendarAllPage() {
 
   // Fetch employees
   const fetchEmployees = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const response = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}&activeOnly=true`);
+      const response = await fetch(`/api/employees?salonId=${salonId}&activeOnly=true`);
       const data = await response.json();
       if (data.success) {
         setEmployees(data.data);
@@ -48,10 +68,11 @@ export default function CalendarAllPage() {
       console.error("Failed to fetch employees:", error);
       toast.error("Nie udalo sie pobrac listy pracownikow");
     }
-  }, []);
+  }, [salonId]);
 
   // Fetch appointments for current date
   const fetchAppointments = useCallback(async () => {
+    if (!salonId) return;
     try {
       const startOfDay = new Date(currentDate);
       startOfDay.setHours(0, 0, 0, 0);
@@ -59,7 +80,7 @@ export default function CalendarAllPage() {
       endOfDay.setHours(23, 59, 59, 999);
 
       const params = new URLSearchParams({
-        salonId: DEMO_SALON_ID,
+        salonId: salonId!,
         startDate: startOfDay.toISOString(),
         endDate: endOfDay.toISOString(),
       });
@@ -86,16 +107,20 @@ export default function CalendarAllPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentDate]);
+  }, [currentDate, salonId]);
 
-  // Initial data load
+  // Initial data load - wait for salonId
   useEffect(() => {
-    fetchEmployees();
-  }, [fetchEmployees]);
+    if (salonId) {
+      fetchEmployees();
+    }
+  }, [salonId, fetchEmployees]);
 
   useEffect(() => {
-    fetchAppointments();
-  }, [fetchAppointments]);
+    if (salonId) {
+      fetchAppointments();
+    }
+  }, [salonId, fetchAppointments]);
 
   // Navigation handlers
   const goToPreviousDay = () => {
