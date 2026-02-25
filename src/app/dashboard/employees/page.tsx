@@ -9,8 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Lock, Users, Clock, UserPlus, Settings } from "lucide-react";
 import { useTabSync } from "@/hooks/use-tab-sync";
 
-const DEMO_SALON_ID = "00000000-0000-0000-0000-000000000001";
-
 interface Employee {
   id: string;
   firstName: string;
@@ -26,10 +24,33 @@ export default function EmployeesPage() {
   const { data: session, isPending } = useSession();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
+  const [salonId, setSalonId] = useState<string | null>(null);
+
+  // Fetch the user's salon
+  useEffect(() => {
+    async function fetchSalon() {
+      try {
+        const res = await fetch("/api/salons/mine");
+        const data = await res.json();
+        if (data.success && data.salon) {
+          setSalonId(data.salon.id);
+        } else {
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to fetch salon:", err);
+        setLoading(false);
+      }
+    }
+    if (session?.user) {
+      fetchSalon();
+    }
+  }, [session]);
 
   const fetchEmployees = useCallback(async () => {
+    if (!salonId) return;
     try {
-      const res = await fetch(`/api/employees?salonId=${DEMO_SALON_ID}`);
+      const res = await fetch(`/api/employees?salonId=${salonId}`);
       const data = await res.json();
       if (data.success) {
         setEmployees(data.data);
@@ -39,11 +60,13 @@ export default function EmployeesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [salonId]);
 
   useEffect(() => {
-    fetchEmployees();
-  }, [fetchEmployees]);
+    if (salonId) {
+      fetchEmployees();
+    }
+  }, [salonId, fetchEmployees]);
 
   // Cross-tab sync: refetch when another tab modifies employees
   useTabSync("employees", fetchEmployees);
