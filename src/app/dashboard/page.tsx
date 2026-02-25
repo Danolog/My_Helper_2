@@ -1290,6 +1290,19 @@ export default function DashboardPage() {
 
         <div className="p-6 border border-border rounded-lg">
           <div className="flex items-center gap-2 mb-2">
+            <Building2 className="w-5 h-5 text-primary" />
+            <h2 className="text-xl font-semibold">Dane salonu</h2>
+          </div>
+          <p className="text-muted-foreground mb-4">
+            Nazwa, adres, telefon i typ dzialalnosci salonu
+          </p>
+          <Button asChild>
+            <Link href="/dashboard/settings/salon">Edytuj dane salonu</Link>
+          </Button>
+        </div>
+
+        <div className="p-6 border border-border rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
             <CreditCard className="w-5 h-5 text-primary" />
             <h2 className="text-xl font-semibold">Platnosci</h2>
           </div>

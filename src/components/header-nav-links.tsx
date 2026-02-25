@@ -1,0 +1,40 @@
+"use client";
+
+import Link from "next/link";
+import { useSession } from "@/lib/auth-client";
+
+export function HeaderNavLinks() {
+  const { data: session, isPending } = useSession();
+
+  if (isPending) return null;
+
+  if (session) {
+    return (
+      <div className="hidden md:flex items-center gap-5 text-sm font-medium text-muted-foreground">
+        <Link href="/dashboard" className="hover:text-primary transition-colors">
+          Pulpit
+        </Link>
+        <Link href="/dashboard/calendar" className="hover:text-primary transition-colors">
+          Kalendarz
+        </Link>
+        <Link href="/dashboard/settings/salon" className="hover:text-primary transition-colors">
+          Moj salon
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className="hidden md:flex items-center gap-5 text-sm font-medium text-muted-foreground">
+      <Link href="/#features" className="hover:text-primary transition-colors">
+        Funkcje
+      </Link>
+      <Link href="/#pricing" className="hover:text-primary transition-colors">
+        Cennik
+      </Link>
+      <Link href="/salons" className="hover:text-primary transition-colors">
+        Salony
+      </Link>
+    </div>
+  );
+}
