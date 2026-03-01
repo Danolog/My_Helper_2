@@ -65,10 +65,14 @@ export async function GET(request: Request) {
     if (employeeId) {
       conditions.push(eq(appointments.employeeId, employeeId));
     }
-    if (startDate) {
+    if (startDate && endDate) {
+      // Overlap query: appointment overlaps with [startDate, endDate] range
+      // when appointment.startTime < endDate AND appointment.endTime > startDate
+      conditions.push(lt(appointments.startTime, new Date(endDate)));
+      conditions.push(gt(appointments.endTime, new Date(startDate)));
+    } else if (startDate) {
       conditions.push(gte(appointments.startTime, new Date(startDate)));
-    }
-    if (endDate) {
+    } else if (endDate) {
       conditions.push(lte(appointments.endTime, new Date(endDate)));
     }
 
