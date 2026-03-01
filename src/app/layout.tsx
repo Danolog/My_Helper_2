@@ -1,3 +1,4 @@
+import { Analytics } from "@vercel/analytics/react";
 import { Playfair_Display, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { OfflineBanner } from "@/components/offline-banner";
@@ -129,6 +130,7 @@ export default function RootLayout({
         <SwRegister />
         <InstallPrompt />
         <SwUpdateToast />
+        <Analytics />
       </body>
     </html>
   );

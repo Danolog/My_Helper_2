@@ -63,3 +63,4 @@ nul
 /venv/
 features.db
 claude-progress.txt
+.env*.local
