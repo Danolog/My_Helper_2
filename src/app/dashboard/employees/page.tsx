@@ -6,8 +6,21 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Lock, Users, Clock, UserPlus, Settings } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Lock, Users, Clock, UserPlus, Pencil } from "lucide-react";
 import { useTabSync } from "@/hooks/use-tab-sync";
+import { toast } from "sonner";
 
 interface Employee {
   id: string;
@@ -20,11 +33,30 @@ interface Employee {
   color: string | null;
 }
 
+interface EmployeeDetail extends Employee {
+  serviceIds: string[];
+}
+
+interface Service {
+  id: string;
+  name: string;
+}
+
 export default function EmployeesPage() {
   const { data: session, isPending } = useSession();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [salonId, setSalonId] = useState<string | null>(null);
+
+  // Edit dialog state
+  const [editOpen, setEditOpen] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editData, setEditData] = useState<EmployeeDetail | null>(null);
+  const [services, setServices] = useState<Service[]>([]);
+  const [selectedServiceIds, setSelectedServiceIds] = useState<Set<string>>(
+    new Set()
+  );
 
   // Fetch the user's salon
   useEffect(() => {
@@ -70,6 +102,97 @@ export default function EmployeesPage() {
 
   // Cross-tab sync: refetch when another tab modifies employees
   useTabSync("employees", fetchEmployees);
+
+  // Fetch services for the salon (for edit dialog)
+  useEffect(() => {
+    async function fetchServices() {
+      if (!salonId) return;
+      try {
+        const res = await fetch(`/api/services?salonId=${salonId}`);
+        const data = await res.json();
+        if (data.success) {
+          setServices(data.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch services:", err);
+      }
+    }
+    if (salonId) {
+      fetchServices();
+    }
+  }, [salonId]);
+
+  const openEditDialog = async (emp: Employee) => {
+    setEditOpen(true);
+    setEditLoading(true);
+    try {
+      const res = await fetch(`/api/employees/${emp.id}`);
+      const data = await res.json();
+      if (data.success) {
+        setEditData(data.data);
+        setSelectedServiceIds(new Set(data.data.serviceIds));
+      } else {
+        toast.error("Nie udalo sie pobrac danych pracownika");
+        setEditOpen(false);
+      }
+    } catch {
+      toast.error("Blad polaczenia");
+      setEditOpen(false);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleEditChange = (
+    field: keyof EmployeeDetail,
+    value: string | boolean
+  ) => {
+    setEditData((prev) => (prev ? { ...prev, [field]: value } : prev));
+  };
+
+  const toggleService = (serviceId: string) => {
+    setSelectedServiceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(serviceId)) {
+        next.delete(serviceId);
+      } else {
+        next.add(serviceId);
+      }
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    if (!editData) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/employees/${editData.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: editData.firstName,
+          lastName: editData.lastName,
+          email: editData.email,
+          phone: editData.phone,
+          role: editData.role,
+          isActive: editData.isActive,
+          serviceIds: Array.from(selectedServiceIds),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("Pracownik zaktualizowany");
+        setEditOpen(false);
+        fetchEmployees();
+      } else {
+        toast.error(data.error || "Nie udalo sie zapisac zmian");
+      }
+    } catch {
+      toast.error("Blad polaczenia");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (isPending) {
     return (
@@ -172,10 +295,12 @@ export default function EmployeesPage() {
                       Harmonogram
                     </Link>
                   </Button>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link href={`/dashboard/employees/${emp.id}/schedule`}>
-                      <Settings className="h-4 w-4" />
-                    </Link>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => openEditDialog(emp)}
+                  >
+                    <Pencil className="h-4 w-4" />
                   </Button>
                 </div>
               </CardContent>
@@ -183,6 +308,134 @@ export default function EmployeesPage() {
           ))}
         </div>
       )}
+
+      {/* Edit Employee Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edytuj pracownika</DialogTitle>
+            <DialogDescription>
+              Zmien dane pracownika i przypisane uslugi.
+            </DialogDescription>
+          </DialogHeader>
+
+          {editLoading ? (
+            <div className="flex justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+            </div>
+          ) : editData ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-firstName">Imie *</Label>
+                  <Input
+                    id="edit-firstName"
+                    value={editData.firstName}
+                    onChange={(e) =>
+                      handleEditChange("firstName", e.target.value)
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-lastName">Nazwisko *</Label>
+                  <Input
+                    id="edit-lastName"
+                    value={editData.lastName}
+                    onChange={(e) =>
+                      handleEditChange("lastName", e.target.value)
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-email">Email</Label>
+                <Input
+                  id="edit-email"
+                  type="email"
+                  value={editData.email || ""}
+                  onChange={(e) => handleEditChange("email", e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-phone">Telefon</Label>
+                <Input
+                  id="edit-phone"
+                  type="tel"
+                  value={editData.phone || ""}
+                  onChange={(e) => handleEditChange("phone", e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="edit-role">Rola</Label>
+                <select
+                  id="edit-role"
+                  value={editData.role}
+                  onChange={(e) => handleEditChange("role", e.target.value)}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="employee">Pracownik</option>
+                  <option value="owner">Wlasciciel</option>
+                  <option value="reception">Recepcja</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <Label htmlFor="edit-active">Aktywny</Label>
+                <Switch
+                  id="edit-active"
+                  checked={editData.isActive}
+                  onCheckedChange={(checked) =>
+                    handleEditChange("isActive", checked)
+                  }
+                />
+              </div>
+
+              {/* Service assignments */}
+              {services.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Przypisane uslugi</Label>
+                  <div className="border rounded-md p-3 space-y-2 max-h-48 overflow-y-auto">
+                    {services.map((service) => (
+                      <div
+                        key={service.id}
+                        className="flex items-center gap-2"
+                      >
+                        <Checkbox
+                          id={`service-${service.id}`}
+                          checked={selectedServiceIds.has(service.id)}
+                          onCheckedChange={() => toggleService(service.id)}
+                        />
+                        <label
+                          htmlFor={`service-${service.id}`}
+                          className="text-sm cursor-pointer"
+                        >
+                          {service.name}
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditOpen(false)}
+              disabled={saving}
+            >
+              Anuluj
+            </Button>
+            <Button onClick={handleSave} disabled={saving || editLoading}>
+              {saving ? "Zapisywanie..." : "Zapisz"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
