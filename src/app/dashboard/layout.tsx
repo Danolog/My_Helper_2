@@ -1,4 +1,4 @@
-import { DashboardSidebar } from "@/components/dashboard/dashboard-sidebar";
+import { DashboardSidebar, DashboardMobileHeader } from "@/components/dashboard/dashboard-sidebar";
 
 /**
  * Dashboard layout wraps all /dashboard/* pages with a persistent sidebar.
@@ -17,7 +17,10 @@ export default function DashboardLayout({
   return (
     <div className="flex min-h-[calc(100vh-4rem)]">
       <DashboardSidebar />
-      <div className="flex-1 overflow-auto">{children}</div>
+      <div className="flex-1 flex flex-col overflow-auto">
+        <DashboardMobileHeader />
+        {children}
+      </div>
     </div>
   );
 }

@@ -230,7 +230,7 @@ const DEFAULT_CONFIG: VoiceAiConfig = {
 
 function VoiceAiContent() {
   const { salonId, loading: salonLoading } = useSalonId();
-  const [config, setConfig] = useState<VoiceAiConfig>(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<VoiceAiConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [callerMessage, setCallerMessage] = useState("");
@@ -284,9 +284,12 @@ function VoiceAiContent() {
       if (res.ok) {
         const data = await res.json();
         setConfig(data.config);
+      } else {
+        setConfig(DEFAULT_CONFIG);
       }
     } catch (err) {
       console.error("Failed to load config:", err);
+      setConfig(DEFAULT_CONFIG);
     } finally {
       setLoading(false);
     }
@@ -351,6 +354,10 @@ function VoiceAiContent() {
         body: JSON.stringify(config),
       });
       if (res.ok) {
+        const data = await res.json();
+        if (data.config) {
+          setConfig(data.config);
+        }
         toast.success("Zapisano", {
           description: "Konfiguracja asystenta glosowego zostala zapisana.",
         });
@@ -371,7 +378,7 @@ function VoiceAiContent() {
 
   const simulateCall = async () => {
     if (!callerMessage.trim()) return;
-    if (!config.enabled) {
+    if (!config || !config.enabled) {
       toast.error("Asystent wylaczony", {
         description:
           "Wlacz asystenta glosowego AI w zakladce Konfiguracja, aby symulowac polaczenia.",
@@ -634,13 +641,16 @@ function VoiceAiContent() {
     key: keyof VoiceAiConfig["capabilities"],
     value: boolean
   ) => {
-    setConfig((prev) => ({
-      ...prev,
-      capabilities: { ...prev.capabilities, [key]: value },
-    }));
+    setConfig((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        capabilities: { ...prev.capabilities, [key]: value },
+      };
+    });
   };
 
-  if (loading) {
+  if (loading || !config) {
     return (
       <div className="container mx-auto p-6 flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -727,7 +737,7 @@ function VoiceAiContent() {
                   id="voice-enabled"
                   checked={config.enabled}
                   onCheckedChange={(checked) =>
-                    setConfig((prev) => ({ ...prev, enabled: checked }))
+                    setConfig((prev) => prev ? ({ ...prev, enabled: checked }) : prev)
                   }
                 />
               </div>
@@ -752,10 +762,10 @@ function VoiceAiContent() {
                   id="greeting"
                   value={config.greeting}
                   onChange={(e) =>
-                    setConfig((prev) => ({
+                    setConfig((prev) => prev ? ({
                       ...prev,
                       greeting: e.target.value,
-                    }))
+                    }) : prev)
                   }
                   rows={3}
                   placeholder="Dzien dobry! W czym moge pomoc?"
@@ -768,10 +778,10 @@ function VoiceAiContent() {
                   <Select
                     value={config.voiceStyle}
                     onValueChange={(value) =>
-                      setConfig((prev) => ({
+                      setConfig((prev) => prev ? ({
                         ...prev,
                         voiceStyle: value as VoiceAiConfig["voiceStyle"],
-                      }))
+                      }) : prev)
                     }
                   >
                     <SelectTrigger>
@@ -792,10 +802,10 @@ function VoiceAiContent() {
                   <Select
                     value={config.language}
                     onValueChange={(value) =>
-                      setConfig((prev) => ({
+                      setConfig((prev) => prev ? ({
                         ...prev,
                         language: value as "pl" | "en",
-                      }))
+                      }) : prev)
                     }
                   >
                     <SelectTrigger>
@@ -820,10 +830,10 @@ function VoiceAiContent() {
                   max={600}
                   value={config.maxCallDuration}
                   onChange={(e) =>
-                    setConfig((prev) => ({
+                    setConfig((prev) => prev ? ({
                       ...prev,
                       maxCallDuration: Number(e.target.value) || 300,
-                    }))
+                    }) : prev)
                   }
                 />
               </div>
@@ -912,10 +922,10 @@ function VoiceAiContent() {
                 <Switch
                   checked={config.transferToHumanEnabled}
                   onCheckedChange={(checked) =>
-                    setConfig((prev) => ({
+                    setConfig((prev) => prev ? ({
                       ...prev,
                       transferToHumanEnabled: checked,
-                    }))
+                    }) : prev)
                   }
                 />
               </div>
@@ -929,10 +939,10 @@ function VoiceAiContent() {
                     id="transfer-phone"
                     value={config.transferPhoneNumber}
                     onChange={(e) =>
-                      setConfig((prev) => ({
+                      setConfig((prev) => prev ? ({
                         ...prev,
                         transferPhoneNumber: e.target.value,
-                      }))
+                      }) : prev)
                     }
                     placeholder="+48 123 456 789"
                   />
@@ -951,10 +961,10 @@ function VoiceAiContent() {
                 <Switch
                   checked={config.businessHoursOnly}
                   onCheckedChange={(checked) =>
-                    setConfig((prev) => ({
+                    setConfig((prev) => prev ? ({
                       ...prev,
                       businessHoursOnly: checked,
-                    }))
+                    }) : prev)
                   }
                 />
               </div>

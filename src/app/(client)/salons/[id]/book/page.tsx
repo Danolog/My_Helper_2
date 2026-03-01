@@ -14,7 +14,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowLeft,
-  Lock,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -235,6 +234,11 @@ export default function ClientBookingPage() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [_depositPaymentId, setDepositPaymentId] = useState<string>("");
   const [_depositSessionId, setDepositSessionId] = useState<string>("");
+
+  // Guest booking info (when not logged in)
+  const [guestName, setGuestName] = useState("");
+  const [guestPhone, setGuestPhone] = useState("");
+  const [guestEmail, setGuestEmail] = useState("");
 
   // Client-specific deposit settings (fetched from salon's client record)
   const [clientDepositSettings, setClientDepositSettings] = useState<{
@@ -475,13 +479,14 @@ export default function ClientBookingPage() {
   // Check first visit promotion when service is selected
   useEffect(() => {
     async function checkFirstVisit() {
-      if (!salonId || !session?.user?.email || !selectedServiceId) {
+      const emailForCheck = session?.user?.email || guestEmail;
+      if (!salonId || !selectedServiceId || !emailForCheck) {
         setFirstVisitPromo(null);
         return;
       }
       try {
         const res = await fetch(
-          `/api/promotions/check-first-visit?salonId=${salonId}&email=${encodeURIComponent(session.user.email)}&serviceId=${selectedServiceId}`
+          `/api/promotions/check-first-visit?salonId=${salonId}&email=${encodeURIComponent(emailForCheck)}&serviceId=${selectedServiceId}`
         );
         const json = await res.json();
         if (json.success) {
@@ -493,7 +498,7 @@ export default function ClientBookingPage() {
       }
     }
     checkFirstVisit();
-  }, [salonId, session?.user?.email, selectedServiceId]);
+  }, [salonId, session?.user?.email, guestEmail, selectedServiceId]);
 
   // Check happy hours promotion when time slot is selected
   useEffect(() => {
@@ -635,6 +640,13 @@ export default function ClientBookingPage() {
       return;
     }
 
+    if (!session) {
+      if (!guestName.trim() || !guestPhone.trim()) {
+        toast.error("Podaj imie i numer telefonu");
+        return;
+      }
+    }
+
     const startTime = new Date(`${selectedDate}T${selectedTimeSlot}:00`);
     const endTime = new Date(startTime.getTime() + effectiveDuration * 60000);
     const variantName = selectedVariant?.name ?? "";
@@ -668,6 +680,7 @@ export default function ClientBookingPage() {
           depositAmount,
           paymentMethod: selectedPaymentMethod,
           ...(selectedPaymentMethod === "blik" ? { blikPhoneNumber: blikPhoneNumber.replace(/[\s\-()]/g, "") } : {}),
+          ...((!session) ? { guestName: guestName.trim(), guestPhone: guestPhone.trim(), guestEmail: guestEmail.trim() || null } : {}),
         };
 
         // Step 1: Create deposit session (which also creates the appointment)
@@ -734,6 +747,7 @@ export default function ClientBookingPage() {
         startTime: startTime.toISOString(),
         endTime: endTime.toISOString(),
         notes: notesText,
+        ...((!session) ? { guestName: guestName.trim(), guestPhone: guestPhone.trim(), guestEmail: guestEmail.trim() || null } : {}),
       };
 
       if (selectedVariantId) {
@@ -783,6 +797,9 @@ export default function ClientBookingPage() {
     setDepositSessionId("");
     setHappyHoursPromo(null);
     setFirstVisitPromo(null);
+    setGuestName("");
+    setGuestPhone("");
+    setGuestEmail("");
   }
 
   // ---------------------------------------------------------------------------
@@ -840,34 +857,7 @@ export default function ClientBookingPage() {
     );
   }
 
-  // Auth required
-  if (!session) {
-    return (
-      <div className="container mx-auto px-4 py-12">
-        <div className="max-w-md mx-auto text-center">
-          <Lock className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-          <h1 className="text-2xl font-bold mb-2">Wymagane logowanie</h1>
-          <p className="text-muted-foreground mb-6">
-            Musisz sie zalogowac, aby zarezerwowac wizyte.
-          </p>
-          <div className="flex flex-col gap-3">
-            <Button asChild size="lg">
-              <Link href="/login">Zaloguj sie</Link>
-            </Button>
-            <p className="text-sm text-muted-foreground">
-              Nie masz konta?{" "}
-              <Link
-                href="/portal/register"
-                className="text-primary hover:underline font-medium"
-              >
-                Zarejestruj sie
-              </Link>
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Guest booking is allowed - no auth gate
 
   // Salon not found
   if (!salon) {
@@ -1683,6 +1673,46 @@ export default function ClientBookingPage() {
                     </div>
                   </div>
                 </>
+              )}
+
+              {/* Guest info form - shown when not logged in */}
+              {!session && (
+                <div className="space-y-4 mb-4">
+                  <Separator />
+                  <div className="flex items-center gap-2 text-lg font-semibold">
+                    <UserPlus className="h-5 w-5" />
+                    Dane kontaktowe
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Podaj swoje dane, abysmy mogli potwierdzic rezerwacje.
+                  </p>
+                  <div>
+                    <label className="text-sm font-medium mb-1 block">Imie *</label>
+                    <Input
+                      value={guestName}
+                      onChange={(e) => setGuestName(e.target.value)}
+                      placeholder="Twoje imie"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium mb-1 block">Telefon *</label>
+                    <Input
+                      value={guestPhone}
+                      onChange={(e) => setGuestPhone(e.target.value)}
+                      placeholder="+48 123 456 789"
+                      type="tel"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium mb-1 block">Email (opcjonalnie)</label>
+                    <Input
+                      value={guestEmail}
+                      onChange={(e) => setGuestEmail(e.target.value)}
+                      placeholder="twoj@email.pl"
+                      type="email"
+                    />
+                  </div>
+                </div>
               )}
 
               <Button

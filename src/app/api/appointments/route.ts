@@ -105,7 +105,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId, promoCodeId, discountAmount } = body;
+    const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId, promoCodeId, discountAmount, guestName, guestPhone, guestEmail } = body;
 
     // Try to get logged-in user ID from session (for client portal bookings)
     let bookedByUserId: string | null = bodyUserId || null;
@@ -254,6 +254,9 @@ export async function POST(request: Request) {
         depositAmount: depositAmount || null,
         promoCodeId: validatedPromoCodeId,
         discountAmount: validatedDiscountAmount,
+        guestName: guestName || null,
+        guestPhone: guestPhone || null,
+        guestEmail: guestEmail || null,
         status: "scheduled",
       })
       .returning();
