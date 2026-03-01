@@ -4,8 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import { useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { TimeGrid } from "@/components/calendar/time-grid";
+import { WeekTimeGrid } from "@/components/calendar/week-time-grid";
 import { RescheduleDialog } from "@/components/calendar/reschedule-dialog";
 import { CalendarLegend } from "@/components/calendar/calendar-legend";
+import { getStartOfWeek, getEndOfWeek } from "@/lib/date-utils";
 import { ChevronLeft, ChevronRight, Calendar, Lock, Palette, Users, Plus, Ban } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -20,12 +22,13 @@ import { NewAppointmentDialog } from "@/components/appointments/new-appointment-
 import { CancelAppointmentDialog } from "@/components/appointments/cancel-appointment-dialog";
 import { CompleteAppointmentDialog } from "@/components/appointments/complete-appointment-dialog";
 import { BlockTimeDialog } from "@/components/calendar/block-time-dialog";
-import type { Appointment, CalendarEvent, Employee, TimeBlock, WorkSchedule } from "@/types/calendar";
+import type { Appointment, CalendarEvent, CalendarView, Employee, TimeBlock, WorkSchedule } from "@/types/calendar";
 import { useTabSync } from "@/hooks/use-tab-sync";
 
 export default function CalendarPage() {
   const { data: session, isPending } = useSession();
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [currentView, setCurrentView] = useState<CalendarView>("day");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [workSchedules, setWorkSchedules] = useState<WorkSchedule[]>([]);
@@ -124,17 +127,24 @@ export default function CalendarPage() {
     }
   }, [salonId]);
 
-  // Fetch time blocks (vacations, breaks, etc.) for the current date
+  // Fetch time blocks (vacations, breaks, etc.) for the current date/week
   const fetchTimeBlocks = useCallback(async () => {
     try {
-      const startOfDay = new Date(currentDate);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(currentDate);
-      endOfDay.setHours(23, 59, 59, 999);
+      let rangeStart: Date;
+      let rangeEnd: Date;
+      if (currentView === "week") {
+        rangeStart = getStartOfWeek(currentDate);
+        rangeEnd = getEndOfWeek(currentDate);
+      } else {
+        rangeStart = new Date(currentDate);
+        rangeStart.setHours(0, 0, 0, 0);
+        rangeEnd = new Date(currentDate);
+        rangeEnd.setHours(23, 59, 59, 999);
+      }
 
       const params = new URLSearchParams({
-        startDate: startOfDay.toISOString(),
-        endDate: endOfDay.toISOString(),
+        startDate: rangeStart.toISOString(),
+        endDate: rangeEnd.toISOString(),
       });
 
       const response = await fetch(`/api/time-blocks?${params}`);
@@ -153,21 +163,28 @@ export default function CalendarPage() {
     } catch (error) {
       console.error("Failed to fetch time blocks:", error);
     }
-  }, [currentDate]);
+  }, [currentDate, currentView]);
 
-  // Fetch appointments for current date
+  // Fetch appointments for current date/week
   const fetchAppointments = useCallback(async () => {
     if (!salonId) return;
     try {
-      const startOfDay = new Date(currentDate);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(currentDate);
-      endOfDay.setHours(23, 59, 59, 999);
+      let rangeStart: Date;
+      let rangeEnd: Date;
+      if (currentView === "week") {
+        rangeStart = getStartOfWeek(currentDate);
+        rangeEnd = getEndOfWeek(currentDate);
+      } else {
+        rangeStart = new Date(currentDate);
+        rangeStart.setHours(0, 0, 0, 0);
+        rangeEnd = new Date(currentDate);
+        rangeEnd.setHours(23, 59, 59, 999);
+      }
 
       const params = new URLSearchParams({
         salonId: salonId!,
-        startDate: startOfDay.toISOString(),
-        endDate: endOfDay.toISOString(),
+        startDate: rangeStart.toISOString(),
+        endDate: rangeEnd.toISOString(),
       });
 
       const response = await fetch(`/api/appointments?${params}`);
@@ -192,7 +209,7 @@ export default function CalendarPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentDate, salonId]);
+  }, [currentDate, currentView, salonId]);
 
   // Initial data load - wait for salonId
   useEffect(() => {
@@ -226,18 +243,20 @@ export default function CalendarPage() {
     : timeBlocks.filter((block) => block.employeeId === selectedEmployeeFilter);
 
   // Navigation handlers
-  const goToPreviousDay = () => {
+  const goToPrevious = () => {
+    const step = currentView === "week" ? 7 : 1;
     setCurrentDate((prev) => {
       const newDate = new Date(prev);
-      newDate.setDate(newDate.getDate() - 1);
+      newDate.setDate(newDate.getDate() - step);
       return newDate;
     });
   };
 
-  const goToNextDay = () => {
+  const goToNext = () => {
+    const step = currentView === "week" ? 7 : 1;
     setCurrentDate((prev) => {
       const newDate = new Date(prev);
-      newDate.setDate(newDate.getDate() + 1);
+      newDate.setDate(newDate.getDate() + step);
       return newDate;
     });
   };
@@ -436,7 +455,14 @@ export default function CalendarPage() {
     setDraggedEvent(null);
   };
 
-  const formatDate = (date: Date) => {
+  const formatDateDisplay = (date: Date) => {
+    if (currentView === "week") {
+      const weekStart = getStartOfWeek(date);
+      const weekEnd = getEndOfWeek(date);
+      const startStr = weekStart.toLocaleDateString("pl-PL", { day: "numeric", month: "short" });
+      const endStr = weekEnd.toLocaleDateString("pl-PL", { day: "numeric", month: "short", year: "numeric" });
+      return `${startStr} - ${endStr}`;
+    }
     return date.toLocaleDateString("pl-PL", {
       weekday: "long",
       day: "numeric",
@@ -549,15 +575,35 @@ export default function CalendarPage() {
             {colorMode === "status" ? "Status" : "Pracownik"}
           </Button>
 
+          {/* View toggle */}
+          <div className="flex items-center rounded-md border border-border">
+            <Button
+              variant={currentView === "day" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setCurrentView("day")}
+              className="rounded-r-none"
+            >
+              Dzien
+            </Button>
+            <Button
+              variant={currentView === "week" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setCurrentView("week")}
+              className="rounded-l-none"
+            >
+              Tydzien
+            </Button>
+          </div>
+
           <div className="w-px h-6 bg-border mx-1" />
 
-          <Button variant="outline" size="sm" onClick={goToPreviousDay}>
+          <Button variant="outline" size="sm" onClick={goToPrevious}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <Button variant="outline" size="sm" onClick={goToToday}>
             Dzisiaj
           </Button>
-          <Button variant="outline" size="sm" onClick={goToNextDay}>
+          <Button variant="outline" size="sm" onClick={goToNext}>
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
@@ -565,7 +611,7 @@ export default function CalendarPage() {
 
       {/* Current date display */}
       <div className="mb-4">
-        <h2 className="text-lg font-medium capitalize">{formatDate(currentDate)}</h2>
+        <h2 className="text-lg font-medium capitalize">{formatDateDisplay(currentDate)}</h2>
       </div>
 
       {/* Legend */}
@@ -585,7 +631,7 @@ export default function CalendarPage() {
           </p>
           <Button variant="outline">Dodaj pracownika</Button>
         </div>
-      ) : (
+      ) : currentView === "day" ? (
         <TimeGrid
           date={currentDate}
           employees={filteredEmployees}
@@ -599,6 +645,19 @@ export default function CalendarPage() {
           onEventCancel={(event) => handleCancelAppointment(event.id)}
           onEventComplete={(event) => handleCompleteAppointment(event)}
           draggedEvent={draggedEvent}
+          colorMode={colorMode}
+        />
+      ) : (
+        <WeekTimeGrid
+          weekStart={getStartOfWeek(currentDate)}
+          employees={filteredEmployees}
+          events={filteredEvents}
+          workSchedules={workSchedules}
+          timeBlocks={filteredTimeBlocks}
+          onEventClick={handleEventClick}
+          onEventCancel={(event) => handleCancelAppointment(event.id)}
+          onEventComplete={(event) => handleCompleteAppointment(event)}
+          onDayClick={(date) => { setCurrentDate(date); setCurrentView("day"); }}
           colorMode={colorMode}
         />
       )}
