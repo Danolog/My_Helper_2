@@ -53,6 +53,14 @@ export default async function LoginPage({
               Zaloguj sie tutaj
             </Link>
           </p>
+          <div className="mt-3 flex flex-col items-center gap-1 text-sm text-muted-foreground">
+            <Link href="/salons" className="text-primary hover:underline">
+              Przegladaj salony bez logowania
+            </Link>
+            <Link href="/" className="hover:underline">
+              Powrot do strony glownej
+            </Link>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -1504,7 +1504,8 @@ export default function GalleryPage() {
       {/* Photo detail dialog */}
       {selectedPhoto && (
         <Dialog open={!!selectedPhoto} onOpenChange={() => setSelectedPhoto(null)}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-3xl max-h-[90vh] p-0">
+            <div className="overflow-y-auto max-h-[calc(90vh-4rem)] p-6">
             <DialogHeader>
               <DialogTitle>
                 {selectedPhoto.description || "Zdjecie galerii"}
@@ -1566,7 +1567,7 @@ export default function GalleryPage() {
                   <img
                     src={selectedPhoto.afterPhotoUrl || selectedPhoto.beforePhotoUrl || ""}
                     alt={selectedPhoto.description || "Zdjecie"}
-                    className="w-full rounded-lg"
+                    className="w-full max-h-[50vh] object-contain rounded-lg"
                   />
                   {/* Show badge for single photos */}
                   {selectedPhoto.beforePhotoUrl && !selectedPhoto.afterPhotoUrl && (
@@ -1702,6 +1703,7 @@ export default function GalleryPage() {
                   Usun zdjecie
                 </Button>
               </div>
+            </div>
             </div>
           </DialogContent>
         </Dialog>

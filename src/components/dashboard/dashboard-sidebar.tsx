@@ -14,7 +14,6 @@ import {
   Package,
   Percent,
   Menu,
-  X,
   Bot,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -176,23 +175,24 @@ function DesktopSidebar({ pathname }: { pathname: string }) {
 }
 
 /**
- * Mobile sidebar - renders a hamburger button that opens a Sheet (drawer).
- * Visible only on screens < lg (1024px).
+ * Mobile header bar with hamburger that opens a Sheet (drawer).
+ * Visible only on screens < lg (1024px). Exported for use in layout.
  */
-function MobileSidebar({ pathname }: { pathname: string }) {
+export function DashboardMobileHeader() {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="lg:hidden">
+    <div className="sticky top-0 z-40 flex items-center gap-3 border-b bg-sidebar px-4 py-3 lg:hidden">
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
           <Button
             variant="ghost"
             size="icon"
-            className="fixed bottom-4 right-4 z-40 h-12 w-12 rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 lg:hidden"
+            className="h-9 w-9"
             aria-label="Otworz menu nawigacyjne"
           >
-            {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            <Menu className="h-5 w-5" />
           </Button>
         </SheetTrigger>
         <SheetContent side="left" className="w-64 bg-sidebar p-0">
@@ -216,6 +216,7 @@ function MobileSidebar({ pathname }: { pathname: string }) {
           </nav>
         </SheetContent>
       </Sheet>
+      <span className="text-sm font-semibold">MyHelper</span>
     </div>
   );
 }
@@ -228,10 +229,5 @@ function MobileSidebar({ pathname }: { pathname: string }) {
 export function DashboardSidebar() {
   const pathname = usePathname();
 
-  return (
-    <>
-      <DesktopSidebar pathname={pathname} />
-      <MobileSidebar pathname={pathname} />
-    </>
-  );
+  return <DesktopSidebar pathname={pathname} />;
 }

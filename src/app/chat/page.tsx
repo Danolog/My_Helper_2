@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
+import Link from "next/link";
 import { useChat } from "@ai-sdk/react";
-import { Copy, Check, Loader2 } from "lucide-react";
+import { Copy, Check, Loader2, ArrowLeft } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { UserProfile } from "@/components/auth/user-profile";
@@ -198,6 +199,14 @@ function ChatContent() {
     },
   });
   const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus input when AI finishes streaming
+  useEffect(() => {
+    if (status !== "streaming") {
+      inputRef.current?.focus();
+    }
+  }, [status]);
 
   // Load messages from localStorage on mount
   useEffect(() => {
@@ -249,7 +258,14 @@ function ChatContent() {
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-4xl mx-auto">
         <div className="flex justify-between items-center mb-6 pb-4 border-b">
-          <h1 className="text-2xl font-bold">AI Chat</h1>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" asChild>
+              <Link href="/dashboard">
+                <ArrowLeft className="h-5 w-5" />
+              </Link>
+            </Button>
+            <h1 className="text-2xl font-bold">AI Chat</h1>
+          </div>
           <div className="flex items-center gap-4">
             <span className="text-sm text-muted-foreground">
               Welcome, {session.user.name}!
@@ -327,11 +343,13 @@ function ChatContent() {
           className="flex gap-2"
         >
           <input
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Type your message..."
             className="flex-1 p-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
             disabled={isStreaming}
+            autoFocus
           />
           <Button type="submit" disabled={!input.trim() || isStreaming}>
             {isStreaming ? (

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Search, MapPin, Phone, Star, Heart, Scissors, ArrowRight } from "lucide-react";
+import { Search, MapPin, Phone, Star, Heart, Scissors, ArrowRight, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NetworkErrorHandler } from "@/components/network-error-handler";
@@ -250,12 +250,20 @@ export default function SalonsListPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredSalons.map((salon) => (
+            {filteredSalons.map((salon) => {
+              const hasServices = (salon.serviceCount ?? 0) > 0;
+              return (
               <Link key={salon.id} href={`/salons/${salon.id}`}>
-                <Card className="h-full border-border/60 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-1 transition-all duration-300 cursor-pointer">
+                <Card className={`h-full border-border/60 hover:shadow-lg hover:shadow-primary/5 hover:-translate-y-1 transition-all duration-300 cursor-pointer ${!hasServices ? "opacity-75" : ""}`}>
                   {/* Gradient placeholder header */}
-                  <div className="h-32 rounded-t-xl bg-gradient-to-br from-primary/10 via-rose-light/10 to-gold/10 flex items-center justify-center">
+                  <div className="relative h-32 rounded-t-xl bg-gradient-to-br from-primary/10 via-rose-light/10 to-gold/10 flex items-center justify-center">
                     <Scissors className="h-8 w-8 text-primary/30" />
+                    {!hasServices && (
+                      <Badge variant="secondary" className="absolute top-3 right-3 text-xs gap-1">
+                        <Clock className="w-3 h-3" />
+                        Wkrotce dostepne
+                      </Badge>
+                    )}
                   </div>
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
@@ -308,22 +316,29 @@ export default function SalonsListPage() {
                         <span className="text-muted-foreground">({salon.reviewCount} opinii)</span>
                       </div>
                     )}
-                    {(salon.serviceCount ?? 0) > 0 && (
+                    {hasServices && (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Scissors className="w-4 h-4 flex-shrink-0" />
                         <span>{salon.serviceCount} {salon.serviceCount === 1 ? "usluga" : (salon.serviceCount ?? 0) < 5 ? "uslugi" : "uslug"}</span>
                       </div>
                     )}
                     <div className="pt-3">
-                      <Button variant="outline" size="sm" className="w-full rounded-full text-primary border-primary/30 hover:bg-primary/5">
-                        Zarezerwuj
-                        <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
-                      </Button>
+                      {hasServices ? (
+                        <Button variant="outline" size="sm" className="w-full rounded-full text-primary border-primary/30 hover:bg-primary/5">
+                          Zarezerwuj
+                          <ArrowRight className="h-3.5 w-3.5 ml-1.5" />
+                        </Button>
+                      ) : (
+                        <Button variant="outline" size="sm" className="w-full rounded-full" disabled>
+                          Wkrotce dostepne
+                        </Button>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
               </Link>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

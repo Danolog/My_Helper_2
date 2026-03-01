@@ -78,7 +78,7 @@ export async function GET() {
       ])
     );
 
-    // Merge aggregate data and filter out salons with no active services
+    // Merge aggregate data - show all salons, sorted with services first
     const enrichedSalons = allSalons
       .map((salon) => ({
         id: salon.id,
@@ -91,7 +91,7 @@ export async function GET() {
         averageRating: reviewStatsMap.get(salon.id)?.averageRating ?? null,
         reviewCount: reviewStatsMap.get(salon.id)?.reviewCount ?? 0,
       }))
-      .filter((salon) => salon.serviceCount > 0);
+      .sort((a, b) => (b.serviceCount > 0 ? 1 : 0) - (a.serviceCount > 0 ? 1 : 0));
 
     return NextResponse.json({
       success: true,

@@ -4,10 +4,13 @@ import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
+  Bell,
   Cake,
+  CreditCard,
   Gift,
   Save,
   Settings,
+  Smartphone,
   Percent,
   Package,
   MessageSquare,
@@ -21,6 +24,7 @@ import {
 import { toast } from "sonner";
 import Link from "next/link";
 import { useSession } from "@/lib/auth-client";
+import { Switch } from "@/components/ui/switch";
 
 interface BirthdaySettings {
   enabled: boolean;
@@ -37,6 +41,12 @@ interface WeMissYouSettings {
   customMessage: string;
   includeBookingLink: boolean;
   autoSend: boolean;
+}
+
+interface NotificationChannelSettings {
+  smsReminders: boolean;
+  pushReminders: boolean;
+  paymentConfirmations: boolean;
 }
 
 export default function NotificationSettingsPage() {
@@ -66,6 +76,15 @@ export default function NotificationSettingsPage() {
   });
   const [savingWeMissYou, setSavingWeMissYou] = useState(false);
   const [weMissYouSavedSuccessfully, setWeMissYouSavedSuccessfully] = useState(false);
+
+  // Notification channel settings state
+  const [channelSettings, setChannelSettings] = useState<NotificationChannelSettings>({
+    smsReminders: true,
+    pushReminders: false,
+    paymentConfirmations: true,
+  });
+  const [savingChannels, setSavingChannels] = useState(false);
+  const [channelsSavedSuccessfully, setChannelsSavedSuccessfully] = useState(false);
 
   // Fetch salon ID - prefer salon owned by current user
   useEffect(() => {
@@ -100,9 +119,10 @@ export default function NotificationSettingsPage() {
     if (!salonId) return;
     setLoading(true);
     try {
-      const [birthdayRes, weMissYouRes] = await Promise.all([
+      const [birthdayRes, weMissYouRes, channelsRes] = await Promise.all([
         fetch(`/api/salons/${salonId}/birthday-settings`),
         fetch(`/api/salons/${salonId}/we-miss-you-settings`),
+        fetch(`/api/salons/${salonId}/notification-type-settings`),
       ]);
       const birthdayData = await birthdayRes.json();
       if (birthdayData.success) {
@@ -111,6 +131,14 @@ export default function NotificationSettingsPage() {
       const weMissYouData = await weMissYouRes.json();
       if (weMissYouData.success) {
         setWeMissYouSettings(weMissYouData.data);
+      }
+      const channelsData = await channelsRes.json();
+      if (channelsData.success) {
+        setChannelSettings({
+          smsReminders: channelsData.data.smsReminders,
+          pushReminders: channelsData.data.pushReminders,
+          paymentConfirmations: channelsData.data.paymentConfirmations,
+        });
       }
     } catch (err) {
       console.error("Failed to fetch notification settings:", err);
@@ -197,6 +225,33 @@ export default function NotificationSettingsPage() {
     }
   };
 
+  // Save notification channel settings
+  const handleSaveChannels = async () => {
+    if (!salonId) return;
+    setSavingChannels(true);
+    setChannelsSavedSuccessfully(false);
+    try {
+      const res = await fetch(`/api/salons/${salonId}/notification-type-settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(channelSettings),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || "Ustawienia kanalow zapisane!");
+        setChannelsSavedSuccessfully(true);
+        setTimeout(() => setChannelsSavedSuccessfully(false), 3000);
+      } else {
+        toast.error(data.error || "Blad zapisywania ustawien kanalow");
+      }
+    } catch (err) {
+      console.error("Failed to save notification channel settings:", err);
+      toast.error("Blad zapisywania ustawien kanalow");
+    } finally {
+      setSavingChannels(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="container mx-auto p-6">
@@ -221,6 +276,111 @@ export default function NotificationSettingsPage() {
       <div className="flex items-center gap-2 mb-6">
         <Settings className="w-6 h-6 text-primary" />
         <h1 className="text-2xl font-bold">Ustawienia powiadomien</h1>
+      </div>
+
+      {/* Notification Channels Section */}
+      <div
+        className="mb-6 border rounded-lg p-6 bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800"
+        data-testid="notification-channels-settings"
+      >
+        <div className="flex items-center gap-2 mb-4">
+          <Bell className="w-5 h-5 text-blue-600" />
+          <h2 className="text-xl font-semibold text-blue-800 dark:text-blue-300">
+            Kanaly powiadomien
+          </h2>
+        </div>
+        <p className="text-sm text-muted-foreground mb-6">
+          Wybierz jakie kanaly powiadomien maja byc aktywne dla Twojego salonu.
+        </p>
+        <div className="space-y-4">
+          {/* SMS Reminders */}
+          <div className="flex items-center justify-between p-4 bg-white dark:bg-gray-900 rounded-lg border">
+            <div className="flex items-center gap-3">
+              <Smartphone className="w-5 h-5 text-blue-600" />
+              <div>
+                <div className="font-medium">Przypomnienia SMS</div>
+                <div className="text-sm text-muted-foreground">
+                  Wysylaj SMS z przypomnieniem 1h przed wizyta
+                </div>
+              </div>
+            </div>
+            <Switch
+              checked={channelSettings.smsReminders}
+              onCheckedChange={(checked) =>
+                setChannelSettings((prev) => ({ ...prev, smsReminders: checked }))
+              }
+            />
+          </div>
+          {/* Push Reminders */}
+          <div className="flex items-center justify-between p-4 bg-white dark:bg-gray-900 rounded-lg border">
+            <div className="flex items-center gap-3">
+              <Bell className="w-5 h-5 text-blue-600" />
+              <div>
+                <div className="font-medium">Powiadomienia Push</div>
+                <div className="text-sm text-muted-foreground">
+                  Wysylaj push 1h i 24h przed wizyta
+                </div>
+              </div>
+            </div>
+            <Switch
+              checked={channelSettings.pushReminders}
+              onCheckedChange={(checked) =>
+                setChannelSettings((prev) => ({ ...prev, pushReminders: checked }))
+              }
+            />
+          </div>
+          {/* Payment Confirmations */}
+          <div className="flex items-center justify-between p-4 bg-white dark:bg-gray-900 rounded-lg border">
+            <div className="flex items-center gap-3">
+              <CreditCard className="w-5 h-5 text-blue-600" />
+              <div>
+                <div className="font-medium">Potwierdzenia platnosci</div>
+                <div className="text-sm text-muted-foreground">
+                  Wysylaj potwierdzenia po oplaceniu zadatku
+                </div>
+              </div>
+            </div>
+            <Switch
+              checked={channelSettings.paymentConfirmations}
+              onCheckedChange={(checked) =>
+                setChannelSettings((prev) => ({
+                  ...prev,
+                  paymentConfirmations: checked,
+                }))
+              }
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-3 pt-4">
+          <Button
+            onClick={handleSaveChannels}
+            disabled={savingChannels}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+            data-testid="save-channels-settings-btn"
+          >
+            {savingChannels ? (
+              "Zapisywanie..."
+            ) : channelsSavedSuccessfully ? (
+              <>
+                <CheckCircle className="w-4 h-4 mr-1" />
+                Zapisano!
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4 mr-1" />
+                Zapisz ustawienia
+              </>
+            )}
+          </Button>
+          {channelsSavedSuccessfully && (
+            <span
+              className="text-sm text-green-600 font-medium"
+              data-testid="channels-save-success-message"
+            >
+              Ustawienia zostaly zapisane pomyslnie
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Birthday Gift Configuration Section */}
