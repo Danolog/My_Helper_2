@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm test*)",
+      "Bash(pnpm lint)",
+      "Bash(pnpm build)",
+      "Bash(pnpm typecheck)",
+      "Bash(npx playwright test*)",
+      "Bash(git diff*)",
+      "Bash(git status)",
+      "Read(**)",
+      "Write(src/**)",
+      "Write(__tests__/**)",
+      "Write(tests/**)"
+    ],
+    "deny": [
+      "Bash(git push*)",
+      "Bash(pnpm publish*)",
+      "Bash(rm -rf*)"
+    ]
+  }
+}
