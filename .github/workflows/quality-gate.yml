@@ -115,4 +115,5 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm audit --audit-level=high
+      - name: Security audit (unfixable like xlsx excluded)
+        run: pnpm audit --audit-level=high --ignore-unfixable
