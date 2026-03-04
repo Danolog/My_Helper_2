@@ -105,7 +105,7 @@ export function EditAppointmentDialog({
   appointment,
   onAppointmentUpdated,
 }: EditAppointmentDialogProps) {
-  const { salonId, loading: salonLoading } = useSalonId();
+  const { salonId } = useSalonId();
 
   // Form state
   const [selectedClientId, setSelectedClientId] = useState("");

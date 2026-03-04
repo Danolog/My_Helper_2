@@ -63,7 +63,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = await request.json();
+    await request.json();
 
     // Simulate a POST that fails with server error
     console.error("[Test Error API] Simulated POST failure");

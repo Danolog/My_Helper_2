@@ -162,7 +162,7 @@ export async function DELETE(
       return NextResponse.json(
         {
           success: false,
-          error: `Nie mozna usunac kategorii "${category.name}" - zawiera ${productCount[0].count} produktow. Najpierw przenies lub usun produkty.`,
+          error: `Nie mozna usunac kategorii "${category.name}" - zawiera ${productCount[0]!.count} produktow. Najpierw przenies lub usun produkty.`,
         },
         { status: 409 }
       );
@@ -175,7 +175,7 @@ export async function DELETE(
       .returning();
 
     console.log(
-      `[Product Categories API] Deleted category: ${deleted.name} (${deleted.id})`
+      `[Product Categories API] Deleted category: ${deleted!.name} (${deleted!.id})`
     );
 
     return NextResponse.json({

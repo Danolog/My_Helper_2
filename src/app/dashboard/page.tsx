@@ -666,7 +666,7 @@ const STATUS_LABELS: Record<string, string> = {
 export default function DashboardPage() {
   const { data: session, isPending } = useSession();
   const { isProPlan, isTrialing, trialDaysRemaining } = useSubscription();
-  const [salon, setSalon] = useState<UserSalon | null>(null);
+  const [, setSalon] = useState<UserSalon | null>(null);
   const [noSalon, setNoSalon] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);

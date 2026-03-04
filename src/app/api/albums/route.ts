@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { albums, photoAlbums, galleryPhotos } from "@/lib/schema";
-import { eq, desc, and, sql, count } from "drizzle-orm";
+import { albums, photoAlbums } from "@/lib/schema";
+import { eq, desc, sql } from "drizzle-orm";
 
 // GET /api/albums - List albums for a salon
 export async function GET(request: Request) {

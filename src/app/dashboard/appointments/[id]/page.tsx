@@ -515,7 +515,7 @@ export default function AppointmentDetailPage() {
   }, [fetchAppointment, fetchMaterials, fetchProducts, fetchTreatment, fetchCommission, fetchRefundStatus, fetchFiscalReceipt, fetchInvoice]);
 
   // Cross-tab sync: refetch when another tab modifies appointments
-  const { notifyChange: notifyAppointmentsChanged } = useTabSync("appointments", fetchAppointment);
+  useTabSync("appointments", fetchAppointment);
 
   const handleAddMaterial = async () => {
     if (!selectedProductId) {

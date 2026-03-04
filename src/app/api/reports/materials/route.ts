@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointmentMaterials, products, appointments, employees, services } from "@/lib/schema";
-import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
+import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 
 // GET /api/reports/materials - Materials consumption report
 export async function GET(request: Request) {

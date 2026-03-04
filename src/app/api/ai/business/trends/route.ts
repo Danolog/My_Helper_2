@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointments, services, employees, clients, reviews } from "@/lib/schema";
-import { eq, and, gte, lte, sql, count, avg } from "drizzle-orm";
+import { eq, and, gte, lte, sql, count } from "drizzle-orm";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 

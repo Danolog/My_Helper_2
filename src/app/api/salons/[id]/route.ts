@@ -250,12 +250,12 @@ export async function PUT(
       success: true,
       message: "Dane salonu zaktualizowane",
       data: {
-        id: updated.id,
-        name: updated.name,
-        phone: updated.phone,
-        email: updated.email,
-        address: updated.address,
-        industryType: updated.industryType,
+        id: updated!.id,
+        name: updated!.name,
+        phone: updated!.phone,
+        email: updated!.email,
+        address: updated!.address,
+        industryType: updated!.industryType,
       },
     });
   } catch (error) {

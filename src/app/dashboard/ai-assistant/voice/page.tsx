@@ -229,7 +229,7 @@ const DEFAULT_CONFIG: VoiceAiConfig = {
 };
 
 function VoiceAiContent() {
-  const { salonId, loading: salonLoading } = useSalonId();
+  const { salonId } = useSalonId();
   const [config, setConfig] = useState<VoiceAiConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

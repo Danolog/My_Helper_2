@@ -127,7 +127,7 @@ function isUpcoming(startDate: string | null): boolean {
 
 export default function PromotionsPage() {
   const { data: session, isPending } = useSession();
-  const { salonId, loading: salonLoading } = useSalonId();
+  const { salonId } = useSalonId();
 
   const [promotionsList, setPromotionsList] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(true);

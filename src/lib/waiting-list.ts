@@ -370,7 +370,7 @@ export async function acceptEarlierSlot(
         .values({
           salonId: entry.salonId,
           clientId: entry.clientId,
-          employeeId: employeeId || null,
+          employeeId: employeeId as string,
           serviceId: entry.serviceId,
           startTime: offeredStart,
           endTime: offeredEnd,
@@ -387,7 +387,7 @@ export async function acceptEarlierSlot(
       .values({
         salonId: entry.salonId,
         clientId: entry.clientId,
-        employeeId: employeeId || null,
+        employeeId: employeeId as string,
         serviceId: entry.serviceId,
         startTime: offeredStart,
         endTime: offeredEnd,
@@ -421,7 +421,7 @@ export async function acceptEarlierSlot(
     success: true,
     message: "Termin zostal zaakceptowany! Wizyta zostala przeniesiona.",
     appointmentId,
-    oldStartTime,
+    ...(oldStartTime !== undefined ? { oldStartTime } : {}),
     newStartTime: offeredStart,
   };
 }

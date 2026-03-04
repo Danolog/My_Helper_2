@@ -116,7 +116,7 @@ interface PromoCodeValidation {
 
 export default function BookingPage() {
   const { data: session, isPending } = useSession();
-  const { salonId, loading: salonLoading } = useSalonId();
+  const { salonId } = useSalonId();
   const [services, setServices] = useState<Service[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState<string>("");
   const [availableEmployees, setAvailableEmployees] = useState<Employee[]>([]);
