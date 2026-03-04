@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 export interface ExcelSheet {
   name: string;
@@ -10,36 +10,33 @@ export interface ExcelSheet {
  * Creates an Excel workbook buffer from multiple sheets.
  * Each sheet has a name, headers row, and data rows.
  */
-export function createExcelWorkbook(sheets: ExcelSheet[]): Uint8Array {
-  const wb = XLSX.utils.book_new();
+export async function createExcelWorkbook(sheets: ExcelSheet[]): Promise<Uint8Array> {
+  const wb = new ExcelJS.Workbook();
 
   for (const sheet of sheets) {
-    // Create data array with headers first
-    const data: (string | number | null | undefined)[][] = [
-      sheet.headers,
-      ...sheet.rows,
-    ];
+    const ws = wb.addWorksheet(sheet.name.slice(0, 31)); // Sheet name max 31 chars
 
-    const ws = XLSX.utils.aoa_to_sheet(data);
+    // Add headers
+    ws.addRow(sheet.headers);
+
+    // Add data rows
+    for (const row of sheet.rows) {
+      ws.addRow(row);
+    }
 
     // Set column widths based on content
-    const colWidths: number[] = sheet.headers.map((h) => h.length);
-    for (const row of sheet.rows) {
-      for (let i = 0; i < row.length; i++) {
+    ws.columns = sheet.headers.map((h, i) => {
+      let maxLen = h.length;
+      for (const row of sheet.rows) {
         const cellLen = String(row[i] ?? "").length;
-        if (cellLen > (colWidths[i] ?? 0)) {
-          colWidths[i] = cellLen;
-        }
+        if (cellLen > maxLen) maxLen = cellLen;
       }
-    }
-    ws["!cols"] = colWidths.map((w) => ({ wch: Math.min(w + 2, 50) }));
-
-    XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0, 31)); // Sheet name max 31 chars
+      return { width: Math.min(maxLen + 2, 50) };
+    });
   }
 
-  // Write to Uint8Array (compatible with NextResponse body)
-  const buf: Uint8Array = XLSX.write(wb, { type: "array", bookType: "xlsx" });
-  return new Uint8Array(buf);
+  const buffer = await wb.xlsx.writeBuffer();
+  return new Uint8Array(buffer);
 }
 
 /**
