@@ -5,7 +5,7 @@ import { eq, and, desc } from "drizzle-orm";
 
 // GET /api/albums/[id]/photos - Get all photos in an album
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {

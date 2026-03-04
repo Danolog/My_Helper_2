@@ -70,7 +70,7 @@ interface ReportData {
 }
 
 export default function MaterialsReportPage() {
-  const { data: session } = useSession();
+  useSession();
   const { salonId, loading: salonLoading } = useSalonId();
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -235,14 +235,6 @@ export default function MaterialsReportPage() {
       day: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
-    });
-  };
-
-  const formatDateShort = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("pl-PL", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
     });
   };
 

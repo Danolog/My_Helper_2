@@ -18,7 +18,7 @@ interface NetworkStatus {
  */
 async function verifyOffline(): Promise<boolean> {
   try {
-    const res = await fetch("/api/health", {
+    await fetch("/api/health", {
       method: "HEAD",
       cache: "no-store",
       signal: AbortSignal.timeout(3000),

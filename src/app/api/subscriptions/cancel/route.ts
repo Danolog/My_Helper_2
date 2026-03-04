@@ -78,8 +78,8 @@ export async function POST() {
             `[Subscriptions API] Stripe subscription ${activeSub.stripeSubscriptionId} set to cancel at period end`,
             {
               cancel_at_period_end: canceledStripeSub.cancel_at_period_end,
-              current_period_end: canceledStripeSub.current_period_end
-                ? new Date(canceledStripeSub.current_period_end * 1000).toISOString()
+              current_period_end: canceledStripeSub.items.data[0]?.current_period_end
+                ? new Date(canceledStripeSub.items.data[0].current_period_end * 1000).toISOString()
                 : null,
             },
           );

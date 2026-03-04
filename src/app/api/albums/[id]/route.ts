@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { albums, photoAlbums } from "@/lib/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 // GET /api/albums/[id] - Get single album with photo count
 export async function GET(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -99,7 +99,7 @@ export async function PATCH(
 
 // DELETE /api/albums/[id] - Delete album (does NOT delete photos, only the album grouping)
 export async function DELETE(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {

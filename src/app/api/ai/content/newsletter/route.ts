@@ -256,13 +256,13 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
 
     const subjectMatch = fullContent.match(/^TEMAT:\s*(.+)/m);
     if (subjectMatch) {
-      subject = subjectMatch[1].trim();
+      subject = subjectMatch[1]!.trim();
       // Remove TEMAT: line from content
       content = fullContent.replace(/^TEMAT:\s*.+\n?\n?/m, "").trim();
     } else {
       // Fallback: use first line as subject
       const lines = fullContent.split("\n");
-      subject = lines[0].trim();
+      subject = lines[0]!.trim();
       content = lines.slice(1).join("\n").trim();
     }
 
@@ -282,7 +282,7 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
           })
           .returning({ id: newsletters.id });
 
-        savedId = saved.id;
+        savedId = saved!.id;
       } catch (error) {
         console.error("[AI Newsletter] Error saving newsletter:", error);
       }

@@ -102,7 +102,7 @@ function formatPromotionValue(type: string, value: string): string {
 
 export default function PromoCodesPage() {
   const { data: session, isPending } = useSession();
-  const { salonId, loading: salonLoading } = useSalonId();
+  const { salonId } = useSalonId();
 
   const [codesList, setCodesList] = useState<PromoCode[]>([]);
   const [promotionsList, setPromotionsList] = useState<Promotion[]>([]);

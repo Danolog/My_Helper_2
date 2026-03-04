@@ -43,7 +43,7 @@ export async function GET() {
     const formattedLogs = logs.map((log) => {
       let parsed: Record<string, unknown> = {};
       try {
-        parsed = typeof log.transcript === "string" ? JSON.parse(log.transcript) : (log.transcript as Record<string, unknown>) || {};
+        parsed = typeof log.transcript === "string" ? JSON.parse(log.transcript) : (log.transcript as unknown as Record<string, unknown>) || {};
       } catch {
         parsed = {};
       }

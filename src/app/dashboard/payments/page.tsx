@@ -144,7 +144,7 @@ function formatDateShort(dateStr: string) {
 }
 
 export default function PaymentsPage() {
-  const { salonId, loading: salonLoading } = useSalonId();
+  const { salonId } = useSalonId();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState<PaymentSummary | null>(null);
   const [pagination, setPagination] = useState<PaginationInfo | null>(null);

@@ -92,7 +92,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[Product Categories API] Created category: ${newCategory.name} (${newCategory.id})`);
+    console.log(`[Product Categories API] Created category: ${newCategory!.name} (${newCategory!.id})`);
 
     return NextResponse.json({
       success: true,

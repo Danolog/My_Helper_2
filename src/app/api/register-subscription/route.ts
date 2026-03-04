@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
           ownerId: registeredUser.id,
         })
         .returning();
-      salonId = newSalon.id;
+      salonId = newSalon!.id;
     }
 
     // Check for existing subscription
@@ -126,11 +126,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: {
-        subscriptionId: subscription.id,
+        subscriptionId: subscription!.id,
         planName: plan.name,
         planSlug: plan.slug,
-        status: subscription.status,
-        trialEndsAt: subscription.trialEndsAt,
+        status: subscription!.status,
+        trialEndsAt: subscription!.trialEndsAt,
       },
     });
   } catch (error) {

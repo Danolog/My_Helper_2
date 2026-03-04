@@ -10,7 +10,7 @@ import {
   products,
   reviews,
 } from "@/lib/schema";
-import { eq, and, gte, lte, sql, count, desc, asc } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, asc } from "drizzle-orm";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 
@@ -85,7 +85,7 @@ export async function GET(_request: Request) {
       "Sobota",
     ];
     const tomorrowDayOfWeek = tomorrowStart.getDay(); // 0=Sunday
-    const tomorrowDayName = dayNames[tomorrowDayOfWeek];
+    const tomorrowDayName = dayNames[tomorrowDayOfWeek]!;
 
     // Gather all data in parallel
     const [
@@ -392,8 +392,8 @@ export async function GET(_request: Request) {
         );
         for (let i = 0; i < sortedApts.length - 1; i++) {
           const gapMs =
-            sortedApts[i + 1].startTime.getTime() -
-            sortedApts[i].endTime.getTime();
+            sortedApts[i + 1]!.startTime.getTime() -
+            sortedApts[i]!.endTime.getTime();
           const gapMin = gapMs / 60000;
           if (gapMin >= 60) {
             totalGapMinutes += gapMin;
