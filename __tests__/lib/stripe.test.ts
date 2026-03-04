@@ -206,7 +206,7 @@ describe("stripe module", () => {
       const stripe = getStripe();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (stripe as any).accounts.retrieve.mockRejectedValue(
-        new Stripe.errors.StripeAuthenticationError("bad key")
+        new Stripe.errors.StripeAuthenticationError({ message: "bad key", type: "authentication_error" })
       );
 
       const status = await testStripeConnection();
@@ -222,7 +222,7 @@ describe("stripe module", () => {
       const stripe = getStripe();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (stripe as any).accounts.retrieve.mockRejectedValue(
-        new Stripe.errors.StripeConnectionError("network down")
+        new Stripe.errors.StripeConnectionError({ message: "network down", type: "api_error" })
       );
 
       const status = await testStripeConnection();
@@ -238,7 +238,7 @@ describe("stripe module", () => {
       const stripe = getStripe();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (stripe as any).accounts.retrieve.mockRejectedValue(
-        new Stripe.errors.StripePermissionError("restricted key")
+        new Stripe.errors.StripePermissionError({ message: "restricted key", type: "api_error" })
       );
 
       const status = await testStripeConnection();

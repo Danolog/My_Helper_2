@@ -159,7 +159,7 @@ describe("isAdminRoute", () => {
 
 // ─── Async Server Function Tests ─────────────────────────────────────────────
 
-const mockGetSession = auth.api.getSession as ReturnType<typeof vi.fn>;
+const mockGetSession = auth.api.getSession as unknown as ReturnType<typeof vi.fn>;
 const mockRedirect = redirect as unknown as ReturnType<typeof vi.fn>;
 const mockCookies = cookies as unknown as ReturnType<typeof vi.fn>;
 

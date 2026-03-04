@@ -120,7 +120,7 @@ describe("fetchWithRetry", () => {
       });
 
       expect(fetch).toHaveBeenCalledTimes(1);
-      const callArgs = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      const callArgs = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
       expect(callArgs[0]).toBe(TEST_URL);
       expect(callArgs[1]).toMatchObject({
         method: "POST",
@@ -128,7 +128,7 @@ describe("fetchWithRetry", () => {
         body: JSON.stringify({ key: "value" }),
       });
       // Should also include an AbortController signal
-      expect(callArgs[1].signal).toBeInstanceOf(AbortSignal);
+      expect((callArgs[1] as RequestInit).signal).toBeInstanceOf(AbortSignal);
     });
   });
 
