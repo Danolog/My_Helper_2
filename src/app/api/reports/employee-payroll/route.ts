@@ -342,7 +342,7 @@ export async function GET(request: Request) {
         },
       ];
 
-      const buf = createExcelWorkbook(sheets);
+      const buf = await createExcelWorkbook(sheets);
       const filename = `raport-wynagrodzen-${dateFrom || "all"}-${dateTo || "all"}.xlsx`;
       return new Response(Buffer.from(buf), {
         status: 200,
