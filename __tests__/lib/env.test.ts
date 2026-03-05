@@ -94,6 +94,12 @@ describe("getClientEnv", () => {
     const env = getClientEnv();
     expect(env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY).toBe("pk_test_123");
   });
+
+  it("should throw when NEXT_PUBLIC_APP_URL is not a valid URL", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "not-a-url";
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(() => getClientEnv()).toThrow("Invalid client environment variables");
+  });
 });
 
 describe("checkEnv", () => {
@@ -157,5 +163,46 @@ describe("checkEnv", () => {
         typeof call[0] === "string" && call[0].includes("Environment warnings")
     );
     expect(envWarningCalls.length).toBe(0);
+  });
+
+  it("should not log warnings when all optional vars are set in development", () => {
+    process.env.POSTGRES_URL = "postgresql://localhost:5432/test";
+    process.env.BETTER_AUTH_SECRET = "a".repeat(32);
+    (process.env as Record<string, string>).NODE_ENV = "development";
+    process.env.GOOGLE_CLIENT_ID = "google-id";
+    process.env.GOOGLE_CLIENT_SECRET = "google-secret";
+    process.env.OPENROUTER_API_KEY = "openrouter-key";
+    process.env.BLOB_READ_WRITE_TOKEN = "blob-token";
+    process.env.STRIPE_SECRET_KEY = "stripe-key";
+
+    checkEnv();
+
+    const warnCalls = (console.warn as ReturnType<typeof vi.fn>).mock.calls;
+    const envWarningCalls = warnCalls.filter(
+      (call: unknown[]) =>
+        typeof call[0] === "string" && call[0].includes("Environment warnings")
+    );
+    expect(envWarningCalls.length).toBe(0);
+  });
+
+  it("should warn about Google OAuth when only GOOGLE_CLIENT_ID is set", () => {
+    process.env.POSTGRES_URL = "postgresql://localhost:5432/test";
+    process.env.BETTER_AUTH_SECRET = "a".repeat(32);
+    (process.env as Record<string, string>).NODE_ENV = "development";
+    process.env.GOOGLE_CLIENT_ID = "google-id";
+    delete process.env.GOOGLE_CLIENT_SECRET;
+    // Set other optional vars to isolate the Google OAuth warning
+    process.env.OPENROUTER_API_KEY = "openrouter-key";
+    process.env.BLOB_READ_WRITE_TOKEN = "blob-token";
+    process.env.STRIPE_SECRET_KEY = "stripe-key";
+
+    checkEnv();
+
+    const warnCalls = (console.warn as ReturnType<typeof vi.fn>).mock.calls;
+    const googleWarningCalls = warnCalls.filter(
+      (call: unknown[]) =>
+        typeof call[0] === "string" && call[0].includes("Google OAuth")
+    );
+    expect(googleWarningCalls.length).toBeGreaterThan(0);
   });
 });

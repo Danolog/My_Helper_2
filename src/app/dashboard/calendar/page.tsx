@@ -271,37 +271,38 @@ export default function CalendarPage() {
   };
 
   // Drag handlers
-  const handleDragStart = (event: CalendarEvent) => {
+  const handleDragStart = useCallback((event: CalendarEvent) => {
     setDraggedEvent(event);
-  };
+  }, []);
 
-  const handleDragEnd = () => {
+  const handleDragEnd = useCallback(() => {
     // Only clear if not opening dialog
     if (!rescheduleDialogOpen) {
       setDraggedEvent(null);
     }
-  };
+  }, [rescheduleDialogOpen]);
 
-  const handleDrop = (employeeId: string, time: Date) => {
-    if (!draggedEvent) return;
-
-    // Open confirmation dialog
-    setPendingReschedule({
-      event: draggedEvent,
-      newStartTime: time,
-      newEmployeeId: employeeId,
+  const handleDrop = useCallback((employeeId: string, time: Date) => {
+    setDraggedEvent((current) => {
+      if (!current) return current;
+      setPendingReschedule({
+        event: current,
+        newStartTime: time,
+        newEmployeeId: employeeId,
+      });
+      setRescheduleDialogOpen(true);
+      return current;
     });
-    setRescheduleDialogOpen(true);
-  };
+  }, []);
 
   // Handle opening cancel dialog
-  const handleCancelAppointment = (appointmentId: string) => {
+  const handleCancelAppointment = useCallback((appointmentId: string) => {
     setCancelAppointmentId(appointmentId);
     setCancelDialogOpen(true);
-  };
+  }, []);
 
   // Handle opening complete dialog
-  const handleCompleteAppointment = async (event: CalendarEvent) => {
+  const handleCompleteAppointment = useCallback(async (event: CalendarEvent) => {
     setCompleteAppointment(event.appointment);
     // Fetch materials for this appointment
     try {
@@ -323,10 +324,19 @@ export default function CalendarPage() {
       setCompleteMaterials([]);
     }
     setCompleteDialogOpen(true);
-  };
+  }, []);
+
+  // Stable callbacks for event cancel/complete (wrapping event -> appointmentId)
+  const handleEventCancel = useCallback((event: CalendarEvent) => {
+    handleCancelAppointment(event.id);
+  }, [handleCancelAppointment]);
+
+  const handleEventComplete = useCallback((event: CalendarEvent) => {
+    handleCompleteAppointment(event);
+  }, [handleCompleteAppointment]);
 
   // Event click handler - shows details with action buttons
-  const handleEventClick = (event: CalendarEvent) => {
+  const handleEventClick = useCallback((event: CalendarEvent) => {
     const statusLabels: Record<string, string> = {
       scheduled: "Zaplanowana",
       confirmed: "Potwierdzona",
@@ -396,7 +406,7 @@ export default function CalendarPage() {
         },
       });
     }
-  };
+  }, [handleCompleteAppointment]);
 
   // Confirm reschedule
   const handleConfirmReschedule = async (notifyClient: boolean) => {
@@ -642,8 +652,8 @@ export default function CalendarPage() {
           onDragEnd={handleDragEnd}
           onDrop={handleDrop}
           onEventClick={handleEventClick}
-          onEventCancel={(event) => handleCancelAppointment(event.id)}
-          onEventComplete={(event) => handleCompleteAppointment(event)}
+          onEventCancel={handleEventCancel}
+          onEventComplete={handleEventComplete}
           draggedEvent={draggedEvent}
           colorMode={colorMode}
         />
@@ -655,8 +665,8 @@ export default function CalendarPage() {
           workSchedules={workSchedules}
           timeBlocks={filteredTimeBlocks}
           onEventClick={handleEventClick}
-          onEventCancel={(event) => handleCancelAppointment(event.id)}
-          onEventComplete={(event) => handleCompleteAppointment(event)}
+          onEventCancel={handleEventCancel}
+          onEventComplete={handleEventComplete}
           onDayClick={(date) => { setCurrentDate(date); setCurrentView("day"); }}
           colorMode={colorMode}
         />

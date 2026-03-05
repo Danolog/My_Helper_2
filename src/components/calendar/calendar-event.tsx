@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { useDraggable } from "@/hooks/use-draggable";
 import type { CalendarEvent } from "@/types/calendar";
 
@@ -52,7 +53,7 @@ const STATUS_LABELS = {
   no_show: "Niestawienie sie",
 };
 
-export function CalendarEventComponent({
+export const CalendarEventComponent = memo(function CalendarEventComponent({
   event,
   onDragStart,
   onDragEnd,
@@ -178,7 +179,19 @@ export function CalendarEventComponent({
       )}
     </div>
   );
-}
+}, (prev, next) => {
+  return (
+    prev.event.id === next.event.id &&
+    prev.event.appointment.status === next.event.appointment.status &&
+    prev.event.employeeColor === next.event.employeeColor &&
+    prev.colorMode === next.colorMode &&
+    prev.onDragStart === next.onDragStart &&
+    prev.onDragEnd === next.onDragEnd &&
+    prev.onClick === next.onClick &&
+    prev.onCancel === next.onCancel &&
+    prev.onComplete === next.onComplete
+  );
+});
 
 // Export status colors for legend component
 export { STATUS_COLORS, STATUS_LABELS };

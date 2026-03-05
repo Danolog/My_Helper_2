@@ -368,6 +368,25 @@ describe("GET /api/clients/[id]", () => {
     expect(body.success).toBe(false);
     expect(body.error).toContain("not found");
   });
+
+  it("should return 500 when database throws", async () => {
+    const errorChain: Record<string, unknown> = {};
+    const methods = ["select", "from", "where", "limit"];
+    for (const m of methods) {
+      (errorChain as Record<string, ReturnType<typeof vi.fn>>)[m] = vi.fn().mockReturnValue(errorChain);
+    }
+    errorChain.then = (_: unknown, reject: (err: Error) => void) => reject(new Error("DB error"));
+    mockDbSelect.mockReturnValue(errorChain);
+
+    const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`);
+    const params = createRouteParams(TEST_IDS.CLIENT_UUID);
+    const response = await getClient(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(500);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Failed to fetch client");
+  });
 });
 
 describe("PUT /api/clients/[id]", () => {
@@ -418,6 +437,80 @@ describe("PUT /api/clients/[id]", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
+  });
+
+  it("should return 200 when updating with all fields", async () => {
+    const employeeUuid = TEST_IDS.EMPLOYEE_UUID;
+    const updated = makeClient({
+      firstName: "Janina",
+      lastName: "Nowak",
+      phone: "+48999888777",
+      email: "janina@example.com",
+      notes: "VIP client",
+      preferences: "Morning appointments",
+      allergies: "Latex",
+      favoriteEmployeeId: employeeUuid,
+      requireDeposit: true,
+      depositType: "fixed",
+      depositValue: "50.00",
+    });
+    mockDbUpdate.mockReturnValue(chainMock([updated]));
+
+    const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`, {
+      method: "PUT",
+      body: {
+        firstName: "Janina",
+        lastName: "Nowak",
+        phone: "+48999888777",
+        email: "janina@example.com",
+        notes: "VIP client",
+        preferences: "Morning appointments",
+        allergies: "Latex",
+        favoriteEmployeeId: employeeUuid,
+        requireDeposit: true,
+        depositType: "fixed",
+        depositValue: "50.00",
+      },
+    });
+    const params = createRouteParams(TEST_IDS.CLIENT_UUID);
+    const response = await updateClient(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect((body as any).data.firstName).toBe("Janina");
+    expect((body as any).data.lastName).toBe("Nowak");
+    expect((body as any).data.phone).toBe("+48999888777");
+    expect((body as any).data.email).toBe("janina@example.com");
+    expect((body as any).data.notes).toBe("VIP client");
+    expect((body as any).data.preferences).toBe("Morning appointments");
+    expect((body as any).data.allergies).toBe("Latex");
+    expect((body as any).data.favoriteEmployeeId).toBe(employeeUuid);
+    expect((body as any).data.requireDeposit).toBe(true);
+    expect((body as any).data.depositType).toBe("fixed");
+    expect((body as any).data.depositValue).toBe("50.00");
+  });
+
+  it("should return 500 when database throws on update", async () => {
+    const errorChain: Record<string, unknown> = {};
+    const methods = ["update", "set", "where", "returning"];
+    for (const m of methods) {
+      (errorChain as Record<string, ReturnType<typeof vi.fn>>)[m] = vi.fn().mockReturnValue(errorChain);
+    }
+    errorChain.then = (_: unknown, reject: (err: Error) => void) => reject(new Error("DB update error"));
+    mockDbUpdate.mockReturnValue(errorChain);
+
+    const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`, {
+      method: "PUT",
+      body: { firstName: "X" },
+    });
+    const params = createRouteParams(TEST_IDS.CLIENT_UUID);
+    const response = await updateClient(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(500);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Failed to update client");
   });
 });
 
@@ -554,5 +647,55 @@ describe("DELETE /api/clients/[id]", () => {
     expect(status).toBe(404);
     expect(body.success).toBe(false);
     expect(body.error).toContain("not found");
+  });
+
+  it("should return 400 when request body is malformed (json parse fails)", async () => {
+    mockGetSession.mockResolvedValue({
+      user: { id: "user-1", email: "owner@test.com" },
+    });
+
+    // Create a request with invalid JSON body so request.json() throws.
+    // The handler catches this and falls through with body = {}, so password
+    // is undefined and it returns 400 "Haslo jest wymagane".
+    const request = new Request(
+      `http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`,
+      {
+        method: "DELETE",
+        body: "this is not valid json",
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+    const params = createRouteParams(TEST_IDS.CLIENT_UUID);
+    const response = await deleteClient(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Haslo");
+  });
+
+  it("should return 400 when account has no password hash (OAuth-only)", async () => {
+    mockGetSession.mockResolvedValue({
+      user: { id: "user-1", email: "owner@test.com" },
+    });
+
+    // Account found but password is null (OAuth-only account, no credential password)
+    mockDbSelect.mockReturnValue(chainMock([{
+      userId: "user-1",
+      providerId: "credential",
+      password: null,
+    }]));
+
+    const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`, {
+      method: "DELETE",
+      body: { password: "some-password" },
+    });
+    const params = createRouteParams(TEST_IDS.CLIENT_UUID);
+    const response = await deleteClient(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Nie mozna zweryfikowac hasla");
   });
 });
