@@ -20,6 +20,7 @@ const NEW_EMPLOYEE = {
 async function loginAsOwner(page: Page) {
   await page.goto('/login');
   await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
   await page.fill('#email', OWNER_CREDENTIALS.email);
   await page.fill('#password', OWNER_CREDENTIALS.password);
   await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
