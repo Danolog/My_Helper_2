@@ -11,6 +11,7 @@ const OWNER_CREDENTIALS = {
 
 async function loginAsOwner(page: Page) {
   await page.goto('/login');
+  await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
   await page.fill('#email', OWNER_CREDENTIALS.email);
   await page.fill('#password', OWNER_CREDENTIALS.password);
   await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
