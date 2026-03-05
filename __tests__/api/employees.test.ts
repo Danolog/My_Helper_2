@@ -140,6 +140,22 @@ describe("GET /api/employees", () => {
     expect(body.success).toBe(false);
     expect(body.error).toContain("Failed to fetch employees");
   });
+
+  it("should filter by activeOnly=true without salonId", async () => {
+    const employee = makeEmployee({ isActive: true });
+    mockDbSelect.mockReturnValue(chainMock([employee]));
+
+    const request = createMockRequest(
+      "http://localhost:3000/api/employees?activeOnly=true"
+    );
+    const response = await listEmployees(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveLength(1);
+    expect((body as any).data[0].isActive).toBe(true);
+  });
 });
 
 describe("POST /api/employees", () => {
@@ -274,5 +290,69 @@ describe("POST /api/employees", () => {
 
     expect(status).toBe(201);
     expect(body.success).toBe(true);
+  });
+
+  it("should cycle colors when all 12 are exhausted", async () => {
+    // All 12 EMPLOYEE_COLORS are already in use by existing employees
+    const allColors = [
+      "#3b82f6", "#10b981", "#f59e0b", "#ef4444",
+      "#8b5cf6", "#ec4899", "#06b6d4", "#f97316",
+      "#84cc16", "#6366f1", "#14b8a6", "#a855f7",
+    ];
+    const existingEmployees = allColors.map((color) => ({ color }));
+
+    // getNextAvailableColor queries existing employees -- returns all 12 colors used
+    mockDbSelect.mockReturnValueOnce(chainMock(existingEmployees));
+
+    // The cycling logic: index = 12 % 12 = 0, so it picks EMPLOYEE_COLORS[0] = "#3b82f6"
+    const newEmployee = makeEmployee({ color: "#3b82f6" });
+    mockDbInsert.mockReturnValue(chainMock([newEmployee]));
+
+    const request = createMockRequest("http://localhost:3000/api/employees", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        firstName: "Beata",
+        lastName: "Zielinska",
+      },
+    });
+
+    const response = await createEmployee(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(201);
+    expect(body.success).toBe(true);
+    expect((body as any).data.color).toBe("#3b82f6");
+  });
+
+  it("should fall back to default color when getNextAvailableColor throws", async () => {
+    // Make the color lookup query reject so getNextAvailableColor's catch fires
+    const errorChain: Record<string, unknown> = {};
+    const methods = ["select", "from", "where"];
+    for (const m of methods) {
+      (errorChain as Record<string, ReturnType<typeof vi.fn>>)[m] = vi.fn().mockReturnValue(errorChain);
+    }
+    errorChain.then = (_: unknown, reject: (err: Error) => void) => reject(new Error("Color query failed"));
+    mockDbSelect.mockReturnValueOnce(errorChain);
+
+    // The catch block returns EMPLOYEE_COLORS[0] = "#3b82f6"
+    const newEmployee = makeEmployee({ color: "#3b82f6" });
+    mockDbInsert.mockReturnValue(chainMock([newEmployee]));
+
+    const request = createMockRequest("http://localhost:3000/api/employees", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        firstName: "Celina",
+        lastName: "Kowalczyk",
+      },
+    });
+
+    const response = await createEmployee(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(201);
+    expect(body.success).toBe(true);
+    expect((body as any).data.color).toBe("#3b82f6");
   });
 });

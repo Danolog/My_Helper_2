@@ -274,6 +274,25 @@ describe("GET /api/services/[id]", () => {
     expect(body.success).toBe(false);
     expect(body.error).toContain("not found");
   });
+
+  it("should return 500 when database throws", async () => {
+    const errorChain: Record<string, unknown> = {};
+    const methods = ["select", "from", "where", "leftJoin"];
+    for (const m of methods) {
+      (errorChain as Record<string, ReturnType<typeof vi.fn>>)[m] = vi.fn().mockReturnValue(errorChain);
+    }
+    errorChain.then = (_: unknown, reject: (err: Error) => void) => reject(new Error("DB error"));
+    mockDbSelect.mockReturnValue(errorChain);
+
+    const request = createMockRequest(`http://localhost:3000/api/services/${TEST_IDS.SERVICE_UUID}`);
+    const params = createRouteParams(TEST_IDS.SERVICE_UUID);
+    const response = await getService(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(500);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Failed to fetch service");
+  });
 });
 
 describe("PUT /api/services/[id]", () => {
@@ -325,6 +344,70 @@ describe("PUT /api/services/[id]", () => {
     expect(status).toBe(404);
     expect(body.success).toBe(false);
   });
+
+  it("should return 200 when updating with all fields", async () => {
+    const categoryUuid = "77777777-7777-7777-7777-777777777777";
+    const updated = makeService({
+      name: "Full Update",
+      description: "A full description",
+      basePrice: "200.00",
+      baseDuration: 90,
+      isActive: false,
+      categoryId: categoryUuid,
+      depositRequired: true,
+      depositPercentage: 30,
+    });
+    mockDbUpdate.mockReturnValue(chainMock([updated]));
+
+    const request = createMockRequest(`http://localhost:3000/api/services/${TEST_IDS.SERVICE_UUID}`, {
+      method: "PUT",
+      body: {
+        name: "Full Update",
+        description: "A full description",
+        basePrice: 200,
+        baseDuration: "90",
+        isActive: false,
+        categoryId: categoryUuid,
+        depositRequired: true,
+        depositPercentage: "30",
+      },
+    });
+    const params = createRouteParams(TEST_IDS.SERVICE_UUID);
+    const response = await updateService(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect((body as any).data.name).toBe("Full Update");
+    expect((body as any).data.description).toBe("A full description");
+    expect((body as any).data.baseDuration).toBe(90);
+    expect((body as any).data.isActive).toBe(false);
+    expect((body as any).data.categoryId).toBe(categoryUuid);
+    expect((body as any).data.depositRequired).toBe(true);
+    expect((body as any).data.depositPercentage).toBe(30);
+  });
+
+  it("should return 500 when database throws on update", async () => {
+    const errorChain: Record<string, unknown> = {};
+    const methods = ["update", "set", "where", "returning"];
+    for (const m of methods) {
+      (errorChain as Record<string, ReturnType<typeof vi.fn>>)[m] = vi.fn().mockReturnValue(errorChain);
+    }
+    errorChain.then = (_: unknown, reject: (err: Error) => void) => reject(new Error("DB update error"));
+    mockDbUpdate.mockReturnValue(errorChain);
+
+    const request = createMockRequest(`http://localhost:3000/api/services/${TEST_IDS.SERVICE_UUID}`, {
+      method: "PUT",
+      body: { name: "X" },
+    });
+    const params = createRouteParams(TEST_IDS.SERVICE_UUID);
+    const response = await updateService(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(500);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Failed to update service");
+  });
 });
 
 describe("DELETE /api/services/[id]", () => {
@@ -366,5 +449,24 @@ describe("DELETE /api/services/[id]", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
+  });
+
+  it("should return 500 when database throws on delete", async () => {
+    const errorChain: Record<string, unknown> = {};
+    const methods = ["delete", "where", "returning"];
+    for (const m of methods) {
+      (errorChain as Record<string, ReturnType<typeof vi.fn>>)[m] = vi.fn().mockReturnValue(errorChain);
+    }
+    errorChain.then = (_: unknown, reject: (err: Error) => void) => reject(new Error("DB delete error"));
+    mockDbDelete.mockReturnValue(errorChain);
+
+    const request = createMockRequest(`http://localhost:3000/api/services/${TEST_IDS.SERVICE_UUID}`);
+    const params = createRouteParams(TEST_IDS.SERVICE_UUID);
+    const response = await deleteService(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(500);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Failed to delete service");
   });
 });

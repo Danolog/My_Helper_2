@@ -29,6 +29,13 @@
       "when": 1772391111055,
       "tag": "0003_eminent_doctor_octopus",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1772742009776,
+      "tag": "0004_add_composite_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -257,6 +257,12 @@ export const appointments = pgTable(
     index("appointments_employee_id_idx").on(table.employeeId),
     index("appointments_start_time_idx").on(table.startTime),
     index("appointments_status_idx").on(table.status),
+    // Composite indexes for performance (CIDX-01, CIDX-02 from PERFORMANCE_REPORT.md)
+    index("appointments_salon_status_start_idx").on(table.salonId, table.status, table.startTime),
+    index("appointments_employee_status_start_idx").on(table.employeeId, table.status, table.startTime),
+    // FK indexes (IDX-01, IDX-02 from PERFORMANCE_REPORT.md)
+    index("appointments_booked_by_user_id_idx").on(table.bookedByUserId),
+    index("appointments_service_id_idx").on(table.serviceId),
   ]
 );
 

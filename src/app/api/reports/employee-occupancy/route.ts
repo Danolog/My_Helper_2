@@ -7,7 +7,7 @@ import {
   services,
   timeBlocks,
 } from "@/lib/schema";
-import { eq, and, gte, lte, ne } from "drizzle-orm";
+import { eq, and, gte, lte, ne, inArray } from "drizzle-orm";
 
 /**
  * Parses a time string like "09:00" into total minutes since midnight.
@@ -89,51 +89,74 @@ export async function GET(request: Request) {
       });
     }
 
-    // 2. Get work schedules for all employees
+    const employeeIds = activeEmployees.map((e) => e.id);
+
+    // 2. Batch: Get work schedules for ALL employees (1 query instead of N)
+    const allSchedules = await db
+      .select({
+        employeeId: workSchedules.employeeId,
+        dayOfWeek: workSchedules.dayOfWeek,
+        startTime: workSchedules.startTime,
+        endTime: workSchedules.endTime,
+      })
+      .from(workSchedules)
+      .where(inArray(workSchedules.employeeId, employeeIds));
+
     const schedulesByEmployee: Record<
       string,
       { dayOfWeek: number; startTime: string; endTime: string }[]
     > = {};
-
-    for (const emp of activeEmployees) {
-      const empSchedules = await db
-        .select({
-          dayOfWeek: workSchedules.dayOfWeek,
-          startTime: workSchedules.startTime,
-          endTime: workSchedules.endTime,
-        })
-        .from(workSchedules)
-        .where(eq(workSchedules.employeeId, emp.id));
-
-      schedulesByEmployee[emp.id] = empSchedules;
+    for (const s of allSchedules) {
+      (schedulesByEmployee[s.employeeId] ??= []).push(s);
     }
 
-    // 3. Get time blocks (vacations, breaks) for all employees in date range
+    // 3. Batch: Get time blocks for ALL employees in date range (1 query instead of N)
+    const allBlocks = await db
+      .select({
+        employeeId: timeBlocks.employeeId,
+        startTime: timeBlocks.startTime,
+        endTime: timeBlocks.endTime,
+        blockType: timeBlocks.blockType,
+      })
+      .from(timeBlocks)
+      .where(
+        and(
+          inArray(timeBlocks.employeeId, employeeIds),
+          lte(timeBlocks.startTime, endDate),
+          gte(timeBlocks.endTime, startDate)
+        )
+      );
+
     const blocksByEmployee: Record<
       string,
       { startTime: Date; endTime: Date; blockType: string }[]
     > = {};
-
-    for (const emp of activeEmployees) {
-      const empBlocks = await db
-        .select({
-          startTime: timeBlocks.startTime,
-          endTime: timeBlocks.endTime,
-          blockType: timeBlocks.blockType,
-        })
-        .from(timeBlocks)
-        .where(
-          and(
-            eq(timeBlocks.employeeId, emp.id),
-            lte(timeBlocks.startTime, endDate),
-            gte(timeBlocks.endTime, startDate)
-          )
-        );
-
-      blocksByEmployee[emp.id] = empBlocks;
+    for (const b of allBlocks) {
+      (blocksByEmployee[b.employeeId] ??= []).push(b);
     }
 
-    // 4. Get all non-cancelled appointments in the date range
+    // 4. Batch: Get all non-cancelled appointments in the date range (1 query instead of N)
+    const allAppointments = await db
+      .select({
+        employeeId: appointments.employeeId,
+        startTime: appointments.startTime,
+        endTime: appointments.endTime,
+        status: appointments.status,
+        basePrice: services.basePrice,
+        discountAmount: appointments.discountAmount,
+      })
+      .from(appointments)
+      .leftJoin(services, eq(appointments.serviceId, services.id))
+      .where(
+        and(
+          eq(appointments.salonId, salonId),
+          inArray(appointments.employeeId, employeeIds),
+          ne(appointments.status, "cancelled"),
+          gte(appointments.startTime, startDate),
+          lte(appointments.startTime, endDate)
+        )
+      );
+
     const appointmentsByEmployee: Record<
       string,
       {
@@ -144,29 +167,8 @@ export async function GET(request: Request) {
         discountAmount: string | null;
       }[]
     > = {};
-
-    for (const emp of activeEmployees) {
-      const empAppointments = await db
-        .select({
-          startTime: appointments.startTime,
-          endTime: appointments.endTime,
-          status: appointments.status,
-          basePrice: services.basePrice,
-          discountAmount: appointments.discountAmount,
-        })
-        .from(appointments)
-        .leftJoin(services, eq(appointments.serviceId, services.id))
-        .where(
-          and(
-            eq(appointments.salonId, salonId),
-            eq(appointments.employeeId, emp.id),
-            ne(appointments.status, "cancelled"),
-            gte(appointments.startTime, startDate),
-            lte(appointments.startTime, endDate)
-          )
-        );
-
-      appointmentsByEmployee[emp.id] = empAppointments;
+    for (const a of allAppointments) {
+      (appointmentsByEmployee[a.employeeId] ??= []).push(a);
     }
 
     // 5. Calculate metrics for each employee

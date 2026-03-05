@@ -6,7 +6,7 @@ import {
   reviews,
   services,
 } from "@/lib/schema";
-import { eq, and, gte, lte } from "drizzle-orm";
+import { eq, and, gte, lte, inArray } from "drizzle-orm";
 
 // GET /api/reports/employee-popularity - Employee popularity ranking report
 export async function GET(request: Request) {
@@ -68,7 +68,63 @@ export async function GET(request: Request) {
       });
     }
 
-    // 2. Get all non-cancelled appointments in the date range per employee
+    const employeeIds = activeEmployees.map((e) => e.id);
+
+    // 2. Batch: Get ALL appointments for all employees in date range (1 query instead of N)
+    const allAppointments = await db
+      .select({
+        employeeId: appointments.employeeId,
+        id: appointments.id,
+        clientId: appointments.clientId,
+        status: appointments.status,
+        serviceId: appointments.serviceId,
+        serviceName: services.name,
+        basePrice: services.basePrice,
+        discountAmount: appointments.discountAmount,
+      })
+      .from(appointments)
+      .leftJoin(services, eq(appointments.serviceId, services.id))
+      .where(
+        and(
+          eq(appointments.salonId, salonId),
+          inArray(appointments.employeeId, employeeIds),
+          gte(appointments.startTime, startDate),
+          lte(appointments.startTime, endDate)
+        )
+      );
+
+    // Group appointments by employee
+    const appointmentsByEmployee: Record<string, typeof allAppointments> = {};
+    for (const a of allAppointments) {
+      (appointmentsByEmployee[a.employeeId] ??= []).push(a);
+    }
+
+    // 3. Batch: Get ALL approved reviews for all employees in date range (1 query instead of N)
+    const allReviews = await db
+      .select({
+        employeeId: reviews.employeeId,
+        rating: reviews.rating,
+      })
+      .from(reviews)
+      .where(
+        and(
+          eq(reviews.salonId, salonId),
+          inArray(reviews.employeeId, employeeIds),
+          eq(reviews.status, "approved"),
+          gte(reviews.createdAt, startDate),
+          lte(reviews.createdAt, endDate)
+        )
+      );
+
+    // Group reviews by employee
+    const reviewsByEmployee: Record<string, typeof allReviews> = {};
+    for (const r of allReviews) {
+      if (r.employeeId) {
+        (reviewsByEmployee[r.employeeId] ??= []).push(r);
+      }
+    }
+
+    // 4. Calculate metrics per employee (in-memory, no more DB calls)
     const employeeMetrics: {
       employeeId: string;
       employeeName: string;
@@ -87,27 +143,7 @@ export async function GET(request: Request) {
     }[] = [];
 
     for (const emp of activeEmployees) {
-      // Get all appointments for this employee in the date range
-      const empAppointments = await db
-        .select({
-          id: appointments.id,
-          clientId: appointments.clientId,
-          status: appointments.status,
-          serviceId: appointments.serviceId,
-          serviceName: services.name,
-          basePrice: services.basePrice,
-          discountAmount: appointments.discountAmount,
-        })
-        .from(appointments)
-        .leftJoin(services, eq(appointments.serviceId, services.id))
-        .where(
-          and(
-            eq(appointments.salonId, salonId),
-            eq(appointments.employeeId, emp.id),
-            gte(appointments.startTime, startDate),
-            lte(appointments.startTime, endDate)
-          )
-        );
+      const empAppointments = appointmentsByEmployee[emp.id] || [];
 
       // Count by status
       const totalBookings = empAppointments.filter(
@@ -169,22 +205,8 @@ export async function GET(request: Request) {
         .sort((a, b) => b.count - a.count)
         .slice(0, 3);
 
-      // Get reviews for this employee (approved reviews in date range)
-      const empReviews = await db
-        .select({
-          rating: reviews.rating,
-        })
-        .from(reviews)
-        .where(
-          and(
-            eq(reviews.salonId, salonId),
-            eq(reviews.employeeId, emp.id),
-            eq(reviews.status, "approved"),
-            gte(reviews.createdAt, startDate),
-            lte(reviews.createdAt, endDate)
-          )
-        );
-
+      // Reviews — from pre-fetched batch data
+      const empReviews = reviewsByEmployee[emp.id] || [];
       const ratingsWithValue = empReviews.filter(
         (r) => r.rating !== null && r.rating !== undefined
       );

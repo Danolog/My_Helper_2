@@ -139,6 +139,38 @@ describe("createServiceSchema", () => {
     });
     expect(result).toBeNull();
   });
+
+  it("should fail when basePrice is empty string (preprocessor returns undefined)", () => {
+    const result = validateBody(createServiceSchema, {
+      ...validService,
+      basePrice: "",
+    });
+    expect(result).not.toBeNull();
+  });
+
+  it("should fail when baseDuration is empty string (preprocessor returns undefined)", () => {
+    const result = validateBody(createServiceSchema, {
+      ...validService,
+      baseDuration: "",
+    });
+    expect(result).not.toBeNull();
+  });
+
+  it("should fail when basePrice is boolean (preprocessor returns undefined for non-number/string)", () => {
+    const result = validateBody(createServiceSchema, {
+      ...validService,
+      basePrice: true,
+    });
+    expect(result).not.toBeNull();
+  });
+
+  it("should fail when basePrice is null (preprocessor returns undefined)", () => {
+    const result = validateBody(createServiceSchema, {
+      ...validService,
+      basePrice: null,
+    });
+    expect(result).not.toBeNull();
+  });
 });
 
 describe("createClientSchema", () => {
@@ -202,6 +234,22 @@ describe("createClientSchema", () => {
       phone: "abc",
     });
     expect(result).not.toBeNull();
+  });
+
+  it("should accept whitespace-only phone (refine returns true for untrimmed empty)", () => {
+    const result = validateBody(createClientSchema, {
+      ...validClient,
+      phone: "   ",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("should accept phone with dots (dots are allowed by regex)", () => {
+    const result = validateBody(createClientSchema, {
+      ...validClient,
+      phone: "+48.123.456.789",
+    });
+    expect(result).toBeNull();
   });
 });
 
@@ -290,6 +338,70 @@ describe("createProductSchema", () => {
     });
     expect(result).toBeNull();
   });
+
+  it("should accept empty string quantity (refine returns true for empty)", () => {
+    const result = validateBody(createProductSchema, {
+      ...validProduct,
+      quantity: "",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("should reject non-numeric string quantity 'abc'", () => {
+    const result = validateBody(createProductSchema, {
+      ...validProduct,
+      quantity: "abc",
+    });
+    expect(result).not.toBeNull();
+  });
+
+  it("should reject negative string quantity '-5'", () => {
+    const result = validateBody(createProductSchema, {
+      ...validProduct,
+      quantity: "-5",
+    });
+    expect(result).not.toBeNull();
+  });
+
+  it("should accept empty string minQuantity", () => {
+    const result = validateBody(createProductSchema, {
+      ...validProduct,
+      minQuantity: "",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("should reject non-numeric string minQuantity 'abc'", () => {
+    const result = validateBody(createProductSchema, {
+      ...validProduct,
+      minQuantity: "abc",
+    });
+    expect(result).not.toBeNull();
+  });
+
+  it("should accept empty string pricePerUnit", () => {
+    const result = validateBody(createProductSchema, {
+      ...validProduct,
+      pricePerUnit: "",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("should reject non-numeric string pricePerUnit 'abc'", () => {
+    const result = validateBody(createProductSchema, {
+      ...validProduct,
+      pricePerUnit: "abc",
+    });
+    expect(result).not.toBeNull();
+  });
+
+  it("should reject negative string pricePerUnit '-1'", () => {
+    const result = validateBody(createProductSchema, {
+      ...validProduct,
+      pricePerUnit: "-1",
+    });
+    expect(result).not.toBeNull();
+  });
 });
 
 describe("createAppointmentSchema", () => {
@@ -344,6 +456,18 @@ describe("createAppointmentSchema", () => {
       notes: "Special request",
     });
     expect(result).toBeNull();
+  });
+
+  it("should fail on startTime required check when startTime is missing but endTime is present", () => {
+    // The refine on line 198 returns true early when startTime is falsy,
+    // but the field-level required check on startTime still fails.
+    const result = validateBody(createAppointmentSchema, {
+      salonId: "salon-123",
+      employeeId: "emp-456",
+      endTime: "2024-01-15T11:00:00Z",
+    });
+    expect(result).not.toBeNull();
+    expect(result!.details.startTime).toBeDefined();
   });
 });
 
