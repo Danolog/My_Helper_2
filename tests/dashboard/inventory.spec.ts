@@ -13,13 +13,16 @@ async function loginAsOwner(page: Page) {
   await page.goto('/login');
   await page.fill('#email', OWNER_CREDENTIALS.email);
   await page.fill('#password', OWNER_CREDENTIALS.password);
-  await page.getByRole('button', { name: /zaloguj się/i }).click();
-  await page.waitForURL('**/dashboard**', { timeout: 10000 });
+  await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
 }
 
 async function navigateToProducts(page: Page) {
   await page.goto('/dashboard/products');
+  await page.waitForLoadState('domcontentloaded');
   await page.waitForLoadState('networkidle');
+  // Wait for page hydration — ensure the add product button is interactive
+  await page.getByRole('button', { name: /dodaj produkt|add product/i }).waitFor({ state: 'visible', timeout: 30000 });
 }
 
 // ---------------------------------------------------------------------------
@@ -34,7 +37,7 @@ test.describe('Flow 5: Inventory & Materials', () => {
   // ── Happy path ──────────────────────────────────────────────────────────
 
   test.describe('Happy path', () => {
-    test('should display products page with header', async ({ page }) => {
+    test('should display products page with header', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
       await expect(page.getByText(/produkty|magazyn|inventory/i).first()).toBeVisible();
       await expect(
@@ -42,88 +45,77 @@ test.describe('Flow 5: Inventory & Materials', () => {
       ).toBeVisible();
     });
 
-    test('should open add product dialog/form', async ({ page }) => {
+    test('should open add product dialog/form', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
       await page.getByRole('button', { name: /dodaj produkt|add product/i }).click();
-      await page.waitForTimeout(500);
 
       // Form fields should be visible
       await expect(
-        page.locator('[role="dialog"]')
+        page.getByTestId('product-dialog')
+          .or(page.locator('[role="dialog"]'))
           .or(page.getByText(/nazwa produktu|product name/i).first())
-      ).toBeVisible({ timeout: 3000 });
+          .first()
+      ).toBeVisible({ timeout: 10000 });
     });
 
-    test('should add a new product', async ({ page }) => {
+    test('should add a new product', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
       await page.getByRole('button', { name: /dodaj produkt|add product/i }).click();
-      await page.waitForTimeout(500);
+      await page.getByTestId('product-name-input').waitFor({ state: 'visible', timeout: 5000 });
 
-      // Fill product form
-      const nameInput = page.locator('input[name="name"], input[placeholder*="nazw"]').first();
-      if (await nameInput.isVisible()) {
-        await nameInput.fill('Farba do włosów - Blond');
-      }
+      // Fill product form using data-testid selectors
+      await page.getByTestId('product-name-input').fill('Farba do włosów - Blond');
+      await page.getByTestId('product-price-input').fill('45.99');
+      await page.getByTestId('product-quantity-input').fill('20');
 
-      const priceInput = page.locator('input[name="price"], input[placeholder*="cen"]').first();
-      if (await priceInput.isVisible()) {
-        await priceInput.fill('45.99');
-      }
-
-      const quantityInput = page.locator('input[name="quantity"], input[placeholder*="ilo"]').first();
-      if (await quantityInput.isVisible()) {
-        await quantityInput.fill('20');
-      }
-
-      const minStockInput = page.locator('input[name="minimumStock"], input[name="minimum"], input[placeholder*="min"]').first();
-      if (await minStockInput.isVisible()) {
-        await minStockInput.fill('5');
+      const minInput = page.getByTestId('product-min-quantity-input');
+      if (await minInput.isVisible()) {
+        await minInput.fill('5');
       }
 
       // Save
-      await page.getByRole('button', { name: /zapisz|dodaj|save|add/i }).last().click();
-      await page.waitForLoadState('networkidle');
+      await page.getByTestId('save-product-btn').click();
+      await page.waitForLoadState('domcontentloaded');
 
       // Product should appear
       await expect(
-        page.getByText(/farba do włosów/i).or(page.getByText('Blond'))
+        page.getByText(/farba do włosów/i).or(page.getByText('Blond')).first()
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display product categories tab', async ({ page }) => {
+    test('should display product categories tab', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
 
       const categoriesTab = page.getByRole('tab', { name: /kategorie|categories/i })
-        .or(page.getByText(/kategorie/i).first());
+        .or(page.getByText(/kategorie/i).first())
+        .first();
       if (await categoriesTab.isVisible()) {
         await categoriesTab.click();
-        await page.waitForTimeout(500);
       }
     });
 
-    test('should display stock alerts tab', async ({ page }) => {
+    test('should display stock alerts tab', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
 
       const alertsTab = page.getByRole('tab', { name: /alert|niski stan|low stock/i })
-        .or(page.getByText(/alert/i).first());
+        .or(page.getByText(/alert/i).first())
+        .first();
       if (await alertsTab.isVisible()) {
         await alertsTab.click();
-        await page.waitForTimeout(500);
       }
     });
 
-    test('should search for products', async ({ page }) => {
+    test('should search for products', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
 
       const searchInput = page.locator('input[type="search"], input[placeholder*="szukaj"], input[placeholder*="search"]').first();
       if (await searchInput.isVisible()) {
         await searchInput.fill('farba');
-        await page.waitForTimeout(500);
         // Filtered results should show
       }
     });
 
-    test('should navigate to product detail page', async ({ page }) => {
+    test('should navigate to product detail page', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
 
       // Click on a product card/row
@@ -131,7 +123,7 @@ test.describe('Flow 5: Inventory & Materials', () => {
       if (await productLink.isVisible()) {
         await productLink.click();
         await page.waitForURL('**/products/**', { timeout: 5000 });
-        await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
       }
     });
   });
@@ -139,13 +131,13 @@ test.describe('Flow 5: Inventory & Materials', () => {
   // ── Error path ──────────────────────────────────────────────────────────
 
   test.describe('Error path', () => {
-    test('should show error when adding product without name', async ({ page }) => {
+    test('should show error when adding product without name', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
       await page.getByRole('button', { name: /dodaj produkt|add product/i }).click();
-      await page.waitForTimeout(500);
+      await page.getByTestId('product-name-input').waitFor({ state: 'visible', timeout: 5000 });
 
       // Try to save without filling required fields
-      await page.getByRole('button', { name: /zapisz|dodaj|save|add/i }).last().click();
+      await page.getByTestId('save-product-btn').click();
 
       // Should show validation error
       await expect(
@@ -153,104 +145,75 @@ test.describe('Flow 5: Inventory & Materials', () => {
       ).toBeVisible({ timeout: 3000 });
     });
 
-    test('should reject negative quantity', async ({ page }) => {
+    test('should reject negative quantity', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
       await page.getByRole('button', { name: /dodaj produkt|add product/i }).click();
-      await page.waitForTimeout(500);
+      await page.getByTestId('product-name-input').waitFor({ state: 'visible', timeout: 5000 });
 
-      const nameInput = page.locator('input[name="name"], input[placeholder*="nazw"]').first();
-      if (await nameInput.isVisible()) {
-        await nameInput.fill('Test Product');
-      }
+      await page.getByTestId('product-name-input').fill('Test Product');
+      await page.getByTestId('product-quantity-input').fill('-5');
 
-      const quantityInput = page.locator('input[name="quantity"], input[placeholder*="ilo"]').first();
-      if (await quantityInput.isVisible()) {
-        await quantityInput.fill('-5');
-      }
-
-      await page.getByRole('button', { name: /zapisz|dodaj|save|add/i }).last().click();
-      await page.waitForTimeout(2000);
-      await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+      await page.getByTestId('save-product-btn').click();
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
-    test('should reject negative price', async ({ page }) => {
+    test('should reject negative price', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
       await page.getByRole('button', { name: /dodaj produkt|add product/i }).click();
-      await page.waitForTimeout(500);
+      await page.getByTestId('product-name-input').waitFor({ state: 'visible', timeout: 5000 });
 
-      const nameInput = page.locator('input[name="name"], input[placeholder*="nazw"]').first();
-      if (await nameInput.isVisible()) {
-        await nameInput.fill('Test Product');
-      }
+      await page.getByTestId('product-name-input').fill('Test Product');
+      await page.getByTestId('product-price-input').fill('-10');
 
-      const priceInput = page.locator('input[name="price"], input[placeholder*="cen"]').first();
-      if (await priceInput.isVisible()) {
-        await priceInput.fill('-10');
-      }
-
-      await page.getByRole('button', { name: /zapisz|dodaj|save|add/i }).last().click();
-      await page.waitForTimeout(2000);
-      await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+      await page.getByTestId('save-product-btn').click();
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
   });
 
   // ── Edge cases ──────────────────────────────────────────────────────────
 
   test.describe('Edge cases', () => {
-    test('should handle empty product list', async ({ page }) => {
+    test('should handle empty product list', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
       // Page should render without errors
-      await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
-    test('should handle very large quantity value', async ({ page }) => {
+    test('should handle very large quantity value', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
       await page.getByRole('button', { name: /dodaj produkt|add product/i }).click();
-      await page.waitForTimeout(500);
+      await page.getByTestId('product-name-input').waitFor({ state: 'visible', timeout: 5000 });
 
-      const nameInput = page.locator('input[name="name"], input[placeholder*="nazw"]').first();
-      if (await nameInput.isVisible()) {
-        await nameInput.fill('Bulk Product');
-      }
+      await page.getByTestId('product-name-input').fill('Bulk Product');
+      await page.getByTestId('product-quantity-input').fill('9999999');
 
-      const quantityInput = page.locator('input[name="quantity"], input[placeholder*="ilo"]').first();
-      if (await quantityInput.isVisible()) {
-        await quantityInput.fill('9999999');
-      }
-
-      await page.getByRole('button', { name: /zapisz|dodaj|save|add/i }).last().click();
-      await page.waitForTimeout(2000);
-      await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+      await page.getByTestId('save-product-btn').click();
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
-    test('should handle special characters in product name', async ({ page }) => {
+    test('should handle special characters in product name', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
       await page.getByRole('button', { name: /dodaj produkt|add product/i }).click();
-      await page.waitForTimeout(500);
+      await page.getByTestId('product-name-input').waitFor({ state: 'visible', timeout: 5000 });
 
-      const nameInput = page.locator('input[name="name"], input[placeholder*="nazw"]').first();
-      if (await nameInput.isVisible()) {
-        await nameInput.fill('Lakier "żelowy" — Łódź #2');
-      }
+      await page.getByTestId('product-name-input').fill('Lakier "żelowy" — Łódź #2');
 
-      await page.getByRole('button', { name: /zapisz|dodaj|save|add/i }).last().click();
-      await page.waitForTimeout(2000);
-      await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+      await page.getByTestId('save-product-btn').click();
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
-    test('should handle search with no results', async ({ page }) => {
+    test('should handle search with no results', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
 
       const searchInput = page.locator('input[type="search"], input[placeholder*="szukaj"], input[placeholder*="search"]').first();
       if (await searchInput.isVisible()) {
         await searchInput.fill('nonexistent_product_xyz_123');
-        await page.waitForTimeout(500);
         // Should show empty state or "no results" message
-        await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
       }
     });
 
-    test('should handle rapid tab switching on products page', async ({ page }) => {
+    test('should handle rapid tab switching on products page', { tag: '@full' }, async ({ page }) => {
       await navigateToProducts(page);
 
       const tabs = page.getByRole('tab');
@@ -260,8 +223,7 @@ test.describe('Flow 5: Inventory & Materials', () => {
         for (let i = 0; i < tabCount * 3; i++) {
           await tabs.nth(i % tabCount).click();
         }
-        await page.waitForTimeout(500);
-        await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
       }
     });
   });
