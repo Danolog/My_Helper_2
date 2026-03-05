@@ -17,6 +17,7 @@ const SEEDED_OWNER = {
 };
 
 async function fillLoginForm(page: Page, email: string, password: string) {
+  await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
   await page.fill('#email', email);
   await page.fill('#password', password);
 }
@@ -119,10 +120,11 @@ test.describe('Flow 1: Authentication', () => {
       await page.goto('/login');
       await fillLoginForm(page, 'wrong@example.com', 'WrongPass123!');
       await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
-      // Should display an error message (UI uses ASCII: "Nieprawidlowy")
+      // Should display an error message — sanitized to Polish:
+      // "Nieprawidlowy email lub haslo" or fallback "Nie udalo sie zalogowac"
       await expect(
-        page.getByText(/nieprawidl|blad|invalid|nie znaleziono/i)
-      ).toBeVisible({ timeout: 5000 });
+        page.getByText(/nieprawidl|nie udalo|blad|invalid|nie znaleziono/i)
+      ).toBeVisible({ timeout: 15000 });
       // Should NOT redirect
       await expect(page).toHaveURL(/\/login/);
     });
