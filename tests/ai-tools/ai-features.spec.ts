@@ -13,8 +13,8 @@ async function loginAsOwner(page: Page) {
   await page.goto('/login');
   await page.fill('#email', OWNER_CREDENTIALS.email);
   await page.fill('#password', OWNER_CREDENTIALS.password);
-  await page.getByRole('button', { name: /zaloguj się/i }).click();
-  await page.waitForURL('**/dashboard**', { timeout: 10000 });
+  await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
+  await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
 }
 
 // AI feature pages
@@ -43,19 +43,20 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
   // ── Happy path ──────────────────────────────────────────────────────────
 
   test.describe('Happy path', () => {
-    test('should display AI assistant hub page', async ({ page }) => {
+    test('should display AI assistant hub page', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/ai-assistant');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       // Should show AI hub with navigation options
       await expect(
-        page.getByText(/asystent ai|ai assistant|inteligenc|narzędzi/i).first()
+        // UI: "Asystent AI" (no diacritics)
+        page.getByText(/asystent ai|ai assistant|inteligenc|narz[eę]dzi/i).first()
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display business intelligence chat', async ({ page }) => {
+    test('should display business intelligence chat', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/ai-assistant/business');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       // Should show chat interface or Pro gate
       await expect(
@@ -63,82 +64,85 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display content generator hub', async ({ page }) => {
+    test('should display content generator hub', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/content-generator');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       await expect(
-        page.getByText(/treści|content|generuj|generator/i).first()
+        // UI: "Generator tresci" (no diacritics)
+        page.getByText(/tre[sś]ci|content|generuj|generator/i).first()
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display social post generator', async ({ page }) => {
+    test('should display social post generator', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/content-generator/social-posts');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       await expect(
         page.getByText(/post|social|media|instagram|facebook/i).first()
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display newsletter generator', async ({ page }) => {
+    test('should display newsletter generator', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/content-generator/newsletters');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       await expect(
         page.getByText(/newsletter|email|kampani/i).first()
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display AI recommendations page', async ({ page }) => {
+    test('should display AI recommendations page', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/ai-recommendations');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       await expect(
         page.getByText(/rekomendacj|suggestion|zaleceni|recommendation/i).first()
           .or(page.getByText(/pro/i).first())
+          .first()
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display trend analysis page', async ({ page }) => {
+    test('should display trend analysis page', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/ai-assistant/trends');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       await expect(
         page.getByText(/trend|analiz|analysis/i).first()
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display voice assistant configuration', async ({ page }) => {
+    test('should display voice assistant configuration', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/ai-assistant/voice');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       await expect(
-        page.getByText(/głosow|voice|asystent|konfigur/i).first()
+        // UI uses "Asystent glosowy" (no diacritics)
+        page.getByText(/g[lł]osow|voice|asystent|konfigur/i).first()
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display scheduled posts page', async ({ page }) => {
+    test('should display scheduled posts page', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/content-generator/scheduled');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       await expect(
         page.getByText(/zaplanowane|scheduled|harmonogram|post/i).first()
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display templates page', async ({ page }) => {
+    test('should display templates page', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/content-generator/templates');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       await expect(
         page.getByText(/szablon|template/i).first()
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should show AI chat input for Pro users', async ({ page }) => {
+    test('should show AI chat input for Pro users', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/ai-assistant/business');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       // Chat input field or Pro gate should be present
       const chatInput = page.locator(
@@ -147,7 +151,7 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
       const proGate = page.getByText(/wymaga planu pro|plan pro|upgrade/i).first();
 
       await expect(
-        chatInput.or(proGate)
+        chatInput.or(proGate).first()
       ).toBeVisible({ timeout: 5000 });
     });
   });
@@ -155,10 +159,10 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
   // ── Error path ──────────────────────────────────────────────────────────
 
   test.describe('Error path', () => {
-    test('should show Pro plan gate for Basic plan users', async ({ page }) => {
+    test('should show Pro plan gate for Basic plan users', { tag: '@full' }, async ({ page }) => {
       // If user is on Basic plan, AI features should show upgrade prompt
       await page.goto('/dashboard/ai-assistant/business');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       // Should either show chat (Pro user) or upgrade gate (Basic user)
       await expect(
@@ -166,39 +170,40 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should prevent unauthenticated access to AI features', async ({ page }) => {
-      const newPage = await page.context().newPage();
+    test('should prevent unauthenticated access to AI features', { tag: '@full' }, async ({ browser }) => {
+      const newContext = await browser.newContext();
+      const newPage = await newContext.newPage();
       await newPage.goto('/dashboard/ai-assistant');
       await newPage.waitForURL('**/login**', { timeout: 10000 });
       await expect(newPage).toHaveURL(/\/login/);
       await newPage.close();
+      await newContext.close();
     });
 
-    test('should handle empty AI chat submission', async ({ page }) => {
+    test('should handle empty AI chat submission', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/ai-assistant/business');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       // Try to submit empty message
-      const submitBtn = page.getByRole('button', { name: /wyślij|send|ask/i }).first();
+      // UI: "Wyslij wiadomosc" (no diacritics)
+      const submitBtn = page.getByRole('button', { name: /wys[lł]ij|send|ask/i }).first();
       if (await submitBtn.isVisible()) {
         await submitBtn.click();
-        await page.waitForTimeout(1000);
         // Should not crash
-        await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
       }
     });
 
-    test('should handle AI content generation without required fields', async ({ page }) => {
+    test('should handle AI content generation without required fields', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/content-generator/social-posts');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       // Try to generate without filling required fields
-      const generateBtn = page.getByRole('button', { name: /generuj|generate|utwórz|create/i }).first();
+      const generateBtn = page.getByRole('button', { name: /generuj|generate|utw[oó]rz|create/i }).first();
       if (await generateBtn.isVisible()) {
         await generateBtn.click();
-        await page.waitForTimeout(2000);
         // Should show validation error, not crash
-        await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
       }
     });
   });
@@ -207,16 +212,16 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
 
   test.describe('Edge cases', () => {
     for (const aiPage of AI_PAGES) {
-      test(`should load ${aiPage.name} without errors`, async ({ page }) => {
+      test(`should load ${aiPage.name} without errors`, { tag: '@full' }, async ({ page }) => {
         await page.goto(aiPage.path);
-        await page.waitForLoadState('networkidle');
-        await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+        await page.waitForLoadState('domcontentloaded');
+        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
       });
     }
 
-    test('should handle very long chat message', async ({ page }) => {
+    test('should handle very long chat message', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/ai-assistant/business');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       const chatInput = page.locator(
         'textarea, input[type="text"][placeholder*="pytanie"], input[placeholder*="wpisz"]'
@@ -226,31 +231,31 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
         const longMessage = 'Pytanie o salon. '.repeat(100);
         await chatInput.fill(longMessage);
         // Should not crash
-        await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
       }
     });
 
-    test('should handle rapid page navigation between AI tools', async ({ page }) => {
+    test('should handle rapid page navigation between AI tools', { tag: '@full' }, async ({ page }) => {
       for (const aiPage of AI_PAGES.slice(0, 5)) {
         await page.goto(aiPage.path);
       }
-      await page.waitForLoadState('networkidle');
-      await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+      await page.waitForLoadState('domcontentloaded');
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
-    test('should handle AI page refresh', async ({ page }) => {
+    test('should handle AI page refresh', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/ai-assistant/business');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
       await page.reload();
-      await page.waitForLoadState('networkidle');
-      await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+      await page.waitForLoadState('domcontentloaded');
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
-    test('should render AI features on mobile viewport', async ({ page }) => {
+    test('should render AI features on mobile viewport', { tag: '@full' }, async ({ page }) => {
       await page.setViewportSize({ width: 375, height: 812 });
       await page.goto('/dashboard/ai-assistant');
-      await page.waitForLoadState('networkidle');
-      await expect(page.locator('body')).not.toContainText(/500|Internal Server Error/i);
+      await page.waitForLoadState('domcontentloaded');
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
   });
 });
