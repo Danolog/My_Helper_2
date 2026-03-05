@@ -85,6 +85,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - run: pnpm db:push
+        name: Push database schema
+
       - run: pnpm exec playwright install --with-deps chromium
 
       - run: pnpm build:ci
