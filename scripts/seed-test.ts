@@ -12,6 +12,7 @@ import { hashPassword } from "better-auth/crypto";
 import {
   user,
   account,
+  verification,
   salons,
   employees,
   services,
@@ -69,7 +70,23 @@ async function seed() {
       set: { password: ownerPasswordHash, updatedAt: new Date() },
     });
 
-  console.log("[seed-test] Created owner user: owner@test.com");
+  // Add email verification record for owner
+  await db
+    .insert(verification)
+    .values({
+      id: "test-owner-email-verify-001",
+      identifier: "owner@test.com",
+      value: "email-verified",
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: verification.id,
+      set: { identifier: "owner@test.com", updatedAt: new Date() },
+    });
+
+  console.log("[seed-test] Created owner user: owner@test.com (emailVerified=true + verification record)");
 
   // 2. Create client user
   const clientPasswordHash = await hashPassword("TestPassword123!");
@@ -104,7 +121,23 @@ async function seed() {
       set: { password: clientPasswordHash, updatedAt: new Date() },
     });
 
-  console.log("[seed-test] Created client user: client@test.com");
+  // Add email verification record for client
+  await db
+    .insert(verification)
+    .values({
+      id: "test-client-email-verify-001",
+      identifier: "client@test.com",
+      value: "email-verified",
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: verification.id,
+      set: { identifier: "client@test.com", updatedAt: new Date() },
+    });
+
+  console.log("[seed-test] Created client user: client@test.com (emailVerified=true + verification record)");
 
   // 3. Create test salon linked to owner
   await db

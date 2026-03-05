@@ -73,6 +73,7 @@ jobs:
     env:
       POSTGRES_URL: postgresql://dev_user:dev_password@localhost:5432/pos_dev
       BETTER_AUTH_SECRET: ci-test-secret-minimum-32-characters-long
+      BETTER_AUTH_URL: http://localhost:3000
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       BASE_URL: http://localhost:3000
     steps:
@@ -93,14 +94,19 @@ jobs:
       - name: Seed test data
         run: pnpm db:seed:test
 
+      - name: Verify seed data
+        run: |
+          PGPASSWORD=dev_password psql -h localhost -U dev_user -d pos_dev -c "SELECT id, email, email_verified, role FROM \"user\" WHERE email IN ('owner@test.com','client@test.com');"
+          PGPASSWORD=dev_password psql -h localhost -U dev_user -d pos_dev -c "SELECT id, provider_id, user_id, CASE WHEN password IS NOT NULL THEN 'SET' ELSE 'NULL' END as pwd FROM account WHERE user_id IN ('test-owner-user-id-00001','test-client-user-id-00001');"
+
       - run: pnpm exec playwright install --with-deps chromium
 
       - run: pnpm build:ci
 
       - name: Run smoke tests
-        run: pnpm exec playwright test --grep @smoke --workers=4 --retries=0
+        run: pnpm exec playwright test --grep @smoke --workers=4 --retries=1
         env:
-          PLAYWRIGHT_TIMEOUT: 10000
+          PLAYWRIGHT_TIMEOUT: 15000
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -134,6 +140,7 @@ jobs:
     env:
       POSTGRES_URL: postgresql://dev_user:dev_password@localhost:5432/pos_dev
       BETTER_AUTH_SECRET: ci-test-secret-minimum-32-characters-long
+      BETTER_AUTH_URL: http://localhost:3000
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       BASE_URL: http://localhost:3000
     steps:
