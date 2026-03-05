@@ -53,6 +53,7 @@ nul
 *.jpeg
 /scripts/*
 !scripts/generate-pwa-icons.ts
+!scripts/seed-test.ts
 
 # PWA icons (unignore)
 !public/icon-192.png
