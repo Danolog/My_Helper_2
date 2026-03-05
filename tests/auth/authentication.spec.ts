@@ -18,6 +18,9 @@ const SEEDED_OWNER = {
 
 async function fillLoginForm(page: Page, email: string, password: string) {
   await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
+  // Wait for React hydration — button must be enabled (not disabled during SSR)
+  await page.getByRole('button', { name: /^zaloguj sie$/i }).waitFor({ state: 'visible', timeout: 10000 });
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
   await page.fill('#email', email);
   await page.fill('#password', password);
 }
@@ -119,7 +122,12 @@ test.describe('Flow 1: Authentication', () => {
     test('should show error for invalid credentials', { tag: '@smoke' }, async ({ page }) => {
       await page.goto('/login');
       await fillLoginForm(page, 'wrong@example.com', 'WrongPass123!');
-      await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
+      const submitBtn = page.getByRole('button', { name: /^zaloguj sie$/i });
+      // Click and wait for API response
+      await Promise.all([
+        page.waitForResponse(resp => resp.url().includes('/api/auth/') && resp.status() >= 400, { timeout: 15000 }).catch(() => {}),
+        submitBtn.click(),
+      ]);
       // Should display an error message — sanitized to Polish:
       // "Nieprawidlowy email lub haslo" or fallback "Nie udalo sie zalogowac"
       await expect(
