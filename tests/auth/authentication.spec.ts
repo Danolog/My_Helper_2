@@ -53,11 +53,14 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should navigate from plan selection to account form', { tag: '@full' }, async ({ page }) => {
       await page.goto('/register');
-      await page.waitForLoadState('domcontentloaded');
-      // Select Basic plan and proceed
-      await page.getByText(/basic/i).first().click();
+      // Wait for plans to load and hydrate
+      const basicCard = page.getByText(/basic/i).first();
+      await expect(basicCard).toBeVisible({ timeout: 15000 });
       const dalej = page.getByRole('button', { name: /dalej/i });
       await expect(dalej).toBeVisible({ timeout: 10000 });
+      await page.waitForTimeout(500);
+      await basicCard.click();
+      await expect(dalej).toBeEnabled({ timeout: 5000 });
       await dalej.click();
       // Step 2 - account form should appear
       await expect(page.locator('#name')).toBeVisible({ timeout: 10000 });
@@ -68,11 +71,17 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should register a new owner account', { tag: '@smoke' }, async ({ page }) => {
       await page.goto('/register');
-      // Step 1 - select plan (wait for hydration)
-      await page.waitForLoadState('domcontentloaded');
-      await page.getByText(/basic/i).first().click();
+      // Wait for plans to load from API and render
+      const basicCard = page.getByText(/basic/i).first();
+      await expect(basicCard).toBeVisible({ timeout: 15000 });
+      // Wait for Dalej button to exist (confirms React hydration)
       const dalej = page.getByRole('button', { name: /dalej/i });
       await expect(dalej).toBeVisible({ timeout: 10000 });
+      await page.waitForTimeout(500);
+      // Select plan and proceed
+      await basicCard.click();
+      // Wait for Dalej to become enabled (selectedPlan set)
+      await expect(dalej).toBeEnabled({ timeout: 5000 });
       await dalej.click();
       // Step 2 - fill form (wait for form to be fully rendered and interactive)
       await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
@@ -166,10 +175,13 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should show error for password mismatch during registration', { tag: '@full' }, async ({ page }) => {
       await page.goto('/register');
-      await page.waitForLoadState('domcontentloaded');
-      await page.getByText(/basic/i).first().click();
+      const basicCard = page.getByText(/basic/i).first();
+      await expect(basicCard).toBeVisible({ timeout: 15000 });
       const dalej = page.getByRole('button', { name: /dalej/i });
       await expect(dalej).toBeVisible({ timeout: 10000 });
+      await page.waitForTimeout(500);
+      await basicCard.click();
+      await expect(dalej).toBeEnabled({ timeout: 5000 });
       await dalej.click();
       await page.waitForSelector('#name', { state: 'visible', timeout: 10000 });
       await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 10000 });
@@ -187,10 +199,13 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should reject password shorter than 8 characters', { tag: '@full' }, async ({ page }) => {
       await page.goto('/register');
-      await page.waitForLoadState('domcontentloaded');
-      await page.getByText(/basic/i).first().click();
+      const basicCard = page.getByText(/basic/i).first();
+      await expect(basicCard).toBeVisible({ timeout: 15000 });
       const dalej = page.getByRole('button', { name: /dalej/i });
       await expect(dalej).toBeVisible({ timeout: 10000 });
+      await page.waitForTimeout(500);
+      await basicCard.click();
+      await expect(dalej).toBeEnabled({ timeout: 5000 });
       await dalej.click();
       await page.waitForSelector('#name', { state: 'visible', timeout: 10000 });
       await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 10000 });
