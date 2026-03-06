@@ -69,3 +69,4 @@ claude-progress.txt
 # test artifacts
 test-results/
 playwright-report/
+tests/.auth/

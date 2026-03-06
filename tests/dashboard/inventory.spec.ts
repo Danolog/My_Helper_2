@@ -4,21 +4,6 @@ import { test, expect, type Page } from '@playwright/test';
 // Helpers
 // ---------------------------------------------------------------------------
 
-const OWNER_CREDENTIALS = {
-  email: 'owner@test.com',
-  password: 'TestPassword123!',
-};
-
-async function loginAsOwner(page: Page) {
-  await page.goto('/login');
-  await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
-  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
-  await page.fill('#email', OWNER_CREDENTIALS.email);
-  await page.fill('#password', OWNER_CREDENTIALS.password);
-  await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
-  await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
-}
-
 async function navigateToProducts(page: Page) {
   await page.goto('/dashboard/products');
   await page.waitForLoadState('domcontentloaded');
@@ -32,9 +17,7 @@ async function navigateToProducts(page: Page) {
 // ---------------------------------------------------------------------------
 
 test.describe('Flow 5: Inventory & Materials', () => {
-  test.beforeEach(async ({ page }) => {
-    await loginAsOwner(page);
-  });
+  // Auth handled by storageState — no login needed
 
   // ── Happy path ──────────────────────────────────────────────────────────
 

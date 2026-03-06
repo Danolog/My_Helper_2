@@ -11,6 +11,8 @@ const CLIENT_CREDENTIALS = {
 
 async function loginAsClient(page: Page) {
   await page.goto('/portal/login');
+  await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
   await page.fill('#email', CLIENT_CREDENTIALS.email);
   await page.fill('#password', CLIENT_CREDENTIALS.password);
   await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
