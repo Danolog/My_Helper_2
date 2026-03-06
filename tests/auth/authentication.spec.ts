@@ -53,11 +53,14 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should navigate from plan selection to account form', { tag: '@full' }, async ({ page }) => {
       await page.goto('/register');
+      await page.waitForLoadState('domcontentloaded');
       // Select Basic plan and proceed
       await page.getByText(/basic/i).first().click();
-      await page.getByRole('button', { name: /dalej/i }).click();
+      const dalej = page.getByRole('button', { name: /dalej/i });
+      await expect(dalej).toBeVisible({ timeout: 10000 });
+      await dalej.click();
       // Step 2 - account form should appear
-      await expect(page.locator('#name')).toBeVisible();
+      await expect(page.locator('#name')).toBeVisible({ timeout: 10000 });
       await expect(page.locator('#email')).toBeVisible();
       await expect(page.locator('#password')).toBeVisible();
       await expect(page.locator('#confirmPassword')).toBeVisible();
@@ -106,6 +109,8 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should navigate to forgot password page', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
+      // Wait for form to render (after session check)
+      await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
       // UI text: "Nie pamietam hasla" (no diacritics)
       await page.getByText(/nie pami[eę]tam has[lł]a/i).click();
       await page.waitForURL('**/forgot-password**');
@@ -167,13 +172,17 @@ test.describe('Flow 1: Authentication', () => {
       await page.goto('/register');
       await page.waitForLoadState('domcontentloaded');
       await page.getByText(/basic/i).first().click();
-      await page.getByRole('button', { name: /dalej/i }).click();
+      const dalej = page.getByRole('button', { name: /dalej/i });
+      await expect(dalej).toBeVisible({ timeout: 10000 });
+      await dalej.click();
       await page.waitForSelector('#name', { state: 'visible', timeout: 10000 });
+      await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 10000 });
+      await page.waitForTimeout(500);
       await page.fill('#name', 'Test User');
       await page.fill('#email', 'test@example.com');
       await page.fill('#password', 'Password123!');
       await page.fill('#confirmPassword', 'DifferentPassword123!');
-      await page.locator('button[type="submit"]').click();
+      await page.locator('form button[type="submit"]').click();
       // UI: "Hasla nie sa identyczne..." (no diacritics)
       await expect(
         page.getByText(/has[lł]a|nie pasuj|identyczne|mismatch|zgodne/i).first()
@@ -184,13 +193,17 @@ test.describe('Flow 1: Authentication', () => {
       await page.goto('/register');
       await page.waitForLoadState('domcontentloaded');
       await page.getByText(/basic/i).first().click();
-      await page.getByRole('button', { name: /dalej/i }).click();
+      const dalej = page.getByRole('button', { name: /dalej/i });
+      await expect(dalej).toBeVisible({ timeout: 10000 });
+      await dalej.click();
       await page.waitForSelector('#name', { state: 'visible', timeout: 10000 });
+      await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 10000 });
+      await page.waitForTimeout(500);
       await page.fill('#name', 'Test User');
       await page.fill('#email', 'test@example.com');
       await page.fill('#password', 'short');
       await page.fill('#confirmPassword', 'short');
-      await page.locator('button[type="submit"]').click();
+      await page.locator('form button[type="submit"]').click();
       // UI: "Haslo jest za krotkie. Wpisz co najmniej 8 znakow" (no diacritics)
       await expect(
         page.getByText(/minimum|8|znak[oó]w|characters|za kr[oó]tkie/i).first()
@@ -262,9 +275,9 @@ test.describe('Flow 1: Authentication', () => {
       await page.waitForURL('**/login**', { timeout: 10000 });
       // Login with seeded credentials (guaranteed to exist)
       await fillLoginForm(page, SEEDED_OWNER.email, SEEDED_OWNER.password);
-      await page.locator('button[type="submit"]').click();
+      await page.locator('form button[type="submit"]').click();
       // Should redirect back to the originally requested page (or dashboard)
-      await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
+      await expect(page).toHaveURL(/\/dashboard/, { timeout: 30000 });
     });
   });
 });
