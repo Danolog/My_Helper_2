@@ -18,7 +18,7 @@ test.describe('Production Health Checks', () => {
     // Wait for client component hydration (session check shows "Ladowanie..." first)
     await expect(page.locator('#email')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('#password')).toBeVisible();
-    await expect(page.getByRole('button', { name: /zaloguj/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Zaloguj sie', exact: true })).toBeVisible();
   });
 
   test('should load the registration page', { tag: '@production' }, async ({ page }) => {
