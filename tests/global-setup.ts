@@ -20,8 +20,19 @@ async function globalSetup(config: FullConfig) {
       await page.goto(`${baseURL}/login`, { waitUntil: 'load', timeout: 60000 });
       await page.waitForSelector('#email', { state: 'visible', timeout: 30000 });
 
+      // Wait for React hydration: type into email and verify React picks it up
       await page.fill('#email', OWNER.email);
       await page.fill('#password', OWNER.password);
+
+      // Confirm hydration — React must control the input value
+      await page.waitForFunction(
+        (email) => {
+          const input = document.querySelector('#email') as HTMLInputElement;
+          return input && input.value === email;
+        },
+        OWNER.email,
+        { timeout: 15000 },
+      );
 
       await Promise.all([
         page.waitForURL('**/dashboard/**', { timeout: 30000 }),
