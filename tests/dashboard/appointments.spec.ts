@@ -79,7 +79,7 @@ test.describe('Flow 4: Appointment System', () => {
         const saveBtn = dialog.getByRole('button', { name: /zapisz|potwierd[zź]|utw[oó]rz|dodaj/i });
         if (await saveBtn.isVisible()) {
           await saveBtn.click();
-          await page.waitForLoadState('networkidle');
+          await page.waitForLoadState('domcontentloaded');
         }
       }
     });
@@ -95,7 +95,7 @@ test.describe('Flow 4: Appointment System', () => {
       const option = page.getByRole('option').first();
       if (await option.isVisible()) {
         await option.click();
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
       }
     });
 
@@ -152,7 +152,7 @@ test.describe('Flow 4: Appointment System', () => {
 
     test('should navigate to booking page', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/booking');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 

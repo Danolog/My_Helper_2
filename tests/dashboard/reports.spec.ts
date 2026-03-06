@@ -35,7 +35,6 @@ test.describe('Flow 8: Reports & Finance', () => {
       test(`should load ${report.name} report page`, { tag: '@full' }, async ({ page }) => {
         await page.goto(report.path);
         await page.waitForLoadState('domcontentloaded');
-        await page.waitForLoadState('networkidle');
         // Page should load without errors
         await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
         // Should contain some report-specific content
@@ -50,7 +49,6 @@ test.describe('Flow 8: Reports & Finance', () => {
     test('should display date range filter on revenue report', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/reports/revenue');
       await page.waitForLoadState('domcontentloaded');
-      await page.waitForLoadState('networkidle');
 
       // Date filter should be available
       const dateFilter = page.locator(
@@ -64,7 +62,6 @@ test.describe('Flow 8: Reports & Finance', () => {
     test('should display employee filter on payroll report', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/reports/employee-payroll');
       await page.waitForLoadState('domcontentloaded');
-      await page.waitForLoadState('networkidle');
 
       // Should have filter options
       await expect(
@@ -77,7 +74,6 @@ test.describe('Flow 8: Reports & Finance', () => {
     test('should display revenue chart or data table', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/reports/revenue');
       await page.waitForLoadState('domcontentloaded');
-      await page.waitForLoadState('networkidle');
 
       // Should display either a chart or a data table
       await expect(
@@ -90,7 +86,6 @@ test.describe('Flow 8: Reports & Finance', () => {
     test('should display monthly comparison data', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/reports/monthly-comparison');
       await page.waitForLoadState('domcontentloaded');
-      await page.waitForLoadState('networkidle');
 
       await expect(
         page.getByText(/por[oó]wnan|comparison|miesi[aą]c|month/i).first()
@@ -100,7 +95,6 @@ test.describe('Flow 8: Reports & Finance', () => {
     test('should display yearly comparison data', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/reports/yearly-comparison');
       await page.waitForLoadState('domcontentloaded');
-      await page.waitForLoadState('networkidle');
 
       await expect(
         page.getByText(/por[oó]wnan|comparison|rok|year/i).first()
@@ -110,7 +104,6 @@ test.describe('Flow 8: Reports & Finance', () => {
     test('should display cancellations report', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/reports/cancellations');
       await page.waitForLoadState('domcontentloaded');
-      await page.waitForLoadState('networkidle');
 
       await expect(
         page.getByText(/anulac|anulowan|cancel|odwo[lł]an|utracony/i).first()
@@ -120,7 +113,6 @@ test.describe('Flow 8: Reports & Finance', () => {
     test('should display materials usage report', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/reports/materials');
       await page.waitForLoadState('domcontentloaded');
-      await page.waitForLoadState('networkidle');
 
       await expect(
         page.getByText(/materia[lł]|zu[zż]yci|materials/i).first()

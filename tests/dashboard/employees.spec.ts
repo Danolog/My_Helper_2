@@ -108,7 +108,7 @@ test.describe('Flow 2: Employee Management', () => {
         const isChecked = await serviceCheckbox.isChecked();
         await serviceCheckbox.setChecked(!isChecked);
         await page.getByRole('button', { name: /zapisz/i }).click();
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
       }
     });
 
@@ -123,7 +123,7 @@ test.describe('Flow 2: Employee Management', () => {
       if (await activeSwitch.isVisible()) {
         await activeSwitch.click();
         await page.getByRole('button', { name: /zapisz/i }).click();
-        await page.waitForLoadState('networkidle');
+        await page.waitForLoadState('domcontentloaded');
       }
     });
   });

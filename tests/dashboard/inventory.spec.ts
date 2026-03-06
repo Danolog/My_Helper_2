@@ -7,7 +7,6 @@ import { test, expect, type Page } from '@playwright/test';
 async function navigateToProducts(page: Page) {
   await page.goto('/dashboard/products');
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForLoadState('networkidle');
   // Wait for page hydration — ensure the add product button is interactive
   await page.getByRole('button', { name: /dodaj produkt|add product/i }).waitFor({ state: 'visible', timeout: 30000 });
 }

@@ -7,7 +7,6 @@ import { test, expect, type Page } from '@playwright/test';
 async function navigateToSubscription(page: Page) {
   await page.goto('/dashboard/subscription');
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForLoadState('networkidle');
 }
 
 // ---------------------------------------------------------------------------

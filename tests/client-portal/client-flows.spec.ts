@@ -12,7 +12,7 @@ const CLIENT_CREDENTIALS = {
 async function loginAsClient(page: Page) {
   await page.goto('/portal/login');
   await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
-  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+  await page.waitForLoadState('domcontentloaded');
   await page.fill('#email', CLIENT_CREDENTIALS.email);
   await page.fill('#password', CLIENT_CREDENTIALS.password);
   await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
@@ -181,14 +181,14 @@ test.describe('Flow 7: Client Portal', () => {
     test('should redirect unauthenticated user from appointments page', { tag: '@full' }, async ({ page }) => {
       await page.goto('/appointments');
       // Should redirect to login or show auth prompt
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
       const url = page.url();
       expect(url).toMatch(/\/(login|portal|appointments)/);
     });
 
     test('should redirect unauthenticated user from favorites page', { tag: '@full' }, async ({ page }) => {
       await page.goto('/favorites');
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
       const url = page.url();
       expect(url).toMatch(/\/(login|portal|favorites)/);
     });
