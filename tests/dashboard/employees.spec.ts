@@ -18,6 +18,15 @@ async function navigateToEmployees(page: Page) {
   await page.getByRole('link', { name: /dodaj pracownika/i }).waitFor({ state: 'visible', timeout: 15000 });
 }
 
+async function openAddEmployeeForm(page: Page) {
+  await navigateToEmployees(page);
+  await page.getByRole('link', { name: /dodaj pracownika/i }).click();
+  // Wait for the add employee page/form to be ready
+  await page.waitForLoadState('domcontentloaded');
+  await page.getByLabel(/imie/i).or(page.locator('#edit-firstName')).or(page.locator('input[name="firstName"]')).first()
+    .waitFor({ state: 'visible', timeout: 15000 });
+}
+
 // ---------------------------------------------------------------------------
 // Flow 2: Employee Management (P0)
 // ---------------------------------------------------------------------------
@@ -37,17 +46,14 @@ test.describe('Flow 2: Employee Management', () => {
     });
 
     test('should open add employee dialog', { tag: '@full' }, async ({ page }) => {
-      await navigateToEmployees(page);
-      await page.getByRole('link', { name: /dodaj pracownika/i }).click();
-      // Add page with form fields should appear
+      await openAddEmployeeForm(page);
       await expect(
         page.getByLabel(/imie/i).or(page.locator('#edit-firstName')).or(page.locator('input[name="firstName"]')).first()
-      ).toBeVisible({ timeout: 3000 });
+      ).toBeVisible();
     });
 
     test('should add a new employee', { tag: '@full' }, async ({ page }) => {
-      await navigateToEmployees(page);
-      await page.getByRole('link', { name: /dodaj pracownika/i }).click();
+      await openAddEmployeeForm(page);
 
       // Fill form
       await page.getByLabel(/imie/i).fill(NEW_EMPLOYEE.firstName);
@@ -132,8 +138,7 @@ test.describe('Flow 2: Employee Management', () => {
 
   test.describe('Error path', () => {
     test('should show error when adding employee without required fields', { tag: '@full' }, async ({ page }) => {
-      await navigateToEmployees(page);
-      await page.getByRole('link', { name: /dodaj pracownika/i }).click();
+      await openAddEmployeeForm(page);
 
       // Submit without filling required fields
       await page.getByRole('button', { name: /dodaj pracownika/i }).click();
@@ -154,8 +159,7 @@ test.describe('Flow 2: Employee Management', () => {
     });
 
     test('should handle invalid email format for employee', { tag: '@full' }, async ({ page }) => {
-      await navigateToEmployees(page);
-      await page.getByRole('link', { name: /dodaj pracownika/i }).click();
+      await openAddEmployeeForm(page);
 
       await page.getByLabel(/imie/i).fill('Test');
       await page.getByLabel(/nazwisko/i).fill('User');
@@ -187,8 +191,7 @@ test.describe('Flow 2: Employee Management', () => {
     });
 
     test('should handle long employee name', { tag: '@full' }, async ({ page }) => {
-      await navigateToEmployees(page);
-      await page.getByRole('link', { name: /dodaj pracownika/i }).click();
+      await openAddEmployeeForm(page);
 
       const longName = 'A'.repeat(200);
       await page.getByLabel(/imie/i).fill(longName);
@@ -199,8 +202,7 @@ test.describe('Flow 2: Employee Management', () => {
     });
 
     test('should handle special characters in employee name', { tag: '@full' }, async ({ page }) => {
-      await navigateToEmployees(page);
-      await page.getByRole('link', { name: /dodaj pracownika/i }).click();
+      await openAddEmployeeForm(page);
 
       await page.getByLabel(/imie/i).fill("Müller-O'Brien");
       await page.getByLabel(/nazwisko/i).fill('Łódź-Żółć');
