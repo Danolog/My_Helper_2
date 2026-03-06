@@ -115,6 +115,7 @@ jobs:
           path: |
             playwright-report/
             test-results.json
+            tests/.auth/*.png
           retention-days: 7
 
   e2e-full:
