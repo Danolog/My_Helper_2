@@ -74,18 +74,14 @@ test.describe('Flow 1: Authentication', () => {
       const dalej = page.getByRole('button', { name: /dalej/i });
       await expect(dalej).toBeVisible({ timeout: 10000 });
       await dalej.click();
-      // Step 2 - fill form (wait for form fields to be ready)
-      await page.waitForSelector('#name', { state: 'visible', timeout: 10000 });
-      await page.waitForFunction(() => {
-        const input = document.querySelector('#name') as HTMLInputElement | null;
-        const btn = document.querySelector('button[type="submit"]');
-        return input !== null && btn !== null;
-      }, { timeout: 10000 });
+      // Step 2 - fill form (wait for form to be fully rendered and interactive)
+      await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
+      await page.waitForTimeout(500);
       await page.fill('#name', TEST_USER.name);
       await page.fill('#email', TEST_USER.email);
       await page.fill('#password', TEST_USER.password);
       await page.fill('#confirmPassword', TEST_USER.password);
-      await page.locator('button[type="submit"]').click();
+      await page.locator('form button[type="submit"]').click();
       // Should see success or redirect (UI text has no diacritics: "Konto utworzone!" / "Konto zostalo utworzone pomyslnie!")
       await expect(
         page.getByText(/konto.*utworzone/i).first().or(page.locator('[href="/dashboard"]')).first()
