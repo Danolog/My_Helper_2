@@ -82,7 +82,7 @@ test.describe('Flow 1: Authentication', () => {
       await page.fill('#email', TEST_USER.email);
       await page.fill('#password', TEST_USER.password);
       await page.fill('#confirmPassword', TEST_USER.password);
-      await page.keyboard.press('Enter');
+      await page.locator('button[type="submit"]').click();
       // Should see success or redirect (UI text has no diacritics: "Konto utworzone!" / "Konto zostalo utworzone pomyslnie!")
       await expect(
         page.getByText(/konto.*utworzone/i).first().or(page.locator('[href="/dashboard"]')).first()
@@ -92,7 +92,8 @@ test.describe('Flow 1: Authentication', () => {
     test('should login with valid credentials and redirect to dashboard', { tag: '@smoke' }, async ({ page }) => {
       await page.goto('/login');
       await fillLoginForm(page, SEEDED_OWNER.email, SEEDED_OWNER.password);
-      await page.keyboard.press('Enter');
+      // Click submit button (hydration already confirmed by fillLoginForm)
+      await page.locator('button[type="submit"]').click();
       await expect(page).toHaveURL(/\/dashboard/, { timeout: 30000 });
     });
 
@@ -145,7 +146,7 @@ test.describe('Flow 1: Authentication', () => {
     test('should show validation errors on empty login form', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
       await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
-      await page.keyboard.press('Enter');
+      await page.locator('button[type="submit"]').click();
       // At least one validation message should appear (UI: "Wpisz adres email..." / "Wpisz haslo...")
       await expect(
         page.getByText(/wymagane|required|wpisz|email|has[lł]o/i).first()
@@ -155,7 +156,7 @@ test.describe('Flow 1: Authentication', () => {
     test('should validate email format on login', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
       await fillLoginForm(page, 'not-an-email', 'SomePass123');
-      await page.keyboard.press('Enter');
+      await page.locator('button[type="submit"]').click();
       // UI: "Nieprawidlowy format email..." (no diacritics)
       await expect(
         page.getByText(/email|format|prawidl/i).first()
@@ -172,7 +173,7 @@ test.describe('Flow 1: Authentication', () => {
       await page.fill('#email', 'test@example.com');
       await page.fill('#password', 'Password123!');
       await page.fill('#confirmPassword', 'DifferentPassword123!');
-      await page.keyboard.press('Enter');
+      await page.locator('button[type="submit"]').click();
       // UI: "Hasla nie sa identyczne..." (no diacritics)
       await expect(
         page.getByText(/has[lł]a|nie pasuj|identyczne|mismatch|zgodne/i).first()
@@ -189,7 +190,7 @@ test.describe('Flow 1: Authentication', () => {
       await page.fill('#email', 'test@example.com');
       await page.fill('#password', 'short');
       await page.fill('#confirmPassword', 'short');
-      await page.keyboard.press('Enter');
+      await page.locator('button[type="submit"]').click();
       // UI: "Haslo jest za krotkie. Wpisz co najmniej 8 znakow" (no diacritics)
       await expect(
         page.getByText(/minimum|8|znak[oó]w|characters|za kr[oó]tkie/i).first()
@@ -223,7 +224,7 @@ test.describe('Flow 1: Authentication', () => {
     test('should show loading state during login', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
       await fillLoginForm(page, SEEDED_OWNER.email, SEEDED_OWNER.password);
-      await page.keyboard.press('Enter');
+      await page.locator('button[type="submit"]').click();
       // Button should show loading state (disabled or text change)
       // UI: "Logowanie..." / "Ladowanie..." (no diacritics)
       await expect(
@@ -239,7 +240,7 @@ test.describe('Flow 1: Authentication', () => {
     test('should handle special characters in email', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
       await fillLoginForm(page, 'user+special@example.com', 'TestPassword123!');
-      await page.keyboard.press('Enter');
+      await page.locator('button[type="submit"]').click();
       // Should either login or show proper error — NOT crash
       await expect(
         page.locator('body')
@@ -261,7 +262,7 @@ test.describe('Flow 1: Authentication', () => {
       await page.waitForURL('**/login**', { timeout: 10000 });
       // Login with seeded credentials (guaranteed to exist)
       await fillLoginForm(page, SEEDED_OWNER.email, SEEDED_OWNER.password);
-      await page.keyboard.press('Enter');
+      await page.locator('button[type="submit"]').click();
       // Should redirect back to the originally requested page (or dashboard)
       await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
     });
