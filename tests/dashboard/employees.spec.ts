@@ -20,9 +20,11 @@ async function navigateToEmployees(page: Page) {
 
 async function openAddEmployeeForm(page: Page) {
   await navigateToEmployees(page);
+  // Wait for hydration before clicking Next.js Link
+  await page.waitForTimeout(500);
   await page.getByRole('link', { name: /dodaj pracownika/i }).click();
-  // Wait for the add employee page/form to be ready
-  await page.waitForLoadState('domcontentloaded');
+  // Wait for navigation to /employees/add and form to render
+  await page.waitForURL(/\/employees\/add/, { timeout: 15000 });
   await page.getByLabel(/imie/i).or(page.locator('#edit-firstName')).or(page.locator('input[name="firstName"]')).first()
     .waitFor({ state: 'visible', timeout: 15000 });
 }
