@@ -20,7 +20,7 @@ async function fillLoginForm(page: Page, email: string, password: string) {
   await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
   // Wait for React hydration — button must be enabled (not disabled during SSR)
   await page.getByRole('button', { name: /^zaloguj sie$/i }).waitFor({ state: 'visible', timeout: 10000 });
-  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+  await page.waitForLoadState('domcontentloaded');
   await page.fill('#email', email);
   await page.fill('#password', password);
 }

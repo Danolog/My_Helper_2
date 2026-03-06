@@ -131,7 +131,7 @@ test.describe('Flow 3: Services & Categories', () => {
     test('should delete a category with confirmation', { tag: '@full' }, async ({ page }) => {
       await navigateToServices(page);
       await page.getByTestId('tab-categories').click();
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('domcontentloaded');
 
       const deleteBtn = page.locator('[data-testid^="delete-category-"]').first();
       await deleteBtn.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
@@ -141,7 +141,7 @@ test.describe('Flow 3: Services & Categories', () => {
         await confirmBtn.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
         if (await confirmBtn.isVisible()) {
           await confirmBtn.click();
-          await page.waitForLoadState('networkidle');
+          await page.waitForLoadState('domcontentloaded');
         }
       }
     });

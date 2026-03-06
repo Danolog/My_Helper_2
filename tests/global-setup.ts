@@ -24,14 +24,9 @@ async function globalSetup(config: FullConfig) {
       await page.fill('#password', OWNER.password);
 
       await Promise.all([
-        page.waitForResponse(
-          resp => resp.url().includes('/api/auth/') && resp.status() < 400,
-          { timeout: 30000 },
-        ),
+        page.waitForURL('**/dashboard/**', { timeout: 30000 }),
         page.getByRole('button', { name: /^zaloguj sie$/i }).click(),
       ]);
-
-      await page.waitForURL('**/dashboard/**', { timeout: 30000 });
       await context.storageState({ path: path.join(authDir, 'owner.json') });
       console.log(`[global-setup] Owner login succeeded (attempt ${attempt})`);
       await context.close();
