@@ -15,15 +15,16 @@ test.describe('Production Health Checks', () => {
 
   test('should load the login page with form', { tag: '@production' }, async ({ page }) => {
     await page.goto('/login');
-    await expect(page.locator('#email')).toBeVisible();
+    // Wait for client component hydration (session check shows "Ladowanie..." first)
+    await expect(page.locator('#email')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('#password')).toBeVisible();
     await expect(page.getByRole('button', { name: /zaloguj/i })).toBeVisible();
   });
 
   test('should load the registration page', { tag: '@production' }, async ({ page }) => {
     await page.goto('/register');
-    await expect(page.getByText(/basic/i)).toBeVisible();
-    await expect(page.getByText(/pro/i)).toBeVisible();
+    await expect(page.getByRole('heading', { name: /basic/i })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole('heading', { name: /pro/i })).toBeVisible();
   });
 
   test('should return 200 from health endpoint', { tag: '@production' }, async ({ request }) => {
