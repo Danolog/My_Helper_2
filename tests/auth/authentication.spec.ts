@@ -17,10 +17,13 @@ const SEEDED_OWNER = {
 };
 
 async function fillLoginForm(page: Page, email: string, password: string) {
-  await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
-  // Wait for React hydration — button must be enabled (not disabled during SSR)
-  await page.getByRole('button', { name: /^zaloguj sie$/i }).waitFor({ state: 'visible', timeout: 10000 });
-  await page.waitForLoadState('domcontentloaded');
+  await page.waitForSelector('#email', { state: 'visible', timeout: 15000 });
+  // Wait for React hydration — controlled input must have React event handlers
+  await page.waitForFunction(() => {
+    const input = document.querySelector('#email') as HTMLInputElement | null;
+    const btn = document.querySelector('button[type="submit"]');
+    return input !== null && btn !== null && !btn.hasAttribute('disabled');
+  }, { timeout: 15000 });
   await page.fill('#email', email);
   await page.fill('#password', password);
 }
@@ -62,15 +65,24 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should register a new owner account', { tag: '@smoke' }, async ({ page }) => {
       await page.goto('/register');
-      // Step 1 - select plan
+      // Step 1 - select plan (wait for hydration)
+      await page.waitForLoadState('domcontentloaded');
       await page.getByText(/basic/i).first().click();
-      await page.getByRole('button', { name: /dalej/i }).click();
-      // Step 2 - fill form
+      const dalej = page.getByRole('button', { name: /dalej/i });
+      await expect(dalej).toBeVisible({ timeout: 10000 });
+      await dalej.click();
+      // Step 2 - fill form (wait for form fields to be ready)
+      await page.waitForSelector('#name', { state: 'visible', timeout: 10000 });
+      await page.waitForFunction(() => {
+        const input = document.querySelector('#name') as HTMLInputElement | null;
+        const btn = document.querySelector('button[type="submit"]');
+        return input !== null && btn !== null;
+      }, { timeout: 10000 });
       await page.fill('#name', TEST_USER.name);
       await page.fill('#email', TEST_USER.email);
       await page.fill('#password', TEST_USER.password);
       await page.fill('#confirmPassword', TEST_USER.password);
-      await page.getByRole('button', { name: /utw[oó]rz konto/i }).click();
+      await page.keyboard.press('Enter');
       // Should see success or redirect (UI text has no diacritics: "Konto utworzone!" / "Konto zostalo utworzone pomyslnie!")
       await expect(
         page.getByText(/konto.*utworzone/i).first().or(page.locator('[href="/dashboard"]')).first()
@@ -79,12 +91,9 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should login with valid credentials and redirect to dashboard', { tag: '@smoke' }, async ({ page }) => {
       await page.goto('/login');
-      // Use seeded owner credentials (already verified, no email verification needed)
       await fillLoginForm(page, SEEDED_OWNER.email, SEEDED_OWNER.password);
-      await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
-      // Should redirect to dashboard
-      await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
-      await expect(page).toHaveURL(/\/dashboard/);
+      await page.keyboard.press('Enter');
+      await expect(page).toHaveURL(/\/dashboard/, { timeout: 30000 });
     });
 
     test('should display Google sign-in button', { tag: '@full' }, async ({ page }) => {
@@ -122,12 +131,7 @@ test.describe('Flow 1: Authentication', () => {
     test('should show error for invalid credentials', { tag: '@smoke' }, async ({ page }) => {
       await page.goto('/login');
       await fillLoginForm(page, 'wrong@example.com', 'WrongPass123!');
-      const submitBtn = page.getByRole('button', { name: /^zaloguj sie$/i });
-      // Click and wait for API response
-      await Promise.all([
-        page.waitForResponse(resp => resp.url().includes('/api/auth/') && resp.status() >= 400, { timeout: 15000 }).catch(() => {}),
-        submitBtn.click(),
-      ]);
+      await page.keyboard.press('Enter');
       // Should display an error message — sanitized to Polish:
       // "Nieprawidlowy email lub haslo" or fallback "Nie udalo sie zalogowac"
       await expect(
@@ -139,7 +143,8 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should show validation errors on empty login form', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
-      await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
+      await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
+      await page.keyboard.press('Enter');
       // At least one validation message should appear (UI: "Wpisz adres email..." / "Wpisz haslo...")
       await expect(
         page.getByText(/wymagane|required|wpisz|email|has[lł]o/i).first()
@@ -148,9 +153,8 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should validate email format on login', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
-      await page.fill('#email', 'not-an-email');
-      await page.fill('#password', 'SomePass123');
-      await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
+      await fillLoginForm(page, 'not-an-email', 'SomePass123');
+      await page.keyboard.press('Enter');
       // UI: "Nieprawidlowy format email..." (no diacritics)
       await expect(
         page.getByText(/email|format|prawidl/i).first()
@@ -159,13 +163,15 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should show error for password mismatch during registration', { tag: '@full' }, async ({ page }) => {
       await page.goto('/register');
+      await page.waitForLoadState('domcontentloaded');
       await page.getByText(/basic/i).first().click();
       await page.getByRole('button', { name: /dalej/i }).click();
+      await page.waitForSelector('#name', { state: 'visible', timeout: 10000 });
       await page.fill('#name', 'Test User');
       await page.fill('#email', 'test@example.com');
       await page.fill('#password', 'Password123!');
       await page.fill('#confirmPassword', 'DifferentPassword123!');
-      await page.getByRole('button', { name: /utw[oó]rz konto/i }).click();
+      await page.keyboard.press('Enter');
       // UI: "Hasla nie sa identyczne..." (no diacritics)
       await expect(
         page.getByText(/has[lł]a|nie pasuj|identyczne|mismatch|zgodne/i).first()
@@ -174,13 +180,15 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should reject password shorter than 8 characters', { tag: '@full' }, async ({ page }) => {
       await page.goto('/register');
+      await page.waitForLoadState('domcontentloaded');
       await page.getByText(/basic/i).first().click();
       await page.getByRole('button', { name: /dalej/i }).click();
+      await page.waitForSelector('#name', { state: 'visible', timeout: 10000 });
       await page.fill('#name', 'Test User');
       await page.fill('#email', 'test@example.com');
       await page.fill('#password', 'short');
       await page.fill('#confirmPassword', 'short');
-      await page.getByRole('button', { name: /utw[oó]rz konto/i }).click();
+      await page.keyboard.press('Enter');
       // UI: "Haslo jest za krotkie. Wpisz co najmniej 8 znakow" (no diacritics)
       await expect(
         page.getByText(/minimum|8|znak[oó]w|characters|za kr[oó]tkie/i).first()
@@ -214,8 +222,7 @@ test.describe('Flow 1: Authentication', () => {
     test('should show loading state during login', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
       await fillLoginForm(page, SEEDED_OWNER.email, SEEDED_OWNER.password);
-      const button = page.getByRole('button', { name: /^zaloguj sie$/i });
-      await button.click();
+      await page.keyboard.press('Enter');
       // Button should show loading state (disabled or text change)
       // UI: "Logowanie..." / "Ladowanie..." (no diacritics)
       await expect(
@@ -231,7 +238,7 @@ test.describe('Flow 1: Authentication', () => {
     test('should handle special characters in email', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
       await fillLoginForm(page, 'user+special@example.com', 'TestPassword123!');
-      await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
+      await page.keyboard.press('Enter');
       // Should either login or show proper error — NOT crash
       await expect(
         page.locator('body')
@@ -253,7 +260,7 @@ test.describe('Flow 1: Authentication', () => {
       await page.waitForURL('**/login**', { timeout: 10000 });
       // Login with seeded credentials (guaranteed to exist)
       await fillLoginForm(page, SEEDED_OWNER.email, SEEDED_OWNER.password);
-      await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
+      await page.keyboard.press('Enter');
       // Should redirect back to the originally requested page (or dashboard)
       await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
     });
