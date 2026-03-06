@@ -18,12 +18,12 @@ const SEEDED_OWNER = {
 
 async function fillLoginForm(page: Page, email: string, password: string) {
   await page.waitForSelector('#email', { state: 'visible', timeout: 15000 });
-  // Wait for React hydration — controlled input must have React event handlers
-  await page.waitForFunction(() => {
-    const input = document.querySelector('#email') as HTMLInputElement | null;
-    const btn = document.querySelector('button[type="submit"]');
-    return input !== null && btn !== null && !btn.hasAttribute('disabled');
-  }, { timeout: 15000 });
+  // Wait for React hydration — the component starts with sessionPending=true
+  // which renders a disabled "Ladowanie..." button (no form). Once hydration
+  // completes and session check finishes, the full form with submit button renders.
+  await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
+  // Extra wait to ensure React event handlers are attached after hydration
+  await page.waitForTimeout(500);
   await page.fill('#email', email);
   await page.fill('#password', password);
 }
