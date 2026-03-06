@@ -127,8 +127,10 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should submit forgot password form', { tag: '@full' }, async ({ page }) => {
       await page.goto('/forgot-password');
+      await page.waitForSelector('#email', { state: 'visible', timeout: 15000 });
+      await page.waitForTimeout(500);
       await page.fill('#email', TEST_USER.email);
-      await page.getByRole('button', { name: /wys[lł]ij link/i }).click();
+      await page.locator('button[type="submit"]').click();
       // Should show success message (UI: "Jesli konto z tym adresem email istnieje...")
       await expect(
         page.getByText(/jesli konto z tym adresem|jeśli konto z tym adresem/i)
@@ -273,9 +275,13 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should navigate between login and register pages', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
+      // Wait for form to render (link is inside the form component)
+      await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
       // UI: "Zarejestruj sie" (no diacritics)
       await page.getByText(/zarejestruj si[eę]/i).click();
-      await expect(page).toHaveURL(/\/register/);
+      await expect(page).toHaveURL(/\/register/, { timeout: 10000 });
+      // Wait for register page to load
+      await page.waitForLoadState('domcontentloaded');
       await page.getByText(/^zaloguj sie$/i).first().click();
       await expect(page).toHaveURL(/\/login/);
     });

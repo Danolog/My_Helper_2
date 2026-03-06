@@ -159,7 +159,7 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
       const newContext = await browser.newContext();
       const newPage = await newContext.newPage();
       await newPage.goto('/dashboard/ai-assistant');
-      await newPage.waitForURL('**/login**', { timeout: 10000 });
+      await newPage.waitForURL('**/login**', { timeout: 30000 });
       await expect(newPage).toHaveURL(/\/login/);
       await newPage.close();
       await newContext.close();

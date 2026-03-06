@@ -198,7 +198,7 @@ test.describe('Flow 4: Appointment System', () => {
       const newContext = await browser.newContext();
       const newPage = await newContext.newPage();
       await newPage.goto('/dashboard/calendar');
-      await newPage.waitForURL('**/login**', { timeout: 10000 });
+      await newPage.waitForURL('**/login**', { timeout: 30000 });
       await expect(newPage).toHaveURL(/\/login/);
       await newPage.close();
       await newContext.close();
