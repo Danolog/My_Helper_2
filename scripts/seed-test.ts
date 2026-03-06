@@ -18,6 +18,7 @@ import {
   services,
   serviceCategories,
   clients,
+  subscriptionPlans,
 } from "../src/lib/schema";
 
 const connectionString = process.env.POSTGRES_URL;
@@ -265,6 +266,56 @@ async function seed() {
   }
 
   console.log("[seed-test] Created 2 clients");
+
+  // 7. Create subscription plans (needed for registration flow)
+  const planData = [
+    {
+      id: "00000000-0000-0000-0000-p10000000001",
+      name: "Basic",
+      slug: "basic",
+      priceMonthly: "49.00",
+      featuresJson: [
+        "Kalendarz wizyt",
+        "Baza klientow",
+        "Zarzadzanie pracownikami",
+        "Raporty podstawowe",
+        "Powiadomienia SMS/email",
+      ],
+    },
+    {
+      id: "00000000-0000-0000-0000-p10000000002",
+      name: "Pro",
+      slug: "pro",
+      priceMonthly: "149.00",
+      featuresJson: [
+        "Wszystko z Basic",
+        "Asystent AI glosowy",
+        "AI Business Intelligence",
+        "Generator tresci AI",
+        "Zaawansowane raporty",
+        "Rekomendacje AI",
+      ],
+    },
+  ];
+
+  for (const plan of planData) {
+    await db
+      .insert(subscriptionPlans)
+      .values({
+        id: plan.id,
+        name: plan.name,
+        slug: plan.slug,
+        priceMonthly: plan.priceMonthly,
+        featuresJson: plan.featuresJson,
+        isActive: true,
+      })
+      .onConflictDoUpdate({
+        target: subscriptionPlans.slug,
+        set: { name: plan.name, priceMonthly: plan.priceMonthly, featuresJson: plan.featuresJson, isActive: true },
+      });
+  }
+
+  console.log("[seed-test] Created 2 subscription plans (Basic + Pro)");
 
   console.log("[seed-test] Seed completed successfully!");
   await sql.end();
