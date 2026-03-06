@@ -270,7 +270,7 @@ async function seed() {
   // 7. Create subscription plans (needed for registration flow)
   const planData = [
     {
-      id: "00000000-0000-0000-0000-p10000000001",
+      id: "00000000-0000-0000-0000-a10000000001",
       name: "Basic",
       slug: "basic",
       priceMonthly: "49.00",
@@ -283,7 +283,7 @@ async function seed() {
       ],
     },
     {
-      id: "00000000-0000-0000-0000-p10000000002",
+      id: "00000000-0000-0000-0000-a10000000002",
       name: "Pro",
       slug: "pro",
       priceMonthly: "149.00",
