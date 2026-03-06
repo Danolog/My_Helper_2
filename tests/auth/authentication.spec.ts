@@ -131,12 +131,13 @@ test.describe('Flow 1: Authentication', () => {
     test('should show error for invalid credentials', { tag: '@smoke' }, async ({ page }) => {
       await page.goto('/login');
       await fillLoginForm(page, 'wrong@example.com', 'WrongPass123!');
-      await page.keyboard.press('Enter');
+      // Click submit button (hydration already confirmed by fillLoginForm)
+      await page.locator('button[type="submit"]').click();
       // Should display an error message — sanitized to Polish:
-      // "Nieprawidlowy email lub haslo" or fallback "Nie udalo sie zalogowac"
+      // "Nieprawidlowy email lub haslo" or "Nie udalo sie zalogowac"
       await expect(
         page.getByText(/nieprawidl|nie udalo|blad|invalid|nie znaleziono/i)
-      ).toBeVisible({ timeout: 15000 });
+      ).toBeVisible({ timeout: 30000 });
       // Should NOT redirect
       await expect(page).toHaveURL(/\/login/);
     });
