@@ -17,9 +17,8 @@ async function globalSetup(config: FullConfig) {
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
-      await page.goto(`${baseURL}/login`, { waitUntil: 'networkidle', timeout: 60000 });
-      await page.waitForSelector('#email', { state: 'visible', timeout: 15000 });
-      await page.waitForLoadState('networkidle');
+      await page.goto(`${baseURL}/login`, { waitUntil: 'load', timeout: 60000 });
+      await page.waitForSelector('#email', { state: 'visible', timeout: 30000 });
 
       await page.fill('#email', OWNER.email);
       await page.fill('#password', OWNER.password);
