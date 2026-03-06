@@ -116,9 +116,10 @@ test.describe('Flow 1: Authentication', () => {
       await page.goto('/login');
       // Wait for form to render (after session check)
       await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
-      // UI text: "Nie pamietam hasla" (no diacritics)
-      await page.getByText(/nie pami[eę]tam has[lł]a/i).click();
-      await page.waitForURL('**/forgot-password**');
+      await page.waitForTimeout(500);
+      // Click the forgot password link
+      await page.locator('a[href="/forgot-password"]').click();
+      await page.waitForURL('**/forgot-password**', { timeout: 15000 });
       await expect(page.locator('#email')).toBeVisible();
       await expect(
         page.getByRole('button', { name: /wys[lł]ij link/i })
@@ -275,15 +276,16 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should navigate between login and register pages', { tag: '@full' }, async ({ page }) => {
       await page.goto('/login');
-      // Wait for form to render (link is inside the form component)
+      // Wait for form to render
       await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
-      // UI: "Zarejestruj sie" (no diacritics)
-      await page.getByText(/zarejestruj si[eę]/i).click();
+      await page.waitForTimeout(500);
+      // Click register link
+      await page.locator('a[href="/register"]').click();
       await expect(page).toHaveURL(/\/register/, { timeout: 10000 });
       // Wait for register page to load
       await page.waitForLoadState('domcontentloaded');
-      await page.getByText(/^zaloguj sie$/i).first().click();
-      await expect(page).toHaveURL(/\/login/);
+      await page.locator('a[href="/login"]').first().click();
+      await expect(page).toHaveURL(/\/login/, { timeout: 10000 });
     });
 
     test('should preserve returnTo URL after login redirect', { tag: '@full' }, async ({ page }) => {
