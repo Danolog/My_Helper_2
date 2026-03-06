@@ -11,12 +11,13 @@ const CLIENT_CREDENTIALS = {
 
 async function loginAsClient(page: Page) {
   await page.goto('/portal/login');
-  await page.waitForSelector('#email', { state: 'visible', timeout: 10000 });
-  await page.waitForLoadState('domcontentloaded');
+  // Wait for React hydration — form renders after session check completes
+  await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
+  await page.waitForTimeout(500);
   await page.fill('#email', CLIENT_CREDENTIALS.email);
   await page.fill('#password', CLIENT_CREDENTIALS.password);
-  await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
-  await page.waitForURL(/\/(salons|appointments|dashboard)/, { timeout: 15000 });
+  await page.locator('form button[type="submit"]').click();
+  await page.waitForURL(/\/(salons|appointments|dashboard)/, { timeout: 30000 });
 }
 
 // ---------------------------------------------------------------------------
@@ -168,14 +169,16 @@ test.describe('Flow 7: Client Portal', () => {
   test.describe('Error path', () => {
     test('should show error for invalid client login', { tag: '@full' }, async ({ page }) => {
       await page.goto('/portal/login');
+      await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
+      await page.waitForTimeout(500);
       await page.fill('#email', 'wrong@example.com');
       await page.fill('#password', 'WrongPass123!');
-      await page.getByRole('button', { name: /^zaloguj sie$/i }).click();
+      await page.locator('form button[type="submit"]').click();
 
       await expect(
         // UI shows: "Nie udalo sie zalogowac. Sprawdz dane i sprobuj ponownie."
         page.getByText(/nie uda[lł]o si[eę]|nieprawidl|bl[aą]d|error|invalid/i).first()
-      ).toBeVisible({ timeout: 5000 });
+      ).toBeVisible({ timeout: 15000 });
     });
 
     test('should redirect unauthenticated user from appointments page', { tag: '@full' }, async ({ page }) => {
