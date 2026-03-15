@@ -232,6 +232,15 @@
   --shadow-warm-xl: 0 0 40px oklch(0.72 0.10 55 / 0.15);
 }
 
+/* Hide scrollbar but keep scrolling */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* ==================== */
 /* Accessibility        */
 /* ==================== */
