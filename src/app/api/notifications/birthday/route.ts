@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { clients, notifications, salons } from "@/lib/schema";
-import { eq, sql, and, isNotNull, inArray } from "drizzle-orm";
+import { eq, sql, and, isNotNull, inArray, like } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
@@ -65,7 +65,7 @@ export async function GET(request: Request) {
         and(
           eq(clients.salonId, salonId),
           isNotNull(clients.birthday),
-          sql`${clients.birthday} LIKE ${"%" + todayMonthDay}`
+          like(clients.birthday, `%${todayMonthDay}`)
         )
       );
 
@@ -157,7 +157,7 @@ export async function POST(request: Request) {
         and(
           eq(clients.salonId, salonId),
           isNotNull(clients.birthday),
-          sql`${clients.birthday} LIKE ${"%" + todayMonthDay}`
+          like(clients.birthday, `%${todayMonthDay}`)
         )
       );
 
