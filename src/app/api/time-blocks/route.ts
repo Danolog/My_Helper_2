@@ -4,6 +4,7 @@ import { timeBlocks, employees } from "@/lib/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, createTimeBlockSchema } from "@/lib/api-validation";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 
 import { logger } from "@/lib/logger";
 // GET /api/time-blocks?employeeId=xxx&startDate=xxx&endDate=xxx
@@ -71,6 +72,15 @@ export async function GET(request: Request) {
 // POST /api/time-blocks - Create a new time block (vacation, break, etc.)
 export async function POST(request: Request) {
   try {
+    const ip = getClientIp(request);
+    const rateLimitResult = apiRateLimit.check(ip);
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
+      );
+    }
+
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
     const body = await request.json();

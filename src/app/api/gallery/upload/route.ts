@@ -3,11 +3,21 @@ import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
 import { logger } from "@/lib/logger";
 // POST /api/gallery/upload - Upload a photo file
 export async function POST(request: Request) {
   try {
+    const ip = getClientIp(request);
+    const rateLimitResult = strictRateLimit.check(ip);
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
+      );
+    }
+
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
     const formData = await request.formData();
