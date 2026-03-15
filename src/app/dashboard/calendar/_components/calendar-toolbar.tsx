@@ -54,7 +54,7 @@ export function CalendarToolbar({
       </div>
 
       {/* Navigation & Controls */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
         {/* New Appointment button */}
         <Button
           size="sm"
@@ -62,7 +62,8 @@ export function CalendarToolbar({
           data-testid="new-appointment-btn"
         >
           <Plus className="h-4 w-4 mr-1" />
-          Nowa wizyta
+          <span className="hidden sm:inline">Nowa wizyta</span>
+          <span className="sm:hidden">Nowa</span>
         </Button>
 
         {/* Block Time button (Feature #36) */}
@@ -73,7 +74,8 @@ export function CalendarToolbar({
           data-testid="block-time-btn"
         >
           <Ban className="h-4 w-4 mr-1" />
-          Zablokuj czas
+          <span className="hidden sm:inline">Zablokuj czas</span>
+          <span className="sm:hidden">Blokuj</span>
         </Button>
 
         {/* Employee filter (Feature #33: individual calendar view) */}
@@ -81,7 +83,7 @@ export function CalendarToolbar({
           value={selectedEmployeeFilter}
           onValueChange={onEmployeeFilterChange}
         >
-          <SelectTrigger className="w-[180px] h-8 text-sm" data-testid="employee-filter">
+          <SelectTrigger className="w-[140px] sm:w-[180px] h-8 text-sm" data-testid="employee-filter">
             <SelectValue placeholder="Filtruj pracownika" />
           </SelectTrigger>
           <SelectContent>
@@ -105,8 +107,8 @@ export function CalendarToolbar({
         {/* Employees link */}
         <Button variant="outline" size="sm" asChild>
           <Link href="/dashboard/employees">
-            <Users className="h-4 w-4 mr-1" />
-            Pracownicy
+            <Users className="h-4 w-4 sm:mr-1" />
+            <span className="hidden sm:inline">Pracownicy</span>
           </Link>
         </Button>
 
@@ -117,8 +119,8 @@ export function CalendarToolbar({
           onClick={onToggleColorMode}
           title={colorMode === "status" ? "Koloruj wg statusu" : "Koloruj wg pracownika"}
         >
-          <Palette className="h-4 w-4 mr-1" />
-          {colorMode === "status" ? "Status" : "Pracownik"}
+          <Palette className="h-4 w-4 sm:mr-1" />
+          <span className="hidden sm:inline">{colorMode === "status" ? "Status" : "Pracownik"}</span>
         </Button>
 
         {/* View toggle */}
@@ -141,17 +143,18 @@ export function CalendarToolbar({
           </Button>
         </div>
 
-        <div className="w-px h-6 bg-border mx-1" />
-
-        <Button variant="outline" size="sm" onClick={onGoToPrevious}>
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <Button variant="outline" size="sm" onClick={onGoToToday}>
-          Dzisiaj
-        </Button>
-        <Button variant="outline" size="sm" onClick={onGoToNext}>
-          <ChevronRight className="h-4 w-4" />
-        </Button>
+        {/* Navigation */}
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" onClick={onGoToPrevious}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={onGoToToday}>
+            Dzisiaj
+          </Button>
+          <Button variant="outline" size="sm" onClick={onGoToNext}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
     </div>
   );
