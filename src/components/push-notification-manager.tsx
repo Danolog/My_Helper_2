@@ -24,7 +24,7 @@ export function PushNotificationManager() {
     subscriptionCount: 0,
   });
 
-  const checkSubscriptionStatus = useCallback(async () => {
+  const checkSubscriptionStatus = useCallback(async (signal?: AbortSignal) => {
     try {
       // Check browser support
       if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
@@ -40,29 +40,36 @@ export function PushNotificationManager() {
       const permission = Notification.permission;
 
       // Check if we have subscriptions on the server
-      const res = await fetch("/api/push/subscribe");
+      const res = await fetch("/api/push/subscribe", signal ? { signal } : {});
       const data = await res.json();
 
-      setState((s) => ({
-        ...s,
-        isSupported: true,
-        isSubscribed: data.success ? data.data.isSubscribed : false,
-        subscriptionCount: data.success ? data.data.count : 0,
-        permission,
-        isLoading: false,
-      }));
-    } catch {
-      setState((s) => ({
-        ...s,
-        isSupported: true,
-        isLoading: false,
-        error: "Blad sprawdzania statusu powiadomien",
-      }));
+      if (!signal?.aborted) {
+        setState((s) => ({
+          ...s,
+          isSupported: true,
+          isSubscribed: data.success ? data.data.isSubscribed : false,
+          subscriptionCount: data.success ? data.data.count : 0,
+          permission,
+          isLoading: false,
+        }));
+      }
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
+      if (!signal?.aborted) {
+        setState((s) => ({
+          ...s,
+          isSupported: true,
+          isLoading: false,
+          error: "Blad sprawdzania statusu powiadomien",
+        }));
+      }
     }
   }, []);
 
   useEffect(() => {
-    checkSubscriptionStatus();
+    const controller = new AbortController();
+    checkSubscriptionStatus(controller.signal);
+    return () => controller.abort();
   }, [checkSubscriptionStatus]);
 
   const subscribe = async () => {

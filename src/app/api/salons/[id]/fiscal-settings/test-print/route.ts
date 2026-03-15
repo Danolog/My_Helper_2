@@ -4,6 +4,7 @@ import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import type { FiscalPrinterSettings } from "../route";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { isValidUuid } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -25,6 +26,13 @@ export async function POST(
     if (isAuthError(authResult)) return authResult;
 
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidłowy ID" },
+        { status: 400 }
+      );
+    }
 
     // Fetch current salon settings
     const [salon] = await db

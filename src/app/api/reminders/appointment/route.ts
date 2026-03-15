@@ -4,6 +4,7 @@ import { appointments, clients, salons, services, employees } from "@/lib/schema
 import { and, eq, gte, lte, isNull, inArray } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
 import { requireCronSecret } from "@/lib/auth-middleware";
+import { isValidUuid } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -43,6 +44,12 @@ export async function POST(request: Request) {
 
     // Optionally filter by salon
     if (salonId) {
+      if (!isValidUuid(salonId)) {
+        return NextResponse.json(
+          { success: false, error: "Nieprawidłowy salonId" },
+          { status: 400 }
+        );
+      }
       conditions.push(eq(appointments.salonId, salonId));
     }
 
@@ -199,6 +206,13 @@ export async function GET(request: Request) {
     if (!salonId) {
       return NextResponse.json(
         { success: false, error: "salonId is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidUuid(salonId)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidłowy salonId" },
         { status: 400 }
       );
     }

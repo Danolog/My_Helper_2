@@ -1,4 +1,5 @@
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { isValidUuid } from "@/lib/api-validation";
 import { isProPlan } from "@/lib/subscription";
 import { db } from "@/lib/db";
 import { scheduledPosts } from "@/lib/schema";
@@ -28,6 +29,13 @@ export async function POST(
   }
 
   const { id } = await params;
+
+  if (!isValidUuid(id)) {
+    return Response.json(
+      { success: false, error: "Nieprawidłowy ID" },
+      { status: 400 }
+    );
+  }
 
   try {
     const [post] = await db

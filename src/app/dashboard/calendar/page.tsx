@@ -1,513 +1,45 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import dynamic from "next/dynamic";
-import { useSession } from "@/lib/auth-client";
-import { Button } from "@/components/ui/button";
-import { TimeGrid } from "@/components/calendar/time-grid";
-import { WeekTimeGrid } from "@/components/calendar/week-time-grid";
-import { CalendarLegend } from "@/components/calendar/calendar-legend";
-import { getStartOfWeek, getEndOfWeek } from "@/lib/date-utils";
-import { ChevronLeft, ChevronRight, Calendar, Lock, Palette, Users, Plus, Ban } from "lucide-react";
-import { toast } from "sonner";
-import Link from "next/link";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import type { Appointment, CalendarEvent, CalendarView, Employee, TimeBlock, WorkSchedule } from "@/types/calendar";
-import { useTabSync } from "@/hooks/use-tab-sync";
-import { mutationFetch } from "@/lib/api-client";
-
-// Lazy-load dialog components (only rendered when user triggers an action)
-const RescheduleDialog = dynamic(
-  () => import("@/components/calendar/reschedule-dialog").then((m) => ({ default: m.RescheduleDialog })),
-  { ssr: false },
-);
-
-const NewAppointmentDialog = dynamic(
-  () => import("@/components/appointments/new-appointment-dialog").then((m) => ({ default: m.NewAppointmentDialog })),
-  { ssr: false },
-);
-
-const CancelAppointmentDialog = dynamic(
-  () => import("@/components/appointments/cancel-appointment-dialog").then((m) => ({ default: m.CancelAppointmentDialog })),
-  { ssr: false },
-);
-
-const CompleteAppointmentDialog = dynamic(
-  () => import("@/components/appointments/complete-appointment-dialog").then((m) => ({ default: m.CompleteAppointmentDialog })),
-  { ssr: false },
-);
-
-const BlockTimeDialog = dynamic(
-  () => import("@/components/calendar/block-time-dialog").then((m) => ({ default: m.BlockTimeDialog })),
-  { ssr: false },
-);
+import { Lock } from "lucide-react";
+import { CalendarDialogs } from "./_components/calendar-dialogs";
+import { CalendarGrid } from "./_components/calendar-grid";
+import { CalendarToolbar } from "./_components/calendar-toolbar";
+import { useCalendarData } from "./_hooks/use-calendar-data";
+import { useCalendarNavigation } from "./_hooks/use-calendar-navigation";
 
 export default function CalendarPage() {
-  const { data: session, isPending } = useSession();
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [currentView, setCurrentView] = useState<CalendarView>("day");
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [workSchedules, setWorkSchedules] = useState<WorkSchedule[]>([]);
-  const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [salonId, setSalonId] = useState<string | null>(null);
+  const nav = useCalendarNavigation();
 
-  // Fetch the user's salon
-  useEffect(() => {
-    if (!session?.user) return;
-    const controller = new AbortController();
-    async function fetchSalon() {
-      try {
-        const res = await fetch("/api/salons/mine", { signal: controller.signal });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.success && data.salon) {
-          setSalonId(data.salon.id);
-        } else {
-          setLoading(false);
-        }
-      } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") return;
-        setLoading(false);
-      }
+  const {
+    session,
+    isPending,
+    employees,
+    events,
+    workSchedules,
+    timeBlocks,
+    loading,
+    fetchAppointments,
+    fetchTimeBlocks,
+    handleConfirmReschedule,
+  } = useCalendarData({
+    currentDate: nav.currentDate,
+    currentView: nav.currentView,
+  });
+
+  // Compute filtered data
+  const { filteredEmployees, filteredEvents, filteredTimeBlocks } =
+    nav.getFilteredData(employees, events, timeBlocks);
+
+  // Wrap reschedule confirm to coordinate between data and navigation hooks
+  const onConfirmReschedule = async (notifyClient: boolean) => {
+    nav.setIsRescheduling(true);
+    const success = await handleConfirmReschedule(nav.pendingReschedule, notifyClient);
+    nav.setIsRescheduling(false);
+    if (success !== false) {
+      nav.setRescheduleDialogOpen(false);
+      nav.setPendingReschedule(null);
+      nav.setDraggedEvent(null);
     }
-    fetchSalon();
-    return () => controller.abort();
-  }, [session]);
-
-  // Employee filter: "all" shows all employees, or a specific employee ID
-  const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState<string>("all");
-
-  // Block time dialog state
-  const [blockTimeDialogOpen, setBlockTimeDialogOpen] = useState(false);
-
-  // Color mode: "status" for status-based colors, "employee" for employee-based colors
-  const [colorMode, setColorMode] = useState<"status" | "employee">("status");
-
-  // Drag & drop state
-  const [draggedEvent, setDraggedEvent] = useState<CalendarEvent | null>(null);
-
-  // Reschedule dialog state
-  const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
-  const [pendingReschedule, setPendingReschedule] = useState<{
-    event: CalendarEvent;
-    newStartTime: Date;
-    newEmployeeId: string;
-  } | null>(null);
-  const [isRescheduling, setIsRescheduling] = useState(false);
-
-  // New appointment dialog state
-  const [newAppointmentDialogOpen, setNewAppointmentDialogOpen] = useState(false);
-
-  // Schedule next appointment data (from complete dialog)
-  const [scheduleNextData, setScheduleNextData] = useState<{
-    clientId: string;
-    serviceId: string;
-    employeeId: string;
-    suggestedDate: string;
-  } | null>(null);
-
-  // Cancel appointment dialog state
-  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
-  const [cancelAppointmentId, setCancelAppointmentId] = useState<string | null>(null);
-
-  // Complete appointment dialog state
-  const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
-  const [completeAppointment, setCompleteAppointment] = useState<CalendarEvent["appointment"] | null>(null);
-  const [completeMaterials, setCompleteMaterials] = useState<Array<{id: string; product: {name: string; pricePerUnit: string | null; unit: string | null;} | null; quantityUsed: string;}>>([]);
-
-  // Fetch employees
-  const fetchEmployees = useCallback(async (signal: AbortSignal | null = null) => {
-    if (!salonId) return;
-    try {
-      const response = await fetch(`/api/employees?salonId=${salonId}&activeOnly=true`, { signal });
-      if (!response.ok) return;
-      const data = await response.json();
-      if (data.success) {
-        setEmployees(data.data);
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") return;
-      toast.error("Nie udalo sie pobrac listy pracownikow");
-    }
-  }, [salonId]);
-
-  // Fetch work schedules for all employees in the salon
-  const fetchWorkSchedules = useCallback(async (signal: AbortSignal | null = null) => {
-    if (!salonId) return;
-    try {
-      const response = await fetch(`/api/work-schedules/by-salon?salonId=${salonId}`, { signal });
-      if (!response.ok) return;
-      const data = await response.json();
-      if (data.success) {
-        setWorkSchedules(data.data);
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") return;
-    }
-  }, [salonId]);
-
-  // Fetch time blocks (vacations, breaks, etc.) for the current date/week
-  const fetchTimeBlocks = useCallback(async (signal: AbortSignal | null = null) => {
-    try {
-      let rangeStart: Date;
-      let rangeEnd: Date;
-      if (currentView === "week") {
-        rangeStart = getStartOfWeek(currentDate);
-        rangeEnd = getEndOfWeek(currentDate);
-      } else {
-        rangeStart = new Date(currentDate);
-        rangeStart.setHours(0, 0, 0, 0);
-        rangeEnd = new Date(currentDate);
-        rangeEnd.setHours(23, 59, 59, 999);
-      }
-
-      const params = new URLSearchParams({
-        startDate: rangeStart.toISOString(),
-        endDate: rangeEnd.toISOString(),
-      });
-
-      const response = await fetch(`/api/time-blocks?${params}`, { signal });
-      if (!response.ok) return;
-      const data = await response.json();
-
-      if (data.success) {
-        // Parse date strings into Date objects
-        const blocks: TimeBlock[] = data.data.map((block: TimeBlock) => ({
-          ...block,
-          startTime: new Date(block.startTime),
-          endTime: new Date(block.endTime),
-          createdAt: new Date(block.createdAt),
-        }));
-        setTimeBlocks(blocks);
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") return;
-    }
-  }, [currentDate, currentView]);
-
-  // Fetch appointments for current date/week
-  const fetchAppointments = useCallback(async (signal: AbortSignal | null = null) => {
-    if (!salonId) return;
-    try {
-      let rangeStart: Date;
-      let rangeEnd: Date;
-      if (currentView === "week") {
-        rangeStart = getStartOfWeek(currentDate);
-        rangeEnd = getEndOfWeek(currentDate);
-      } else {
-        rangeStart = new Date(currentDate);
-        rangeStart.setHours(0, 0, 0, 0);
-        rangeEnd = new Date(currentDate);
-        rangeEnd.setHours(23, 59, 59, 999);
-      }
-
-      const params = new URLSearchParams({
-        salonId: salonId!,
-        startDate: rangeStart.toISOString(),
-        endDate: rangeEnd.toISOString(),
-      });
-
-      const response = await fetch(`/api/appointments?${params}`, { signal });
-      if (!response.ok) return;
-      const data = await response.json();
-
-      if (data.success) {
-        // Transform appointments to calendar events
-        const calendarEvents: CalendarEvent[] = data.data.map((apt: Appointment) => ({
-          id: apt.id,
-          title: apt.service?.name || "Wizyta",
-          start: new Date(apt.startTime),
-          end: new Date(apt.endTime),
-          employeeId: apt.employeeId,
-          employeeColor: apt.employee?.color || "#3b82f6",
-          appointment: apt,
-        }));
-        setEvents(calendarEvents);
-      }
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") return;
-      toast.error("Nie udalo sie pobrac wizyt");
-    } finally {
-      setLoading(false);
-    }
-  }, [currentDate, currentView, salonId]);
-
-  // Initial data load - wait for salonId
-  useEffect(() => {
-    if (!salonId) return;
-    const controller = new AbortController();
-    fetchEmployees(controller.signal);
-    fetchWorkSchedules(controller.signal);
-    return () => controller.abort();
-  }, [salonId, fetchEmployees, fetchWorkSchedules]);
-
-  useEffect(() => {
-    if (!salonId) return;
-    const controller = new AbortController();
-    fetchAppointments(controller.signal);
-    fetchTimeBlocks(controller.signal);
-    return () => controller.abort();
-  }, [salonId, fetchAppointments, fetchTimeBlocks]);
-
-  // Cross-tab sync: refetch when another tab modifies appointments
-  const { notifyChange: notifyCalendarChanged } = useTabSync("appointments", fetchAppointments);
-
-  // Filtered data based on employee selection (Feature #33: individual calendar view)
-  const filteredEmployees = selectedEmployeeFilter === "all"
-    ? employees
-    : employees.filter((emp) => emp.id === selectedEmployeeFilter);
-
-  const filteredEvents = selectedEmployeeFilter === "all"
-    ? events
-    : events.filter((event) => event.employeeId === selectedEmployeeFilter);
-
-  const filteredTimeBlocks = selectedEmployeeFilter === "all"
-    ? timeBlocks
-    : timeBlocks.filter((block) => block.employeeId === selectedEmployeeFilter);
-
-  // Navigation handlers
-  const goToPrevious = () => {
-    const step = currentView === "week" ? 7 : 1;
-    setCurrentDate((prev) => {
-      const newDate = new Date(prev);
-      newDate.setDate(newDate.getDate() - step);
-      return newDate;
-    });
-  };
-
-  const goToNext = () => {
-    const step = currentView === "week" ? 7 : 1;
-    setCurrentDate((prev) => {
-      const newDate = new Date(prev);
-      newDate.setDate(newDate.getDate() + step);
-      return newDate;
-    });
-  };
-
-  const goToToday = () => {
-    setCurrentDate(new Date());
-  };
-
-  // Toggle color mode
-  const toggleColorMode = () => {
-    setColorMode((prev) => (prev === "status" ? "employee" : "status"));
-  };
-
-  // Drag handlers
-  const handleDragStart = useCallback((event: CalendarEvent) => {
-    setDraggedEvent(event);
-  }, []);
-
-  const handleDragEnd = useCallback(() => {
-    // Only clear if not opening dialog
-    if (!rescheduleDialogOpen) {
-      setDraggedEvent(null);
-    }
-  }, [rescheduleDialogOpen]);
-
-  const handleDrop = useCallback((employeeId: string, time: Date) => {
-    setDraggedEvent((current) => {
-      if (!current) return current;
-      setPendingReschedule({
-        event: current,
-        newStartTime: time,
-        newEmployeeId: employeeId,
-      });
-      setRescheduleDialogOpen(true);
-      return current;
-    });
-  }, []);
-
-  // Handle opening cancel dialog
-  const handleCancelAppointment = useCallback((appointmentId: string) => {
-    setCancelAppointmentId(appointmentId);
-    setCancelDialogOpen(true);
-  }, []);
-
-  // Handle opening complete dialog
-  const handleCompleteAppointment = useCallback(async (event: CalendarEvent) => {
-    setCompleteAppointment(event.appointment);
-    // Fetch materials for this appointment
-    try {
-      const res = await fetch(`/api/appointments/${event.id}/materials`);
-      const data = await res.json();
-      if (data.success) {
-        setCompleteMaterials(data.data.map((m: { id: string; quantityUsed: string; product: { name: string; pricePerUnit: string | null; unit: string | null } | null }) => ({
-          id: m.id,
-          product: m.product ? {
-            name: m.product.name,
-            pricePerUnit: m.product.pricePerUnit,
-            unit: m.product.unit,
-          } : null,
-          quantityUsed: m.quantityUsed,
-        })));
-      }
-    } catch {
-      setCompleteMaterials([]);
-    }
-    setCompleteDialogOpen(true);
-  }, []);
-
-  // Stable callbacks for event cancel/complete (wrapping event -> appointmentId)
-  const handleEventCancel = useCallback((event: CalendarEvent) => {
-    handleCancelAppointment(event.id);
-  }, [handleCancelAppointment]);
-
-  const handleEventComplete = useCallback((event: CalendarEvent) => {
-    handleCompleteAppointment(event);
-  }, [handleCompleteAppointment]);
-
-  // Event click handler - shows details with action buttons
-  const handleEventClick = useCallback((event: CalendarEvent) => {
-    const statusLabels: Record<string, string> = {
-      scheduled: "Zaplanowana",
-      confirmed: "Potwierdzona",
-      completed: "Zakonczona",
-      cancelled: "Anulowana",
-      no_show: "Niestawienie sie",
-    };
-
-    const clientName = event.appointment.client
-      ? `${event.appointment.client.firstName} ${event.appointment.client.lastName}`
-      : null;
-    const clientInfo = clientName
-      ? `Klient: ${clientName}`
-      : "Brak przypisanego klienta";
-    const statusInfo = `Status: ${statusLabels[event.appointment.status] || event.appointment.status}`;
-
-    // Check if the client has allergies or preferences
-    const clientAllergies = event.appointment.client?.allergies;
-    const clientPreferences = event.appointment.client?.preferences;
-    const hasAllergies = clientAllergies && clientAllergies.trim().length > 0;
-    const hasPreferences = clientPreferences && clientPreferences.trim().length > 0;
-
-    let description = `${clientInfo} | ${statusInfo}`;
-    if (hasPreferences) {
-      description += `\nPreferencje: ${clientPreferences}`;
-    }
-    if (hasAllergies) {
-      description += `\nUWAGA ALERGIE: ${clientAllergies}`;
-    }
-
-    // Show "Complete" button for completable appointments (scheduled/confirmed)
-    const isCompletable = event.appointment.status === "scheduled" || event.appointment.status === "confirmed";
-
-    if (hasAllergies) {
-      toast.warning(`Wizyta: ${event.title}`, {
-        description,
-        duration: 8000,
-        action: isCompletable ? {
-          label: "Zakoncz wizyte",
-          onClick: () => handleCompleteAppointment(event),
-        } : {
-          label: "Szczegoly",
-          onClick: () => window.location.href = `/dashboard/appointments/${event.id}`,
-        },
-      });
-    } else if (hasPreferences) {
-      toast.info(`Wizyta: ${event.title}`, {
-        description,
-        duration: 6000,
-        action: isCompletable ? {
-          label: "Zakoncz wizyte",
-          onClick: () => handleCompleteAppointment(event),
-        } : {
-          label: "Szczegoly",
-          onClick: () => window.location.href = `/dashboard/appointments/${event.id}`,
-        },
-      });
-    } else {
-      toast.info(`Wizyta: ${event.title}`, {
-        description,
-        action: isCompletable ? {
-          label: "Zakoncz wizyte",
-          onClick: () => handleCompleteAppointment(event),
-        } : {
-          label: "Szczegoly",
-          onClick: () => window.location.href = `/dashboard/appointments/${event.id}`,
-        },
-      });
-    }
-  }, [handleCompleteAppointment]);
-
-  // Confirm reschedule
-  const handleConfirmReschedule = async (notifyClient: boolean) => {
-    if (!pendingReschedule) return;
-
-    setIsRescheduling(true);
-
-    try {
-      const { event, newStartTime, newEmployeeId } = pendingReschedule;
-      const duration = new Date(event.end).getTime() - new Date(event.start).getTime();
-      const newEndTime = new Date(newStartTime.getTime() + duration);
-
-      const response = await mutationFetch(`/api/appointments/${event.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          startTime: newStartTime.toISOString(),
-          endTime: newEndTime.toISOString(),
-          employeeId: newEmployeeId,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        toast.success("Wizyta zostala przeniesiona", {
-          description: notifyClient
-            ? "Klient zostanie powiadomiony o zmianie terminu"
-            : undefined,
-        });
-        // Refresh appointments
-        fetchAppointments();
-        notifyCalendarChanged();
-      } else {
-        toast.error("Nie udalo sie przeniesc wizyty", {
-          description: data.error,
-        });
-      }
-    } catch {
-      toast.error("Wystapil blad podczas przenoszenia wizyty");
-    } finally {
-      setIsRescheduling(false);
-      setRescheduleDialogOpen(false);
-      setPendingReschedule(null);
-      setDraggedEvent(null);
-    }
-  };
-
-  // Cancel reschedule
-  const handleCancelReschedule = () => {
-    setRescheduleDialogOpen(false);
-    setPendingReschedule(null);
-    setDraggedEvent(null);
-  };
-
-  const formatDateDisplay = (date: Date) => {
-    if (currentView === "week") {
-      const weekStart = getStartOfWeek(date);
-      const weekEnd = getEndOfWeek(date);
-      const startStr = weekStart.toLocaleDateString("pl-PL", { day: "numeric", month: "short" });
-      const endStr = weekEnd.toLocaleDateString("pl-PL", { day: "numeric", month: "short", year: "numeric" });
-      return `${startStr} - ${endStr}`;
-    }
-    return date.toLocaleDateString("pl-PL", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
   };
 
   if (isPending) {
@@ -534,266 +66,88 @@ export default function CalendarPage() {
 
   return (
     <div className="container mx-auto p-6 max-w-full">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div className="flex items-center gap-4">
-          <Calendar className="w-8 h-8 text-primary" />
-          <div>
-            <h1 className="text-2xl font-bold">Kalendarz</h1>
-            <p className="text-muted-foreground text-sm">
-              Przeciagnij wizyte, aby zmienic jej termin
-            </p>
-          </div>
-        </div>
-
-        {/* Navigation & Controls */}
-        <div className="flex items-center gap-2">
-          {/* New Appointment button */}
-          <Button
-            size="sm"
-            onClick={() => setNewAppointmentDialogOpen(true)}
-            data-testid="new-appointment-btn"
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Nowa wizyta
-          </Button>
-
-          {/* Block Time button (Feature #36) */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setBlockTimeDialogOpen(true)}
-            data-testid="block-time-btn"
-          >
-            <Ban className="h-4 w-4 mr-1" />
-            Zablokuj czas
-          </Button>
-
-          {/* Employee filter (Feature #33: individual calendar view) */}
-          <Select
-            value={selectedEmployeeFilter}
-            onValueChange={setSelectedEmployeeFilter}
-          >
-            <SelectTrigger className="w-[180px] h-8 text-sm" data-testid="employee-filter">
-              <SelectValue placeholder="Filtruj pracownika" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Wszyscy pracownicy</SelectItem>
-              {employees.map((emp) => (
-                <SelectItem key={emp.id} value={emp.id}>
-                  <span className="flex items-center gap-2">
-                    {emp.color && (
-                      <span
-                        className="inline-block w-2.5 h-2.5 rounded-full"
-                        style={{ backgroundColor: emp.color }}
-                      />
-                    )}
-                    {emp.firstName} {emp.lastName}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {/* Employees link */}
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/dashboard/employees">
-              <Users className="h-4 w-4 mr-1" />
-              Pracownicy
-            </Link>
-          </Button>
-
-          {/* Color mode toggle */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={toggleColorMode}
-            title={colorMode === "status" ? "Koloruj wg statusu" : "Koloruj wg pracownika"}
-          >
-            <Palette className="h-4 w-4 mr-1" />
-            {colorMode === "status" ? "Status" : "Pracownik"}
-          </Button>
-
-          {/* View toggle */}
-          <div className="flex items-center rounded-md border border-border">
-            <Button
-              variant={currentView === "day" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setCurrentView("day")}
-              className="rounded-r-none"
-            >
-              Dzien
-            </Button>
-            <Button
-              variant={currentView === "week" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setCurrentView("week")}
-              className="rounded-l-none"
-            >
-              Tydzien
-            </Button>
-          </div>
-
-          <div className="w-px h-6 bg-border mx-1" />
-
-          <Button variant="outline" size="sm" onClick={goToPrevious}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={goToToday}>
-            Dzisiaj
-          </Button>
-          <Button variant="outline" size="sm" onClick={goToNext}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-
-      {/* Current date display */}
-      <div className="mb-4">
-        <h2 className="text-lg font-medium capitalize">{formatDateDisplay(currentDate)}</h2>
-      </div>
-
-      {/* Legend */}
-      <div className="mb-4">
-        <CalendarLegend colorMode={colorMode} employees={employees} />
-      </div>
-
-      {/* Calendar grid */}
-      {loading ? (
-        <div className="flex justify-center items-center h-96">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-        </div>
-      ) : employees.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-96 text-center">
-          <p className="text-muted-foreground mb-4">
-            Brak pracownikow w salonie. Dodaj pracownikow, aby korzystac z kalendarza.
-          </p>
-          <Button variant="outline">Dodaj pracownika</Button>
-        </div>
-      ) : currentView === "day" ? (
-        <TimeGrid
-          date={currentDate}
-          employees={filteredEmployees}
-          events={filteredEvents}
-          workSchedules={workSchedules}
-          timeBlocks={filteredTimeBlocks}
-          onDragStart={handleDragStart}
-          onDragEnd={handleDragEnd}
-          onDrop={handleDrop}
-          onEventClick={handleEventClick}
-          onEventCancel={handleEventCancel}
-          onEventComplete={handleEventComplete}
-          draggedEvent={draggedEvent}
-          colorMode={colorMode}
-        />
-      ) : (
-        <WeekTimeGrid
-          weekStart={getStartOfWeek(currentDate)}
-          employees={filteredEmployees}
-          events={filteredEvents}
-          workSchedules={workSchedules}
-          timeBlocks={filteredTimeBlocks}
-          onEventClick={handleEventClick}
-          onEventCancel={handleEventCancel}
-          onEventComplete={handleEventComplete}
-          onDayClick={(date) => { setCurrentDate(date); setCurrentView("day"); }}
-          colorMode={colorMode}
-        />
-      )}
-
-      {/* Reschedule confirmation dialog */}
-      <RescheduleDialog
-        open={rescheduleDialogOpen}
-        onOpenChange={setRescheduleDialogOpen}
-        event={pendingReschedule?.event || null}
-        newStartTime={pendingReschedule?.newStartTime || null}
-        newEmployeeId={pendingReschedule?.newEmployeeId || null}
-        onConfirm={handleConfirmReschedule}
-        onCancel={handleCancelReschedule}
-        isLoading={isRescheduling}
+      <CalendarToolbar
+        currentView={nav.currentView}
+        colorMode={nav.colorMode}
+        selectedEmployeeFilter={nav.selectedEmployeeFilter}
+        employees={employees}
+        onViewChange={nav.setCurrentView}
+        onEmployeeFilterChange={nav.setSelectedEmployeeFilter}
+        onToggleColorMode={nav.toggleColorMode}
+        onNewAppointment={() => nav.setNewAppointmentDialogOpen(true)}
+        onBlockTime={() => nav.setBlockTimeDialogOpen(true)}
+        onGoToPrevious={nav.goToPrevious}
+        onGoToToday={nav.goToToday}
+        onGoToNext={nav.goToNext}
       />
 
-      {/* New appointment dialog */}
-      <NewAppointmentDialog
-        open={newAppointmentDialogOpen}
-        onOpenChange={(v) => {
-          setNewAppointmentDialogOpen(v);
-          if (!v) setScheduleNextData(null);
+      <CalendarGrid
+        currentDate={nav.currentDate}
+        currentView={nav.currentView}
+        loading={loading}
+        colorMode={nav.colorMode}
+        employees={employees}
+        filteredEmployees={filteredEmployees}
+        filteredEvents={filteredEvents}
+        filteredTimeBlocks={filteredTimeBlocks}
+        workSchedules={workSchedules}
+        draggedEvent={nav.draggedEvent}
+        dateDisplay={nav.formatDateDisplay(nav.currentDate)}
+        onDragStart={nav.handleDragStart}
+        onDragEnd={nav.handleDragEnd}
+        onDrop={nav.handleDrop}
+        onEventClick={nav.handleEventClick}
+        onEventCancel={nav.handleEventCancel}
+        onEventComplete={nav.handleEventComplete}
+        onDayClick={(date) => { nav.setCurrentDate(date); nav.setCurrentView("day"); }}
+      />
+
+      <CalendarDialogs
+        rescheduleDialogOpen={nav.rescheduleDialogOpen}
+        onRescheduleOpenChange={nav.setRescheduleDialogOpen}
+        pendingReschedule={nav.pendingReschedule}
+        onConfirmReschedule={onConfirmReschedule}
+        onCancelReschedule={nav.handleCancelReschedule}
+        isRescheduling={nav.isRescheduling}
+        newAppointmentDialogOpen={nav.newAppointmentDialogOpen}
+        onNewAppointmentOpenChange={(v) => {
+          nav.setNewAppointmentDialogOpen(v);
+          if (!v) nav.setScheduleNextData(null);
         }}
         onAppointmentCreated={() => {
           fetchAppointments();
-          setScheduleNextData(null);
+          nav.setScheduleNextData(null);
         }}
-        defaultDate={currentDate}
-        defaultClientId={scheduleNextData?.clientId}
-        defaultServiceId={scheduleNextData?.serviceId}
-        defaultEmployeeId={scheduleNextData?.employeeId || undefined}
-        defaultDateString={scheduleNextData?.suggestedDate}
-        title={scheduleNextData ? "Nastepna wizyta" : undefined}
-      />
-
-      {/* Cancel appointment dialog */}
-      <CancelAppointmentDialog
-        open={cancelDialogOpen}
-        onOpenChange={setCancelDialogOpen}
-        appointmentId={cancelAppointmentId}
+        defaultDate={nav.currentDate}
+        scheduleNextData={nav.scheduleNextData}
+        cancelDialogOpen={nav.cancelDialogOpen}
+        onCancelDialogOpenChange={nav.setCancelDialogOpen}
+        cancelAppointmentId={nav.cancelAppointmentId}
         onAppointmentCancelled={fetchAppointments}
-      />
-
-      {/* Block time dialog (Feature #36) */}
-      <BlockTimeDialog
-        open={blockTimeDialogOpen}
-        onOpenChange={setBlockTimeDialogOpen}
+        blockTimeDialogOpen={nav.blockTimeDialogOpen}
+        onBlockTimeOpenChange={nav.setBlockTimeDialogOpen}
         employees={employees}
-        defaultDate={currentDate}
         onBlockCreated={() => {
           fetchTimeBlocks();
         }}
+        completeDialogOpen={nav.completeDialogOpen}
+        onCompleteDialogOpenChange={nav.setCompleteDialogOpen}
+        completeAppointment={nav.completeAppointment}
+        completeMaterials={nav.completeMaterials}
+        onCompleted={() => {
+          fetchAppointments();
+        }}
+        onScheduleNext={(data) => {
+          nav.setScheduleNextData({
+            clientId: data.clientId,
+            serviceId: data.serviceId,
+            employeeId: data.employeeId,
+            suggestedDate: data.suggestedDate,
+          });
+          nav.setCompleteAppointment(null);
+          nav.setNewAppointmentDialogOpen(true);
+        }}
       />
-
-      {/* Complete appointment dialog */}
-      {completeAppointment && (
-        <CompleteAppointmentDialog
-          open={completeDialogOpen}
-          onOpenChange={setCompleteDialogOpen}
-          appointment={{
-            id: completeAppointment.id,
-            employeeId: completeAppointment.employeeId,
-            status: completeAppointment.status,
-            service: completeAppointment.service ? {
-              id: completeAppointment.service.id,
-              name: completeAppointment.service.name,
-              basePrice: completeAppointment.service.basePrice,
-              baseDuration: completeAppointment.service.baseDuration,
-              suggestedNextVisitDays: completeAppointment.service.suggestedNextVisitDays ?? null,
-            } : null,
-            employee: completeAppointment.employee ? {
-              id: completeAppointment.employee.id,
-              firstName: completeAppointment.employee.firstName,
-              lastName: completeAppointment.employee.lastName,
-            } : null,
-            client: completeAppointment.client ? {
-              id: completeAppointment.client.id,
-              firstName: completeAppointment.client.firstName,
-              lastName: completeAppointment.client.lastName,
-            } : null,
-          }}
-          materials={completeMaterials}
-          onCompleted={() => {
-            fetchAppointments();
-          }}
-          onScheduleNext={(data) => {
-            setScheduleNextData({
-              clientId: data.clientId,
-              serviceId: data.serviceId,
-              employeeId: data.employeeId,
-              suggestedDate: data.suggestedDate,
-            });
-            setCompleteAppointment(null);
-            setNewAppointmentDialogOpen(true);
-          }}
-        />
-      )}
     </div>
   );
 }
