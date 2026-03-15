@@ -20,7 +20,7 @@ export function UserProfile() {
   const router = useRouter();
 
   if (isPending) {
-    return <div>Loading...</div>;
+    return <div className="h-8 w-8 animate-pulse rounded-full bg-muted" />;
   }
 
   if (!session) {
@@ -28,11 +28,11 @@ export function UserProfile() {
       <div className="flex items-center gap-2">
         <Link href="/login">
           <Button variant="ghost" size="sm">
-            Sign in
+            Zaloguj się
           </Button>
         </Link>
         <Link href="/register">
-          <Button size="sm">Sign up</Button>
+          <Button size="sm">Zarejestruj się</Button>
         </Link>
       </div>
     );
@@ -79,13 +79,13 @@ export function UserProfile() {
         <DropdownMenuItem asChild>
           <Link href="/profile" className="flex items-center">
             <User className="mr-2 h-4 w-4" />
-            Your Profile
+            Mój profil
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleSignOut} variant="destructive">
           <LogOut className="mr-2 h-4 w-4" />
-          Log out
+          Wyloguj się
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

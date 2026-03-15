@@ -45,10 +45,10 @@ export function HeaderNavLinks() {
 
   return (
     <div className="hidden md:flex items-center gap-5 text-sm font-medium text-muted-foreground">
-      <Link href="/#features" className="hover:text-primary transition-colors">
+      <Link href="/dla-salonow#features" className="hover:text-primary transition-colors">
         Funkcje
       </Link>
-      <Link href="/#pricing" className="hover:text-primary transition-colors">
+      <Link href="/dla-salonow#pricing" className="hover:text-primary transition-colors">
         Cennik
       </Link>
       <Link href="/dla-klientow" className="hover:text-primary transition-colors">
