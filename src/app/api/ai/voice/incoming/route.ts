@@ -13,6 +13,7 @@ import {
 import { eq, and, gte, lt, not } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { voiceIncomingSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 type VoiceAiConfig = {
@@ -59,19 +60,19 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { callerMessage: string; callerPhone?: string };
+  let rawBody: unknown;
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (!body.callerMessage || typeof body.callerMessage !== "string") {
-    return NextResponse.json(
-      { error: "callerMessage is required" },
-      { status: 400 }
-    );
+  const validationError = validateBody(voiceIncomingSchema, rawBody);
+  if (validationError) {
+    return NextResponse.json(validationError, { status: 400 });
   }
+
+  const body = rawBody as { callerMessage: string; callerPhone?: string };
 
   try {
     // Load voice AI config

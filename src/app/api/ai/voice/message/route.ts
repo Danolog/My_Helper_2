@@ -4,14 +4,9 @@ import { aiConversations } from "@/lib/schema";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { voiceMessageSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
-interface MessageRequestBody {
-  callerPhone: string;
-  callerName?: string;
-  message: string;
-  conversationId?: string;
-}
 
 /**
  * POST /api/ai/voice/message
@@ -38,26 +33,19 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: MessageRequestBody;
+  let rawBody: unknown;
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (!body.callerPhone || typeof body.callerPhone !== "string") {
-    return NextResponse.json(
-      { error: "callerPhone is required" },
-      { status: 400 }
-    );
+  const validationError = validateBody(voiceMessageSchema, rawBody);
+  if (validationError) {
+    return NextResponse.json(validationError, { status: 400 });
   }
 
-  if (!body.message || typeof body.message !== "string") {
-    return NextResponse.json(
-      { error: "message is required" },
-      { status: 400 }
-    );
-  }
+  const body = rawBody as { callerPhone: string; callerName?: string; message: string; conversationId?: string };
 
   try {
     // Generate a human-readable reference number: MSG-YYYYMMDD-XXXX

@@ -5,6 +5,7 @@ import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { voiceConfigSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 export type VoiceAiConfig = {
@@ -95,24 +96,31 @@ export async function PUT(req: Request) {
   }
 
   try {
-    const body = await req.json();
+    const rawBody = await req.json();
+    const validationError = validateBody(voiceConfigSchema, rawBody);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
+
+    const body = rawBody as Record<string, unknown>;
+    const capabilities = body.capabilities as Record<string, unknown> | undefined;
     const config: VoiceAiConfig = {
       enabled: Boolean(body.enabled),
       greeting: String(body.greeting || DEFAULT_CONFIG.greeting),
       businessHoursOnly: Boolean(body.businessHoursOnly ?? true),
       language: body.language === "en" ? "en" : "pl",
-      voiceStyle: ["professional", "friendly", "warm"].includes(body.voiceStyle)
-        ? body.voiceStyle
+      voiceStyle: ["professional", "friendly", "warm"].includes(body.voiceStyle as string)
+        ? (body.voiceStyle as VoiceAiConfig["voiceStyle"])
         : "friendly",
       maxCallDuration: Math.min(Math.max(Number(body.maxCallDuration) || 300, 60), 600),
       transferToHumanEnabled: Boolean(body.transferToHumanEnabled ?? true),
       transferPhoneNumber: String(body.transferPhoneNumber || ""),
       capabilities: {
-        bookAppointments: Boolean(body.capabilities?.bookAppointments ?? true),
-        checkAvailability: Boolean(body.capabilities?.checkAvailability ?? true),
-        cancelAppointments: Boolean(body.capabilities?.cancelAppointments ?? true),
-        rescheduleAppointments: Boolean(body.capabilities?.rescheduleAppointments ?? true),
-        answerFaq: Boolean(body.capabilities?.answerFaq ?? true),
+        bookAppointments: Boolean(capabilities?.bookAppointments ?? true),
+        checkAvailability: Boolean(capabilities?.checkAvailability ?? true),
+        cancelAppointments: Boolean(capabilities?.cancelAppointments ?? true),
+        rescheduleAppointments: Boolean(capabilities?.rescheduleAppointments ?? true),
+        answerFaq: Boolean(capabilities?.answerFaq ?? true),
       },
     };
 

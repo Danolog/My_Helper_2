@@ -4,6 +4,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
+import { downgradeSubscriptionSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -28,20 +29,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const body: unknown = await request.json();
-    if (
-      !body ||
-      typeof body !== "object" ||
-      !("targetPlanSlug" in body) ||
-      typeof (body as Record<string, unknown>).targetPlanSlug !== "string"
-    ) {
-      return NextResponse.json(
-        { success: false, error: "targetPlanSlug is required" },
-        { status: 400 },
-      );
+    const rawBody: unknown = await request.json();
+    const validationError = validateBody(downgradeSubscriptionSchema, rawBody);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
 
-    const { targetPlanSlug } = body as { targetPlanSlug: string };
+    const { targetPlanSlug } = rawBody as { targetPlanSlug: string };
 
     // Find the current active subscription
     const [activeSub] = await db

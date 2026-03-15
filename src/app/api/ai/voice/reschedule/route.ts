@@ -15,19 +15,11 @@ import { eq, and, gte, lt, not } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { voiceRescheduleSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /** Slot interval in minutes used when generating available time slots. */
 const SLOT_INTERVAL = 15;
-
-interface RescheduleRequestBody {
-  appointmentId?: string; // Direct appointment ID if known
-  callerPhone: string; // Phone to look up client
-  callerName?: string;
-  preferredDate?: string; // YYYY-MM-DD
-  preferredTime?: string; // HH:MM
-  notes?: string;
-}
 
 /**
  * POST /api/ai/voice/reschedule
@@ -59,17 +51,20 @@ export async function POST(req: Request) {
     );
   }
 
-  // --- Parse request body ---
-  let body: RescheduleRequestBody;
+  // --- Parse and validate request body ---
+  let rawBody: unknown;
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (!body.callerPhone || typeof body.callerPhone !== "string") {
-    return NextResponse.json({ error: "callerPhone is required" }, { status: 400 });
+  const validationError = validateBody(voiceRescheduleSchema, rawBody);
+  if (validationError) {
+    return NextResponse.json(validationError, { status: 400 });
   }
+
+  const body = rawBody as { appointmentId?: string; callerPhone: string; callerName?: string; preferredDate?: string; preferredTime?: string; notes?: string };
 
   try {
     // ------------------------------------------------------------------
