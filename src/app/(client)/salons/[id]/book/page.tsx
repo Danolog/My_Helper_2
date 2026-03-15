@@ -418,24 +418,25 @@ export default function ClientBookingPage() {
 
   const fetchAssignedEmployees = useCallback(
     async (serviceId: string, signal?: AbortSignal) => {
-      if (!serviceId) {
+      if (!serviceId || !salonId) {
         setAssignedEmployees([]);
         return;
       }
       setLoadingEmployees(true);
       try {
-        const res = await fetch(`/api/services/${serviceId}/employee-assignments`, signal ? { signal } : {});
+        const res = await fetch(`/api/salons/${salonId}/services/${serviceId}`, signal ? { signal } : {});
         const json = await res.json();
-        if (json.success) {
-          const emps: AssignedEmployee[] = json.data
-            .map(
-              (assignment: { employee: AssignedEmployee | null }) =>
-                assignment.employee
-            )
-            .filter(
-              (emp: AssignedEmployee | null): emp is AssignedEmployee =>
-                emp !== null && emp.isActive
-            );
+        if (json.success && json.data.employees) {
+          const emps: AssignedEmployee[] = json.data.employees.map(
+            (emp: { id: string; firstName: string; lastName: string; role: string; color: string | null }) => ({
+              id: emp.id,
+              firstName: emp.firstName,
+              lastName: emp.lastName,
+              role: emp.role,
+              isActive: true,
+              color: emp.color,
+            })
+          );
           setAssignedEmployees(emps);
         }
       } catch (error) {
@@ -445,7 +446,7 @@ export default function ClientBookingPage() {
         setLoadingEmployees(false);
       }
     },
-    []
+    [salonId]
   );
 
   const fetchAvailableSlots = useCallback(
