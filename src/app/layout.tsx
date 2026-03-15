@@ -6,8 +6,6 @@ import { OfflineBanner } from "@/components/offline-banner";
 import { InstallPrompt } from "@/components/pwa/install-prompt";
 import { SwRegister } from "@/components/pwa/sw-register";
 import { SwUpdateToast } from "@/components/pwa/sw-update-toast";
-import { SiteFooter } from "@/components/site-footer";
-import { SiteHeader } from "@/components/site-header";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import type { Metadata } from "next";
@@ -124,13 +122,8 @@ export default async function RootLayout({
           defaultTheme="system"
           enableSystem
         >
-          <a href="#main-content" className="skip-link">
-            Przejdź do treści
-          </a>
           <OfflineBanner />
-          <SiteHeader />
-          <main id="main-content">{children}</main>
-          <SiteFooter />
+          {children}
           <Toaster richColors position="top-right" />
         </ThemeProvider>
         <SwRegister />

@@ -62,21 +62,21 @@ describe("UserProfile", () => {
     mockSessionData = { data: null, isPending: false };
   });
 
-  it("shows loading text when session is pending", () => {
+  it("shows loading skeleton when session is pending", () => {
     mockSessionData = { data: null, isPending: true };
-    render(<UserProfile />);
+    const { container } = render(<UserProfile />);
 
-    expect(screen.getByText("Loading...")).toBeInTheDocument();
+    expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
   });
 
   it("shows sign in and sign up links when no session", () => {
     render(<UserProfile />);
 
-    expect(screen.getByText("Sign in")).toBeInTheDocument();
-    expect(screen.getByText("Sign up")).toBeInTheDocument();
+    expect(screen.getByText("Zaloguj się")).toBeInTheDocument();
+    expect(screen.getByText("Zarejestruj się")).toBeInTheDocument();
 
-    const signInLink = screen.getByText("Sign in").closest("a");
-    const signUpLink = screen.getByText("Sign up").closest("a");
+    const signInLink = screen.getByText("Zaloguj się").closest("a");
+    const signUpLink = screen.getByText("Zarejestruj się").closest("a");
     expect(signInLink).toHaveAttribute("href", "/login");
     expect(signUpLink).toHaveAttribute("href", "/register");
   });

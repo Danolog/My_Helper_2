@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Scissors } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
 import { HeaderNavLinks } from "@/components/header-nav-links";
+import { SiteHeaderMobileMenu } from "@/components/site-header-mobile-menu";
 import { ModeToggle } from "./ui/mode-toggle";
 
 export function SiteHeader() {
@@ -35,12 +36,16 @@ export function SiteHeader() {
               </span>
             </Link>
           </h1>
-          <div className="flex items-center gap-6" role="group" aria-label="User actions">
+          <div className="hidden md:flex items-center gap-6" role="group" aria-label="User actions">
             <HeaderNavLinks />
             <div className="flex items-center gap-3">
               <UserProfile />
               <ModeToggle />
             </div>
+          </div>
+          <div className="md:hidden flex items-center gap-2">
+            <ModeToggle />
+            <SiteHeaderMobileMenu />
           </div>
         </nav>
       </header>

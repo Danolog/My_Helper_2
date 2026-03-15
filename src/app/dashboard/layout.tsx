@@ -15,7 +15,7 @@ export default async function DashboardLayout({
     redirect("/salons");
   }
   return (
-    <div className="flex min-h-[calc(100vh-4rem)]">
+    <div className="flex min-h-screen">
       <DashboardSidebar />
       <div className="flex-1 flex flex-col overflow-auto pb-20 md:pb-0">
         <DashboardMobileHeader />
