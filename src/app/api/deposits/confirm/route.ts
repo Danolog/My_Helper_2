@@ -14,6 +14,10 @@ import { logger } from "@/lib/logger";
  * Sends SMS confirmation to the client with payment and appointment details.
  * In production, this would be called by Stripe webhook or after redirect from Stripe Checkout.
  * For development, this simulates the payment confirmation.
+ *
+ * Auth: This endpoint uses token-based verification (depositPaymentId + sessionId)
+ * instead of session auth, because it's called by Stripe redirect or webhook.
+ * Rate limiting (strictRateLimit) prevents brute-force token guessing.
  */
 export async function POST(request: Request) {
   try {

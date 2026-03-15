@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { isValidUuid } from "@/lib/api-validation";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
@@ -35,6 +36,13 @@ export async function GET(
     }
 
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidłowy ID" },
+        { status: 400 }
+      );
+    }
 
     // Fetch payment with plan and salon data
     const rows = await db

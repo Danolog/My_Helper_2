@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import Image from "next/image";
 import { Upload, X, Loader2, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -285,13 +286,11 @@ export function PhotoUploadDialog({
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div className="relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- data URI from FileReader */}
-                  <img src={beforePreview} alt="Przed" className="w-full h-20 object-cover rounded border" />
+                  <Image src={beforePreview} alt="Przed" width={200} height={80} unoptimized className="w-full h-20 object-cover rounded border" />
                   <span className="absolute bottom-1 left-1 bg-orange-500 text-white text-[10px] px-1 rounded">PRZED</span>
                 </div>
                 <div className="relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- data URI from FileReader */}
-                  <img src={uploadPreview} alt="Po" className="w-full h-20 object-cover rounded border" />
+                  <Image src={uploadPreview} alt="Po" width={200} height={80} unoptimized className="w-full h-20 object-cover rounded border" />
                   <span className="absolute bottom-1 left-1 bg-green-500 text-white text-[10px] px-1 rounded">PO</span>
                 </div>
               </div>

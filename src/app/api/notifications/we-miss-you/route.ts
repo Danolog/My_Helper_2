@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { clients, appointments, notifications, salons } from "@/lib/schema";
 import { eq, sql, and, lt, isNull, or, inArray } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
+import { isValidUuid } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 interface WeMissYouSettings {
@@ -131,6 +132,13 @@ export async function GET(request: Request) {
       );
     }
 
+    if (!isValidUuid(salonId)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidłowy salonId" },
+        { status: 400 }
+      );
+    }
+
     // Get salon with settings
     const [salon] = await db
       .select({ id: salons.id, settingsJson: salons.settingsJson })
@@ -187,6 +195,13 @@ export async function POST(request: Request) {
     if (!salonId) {
       return NextResponse.json(
         { success: false, error: "salonId is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidUuid(salonId)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidłowy salonId" },
         { status: 400 }
       );
     }

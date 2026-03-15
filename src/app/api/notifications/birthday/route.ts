@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { clients, notifications, salons } from "@/lib/schema";
 import { eq, sql, and, isNotNull, inArray, like } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
+import { isValidUuid } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 interface BirthdaySettings {
@@ -30,6 +31,13 @@ export async function GET(request: Request) {
     if (!salonId) {
       return NextResponse.json(
         { success: false, error: "salonId is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidUuid(salonId)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidłowy salonId" },
         { status: 400 }
       );
     }
@@ -111,6 +119,13 @@ export async function POST(request: Request) {
     if (!salonId) {
       return NextResponse.json(
         { success: false, error: "salonId is required" },
+        { status: 400 }
+      );
+    }
+
+    if (!isValidUuid(salonId)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidłowy salonId" },
         { status: 400 }
       );
     }

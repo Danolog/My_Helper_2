@@ -13,21 +13,25 @@ export function GitHubStars({ repo }: GitHubStarsProps) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const controller = new AbortController();
     async function fetchStars() {
       try {
-        const response = await fetch(`https://api.github.com/repos/${repo}`);
+        const response = await fetch(`https://api.github.com/repos/${repo}`, {
+          signal: controller.signal,
+        });
         if (response.ok) {
           const data = await response.json();
-          setStars(data.stargazers_count);
+          if (!controller.signal.aborted) setStars(data.stargazers_count);
         }
-      } catch {
-        // GitHub API call failed — stars will show as 0
+      } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") return;
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
 
     fetchStars();
+    return () => controller.abort();
   }, [repo]);
 
   const formatStars = (count: number) => {

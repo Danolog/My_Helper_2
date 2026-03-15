@@ -872,3 +872,49 @@ export const createWorkScheduleSchema = z.object({
     isDayOff: z.boolean().optional(),
   })),
 });
+
+// ==========================================
+// Subscription Mutation Schemas
+// ==========================================
+
+export const cancelSubscriptionSchema = z.object({
+  reason: z.string().max(500).optional(),
+  immediate: z.boolean().default(false),
+});
+
+export const renewSubscriptionSchema = z.object({
+  planId: z.string().uuid(),
+});
+
+// ==========================================
+// Client Action Schemas
+// ==========================================
+
+export const clientCancelSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+
+export const sendReminderSchema = z.object({
+  appointmentId: z.string().uuid(),
+  type: z.enum(["sms", "push", "email"]).default("push"),
+});
+
+// ==========================================
+// Fiscal Test Schema
+// ==========================================
+
+export const fiscalTestSchema = z.object({
+  apiKey: z.string().min(1),
+  endpoint: z.string().url(),
+});
+
+// ==========================================
+// UUID Param Validation Helper
+// ==========================================
+
+/**
+ * Validate a UUID string param. Returns true if valid.
+ */
+export function isValidUuid(value: string): boolean {
+  return z.string().uuid().safeParse(value).success;
+}

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { appointments, employees, services, salons, depositPayments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { isValidUuid } from "@/lib/api-validation";
 import { processAutomaticRefund } from "@/lib/refund";
 import { notifyWaitingList } from "@/lib/waiting-list";
 
@@ -24,6 +25,13 @@ export async function GET(
 
     const userId = session.user.id;
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidłowy ID" },
+        { status: 400 }
+      );
+    }
 
     // Fetch appointment ensuring it belongs to this user
     const result = await db
@@ -139,6 +147,13 @@ export async function POST(
 
     const userId = session.user.id;
     const { id } = await params;
+
+    if (!isValidUuid(id)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidłowy ID" },
+        { status: 400 }
+      );
+    }
 
     // Fetch appointment ensuring it belongs to this user
     const result = await db

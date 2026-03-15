@@ -476,13 +476,11 @@ export function AlbumManager({
                       {isPair ? (
                         <div className="w-full h-full flex">
                           <div className="w-1/2 h-full relative overflow-hidden">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={photo.beforePhotoUrl!} alt="Przed" className="absolute inset-0 w-[200%] h-full object-cover" />
+                            <Image src={photo.beforePhotoUrl!} alt="Przed" fill style={{ width: '200%' }} className="object-cover" />
                           </div>
                           <div className="w-0.5 bg-white z-10 relative" />
                           <div className="w-1/2 h-full relative overflow-hidden">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={photo.afterPhotoUrl!} alt="Po" className="absolute inset-0 w-[200%] h-full object-cover object-right" />
+                            <Image src={photo.afterPhotoUrl!} alt="Po" fill style={{ width: '200%', objectPosition: 'right' }} className="object-cover" />
                           </div>
                         </div>
                       ) : photo.afterPhotoUrl ? (
