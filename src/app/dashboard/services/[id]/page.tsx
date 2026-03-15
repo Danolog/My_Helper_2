@@ -18,7 +18,9 @@ import { EmployeeAssignmentCard } from "./_components/employee-assignment-card";
 import { EmployeePricingCard } from "./_components/employee-pricing-card";
 import { LinkedProductsCard } from "./_components/linked-products-card";
 import { GalleryPhotosCard } from "./_components/gallery-photos-card";
-import { EditServiceDialog } from "./_components/edit-service-dialog";
+import dynamic from "next/dynamic";
+
+const EditServiceDialog = dynamic(() => import("./_components/edit-service-dialog").then((m) => m.EditServiceDialog));
 
 export default function ServiceDetailPage() {
   const params = useParams();

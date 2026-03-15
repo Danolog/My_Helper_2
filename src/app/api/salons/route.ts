@@ -6,6 +6,10 @@ import { validateBody, createSalonSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
+
+// Revalidate salon list every 60 seconds (ISR)
+export const revalidate = 60;
+
 // GET /api/salons - List all salons (filtered to exclude test/incomplete salons)
 export async function GET() {
   try {

@@ -8,7 +8,9 @@ import { NewsletterHeader } from "./_components/newsletter-header";
 import { NewsletterPreviewCard } from "./_components/newsletter-preview-card";
 import { NewsletterTabSwitcher } from "./_components/newsletter-tab-switcher";
 import { SavedNewslettersCard } from "./_components/saved-newsletters-card";
-import { SendNewsletterDialog } from "./_components/send-newsletter-dialog";
+import dynamic from "next/dynamic";
+
+const SendNewsletterDialog = dynamic(() => import("./_components/send-newsletter-dialog").then((m) => m.SendNewsletterDialog));
 import { useNewsletterGenerator } from "./_hooks/use-newsletter-generator";
 import { useSavedNewsletters } from "./_hooks/use-saved-newsletters";
 

@@ -40,11 +40,13 @@ export async function GET(request: Request) {
       category: row.category,
     }));
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       data: formattedServices,
       count: formattedServices.length,
     });
+    response.headers.set("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
+    return response;
   } catch (error) {
     logger.error("[Services API] Database error", { error: error });
     return NextResponse.json(

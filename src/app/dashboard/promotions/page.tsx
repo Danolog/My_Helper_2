@@ -7,8 +7,10 @@ import { usePromotionsData } from "./_hooks/use-promotions-data";
 import { usePromotionForm } from "./_hooks/use-promotion-form";
 import { PromotionSummaryCards } from "./_components/promotion-summary-cards";
 import { PromotionList } from "./_components/promotion-list";
-import { PromotionDialog } from "./_components/promotion-dialog";
-import { DeletePromotionDialog } from "./_components/delete-promotion-dialog";
+import dynamic from "next/dynamic";
+
+const PromotionDialog = dynamic(() => import("./_components/promotion-dialog").then((m) => m.PromotionDialog));
+const DeletePromotionDialog = dynamic(() => import("./_components/delete-promotion-dialog").then((m) => m.DeletePromotionDialog));
 
 export default function PromotionsPage() {
   const {
