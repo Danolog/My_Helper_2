@@ -54,27 +54,30 @@ export async function POST(request: Request) {
       });
     }
 
-    // Update the deposit payment to "succeeded"
-    const [updatedPayment] = await db
-      .update(depositPayments)
-      .set({
-        status: "succeeded",
-        paidAt: new Date(),
-        stripePaymentIntentId: sessionId || `sim_${Date.now()}`,
-      })
-      .where(eq(depositPayments.id, depositPaymentId))
-      .returning();
+    // Update deposit payment and appointment atomically
+    const { updatedPayment, updatedAppointment } = await db.transaction(async (tx) => {
+      const [_updatedPayment] = await tx
+        .update(depositPayments)
+        .set({
+          status: "succeeded",
+          paidAt: new Date(),
+          stripePaymentIntentId: sessionId || `sim_${Date.now()}`,
+        })
+        .where(eq(depositPayments.id, depositPaymentId))
+        .returning();
 
-    // Update the appointment to mark deposit as paid and confirm
-    const [updatedAppointment] = await db
-      .update(appointments)
-      .set({
-        depositPaid: true,
-        status: "confirmed",
-        updatedAt: new Date(),
-      })
-      .where(eq(appointments.id, payment.appointmentId))
-      .returning();
+      const [_updatedAppointment] = await tx
+        .update(appointments)
+        .set({
+          depositPaid: true,
+          status: "confirmed",
+          updatedAt: new Date(),
+        })
+        .where(eq(appointments.id, payment.appointmentId))
+        .returning();
+
+      return { updatedPayment: _updatedPayment, updatedAppointment: _updatedAppointment };
+    });
 
     logger.info(`[Deposit API] Payment confirmed: ${depositPaymentId}, appointment: ${payment.appointmentId}`);
 

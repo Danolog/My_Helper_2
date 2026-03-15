@@ -95,34 +95,37 @@ export async function POST() {
       }
     }
 
-    // Record the renewal payment
-    const [payment] = await db
-      .insert(subscriptionPayments)
-      .values({
-        subscriptionId: sub.id,
-        salonId,
-        amount: renewPlan.priceMonthly,
-        currency: "PLN",
-        stripePaymentIntentId: `sim_renewal_pi_${Date.now()}`,
-        status: "succeeded",
-        paidAt: now,
-      })
-      .returning();
+    // Record the renewal payment and update subscription atomically
+    const { payment, updatedSub } = await db.transaction(async (tx) => {
+      const [_payment] = await tx
+        .insert(subscriptionPayments)
+        .values({
+          subscriptionId: sub.id,
+          salonId,
+          amount: renewPlan.priceMonthly,
+          currency: "PLN",
+          stripePaymentIntentId: `sim_renewal_pi_${Date.now()}`,
+          status: "succeeded",
+          paidAt: now,
+        })
+        .returning();
 
-    // Update subscription with new period dates
-    const [updatedSub] = await db
-      .update(salonSubscriptions)
-      .set({
-        planId: renewPlanId,
-        currentPeriodStart: newPeriodStart,
-        currentPeriodEnd: newPeriodEnd,
-        // Clear scheduled changes if applied
-        ...(planChanged
-          ? { scheduledPlanId: null, scheduledChangeAt: null }
-          : {}),
-      })
-      .where(eq(salonSubscriptions.id, sub.id))
-      .returning();
+      const [_updatedSub] = await tx
+        .update(salonSubscriptions)
+        .set({
+          planId: renewPlanId,
+          currentPeriodStart: newPeriodStart,
+          currentPeriodEnd: newPeriodEnd,
+          // Clear scheduled changes if applied
+          ...(planChanged
+            ? { scheduledPlanId: null, scheduledChangeAt: null }
+            : {}),
+        })
+        .where(eq(salonSubscriptions.id, sub.id))
+        .returning();
+
+      return { payment: _payment, updatedSub: _updatedSub };
+    });
 
     // eslint-disable-next-line no-console
     logger.info(`[Subscription Renewal] Subscription ${sub.id} renewed. ` +

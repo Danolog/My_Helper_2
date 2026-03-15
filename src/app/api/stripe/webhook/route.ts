@@ -234,35 +234,36 @@ async function handleInvoicePaid(event: Stripe.Event) {
     ? plan.priceMonthly
     : (invoice.amount_paid / 100).toFixed(2);
 
-  // Update the subscription with new period dates
-  await db
-    .update(salonSubscriptions)
-    .set({
-      status: "active",
-      currentPeriodStart: periodStart,
-      currentPeriodEnd: periodEnd,
-      planId: newPlanId,
-      // Clear scheduled changes if applied
-      ...(newPlanId !== sub.planId
-        ? { scheduledPlanId: null, scheduledChangeAt: null }
-        : {}),
-    })
-    .where(eq(salonSubscriptions.id, sub.id));
-
-  // Record the renewal payment
+  // Record the renewal payment and update the subscription atomically
   const paymentIntentId = getPaymentIntentIdFromInvoice(
     invoice,
     `stripe_pi_${event.id}`
   );
 
-  await db.insert(subscriptionPayments).values({
-    subscriptionId: sub.id,
-    salonId: sub.salonId,
-    amount,
-    currency: "PLN",
-    stripePaymentIntentId: paymentIntentId,
-    status: "succeeded",
-    paidAt: new Date(),
+  await db.transaction(async (tx) => {
+    await tx
+      .update(salonSubscriptions)
+      .set({
+        status: "active",
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodEnd,
+        planId: newPlanId,
+        // Clear scheduled changes if applied
+        ...(newPlanId !== sub.planId
+          ? { scheduledPlanId: null, scheduledChangeAt: null }
+          : {}),
+      })
+      .where(eq(salonSubscriptions.id, sub.id));
+
+    await tx.insert(subscriptionPayments).values({
+      subscriptionId: sub.id,
+      salonId: sub.salonId,
+      amount,
+      currency: "PLN",
+      stripePaymentIntentId: paymentIntentId,
+      status: "succeeded",
+      paidAt: new Date(),
+    });
   });
 
   logger.info("Subscription renewed", {
@@ -291,11 +292,6 @@ async function handleInvoicePaymentFailed(event: Stripe.Event) {
     return;
   }
 
-  await db
-    .update(salonSubscriptions)
-    .set({ status: "past_due" })
-    .where(eq(salonSubscriptions.id, sub.id));
-
   // Record the failed payment attempt
   const [plan] = await db
     .select()
@@ -307,14 +303,21 @@ async function handleInvoicePaymentFailed(event: Stripe.Event) {
     `stripe_pi_failed_${event.id}`
   );
 
-  await db.insert(subscriptionPayments).values({
-    subscriptionId: sub.id,
-    salonId: sub.salonId,
-    amount: plan ? plan.priceMonthly : "0.00",
-    currency: "PLN",
-    stripePaymentIntentId: paymentIntentId,
-    status: "failed",
-    paidAt: null,
+  await db.transaction(async (tx) => {
+    await tx
+      .update(salonSubscriptions)
+      .set({ status: "past_due" })
+      .where(eq(salonSubscriptions.id, sub.id));
+
+    await tx.insert(subscriptionPayments).values({
+      subscriptionId: sub.id,
+      salonId: sub.salonId,
+      amount: plan ? plan.priceMonthly : "0.00",
+      currency: "PLN",
+      stripePaymentIntentId: paymentIntentId,
+      status: "failed",
+      paidAt: null,
+    });
   });
 
   logger.warn("Payment failed, subscription set to past_due", { subscriptionId: sub.id });

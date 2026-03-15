@@ -47,64 +47,66 @@ async function createSimulatedSubscription(
       ),
     );
 
-  let subscription;
+  return await db.transaction(async (tx) => {
+    let subscription;
 
-  if (existingReusable.length > 0 && existingReusable[0]) {
-    // Reactivate existing subscription (trialing or canceled)
-    const [updated] = await db
-      .update(salonSubscriptions)
-      .set({
-        planId,
-        stripeSubscriptionId: `sim_sub_${Date.now()}`,
-        stripeCustomerId: `sim_cus_${Date.now()}`,
-        status: "active",
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
-        trialEndsAt: null,
-        canceledAt: null,
-      })
-      .where(eq(salonSubscriptions.id, existingReusable[0].id))
-      .returning();
+    if (existingReusable.length > 0 && existingReusable[0]) {
+      // Reactivate existing subscription (trialing or canceled)
+      const [updated] = await tx
+        .update(salonSubscriptions)
+        .set({
+          planId,
+          stripeSubscriptionId: `sim_sub_${Date.now()}`,
+          stripeCustomerId: `sim_cus_${Date.now()}`,
+          status: "active",
+          currentPeriodStart: now,
+          currentPeriodEnd: periodEnd,
+          trialEndsAt: null,
+          canceledAt: null,
+        })
+        .where(eq(salonSubscriptions.id, existingReusable[0].id))
+        .returning();
 
-    subscription = updated;
-    logger.info("Reactivated subscription to active", {
-      previousStatus: existingReusable[0].status,
-      subscriptionId: existingReusable[0].id,
+      subscription = updated;
+      logger.info("Reactivated subscription to active", {
+        previousStatus: existingReusable[0].status,
+        subscriptionId: existingReusable[0].id,
+      });
+    } else {
+      // Create new active subscription
+      const [created] = await tx
+        .insert(salonSubscriptions)
+        .values({
+          salonId: _salonId,
+          planId,
+          stripeSubscriptionId: `sim_sub_${Date.now()}`,
+          stripeCustomerId: `sim_cus_${Date.now()}`,
+          status: "active",
+          currentPeriodStart: now,
+          currentPeriodEnd: periodEnd,
+        })
+        .returning();
+
+      subscription = created;
+    }
+
+    if (!subscription) {
+      throw new Error("Failed to create simulated subscription record");
+    }
+
+    // Record the simulated payment
+    await tx.insert(subscriptionPayments).values({
+      subscriptionId: subscription.id,
+      salonId: _salonId,
+      amount: priceMonthly,
+      currency: "PLN",
+      stripePaymentIntentId: `sim_pi_${Date.now()}`,
+      status: "succeeded",
+      paidAt: now,
     });
-  } else {
-    // Create new active subscription
-    const [created] = await db
-      .insert(salonSubscriptions)
-      .values({
-        salonId: _salonId,
-        planId,
-        stripeSubscriptionId: `sim_sub_${Date.now()}`,
-        stripeCustomerId: `sim_cus_${Date.now()}`,
-        status: "active",
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
-      })
-      .returning();
 
-    subscription = created;
-  }
-
-  if (!subscription) {
-    throw new Error("Failed to create simulated subscription record");
-  }
-
-  // Record the simulated payment
-  await db.insert(subscriptionPayments).values({
-    subscriptionId: subscription.id,
-    salonId: _salonId,
-    amount: priceMonthly,
-    currency: "PLN",
-    stripePaymentIntentId: `sim_pi_${Date.now()}`,
-    status: "succeeded",
-    paidAt: now,
+    return { subscriptionId: subscription.id };
   });
-
-  return { subscriptionId: subscription.id };
 }
 
 /**
@@ -197,28 +199,30 @@ export async function POST(request: Request) {
         );
       }
       // Different plan → upgrade: update the existing subscription's planId
-      // and record a new payment for the upgrade
+      // and record a new payment for the upgrade atomically
       const now = new Date();
       const periodEnd = new Date(now);
       periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-      await db
-        .update(salonSubscriptions)
-        .set({
-          planId: plan.id,
-          currentPeriodStart: now,
-          currentPeriodEnd: periodEnd,
-        })
-        .where(eq(salonSubscriptions.id, existingSub.id));
+      await db.transaction(async (tx) => {
+        await tx
+          .update(salonSubscriptions)
+          .set({
+            planId: plan.id,
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+          })
+          .where(eq(salonSubscriptions.id, existingSub.id));
 
-      await db.insert(subscriptionPayments).values({
-        subscriptionId: existingSub.id,
-        salonId: salonId,
-        amount: plan.priceMonthly,
-        currency: "PLN",
-        stripePaymentIntentId: `sim_upgrade_pi_${Date.now()}`,
-        status: "succeeded",
-        paidAt: now,
+        await tx.insert(subscriptionPayments).values({
+          subscriptionId: existingSub.id,
+          salonId: salonId,
+          amount: plan.priceMonthly,
+          currency: "PLN",
+          stripePaymentIntentId: `sim_upgrade_pi_${Date.now()}`,
+          status: "succeeded",
+          paidAt: now,
+        });
       });
 
       logger.info("Subscription upgraded", {
