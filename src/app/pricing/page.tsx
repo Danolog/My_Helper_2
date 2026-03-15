@@ -29,6 +29,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useSession } from "@/lib/auth-client";
+import { mutationFetch } from "@/lib/api-client";
 import { TRIAL_DAYS } from "@/lib/constants";
 
 type Plan = {
@@ -165,7 +166,7 @@ export default function PricingPage() {
       setCheckoutLoading(planSlug);
 
       try {
-        const res = await fetch("/api/subscriptions/checkout", {
+        const res = await mutationFetch("/api/subscriptions/checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ planSlug }),

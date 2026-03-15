@@ -52,6 +52,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { toast } from "sonner";
 import { getTemplateById } from "@/lib/content-templates";
+import { mutationFetch } from "@/lib/api-client";
 
 type GoalType =
   | "promotion"
@@ -229,7 +230,7 @@ function SendNewsletterDialog({
     if (!newsletter || selectedIds.size === 0) return;
     setSending(true);
     try {
-      const response = await fetch(`/api/newsletters/${newsletter.id}/send`, {
+      const response = await mutationFetch(`/api/newsletters/${newsletter.id}/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -495,7 +496,7 @@ function NewslettersContent() {
     setGeneratedNewsletter(null);
 
     try {
-      const response = await fetch("/api/ai/content/newsletter", {
+      const response = await mutationFetch("/api/ai/content/newsletter", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -538,7 +539,7 @@ function NewslettersContent() {
 
     setIsSaving(true);
     try {
-      const response = await fetch("/api/newsletters", {
+      const response = await mutationFetch("/api/newsletters", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

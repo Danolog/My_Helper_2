@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { mutationFetch } from "@/lib/api-client";
 import type { AppointmentDetail } from "./types";
 
 interface AppointmentNotesProps {
@@ -35,7 +36,7 @@ export function AppointmentNotes({
   const handleSaveNotes = async () => {
     setSavingNotes(true);
     try {
-      const res = await fetch(`/api/appointments/${appointment.id}`, {
+      const res = await mutationFetch(`/api/appointments/${appointment.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notes: notesValue.trim() || null }),

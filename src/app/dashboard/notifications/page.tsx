@@ -6,6 +6,7 @@ import { ArrowLeft, MessageSquare, RefreshCw, Filter, Cake, Gift, Send, Settings
 import { toast } from "sonner";
 import Link from "next/link";
 import { PushNotificationManager } from "@/components/push-notification-manager";
+import { mutationFetch } from "@/lib/api-client";
 
 interface Notification {
   id: string;
@@ -165,7 +166,7 @@ export default function NotificationsPage() {
         requestBody.giftType = "product";
         requestBody.productName = birthdayProductName;
       }
-      const res = await fetch("/api/notifications/birthday", {
+      const res = await mutationFetch("/api/notifications/birthday", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
@@ -224,7 +225,7 @@ export default function NotificationsPage() {
     if (!salonId) return;
     setSendingWeMissYou(true);
     try {
-      const res = await fetch("/api/notifications/we-miss-you", {
+      const res = await mutationFetch("/api/notifications/we-miss-you", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ salonId }),

@@ -26,6 +26,7 @@ import { signUp, sendVerificationEmail } from "@/lib/auth-client"
 import { sanitizeAuthError } from "@/lib/error-messages"
 import { useFormRecovery } from "@/hooks/use-form-recovery"
 import { FormRecoveryBanner } from "@/components/form-recovery-banner"
+import { mutationFetch } from "@/lib/api-client"
 import { TRIAL_DAYS } from "@/lib/constants"
 
 type Plan = {
@@ -194,7 +195,7 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
         // After signup, create salon subscription with selected plan
         if (selectedPlan) {
           try {
-            await fetch("/api/register-subscription", {
+            await mutationFetch("/api/register-subscription", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({

@@ -46,6 +46,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { PLANS, TRIAL_DAYS } from "@/lib/constants";
+import { mutationFetch } from "@/lib/api-client";
 
 type SubscriptionData = {
   id: string;
@@ -249,7 +250,7 @@ export default function SubscriptionPage() {
   const handleCancel = useCallback(async () => {
     setCancelLoading(true);
     try {
-      const res = await fetch("/api/subscriptions/cancel", {
+      const res = await mutationFetch("/api/subscriptions/cancel", {
         method: "POST",
       });
       const data = await res.json();
@@ -283,7 +284,7 @@ export default function SubscriptionPage() {
     async (targetSlug: string) => {
       setChangePlanLoading(true);
       try {
-        const res = await fetch("/api/subscriptions/checkout", {
+        const res = await mutationFetch("/api/subscriptions/checkout", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ planSlug: targetSlug }),
@@ -322,7 +323,7 @@ export default function SubscriptionPage() {
     async (targetSlug: string) => {
       setDowngradeLoading(true);
       try {
-        const res = await fetch("/api/subscriptions/downgrade", {
+        const res = await mutationFetch("/api/subscriptions/downgrade", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ targetPlanSlug: targetSlug }),
@@ -357,7 +358,7 @@ export default function SubscriptionPage() {
   const handleCancelDowngrade = useCallback(async () => {
     setCancelDowngradeLoading(true);
     try {
-      const res = await fetch("/api/subscriptions/downgrade", {
+      const res = await mutationFetch("/api/subscriptions/downgrade", {
         method: "DELETE",
       });
       const data = await res.json();
@@ -387,7 +388,7 @@ export default function SubscriptionPage() {
   const handleSimulateNearExpiry = useCallback(async () => {
     setSimulateLoading(true);
     try {
-      const res = await fetch("/api/subscriptions/expiration-warning", {
+      const res = await mutationFetch("/api/subscriptions/expiration-warning", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ simulate: true }),
@@ -419,7 +420,7 @@ export default function SubscriptionPage() {
   const handleSendWarning = useCallback(async () => {
     setSendWarningLoading(true);
     try {
-      const res = await fetch("/api/subscriptions/expiration-warning", {
+      const res = await mutationFetch("/api/subscriptions/expiration-warning", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ warningDays: 30 }),
@@ -456,7 +457,7 @@ export default function SubscriptionPage() {
   const handleSimulateRenewal = useCallback(async () => {
     setRenewLoading(true);
     try {
-      const res = await fetch("/api/subscriptions/renew", {
+      const res = await mutationFetch("/api/subscriptions/renew", {
         method: "POST",
       });
       const data = await res.json();

@@ -30,6 +30,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useSession } from "@/lib/auth-client";
+import { mutationFetch } from "@/lib/api-client";
 
 interface ServiceVariant {
   id: string;
@@ -300,7 +301,7 @@ export default function SalonProfilePage() {
     setFavoriteLoading(true);
     try {
       if (isFavorite) {
-        const res = await fetch(`/api/favorites/salons?salonId=${salonId}`, {
+        const res = await mutationFetch(`/api/favorites/salons?salonId=${salonId}`, {
           method: "DELETE",
         });
         const json = await res.json();
@@ -308,7 +309,7 @@ export default function SalonProfilePage() {
           setIsFavorite(false);
         }
       } else {
-        const res = await fetch("/api/favorites/salons", {
+        const res = await mutationFetch("/api/favorites/salons", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ salonId }),

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { useSession } from "@/lib/auth-client";
+import { mutationFetch } from "@/lib/api-client";
 
 interface SalonData {
   id: string;
@@ -81,7 +82,7 @@ export default function SalonSettingsPage() {
 
     setSaving(true);
     try {
-      const res = await fetch(`/api/salons/${salon.id}`, {
+      const res = await mutationFetch(`/api/salons/${salon.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

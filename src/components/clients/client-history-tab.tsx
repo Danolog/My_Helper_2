@@ -27,6 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { getStatusLabel, getStatusVariant, formatDuration } from "./utils";
+import { mutationFetch } from "@/lib/api-client";
 import type { AppointmentData } from "./types";
 
 interface ClientHistoryTabProps {
@@ -99,7 +100,7 @@ export function ClientHistoryTab({ clientId }: ClientHistoryTabProps) {
   const handleSaveTreatment = async (appointmentId: string) => {
     setSavingTreatment(true);
     try {
-      const res = await fetch(`/api/appointments/${appointmentId}/treatment`, {
+      const res = await mutationFetch(`/api/appointments/${appointmentId}/treatment`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

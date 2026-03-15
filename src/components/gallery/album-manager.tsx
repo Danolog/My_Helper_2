@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { mutationFetch } from "@/lib/api-client";
 import type { GalleryPhoto, Album } from "./gallery-types";
 
 // ---- Sub-components for album management dialogs ----
@@ -33,7 +34,7 @@ function CreateAlbumDialog({ open, onOpenChange, onCreated, salonId }: CreateAlb
     if (!name.trim()) return;
     setCreating(true);
     try {
-      const res = await fetch("/api/albums", {
+      const res = await mutationFetch("/api/albums", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -285,7 +286,7 @@ export function AlbumManager({
 
   const handleDeleteAlbum = async (album: Album) => {
     try {
-      const res = await fetch(`/api/albums/${album.id}`, { method: "DELETE" });
+      const res = await mutationFetch(`/api/albums/${album.id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
         onAlbumsChange(albums.filter((a) => a.id !== album.id));
@@ -304,7 +305,7 @@ export function AlbumManager({
     if (!addToAlbumPhotoId) return;
     setAddingToAlbum(true);
     try {
-      const res = await fetch(`/api/albums/${albumId}/photos`, {
+      const res = await mutationFetch(`/api/albums/${albumId}/photos`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ photoIds: [addToAlbumPhotoId] }),
@@ -333,7 +334,7 @@ export function AlbumManager({
     if (!viewingAlbum) return;
     setRemovingFromAlbum(photoId);
     try {
-      const res = await fetch(
+      const res = await mutationFetch(
         `/api/albums/${viewingAlbum.id}/photos?photoId=${photoId}`,
         { method: "DELETE" }
       );

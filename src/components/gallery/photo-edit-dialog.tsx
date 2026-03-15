@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { mutationFetch } from "@/lib/api-client";
 import type { GalleryPhoto, Employee, Service } from "./gallery-types";
 
 interface PhotoEditDialogProps {
@@ -53,7 +54,7 @@ export function PhotoEditDialog({
     setEditSaving(true);
 
     try {
-      const res = await fetch(`/api/gallery/${photo.id}`, {
+      const res = await mutationFetch(`/api/gallery/${photo.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

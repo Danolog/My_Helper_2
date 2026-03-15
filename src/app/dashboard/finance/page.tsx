@@ -33,6 +33,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 
 interface CommissionRecord {
   id: string;
@@ -151,7 +152,7 @@ export default function FinancePage() {
 
     setSavingRate(true);
     try {
-      const res = await fetch("/api/employees/commission-rate", {
+      const res = await mutationFetch("/api/employees/commission-rate", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

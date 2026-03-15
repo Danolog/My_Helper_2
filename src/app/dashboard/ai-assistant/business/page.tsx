@@ -49,6 +49,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { toast } from "sonner";
 import { getUserFriendlyMessage } from "@/lib/error-messages";
+import { mutationFetch } from "@/lib/api-client";
 import type { Components } from "react-markdown";
 
 // ────────────────────────────────────────────────────────────
@@ -1387,7 +1388,7 @@ function BusinessAssistantContent() {
     try {
       const apiMessages = buildAPIMessages(messageText);
 
-      const res = await fetch("/api/ai/business/chat", {
+      const res = await mutationFetch("/api/ai/business/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: apiMessages }),

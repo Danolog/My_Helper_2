@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import type { Appointment, CalendarEvent, CalendarView, Employee, TimeBlock, WorkSchedule } from "@/types/calendar";
 import { useTabSync } from "@/hooks/use-tab-sync";
+import { mutationFetch } from "@/lib/api-client";
 
 // Lazy-load dialog components (only rendered when user triggers an action)
 const RescheduleDialog = dynamic(
@@ -448,7 +449,7 @@ export default function CalendarPage() {
       const duration = new Date(event.end).getTime() - new Date(event.start).getTime();
       const newEndTime = new Date(newStartTime.getTime() + duration);
 
-      const response = await fetch(`/api/appointments/${event.id}`, {
+      const response = await mutationFetch(`/api/appointments/${event.id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

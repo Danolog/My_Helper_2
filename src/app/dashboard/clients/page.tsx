@@ -45,6 +45,7 @@ import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { EmptyState } from "@/components/ui/empty-state";
+import { mutationFetch } from "@/lib/api-client";
 
 interface Client {
   id: string;
@@ -326,7 +327,7 @@ export default function ClientsPage() {
 
     setSaving(true);
     try {
-      const res = await fetch("/api/clients", {
+      const res = await mutationFetch("/api/clients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -56,6 +56,7 @@ import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { EmptyState } from "@/components/ui/empty-state";
+import { mutationFetch } from "@/lib/api-client";
 
 interface ServiceCategory {
   id: string;
@@ -271,7 +272,7 @@ export default function ServicesPage() {
 
     setSaving(true);
     try {
-      const res = await fetch("/api/services", {
+      const res = await mutationFetch("/api/services", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -315,7 +316,7 @@ export default function ServicesPage() {
     if (!serviceToDelete) return;
     setDeletingService(true);
     try {
-      const res = await fetch(`/api/services/${serviceToDelete.id}`, {
+      const res = await mutationFetch(`/api/services/${serviceToDelete.id}`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -362,7 +363,7 @@ export default function ServicesPage() {
     try {
       if (editingCategory) {
         // Update existing category
-        const res = await fetch(`/api/service-categories/${editingCategory.id}`, {
+        const res = await mutationFetch(`/api/service-categories/${editingCategory.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: categoryFormName.trim() }),
@@ -379,7 +380,7 @@ export default function ServicesPage() {
         }
       } else {
         // Create new category
-        const res = await fetch("/api/service-categories", {
+        const res = await mutationFetch("/api/service-categories", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -410,7 +411,7 @@ export default function ServicesPage() {
     if (!categoryToDelete) return;
     setDeletingCategory(true);
     try {
-      const res = await fetch(`/api/service-categories/${categoryToDelete.id}`, {
+      const res = await mutationFetch(`/api/service-categories/${categoryToDelete.id}`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -433,7 +434,7 @@ export default function ServicesPage() {
   // Assign a service to a category
   const handleAssignCategory = async (serviceId: string, categoryId: string | null) => {
     try {
-      const res = await fetch(`/api/services/${serviceId}`, {
+      const res = await mutationFetch(`/api/services/${serviceId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ categoryId }),

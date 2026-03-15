@@ -24,6 +24,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 
 interface Review {
   id: string;
@@ -82,7 +83,7 @@ export default function ReviewModerationPage() {
   const handleModerate = async (reviewId: string, action: "approve" | "reject") => {
     try {
       setModeratingId(reviewId);
-      const res = await fetch(`/api/reviews/${reviewId}/moderate`, {
+      const res = await mutationFetch(`/api/reviews/${reviewId}/moderate`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
@@ -104,7 +105,7 @@ export default function ReviewModerationPage() {
   const handleGenerateResponse = async (reviewId: string) => {
     try {
       setGeneratingId(reviewId);
-      const res = await fetch("/api/ai/content/generate-review-response", {
+      const res = await mutationFetch("/api/ai/content/generate-review-response", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reviewId }),
@@ -136,7 +137,7 @@ export default function ReviewModerationPage() {
 
     try {
       setSavingId(reviewId);
-      const res = await fetch(`/api/reviews/${reviewId}/respond`, {
+      const res = await mutationFetch(`/api/reviews/${reviewId}/respond`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ response: responseText.trim() }),
@@ -173,7 +174,7 @@ export default function ReviewModerationPage() {
   const handleDeleteResponse = async (reviewId: string) => {
     try {
       setSavingId(reviewId);
-      const res = await fetch(`/api/reviews/${reviewId}/respond`, {
+      const res = await mutationFetch(`/api/reviews/${reviewId}/respond`, {
         method: "DELETE",
       });
       const data = await res.json();

@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle2, Loader2, XCircle, ArrowRight } from "lucide-react";
+import { mutationFetch } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -42,7 +43,7 @@ function SuccessContent() {
       }
 
       try {
-        const res = await fetch("/api/subscriptions/confirm", {
+        const res = await mutationFetch("/api/subscriptions/confirm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ sessionId }),

@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
+import { mutationFetch } from "@/lib/api-client";
 
 interface WaitingListEntry {
   id: string;
@@ -138,7 +139,7 @@ export default function WaitingListPage() {
   const handleAccept = async (entryId: string) => {
     setActionLoading(entryId);
     try {
-      const res = await fetch(`/api/client/waiting-list/${entryId}`, {
+      const res = await mutationFetch(`/api/client/waiting-list/${entryId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accepted: true }),
@@ -169,7 +170,7 @@ export default function WaitingListPage() {
   const handleDecline = async (entryId: string) => {
     setActionLoading(entryId);
     try {
-      const res = await fetch(`/api/client/waiting-list/${entryId}`, {
+      const res = await mutationFetch(`/api/client/waiting-list/${entryId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accepted: false }),
@@ -200,7 +201,7 @@ export default function WaitingListPage() {
   const handleRemove = async (entryId: string) => {
     setActionLoading(entryId);
     try {
-      const res = await fetch(`/api/client/waiting-list/${entryId}`, {
+      const res = await mutationFetch(`/api/client/waiting-list/${entryId}`, {
         method: "DELETE",
       });
       const data = await res.json();

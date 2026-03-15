@@ -25,6 +25,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 
 interface MaterialRecord {
@@ -136,7 +137,7 @@ export function CompleteAppointmentDialog({
   const handleComplete = async () => {
     setCompleting(true);
     try {
-      const res = await fetch(
+      const res = await mutationFetch(
         `/api/appointments/${appointment.id}/complete`,
         {
           method: "POST",

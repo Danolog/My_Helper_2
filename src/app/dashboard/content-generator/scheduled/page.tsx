@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 
 type ScheduledPost = {
   id: string;
@@ -146,7 +147,7 @@ function ScheduledPostsContent() {
   const handleCancel = async (postId: string) => {
     setActionLoading(postId);
     try {
-      const response = await fetch(`/api/scheduled-posts/${postId}`, {
+      const response = await mutationFetch(`/api/scheduled-posts/${postId}`, {
         method: "DELETE",
       });
       const data = await response.json();
@@ -166,7 +167,7 @@ function ScheduledPostsContent() {
   const handlePublish = async (postId: string) => {
     setActionLoading(postId);
     try {
-      const response = await fetch(`/api/scheduled-posts/${postId}/publish`, {
+      const response = await mutationFetch(`/api/scheduled-posts/${postId}/publish`, {
         method: "POST",
       });
       const data = await response.json();

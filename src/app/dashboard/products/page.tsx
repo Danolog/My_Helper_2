@@ -55,6 +55,7 @@ import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { EmptyState } from "@/components/ui/empty-state";
+import { mutationFetch } from "@/lib/api-client";
 
 interface Product {
   id: string;
@@ -355,13 +356,13 @@ export default function ProductsPage() {
 
       let res: Response;
       if (editingProduct) {
-        res = await fetch(`/api/products/${editingProduct.id}`, {
+        res = await mutationFetch(`/api/products/${editingProduct.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
       } else {
-        res = await fetch("/api/products", {
+        res = await mutationFetch("/api/products", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -410,7 +411,7 @@ export default function ProductsPage() {
     if (!productToDelete) return;
 
     try {
-      const res = await fetch(`/api/products/${productToDelete.id}`, {
+      const res = await mutationFetch(`/api/products/${productToDelete.id}`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -468,13 +469,13 @@ export default function ProductsPage() {
     try {
       let res: Response;
       if (editingCategory) {
-        res = await fetch(`/api/product-categories/${editingCategory.id}`, {
+        res = await mutationFetch(`/api/product-categories/${editingCategory.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name: categoryFormName.trim() }),
         });
       } else {
-        res = await fetch("/api/product-categories", {
+        res = await mutationFetch("/api/product-categories", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -508,7 +509,7 @@ export default function ProductsPage() {
     if (!categoryToDelete) return;
 
     try {
-      const res = await fetch(`/api/product-categories/${categoryToDelete.id}`, {
+      const res = await mutationFetch(`/api/product-categories/${categoryToDelete.id}`, {
         method: "DELETE",
       });
       const data = await res.json();

@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
 import { validatePhone } from "@/lib/validations";
+import { mutationFetch } from "@/lib/api-client";
 
 export default function ClientProfilePage() {
   const params = useParams();
@@ -165,7 +166,7 @@ export default function ClientProfilePage() {
 
     setSaving(true);
     try {
-      const res = await fetch(`/api/clients/${clientId}`, {
+      const res = await mutationFetch(`/api/clients/${clientId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

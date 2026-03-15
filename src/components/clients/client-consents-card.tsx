@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import { mutationFetch } from "@/lib/api-client";
 import type { ConsentStatus } from "./types";
 
 interface ClientConsentsCardProps {
@@ -52,7 +53,7 @@ export function ClientConsentsCard({ clientId }: ClientConsentsCardProps) {
   const handleConsentToggle = async (consentType: "email" | "sms" | "phone", newValue: boolean) => {
     setSavingConsents(true);
     try {
-      const res = await fetch(`/api/clients/${clientId}/consents`, {
+      const res = await mutationFetch(`/api/clients/${clientId}/consents`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

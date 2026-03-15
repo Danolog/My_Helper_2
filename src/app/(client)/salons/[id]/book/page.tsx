@@ -23,6 +23,7 @@ import type {
 } from "@/components/booking/types";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth-client";
+import { mutationFetch } from "@/lib/api-client";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
 
 // ---------------------------------------------------------------------------
@@ -557,7 +558,7 @@ export default function ClientBookingPage() {
         };
 
         // Step 1: Create deposit session (which also creates the appointment)
-        const sessionRes = await fetch("/api/deposits/create-session", {
+        const sessionRes = await mutationFetch("/api/deposits/create-session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(depositBody),
@@ -587,7 +588,7 @@ export default function ClientBookingPage() {
         await new Promise((resolve) => setTimeout(resolve, 1500));
 
         // Step 3: Confirm the payment
-        const confirmRes = await fetch("/api/deposits/confirm", {
+        const confirmRes = await mutationFetch("/api/deposits/confirm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ depositPaymentId: payId, sessionId: sessId }),
@@ -626,7 +627,7 @@ export default function ClientBookingPage() {
         body.variantId = selectedVariantId;
       }
 
-      const res = await fetch("/api/appointments", {
+      const res = await mutationFetch("/api/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

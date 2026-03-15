@@ -46,6 +46,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 
 interface Promotion {
   id: string;
@@ -221,7 +222,7 @@ export default function PromoCodesPage() {
       // Expiry date
       payload.expiresAt = formExpiresAt || null;
 
-      const res = await fetch(url, {
+      const res = await mutationFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -251,7 +252,7 @@ export default function PromoCodesPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/promo-codes/${deleteTarget.id}`, {
+      const res = await mutationFetch(`/api/promo-codes/${deleteTarget.id}`, {
         method: "DELETE",
       });
       const data = await res.json();

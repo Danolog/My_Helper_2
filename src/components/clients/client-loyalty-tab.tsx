@@ -26,6 +26,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { mutationFetch } from "@/lib/api-client";
 import type { LoyaltyData, RewardsData, RewardItem } from "./types";
 
 interface ClientLoyaltyTabProps {
@@ -92,7 +93,7 @@ export function ClientLoyaltyTab({ clientId, salonId }: ClientLoyaltyTabProps) {
     if (!selectedReward) return;
     setRedeemingReward(true);
     try {
-      const res = await fetch(`/api/clients/${clientId}/loyalty/redeem`, {
+      const res = await mutationFetch(`/api/clients/${clientId}/loyalty/redeem`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

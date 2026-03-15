@@ -21,6 +21,7 @@ import {
 import { toast } from "sonner";
 import Link from "next/link";
 import { useSession } from "@/lib/auth-client";
+import { mutationFetch } from "@/lib/api-client";
 
 interface RewardTier {
   id: string;
@@ -133,7 +134,7 @@ export default function LoyaltySettingsPage() {
         pointsExpiryDays: expiryEnabled ? parseInt(expiryDaysInput) || 365 : null,
       };
 
-      const res = await fetch(`/api/salons/${salonId}/loyalty-settings`, {
+      const res = await mutationFetch(`/api/salons/${salonId}/loyalty-settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settingsToSave),

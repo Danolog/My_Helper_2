@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
+import { mutationFetch } from "@/lib/api-client";
 import { Bell, BellOff, BellRing, Loader2 } from "lucide-react";
 
 interface PushManagerState {
@@ -99,7 +100,7 @@ export function PushNotificationManager() {
       });
 
       // Send subscription to server
-      const res = await fetch("/api/push/subscribe", {
+      const res = await mutationFetch("/api/push/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -143,7 +144,7 @@ export function PushNotificationManager() {
           await subscription.unsubscribe();
 
           // Remove from server
-          await fetch("/api/push/unsubscribe", {
+          await mutationFetch("/api/push/unsubscribe", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ endpoint: subscription.endpoint }),
@@ -169,7 +170,7 @@ export function PushNotificationManager() {
   const sendTestNotification = async () => {
     setState((s) => ({ ...s, isLoading: true, error: null }));
     try {
-      const res = await fetch("/api/push/test", { method: "POST" });
+      const res = await mutationFetch("/api/push/test", { method: "POST" });
       const data = await res.json();
       if (!data.success) {
         throw new Error(data.data?.error || "Failed to send test");
