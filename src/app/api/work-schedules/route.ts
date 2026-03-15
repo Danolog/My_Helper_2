@@ -4,6 +4,7 @@ import { workSchedules, employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, createWorkScheduleSchema } from "@/lib/api-validation";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 
 import { logger } from "@/lib/logger";
 // GET /api/work-schedules?employeeId=xxx
@@ -49,6 +50,15 @@ export async function GET(request: Request) {
 // Accepts a full week schedule: { employeeId, schedules: [{ dayOfWeek, startTime, endTime, isDayOff }] }
 export async function POST(request: Request) {
   try {
+    const ip = getClientIp(request);
+    const rateLimitResult = apiRateLimit.check(ip);
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
+      );
+    }
+
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
     const body = await request.json();
