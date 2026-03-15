@@ -33,7 +33,7 @@ import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
 export default function ClientBookingPage() {
   const params = useParams();
   const salonId = params.id as string;
-  const { data: session, isPending: sessionPending } = useSession();
+  const { data: session } = useSession();
 
   // Salon data
   const [salon, setSalon] = useState<SalonDetail | null>(null);
@@ -678,8 +678,8 @@ export default function ClientBookingPage() {
   // Render helpers
   // ---------------------------------------------------------------------------
 
-  // Loading state
-  if (sessionPending || loadingSalon) {
+  // Loading state — don't block on session (guests can book without auth)
+  if (loadingSalon) {
     return (
       <div className="container mx-auto p-6">
         <div className="flex justify-center items-center py-12">

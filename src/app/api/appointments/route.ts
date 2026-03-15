@@ -5,6 +5,8 @@ import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
 import { validateBody, createAppointmentSchema } from "@/lib/api-validation";
 import { isValidUuid, isValidDateString } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getOptionalSession } from "@/lib/session";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
 import { logger } from "@/lib/logger";
 // GET /api/appointments - List appointments with optional date range filter
@@ -109,21 +111,47 @@ export async function GET(request: Request) {
 }
 
 // POST /api/appointments - Create a new appointment
+// Auth is optional: logged-in users book with their session, guests provide contact info.
 export async function POST(request: Request) {
   try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+    // Rate limit to prevent abuse (especially from unauthenticated guests)
+    const ip = getClientIp(request);
+    const rateLimitResult = strictRateLimit.check(ip);
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
+      );
+    }
+
+    const session = await getOptionalSession();
 
     const body = await request.json();
     const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId, promoCodeId, discountAmount, guestName, guestPhone, guestEmail } = body;
 
-    // Use provided bookedByUserId or fall back to the authenticated user's ID
-    const bookedByUserId: string | null = bodyUserId || authResult.user.id || null;
+    // Use provided bookedByUserId, fall back to session user, or null for guests
+    const bookedByUserId: string | null = bodyUserId || session?.user?.id || null;
 
     // Server-side validation with Zod schema
     const validationError = validateBody(createAppointmentSchema, body);
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
+    }
+
+    // Guest validation: require name and phone when not logged in
+    if (!session) {
+      if (!guestName?.trim() || guestName.trim().length < 2) {
+        return NextResponse.json(
+          { success: false, error: "Imię i nazwisko jest wymagane (min. 2 znaki)" },
+          { status: 400 }
+        );
+      }
+      if (!guestPhone?.trim() || !/^(\+48)?[0-9]{9}$/.test(guestPhone.trim().replace(/[\s\-()]/g, ""))) {
+        return NextResponse.json(
+          { success: false, error: "Podaj prawidłowy numer telefonu (9 cyfr)" },
+          { status: 400 }
+        );
+      }
     }
 
     // Check for overlapping appointments for this employee (only need id for existence check)

@@ -418,8 +418,8 @@ export default function Home() {
                 </Link>
               </Button>
               <Button asChild variant="outline" size="lg" className="rounded-full h-12 px-8 border-border/80">
-                <Link href="/portal/login">
-                  Zaloguj się
+                <Link href="/dla-klientow">
+                  Portal klienta
                 </Link>
               </Button>
             </CardContent>

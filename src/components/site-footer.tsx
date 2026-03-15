@@ -31,7 +31,7 @@ export function SiteFooter() {
             <h3 className="font-semibold text-sm mb-3 text-[oklch(0.95_0.01_70)]">Dla klientow</h3>
             <ul className="space-y-2 text-sm text-[oklch(0.60_0.03_55)]">
               <li><Link href="/salons" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Przegladaj salony</Link></li>
-              <li><Link href="/portal/login" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Portal klienta</Link></li>
+              <li><Link href="/dla-klientow" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Portal klienta</Link></li>
             </ul>
           </div>
           <div>

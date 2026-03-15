@@ -39,11 +39,13 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-// Mock the auth module (used in POST for bookedByUserId)
+// Mock the auth module (used via getOptionalSession in POST)
 vi.mock("@/lib/auth", () => ({
   auth: {
     api: {
-      getSession: vi.fn().mockResolvedValue(null),
+      getSession: vi.fn().mockResolvedValue({
+        user: { id: "test-user-id", email: "test@test.com", name: "Test User" },
+      }),
     },
   },
 }));
@@ -51,6 +53,22 @@ vi.mock("@/lib/auth", () => ({
 // Mock next/headers (used in appointments POST)
 vi.mock("next/headers", () => ({
   headers: vi.fn().mockResolvedValue(new Headers()),
+}));
+
+// Mock session module (getOptionalSession used in POST)
+vi.mock("@/lib/session", () => ({
+  getOptionalSession: vi.fn().mockResolvedValue({
+    user: { id: "test-user-id", email: "test@test.com", name: "Test User" },
+  }),
+}));
+
+// Mock rate-limit module (used in POST for guest booking protection)
+vi.mock("@/lib/rate-limit", () => ({
+  strictRateLimit: { check: vi.fn().mockReturnValue({ success: true, remaining: 4, reset: 60000 }) },
+  getClientIp: vi.fn().mockReturnValue("127.0.0.1"),
+  apiRateLimit: { check: vi.fn().mockReturnValue({ success: true, remaining: 59, reset: 60000 }) },
+  authRateLimit: { check: vi.fn().mockReturnValue({ success: true, remaining: 9, reset: 60000 }) },
+  createRateLimit: vi.fn(),
 }));
 
 // Mock refund utilities (used in DELETE)
@@ -802,6 +820,147 @@ describe("POST /api/appointments", () => {
     expect(status).toBe(201);
     expect(body.success).toBe(true);
     expect(body.data).toBeDefined();
+  });
+
+  // -------------------------------------------------------
+  // Guest booking tests (no auth session)
+  // -------------------------------------------------------
+
+  it("should return 201 for guest booking with valid guestName and guestPhone", async () => {
+    // Temporarily mock getOptionalSession to return null (guest)
+    const { getOptionalSession } = await import("@/lib/session");
+    vi.mocked(getOptionalSession).mockResolvedValueOnce(null);
+
+    const newAppointment = makeAppointment({
+      clientId: null,
+      guestName: "Jan Kowalski",
+      guestPhone: "123456789",
+      bookedByUserId: null,
+    });
+
+    const overlapChain = chainMock([]);
+    const timeBlockChain = chainMock([]);
+    const insertChain = chainMock([newAppointment]);
+
+    mockDbSelect
+      .mockReturnValueOnce(overlapChain)
+      .mockReturnValueOnce(timeBlockChain);
+    mockDbInsert.mockReturnValue(insertChain);
+
+    const request = createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+        guestName: "Jan Kowalski",
+        guestPhone: "123456789",
+      },
+    });
+
+    const response = await createAppointment(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(201);
+    expect(body.success).toBe(true);
+    expect(body.data).toBeDefined();
+  });
+
+  it("should return 400 for guest booking without guestName", async () => {
+    const { getOptionalSession } = await import("@/lib/session");
+    vi.mocked(getOptionalSession).mockResolvedValueOnce(null);
+
+    const request = createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+        guestPhone: "123456789",
+      },
+    });
+
+    const response = await createAppointment(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Imię i nazwisko");
+  });
+
+  it("should return 400 for guest booking without guestPhone", async () => {
+    const { getOptionalSession } = await import("@/lib/session");
+    vi.mocked(getOptionalSession).mockResolvedValueOnce(null);
+
+    const request = createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+        guestName: "Jan Kowalski",
+      },
+    });
+
+    const response = await createAppointment(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("numer telefonu");
+  });
+
+  it("should return 400 for guest booking with too short guestName", async () => {
+    const { getOptionalSession } = await import("@/lib/session");
+    vi.mocked(getOptionalSession).mockResolvedValueOnce(null);
+
+    const request = createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+        guestName: "J",
+        guestPhone: "123456789",
+      },
+    });
+
+    const response = await createAppointment(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("min. 2 znaki");
+  });
+
+  it("should return 429 when rate limited", async () => {
+    const { strictRateLimit } = await import("@/lib/rate-limit");
+    vi.mocked(strictRateLimit.check).mockReturnValueOnce({
+      success: false,
+      remaining: 0,
+      reset: 30000,
+    });
+
+    const request = createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+      },
+    });
+
+    const response = await createAppointment(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(429);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Zbyt wiele");
   });
 });
 
