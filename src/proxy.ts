@@ -98,7 +98,7 @@ function buildCsp(nonce: string): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' storage.googleapis.com`,
-    "style-src 'self' 'unsafe-inline' fonts.googleapis.com",
+    `style-src 'self' 'nonce-${nonce}' fonts.googleapis.com`,
     "font-src 'self' fonts.gstatic.com",
     "img-src 'self' data: blob: lh3.googleusercontent.com avatars.githubusercontent.com *.public.blob.vercel-storage.com images.unsplash.com",
     "connect-src 'self' *.googleapis.com accounts.google.com",
