@@ -121,6 +121,7 @@ export default async function RootLayout({
           attribute="class"
           defaultTheme="system"
           enableSystem
+          nonce={nonce}
         >
           <OfflineBanner />
           {children}
