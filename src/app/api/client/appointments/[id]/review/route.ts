@@ -5,6 +5,7 @@ import { appointments, reviews } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 
+import { logger } from "@/lib/logger";
 // GET /api/client/appointments/[id]/review - Check if a review exists for this appointment
 export async function GET(
   _request: Request,
@@ -55,7 +56,7 @@ export async function GET(
       data: review,
     });
   } catch (error) {
-    console.error("[Client Review API] GET Error:", error);
+    logger.error("[Client Review API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac opinii" },
       { status: 500 }
@@ -158,10 +159,8 @@ export async function POST(
       })
       .returning();
 
-    console.log(
-      `[Client Review API] User ${userId} submitted review for appointment ${id}`,
-      { rating: hasRating ? rating : null, hasComment, reviewId: newReview?.id }
-    );
+    logger.info(`[Client Review API] User ${userId} submitted review for appointment ${id}`,
+      { rating: hasRating ? rating : null, hasComment, reviewId: newReview?.id });
 
     return NextResponse.json({
       success: true,
@@ -169,7 +168,7 @@ export async function POST(
       message: "Opinia zostala dodana pomyslnie",
     });
   } catch (error) {
-    console.error("[Client Review API] POST Error:", error);
+    logger.error("[Client Review API] POST Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie dodac opinii" },
       { status: 500 }

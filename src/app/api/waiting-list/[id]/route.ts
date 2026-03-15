@@ -13,6 +13,7 @@ import { auth } from "@/lib/auth";
 import { validateBody, updateWaitingListSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/waiting-list/[id] - Get a single waiting list entry
 export async function GET(
   _request: Request,
@@ -98,7 +99,7 @@ export async function GET(
       data: formattedEntry,
     });
   } catch (error) {
-    console.error("[WaitingList API] GET [id] Error:", error);
+    logger.error("[WaitingList API] GET [id] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac wpisu" },
       { status: 500 }
@@ -200,10 +201,8 @@ export async function PUT(
       .where(eq(waitingList.id, id))
       .returning();
 
-    console.log(
-      `[WaitingList API] PUT: Updated entry ${id} in salon ${salon.id}`,
-      updateData
-    );
+    logger.info(`[WaitingList API] PUT: Updated entry ${id} in salon ${salon.id}`,
+      updateData);
 
     return NextResponse.json({
       success: true,
@@ -211,7 +210,7 @@ export async function PUT(
       message: "Wpis zostal zaktualizowany",
     });
   } catch (error) {
-    console.error("[WaitingList API] PUT Error:", error);
+    logger.error("[WaitingList API] PUT Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie zaktualizowac wpisu" },
       { status: 500 }
@@ -268,9 +267,7 @@ export async function DELETE(
       );
     }
 
-    console.log(
-      `[WaitingList API] DELETE: Removed entry ${id} from salon ${salon.id}`
-    );
+    logger.info(`[WaitingList API] DELETE: Removed entry ${id} from salon ${salon.id}`);
 
     return NextResponse.json({
       success: true,
@@ -278,7 +275,7 @@ export async function DELETE(
       message: "Wpis zostal usuniety z listy oczekujacych",
     });
   } catch (error) {
-    console.error("[WaitingList API] DELETE Error:", error);
+    logger.error("[WaitingList API] DELETE Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie usunac wpisu" },
       { status: 500 }

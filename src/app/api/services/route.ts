@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { validateBody, createServiceSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/services - List all services
 export async function GET(request: Request) {
   try {
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
     const salonId = searchParams.get("salonId");
     const activeOnly = searchParams.get("activeOnly") === "true";
 
-    console.log("[Services API] GET with params:", { salonId, activeOnly });
+    logger.info("[Services API] GET with params", { salonId, activeOnly });
 
     let query = db.select({
       service: services,
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
     }
 
     const result = await query;
-    console.log(`[Services API] Query returned ${result.length} rows`);
+    logger.info(`[Services API] Query returned ${result.length} rows`);
 
     const formattedServices = result.map((row) => ({
       ...row.service,
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
       count: formattedServices.length,
     });
   } catch (error) {
-    console.error("[Services API] Database error:", error);
+    logger.error("[Services API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch services" },
       { status: 500 }
@@ -71,7 +72,7 @@ export async function POST(request: Request) {
     const parsedPrice = parseFloat(basePrice);
     const parsedDuration = parseInt(baseDuration, 10);
 
-    console.log(`[Services API] Creating service: ${name}`);
+    logger.info(`[Services API] Creating service: ${name}`);
     const [newService] = await db
       .insert(services)
       .values({
@@ -85,14 +86,14 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[Services API] Created service with id: ${newService?.id}`);
+    logger.info(`[Services API] Created service with id: ${newService?.id}`);
 
     return NextResponse.json({
       success: true,
       data: newService,
     }, { status: 201 });
   } catch (error) {
-    console.error("[Services API] Database error:", error);
+    logger.error("[Services API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create service" },
       { status: 500 }

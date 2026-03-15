@@ -4,6 +4,7 @@ import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 export interface FiscalPrinterSettings {
   enabled: boolean;
   connectionType: "network" | "usb" | "serial";
@@ -83,7 +84,7 @@ export async function GET(
       data: fiscalSettings,
     });
   } catch (error) {
-    console.error("[Fiscal Settings API] GET Error:", error);
+    logger.error("[Fiscal Settings API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch fiscal settings" },
       { status: 500 }
@@ -227,10 +228,8 @@ export async function PUT(
       .where(eq(salons.id, id))
       .returning();
 
-    console.log(
-      `[Fiscal Settings API] Updated fiscal settings for salon ${id}:`,
-      newFiscalSettings
-    );
+    logger.info(`[Fiscal Settings API] Updated fiscal settings for salon ${id}`,
+      { settings: newFiscalSettings as unknown as Record<string, unknown> });
 
     return NextResponse.json({
       success: true,
@@ -238,7 +237,7 @@ export async function PUT(
       message: "Ustawienia drukarki fiskalnej zostaly zapisane",
     });
   } catch (error) {
-    console.error("[Fiscal Settings API] PUT Error:", error);
+    logger.error("[Fiscal Settings API] PUT Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update fiscal settings" },
       { status: 500 }

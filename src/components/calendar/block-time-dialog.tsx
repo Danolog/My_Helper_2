@@ -136,8 +136,7 @@ export function BlockTimeDialog({
           description: data.error,
         });
       }
-    } catch (error) {
-      console.error("Failed to create time block:", error);
+    } catch {
       toast.error("Blad podczas blokowania czasu");
     } finally {
       setSubmitting(false);

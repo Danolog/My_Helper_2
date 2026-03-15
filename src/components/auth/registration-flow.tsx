@@ -203,8 +203,7 @@ export function RegistrationFlow({ preselectedPlan }: RegistrationFlowProps) {
               }),
             })
           } catch {
-            // Non-critical - subscription can be set up later
-            console.error("Failed to set initial subscription plan")
+            // Non-critical — subscription can be set up later
           }
         }
 

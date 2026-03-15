@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { salons, galleryPhotos, employees, services } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 const requestSchema = z.object({
   photoId: z.string().uuid("Nieprawidlowy format ID zdjecia"),
   platform: z.enum(["instagram", "facebook", "tiktok"]),
@@ -148,7 +149,7 @@ export async function POST(req: Request) {
 
     photo = result;
   } catch (error) {
-    console.error("[AI Content] Error fetching gallery photo:", error);
+    logger.error("[AI Content] Error fetching gallery photo", { error: error });
     return Response.json(
       { error: "Blad podczas pobierania danych zdjecia." },
       { status: 500 }
@@ -181,7 +182,7 @@ export async function POST(req: Request) {
       }
     }
   } catch (error) {
-    console.error("[AI Content] Error fetching salon info:", error);
+    logger.error("[AI Content] Error fetching salon info", { error: error });
   }
 
   // Build photo context for the prompt
@@ -282,7 +283,7 @@ Wygeneruj TYLKO tresc podpisu, bez zadnych dodatkowych komentarzy.`;
       characterCount: caption.length,
     });
   } catch (error) {
-    console.error("[AI Content] Error generating photo caption:", error);
+    logger.error("[AI Content] Error generating photo caption", { error: error });
     return Response.json(
       { error: "Blad podczas generowania podpisu. Sprobuj ponownie." },
       { status: 500 }

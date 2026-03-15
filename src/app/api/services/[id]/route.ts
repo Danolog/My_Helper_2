@@ -6,6 +6,7 @@ import { validateBody, updateServiceSchema } from "@/lib/api-validation";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/services/[id] - Get a single service with its variants
 export async function GET(
   _request: Request,
@@ -55,7 +56,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Services API] Error fetching service:", error);
+    logger.error("[Services API] Error fetching service", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch service" },
       { status: 500 }
@@ -119,7 +120,7 @@ export async function PUT(
       data: updated,
     });
   } catch (error) {
-    console.error("[Services API] Error updating service:", error);
+    logger.error("[Services API] Error updating service", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update service" },
       { status: 500 }
@@ -162,14 +163,14 @@ export async function DELETE(
       );
     }
 
-    console.log(`[Services API] Deleted service: ${deleted.name} (${deleted.id})`);
+    logger.info(`[Services API] Deleted service: ${deleted.name} (${deleted.id})`);
 
     return NextResponse.json({
       success: true,
       data: deleted,
     });
   } catch (error) {
-    console.error("[Services API] Error deleting service:", error);
+    logger.error("[Services API] Error deleting service", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete service" },
       { status: 500 }

@@ -6,6 +6,7 @@ import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /** Trend direction based on percentage change relative to a threshold. */
 function classifyTrend(
   current: number,
@@ -854,7 +855,7 @@ export async function GET(_request: Request) {
       },
     });
   } catch (error) {
-    console.error("[AI Business Trends] Error:", error);
+    logger.error("[AI Business Trends] Error", { error: error });
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
       { error: "Failed to compute business trends", details: message },

@@ -479,8 +479,7 @@ function NewslettersContent() {
         const data = await response.json();
         setSavedNewsletters(data.newsletters || []);
       }
-    } catch (error) {
-      console.error("Error fetching saved newsletters:", error);
+    } catch {
     } finally {
       setLoadingSaved(false);
     }
@@ -521,8 +520,7 @@ function NewslettersContent() {
       setEditedContent(data.content);
       setIsEditingNewsletter(false);
       toast.success("Newsletter wygenerowany pomyslnie!");
-    } catch (error) {
-      console.error("Error generating newsletter:", error);
+    } catch {
       toast.error(
         "Nie udalo sie wygenerowac newslettera. Sprobuj ponownie."
       );
@@ -569,8 +567,7 @@ function NewslettersContent() {
         // Refresh saved list
         fetchSavedNewsletters();
       }
-    } catch (error) {
-      console.error("Error saving newsletter:", error);
+    } catch {
       toast.error("Nie udalo sie zapisac newslettera.");
     } finally {
       setIsSaving(false);

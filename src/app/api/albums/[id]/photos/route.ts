@@ -4,6 +4,7 @@ import { albums, photoAlbums, galleryPhotos, employees, services } from "@/lib/s
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/albums/[id]/photos - Get all photos in an album
 export async function GET(
   _request: Request,
@@ -54,7 +55,7 @@ export async function GET(
       .where(eq(photoAlbums.albumId, id))
       .orderBy(desc(galleryPhotos.createdAt));
 
-    console.log(`[Albums API] GET photos: ${photos.length} photos in album "${album.name}"`);
+    logger.info(`[Albums API] GET photos: ${photos.length} photos in album "${album.name}"`);
 
     return NextResponse.json({
       success: true,
@@ -67,7 +68,7 @@ export async function GET(
       count: photos.length,
     });
   } catch (error) {
-    console.error("[Albums API] Database error:", error);
+    logger.error("[Albums API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch album photos" },
       { status: 500 }
@@ -132,7 +133,7 @@ export async function POST(
 
     await db.insert(photoAlbums).values(values);
 
-    console.log(`[Albums API] Added ${newPhotoIds.length} photos to album "${album.name}"`);
+    logger.info(`[Albums API] Added ${newPhotoIds.length} photos to album "${album.name}"`);
 
     return NextResponse.json(
       {
@@ -143,7 +144,7 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    console.error("[Albums API] Database error:", error);
+    logger.error("[Albums API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to add photos to album" },
       { status: 500 }
@@ -188,14 +189,14 @@ export async function DELETE(
       );
     }
 
-    console.log(`[Albums API] Removed photo ${photoId} from album ${id}`);
+    logger.info(`[Albums API] Removed photo ${photoId} from album ${id}`);
 
     return NextResponse.json({
       success: true,
       message: "Photo removed from album",
     });
   } catch (error) {
-    console.error("[Albums API] Database error:", error);
+    logger.error("[Albums API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to remove photo from album" },
       { status: 500 }

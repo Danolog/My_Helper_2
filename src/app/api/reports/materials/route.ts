@@ -4,6 +4,7 @@ import { appointmentMaterials, products, appointments, employees, services } fro
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/reports/materials - Materials consumption report
 export async function GET(request: Request) {
   try {
@@ -209,7 +210,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Materials Report API] Database error:", error);
+    logger.error("[Materials Report API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to generate materials report" },
       { status: 500 }

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { promotions, appointments, services } from "@/lib/schema";
 import { eq, and, not, sql } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 // GET /api/promotions/check - Check if a client qualifies for any buy2get1 promotion
 // Query params: salonId, clientId, serviceId
 export async function GET(request: Request) {
@@ -119,7 +120,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Promotions Check API] Error:", error);
+    logger.error("[Promotions Check API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to check promotions" },
       { status: 500 }

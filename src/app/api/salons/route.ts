@@ -4,6 +4,7 @@ import { salons, services, reviews } from "@/lib/schema";
 import { eq, and, isNotNull, ne, inArray, count, avg } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/salons - List all salons (filtered to exclude test/incomplete salons)
 export async function GET() {
   try {
@@ -100,7 +101,7 @@ export async function GET() {
       count: enrichedSalons.length,
     });
   } catch (error) {
-    console.error("[Salons API] Database error:", error);
+    logger.error("[Salons API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch salons" },
       { status: 500 }
@@ -124,7 +125,7 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(`[Salons API] Executing: INSERT INTO salons (name, phone, email, address, industry_type, owner_id)`);
+    logger.info(`[Salons API] Executing: INSERT INTO salons (name, phone, email, address, industry_type, owner_id)`);
     const [newSalon] = await db
       .insert(salons)
       .values({
@@ -137,14 +138,14 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[Salons API] INSERT successful, created salon with id: ${newSalon?.id}`);
+    logger.info(`[Salons API] INSERT successful, created salon with id: ${newSalon?.id}`);
 
     return NextResponse.json({
       success: true,
       data: newSalon,
     }, { status: 201 });
   } catch (error) {
-    console.error("[Salons API] Database error:", error);
+    logger.error("[Salons API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create salon" },
       { status: 500 }
@@ -168,7 +169,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    console.log(`[Salons API] Executing: DELETE FROM salons WHERE id = '${id}'`);
+    logger.info(`[Salons API] Executing: DELETE FROM salons WHERE id = '${id}'`);
     const [deleted] = await db
       .delete(salons)
       .where(eq(salons.id, id))
@@ -181,14 +182,14 @@ export async function DELETE(request: Request) {
       );
     }
 
-    console.log(`[Salons API] DELETE successful, removed salon: ${deleted.name}`);
+    logger.info(`[Salons API] DELETE successful, removed salon: ${deleted.name}`);
 
     return NextResponse.json({
       success: true,
       data: deleted,
     });
   } catch (error) {
-    console.error("[Salons API] Database error:", error);
+    logger.error("[Salons API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete salon" },
       { status: 500 }

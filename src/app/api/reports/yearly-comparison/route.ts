@@ -4,6 +4,7 @@ import { appointments, services, employees } from "@/lib/schema";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 interface YearMetrics {
   totalRevenue: string;
   totalAppointments: number;
@@ -401,7 +402,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Yearly Comparison Report API] Database error:", error);
+    logger.error("[Yearly Comparison Report API] Database error", { error: error });
     return NextResponse.json(
       {
         success: false,

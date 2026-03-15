@@ -5,6 +5,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { validateBody, updateProductSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * Check if a product has low stock and create a notification if needed.
  * Prevents duplicate notifications within 24 hours.
@@ -55,9 +56,7 @@ async function checkAndNotifyLowStock(product: {
       })
       .returning();
 
-    console.log(
-      `[Low Stock Alert] Notification sent for "${product.name}" (${product.id}) - qty: ${qty}, min: ${minQty}`
-    );
+    logger.info(`[Low Stock Alert] Notification sent for "${product.name}" (${product.id}) - qty: ${qty}, min: ${minQty}`);
 
     return { notificationSent: true, notification };
   }
@@ -94,7 +93,7 @@ export async function GET(
       data: product,
     });
   } catch (error) {
-    console.error("[Products API] Database error:", error);
+    logger.error("[Products API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch product" },
       { status: 500 }
@@ -143,14 +142,14 @@ export async function PUT(
       );
     }
 
-    console.log(`[Products API] Updated product: ${updatedProduct.name} (${updatedProduct.id})`);
+    logger.info(`[Products API] Updated product: ${updatedProduct.name} (${updatedProduct.id})`);
 
     // Check for low stock and send notification if needed
     let lowStockAlert = null;
     try {
       lowStockAlert = await checkAndNotifyLowStock(updatedProduct);
     } catch (alertError) {
-      console.error("[Products API] Low stock check failed (non-blocking):", alertError);
+      logger.error("[Products API] Low stock check failed (non-blocking)", { error: alertError });
     }
 
     return NextResponse.json({
@@ -159,7 +158,7 @@ export async function PUT(
       lowStockAlert,
     });
   } catch (error) {
-    console.error("[Products API] Database error:", error);
+    logger.error("[Products API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update product" },
       { status: 500 }
@@ -190,7 +189,7 @@ export async function DELETE(
       );
     }
 
-    console.log(`[Products API] Deleted product: ${deletedProduct.name} (${deletedProduct.id})`);
+    logger.info(`[Products API] Deleted product: ${deletedProduct.name} (${deletedProduct.id})`);
 
     return NextResponse.json({
       success: true,
@@ -198,7 +197,7 @@ export async function DELETE(
       message: "Product deleted successfully",
     });
   } catch (error) {
-    console.error("[Products API] Database error:", error);
+    logger.error("[Products API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete product" },
       { status: 500 }

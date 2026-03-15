@@ -6,6 +6,7 @@ import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
 import { getUserSalonId } from "@/lib/get-user-salon";
 
+import { logger } from "@/lib/logger";
 const createSchema = z.object({
   platform: z.enum(["instagram", "facebook", "tiktok"]),
   postType: z.enum([
@@ -58,7 +59,7 @@ export async function GET() {
 
     return Response.json({ posts });
   } catch (error) {
-    console.error("[Scheduled Posts] Error fetching posts:", error);
+    logger.error("[Scheduled Posts] Error fetching posts", { error: error });
     return Response.json({ error: "Failed to fetch scheduled posts" }, { status: 500 });
   }
 }
@@ -115,7 +116,7 @@ export async function POST(req: Request) {
 
     return Response.json({ success: true, post: newPost }, { status: 201 });
   } catch (error) {
-    console.error("[Scheduled Posts] Error creating post:", error);
+    logger.error("[Scheduled Posts] Error creating post", { error: error });
     return Response.json({ error: "Failed to create scheduled post" }, { status: 500 });
   }
 }

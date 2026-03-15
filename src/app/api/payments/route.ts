@@ -4,6 +4,7 @@ import { depositPayments, subscriptionPayments, appointments, clients, services,
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/payments
  *
@@ -211,7 +212,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("[Payments API] Error fetching payments:", error);
+    logger.error("[Payments API] Error fetching payments", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch payments" },
       { status: 500 }

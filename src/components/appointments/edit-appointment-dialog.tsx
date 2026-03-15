@@ -180,8 +180,8 @@ export function EditAppointmentDialog({
       if (data.success) {
         setClients(data.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch clients:", error);
+    } catch {
+      // Client list unavailable — select will remain empty
     } finally {
       setLoadingClients(false);
     }
@@ -197,8 +197,8 @@ export function EditAppointmentDialog({
       if (data.success) {
         setAllServices(data.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch services:", error);
+    } catch {
+      // Service list unavailable
     } finally {
       setLoadingServices(false);
     }
@@ -214,8 +214,8 @@ export function EditAppointmentDialog({
       if (data.success) {
         setEmployees(data.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch employees:", error);
+    } catch {
+      // Employee list unavailable
     } finally {
       setLoadingEmployees(false);
     }
@@ -242,8 +242,8 @@ export function EditAppointmentDialog({
             setVariants(data.data);
           }
         })
-        .catch((error) => {
-          console.error("Failed to fetch variants:", error);
+        .catch(() => {
+          // Variant fetch failed — variants will remain empty
         })
         .finally(() => {
           setLoadingVariants(false);
@@ -349,8 +349,7 @@ export function EditAppointmentDialog({
           description: data.error,
         });
       }
-    } catch (error) {
-      console.error("Failed to update appointment:", error);
+    } catch {
       toast.error("Blad podczas aktualizacji wizyty");
     } finally {
       setSubmitting(false);

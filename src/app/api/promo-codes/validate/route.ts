@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 // POST /api/promo-codes/validate - Validate a promo code and return discount info
 export async function POST(request: Request) {
   try {
@@ -141,7 +142,7 @@ export async function POST(request: Request) {
       data: response,
     });
   } catch (error) {
-    console.error("[PromoCodes Validate API] Database error:", error);
+    logger.error("[PromoCodes Validate API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to validate promo code" },
       { status: 500 }

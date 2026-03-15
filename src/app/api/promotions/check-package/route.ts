@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { promotions, services } from "@/lib/schema";
 import { eq, and, inArray } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/promotions/check-package
  * Get active package promotions for a salon with service details
@@ -91,7 +92,7 @@ export async function GET(request: Request) {
       data: packagesWithDetails,
     });
   } catch (error) {
-    console.error("[Package Check API] Error:", error);
+    logger.error("[Package Check API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to check packages" },
       { status: 500 }

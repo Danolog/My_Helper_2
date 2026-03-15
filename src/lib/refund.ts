@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { depositPayments, appointments, notifications } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { getStripe } from "@/lib/stripe";
+import { logger } from "@/lib/logger";
 
 export interface RefundResult {
   success: boolean;
@@ -35,7 +36,7 @@ export async function processAutomaticRefund(
       .where(eq(depositPayments.appointmentId, appointmentId));
 
     if (!payment) {
-      console.log(`[Refund] No deposit payment found for appointment ${appointmentId}`);
+      logger.debug("No deposit payment found for appointment", { appointmentId });
       return {
         success: true,
         refunded: false,
@@ -44,7 +45,7 @@ export async function processAutomaticRefund(
     }
 
     if (payment.status !== "succeeded") {
-      console.log(`[Refund] Payment ${payment.id} status is ${payment.status}, not eligible for refund`);
+      logger.debug("Payment not eligible for refund", { paymentId: payment.id, status: payment.status });
       return {
         success: true,
         refunded: false,
@@ -76,19 +77,16 @@ export async function processAutomaticRefund(
           });
 
           stripeRefundId = refund.id;
-          console.log(`[Refund] Stripe refund created: ${refund.id} for payment intent ${payment.stripePaymentIntentId}`);
+          logger.info("Stripe refund created", { refundId: refund.id, paymentIntentId: payment.stripePaymentIntentId });
         } catch (stripeError) {
-          console.error("[Refund] Stripe refund failed:", stripeError);
-          // Even if Stripe refund fails, we still mark it as refunded in our system
-          // Staff will need to process manual refund
-          console.log("[Refund] Marking as refunded in system (manual Stripe refund needed)");
+          logger.error("Stripe refund failed, marking as refunded for manual processing", { error: stripeError });
         }
       } else {
-        console.log("[Refund] Stripe not configured, marking as refunded (manual refund needed)");
+        logger.warn("Stripe not configured, marking as refunded for manual processing");
       }
     } else {
       // For non-Stripe payments (e.g., Blik P2P), mark as refunded - manual refund needed
-      console.log(`[Refund] Non-Stripe payment (${payment.paymentMethod}), marking as refunded (manual refund needed)`);
+      logger.info("Non-Stripe payment marked as refunded for manual processing", { paymentMethod: payment.paymentMethod });
     }
 
     // Update the deposit payment record
@@ -110,7 +108,7 @@ export async function processAutomaticRefund(
       })
       .where(eq(appointments.id, appointmentId));
 
-    console.log(`[Refund] Successfully processed refund for appointment ${appointmentId}, amount: ${amount} PLN`);
+    logger.info("Refund processed successfully", { appointmentId, amount });
 
     return {
       success: true,
@@ -120,7 +118,7 @@ export async function processAutomaticRefund(
       message: `Zwrot zadatku ${amount.toFixed(2)} PLN zostal zainicjowany`,
     };
   } catch (error) {
-    console.error("[Refund] Error processing refund:", error);
+    logger.error("Error processing refund", { error });
     return {
       success: false,
       refunded: false,
@@ -164,9 +162,9 @@ export async function createRefundNotification(
       status: "pending",
     });
 
-    console.log(`[Refund] Created refund notification for client ${clientId}`);
+    logger.info("Refund notification created", { clientId });
   } catch (error) {
-    console.error("[Refund] Failed to create refund notification:", error);
+    logger.error("Failed to create refund notification", { error, clientId });
     // Don't throw - notification failure shouldn't break the refund
   }
 }

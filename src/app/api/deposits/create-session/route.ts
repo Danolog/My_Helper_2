@@ -83,7 +83,7 @@ export async function POST(request: Request) {
 
     // Verify the service exists and has deposit required
     if (serviceId) {
-      const [service] = await db.select().from(services).where(eq(services.id, serviceId));
+      const [service] = await db.select({ id: services.id }).from(services).where(eq(services.id, serviceId));
       if (!service) {
         return NextResponse.json(
           { success: false, error: "Service not found" },
@@ -92,8 +92,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Check for overlapping appointments for this employee
-    const overlapping = await db.select()
+    // Check for overlapping appointments for this employee (only need id for existence check)
+    const overlapping = await db.select({ id: appointments.id })
       .from(appointments)
       .where(
         and(
@@ -123,8 +123,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check for vacation/time blocks that overlap
-    const conflictingBlocks = await db.select()
+    // Check for vacation/time blocks that overlap (only need id for existence check)
+    const conflictingBlocks = await db.select({ id: timeBlocks.id })
       .from(timeBlocks)
       .where(
         and(

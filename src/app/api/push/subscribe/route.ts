@@ -4,6 +4,7 @@ import { pushSubscriptions } from "@/lib/schema";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { eq, and } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/push/subscribe
  *
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
         })
         .where(eq(pushSubscriptions.id, existingRow.id));
 
-      console.log(`[Push] Updated subscription for user ${user.id}`);
+      logger.info(`[Push] Updated subscription for user ${user.id}`);
 
       return NextResponse.json({
         success: true,
@@ -70,14 +71,14 @@ export async function POST(request: Request) {
       .returning();
 
     const subId = sub?.id;
-    console.log(`[Push] New subscription registered for user ${user.id}: ${subId}`);
+    logger.info(`[Push] New subscription registered for user ${user.id}: ${subId}`);
 
     return NextResponse.json({
       success: true,
       data: { id: subId, created: true },
     });
   } catch (error) {
-    console.error("[Push Subscribe] Error:", error);
+    logger.error("[Push Subscribe] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to register push subscription" },
       { status: 500 }
@@ -115,7 +116,7 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error("[Push Subscribe] Error:", error);
+    logger.error("[Push Subscribe] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to check push subscriptions" },
       { status: 500 }

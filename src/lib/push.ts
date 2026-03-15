@@ -2,6 +2,7 @@ import webpush from "web-push";
 import { db } from "@/lib/db";
 import { notifications, pushSubscriptions } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { logger } from "@/lib/logger";
 
 // Configure web-push with VAPID details
 const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "";
@@ -49,7 +50,7 @@ export async function sendPushNotification(
       .where(eq(pushSubscriptions.userId, userId));
 
     if (subs.length === 0) {
-      console.log(`[Push] No push subscriptions found for user ${userId}`);
+      logger.debug("No push subscriptions found for user", { userId });
       return { success: false, sent: 0, failed: 0, error: "No subscriptions" };
     }
 
@@ -62,14 +63,11 @@ export async function sendPushNotification(
       data: msg.data || {},
     });
 
-    console.log("\n╔══════════════════════════════════════════════════╗");
-    console.log("║              🔔  PUSH NOTIFICATION              ║");
-    console.log("╠══════════════════════════════════════════════════╣");
-    console.log(`║  User:    ${userId}`);
-    console.log(`║  Title:   ${msg.title}`);
-    console.log(`║  Body:    ${msg.body}`);
-    console.log(`║  Devices: ${subs.length}`);
-    console.log("╚══════════════════════════════════════════════════╝\n");
+    logger.info("Sending push notification", {
+      userId,
+      title: msg.title,
+      devices: subs.length,
+    });
 
     let sent = 0;
     let failed = 0;
@@ -90,13 +88,14 @@ export async function sendPushNotification(
       } catch (err: unknown) {
         failed++;
         const statusCode = (err as { statusCode?: number })?.statusCode;
-        console.error(
-          `[Push] Failed to send to endpoint ${sub.endpoint.slice(0, 50)}...: ${statusCode || "unknown"}`
-        );
+        logger.error("Push delivery failed for endpoint", {
+          endpoint: sub.endpoint.slice(0, 50),
+          statusCode: statusCode || "unknown",
+        });
 
         // If subscription is expired/invalid (410 Gone or 404), remove it
         if (statusCode === 410 || statusCode === 404) {
-          console.log(`[Push] Removing expired subscription: ${sub.id}`);
+          logger.info("Removing expired push subscription", { subscriptionId: sub.id });
           await db
             .delete(pushSubscriptions)
             .where(eq(pushSubscriptions.id, sub.id));
@@ -118,9 +117,7 @@ export async function sendPushNotification(
       .returning();
 
     const notifId = notification?.id;
-    console.log(
-      `[Push] Notification saved: ${notifId} (${sent} sent, ${failed} failed)`
-    );
+    logger.info("Push notification saved", { notificationId: notifId, sent, failed });
 
     return {
       success: sent > 0,
@@ -129,7 +126,7 @@ export async function sendPushNotification(
       ...(notifId ? { notificationId: notifId } : {}),
     };
   } catch (error) {
-    console.error("[Push] Failed to send push notification:", error);
+    logger.error("Failed to send push notification", { error });
 
     // Try to save notification with failed status
     try {

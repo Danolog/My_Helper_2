@@ -107,8 +107,7 @@ export default function MaterialsReportPage() {
         throw new Error(json.error || "Failed to fetch report");
       }
       setReportData(json.data);
-    } catch (err) {
-      console.error("[Materials Report] Error:", err);
+    } catch {
       setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
@@ -145,8 +144,7 @@ export default function MaterialsReportPage() {
       document.body.removeChild(a);
 
       toast.success("Raport wyeksportowany do CSV");
-    } catch (err) {
-      console.error("[Materials Report] Export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu");
     }
   };
@@ -222,8 +220,7 @@ export default function MaterialsReportPage() {
         filename: `raport-zuzycie-materialow-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
       });
       toast.success("Raport wyeksportowany do PDF");
-    } catch (err) {
-      console.error("[Materials Report] PDF export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu do PDF");
     }
   };

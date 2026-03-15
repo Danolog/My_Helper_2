@@ -5,6 +5,7 @@ import { reviews, salons, clients, employees, services, appointments } from "@/l
 import { eq, and, desc } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 
+import { logger } from "@/lib/logger";
 // GET /api/reviews - List reviews for the owner's salon with optional status filter
 export async function GET(request: Request) {
   try {
@@ -77,9 +78,7 @@ export async function GET(request: Request) {
       appointmentDate: row.appointment?.startTime || null,
     }));
 
-    console.log(
-      `[Reviews Moderation API] GET: ${formattedReviews.length} reviews found (status: ${status || "all"}) for salon ${salon.id}`
-    );
+    logger.info(`[Reviews Moderation API] GET: ${formattedReviews.length} reviews found (status: ${status || "all"}) for salon ${salon.id}`);
 
     return NextResponse.json({
       success: true,
@@ -87,7 +86,7 @@ export async function GET(request: Request) {
       count: formattedReviews.length,
     });
   } catch (error) {
-    console.error("[Reviews Moderation API] GET Error:", error);
+    logger.error("[Reviews Moderation API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac opinii" },
       { status: 500 }

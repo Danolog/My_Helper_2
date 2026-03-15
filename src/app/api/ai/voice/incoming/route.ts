@@ -14,6 +14,7 @@ import { eq, and, gte, lt, not } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 type VoiceAiConfig = {
   enabled: boolean;
   greeting: string;
@@ -179,7 +180,7 @@ export async function POST(req: Request) {
       messageTaken: aiResponse.messageTaken ?? false,
     });
   } catch (error) {
-    console.error("[Voice AI Incoming] Error:", error);
+    logger.error("[Voice AI Incoming] Error", { error: error });
     return NextResponse.json(
       { error: "Blad przetwarzania polaczenia" },
       { status: 500 }

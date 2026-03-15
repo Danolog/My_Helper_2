@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import type { FiscalPrinterSettings } from "../route";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/salons/[id]/fiscal-settings/test-connection
  *
@@ -95,12 +96,10 @@ export async function POST(
       testResult = "success";
       testError = null;
 
-      console.log(
-        `[Fiscal Test] Connection test for salon ${id}: ` +
+      logger.info(`[Fiscal Test] Connection test for salon ${id}: ` +
         `type=${fiscalSettings.connectionType}, ` +
         `ip=${fiscalSettings.ipAddress}:${fiscalSettings.port}, ` +
-        `model=${fiscalSettings.printerModel}`
-      );
+        `model=${fiscalSettings.printerModel}`);
     }
 
     // Update test results in settings
@@ -141,7 +140,7 @@ export async function POST(
           : `Test polaczenia nie powiodl sie: ${testError}`,
     });
   } catch (error) {
-    console.error("[Fiscal Test Connection API] Error:", error);
+    logger.error("[Fiscal Test Connection API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to test fiscal printer connection" },
       { status: 500 }

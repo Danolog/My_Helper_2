@@ -4,6 +4,7 @@ import { promotions, promoCodes, appointments, services, clients } from "@/lib/s
 import { eq, and, gte, lte, desc, sql, isNotNull } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/reports/promotions - Promotion effectiveness report (ROI on promotions)
 export async function GET(request: Request) {
   try {
@@ -350,7 +351,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Promotions Report API] Database error:", error);
+    logger.error("[Promotions Report API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to generate promotions report" },
       { status: 500 }

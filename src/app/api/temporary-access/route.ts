@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * Available feature names that can be granted temporarily.
  * These correspond to dashboard sections that employees/receptionists
@@ -37,9 +38,7 @@ async function cleanupExpiredAccess(): Promise<number> {
     .returning({ id: temporaryAccess.id });
 
   if (expired.length > 0) {
-    console.log(
-      `[Temporary Access] Cleaned up ${expired.length} expired access entries`
-    );
+    logger.info(`[Temporary Access] Cleaned up ${expired.length} expired access entries`);
   }
 
   return expired.length;
@@ -117,9 +116,7 @@ export async function GET(request: Request) {
       grants = [];
     }
 
-    console.log(
-      `[Temporary Access] Found ${grants.length} active grants${userId ? ` for user ${userId}` : ""}`
-    );
+    logger.info(`[Temporary Access] Found ${grants.length} active grants${userId ? ` for user ${userId}` : ""}`);
 
     return NextResponse.json({
       success: true,
@@ -127,7 +124,7 @@ export async function GET(request: Request) {
       count: grants.length,
     });
   } catch (error) {
-    console.error("[Temporary Access] Database error:", error);
+    logger.error("[Temporary Access] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udało się pobrać uprawnień tymczasowych" },
       { status: 500 }
@@ -282,9 +279,7 @@ export async function POST(request: Request) {
         .where(eq(temporaryAccess.id, existing.id))
         .returning();
 
-      console.log(
-        `[Temporary Access] Updated grant for user ${userId}: ${featureName} until ${expiresAt.toISOString()}`
-      );
+      logger.info(`[Temporary Access] Updated grant for user ${userId}: ${featureName} until ${expiresAt.toISOString()}`);
 
       return NextResponse.json({
         success: true,
@@ -304,9 +299,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(
-      `[Temporary Access] Granted ${featureName} to user ${userId} until ${expiresAt.toISOString()} by ${session.user.email}`
-    );
+    logger.info(`[Temporary Access] Granted ${featureName} to user ${userId} until ${expiresAt.toISOString()} by ${session.user.email}`);
 
     return NextResponse.json(
       {
@@ -317,7 +310,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("[Temporary Access] Database error:", error);
+    logger.error("[Temporary Access] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udało się nadać uprawnień tymczasowych" },
       { status: 500 }
@@ -429,9 +422,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    console.log(
-      `[Temporary Access] Revoked grant ${grantId} (${deleted.featureName} for user ${deleted.userId}) by ${session.user.email}`
-    );
+    logger.info(`[Temporary Access] Revoked grant ${grantId} (${deleted.featureName} for user ${deleted.userId}) by ${session.user.email}`);
 
     return NextResponse.json({
       success: true,
@@ -439,7 +430,7 @@ export async function DELETE(request: Request) {
       message: "Czasowy dostep zostal cofniety",
     });
   } catch (error) {
-    console.error("[Temporary Access] Database error:", error);
+    logger.error("[Temporary Access] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udało się cofnąć uprawnień tymczasowych" },
       { status: 500 }

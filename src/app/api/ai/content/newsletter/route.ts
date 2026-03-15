@@ -13,6 +13,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 const requestSchema = z.object({
   topic: z.string().min(1).max(500),
   goals: z
@@ -187,7 +188,7 @@ export async function POST(req: Request) {
       // promotions table might not exist yet
     }
   } catch (error) {
-    console.error("[AI Newsletter] Error fetching salon context:", error);
+    logger.error("[AI Newsletter] Error fetching salon context", { error: error });
   }
 
   const goalLabel = GOAL_LABELS[goals] ?? "Promocja";
@@ -288,7 +289,7 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
 
         savedId = saved!.id;
       } catch (error) {
-        console.error("[AI Newsletter] Error saving newsletter:", error);
+        logger.error("[AI Newsletter] Error saving newsletter", { error: error });
       }
     }
 
@@ -302,7 +303,7 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
       savedId,
     });
   } catch (error: unknown) {
-    console.error("[AI Newsletter] Error generating newsletter:", error);
+    logger.error("[AI Newsletter] Error generating newsletter", { error: error });
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
     return Response.json(
@@ -335,7 +336,7 @@ export async function GET() {
 
     return Response.json({ newsletters: result });
   } catch (error) {
-    console.error("[AI Newsletter] Error fetching newsletters:", error);
+    logger.error("[AI Newsletter] Error fetching newsletters", { error: error });
     return Response.json(
       { error: "Blad podczas pobierania newsletterow" },
       { status: 500 }

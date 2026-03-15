@@ -5,6 +5,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { validateBody, createPromoCodeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * Generate a random 8-character alphanumeric uppercase code.
  * Uses crypto.getRandomValues for better randomness than Math.random.
@@ -53,7 +54,7 @@ export async function GET(request: Request) {
       count: formattedCodes.length,
     });
   } catch (error) {
-    console.error("[PromoCodes API] Database error:", error);
+    logger.error("[PromoCodes API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch promo codes" },
       { status: 500 }
@@ -146,9 +147,7 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(
-      `[PromoCodes API] Created promo code: ${newPromoCode.code} (${newPromoCode.id}) for salon ${newPromoCode.salonId}`
-    );
+    logger.info(`[PromoCodes API] Created promo code: ${newPromoCode.code} (${newPromoCode.id}) for salon ${newPromoCode.salonId}`);
 
     return NextResponse.json(
       {
@@ -158,7 +157,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("[PromoCodes API] Database error:", error);
+    logger.error("[PromoCodes API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create promo code" },
       { status: 500 }

@@ -10,6 +10,7 @@ import {
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/reports/materials-profitloss - Material profit/loss report
 // Tracks product costs vs. revenue generated from appointments using those products
 export async function GET(request: Request) {
@@ -350,10 +351,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error(
-      "[Materials Profit/Loss Report API] Database error:",
-      error
-    );
+    logger.error("[Materials Profit/Loss Report API] Database error", { error: error });
     return NextResponse.json(
       {
         success: false,

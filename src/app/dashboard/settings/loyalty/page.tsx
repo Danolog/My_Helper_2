@@ -84,8 +84,7 @@ export default function LoyaltySettingsPage() {
         } else {
           setLoading(false);
         }
-      } catch (err) {
-        console.error("Failed to fetch salon:", err);
+      } catch {
         setLoading(false);
       }
     }
@@ -111,8 +110,7 @@ export default function LoyaltySettingsPage() {
           setExpiryDaysInput("365");
         }
       }
-    } catch (err) {
-      console.error("Failed to fetch loyalty settings:", err);
+    } catch {
       toast.error("Nie udalo sie zaladowac ustawien");
     } finally {
       setLoading(false);
@@ -153,8 +151,7 @@ export default function LoyaltySettingsPage() {
       } else {
         toast.error(data.error || "Nie udalo sie zapisac ustawien");
       }
-    } catch (err) {
-      console.error("Failed to save loyalty settings:", err);
+    } catch {
       toast.error("Blad zapisu ustawien");
     } finally {
       setSaving(false);

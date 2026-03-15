@@ -5,6 +5,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/clients/[id]/loyalty
  *
@@ -85,7 +86,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Client Loyalty API] GET error:", error);
+    logger.error("[Client Loyalty API] GET error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch loyalty data" },
       { status: 500 }

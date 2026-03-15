@@ -6,6 +6,7 @@ import { salons, services, employees, reviews, serviceCategories, serviceVariant
 import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";
 import { validateBody, updateSalonSchema } from "@/lib/api-validation";
 
+import { logger } from "@/lib/logger";
 // GET /api/salons/[id] - Get salon details with services, employees, and rating
 export async function GET(
   _request: Request,
@@ -14,7 +15,21 @@ export async function GET(
   try {
     const { id } = await params;
 
-    const [salon] = await db.select().from(salons).where(eq(salons.id, id));
+    // Select all salon columns needed for the detail view
+    const salonColumns = {
+      id: salons.id,
+      name: salons.name,
+      phone: salons.phone,
+      email: salons.email,
+      address: salons.address,
+      industryType: salons.industryType,
+      settingsJson: salons.settingsJson,
+      ownerId: salons.ownerId,
+      createdAt: salons.createdAt,
+      updatedAt: salons.updatedAt,
+    };
+
+    const [salon] = await db.select(salonColumns).from(salons).where(eq(salons.id, id));
 
     if (!salon) {
       return NextResponse.json(
@@ -23,15 +38,34 @@ export async function GET(
       );
     }
 
-    // Get active services
+    // Get active services with explicit columns
+    const serviceColumns = {
+      id: services.id,
+      salonId: services.salonId,
+      categoryId: services.categoryId,
+      name: services.name,
+      description: services.description,
+      basePrice: services.basePrice,
+      baseDuration: services.baseDuration,
+      suggestedNextVisitDays: services.suggestedNextVisitDays,
+      depositRequired: services.depositRequired,
+      depositPercentage: services.depositPercentage,
+      isActive: services.isActive,
+    };
+
     const salonServices = await db
-      .select()
+      .select(serviceColumns)
       .from(services)
       .where(and(eq(services.salonId, id), eq(services.isActive, true)));
 
     // Get service categories for this salon
     const categories = await db
-      .select()
+      .select({
+        id: serviceCategories.id,
+        salonId: serviceCategories.salonId,
+        name: serviceCategories.name,
+        sortOrder: serviceCategories.sortOrder,
+      })
       .from(serviceCategories)
       .where(eq(serviceCategories.salonId, id))
       .orderBy(asc(serviceCategories.sortOrder));
@@ -41,7 +75,13 @@ export async function GET(
     let variants: { id: string; serviceId: string; name: string; priceModifier: string | null; durationModifier: number | null }[] = [];
     if (serviceIds.length > 0) {
       variants = await db
-        .select()
+        .select({
+          id: serviceVariants.id,
+          serviceId: serviceVariants.serviceId,
+          name: serviceVariants.name,
+          priceModifier: serviceVariants.priceModifier,
+          durationModifier: serviceVariants.durationModifier,
+        })
         .from(serviceVariants)
         .where(inArray(serviceVariants.serviceId, serviceIds));
     }
@@ -53,9 +93,16 @@ export async function GET(
       variants: variants.filter((v) => v.serviceId === service.id),
     }));
 
-    // Get active employees
+    // Get active employees (only columns used in enrichedEmployees mapping)
     const salonEmployees = await db
-      .select()
+      .select({
+        id: employees.id,
+        firstName: employees.firstName,
+        lastName: employees.lastName,
+        role: employees.role,
+        photoUrl: employees.photoUrl,
+        color: employees.color,
+      })
       .from(employees)
       .where(and(eq(employees.salonId, id), eq(employees.isActive, true)));
 
@@ -168,7 +215,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Salon Detail API] Error:", error);
+    logger.error("[Salon Detail API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch salon details" },
       { status: 500 }
@@ -258,7 +305,7 @@ export async function PUT(
       },
     });
   } catch (error) {
-    console.error("[Salon Update API] Error:", error);
+    logger.error("[Salon Update API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie zaktualizowac danych salonu" },
       { status: 500 }

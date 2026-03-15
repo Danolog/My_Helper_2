@@ -96,8 +96,6 @@ describe("useSalonId", () => {
   // --- Error handling ---
 
   it("should set loading=false and salonId=null on fetch error", async () => {
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
     mockUseSession.mockReturnValue({
       data: { session: {} as never, user: { id: "u1" } as never },
     } as never);
@@ -111,10 +109,6 @@ describe("useSalonId", () => {
     });
 
     expect(result.current.salonId).toBeNull();
-    expect(consoleSpy).toHaveBeenCalledWith(
-      "Failed to fetch salon:",
-      expect.any(Error)
-    );
   });
 
   it("should handle API returning success=false", async () => {

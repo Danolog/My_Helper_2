@@ -5,6 +5,7 @@ import { scheduledPosts } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 
+import { logger } from "@/lib/logger";
 // POST - Manually publish a scheduled post (simulates publishing)
 export async function POST(
   _req: Request,
@@ -59,13 +60,11 @@ export async function POST(
       .where(eq(scheduledPosts.id, id))
       .returning();
 
-    console.log(
-      `[Scheduled Posts] Post ${id} published on ${post.platform} at ${new Date().toISOString()}`
-    );
+    logger.info(`[Scheduled Posts] Post ${id} published on ${post.platform} at ${new Date().toISOString()}`);
 
     return Response.json({ success: true, post: updated });
   } catch (error) {
-    console.error("[Scheduled Posts] Error publishing post:", error);
+    logger.error("[Scheduled Posts] Error publishing post", { error: error });
     return Response.json({ error: "Failed to publish post" }, { status: 500 });
   }
 }

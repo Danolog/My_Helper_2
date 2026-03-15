@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/subscriptions/current
  *
@@ -111,7 +112,7 @@ export async function GET() {
       scheduledPlan,
     });
   } catch (error) {
-    console.error("[Subscriptions API] Error fetching current subscription:", error);
+    logger.error("[Subscriptions API] Error fetching current subscription", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac subskrypcji" },
       { status: 500 },

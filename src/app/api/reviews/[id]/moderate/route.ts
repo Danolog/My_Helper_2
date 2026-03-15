@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { validateBody, reviewModerateSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // PATCH /api/reviews/[id]/moderate - Approve or reject a review
 export async function PATCH(
   request: Request,
@@ -78,9 +79,7 @@ export async function PATCH(
       .where(eq(reviews.id, reviewId))
       .returning();
 
-    console.log(
-      `[Reviews Moderation API] Review ${reviewId} ${newStatus} by user ${userId} (salon ${salon.id})`
-    );
+    logger.info(`[Reviews Moderation API] Review ${reviewId} ${newStatus} by user ${userId} (salon ${salon.id})`);
 
     return NextResponse.json({
       success: true,
@@ -91,7 +90,7 @@ export async function PATCH(
           : "Opinia zostala odrzucona",
     });
   } catch (error) {
-    console.error("[Reviews Moderation API] PATCH Error:", error);
+    logger.error("[Reviews Moderation API] PATCH Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie zmoderować opinii" },
       { status: 500 }

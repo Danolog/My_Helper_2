@@ -126,8 +126,8 @@ export function StarterPromptModal() {
       await navigator.clipboard.writeText(finalPrompt);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy text: ", err);
+    } catch {
+      // Clipboard API failed — user will need to copy manually
     }
   };
 

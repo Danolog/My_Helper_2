@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { sql } from 'drizzle-orm';
 
+import { logger } from "@/lib/logger";
 // Health checks must always reflect real-time system state — never cache
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,7 @@ export async function GET() {
       }
     });
   } catch (error) {
-    console.error('Health check failed:', error);
+    logger.error('Health check failed', { error: error });
     const responseTime = Date.now() - startTime;
 
     return NextResponse.json({

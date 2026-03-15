@@ -62,13 +62,11 @@ export default function ReviewModerationPage() {
       if (data.success) {
         setReviews(data.data);
       } else {
-        console.error("[Reviews Page] Error:", data.error);
         if (res.status === 403) {
           toast.error("Brak dostepu - musisz byc wlascicielem salonu");
         }
       }
-    } catch (error) {
-      console.error("[Reviews Page] Fetch error:", error);
+    } catch {
       toast.error("Nie udalo sie pobrac opinii");
     } finally {
       setLoading(false);
@@ -96,8 +94,7 @@ export default function ReviewModerationPage() {
       } else {
         toast.error(data.error || "Nie udalo sie zmoderowac opinii");
       }
-    } catch (error) {
-      console.error("[Reviews Page] Moderate error:", error);
+    } catch {
       toast.error("Wystapil blad");
     } finally {
       setModeratingId(null);
@@ -124,8 +121,7 @@ export default function ReviewModerationPage() {
           toast.error(data.error || "Nie udalo sie wygenerowac odpowiedzi");
         }
       }
-    } catch (error) {
-      console.error("[Reviews Page] Generate response error:", error);
+    } catch {
       toast.error("Wystapil blad podczas generowania odpowiedzi");
     } finally {
       setGeneratingId(null);
@@ -167,8 +163,7 @@ export default function ReviewModerationPage() {
       } else {
         toast.error(data.error || "Nie udalo sie zapisac odpowiedzi");
       }
-    } catch (error) {
-      console.error("[Reviews Page] Save response error:", error);
+    } catch {
       toast.error("Wystapil blad podczas zapisywania odpowiedzi");
     } finally {
       setSavingId(null);
@@ -195,8 +190,7 @@ export default function ReviewModerationPage() {
       } else {
         toast.error(data.error || "Nie udalo sie usunac odpowiedzi");
       }
-    } catch (error) {
-      console.error("[Reviews Page] Delete response error:", error);
+    } catch {
       toast.error("Wystapil blad");
     } finally {
       setSavingId(null);

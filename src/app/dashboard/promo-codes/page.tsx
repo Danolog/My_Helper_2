@@ -149,7 +149,6 @@ export default function PromoCodesPage() {
         setPromotionsList(data.data.filter((p: Promotion) => p.isActive));
       }
     } catch {
-      console.error("Failed to fetch promotions for promo codes");
     }
   }, [salonId]);
 

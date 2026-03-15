@@ -20,7 +20,6 @@ export default function DashboardError({
 }) {
   useEffect(() => {
     // Log the error for debugging (console only, never shown to user)
-    console.error("Dashboard error:", error);
   }, [error]);
 
   return (

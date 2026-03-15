@@ -13,6 +13,7 @@ import { auth } from "@/lib/auth";
 import { validateBody, createWaitingListSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/waiting-list - List waiting list entries for the salon owner's salon
 export async function GET(request: Request) {
   try {
@@ -107,9 +108,7 @@ export async function GET(request: Request) {
       createdAt: row.entry.createdAt,
     }));
 
-    console.log(
-      `[WaitingList API] GET: ${formattedEntries.length} entries for salon ${salon.id}`
-    );
+    logger.info(`[WaitingList API] GET: ${formattedEntries.length} entries for salon ${salon.id}`);
 
     return NextResponse.json({
       success: true,
@@ -117,7 +116,7 @@ export async function GET(request: Request) {
       count: formattedEntries.length,
     });
   } catch (error) {
-    console.error("[WaitingList API] GET Error:", error);
+    logger.error("[WaitingList API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac listy oczekujacych" },
       { status: 500 }
@@ -235,9 +234,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(
-      `[WaitingList API] POST: Created entry ${newEntry?.id} for client ${clientId} in salon ${salon.id}`
-    );
+    logger.info(`[WaitingList API] POST: Created entry ${newEntry?.id} for client ${clientId} in salon ${salon.id}`);
 
     return NextResponse.json(
       {
@@ -248,7 +245,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("[WaitingList API] POST Error:", error);
+    logger.error("[WaitingList API] POST Error", { error: error });
     return NextResponse.json(
       {
         success: false,

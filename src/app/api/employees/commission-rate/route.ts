@@ -4,6 +4,7 @@ import { employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // PUT /api/employees/commission-rate - Update employee's default commission rate
 export async function PUT(request: Request) {
   try {
@@ -71,7 +72,7 @@ export async function PUT(request: Request) {
       message: `Prowizja dla ${updated.firstName} ${updated.lastName} ustawiona na ${rate}%`,
     });
   } catch (error) {
-    console.error("[Commission Rate API] Database error:", error);
+    logger.error("[Commission Rate API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update commission rate" },
       { status: 500 }
@@ -104,7 +105,7 @@ export async function GET() {
       data: result,
     });
   } catch (error) {
-    console.error("[Commission Rate API] Database error:", error);
+    logger.error("[Commission Rate API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch commission rates" },
       { status: 500 }

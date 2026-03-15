@@ -4,6 +4,7 @@ import { productCategories, products } from "@/lib/schema";
 import { eq, asc, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/product-categories - List product categories with product counts
 export async function GET(request: Request) {
   try {
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
       count: categories.length,
     });
   } catch (error) {
-    console.error("[Product Categories API] Database error:", error);
+    logger.error("[Product Categories API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch product categories" },
       { status: 500 }
@@ -99,14 +100,14 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[Product Categories API] Created category: ${newCategory!.name} (${newCategory!.id})`);
+    logger.info(`[Product Categories API] Created category: ${newCategory!.name} (${newCategory!.id})`);
 
     return NextResponse.json({
       success: true,
       data: newCategory,
     }, { status: 201 });
   } catch (error) {
-    console.error("[Product Categories API] Database error:", error);
+    logger.error("[Product Categories API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create product category" },
       { status: 500 }

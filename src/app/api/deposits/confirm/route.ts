@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { sendPaymentConfirmationSms } from "@/lib/sms";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/deposits/confirm
  *
@@ -69,7 +70,7 @@ export async function POST(request: Request) {
       .where(eq(appointments.id, payment.appointmentId))
       .returning();
 
-    console.log(`[Deposit API] Payment confirmed: ${depositPaymentId}, appointment: ${payment.appointmentId}`);
+    logger.info(`[Deposit API] Payment confirmed: ${depositPaymentId}, appointment: ${payment.appointmentId}`);
 
     // Send SMS confirmation to client (async, don't block the response)
     let smsSent = false;
@@ -114,14 +115,14 @@ export async function POST(request: Request) {
             clientId: client.id,
           });
           smsSent = smsResult.success;
-          console.log(`[Deposit API] SMS confirmation ${smsSent ? "sent" : "failed"} for client ${client.id}`);
+          logger.info(`[Deposit API] SMS confirmation ${smsSent ? "sent" : "failed"} for client ${client.id}`);
         } else {
-          console.log(`[Deposit API] No phone number for client, skipping SMS`);
+          logger.info(`[Deposit API] No phone number for client, skipping SMS`);
         }
       }
     } catch (smsError) {
       // SMS failure should not affect payment confirmation
-      console.error("[Deposit API] SMS notification error (non-blocking):", smsError);
+      logger.error("[Deposit API] SMS notification error (non-blocking)", { error: smsError });
     }
 
     return NextResponse.json({
@@ -134,7 +135,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Deposit API] Error confirming payment:", error);
+    logger.error("[Deposit API] Error confirming payment", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to confirm deposit payment" },
       { status: 500 }

@@ -87,8 +87,7 @@ export function CancelAppointmentDialog({
       } else {
         setError(data.error || "Nie udalo sie pobrac informacji o wizycie");
       }
-    } catch (err) {
-      console.error("Failed to fetch cancel info:", err);
+    } catch {
       setError("Blad polaczenia z serwerem");
     } finally {
       setLoading(false);
@@ -145,8 +144,7 @@ export function CancelAppointmentDialog({
           description: data.error,
         });
       }
-    } catch (err) {
-      console.error("Failed to cancel appointment:", err);
+    } catch {
       toast.error("Blad podczas anulowania wizyty");
     } finally {
       setCancelling(false);

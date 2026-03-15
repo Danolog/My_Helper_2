@@ -30,8 +30,7 @@ export default function CalendarAllPage() {
         } else {
           setLoading(false);
         }
-      } catch (err) {
-        console.error("Failed to fetch salon:", err);
+      } catch {
         setLoading(false);
       }
     }
@@ -64,8 +63,7 @@ export default function CalendarAllPage() {
       if (data.success) {
         setEmployees(data.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch employees:", error);
+    } catch {
       toast.error("Nie udalo sie pobrac listy pracownikow");
     }
   }, [salonId]);
@@ -101,8 +99,7 @@ export default function CalendarAllPage() {
         }));
         setEvents(calendarEvents);
       }
-    } catch (error) {
-      console.error("Failed to fetch appointments:", error);
+    } catch {
       toast.error("Nie udalo sie pobrac wizyt");
     } finally {
       setLoading(false);
@@ -229,8 +226,7 @@ export default function CalendarAllPage() {
           description: data.error,
         });
       }
-    } catch (error) {
-      console.error("Failed to reschedule:", error);
+    } catch {
       toast.error("Wystapil blad podczas przenoszenia wizyty");
     } finally {
       setIsRescheduling(false);

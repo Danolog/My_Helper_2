@@ -4,6 +4,7 @@ import { pushSubscriptions } from "@/lib/schema";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { eq, and } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/push/unsubscribe
  *
@@ -35,16 +36,14 @@ export async function POST(request: Request) {
       )
       .returning();
 
-    console.log(
-      `[Push] Unsubscribed ${deleted.length} subscription(s) for user ${user.id}`
-    );
+    logger.info(`[Push] Unsubscribed ${deleted.length} subscription(s) for user ${user.id}`);
 
     return NextResponse.json({
       success: true,
       data: { removed: deleted.length },
     });
   } catch (error) {
-    console.error("[Push Unsubscribe] Error:", error);
+    logger.error("[Push Unsubscribe] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to unsubscribe" },
       { status: 500 }

@@ -6,6 +6,7 @@ import type { LoyaltySettings, RewardTier } from "@/app/api/salons/[id]/loyalty-
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/clients/[id]/loyalty/redeem
  *
@@ -149,9 +150,7 @@ export async function POST(
       throw new Error("Failed to create redemption transaction");
     }
 
-    console.log(
-      `[Loyalty Redeem] Client ${clientId} redeemed "${rewardTier.name}" for ${rewardTier.pointsRequired} points. Balance: ${loyaltyRecord.points} -> ${newBalance}`
-    );
+    logger.info(`[Loyalty Redeem] Client ${clientId} redeemed "${rewardTier.name}" for ${rewardTier.pointsRequired} points. Balance: ${loyaltyRecord.points} -> ${newBalance}`);
 
     // 5. Return success with details
     return NextResponse.json({
@@ -173,7 +172,7 @@ export async function POST(
       message: `Nagroda "${rewardTier.name}" zostala zrealizowana! Wykorzystano ${rewardTier.pointsRequired} punktow.`,
     });
   } catch (error) {
-    console.error("[Loyalty Redeem API] Error:", error);
+    logger.error("[Loyalty Redeem API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Blad podczas realizacji nagrody" },
       { status: 500 }
@@ -269,7 +268,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Loyalty Redeem API] GET Error:", error);
+    logger.error("[Loyalty Redeem API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Blad podczas pobierania nagrod" },
       { status: 500 }

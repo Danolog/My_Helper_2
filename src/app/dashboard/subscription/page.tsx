@@ -188,24 +188,26 @@ export default function SubscriptionPage() {
   const [simulateLoading, setSimulateLoading] = useState(false);
   const [sendWarningLoading, setSendWarningLoading] = useState(false);
 
-  const fetchExpirationWarning = useCallback(async () => {
+  const fetchExpirationWarning = useCallback(async (signal: AbortSignal | null = null) => {
     try {
-      const res = await fetch("/api/subscriptions/expiration-warning");
+      const res = await fetch("/api/subscriptions/expiration-warning", { signal });
+      if (!res.ok) return;
       const data = await res.json();
-      if (res.ok && data.success && data.data) {
+      if (data.success && data.data) {
         setExpirationData(data.data);
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       // Non-critical, silently fail
     }
   }, []);
 
-  const fetchSubscription = useCallback(async () => {
+  const fetchSubscription = useCallback(async (signal: AbortSignal | null = null) => {
     try {
       setError(null);
       const [subRes, plansRes] = await Promise.all([
-        fetch("/api/subscriptions/current"),
-        fetch("/api/subscription-plans"),
+        fetch("/api/subscriptions/current", { signal }),
+        fetch("/api/subscription-plans", { signal }),
       ]);
       const subData = await subRes.json();
       const plansData = await plansRes.json();
@@ -226,7 +228,8 @@ export default function SubscriptionPage() {
         }
         setAllPlans(map);
       }
-    } catch (err) {
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       setError("Nie udalo sie zaladowac informacji o subskrypcji. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
@@ -234,8 +237,10 @@ export default function SubscriptionPage() {
   }, []);
 
   useEffect(() => {
-    fetchSubscription();
-    fetchExpirationWarning();
+    const controller = new AbortController();
+    fetchSubscription(controller.signal);
+    fetchExpirationWarning(controller.signal);
+    return () => controller.abort();
   }, [fetchSubscription, fetchExpirationWarning]);
 
   /**

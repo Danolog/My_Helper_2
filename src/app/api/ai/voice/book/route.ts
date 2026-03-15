@@ -17,6 +17,7 @@ import { sendSms } from "@/lib/sms";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /** Slot interval in minutes used when generating available time slots. */
 const SLOT_INTERVAL = 15;
 
@@ -464,7 +465,7 @@ export async function POST(req: Request) {
       });
       smsSent = smsResult.success;
     } catch (smsError) {
-      console.error("[Voice AI Book] SMS send failed:", smsError);
+      logger.error("[Voice AI Book] SMS send failed", { error: smsError });
       // SMS failure should not block the booking itself
     }
 
@@ -516,7 +517,7 @@ export async function POST(req: Request) {
       conversationId: conversation?.id || null,
     });
   } catch (error) {
-    console.error("[Voice AI Book] Error:", error);
+    logger.error("[Voice AI Book] Error", { error: error });
     return NextResponse.json(
       { error: "Blad przetwarzania rezerwacji glosowej" },
       { status: 500 }

@@ -4,6 +4,7 @@ import { subscriptionPlans } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { PLANS } from "@/lib/constants";
 
+import { logger } from "@/lib/logger";
 // Subscription plans rarely change — revalidate every hour to reduce DB queries
 export const revalidate = 3600;
 
@@ -114,7 +115,7 @@ export async function GET() {
       })),
     });
   } catch (error) {
-    console.error("[Subscription Plans API] Error:", error);
+    logger.error("[Subscription Plans API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch subscription plans" },
       { status: 500 }

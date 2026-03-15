@@ -4,6 +4,7 @@ import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
 import { eq, and, not, lte, gte, or, lt, gt, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/appointments/book-package
  * Book all services in a package promotion as sequential appointments
@@ -207,11 +208,9 @@ export async function POST(request: Request) {
       }
     }
 
-    console.log(
-      `[Package Booking API] Booked package "${promotion.name}" with ${createdAppointments.length} services. ` +
+    logger.info(`[Package Booking API] Booked package "${promotion.name}" with ${createdAppointments.length} services. ` +
       `Package price: ${packagePrice.toFixed(2)} PLN (individual total: ${totalIndividualPrice.toFixed(2)} PLN). ` +
-      `Savings: ${(totalIndividualPrice - packagePrice).toFixed(2)} PLN`
-    );
+      `Savings: ${(totalIndividualPrice - packagePrice).toFixed(2)} PLN`);
 
     return NextResponse.json({
       success: true,
@@ -225,7 +224,7 @@ export async function POST(request: Request) {
       },
     }, { status: 201 });
   } catch (error) {
-    console.error("[Package Booking API] Error:", error);
+    logger.error("[Package Booking API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to book package" },
       { status: 500 }

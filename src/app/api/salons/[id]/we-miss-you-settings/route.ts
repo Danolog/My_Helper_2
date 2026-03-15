@@ -4,6 +4,7 @@ import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 export interface WeMissYouSettings {
   enabled: boolean;
   inactiveDays: number; // Number of days since last visit to consider inactive (default 30)
@@ -62,7 +63,7 @@ export async function GET(
       data: weMissYouSettings,
     });
   } catch (error) {
-    console.error("[We Miss You Settings API] GET Error:", error);
+    logger.error("[We Miss You Settings API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch we-miss-you settings" },
       { status: 500 }
@@ -153,10 +154,8 @@ export async function PUT(
       .where(eq(salons.id, id))
       .returning();
 
-    console.log(
-      `[We Miss You Settings API] Updated we-miss-you settings for salon ${id}:`,
-      newWeMissYouSettings
-    );
+    logger.info(`[We Miss You Settings API] Updated we-miss-you settings for salon ${id}`,
+      { settings: newWeMissYouSettings as unknown as Record<string, unknown> });
 
     return NextResponse.json({
       success: true,
@@ -164,7 +163,7 @@ export async function PUT(
       message: "Ustawienia re-engagement zostaly zapisane",
     });
   } catch (error) {
-    console.error("[We Miss You Settings API] PUT Error:", error);
+    logger.error("[We Miss You Settings API] PUT Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update we-miss-you settings" },
       { status: 500 }

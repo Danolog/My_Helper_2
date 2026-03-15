@@ -126,8 +126,7 @@ export default function MaterialsProfitLossPage() {
         throw new Error(json.error || "Failed to fetch report");
       }
       setReportData(json.data);
-    } catch (err) {
-      console.error("[Materials Profit/Loss Report] Error:", err);
+    } catch {
       setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
@@ -166,8 +165,7 @@ export default function MaterialsProfitLossPage() {
       document.body.removeChild(a);
 
       toast.success("Raport wyeksportowany do CSV");
-    } catch (err) {
-      console.error("[Materials Profit/Loss Report] Export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu");
     }
   };
@@ -246,8 +244,7 @@ export default function MaterialsProfitLossPage() {
         filename: `raport-zysk-strata-materialow-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
       });
       toast.success("Raport wyeksportowany do PDF");
-    } catch (err) {
-      console.error("[Materials Profit/Loss Report] PDF export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu do PDF");
     }
   };

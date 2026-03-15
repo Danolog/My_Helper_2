@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { testStripeConnection } from "@/lib/stripe";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/stripe/status
  *
@@ -17,7 +18,7 @@ export async function GET() {
     if (isAuthError(authResult)) return authResult;
     const status = await testStripeConnection();
 
-    console.log("[Stripe Status API] Connection test result:", {
+    logger.info("[Stripe Status API] Connection test result", {
       configured: status.configured,
       connected: status.connected,
       accountId: status.accountId,
@@ -29,7 +30,7 @@ export async function GET() {
       data: status,
     });
   } catch (error) {
-    console.error("[Stripe Status API] Error:", error);
+    logger.error("[Stripe Status API] Error", { error: error });
     return NextResponse.json(
       {
         success: false,

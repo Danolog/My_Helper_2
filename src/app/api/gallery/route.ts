@@ -4,6 +4,7 @@ import { galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/gallery - List gallery photos
 export async function GET(request: Request) {
   try {
@@ -53,7 +54,7 @@ export async function GET(request: Request) {
       .where(and(...conditions))
       .orderBy(desc(galleryPhotos.createdAt));
 
-    console.log(`[Gallery API] GET: ${photos.length} photos found (filters: employeeId=${employeeId || 'none'}, serviceId=${serviceId || 'none'})`);
+    logger.info(`[Gallery API] GET: ${photos.length} photos found (filters: employeeId=${employeeId || 'none'}, serviceId=${serviceId || 'none'})`);
 
     return NextResponse.json({
       success: true,
@@ -61,7 +62,7 @@ export async function GET(request: Request) {
       count: photos.length,
     });
   } catch (error) {
-    console.error("[Gallery API] Database error:", error);
+    logger.error("[Gallery API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch gallery photos" },
       { status: 500 }
@@ -116,7 +117,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[Gallery API] Created photo: ${newPhoto?.id}`);
+    logger.info(`[Gallery API] Created photo: ${newPhoto?.id}`);
 
     return NextResponse.json(
       {
@@ -126,7 +127,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("[Gallery API] Database error:", error);
+    logger.error("[Gallery API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create gallery photo" },
       { status: 500 }

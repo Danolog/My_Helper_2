@@ -108,8 +108,7 @@ export default function ProductDetailPage() {
         toast.error("Nie znaleziono produktu");
         router.replace("/dashboard/products");
       }
-    } catch (error) {
-      console.error("Failed to fetch usage history:", error);
+    } catch {
       toast.error("Blad podczas ladowania historii zuzycia");
     } finally {
       setLoading(false);

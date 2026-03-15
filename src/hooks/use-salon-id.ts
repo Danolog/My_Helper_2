@@ -29,8 +29,8 @@ export function useSalonId() {
         if (!cancelled && data.success && data.salon) {
           setSalonId(data.salon.id);
         }
-      } catch (err) {
-        console.error("Failed to fetch salon:", err);
+      } catch {
+        // Salon fetch failed — salonId will remain null
       } finally {
         if (!cancelled) setLoading(false);
       }

@@ -11,6 +11,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, avg, count, desc } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 // GET /api/salons/[id]/employees/[employeeId] - Get employee profile details
 export async function GET(
   _request: Request,
@@ -162,7 +163,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Employee Profile API] Error:", error);
+    logger.error("[Employee Profile API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch employee profile" },
       { status: 500 }

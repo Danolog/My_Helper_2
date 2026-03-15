@@ -9,6 +9,7 @@ import {
 import { eq, and, isNull, or, not } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
 import { sendPushNotification } from "@/lib/push";
+import { logger } from "@/lib/logger";
 import crypto from "crypto";
 
 interface NotifyWaitingListParams {
@@ -86,15 +87,11 @@ export async function notifyWaitingList(
       );
 
     if (entries.length === 0) {
-      console.log(
-        `[WaitingList] No matching waiting list entries for salon ${params.salonId}`
-      );
+      logger.debug("No matching waiting list entries for freed slot", { salonId: params.salonId });
       return result;
     }
 
-    console.log(
-      `[WaitingList] Found ${entries.length} matching entries for freed slot`
-    );
+    logger.info("Found matching waiting list entries for freed slot", { count: entries.length, salonId: params.salonId });
 
     // Format the freed slot details for notification messages
     const formattedDate = params.startTime.toLocaleDateString("pl-PL", {
@@ -135,10 +132,7 @@ export async function notifyWaitingList(
             result.errors++;
           }
         } catch (err) {
-          console.error(
-            `[WaitingList] SMS error for client ${row.client.id}:`,
-            err
-          );
+          logger.error("Waiting list SMS notification failed", { clientId: row.client.id, error: err });
           result.errors++;
         }
       }
@@ -172,10 +166,7 @@ export async function notifyWaitingList(
             }
           }
         } catch (err) {
-          console.error(
-            `[WaitingList] Push error for client ${row.client.id}:`,
-            err
-          );
+          logger.warn("Waiting list push notification failed", { clientId: row.client.id, error: err });
           // Push failures are non-critical; do not increment errors
         }
       }
@@ -218,20 +209,19 @@ export async function notifyWaitingList(
           .where(eq(waitingList.id, row.entry.id));
         result.notified++;
       } catch (updateErr) {
-        console.error(
-          `[WaitingList] Failed to update notifiedAt for entry ${row.entry.id}:`,
-          updateErr
-        );
+        logger.error("Failed to update notifiedAt for waiting list entry", { entryId: row.entry.id, error: updateErr });
         result.errors++;
       }
     }
 
-    console.log(
-      `[WaitingList] Notification complete: ${result.notified} notified, ` +
-        `${result.smsCount} SMS, ${result.pushCount} push, ${result.errors} errors`
-    );
+    logger.info("Waiting list notification complete", {
+      notified: result.notified,
+      smsCount: result.smsCount,
+      pushCount: result.pushCount,
+      errors: result.errors,
+    });
   } catch (error) {
-    console.error("[WaitingList] Failed to notify waiting list:", error);
+    logger.error("Failed to notify waiting list", { error });
     result.errors++;
   }
 
@@ -360,9 +350,11 @@ export async function acceptEarlierSlot(
         })
         .where(eq(appointments.id, entry.existingAppointmentId));
       appointmentId = entry.existingAppointmentId;
-      console.log(
-        `[WaitingList] Moved appointment ${appointmentId} from ${oldStartTime.toISOString()} to ${offeredStart.toISOString()}`
-      );
+      logger.info("Moved appointment from waiting list", {
+        appointmentId,
+        from: oldStartTime.toISOString(),
+        to: offeredStart.toISOString(),
+      });
     } else {
       // Existing appointment was cancelled or missing – create new
       const [newAppt] = await db
@@ -414,7 +406,7 @@ export async function acceptEarlierSlot(
       status: "sent",
     });
   } catch (notifErr) {
-    console.error("[WaitingList] Failed to create confirmation notification:", notifErr);
+    logger.error("Failed to create waiting list confirmation notification", { error: notifErr });
   }
 
   return {

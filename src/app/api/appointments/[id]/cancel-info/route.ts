@@ -4,6 +4,7 @@ import { appointments, clients, employees, services } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/cancel-info - Get cancellation policy details for an appointment
 export async function GET(
   _request: Request,
@@ -94,7 +95,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Appointments API] Database error:", error);
+    logger.error("[Appointments API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to get cancellation info" },
       { status: 500 }

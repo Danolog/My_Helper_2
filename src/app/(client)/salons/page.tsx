@@ -84,7 +84,6 @@ export default function SalonsListPage() {
         setSalons(json.data);
       }
     } catch (error) {
-      console.error("Failed to fetch salons:", error);
       const errInfo = getNetworkErrorMessage(error);
       setFetchError(errInfo);
     } finally {
@@ -100,8 +99,7 @@ export default function SalonsListPage() {
         const ids = new Set<string>(json.data.map((f: { salonId: string }) => f.salonId));
         setFavoriteIds(ids);
       }
-    } catch (error) {
-      console.error("Failed to fetch favorites:", error);
+    } catch {
     }
   }
 
@@ -144,8 +142,7 @@ export default function SalonsListPage() {
           });
         }
       }
-    } catch (error) {
-      console.error("Failed to toggle favorite:", error);
+    } catch {
     }
   }
 

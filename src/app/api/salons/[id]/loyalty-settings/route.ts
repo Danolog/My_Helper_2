@@ -4,6 +4,7 @@ import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 export interface RewardTier {
   id: string;
   name: string;
@@ -70,7 +71,7 @@ export async function GET(
       data: loyaltySettings,
     });
   } catch (error) {
-    console.error("[Loyalty Settings API] GET Error:", error);
+    logger.error("[Loyalty Settings API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch loyalty settings" },
       { status: 500 }
@@ -191,10 +192,8 @@ export async function PUT(
       .where(eq(salons.id, id))
       .returning();
 
-    console.log(
-      `[Loyalty Settings API] Updated loyalty settings for salon ${id}:`,
-      newLoyaltySettings
-    );
+    logger.info(`[Loyalty Settings API] Updated loyalty settings for salon ${id}`,
+      { settings: newLoyaltySettings as unknown as Record<string, unknown> });
 
     return NextResponse.json({
       success: true,
@@ -202,7 +201,7 @@ export async function PUT(
       message: "Ustawienia programu lojalnosciowego zostaly zapisane",
     });
   } catch (error) {
-    console.error("[Loyalty Settings API] PUT Error:", error);
+    logger.error("[Loyalty Settings API] PUT Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update loyalty settings" },
       { status: 500 }

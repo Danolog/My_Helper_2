@@ -15,6 +15,7 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/appointments/[id]/invoice
  *
@@ -58,7 +59,7 @@ export async function GET(
       hasInvoice: true,
     });
   } catch (error) {
-    console.error("[Invoice API] GET Error:", error);
+    logger.error("[Invoice API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac faktury" },
       { status: 500 }
@@ -394,9 +395,7 @@ export async function POST(
       })
       .returning();
 
-    console.log(
-      `[Invoice] Generated invoice ${invoiceNumber} for appointment ${id}`
-    );
+    logger.info(`[Invoice] Generated invoice ${invoiceNumber} for appointment ${id}`);
 
     return NextResponse.json({
       success: true,
@@ -405,7 +404,7 @@ export async function POST(
       message: `Faktura ${invoiceNumber} zostala wygenerowana`,
     });
   } catch (error) {
-    console.error("[Invoice API] POST Error:", error);
+    logger.error("[Invoice API] POST Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie wygenerowac faktury" },
       { status: 500 }

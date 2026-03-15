@@ -9,6 +9,7 @@ import { validateBody, updateClientSchema } from "@/lib/api-validation";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/clients/[id] - Get a single client by ID
 export async function GET(
   _request: Request,
@@ -27,7 +28,7 @@ export async function GET(
       );
     }
 
-    console.log(`[Clients API] Executing: SELECT * FROM clients WHERE id = '${id}'`);
+    logger.info(`[Clients API] Executing: SELECT * FROM clients WHERE id = '${id}'`);
     const [client] = await db
       .select()
       .from(clients)
@@ -41,14 +42,14 @@ export async function GET(
       );
     }
 
-    console.log(`[Clients API] Found client: ${client.firstName} ${client.lastName}`);
+    logger.info(`[Clients API] Found client: ${client.firstName} ${client.lastName}`);
 
     return NextResponse.json({
       success: true,
       data: client,
     });
   } catch (error) {
-    console.error("[Clients API] Database error:", error);
+    logger.error("[Clients API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch client" },
       { status: 500 }
@@ -98,7 +99,7 @@ export async function PUT(
     if (depositType !== undefined) updateData.depositType = depositType;
     if (depositValue !== undefined) updateData.depositValue = depositValue;
 
-    console.log(`[Clients API] Updating client ${id}:`, updateData);
+    logger.info(`[Clients API] Updating client ${id}`, { updateData });
 
     const [updated] = await db
       .update(clients)
@@ -113,14 +114,14 @@ export async function PUT(
       );
     }
 
-    console.log(`[Clients API] Updated client ${id} successfully`);
+    logger.info(`[Clients API] Updated client ${id} successfully`);
 
     return NextResponse.json({
       success: true,
       data: updated,
     });
   } catch (error) {
-    console.error("[Clients API] Database error:", error);
+    logger.error("[Clients API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update client" },
       { status: 500 }
@@ -195,7 +196,7 @@ export async function DELETE(
     });
 
     if (!isPasswordValid) {
-      console.log(`[Clients API] Password verification failed for user ${session.user.email} when attempting to delete client ${id}`);
+      logger.info(`[Clients API] Password verification failed for user ${session.user.email} when attempting to delete client ${id}`);
       return NextResponse.json(
         { success: false, error: "Nieprawidlowe haslo" },
         { status: 403 }
@@ -215,14 +216,14 @@ export async function DELETE(
       );
     }
 
-    console.log(`[Clients API] Deleted client: ${deleted.firstName} ${deleted.lastName} (${deleted.id}) by user ${session.user.email} after password verification`);
+    logger.info(`[Clients API] Deleted client: ${deleted.firstName} ${deleted.lastName} (${deleted.id}) by user ${session.user.email} after password verification`);
 
     return NextResponse.json({
       success: true,
       data: deleted,
     });
   } catch (error) {
-    console.error("[Clients API] Database error:", error);
+    logger.error("[Clients API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete client" },
       { status: 500 }

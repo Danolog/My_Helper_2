@@ -4,6 +4,7 @@ import { appointments, services, employees, clients, reviews, serviceCategories 
 import { eq, and, gte, lte, desc, ne, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/reports/services-popularity - Service popularity report: most booked services
 export async function GET(request: Request) {
   try {
@@ -286,7 +287,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Service Popularity Report API] Database error:", error);
+    logger.error("[Service Popularity Report API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to generate service popularity report" },
       { status: 500 }

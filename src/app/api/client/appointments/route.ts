@@ -5,6 +5,7 @@ import { appointments, employees, services, salons } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 
+import { logger } from "@/lib/logger";
 // GET /api/client/appointments - List appointments for the authenticated client user
 export async function GET() {
   try {
@@ -17,7 +18,7 @@ export async function GET() {
     }
 
     const userId = session.user.id;
-    console.log(`[Client Appointments API] Fetching appointments for user: ${userId}`);
+    logger.info(`[Client Appointments API] Fetching appointments for user: ${userId}`);
 
     const result = await db
       .select({
@@ -54,7 +55,7 @@ export async function GET() {
       createdAt: row.appointment.createdAt,
     }));
 
-    console.log(`[Client Appointments API] Found ${formattedAppointments.length} appointments for user ${userId}`);
+    logger.info(`[Client Appointments API] Found ${formattedAppointments.length} appointments for user ${userId}`);
 
     return NextResponse.json({
       success: true,
@@ -62,7 +63,7 @@ export async function GET() {
       count: formattedAppointments.length,
     });
   } catch (error) {
-    console.error("[Client Appointments API] Error:", error);
+    logger.error("[Client Appointments API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch client appointments" },
       { status: 500 }

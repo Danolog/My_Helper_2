@@ -6,6 +6,7 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/invoices/[id]/send-email
  *
@@ -139,7 +140,7 @@ export async function POST(
 
     // In development mode, log to console instead of sending
     // eslint-disable-next-line no-console
-    console.log(`
+    logger.info(`
 ${"=".repeat(70)}
 INVOICE EMAIL SENT
 ${"=".repeat(70)}
@@ -172,7 +173,7 @@ ${"=".repeat(70)}
       },
     });
   } catch (error) {
-    console.error("[Invoice Send Email API] Error:", error);
+    logger.error("[Invoice Send Email API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie wyslac faktury emailem" },
       { status: 500 }

@@ -4,6 +4,7 @@ import { clients, notifications, salons } from "@/lib/schema";
 import { eq, sql, and, isNotNull, inArray } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 interface BirthdaySettings {
   enabled: boolean;
   giftType: "discount" | "product";
@@ -78,7 +79,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Birthday Notifications API] Error:", error);
+    logger.error("[Birthday Notifications API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to check birthday notifications" },
       { status: 500 }
@@ -216,9 +217,7 @@ export async function POST(request: Request) {
 
     for (const client of birthdayClients) {
       if (alreadyNotifiedIds.has(client.id)) {
-        console.log(
-          `[Birthday Notifications] Already sent birthday notification to ${client.firstName} ${client.lastName} today, skipping`
-        );
+        logger.info(`[Birthday Notifications] Already sent birthday notification to ${client.firstName} ${client.lastName} today, skipping`);
         continue;
       }
 
@@ -266,9 +265,7 @@ export async function POST(request: Request) {
         clientPhone: client.phone,
       });
 
-      console.log(
-        `[Birthday Notifications] Queued birthday notification for ${client.firstName} ${client.lastName} (${notificationType})`
-      );
+      logger.info(`[Birthday Notifications] Queued birthday notification for ${client.firstName} ${client.lastName} (${notificationType})`);
     }
 
     // Batch-insert all notifications in a single query instead of N individual INSERTs
@@ -298,7 +295,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Birthday Notifications API] Error:", error);
+    logger.error("[Birthday Notifications API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to send birthday notifications" },
       { status: 500 }

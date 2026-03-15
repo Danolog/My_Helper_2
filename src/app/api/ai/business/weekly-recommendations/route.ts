@@ -16,6 +16,7 @@ import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 interface WeeklyRecommendation {
   id: string;
   type: "strategy" | "staffing" | "marketing" | "revenue" | "preparation" | "warning";
@@ -719,7 +720,7 @@ export async function GET(_request: Request) {
       },
     });
   } catch (error) {
-    console.error("[AI Weekly Recommendations] Error:", error);
+    logger.error("[AI Weekly Recommendations] Error", { error: error });
     return NextResponse.json(
       { error: "Failed to generate weekly recommendations" },
       { status: 500 }

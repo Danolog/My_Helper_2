@@ -439,8 +439,7 @@ export default function SalonGalleryPage() {
             setFilterServices(json.filters.services || []);
           }
         }
-      } catch (error) {
-        console.error("Failed to fetch gallery:", error);
+      } catch {
       } finally {
         setLoading(false);
       }
@@ -455,8 +454,7 @@ export default function SalonGalleryPage() {
       if (json.success && json.data) {
         setSalonName(json.data.name);
       }
-    } catch (error) {
-      console.error("Failed to fetch salon name:", error);
+    } catch {
     }
   }, [salonId]);
 

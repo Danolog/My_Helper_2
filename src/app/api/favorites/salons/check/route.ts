@@ -5,6 +5,7 @@ import { favoriteSalons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 
+import { logger } from "@/lib/logger";
 // GET /api/favorites/salons/check?salonId=<uuid> - Check if salon is in favorites
 export async function GET(request: Request) {
   try {
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
       isFavorite: !!existing,
     });
   } catch (error) {
-    console.error("[Favorites Check API] Error:", error);
+    logger.error("[Favorites Check API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to check favorite status" },
       { status: 500 }

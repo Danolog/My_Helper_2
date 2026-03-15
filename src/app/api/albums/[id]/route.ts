@@ -4,6 +4,7 @@ import { albums, photoAlbums } from "@/lib/schema";
 import { eq, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/albums/[id] - Get single album with photo count
 export async function GET(
   _request: Request,
@@ -40,7 +41,7 @@ export async function GET(
       data: album,
     });
   } catch (error) {
-    console.error("[Albums API] Database error:", error);
+    logger.error("[Albums API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch album" },
       { status: 500 }
@@ -87,14 +88,14 @@ export async function PATCH(
       );
     }
 
-    console.log(`[Albums API] Updated album: ${id}`);
+    logger.info(`[Albums API] Updated album: ${id}`);
 
     return NextResponse.json({
       success: true,
       data: updated,
     });
   } catch (error) {
-    console.error("[Albums API] Database error:", error);
+    logger.error("[Albums API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update album" },
       { status: 500 }
@@ -128,14 +129,14 @@ export async function DELETE(
     // Delete album (cascade will remove photo_albums entries)
     await db.delete(albums).where(eq(albums.id, id));
 
-    console.log(`[Albums API] Deleted album: ${id} - "${album.name}"`);
+    logger.info(`[Albums API] Deleted album: ${id} - "${album.name}"`);
 
     return NextResponse.json({
       success: true,
       message: "Album deleted successfully",
     });
   } catch (error) {
-    console.error("[Albums API] Database error:", error);
+    logger.error("[Albums API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete album" },
       { status: 500 }

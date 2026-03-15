@@ -13,6 +13,7 @@ import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * Severity levels for business alerts.
  * - critical: Requires immediate attention (severe drops, major issues)
@@ -895,7 +896,7 @@ export async function GET(_request: Request) {
       },
     });
   } catch (error) {
-    console.error("[AI Business Alerts] Error:", error);
+    logger.error("[AI Business Alerts] Error", { error: error });
     return NextResponse.json(
       { error: "Failed to generate business alerts" },
       { status: 500 }

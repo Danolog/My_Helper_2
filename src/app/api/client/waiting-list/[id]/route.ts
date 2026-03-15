@@ -9,6 +9,7 @@ import {
   declineEarlierSlot,
 } from "@/lib/waiting-list";
 
+import { logger } from "@/lib/logger";
 // POST /api/client/waiting-list/[id] - Client accepts or declines a notified slot
 export async function POST(
   request: Request,
@@ -97,10 +98,8 @@ export async function POST(
           id,
           entry.entry.acceptToken
         );
-        console.log(
-          `[Client WaitingList API] POST [id]: Accept result for ${id}:`,
-          acceptResult
-        );
+        logger.info(`[Client WaitingList API] POST [id]: Accept result for ${id}`,
+          { result: acceptResult as unknown as Record<string, unknown> });
         return NextResponse.json({
           success: acceptResult.success,
           message: acceptResult.message,
@@ -115,10 +114,8 @@ export async function POST(
           id,
           entry.entry.acceptToken
         );
-        console.log(
-          `[Client WaitingList API] POST [id]: Decline result for ${id}:`,
-          declineResult
-        );
+        logger.info(`[Client WaitingList API] POST [id]: Decline result for ${id}`,
+          { result: declineResult as unknown as Record<string, unknown> });
         return NextResponse.json({
           success: declineResult.success,
           message: declineResult.message,
@@ -134,9 +131,7 @@ export async function POST(
       .returning();
 
     const action = accepted ? "zaakceptowal" : "odrzucil";
-    console.log(
-      `[Client WaitingList API] POST [id]: User ${session.user.id} ${action} entry ${id}`
-    );
+    logger.info(`[Client WaitingList API] POST [id]: User ${session.user.id} ${action} entry ${id}`);
 
     return NextResponse.json({
       success: true,
@@ -146,7 +141,7 @@ export async function POST(
         : "Termin zostal odrzucony.",
     });
   } catch (error) {
-    console.error("[Client WaitingList API] POST [id] Error:", error);
+    logger.error("[Client WaitingList API] POST [id] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie zaktualizowac wpisu" },
       { status: 500 }
@@ -202,9 +197,7 @@ export async function DELETE(
       .where(eq(waitingList.id, id))
       .returning();
 
-    console.log(
-      `[Client WaitingList API] DELETE: User ${session.user.id} removed entry ${id}`
-    );
+    logger.info(`[Client WaitingList API] DELETE: User ${session.user.id} removed entry ${id}`);
 
     return NextResponse.json({
       success: true,
@@ -212,7 +205,7 @@ export async function DELETE(
       message: "Zostales usuniety z listy oczekujacych",
     });
   } catch (error) {
-    console.error("[Client WaitingList API] DELETE Error:", error);
+    logger.error("[Client WaitingList API] DELETE Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie usunac wpisu" },
       { status: 500 }

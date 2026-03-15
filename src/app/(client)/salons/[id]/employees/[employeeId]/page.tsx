@@ -111,8 +111,7 @@ export default function EmployeeProfilePage() {
       if (json.success) {
         setEmployee(json.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch employee:", error);
+    } catch {
     } finally {
       setLoading(false);
     }

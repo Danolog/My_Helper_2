@@ -159,48 +159,51 @@ export default function BookingPage() {
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
   const [loadingAllEmployees, setLoadingAllEmployees] = useState(false);
 
-  const fetchServices = useCallback(async () => {
+  const fetchServices = useCallback(async (signal: AbortSignal | null = null) => {
     if (!salonId) return;
     try {
       setLoadingServices(true);
-      const res = await fetch(`/api/services?salonId=${salonId}&activeOnly=true`);
+      const res = await fetch(`/api/services?salonId=${salonId}&activeOnly=true`, { signal });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         setServices(data.data);
       }
     } catch (error) {
-      console.error("Failed to fetch services:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
     } finally {
       setLoadingServices(false);
     }
   }, [salonId]);
 
-  const fetchClients = useCallback(async () => {
+  const fetchClients = useCallback(async (signal: AbortSignal | null = null) => {
     if (!salonId) return;
     try {
       setLoadingClients(true);
-      const res = await fetch(`/api/clients?salonId=${salonId}`);
+      const res = await fetch(`/api/clients?salonId=${salonId}`, { signal });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         setClients(data.data);
       }
     } catch (error) {
-      console.error("Failed to fetch clients:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
     } finally {
       setLoadingClients(false);
     }
   }, [salonId]);
 
-  const fetchPackages = useCallback(async () => {
+  const fetchPackages = useCallback(async (signal: AbortSignal | null = null) => {
     if (!salonId) return;
     try {
-      const res = await fetch(`/api/promotions/check-package?salonId=${salonId}`);
+      const res = await fetch(`/api/promotions/check-package?salonId=${salonId}`, { signal });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         setAvailablePackages(data.data);
       }
     } catch (error) {
-      console.error("Failed to fetch packages:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
     }
   }, [salonId]);
 
@@ -213,17 +216,18 @@ export default function BookingPage() {
       if (data.success) {
         setAllEmployees(data.data.filter((e: Employee) => e.isActive));
       }
-    } catch (error) {
-      console.error("Failed to fetch employees:", error);
+    } catch {
     } finally {
       setLoadingAllEmployees(false);
     }
   }, [salonId]);
 
   useEffect(() => {
-    fetchServices();
-    fetchClients();
-    fetchPackages();
+    const controller = new AbortController();
+    fetchServices(controller.signal);
+    fetchClients(controller.signal);
+    fetchPackages(controller.signal);
+    return () => controller.abort();
   }, [fetchServices, fetchClients, fetchPackages]);
 
   // When a service is selected, fetch assigned employees
@@ -244,15 +248,14 @@ export default function BookingPage() {
           .filter((emp: Employee | null): emp is Employee => emp !== null && emp.isActive);
         setAvailableEmployees(employees);
       }
-    } catch (error) {
-      console.error("Failed to fetch assigned employees:", error);
+    } catch {
     } finally {
       setLoadingEmployees(false);
     }
   }, []);
 
   // Fetch available slots when employee and date change
-  const fetchAvailableSlots = useCallback(async (employeeId: string, date: string, duration: number) => {
+  const fetchAvailableSlots = useCallback(async (employeeId: string, date: string, duration: number, signal: AbortSignal | null = null) => {
     if (!employeeId || !date || !duration) {
       setSlotsData(null);
       return;
@@ -262,8 +265,10 @@ export default function BookingPage() {
     setSelectedTimeSlot("");
     try {
       const res = await fetch(
-        `/api/available-slots?employeeId=${employeeId}&date=${date}&duration=${duration}`
+        `/api/available-slots?employeeId=${employeeId}&date=${date}&duration=${duration}`,
+        { signal }
       );
+      if (!res.ok) { setSlotsData(null); return; }
       const data = await res.json();
       if (data.success) {
         setSlotsData(data.data);
@@ -272,7 +277,7 @@ export default function BookingPage() {
         setSlotsData(null);
       }
     } catch (error) {
-      console.error("Failed to fetch available slots:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
       toast.error("Blad pobierania dostepnych terminow");
       setSlotsData(null);
     } finally {
@@ -281,7 +286,7 @@ export default function BookingPage() {
   }, []);
 
   // Check for applicable promotions when client and service are selected
-  const checkPromotions = useCallback(async (clientId: string, serviceId: string) => {
+  const checkPromotions = useCallback(async (clientId: string, serviceId: string, signal: AbortSignal | null = null) => {
     if (!clientId || !serviceId || !salonId) {
       setPromoCheck(null);
       return;
@@ -290,8 +295,10 @@ export default function BookingPage() {
     setLoadingPromo(true);
     try {
       const res = await fetch(
-        `/api/promotions/check?salonId=${salonId}&clientId=${clientId}&serviceId=${serviceId}`
+        `/api/promotions/check?salonId=${salonId}&clientId=${clientId}&serviceId=${serviceId}`,
+        { signal }
       );
+      if (!res.ok) { setPromoCheck(null); return; }
       const data = await res.json();
       if (data.success) {
         setPromoCheck(data.data);
@@ -299,7 +306,7 @@ export default function BookingPage() {
         setPromoCheck(null);
       }
     } catch (error) {
-      console.error("Failed to check promotions:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
       setPromoCheck(null);
     } finally {
       setLoadingPromo(false);
@@ -308,11 +315,13 @@ export default function BookingPage() {
 
   // Re-check promotions when client or service changes
   useEffect(() => {
+    const controller = new AbortController();
     if (selectedClientId && selectedServiceId) {
-      checkPromotions(selectedClientId, selectedServiceId);
+      checkPromotions(selectedClientId, selectedServiceId, controller.signal);
     } else {
       setPromoCheck(null);
     }
+    return () => controller.abort();
   }, [selectedClientId, selectedServiceId, checkPromotions]);
 
   // Validate promo code
@@ -345,8 +354,7 @@ export default function BookingPage() {
         toast.error("Nie udalo sie zwalidowac kodu");
         setPromoCodeValidation(null);
       }
-    } catch (error) {
-      console.error("Failed to validate promo code:", error);
+    } catch {
       toast.error("Blad walidacji kodu promocyjnego");
       setPromoCodeValidation(null);
     } finally {
@@ -397,13 +405,15 @@ export default function BookingPage() {
 
   // Auto-fetch slots when employee or date changes
   useEffect(() => {
+    const controller = new AbortController();
     const selectedService = services.find((s) => s.id === selectedServiceId);
     if (selectedEmployeeId && selectedDate && selectedService) {
-      fetchAvailableSlots(selectedEmployeeId, selectedDate, selectedService.baseDuration);
+      fetchAvailableSlots(selectedEmployeeId, selectedDate, selectedService.baseDuration, controller.signal);
     } else {
       setSlotsData(null);
       setSelectedTimeSlot("");
     }
+    return () => controller.abort();
   }, [selectedEmployeeId, selectedDate, selectedServiceId, services, fetchAvailableSlots]);
 
   const handleServiceChange = (serviceId: string) => {
@@ -517,8 +527,7 @@ export default function BookingPage() {
       } else {
         toast.error(data.error || "Nie udalo sie zarezerwowac wizyty");
       }
-    } catch (error) {
-      console.error("Failed to book appointment:", error);
+    } catch {
       toast.error("Blad rezerwacji wizyty");
     } finally {
       setIsBooking(false);
@@ -526,7 +535,7 @@ export default function BookingPage() {
   };
 
   // Package booking: fetch slots when employee and date change
-  const fetchPackageSlots = useCallback(async (empId: string, date: string, duration: number) => {
+  const fetchPackageSlots = useCallback(async (empId: string, date: string, duration: number, signal: AbortSignal | null = null) => {
     if (!empId || !date || !duration) {
       setPackageSlotsData(null);
       return;
@@ -535,15 +544,18 @@ export default function BookingPage() {
     setPackageTimeSlot("");
     try {
       const res = await fetch(
-        `/api/available-slots?employeeId=${empId}&date=${date}&duration=${duration}`
+        `/api/available-slots?employeeId=${empId}&date=${date}&duration=${duration}`,
+        { signal }
       );
+      if (!res.ok) { setPackageSlotsData(null); return; }
       const data = await res.json();
       if (data.success) {
         setPackageSlotsData(data.data);
       } else {
         setPackageSlotsData(null);
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       setPackageSlotsData(null);
     } finally {
       setLoadingPackageSlots(false);
@@ -551,13 +563,15 @@ export default function BookingPage() {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     const selectedPackage = availablePackages.find((p) => p.id === selectedPackageId);
     if (packageEmployeeId && packageDate && selectedPackage) {
-      fetchPackageSlots(packageEmployeeId, packageDate, selectedPackage.totalDuration);
+      fetchPackageSlots(packageEmployeeId, packageDate, selectedPackage.totalDuration, controller.signal);
     } else {
       setPackageSlotsData(null);
       setPackageTimeSlot("");
     }
+    return () => controller.abort();
   }, [packageEmployeeId, packageDate, selectedPackageId, availablePackages, fetchPackageSlots]);
 
   const handleSelectPackage = (pkgId: string) => {
@@ -606,8 +620,7 @@ export default function BookingPage() {
       } else {
         toast.error(data.error || "Nie udalo sie zarezerwowac pakietu");
       }
-    } catch (error) {
-      console.error("Failed to book package:", error);
+    } catch {
       toast.error("Blad rezerwacji pakietu");
     } finally {
       setIsBooking(false);

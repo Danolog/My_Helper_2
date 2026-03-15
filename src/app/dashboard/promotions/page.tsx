@@ -251,7 +251,6 @@ export default function PromotionsPage() {
       }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
-      console.error("Failed to fetch services for promotions");
     }
   }, [salonId]);
 

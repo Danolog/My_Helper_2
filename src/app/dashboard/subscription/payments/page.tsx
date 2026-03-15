@@ -180,7 +180,7 @@ export default function SubscriptionPaymentHistoryPage() {
       setPayments(data.data.payments);
       setSummary(data.data.summary);
       setPagination(data.data.pagination);
-    } catch (err) {
+    } catch {
       setError("Nie udalo sie zaladowac historii platnosci. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);

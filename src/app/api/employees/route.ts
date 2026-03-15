@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { validateBody, createEmployeeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // Predefined palette of distinct colors for employees
 const EMPLOYEE_COLORS = [
   "#3b82f6", // Blue
@@ -56,29 +57,43 @@ export async function GET(request: Request) {
     const salonId = searchParams.get("salonId");
     const activeOnly = searchParams.get("activeOnly") === "true";
 
-    console.log("[Employees API] GET with params:", { salonId, activeOnly });
+    logger.info("[Employees API] GET with params", { salonId, activeOnly });
+
+    // Select only the columns needed by list consumers (excludes userId, commissionRate, timestamps)
+    const employeeColumns = {
+      id: employees.id,
+      salonId: employees.salonId,
+      firstName: employees.firstName,
+      lastName: employees.lastName,
+      phone: employees.phone,
+      email: employees.email,
+      photoUrl: employees.photoUrl,
+      role: employees.role,
+      isActive: employees.isActive,
+      color: employees.color,
+    };
 
     let allEmployees;
     if (salonId && activeOnly) {
       allEmployees = await db
-        .select()
+        .select(employeeColumns)
         .from(employees)
         .where(and(eq(employees.salonId, salonId), eq(employees.isActive, true)));
     } else if (salonId) {
       allEmployees = await db
-        .select()
+        .select(employeeColumns)
         .from(employees)
         .where(eq(employees.salonId, salonId));
     } else if (activeOnly) {
       allEmployees = await db
-        .select()
+        .select(employeeColumns)
         .from(employees)
         .where(eq(employees.isActive, true));
     } else {
-      allEmployees = await db.select().from(employees);
+      allEmployees = await db.select(employeeColumns).from(employees);
     }
 
-    console.log(`[Employees API] Query returned ${allEmployees.length} rows`);
+    logger.info(`[Employees API] Query returned ${allEmployees.length} rows`);
 
     return NextResponse.json({
       success: true,
@@ -86,7 +101,7 @@ export async function GET(request: Request) {
       count: allEmployees.length,
     });
   } catch (error) {
-    console.error("[Employees API] Database error:", error);
+    logger.error("[Employees API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch employees" },
       { status: 500 }
@@ -113,7 +128,7 @@ export async function POST(request: Request) {
     // Get next available color if not provided
     const employeeColor = color || await getNextAvailableColor(salonId);
 
-    console.log(`[Employees API] Creating employee: ${firstName} ${lastName} with color ${employeeColor}`);
+    logger.info(`[Employees API] Creating employee: ${firstName} ${lastName} with color ${employeeColor}`);
     const [newEmployee] = await db
       .insert(employees)
       .values({
@@ -130,14 +145,14 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[Employees API] Created employee with id: ${newEmployee?.id}`);
+    logger.info(`[Employees API] Created employee with id: ${newEmployee?.id}`);
 
     return NextResponse.json({
       success: true,
       data: newEmployee,
     }, { status: 201 });
   } catch (error) {
-    console.error("[Employees API] Database error:", error);
+    logger.error("[Employees API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create employee" },
       { status: 500 }

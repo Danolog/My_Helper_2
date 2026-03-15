@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { validateBody, updatePromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/promotions/:id - Get a single promotion
 export async function GET(
   _request: Request,
@@ -33,7 +34,7 @@ export async function GET(
       data: promotion,
     });
   } catch (error) {
-    console.error("[Promotions API] Database error:", error);
+    logger.error("[Promotions API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch promotion" },
       { status: 500 }
@@ -137,14 +138,14 @@ export async function PUT(
       );
     }
 
-    console.log(`[Promotions API] Updated promotion: ${updated.name} (${updated.id})`);
+    logger.info(`[Promotions API] Updated promotion: ${updated.name} (${updated.id})`);
 
     return NextResponse.json({
       success: true,
       data: updated,
     });
   } catch (error) {
-    console.error("[Promotions API] Database error:", error);
+    logger.error("[Promotions API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update promotion" },
       { status: 500 }
@@ -174,14 +175,14 @@ export async function DELETE(
       );
     }
 
-    console.log(`[Promotions API] Deleted promotion: ${deleted.name} (${deleted.id})`);
+    logger.info(`[Promotions API] Deleted promotion: ${deleted.name} (${deleted.id})`);
 
     return NextResponse.json({
       success: true,
       data: deleted,
     });
   } catch (error) {
-    console.error("[Promotions API] Database error:", error);
+    logger.error("[Promotions API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete promotion" },
       { status: 500 }

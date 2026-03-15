@@ -10,6 +10,7 @@ import {
 } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 // GET /api/salons/[id]/services/[serviceId] - Get service details with variants and assigned employees
 export async function GET(
   _request: Request,
@@ -115,7 +116,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Salon Service Detail API] Error:", error);
+    logger.error("[Salon Service Detail API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch service details" },
       { status: 500 }

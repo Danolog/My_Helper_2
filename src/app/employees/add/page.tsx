@@ -49,8 +49,8 @@ export default function AddEmployeePage() {
         if (data.success && data.salon) {
           setSalonId(data.salon.id);
         }
-      } catch (err) {
-        console.error("Failed to fetch salon:", err);
+      } catch {
+        // salon fetch failed silently
       }
     }
     if (session?.user) {
@@ -212,8 +212,7 @@ export default function AddEmployeePage() {
           description: data.error,
         });
       }
-    } catch (error) {
-      console.error("Failed to add employee:", error);
+    } catch {
       toast.error("Wystapil blad podczas dodawania pracownika");
     } finally {
       setIsSubmitting(false);

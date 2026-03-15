@@ -8,6 +8,7 @@ import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 type RouteParams = { params: Promise<{ id: string }> };
 
 // GET /api/gallery/[id] - Get a single gallery photo
@@ -51,7 +52,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
       data: photo,
     });
   } catch (error) {
-    console.error("[Gallery API] Error:", error);
+    logger.error("[Gallery API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch photo" },
       { status: 500 }
@@ -183,14 +184,14 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
       .where(eq(galleryPhotos.id, id));
 
-    console.log(`[Gallery API] Updated photo: ${id}`);
+    logger.info(`[Gallery API] Updated photo: ${id}`);
 
     return NextResponse.json({
       success: true,
       data: fullPhoto,
     });
   } catch (error) {
-    console.error("[Gallery API] Error updating photo:", error);
+    logger.error("[Gallery API] Error updating photo", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update photo" },
       { status: 500 }
@@ -281,14 +282,14 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
       }
     }
 
-    console.log(`[Gallery API] Deleted photo: ${id}`);
+    logger.info(`[Gallery API] Deleted photo: ${id}`);
 
     return NextResponse.json({
       success: true,
       message: "Photo deleted successfully",
     });
   } catch (error) {
-    console.error("[Gallery API] Error:", error);
+    logger.error("[Gallery API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete photo" },
       { status: 500 }

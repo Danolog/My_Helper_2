@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { salons, services, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 const platformEnum = z.enum(["instagram", "facebook", "tiktok"]);
 
 const requestSchema = z.object({
@@ -190,7 +191,7 @@ export async function POST(req: Request) {
       // promotions table might not exist yet
     }
   } catch (error) {
-    console.error("[AI Content] Error fetching salon context:", error);
+    logger.error("[AI Content] Error fetching salon context", { error: error });
   }
 
   // Platform is validated by zod enum - always present in constraints
@@ -270,7 +271,7 @@ Wygeneruj TYLKO tresc posta, bez zadnych dodatkowych komentarzy.`;
       maxLength: platformConfig.maxLength,
     });
   } catch (error) {
-    console.error("[AI Content] Error generating social post:", error);
+    logger.error("[AI Content] Error generating social post", { error: error });
     return Response.json(
       { error: "Blad podczas generowania posta. Sprobuj ponownie." },
       { status: 500 }

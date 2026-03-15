@@ -4,6 +4,7 @@ import { notifications, clients } from "@/lib/schema";
 import { desc, eq, and, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/notifications
  *
@@ -98,7 +99,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Notifications API] Error:", error);
+    logger.error("[Notifications API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch notifications" },
       { status: 500 }

@@ -2,6 +2,7 @@ import { and, eq, gt, lt } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { temporaryAccess } from "@/lib/schema";
+import { logger } from "@/lib/logger";
 
 /**
  * Check if a user has active (non-expired) temporary access to a specific feature.
@@ -72,9 +73,7 @@ export async function cleanupExpiredTemporaryAccess(): Promise<number> {
     .returning({ id: temporaryAccess.id });
 
   if (expired.length > 0) {
-    console.warn(
-      `[Temporary Access Cleanup] Removed ${expired.length} expired entries`
-    );
+    logger.info("Cleaned up expired temporary access entries", { count: expired.length });
   }
 
   return expired.length;

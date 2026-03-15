@@ -4,6 +4,7 @@ import { serviceVariants, services } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/services/[id]/variants - List all variants for a service
 export async function GET(
   _request: Request,
@@ -39,7 +40,7 @@ export async function GET(
       count: variants.length,
     });
   } catch (error) {
-    console.error("[Variants API] Error fetching variants:", error);
+    logger.error("[Variants API] Error fetching variants", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch variants" },
       { status: 500 }
@@ -90,7 +91,7 @@ export async function POST(
       })
       .returning();
 
-    console.log(`[Variants API] Created variant "${name}" for service ${id}`);
+    logger.info(`[Variants API] Created variant "${name}" for service ${id}`);
 
     return NextResponse.json(
       {
@@ -100,7 +101,7 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    console.error("[Variants API] Error creating variant:", error);
+    logger.error("[Variants API] Error creating variant", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create variant" },
       { status: 500 }

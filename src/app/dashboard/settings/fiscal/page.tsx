@@ -104,8 +104,7 @@ export default function FiscalSettingsPage() {
         } else {
           setLoading(false);
         }
-      } catch (err) {
-        console.error("Failed to fetch salon:", err);
+      } catch {
         setLoading(false);
       }
     }
@@ -124,8 +123,7 @@ export default function FiscalSettingsPage() {
       if (data.success) {
         setSettings(data.data);
       }
-    } catch (err) {
-      console.error("Failed to fetch fiscal settings:", err);
+    } catch {
       toast.error("Nie mozna zaladowac ustawien drukarki fiskalnej");
     } finally {
       setLoading(false);
@@ -155,8 +153,7 @@ export default function FiscalSettingsPage() {
       } else {
         toast.error(data.error || "Blad zapisywania ustawien");
       }
-    } catch (err) {
-      console.error("Failed to save fiscal settings:", err);
+    } catch {
       toast.error("Blad zapisywania ustawien");
     } finally {
       setSaving(false);
@@ -211,8 +208,7 @@ export default function FiscalSettingsPage() {
           lastTestError: data.data?.testError || data.error || "Unknown error",
         }));
       }
-    } catch (err) {
-      console.error("Test connection error:", err);
+    } catch {
       toast.error("Blad testu polaczenia");
     } finally {
       setTesting(false);
@@ -233,8 +229,7 @@ export default function FiscalSettingsPage() {
       } else {
         toast.error(data.error || "Nie udalo sie wydrukowac testu");
       }
-    } catch (err) {
-      console.error("Test print error:", err);
+    } catch {
       toast.error("Blad wydruku testowego");
     } finally {
       setPrinting(false);

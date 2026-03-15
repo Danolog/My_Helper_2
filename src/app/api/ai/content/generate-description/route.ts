@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 const requestSchema = z.object({
   serviceName: z.string().min(1, "Nazwa uslugi jest wymagana").max(200),
   categoryName: z.string().max(100).optional(),
@@ -91,7 +92,7 @@ export async function POST(req: Request) {
       }
     }
   } catch (error) {
-    console.error("[AI Content] Error fetching salon info:", error);
+    logger.error("[AI Content] Error fetching salon info", { error: error });
   }
 
   // Build context
@@ -140,7 +141,7 @@ Zasady:
 
     return Response.json({ success: true, description });
   } catch (error) {
-    console.error("[AI Content] Error generating description:", error);
+    logger.error("[AI Content] Error generating description", { error: error });
     return Response.json(
       { error: "Blad podczas generowania opisu. Sprobuj ponownie." },
       { status: 500 }

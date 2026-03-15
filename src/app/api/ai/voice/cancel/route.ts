@@ -18,6 +18,7 @@ import { notifyWaitingList } from "@/lib/waiting-list";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 interface CancelRequestBody {
   appointmentId?: string; // Direct appointment ID if known
   callerPhone: string; // Phone to look up client
@@ -230,7 +231,7 @@ export async function POST(req: Request) {
       .where(eq(appointments.id, appointmentRow.id))
       .returning();
 
-    console.log(`[Voice AI Cancel] Cancelled appointment ${appointmentRow.id}`, {
+    logger.info(`[Voice AI Cancel] Cancelled appointment ${appointmentRow.id}`, {
       hoursUntilAppointment: hoursUntilAppointment.toFixed(1),
       isMoreThan24h,
       hasDeposit,
@@ -248,7 +249,7 @@ export async function POST(req: Request) {
         appointmentRow.id,
         "Anulacja wizyty przez asystenta glosowego AI - wiecej niz 24h przed terminem"
       );
-      console.log(`[Voice AI Cancel] Refund result for appointment ${appointmentRow.id}:`, refundResult);
+      logger.info(`[Voice AI Cancel] Refund result for appointment ${appointmentRow.id}`, { refundResult: refundResult as unknown as Record<string, unknown> });
 
       // Create refund notification for client
       if (refundResult.refunded && clientRecord) {
@@ -275,9 +276,9 @@ export async function POST(req: Request) {
             refundReason: "Anulacja wizyty przez AI mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
           })
           .where(eq(depositPayments.appointmentId, appointmentRow.id));
-        console.log(`[Voice AI Cancel] Deposit marked as forfeited for appointment ${appointmentRow.id}`);
+        logger.info(`[Voice AI Cancel] Deposit marked as forfeited for appointment ${appointmentRow.id}`);
       } catch (forfeitError) {
-        console.error("[Voice AI Cancel] Failed to mark deposit as forfeited:", forfeitError);
+        logger.error("[Voice AI Cancel] Failed to mark deposit as forfeited", { error: forfeitError });
       }
     }
 
@@ -313,7 +314,7 @@ export async function POST(req: Request) {
           status: "pending",
         });
       } catch (notifError) {
-        console.error("[Voice AI Cancel] Failed to create notification:", notifError);
+        logger.error("[Voice AI Cancel] Failed to create notification", { error: notifError });
       }
     }
 
@@ -344,7 +345,7 @@ export async function POST(req: Request) {
         salonName,
       });
     } catch (waitingListError) {
-      console.error("[Voice AI Cancel] Failed to notify waiting list:", waitingListError);
+      logger.error("[Voice AI Cancel] Failed to notify waiting list", { error: waitingListError });
     }
 
     // ------------------------------------------------------------------
@@ -387,7 +388,7 @@ export async function POST(req: Request) {
       });
       smsSent = smsResult.success;
     } catch (smsError) {
-      console.error("[Voice AI Cancel] SMS send failed:", smsError);
+      logger.error("[Voice AI Cancel] SMS send failed", { error: smsError });
     }
 
     // ------------------------------------------------------------------
@@ -456,7 +457,7 @@ export async function POST(req: Request) {
       conversationId: conversation?.id || null,
     });
   } catch (error) {
-    console.error("[Voice AI Cancel] Error:", error);
+    logger.error("[Voice AI Cancel] Error", { error: error });
     return NextResponse.json(
       { error: "Blad przetwarzania anulacji wizyty" },
       { status: 500 }

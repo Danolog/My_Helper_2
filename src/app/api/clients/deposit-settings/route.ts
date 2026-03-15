@@ -4,6 +4,7 @@ import { clients } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/clients/deposit-settings?salonId=...&email=...
  *
@@ -64,7 +65,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Client Deposit Settings API] Error:", error);
+    logger.error("[Client Deposit Settings API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch client deposit settings" },
       { status: 500 }

@@ -4,6 +4,7 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // POST /api/gallery/upload - Upload a photo file
 export async function POST(request: Request) {
   try {
@@ -60,7 +61,7 @@ export async function POST(request: Request) {
     const url = `/uploads/gallery/${filename}`;
     const thumbnailUrl = `/uploads/gallery/thumbs/${filename}`;
 
-    console.log(`[Gallery Upload] File uploaded: ${filename} (${file.size} bytes)`);
+    logger.info(`[Gallery Upload] File uploaded: ${filename} (${file.size} bytes)`);
 
     return NextResponse.json({
       success: true,
@@ -73,7 +74,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Gallery Upload] Error:", error);
+    logger.error("[Gallery Upload] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to upload file" },
       { status: 500 }

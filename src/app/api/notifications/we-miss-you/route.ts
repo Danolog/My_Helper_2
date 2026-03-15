@@ -4,6 +4,7 @@ import { clients, appointments, notifications, salons } from "@/lib/schema";
 import { eq, sql, and, lt, isNull, or, inArray } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 interface WeMissYouSettings {
   enabled: boolean;
   inactiveDays: number;
@@ -159,7 +160,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[We Miss You Notifications API] Error:", error);
+    logger.error("[We Miss You Notifications API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to check we-miss-you notifications" },
       { status: 500 }
@@ -274,9 +275,7 @@ export async function POST(request: Request) {
 
     for (const client of inactiveClients) {
       if (recentlyNotifiedIds.has(client.id)) {
-        console.log(
-          `[We Miss You Notifications] Already sent notification to ${client.firstName} ${client.lastName} in the last ${SPAM_GUARD_DAYS} days, skipping`
-        );
+        logger.info(`[We Miss You Notifications] Already sent notification to ${client.firstName} ${client.lastName} in the last ${SPAM_GUARD_DAYS} days, skipping`);
         continue;
       }
 
@@ -315,9 +314,7 @@ export async function POST(request: Request) {
         clientPhone: client.phone,
       });
 
-      console.log(
-        `[We Miss You Notifications] Queued notification for ${client.firstName} ${client.lastName} (${notificationType})`
-      );
+      logger.info(`[We Miss You Notifications] Queued notification for ${client.firstName} ${client.lastName} (${notificationType})`);
     }
 
     // Batch-insert all notifications in a single query instead of N individual INSERTs
@@ -347,7 +344,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[We Miss You Notifications API] Error:", error);
+    logger.error("[We Miss You Notifications API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to send we-miss-you notifications" },
       { status: 500 }

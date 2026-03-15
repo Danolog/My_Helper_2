@@ -4,6 +4,7 @@ import { depositPayments, appointments } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/refund-status - Get refund status for an appointment
 export async function GET(
   _request: Request,
@@ -74,7 +75,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Refund Status API] Error:", error);
+    logger.error("[Refund Status API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to get refund status" },
       { status: 500 }

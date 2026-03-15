@@ -60,9 +60,12 @@ export default function CalendarPage() {
 
   // Fetch the user's salon
   useEffect(() => {
+    if (!session?.user) return;
+    const controller = new AbortController();
     async function fetchSalon() {
       try {
-        const res = await fetch("/api/salons/mine");
+        const res = await fetch("/api/salons/mine", { signal: controller.signal });
+        if (!res.ok) return;
         const data = await res.json();
         if (data.success && data.salon) {
           setSalonId(data.salon.id);
@@ -70,13 +73,12 @@ export default function CalendarPage() {
           setLoading(false);
         }
       } catch (err) {
-        console.error("Failed to fetch salon:", err);
+        if (err instanceof Error && err.name === "AbortError") return;
         setLoading(false);
       }
     }
-    if (session?.user) {
-      fetchSalon();
-    }
+    fetchSalon();
+    return () => controller.abort();
   }, [session]);
 
   // Employee filter: "all" shows all employees, or a specific employee ID
@@ -121,36 +123,38 @@ export default function CalendarPage() {
   const [completeMaterials, setCompleteMaterials] = useState<Array<{id: string; product: {name: string; pricePerUnit: string | null; unit: string | null;} | null; quantityUsed: string;}>>([]);
 
   // Fetch employees
-  const fetchEmployees = useCallback(async () => {
+  const fetchEmployees = useCallback(async (signal: AbortSignal | null = null) => {
     if (!salonId) return;
     try {
-      const response = await fetch(`/api/employees?salonId=${salonId}&activeOnly=true`);
+      const response = await fetch(`/api/employees?salonId=${salonId}&activeOnly=true`, { signal });
+      if (!response.ok) return;
       const data = await response.json();
       if (data.success) {
         setEmployees(data.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch employees:", error);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
       toast.error("Nie udalo sie pobrac listy pracownikow");
     }
   }, [salonId]);
 
   // Fetch work schedules for all employees in the salon
-  const fetchWorkSchedules = useCallback(async () => {
+  const fetchWorkSchedules = useCallback(async (signal: AbortSignal | null = null) => {
     if (!salonId) return;
     try {
-      const response = await fetch(`/api/work-schedules/by-salon?salonId=${salonId}`);
+      const response = await fetch(`/api/work-schedules/by-salon?salonId=${salonId}`, { signal });
+      if (!response.ok) return;
       const data = await response.json();
       if (data.success) {
         setWorkSchedules(data.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch work schedules:", error);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
     }
   }, [salonId]);
 
   // Fetch time blocks (vacations, breaks, etc.) for the current date/week
-  const fetchTimeBlocks = useCallback(async () => {
+  const fetchTimeBlocks = useCallback(async (signal: AbortSignal | null = null) => {
     try {
       let rangeStart: Date;
       let rangeEnd: Date;
@@ -169,7 +173,8 @@ export default function CalendarPage() {
         endDate: rangeEnd.toISOString(),
       });
 
-      const response = await fetch(`/api/time-blocks?${params}`);
+      const response = await fetch(`/api/time-blocks?${params}`, { signal });
+      if (!response.ok) return;
       const data = await response.json();
 
       if (data.success) {
@@ -182,13 +187,13 @@ export default function CalendarPage() {
         }));
         setTimeBlocks(blocks);
       }
-    } catch (error) {
-      console.error("Failed to fetch time blocks:", error);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
     }
   }, [currentDate, currentView]);
 
   // Fetch appointments for current date/week
-  const fetchAppointments = useCallback(async () => {
+  const fetchAppointments = useCallback(async (signal: AbortSignal | null = null) => {
     if (!salonId) return;
     try {
       let rangeStart: Date;
@@ -209,7 +214,8 @@ export default function CalendarPage() {
         endDate: rangeEnd.toISOString(),
       });
 
-      const response = await fetch(`/api/appointments?${params}`);
+      const response = await fetch(`/api/appointments?${params}`, { signal });
+      if (!response.ok) return;
       const data = await response.json();
 
       if (data.success) {
@@ -225,8 +231,8 @@ export default function CalendarPage() {
         }));
         setEvents(calendarEvents);
       }
-    } catch (error) {
-      console.error("Failed to fetch appointments:", error);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
       toast.error("Nie udalo sie pobrac wizyt");
     } finally {
       setLoading(false);
@@ -235,17 +241,19 @@ export default function CalendarPage() {
 
   // Initial data load - wait for salonId
   useEffect(() => {
-    if (salonId) {
-      fetchEmployees();
-      fetchWorkSchedules();
-    }
+    if (!salonId) return;
+    const controller = new AbortController();
+    fetchEmployees(controller.signal);
+    fetchWorkSchedules(controller.signal);
+    return () => controller.abort();
   }, [salonId, fetchEmployees, fetchWorkSchedules]);
 
   useEffect(() => {
-    if (salonId) {
-      fetchAppointments();
-      fetchTimeBlocks();
-    }
+    if (!salonId) return;
+    const controller = new AbortController();
+    fetchAppointments(controller.signal);
+    fetchTimeBlocks(controller.signal);
+    return () => controller.abort();
   }, [salonId, fetchAppointments, fetchTimeBlocks]);
 
   // Cross-tab sync: refetch when another tab modifies appointments
@@ -341,8 +349,7 @@ export default function CalendarPage() {
           quantityUsed: m.quantityUsed,
         })));
       }
-    } catch (error) {
-      console.error("Failed to fetch materials:", error);
+    } catch {
       setCompleteMaterials([]);
     }
     setCompleteDialogOpen(true);
@@ -469,8 +476,7 @@ export default function CalendarPage() {
           description: data.error,
         });
       }
-    } catch (error) {
-      console.error("Failed to reschedule:", error);
+    } catch {
       toast.error("Wystapil blad podczas przenoszenia wizyty");
     } finally {
       setIsRescheduling(false);

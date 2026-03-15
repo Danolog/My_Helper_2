@@ -4,6 +4,7 @@ import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 export interface NotificationTypeSettings {
   smsReminders: boolean; // SMS appointment reminders (1h before)
   pushReminders: boolean; // Push appointment reminders (1h and 24h before)
@@ -61,7 +62,7 @@ export async function GET(
       data: notificationTypeSettings,
     });
   } catch (error) {
-    console.error("[Notification Type Settings API] GET Error:", error);
+    logger.error("[Notification Type Settings API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch notification type settings" },
       { status: 500 }
@@ -147,10 +148,8 @@ export async function PUT(
       .set({ settingsJson: updatedSettings })
       .where(eq(salons.id, id));
 
-    console.log(
-      `[Notification Type Settings API] Updated notification type settings for salon ${id}:`,
-      newSettings
-    );
+    logger.info(`[Notification Type Settings API] Updated notification type settings for salon ${id}`,
+      { settings: newSettings as unknown as Record<string, unknown> });
 
     return NextResponse.json({
       success: true,
@@ -158,7 +157,7 @@ export async function PUT(
       message: "Ustawienia typow powiadomien zostaly zapisane",
     });
   } catch (error) {
-    console.error("[Notification Type Settings API] PUT Error:", error);
+    logger.error("[Notification Type Settings API] PUT Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update notification type settings" },
       { status: 500 }

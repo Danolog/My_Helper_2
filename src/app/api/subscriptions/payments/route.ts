@@ -9,6 +9,7 @@ import {
   subscriptionPlans,
 } from "@/lib/schema";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/subscriptions/payments
  *
@@ -145,10 +146,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error(
-      "[Subscription Payments API] Error fetching payments:",
-      error,
-    );
+    logger.error("[Subscription Payments API] Error fetching payments", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac historii platnosci" },
       { status: 500 },

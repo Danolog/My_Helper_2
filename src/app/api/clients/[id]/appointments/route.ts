@@ -4,6 +4,7 @@ import { appointments, clients, employees, services, treatmentHistory, appointme
 import { eq, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/clients/[id]/appointments - Get all appointments for a specific client
 export async function GET(
   _request: Request,
@@ -29,7 +30,7 @@ export async function GET(
       );
     }
 
-    console.log(`[Client Appointments API] Fetching appointments for client: ${client.firstName} ${client.lastName} (${id})`);
+    logger.info(`[Client Appointments API] Fetching appointments for client: ${client.firstName} ${client.lastName} (${id})`);
 
     // Fetch all appointments for this client with joined employee, service, and treatment data
     const result = await db
@@ -133,7 +134,7 @@ export async function GET(
       materials: materialsMap[row.appointment.id] || [],
     }));
 
-    console.log(`[Client Appointments API] Found ${formattedAppointments.length} appointments for client ${id}`);
+    logger.info(`[Client Appointments API] Found ${formattedAppointments.length} appointments for client ${id}`);
 
     return NextResponse.json({
       success: true,
@@ -141,7 +142,7 @@ export async function GET(
       count: formattedAppointments.length,
     });
   } catch (error) {
-    console.error("[Client Appointments API] Database error:", error);
+    logger.error("[Client Appointments API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch client appointments" },
       { status: 500 }

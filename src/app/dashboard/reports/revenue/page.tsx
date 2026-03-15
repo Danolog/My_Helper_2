@@ -121,8 +121,7 @@ export default function RevenueReportPage() {
         throw new Error("Nie udalo sie pobrac raportu. Sprobuj ponownie pozniej.");
       }
       setReportData(json.data);
-    } catch (err) {
-      console.error("[Revenue Report] Error:", err);
+    } catch {
       setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
@@ -180,8 +179,7 @@ export default function RevenueReportPage() {
           ? "Raport wyeksportowany do Excel"
           : "Raport wyeksportowany do CSV"
       );
-    } catch (err) {
-      console.error("[Revenue Report] Export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu");
     }
   };
@@ -271,8 +269,7 @@ export default function RevenueReportPage() {
         filename: `raport-przychodow-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
       });
       toast.success("Raport wyeksportowany do PDF");
-    } catch (err) {
-      console.error("[Revenue Report] PDF export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu do PDF");
     }
   };

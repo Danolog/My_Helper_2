@@ -4,6 +4,7 @@ import { employeeCommissions, employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/commission - Get commission info for an appointment
 export async function GET(
   _request: Request,
@@ -43,7 +44,7 @@ export async function GET(
         : null,
     });
   } catch (error) {
-    console.error("[Commission API] Database error:", error);
+    logger.error("[Commission API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch commission" },
       { status: 500 }

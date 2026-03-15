@@ -97,8 +97,7 @@ export default function ServicePopularityReportPage() {
         throw new Error(json.error || "Failed to fetch report");
       }
       setReportData(json.data);
-    } catch (err) {
-      console.error("[Service Popularity Report] Error:", err);
+    } catch {
       setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
@@ -137,8 +136,7 @@ export default function ServicePopularityReportPage() {
       document.body.removeChild(a);
 
       toast.success("Raport wyeksportowany do CSV");
-    } catch (err) {
-      console.error("[Service Popularity Report] Export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu");
     }
   };
@@ -189,8 +187,7 @@ export default function ServicePopularityReportPage() {
         filename: `raport-popularnosc-uslug-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
       });
       toast.success("Raport wyeksportowany do PDF");
-    } catch (err) {
-      console.error("[Service Popularity Report] PDF export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu do PDF");
     }
   };

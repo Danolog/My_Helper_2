@@ -4,6 +4,7 @@ import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/promo-codes/:id - Get a single promo code with joined promotion data
 export async function GET(
   _request: Request,
@@ -39,7 +40,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[PromoCodes API] Database error:", error);
+    logger.error("[PromoCodes API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch promo code" },
       { status: 500 }
@@ -166,14 +167,14 @@ export async function PUT(
       );
     }
 
-    console.log(`[PromoCodes API] Updated promo code: ${updated.code} (${updated.id})`);
+    logger.info(`[PromoCodes API] Updated promo code: ${updated.code} (${updated.id})`);
 
     return NextResponse.json({
       success: true,
       data: updated,
     });
   } catch (error) {
-    console.error("[PromoCodes API] Database error:", error);
+    logger.error("[PromoCodes API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update promo code" },
       { status: 500 }
@@ -203,14 +204,14 @@ export async function DELETE(
       );
     }
 
-    console.log(`[PromoCodes API] Deleted promo code: ${deleted.code} (${deleted.id})`);
+    logger.info(`[PromoCodes API] Deleted promo code: ${deleted.code} (${deleted.id})`);
 
     return NextResponse.json({
       success: true,
       data: deleted,
     });
   } catch (error) {
-    console.error("[PromoCodes API] Database error:", error);
+    logger.error("[PromoCodes API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete promo code" },
       { status: 500 }

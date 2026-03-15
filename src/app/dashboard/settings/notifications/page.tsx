@@ -88,9 +88,11 @@ export default function NotificationSettingsPage() {
 
   // Fetch salon ID - prefer salon owned by current user
   useEffect(() => {
+    const controller = new AbortController();
     async function fetchSalonId() {
       try {
-        const res = await fetch("/api/salons");
+        const res = await fetch("/api/salons", { signal: controller.signal });
+        if (!res.ok) return;
         const data = await res.json();
         if (data.success && data.data.length > 0) {
           // Try to find a salon owned by the current user
@@ -105,24 +107,25 @@ export default function NotificationSettingsPage() {
           setLoading(false);
         }
       } catch (err) {
-        console.error("Failed to fetch salon:", err);
+        if (err instanceof Error && err.name === "AbortError") return;
         setLoading(false);
       }
     }
     if (session?.user) {
       fetchSalonId();
     }
+    return () => controller.abort();
   }, [session]);
 
   // Fetch birthday settings when salonId is available
-  const fetchSettings = useCallback(async () => {
+  const fetchSettings = useCallback(async (signal: AbortSignal | null = null) => {
     if (!salonId) return;
     setLoading(true);
     try {
       const [birthdayRes, weMissYouRes, channelsRes] = await Promise.all([
-        fetch(`/api/salons/${salonId}/birthday-settings`),
-        fetch(`/api/salons/${salonId}/we-miss-you-settings`),
-        fetch(`/api/salons/${salonId}/notification-type-settings`),
+        fetch(`/api/salons/${salonId}/birthday-settings`, { signal }),
+        fetch(`/api/salons/${salonId}/we-miss-you-settings`, { signal }),
+        fetch(`/api/salons/${salonId}/notification-type-settings`, { signal }),
       ]);
       const birthdayData = await birthdayRes.json();
       if (birthdayData.success) {
@@ -141,7 +144,7 @@ export default function NotificationSettingsPage() {
         });
       }
     } catch (err) {
-      console.error("Failed to fetch notification settings:", err);
+      if (err instanceof Error && err.name === "AbortError") return;
       toast.error("Nie mozna zaladowac ustawien powiadomien");
     } finally {
       setLoading(false);
@@ -149,9 +152,10 @@ export default function NotificationSettingsPage() {
   }, [salonId]);
 
   useEffect(() => {
-    if (salonId) {
-      fetchSettings();
-    }
+    if (!salonId) return;
+    const controller = new AbortController();
+    fetchSettings(controller.signal);
+    return () => controller.abort();
   }, [salonId, fetchSettings]);
 
   // Save settings
@@ -174,8 +178,7 @@ export default function NotificationSettingsPage() {
       } else {
         toast.error(data.error || "Blad zapisywania ustawien");
       }
-    } catch (err) {
-      console.error("Failed to save birthday settings:", err);
+    } catch {
       toast.error("Blad zapisywania ustawien");
     } finally {
       setSaving(false);
@@ -217,8 +220,7 @@ export default function NotificationSettingsPage() {
       } else {
         toast.error(data.error || "Blad zapisywania ustawien");
       }
-    } catch (err) {
-      console.error("Failed to save we-miss-you settings:", err);
+    } catch {
       toast.error("Blad zapisywania ustawien");
     } finally {
       setSavingWeMissYou(false);
@@ -244,8 +246,7 @@ export default function NotificationSettingsPage() {
       } else {
         toast.error(data.error || "Blad zapisywania ustawien kanalow");
       }
-    } catch (err) {
-      console.error("Failed to save notification channel settings:", err);
+    } catch {
       toast.error("Blad zapisywania ustawien kanalow");
     } finally {
       setSavingChannels(false);

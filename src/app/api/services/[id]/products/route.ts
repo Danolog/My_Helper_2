@@ -4,6 +4,7 @@ import { serviceProducts, products } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/services/[id]/products - List products linked to a service (for auto-deduction)
 export async function GET(
   _request: Request,
@@ -38,7 +39,7 @@ export async function GET(
       count: result.length,
     });
   } catch (error) {
-    console.error("[Service Products API] Database error:", error);
+    logger.error("[Service Products API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch service products" },
       { status: 500 }
@@ -86,9 +87,7 @@ export async function POST(
         .where(eq(serviceProducts.id, existing.id))
         .returning();
 
-      console.log(
-        `[Service Products API] Updated product link: service=${serviceId}, product=${productId}, qty=${defaultQuantity || 1}`
-      );
+      logger.info(`[Service Products API] Updated product link: service=${serviceId}, product=${productId}, qty=${defaultQuantity || 1}`);
 
       return NextResponse.json({
         success: true,
@@ -107,9 +106,7 @@ export async function POST(
       })
       .returning();
 
-    console.log(
-      `[Service Products API] Linked product to service: service=${serviceId}, product=${productId}, qty=${defaultQuantity || 1}`
-    );
+    logger.info(`[Service Products API] Linked product to service: service=${serviceId}, product=${productId}, qty=${defaultQuantity || 1}`);
 
     return NextResponse.json(
       {
@@ -119,7 +116,7 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    console.error("[Service Products API] Database error:", error);
+    logger.error("[Service Products API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to link product to service" },
       { status: 500 }
@@ -164,9 +161,7 @@ export async function DELETE(
       );
     }
 
-    console.log(
-      `[Service Products API] Removed product link: service=${serviceId}, linkId=${linkId}`
-    );
+    logger.info(`[Service Products API] Removed product link: service=${serviceId}, linkId=${linkId}`);
 
     return NextResponse.json({
       success: true,
@@ -174,7 +169,7 @@ export async function DELETE(
       message: "Product link removed",
     });
   } catch (error) {
-    console.error("[Service Products API] Database error:", error);
+    logger.error("[Service Products API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to remove product link" },
       { status: 500 }

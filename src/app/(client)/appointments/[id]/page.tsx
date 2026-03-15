@@ -256,8 +256,7 @@ export default function AppointmentDetailPage() {
       } else {
         setError(json.error || "Nie znaleziono wizyty");
       }
-    } catch (err) {
-      console.error("Failed to fetch appointment:", err);
+    } catch {
       setError("Blad ladowania danych wizyty");
     } finally {
       setLoading(false);
@@ -273,8 +272,7 @@ export default function AppointmentDetailPage() {
       if (json.success && json.data) {
         setExistingReview(json.data);
       }
-    } catch (err) {
-      console.error("Failed to fetch review:", err);
+    } catch {
     } finally {
       setReviewLoading(false);
     }
@@ -310,8 +308,7 @@ export default function AppointmentDetailPage() {
           description: json.error,
         });
       }
-    } catch (err) {
-      console.error("Failed to submit review:", err);
+    } catch {
       toast.error("Blad podczas dodawania opinii");
     } finally {
       setSubmittingReview(false);
@@ -347,8 +344,7 @@ export default function AppointmentDetailPage() {
       } else {
         setCancelError(data.error || "Nie udalo sie pobrac informacji o anulowaniu");
       }
-    } catch (err) {
-      console.error("Failed to fetch cancel info:", err);
+    } catch {
       setCancelError("Blad polaczenia z serwerem");
     } finally {
       setCancelLoading(false);
@@ -392,8 +388,7 @@ export default function AppointmentDetailPage() {
           description: data.error,
         });
       }
-    } catch (err) {
-      console.error("Failed to cancel appointment:", err);
+    } catch {
       toast.error("Blad podczas anulowania wizyty");
     } finally {
       setCancelling(false);

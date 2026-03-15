@@ -4,6 +4,7 @@ import { timeBlocks, employees } from "@/lib/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/time-blocks?employeeId=xxx&startDate=xxx&endDate=xxx
 export async function GET(request: Request) {
   try {
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
     const endDate = searchParams.get("endDate");
     const blockType = searchParams.get("blockType");
 
-    console.log("[TimeBlocks API] GET with params:", { employeeId, startDate, endDate, blockType });
+    logger.info("[TimeBlocks API] GET with params", { employeeId, startDate, endDate, blockType });
 
     const conditions = [];
 
@@ -45,7 +46,7 @@ export async function GET(request: Request) {
     }
 
     const result = await query;
-    console.log(`[TimeBlocks API] Query returned ${result.length} rows`);
+    logger.info(`[TimeBlocks API] Query returned ${result.length} rows`);
 
     const formattedBlocks = result.map((row) => ({
       ...row.timeBlock,
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
       count: formattedBlocks.length,
     });
   } catch (error) {
-    console.error("[TimeBlocks API] Database error:", error);
+    logger.error("[TimeBlocks API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch time blocks" },
       { status: 500 }
@@ -114,7 +115,7 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(`[TimeBlocks API] Creating ${blockType} block for employee: ${employeeId}`);
+    logger.info(`[TimeBlocks API] Creating ${blockType} block for employee: ${employeeId}`);
 
     const [newBlock] = await db
       .insert(timeBlocks)
@@ -127,7 +128,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[TimeBlocks API] Created time block with id: ${newBlock?.id}`);
+    logger.info(`[TimeBlocks API] Created time block with id: ${newBlock?.id}`);
 
     return NextResponse.json(
       {
@@ -137,7 +138,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("[TimeBlocks API] Database error:", error);
+    logger.error("[TimeBlocks API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create time block" },
       { status: 500 }
@@ -160,7 +161,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    console.log(`[TimeBlocks API] Deleting time block: ${id}`);
+    logger.info(`[TimeBlocks API] Deleting time block: ${id}`);
 
     const deleted = await db
       .delete(timeBlocks)
@@ -174,7 +175,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    console.log(`[TimeBlocks API] Deleted time block: ${id}`);
+    logger.info(`[TimeBlocks API] Deleted time block: ${id}`);
 
     return NextResponse.json({
       success: true,
@@ -182,7 +183,7 @@ export async function DELETE(request: Request) {
       message: "Time block deleted successfully",
     });
   } catch (error) {
-    console.error("[TimeBlocks API] Database error:", error);
+    logger.error("[TimeBlocks API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete time block" },
       { status: 500 }

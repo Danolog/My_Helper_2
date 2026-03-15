@@ -131,7 +131,10 @@ export function useFormRecovery<T extends Record<string, unknown>>(
           // Warn when localStorage is full or unavailable so the user knows
           // form recovery will not work. This is intentionally not silent
           // because a user could lose data on refresh without knowing.
-          console.warn("Form recovery: nie udalo sie zapisac stanu formularza (localStorage moze byc pelny)", e);
+          // localStorage may be full or unavailable — form recovery will not persist
+          if (process.env.NODE_ENV === "development") {
+            console.warn("[useFormRecovery] Failed to save form state to localStorage", e);
+          }
         }
       }, debounceMs);
     },
