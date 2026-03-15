@@ -12,11 +12,8 @@ import {
   CalendarClock,
   Clock,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -33,9 +30,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { POST_TYPES } from "../_types";
-import type { GeneratedPost } from "../_types";
 import { PLATFORMS } from "./platforms";
+import type { GeneratedPost } from "../_types";
 
 type PostPreviewCardProps = {
   isGenerating: boolean;

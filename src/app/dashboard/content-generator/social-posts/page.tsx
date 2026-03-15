@@ -3,9 +3,9 @@
 import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
-import { SocialPostsHeader } from "./_components/social-posts-header";
 import { PostConfigCard } from "./_components/post-config-card";
 import { PostPreviewCard } from "./_components/post-preview-card";
+import { SocialPostsHeader } from "./_components/social-posts-header";
 import { useSocialPosts } from "./_hooks/use-social-posts";
 
 function SocialPostsContent() {

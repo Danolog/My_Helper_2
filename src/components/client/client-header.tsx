@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, Scissors } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Menu, Scissors, LogOut } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,12 +14,21 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { useSession } from "@/lib/auth-client";
+import { useSession, signOut } from "@/lib/auth-client";
 
 export function ClientHeader() {
   const { data: session } = useSession();
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
+
+  const handleSignOut = async () => {
+    navigator.serviceWorker?.controller?.postMessage({ type: "CLEAR_CACHES" });
+    await signOut();
+    setOpen(false);
+    router.replace("/");
+    router.refresh();
+  };
 
   const navLinks = [
     { href: "/salons", label: "Salony" },
@@ -99,7 +109,19 @@ export function ClientHeader() {
                 ))}
                 <div className="border-t pt-3 mt-3">
                   {session ? (
-                    <UserProfile />
+                    <div className="flex flex-col gap-2">
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        {session.user?.name || session.user?.email}
+                      </div>
+                      <Button
+                        variant="outline"
+                        className="justify-start gap-2 text-destructive hover:text-destructive"
+                        onClick={handleSignOut}
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Wyloguj się
+                      </Button>
+                    </div>
                   ) : (
                     <div className="flex flex-col gap-2">
                       <Button
@@ -107,10 +129,10 @@ export function ClientHeader() {
                         asChild
                         onClick={() => setOpen(false)}
                       >
-                        <Link href="/portal/login">Zaloguj sie</Link>
+                        <Link href="/portal/login">Zaloguj się</Link>
                       </Button>
                       <Button asChild onClick={() => setOpen(false)}>
-                        <Link href="/portal/register">Zarejestruj sie</Link>
+                        <Link href="/portal/register">Zarejestruj się</Link>
                       </Button>
                     </div>
                   )}
