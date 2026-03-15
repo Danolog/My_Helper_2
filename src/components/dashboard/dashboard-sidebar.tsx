@@ -3,11 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard,
   Calendar,
-  Users,
+  UserRound,
   Scissors,
+  UserCog,
   Image,
   BarChart3,
   CreditCard,
@@ -28,98 +30,122 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-/**
- * Navigation items for the dashboard sidebar.
- * Each item has a Polish label, an href, an icon, and optionally
- * a matcher function for more complex active-route detection.
- */
-const NAV_ITEMS = [
-  {
-    label: "Pulpit",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    // Only match exact /dashboard, not sub-routes
-    isActive: (pathname: string) => pathname === "/dashboard",
-  },
-  {
-    label: "Kalendarz",
-    href: "/dashboard/calendar",
-    icon: Calendar,
-    isActive: (pathname: string) => pathname.startsWith("/dashboard/calendar"),
-  },
-  {
-    label: "Klienci",
-    href: "/dashboard/clients",
-    icon: Users,
-    isActive: (pathname: string) => pathname.startsWith("/dashboard/clients"),
-  },
-  {
-    label: "Uslugi",
-    href: "/dashboard/services",
-    icon: Scissors,
-    isActive: (pathname: string) => pathname.startsWith("/dashboard/services"),
-  },
-  {
-    label: "Pracownicy",
-    href: "/dashboard/employees",
-    icon: Users,
-    isActive: (pathname: string) => pathname.startsWith("/dashboard/employees"),
-  },
-  {
-    label: "Galeria",
-    href: "/dashboard/gallery",
-    icon: Image,
-    isActive: (pathname: string) => pathname.startsWith("/dashboard/gallery"),
-  },
-  {
-    label: "Magazyn",
-    href: "/dashboard/products",
-    icon: Package,
-    isActive: (pathname: string) => pathname.startsWith("/dashboard/products"),
-  },
-  {
-    label: "Promocje",
-    href: "/dashboard/promotions",
-    icon: Percent,
-    isActive: (pathname: string) => pathname.startsWith("/dashboard/promotions"),
-  },
-  {
-    label: "Raporty",
-    href: "/dashboard/reports/revenue",
-    icon: BarChart3,
-    isActive: (pathname: string) => pathname.startsWith("/dashboard/reports"),
-  },
-  {
-    label: "Asystent AI",
-    href: "/dashboard/ai-assistant",
-    icon: Bot,
-    isActive: (pathname: string) =>
-      pathname.startsWith("/dashboard/ai-assistant") ||
-      pathname.startsWith("/dashboard/ai-recommendations") ||
-      pathname.startsWith("/dashboard/content-generator"),
-  },
-  {
-    label: "Subskrypcja",
-    href: "/dashboard/subscription",
-    icon: CreditCard,
-    isActive: (pathname: string) =>
-      pathname.startsWith("/dashboard/subscription") ||
-      pathname.startsWith("/dashboard/settings"),
-  },
-] as const;
+interface NavItem {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  badge?: string;
+  isActive: (pathname: string) => boolean;
+}
 
-/**
- * Renders a single navigation link with active state styling.
- * Uses the sidebar CSS tokens for consistent theming in light/dark mode.
- */
+interface NavGroup {
+  title: string;
+  items: NavItem[];
+}
+
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    title: "Glowne",
+    items: [
+      {
+        label: "Pulpit",
+        href: "/dashboard",
+        icon: LayoutDashboard,
+        isActive: (pathname: string) => pathname === "/dashboard",
+      },
+      {
+        label: "Kalendarz",
+        href: "/dashboard/calendar",
+        icon: Calendar,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/calendar"),
+      },
+    ],
+  },
+  {
+    title: "Zarzadzanie",
+    items: [
+      {
+        label: "Klienci",
+        href: "/dashboard/clients",
+        icon: UserRound,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/clients"),
+      },
+      {
+        label: "Uslugi",
+        href: "/dashboard/services",
+        icon: Scissors,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/services"),
+      },
+      {
+        label: "Pracownicy",
+        href: "/dashboard/employees",
+        icon: UserCog,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/employees"),
+      },
+      {
+        label: "Magazyn",
+        href: "/dashboard/products",
+        icon: Package,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/products"),
+      },
+    ],
+  },
+  {
+    title: "Marketing",
+    items: [
+      {
+        label: "Galeria",
+        href: "/dashboard/gallery",
+        icon: Image,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/gallery"),
+      },
+      {
+        label: "Promocje",
+        href: "/dashboard/promotions",
+        icon: Percent,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/promotions"),
+      },
+      {
+        label: "Asystent AI",
+        href: "/dashboard/ai-assistant",
+        icon: Bot,
+        badge: "PRO",
+        isActive: (pathname: string) =>
+          pathname.startsWith("/dashboard/ai-assistant") ||
+          pathname.startsWith("/dashboard/ai-recommendations") ||
+          pathname.startsWith("/dashboard/content-generator"),
+      },
+    ],
+  },
+  {
+    title: "Finanse",
+    items: [
+      {
+        label: "Raporty",
+        href: "/dashboard/reports/revenue",
+        icon: BarChart3,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/reports"),
+      },
+      {
+        label: "Subskrypcja",
+        href: "/dashboard/subscription",
+        icon: CreditCard,
+        isActive: (pathname: string) =>
+          pathname.startsWith("/dashboard/subscription") ||
+          pathname.startsWith("/dashboard/settings"),
+      },
+    ],
+  },
+];
+
 function NavLink({
   item,
   pathname,
   onClick,
 }: {
-  item: (typeof NAV_ITEMS)[number];
+  item: NavItem;
   pathname: string;
-  onClick?: () => void;
+  onClick?: (() => void) | undefined;
 }) {
   const active = item.isActive(pathname);
   const Icon = item.icon;
@@ -129,7 +155,7 @@ function NavLink({
       href={item.href}
       {...(onClick ? { onClick } : {})}
       className={cn(
-        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+        "flex items-center gap-3 rounded-lg px-3 py-3 min-h-[44px] text-sm font-medium transition-colors",
         active
           ? "bg-sidebar-accent text-sidebar-accent-foreground border-l-[3px] border-primary"
           : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground border-l-[3px] border-transparent"
@@ -138,37 +164,60 @@ function NavLink({
     >
       <Icon className="h-4 w-4 shrink-0" />
       <span className="flex-1">{item.label}</span>
-      {item.label === "Asystent AI" && (
+      {item.badge && (
         <Badge variant="gold" className="text-[10px] px-1.5 py-0">
-          PRO
+          {item.badge}
         </Badge>
       )}
     </Link>
   );
 }
 
+export function SidebarNav({
+  pathname,
+  onClick,
+}: {
+  pathname: string;
+  onClick?: () => void;
+}) {
+  return (
+    <nav
+      className="flex flex-col gap-1"
+      role="navigation"
+      aria-label="Panel nawigacyjny"
+    >
+      {NAV_GROUPS.map((group, groupIndex) => (
+        <div key={group.title} className={cn(groupIndex > 0 && "mt-4")}>
+          <h3 className="px-3 mb-1 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
+            {group.title}
+          </h3>
+          <div className="flex flex-col gap-0.5">
+            {group.items.map((item) => (
+              <NavLink
+                key={item.href}
+                item={item}
+                pathname={pathname}
+                onClick={onClick}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </nav>
+  );
+}
+
 /**
- * Desktop sidebar - always visible on screens >= lg (1024px).
- * Renders a fixed-width column on the left side of the dashboard.
+ * Desktop sidebar - always visible on screens >= md (768px).
  */
 function DesktopSidebar({ pathname }: { pathname: string }) {
   return (
     <aside
-      className="hidden lg:flex lg:w-64 lg:flex-col lg:border-r border-sidebar-border bg-sidebar"
-      role="navigation"
+      className="hidden md:flex md:w-64 md:flex-col md:border-r border-sidebar-border bg-sidebar"
       aria-label="Panel nawigacyjny"
     >
-      <div className="flex h-full flex-col gap-2 p-4">
-        <div className="mb-2">
-          <h2 className="px-3 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/50">
-            Menu
-          </h2>
-        </div>
-        <nav className="flex flex-col gap-1">
-          {NAV_ITEMS.map((item) => (
-            <NavLink key={item.href} item={item} pathname={pathname} />
-          ))}
-        </nav>
+      <div className="flex h-full flex-col p-4 overflow-y-auto">
+        <SidebarNav pathname={pathname} />
       </div>
     </aside>
   );
@@ -176,14 +225,14 @@ function DesktopSidebar({ pathname }: { pathname: string }) {
 
 /**
  * Mobile header bar with hamburger that opens a Sheet (drawer).
- * Visible only on screens < lg (1024px). Exported for use in layout.
+ * Visible only on screens < md (768px).
  */
 export function DashboardMobileHeader() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="sticky top-0 z-40 flex items-center gap-3 border-b bg-sidebar px-4 py-3 lg:hidden">
+    <div className="sticky top-0 z-40 flex items-center gap-3 border-b bg-sidebar px-4 py-3 md:hidden">
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger asChild>
           <Button
@@ -200,20 +249,9 @@ export function DashboardMobileHeader() {
             <SheetTitle className="text-sidebar-foreground">Menu</SheetTitle>
           </SheetHeader>
           <Separator className="bg-sidebar-border" />
-          <nav
-            className="flex flex-col gap-1 p-4"
-            role="navigation"
-            aria-label="Panel nawigacyjny"
-          >
-            {NAV_ITEMS.map((item) => (
-              <NavLink
-                key={item.href}
-                item={item}
-                pathname={pathname}
-                onClick={() => setOpen(false)}
-              />
-            ))}
-          </nav>
+          <div className="p-4 overflow-y-auto">
+            <SidebarNav pathname={pathname} onClick={() => setOpen(false)} />
+          </div>
         </SheetContent>
       </Sheet>
       <span className="text-sm font-semibold">MyHelper</span>
@@ -223,8 +261,6 @@ export function DashboardMobileHeader() {
 
 /**
  * DashboardSidebar is the main exported component.
- * It renders both the desktop sidebar (always visible on lg+)
- * and the mobile sidebar (hamburger + Sheet drawer on < lg).
  */
 export function DashboardSidebar() {
   const pathname = usePathname();
