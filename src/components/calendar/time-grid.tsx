@@ -169,10 +169,11 @@ export function TimeGrid({
   };
 
   return (
-    <div className="flex flex-col border border-border rounded-lg overflow-hidden bg-background" role="grid" aria-label="Kalendarz wizyt">
+    <div className="border border-border rounded-lg overflow-auto bg-background" role="grid" aria-label="Kalendarz wizyt">
+      <div className="flex flex-col min-w-fit">
       {/* Header with employee names */}
       <div className="flex border-b border-border bg-muted/50 sticky top-0 z-10">
-        <div className="w-20 flex-shrink-0 border-r border-border p-2 text-xs font-medium text-muted-foreground">
+        <div className="w-20 flex-shrink-0 border-r border-border p-2 text-xs font-medium text-muted-foreground sticky left-0 bg-muted/50 z-[5]">
           Czas
         </div>
         {employees.map((employee) => {
@@ -198,9 +199,9 @@ export function TimeGrid({
       </div>
 
       {/* Time slots grid */}
-      <div className="flex flex-1 overflow-auto">
+      <div className="flex flex-1">
         {/* Time labels column */}
-        <div className="w-20 flex-shrink-0 border-r border-border">
+        <div className="w-20 flex-shrink-0 border-r border-border sticky left-0 bg-background z-[5]">
           {timeSlots.map((slot, index) => (
             <div
               key={index}
@@ -331,6 +332,7 @@ export function TimeGrid({
             </div>
           );
         })}
+      </div>
       </div>
     </div>
   );
