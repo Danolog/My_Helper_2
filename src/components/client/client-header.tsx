@@ -32,7 +32,7 @@ export function ClientHeader() {
     <header className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur">
       <div className="container mx-auto flex h-14 items-center justify-between px-4">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 font-bold text-lg">
+        <Link href="/dla-klientow" className="flex items-center gap-2 font-bold text-lg">
           <Scissors className="h-5 w-5 text-primary" />
           MyHelper
         </Link>

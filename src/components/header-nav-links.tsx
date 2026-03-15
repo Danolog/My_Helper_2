@@ -51,8 +51,8 @@ export function HeaderNavLinks() {
       <Link href="/#pricing" className="hover:text-primary transition-colors">
         Cennik
       </Link>
-      <Link href="/salons" className="hover:text-primary transition-colors">
-        Salony
+      <Link href="/dla-klientow" className="hover:text-primary transition-colors">
+        Dla klientów
       </Link>
     </div>
   );

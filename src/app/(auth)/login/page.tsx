@@ -49,8 +49,8 @@ export default async function LoginPage({
           <SignInButton returnTo={returnTo} defaultRedirect="/dashboard" registerHref="/register" />
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Jestes klientem?{" "}
-            <Link href="/portal/login" className="text-primary hover:underline">
-              Zaloguj sie tutaj
+            <Link href="/dla-klientow" className="text-primary hover:underline">
+              Przejdz do portalu klienta
             </Link>
           </p>
           <div className="mt-3 flex flex-col items-center gap-1 text-sm text-muted-foreground">

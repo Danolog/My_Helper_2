@@ -3,10 +3,10 @@ import { db } from "@/lib/db";
 import { services, appointments, depositPayments } from "@/lib/schema";
 import { eq, and, not, or, lte, gte, lt, gt } from "drizzle-orm";
 import { timeBlocks } from "@/lib/schema";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, depositCreateSessionSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { getOptionalSession } from "@/lib/session";
 
 /**
  * POST /api/deposits/create-session
@@ -26,9 +26,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-  const { user } = authResult;
+  const session = await getOptionalSession();
 
   try {
     const body = await request.json();
@@ -48,9 +46,28 @@ export async function POST(request: Request) {
       depositAmount,
       paymentMethod,
       blikPhoneNumber,
+      guestName,
+      guestPhone,
+      guestEmail,
     } = body;
 
-    const bookedByUserId = user.id;
+    const bookedByUserId = session?.user?.id || null;
+
+    // Guest validation: require name and phone when not logged in
+    if (!session) {
+      if (!guestName?.trim() || guestName.trim().length < 2) {
+        return NextResponse.json(
+          { success: false, error: "Imię i nazwisko jest wymagane (min. 2 znaki)" },
+          { status: 400 }
+        );
+      }
+      if (!guestPhone?.trim() || !/^(\+48)?[0-9]{9}$/.test(guestPhone.trim().replace(/[\s\-()]/g, ""))) {
+        return NextResponse.json(
+          { success: false, error: "Podaj prawidłowy numer telefonu (9 cyfr)" },
+          { status: 400 }
+        );
+      }
+    }
 
     if (parseFloat(depositAmount) <= 0) {
       return NextResponse.json(
@@ -154,6 +171,9 @@ export async function POST(request: Request) {
         depositAmount: String(depositAmount),
         depositPaid: false,
         status: "scheduled",
+        guestName: guestName?.trim() || null,
+        guestPhone: guestPhone?.trim() || null,
+        guestEmail: guestEmail?.trim() || null,
       })
       .returning();
 
