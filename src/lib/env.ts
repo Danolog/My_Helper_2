@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { logger } from "@/lib/logger";
 
 /**
  * Server-side environment variables schema.
@@ -61,10 +62,9 @@ export function getServerEnv(): ServerEnv {
   const parsed = serverEnvSchema.safeParse(process.env);
 
   if (!parsed.success) {
-    console.error(
-      "Invalid server environment variables:",
-      parsed.error.flatten().fieldErrors
-    );
+    logger.error("Invalid server environment variables", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
     throw new Error("Invalid server environment variables");
   }
 
@@ -83,10 +83,9 @@ export function getClientEnv(): ClientEnv {
   });
 
   if (!parsed.success) {
-    console.error(
-      "Invalid client environment variables:",
-      parsed.error.flatten().fieldErrors
-    );
+    logger.error("Invalid client environment variables", {
+      errors: parsed.error.flatten().fieldErrors,
+    });
     throw new Error("Invalid client environment variables");
   }
 
@@ -128,8 +127,8 @@ export function checkEnv(): void {
 
   // Log warnings in development
   if (process.env.NODE_ENV === "development" && warnings.length > 0) {
-    console.warn("\n⚠️  Environment warnings:");
-    warnings.forEach((w) => console.warn(`   - ${w}`));
-    console.warn("");
+    for (const w of warnings) {
+      logger.warn(w);
+    }
   }
 }

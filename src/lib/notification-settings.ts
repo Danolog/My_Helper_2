@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
+import { logger } from "@/lib/logger";
 
 export interface NotificationTypeSettings {
   smsReminders: boolean;
@@ -43,10 +44,7 @@ export async function getNotificationTypeSettings(
       ...((settings?.notificationTypes as Partial<NotificationTypeSettings>) || {}),
     };
   } catch (error) {
-    console.error(
-      `[NotificationSettings] Error fetching settings for salon ${salonId}:`,
-      error
-    );
+    logger.error("Error fetching notification settings", { salonId, error });
     // Return defaults on error - don't block notifications due to settings fetch failure
     return { ...DEFAULT_NOTIFICATION_TYPE_SETTINGS };
   }

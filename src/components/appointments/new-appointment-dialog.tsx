@@ -122,8 +122,8 @@ export function NewAppointmentDialog({
           if (data.success && data.salon) {
             setSalonId(data.salon.id);
           }
-        } catch (err) {
-          console.error("Failed to fetch salon:", err);
+        } catch {
+          // Salon fetch failed — dialog cannot load data
         }
       }
       fetchSalon();
@@ -167,8 +167,8 @@ export function NewAppointmentDialog({
       if (data.success) {
         setClients(data.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch clients:", error);
+    } catch {
+      // Client list unavailable
     } finally {
       setLoadingClients(false);
     }
@@ -184,8 +184,8 @@ export function NewAppointmentDialog({
       if (data.success) {
         setAllServices(data.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch services:", error);
+    } catch {
+      // Service list unavailable
     } finally {
       setLoadingServices(false);
     }
@@ -201,8 +201,8 @@ export function NewAppointmentDialog({
       if (data.success) {
         setEmployees(data.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch employees:", error);
+    } catch {
+      // Employee list unavailable
     } finally {
       setLoadingEmployees(false);
     }
@@ -229,8 +229,8 @@ export function NewAppointmentDialog({
             setVariants(data.data);
           }
         })
-        .catch((error) => {
-          console.error("Failed to fetch variants:", error);
+        .catch(() => {
+          // Variant fetch failed
         })
         .finally(() => {
           setLoadingVariants(false);
@@ -364,8 +364,7 @@ export function NewAppointmentDialog({
           description: data.error,
         });
       }
-    } catch (error) {
-      console.error("Failed to create appointment:", error);
+    } catch {
       toast.error("Błąd podczas tworzenia wizyty");
     } finally {
       setSubmitting(false);

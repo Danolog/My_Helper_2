@@ -13,6 +13,7 @@ import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 export async function GET(_request: Request) {
   const authResult = await requireAuth();
   if (isAuthError(authResult)) return authResult;
@@ -323,7 +324,7 @@ export async function GET(_request: Request) {
 
     return NextResponse.json({ success: true, analytics });
   } catch (error) {
-    console.error("[AI Business Analytics] Error:", error);
+    logger.error("[AI Business Analytics] Error", { error: error });
     return NextResponse.json(
       { error: "Failed to gather analytics" },
       { status: 500 }

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/promotions/check-happy-hours
  * Check if a booking time slot qualifies for a happy hours promotion
@@ -105,7 +106,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Promotions Happy Hours Check] Error:", error);
+    logger.error("[Promotions Happy Hours Check] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to check happy hours promotions" },
       { status: 500 }

@@ -4,6 +4,7 @@ import { productCategories, products } from "@/lib/schema";
 import { eq, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/product-categories/[id] - Get a single category with product count
 export async function GET(
   _request: Request,
@@ -42,7 +43,7 @@ export async function GET(
       data: result[0],
     });
   } catch (error) {
-    console.error("[Product Categories API] Database error:", error);
+    logger.error("[Product Categories API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch category" },
       { status: 500 }
@@ -119,9 +120,7 @@ export async function PUT(
         .set({ category: newName })
         .where(eq(products.category, oldName));
 
-      console.log(
-        `[Product Categories API] Renamed "${oldName}" -> "${newName}", updated associated products`
-      );
+      logger.info(`[Product Categories API] Renamed "${oldName}" -> "${newName}", updated associated products`);
     }
 
     return NextResponse.json({
@@ -129,7 +128,7 @@ export async function PUT(
       data: updated,
     });
   } catch (error) {
-    console.error("[Product Categories API] Database error:", error);
+    logger.error("[Product Categories API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update category" },
       { status: 500 }
@@ -184,9 +183,7 @@ export async function DELETE(
       .where(eq(productCategories.id, id))
       .returning();
 
-    console.log(
-      `[Product Categories API] Deleted category: ${deleted!.name} (${deleted!.id})`
-    );
+    logger.info(`[Product Categories API] Deleted category: ${deleted!.name} (${deleted!.id})`);
 
     return NextResponse.json({
       success: true,
@@ -194,7 +191,7 @@ export async function DELETE(
       message: "Category deleted successfully",
     });
   } catch (error) {
-    console.error("[Product Categories API] Database error:", error);
+    logger.error("[Product Categories API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete category" },
       { status: 500 }

@@ -8,6 +8,7 @@ import { db } from "@/lib/db";
 import { salons, reviews, clients, employees, services, appointments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 const requestSchema = z.object({
   reviewId: z.string().uuid("Nieprawidlowe ID opinii"),
 });
@@ -126,7 +127,7 @@ export async function POST(req: Request) {
       }
     }
   } catch (error) {
-    console.error("[AI Content] Error fetching salon info:", error);
+    logger.error("[AI Content] Error fetching salon info", { error: error });
   }
 
   // Build context about the review
@@ -189,9 +190,7 @@ Zasady:
       );
     }
 
-    console.log(
-      `[AI Content] Generated review response for review ${reviewId} (rating: ${review.rating})`
-    );
+    logger.info(`[AI Content] Generated review response for review ${reviewId} (rating: ${review.rating})`);
 
     return Response.json({
       success: true,
@@ -200,7 +199,7 @@ Zasady:
       tone: !review.rating || review.rating >= 4 ? "positive" : review.rating === 3 ? "neutral" : "negative",
     });
   } catch (error) {
-    console.error("[AI Content] Error generating review response:", error);
+    logger.error("[AI Content] Error generating review response", { error: error });
     return Response.json(
       { error: "Blad podczas generowania odpowiedzi. Sprobuj ponownie." },
       { status: 500 }

@@ -5,6 +5,7 @@ import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 interface MessageRequestBody {
   callerPhone: string;
   callerName?: string;
@@ -91,7 +92,7 @@ export async function POST(req: Request) {
       message: `Wiadomosc zostala zapisana. Numer referencyjny: ${referenceNumber}. Skontaktujemy sie z Panem/Pania najszybciej jak to mozliwe.`,
     });
   } catch (error) {
-    console.error("[Voice AI Message] Error:", error);
+    logger.error("[Voice AI Message] Error", { error: error });
     return NextResponse.json(
       { error: "Blad podczas zapisywania wiadomosci" },
       { status: 500 }

@@ -4,6 +4,7 @@ import { employeeServicePrices, employees, serviceVariants } from "@/lib/schema"
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/services/[id]/employee-prices - List all employee-specific prices for a service
 export async function GET(
   _request: Request,
@@ -38,7 +39,7 @@ export async function GET(
       count: formatted.length,
     });
   } catch (error) {
-    console.error("[Employee Prices API] Error fetching prices:", error);
+    logger.error("[Employee Prices API] Error fetching prices", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch employee prices" },
       { status: 500 }
@@ -121,7 +122,7 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    console.error("[Employee Prices API] Error saving price:", error);
+    logger.error("[Employee Prices API] Error saving price", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to save employee price" },
       { status: 500 }
@@ -166,7 +167,7 @@ export async function DELETE(
       data: deleted,
     });
   } catch (error) {
-    console.error("[Employee Prices API] Error deleting price:", error);
+    logger.error("[Employee Prices API] Error deleting price", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete employee price" },
       { status: 500 }

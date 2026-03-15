@@ -201,7 +201,7 @@ export default function CancellationReportPage() {
     window.history.replaceState(null, "", newUrl);
   }, [dateFrom, dateTo, selectedEmployeeIds, activeTab, showComparison, compareDateFrom, compareDateTo, pathname]);
 
-  const fetchReport = useCallback(async () => {
+  const fetchReport = useCallback(async (signal: AbortSignal | null = null) => {
     if (!salonId) return;
     setLoading(true);
     setError(null);
@@ -220,7 +220,8 @@ export default function CancellationReportPage() {
       }
 
       const res = await fetch(
-        `/api/reports/cancellations?${params.toString()}`
+        `/api/reports/cancellations?${params.toString()}`,
+        { signal }
       );
       if (!res.ok) {
         throw new Error("Failed to fetch report");
@@ -231,7 +232,7 @@ export default function CancellationReportPage() {
       }
       setReportData(json.data);
     } catch (err) {
-      console.error("[Cancellation Report] Error:", err);
+      if (err instanceof Error && err.name === "AbortError") return;
       setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
@@ -239,7 +240,9 @@ export default function CancellationReportPage() {
   }, [salonId, dateFrom, dateTo, selectedEmployeeIds, showComparison, compareDateFrom, compareDateTo]);
 
   useEffect(() => {
-    fetchReport();
+    const controller = new AbortController();
+    fetchReport(controller.signal);
+    return () => controller.abort();
   }, [fetchReport]);
 
   const handleExportCSV = async () => {
@@ -274,8 +277,7 @@ export default function CancellationReportPage() {
       document.body.removeChild(a);
 
       toast.success("Raport wyeksportowany do CSV");
-    } catch (err) {
-      console.error("[Cancellation Report] Export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu");
     }
   };
@@ -385,8 +387,7 @@ export default function CancellationReportPage() {
         filename: `raport-anulacji-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
       });
       toast.success("Raport wyeksportowany do PDF");
-    } catch (err) {
-      console.error("[Cancellation Report] PDF export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu do PDF");
     }
   };

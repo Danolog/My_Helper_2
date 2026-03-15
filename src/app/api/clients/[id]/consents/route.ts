@@ -6,6 +6,7 @@ import { marketingConsents, clients } from "@/lib/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 
+import { logger } from "@/lib/logger";
 const VALID_CONSENT_TYPES = ["email", "sms", "phone"] as const;
 type ConsentType = (typeof VALID_CONSENT_TYPES)[number];
 
@@ -82,7 +83,7 @@ export async function GET(
       consents,
     });
   } catch (error) {
-    console.error("[Client Consents] GET Error:", error);
+    logger.error("[Client Consents] GET Error", { error: error });
     return Response.json(
       { error: "Blad podczas pobierania zgod marketingowych" },
       { status: 500 }
@@ -175,7 +176,7 @@ export async function PUT(
           consentType: type,
           grantedAt: now,
         });
-        console.log(`[Client Consents] Granted ${type} consent for client ${clientId}`);
+        logger.info(`[Client Consents] Granted ${type} consent for client ${clientId}`);
       } else if (!shouldBeGranted && isCurrentlyGranted) {
         // Revoke existing consent
         const consentId = activeConsentMap.get(type)!;
@@ -183,7 +184,7 @@ export async function PUT(
           .update(marketingConsents)
           .set({ revokedAt: now })
           .where(eq(marketingConsents.id, consentId));
-        console.log(`[Client Consents] Revoked ${type} consent for client ${clientId}`);
+        logger.info(`[Client Consents] Revoked ${type} consent for client ${clientId}`);
       }
       // If shouldBeGranted === isCurrentlyGranted, no change needed
     }
@@ -221,7 +222,7 @@ export async function PUT(
       consents: result,
     });
   } catch (error) {
-    console.error("[Client Consents] PUT Error:", error);
+    logger.error("[Client Consents] PUT Error", { error: error });
     return Response.json(
       { error: "Blad podczas aktualizacji zgod marketingowych" },
       { status: 500 }

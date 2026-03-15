@@ -38,8 +38,7 @@ export default function FavoritesPage() {
       if (json.success) {
         setFavorites(json.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch favorites:", error);
+    } catch {
     } finally {
       setLoading(false);
     }
@@ -64,8 +63,7 @@ export default function FavoritesPage() {
       if (json.success) {
         setFavorites((prev) => prev.filter((f) => f.salonId !== salonId));
       }
-    } catch (error) {
-      console.error("Failed to remove favorite:", error);
+    } catch {
     }
   }
 

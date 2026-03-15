@@ -4,6 +4,7 @@ import { workSchedules, employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/work-schedules/by-salon?salonId=xxx&dayOfWeek=1
 // Returns all work schedules for active employees in a salon, optionally filtered by day
 export async function GET(request: Request) {
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
       );
     }
 
-    console.log("[WorkSchedules BySalon API] GET for salon:", salonId, "day:", dayOfWeekStr);
+    logger.info("[WorkSchedules BySalon API] GET for salon", { salonId });
 
     // Get all active employees for the salon
     const activeEmployees = await db
@@ -59,7 +60,7 @@ export async function GET(request: Request) {
       allSchedules.push(...schedules);
     }
 
-    console.log(`[WorkSchedules BySalon API] Found ${allSchedules.length} schedule entries`);
+    logger.info(`[WorkSchedules BySalon API] Found ${allSchedules.length} schedule entries`);
 
     return NextResponse.json({
       success: true,
@@ -67,7 +68,7 @@ export async function GET(request: Request) {
       count: allSchedules.length,
     });
   } catch (error) {
-    console.error("[WorkSchedules BySalon API] Database error:", error);
+    logger.error("[WorkSchedules BySalon API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch work schedules" },
       { status: 500 }

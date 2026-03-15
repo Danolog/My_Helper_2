@@ -3,6 +3,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { sendPushNotification } from "@/lib/push";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/push/test
  *
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
       data: result,
     });
   } catch (error) {
-    console.error("[Push Test] Error:", error);
+    logger.error("[Push Test] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to send test push" },
       { status: 500 }

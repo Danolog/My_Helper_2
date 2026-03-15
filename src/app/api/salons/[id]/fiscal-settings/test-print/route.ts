@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import type { FiscalPrinterSettings } from "../route";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/salons/[id]/fiscal-settings/test-print
  *
@@ -97,10 +98,8 @@ export async function POST(
       status: "Drukarka polaczona - test wydruku pomyslny",
     };
 
-    console.log(
-      `[Fiscal Test Print] Test print for salon ${id}:`,
-      JSON.stringify(testReceipt, null, 2)
-    );
+    logger.info(`[Fiscal Test Print] Test print for salon ${id}`,
+      { testReceipt });
 
     return NextResponse.json({
       success: true,
@@ -111,7 +110,7 @@ export async function POST(
       message: "Testowy paragon zostal wyslany do drukarki",
     });
   } catch (error) {
-    console.error("[Fiscal Test Print API] Error:", error);
+    logger.error("[Fiscal Test Print API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to send test print" },
       { status: 500 }

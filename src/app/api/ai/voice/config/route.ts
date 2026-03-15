@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 export type VoiceAiConfig = {
   enabled: boolean;
   greeting: string;
@@ -71,7 +72,7 @@ export async function GET() {
 
     return NextResponse.json({ config: voiceConfig });
   } catch (error) {
-    console.error("[Voice AI Config] Error:", error);
+    logger.error("[Voice AI Config] Error", { error: error });
     return NextResponse.json({ error: "Blad serwera" }, { status: 500 });
   }
 }
@@ -132,7 +133,7 @@ export async function PUT(req: Request) {
 
     return NextResponse.json({ config, message: "Konfiguracja zapisana" });
   } catch (error) {
-    console.error("[Voice AI Config] Error:", error);
+    logger.error("[Voice AI Config] Error", { error: error });
     return NextResponse.json({ error: "Blad zapisu konfiguracji" }, { status: 500 });
   }
 }

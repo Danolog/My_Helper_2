@@ -4,6 +4,7 @@ import { serviceVariants } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // PUT /api/services/[id]/variants/[variantId] - Update a variant
 export async function PUT(
   request: Request,
@@ -45,7 +46,7 @@ export async function PUT(
       data: updated,
     });
   } catch (error) {
-    console.error("[Variants API] Error updating variant:", error);
+    logger.error("[Variants API] Error updating variant", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update variant" },
       { status: 500 }
@@ -86,7 +87,7 @@ export async function DELETE(
       data: deleted,
     });
   } catch (error) {
-    console.error("[Variants API] Error deleting variant:", error);
+    logger.error("[Variants API] Error deleting variant", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete variant" },
       { status: 500 }

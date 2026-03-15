@@ -4,6 +4,7 @@ import { services, employeeServicePrices, serviceVariants, employees } from "@/l
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/services/[id]/price?employeeId=xxx&variantId=yyy
 // Returns the effective price for a service based on employee-specific pricing
 export async function GET(
@@ -107,7 +108,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Price Resolution API] Error:", error);
+    logger.error("[Price Resolution API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to resolve price" },
       { status: 500 }

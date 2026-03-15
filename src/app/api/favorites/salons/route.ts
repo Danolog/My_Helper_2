@@ -5,6 +5,7 @@ import { favoriteSalons, salons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 
+import { logger } from "@/lib/logger";
 // GET /api/favorites/salons - List favorite salons for authenticated user
 export async function GET() {
   try {
@@ -39,7 +40,7 @@ export async function GET() {
       count: favorites.length,
     });
   } catch (error) {
-    console.error("[Favorites API] Error fetching favorites:", error);
+    logger.error("[Favorites API] Error fetching favorites", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch favorite salons" },
       { status: 500 }
@@ -69,8 +70,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check if salon exists
-    const [salon] = await db.select().from(salons).where(eq(salons.id, salonId));
+    // Check if salon exists (only need id for existence check)
+    const [salon] = await db.select({ id: salons.id }).from(salons).where(eq(salons.id, salonId));
     if (!salon) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
@@ -78,9 +79,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check if already favorited
+    // Check if already favorited (only need id for existence check)
     const [existing] = await db
-      .select()
+      .select({ id: favoriteSalons.id })
       .from(favoriteSalons)
       .where(
         and(
@@ -112,7 +113,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("[Favorites API] Error adding favorite:", error);
+    logger.error("[Favorites API] Error adding favorite", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to add salon to favorites" },
       { status: 500 }
@@ -164,7 +165,7 @@ export async function DELETE(request: Request) {
       data: deleted,
     });
   } catch (error) {
-    console.error("[Favorites API] Error removing favorite:", error);
+    logger.error("[Favorites API] Error removing favorite", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to remove salon from favorites" },
       { status: 500 }

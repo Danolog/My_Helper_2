@@ -4,6 +4,7 @@ import { employeeServices, employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/services/[id]/employee-assignments - List employees assigned to this service
 export async function GET(
   _request: Request,
@@ -35,7 +36,7 @@ export async function GET(
       count: formatted.length,
     });
   } catch (error) {
-    console.error("[Employee Assignments API] Error fetching assignments:", error);
+    logger.error("[Employee Assignments API] Error fetching assignments", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch employee assignments" },
       { status: 500 }
@@ -98,7 +99,7 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    console.error("[Employee Assignments API] Error creating assignment:", error);
+    logger.error("[Employee Assignments API] Error creating assignment", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to assign employee" },
       { status: 500 }
@@ -148,7 +149,7 @@ export async function DELETE(
       data: deleted[0],
     });
   } catch (error) {
-    console.error("[Employee Assignments API] Error deleting assignment:", error);
+    logger.error("[Employee Assignments API] Error deleting assignment", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to unassign employee" },
       { status: 500 }

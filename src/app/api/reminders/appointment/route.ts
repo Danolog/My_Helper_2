@@ -5,6 +5,7 @@ import { and, eq, gte, lte, isNull, inArray } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
 import { requireCronSecret } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/reminders/appointment
  *
@@ -157,9 +158,7 @@ export async function POST(request: Request) {
     const sent = results.filter((r) => r.success).length;
     const failed = results.filter((r) => !r.success).length;
 
-    console.log(
-      `[Reminders] Processed ${results.length} appointments: ${sent} sent, ${failed} failed`
-    );
+    logger.info(`[Reminders] Processed ${results.length} appointments: ${sent} sent, ${failed} failed`);
 
     return NextResponse.json({
       success: true,
@@ -171,7 +170,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Reminders] Error sending appointment reminders:", error);
+    logger.error("[Reminders] Error sending appointment reminders", { error: error });
     return NextResponse.json(
       {
         success: false,
@@ -259,7 +258,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Reminders] Error fetching reminder preview:", error);
+    logger.error("[Reminders] Error fetching reminder preview", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch reminder preview" },
       { status: 500 }

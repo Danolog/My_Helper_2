@@ -11,6 +11,7 @@ import {
 import { eq, and, desc } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 
+import { logger } from "@/lib/logger";
 // GET /api/client/waiting-list - List waiting list entries for the authenticated client
 export async function GET() {
   try {
@@ -113,9 +114,7 @@ export async function GET() {
       createdAt: row.entry.createdAt,
     }));
 
-    console.log(
-      `[Client WaitingList API] GET: ${formattedEntries.length} entries for user ${session.user.id}`
-    );
+    logger.info(`[Client WaitingList API] GET: ${formattedEntries.length} entries for user ${session.user.id}`);
 
     return NextResponse.json({
       success: true,
@@ -123,7 +122,7 @@ export async function GET() {
       count: formattedEntries.length,
     });
   } catch (error) {
-    console.error("[Client WaitingList API] GET Error:", error);
+    logger.error("[Client WaitingList API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac listy oczekujacych" },
       { status: 500 }
@@ -199,9 +198,7 @@ export async function POST(request: Request) {
       }
 
       clientRecord = newClient;
-      console.log(
-        `[Client WaitingList API] Auto-created client ${clientRecord.id} for user ${session.user.id} at salon ${salonId}`
-      );
+      logger.info(`[Client WaitingList API] Auto-created client ${clientRecord.id} for user ${session.user.id} at salon ${salonId}`);
     }
 
     if (serviceId) {
@@ -258,9 +255,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(
-      `[Client WaitingList API] POST: User ${session.user.id} joined waiting list at salon ${salonId}, entry ${newEntry?.id}`
-    );
+    logger.info(`[Client WaitingList API] POST: User ${session.user.id} joined waiting list at salon ${salonId}, entry ${newEntry?.id}`);
 
     return NextResponse.json(
       {
@@ -271,7 +266,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("[Client WaitingList API] POST Error:", error);
+    logger.error("[Client WaitingList API] POST Error", { error: error });
     return NextResponse.json(
       {
         success: false,

@@ -9,6 +9,7 @@ import {
   subscriptionPlans,
 } from "@/lib/schema";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/subscriptions/renew
  *
@@ -90,9 +91,7 @@ export async function POST() {
         planChanged = true;
 
         // eslint-disable-next-line no-console
-        console.log(
-          `[Subscription Renewal] Applying scheduled plan change: ${plan.slug} → ${targetPlan.slug}`
-        );
+        logger.info(`[Subscription Renewal] Applying scheduled plan change: ${plan.slug} → ${targetPlan.slug}`);
       }
     }
 
@@ -126,12 +125,10 @@ export async function POST() {
       .returning();
 
     // eslint-disable-next-line no-console
-    console.log(
-      `[Subscription Renewal] Subscription ${sub.id} renewed. ` +
+    logger.info(`[Subscription Renewal] Subscription ${sub.id} renewed. ` +
         `Plan: ${renewPlan.slug} (${renewPlan.priceMonthly} PLN). ` +
         `New period: ${newPeriodStart.toISOString()} - ${newPeriodEnd.toISOString()}` +
-        (planChanged ? ` (plan changed from ${plan.slug} to ${renewPlan.slug})` : "")
-    );
+        (planChanged ? ` (plan changed from ${plan.slug} to ${renewPlan.slug})` : ""));
 
     return NextResponse.json({
       success: true,
@@ -161,7 +158,7 @@ export async function POST() {
       newPlan: renewPlan.slug,
     });
   } catch (error) {
-    console.error("[Subscription Renewal] Error:", error);
+    logger.error("[Subscription Renewal] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie odnowic subskrypcji" },
       { status: 500 }
@@ -251,7 +248,7 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error("[Subscription Renewal] Error:", error);
+    logger.error("[Subscription Renewal] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac informacji o odnowieniu" },
       { status: 500 }

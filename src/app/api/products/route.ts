@@ -5,6 +5,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { validateBody, createProductSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * Check if a product has low stock and create a notification if needed.
  */
@@ -53,9 +54,7 @@ async function checkAndNotifyLowStock(product: {
       })
       .returning();
 
-    console.log(
-      `[Low Stock Alert] Notification sent for "${product.name}" (${product.id}) - qty: ${qty}, min: ${minQty}`
-    );
+    logger.info(`[Low Stock Alert] Notification sent for "${product.name}" (${product.id}) - qty: ${qty}, min: ${minQty}`);
 
     return { notificationSent: true, notification };
   }
@@ -72,7 +71,21 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
-    let query = db.select().from(products);
+    // Select only the columns needed by the inventory UI
+    const productColumns = {
+      id: products.id,
+      salonId: products.salonId,
+      name: products.name,
+      category: products.category,
+      quantity: products.quantity,
+      minQuantity: products.minQuantity,
+      unit: products.unit,
+      pricePerUnit: products.pricePerUnit,
+      createdAt: products.createdAt,
+      updatedAt: products.updatedAt,
+    };
+
+    let query = db.select(productColumns).from(products);
 
     if (salonId) {
       query = query.where(eq(products.salonId, salonId)) as typeof query;
@@ -86,7 +99,7 @@ export async function GET(request: Request) {
       count: result.length,
     });
   } catch (error) {
-    console.error("[Products API] Database error:", error);
+    logger.error("[Products API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch products" },
       { status: 500 }
@@ -130,14 +143,14 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(`[Products API] Created product: ${newProduct.name} (${newProduct.id})`);
+    logger.info(`[Products API] Created product: ${newProduct.name} (${newProduct.id})`);
 
     // Check for low stock and send notification if needed
     let lowStockAlert = null;
     try {
       lowStockAlert = await checkAndNotifyLowStock(newProduct);
     } catch (alertError) {
-      console.error("[Products API] Low stock check failed (non-blocking):", alertError);
+      logger.error("[Products API] Low stock check failed (non-blocking)", { error: alertError });
     }
 
     return NextResponse.json({
@@ -146,7 +159,7 @@ export async function POST(request: Request) {
       lowStockAlert,
     }, { status: 201 });
   } catch (error) {
-    console.error("[Products API] Database error:", error);
+    logger.error("[Products API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create product" },
       { status: 500 }

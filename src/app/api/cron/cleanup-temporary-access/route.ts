@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { cleanupExpiredTemporaryAccess } from "@/lib/temporary-access";
 import { requireCronSecret } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/cron/cleanup-temporary-access
  *
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
       removedCount,
     });
   } catch (error) {
-    console.error("[Cron] Cleanup temporary access error:", error);
+    logger.error("[Cron] Cleanup temporary access error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udało się wyczyścić uprawnień tymczasowych" },
       { status: 500 }

@@ -6,6 +6,7 @@ import { validateBody, createAppointmentSchema } from "@/lib/api-validation";
 import { isValidUuid, isValidDateString } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/appointments - List appointments with optional date range filter
 export async function GET(request: Request) {
   try {
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
     const salonId = searchParams.get("salonId");
     const employeeId = searchParams.get("employeeId");
 
-    console.log("[Appointments API] GET with params:", { startDate, endDate, salonId, employeeId });
+    logger.info("[Appointments API] GET with params", { startDate, endDate, salonId, employeeId });
 
     // Validate date parameters
     if (startDate && !isValidDateString(startDate)) {
@@ -83,7 +84,7 @@ export async function GET(request: Request) {
     }
 
     const result = await query;
-    console.log(`[Appointments API] Query returned ${result.length} rows`);
+    logger.info(`[Appointments API] Query returned ${result.length} rows`);
 
     // Transform result to a cleaner format
     const formattedAppointments = result.map((row) => ({
@@ -99,7 +100,7 @@ export async function GET(request: Request) {
       count: formattedAppointments.length,
     });
   } catch (error) {
-    console.error("[Appointments API] Database error:", error);
+    logger.error("[Appointments API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch appointments" },
       { status: 500 }
@@ -125,8 +126,8 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    // Check for overlapping appointments for this employee
-    const overlapping = await db.select()
+    // Check for overlapping appointments for this employee (only need id for existence check)
+    const overlapping = await db.select({ id: appointments.id })
       .from(appointments)
       .where(
         and(
@@ -157,7 +158,12 @@ export async function POST(request: Request) {
     }
 
     // Check for vacation/time blocks that overlap with the requested time
-    const conflictingBlocks = await db.select()
+    // Need blockType and reason for the user-facing error message
+    const conflictingBlocks = await db.select({
+      id: timeBlocks.id,
+      blockType: timeBlocks.blockType,
+      reason: timeBlocks.reason,
+    })
       .from(timeBlocks)
       .where(
         and(
@@ -238,7 +244,7 @@ export async function POST(request: Request) {
       validatedDiscountAmount = discountAmount ? String(discountAmount) : null;
     }
 
-    console.log(`[Appointments API] Creating appointment for employee ${employeeId}, bookedBy: ${bookedByUserId}, promoCode: ${validatedPromoCodeId}`);
+    logger.info(`[Appointments API] Creating appointment for employee ${employeeId}, bookedBy: ${bookedByUserId}, promoCode: ${validatedPromoCodeId}`);
     const [newAppointment] = await db
       .insert(appointments)
       .values({
@@ -266,17 +272,17 @@ export async function POST(request: Request) {
         .update(promoCodes)
         .set({ usedCount: sql`COALESCE(${promoCodes.usedCount}, 0) + 1` })
         .where(eq(promoCodes.id, validatedPromoCodeId));
-      console.log(`[Appointments API] Incremented usage count for promo code ${validatedPromoCodeId}`);
+      logger.info(`[Appointments API] Incremented usage count for promo code ${validatedPromoCodeId}`);
     }
 
-    console.log(`[Appointments API] Created appointment with id: ${newAppointment?.id}`);
+    logger.info(`[Appointments API] Created appointment with id: ${newAppointment?.id}`);
 
     return NextResponse.json({
       success: true,
       data: newAppointment,
     }, { status: 201 });
   } catch (error) {
-    console.error("[Appointments API] Database error:", error);
+    logger.error("[Appointments API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create appointment" },
       { status: 500 }

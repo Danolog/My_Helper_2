@@ -5,6 +5,7 @@ import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { validateBody, createClientSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/clients - List all clients with optional filtering
 // Supported query params:
 //   salonId        - filter by salon
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
     const lastVisitTo = searchParams.get("lastVisitTo");
     const hasAllergies = searchParams.get("hasAllergies");
 
-    console.log("[Clients API] GET with params:", {
+    logger.info("[Clients API] GET with params", {
       salonId,
       dateAddedFrom,
       dateAddedTo,
@@ -86,7 +87,7 @@ export async function GET(request: Request) {
     }
 
     const result = await query;
-    console.log(`[Clients API] Query returned ${result.length} rows`);
+    logger.info(`[Clients API] Query returned ${result.length} rows`);
 
     // Flatten: spread client fields and attach lastVisit at the top level
     const data = result.map((row) => ({
@@ -100,7 +101,7 @@ export async function GET(request: Request) {
       count: data.length,
     });
   } catch (error) {
-    console.error("[Clients API] Database error:", error);
+    logger.error("[Clients API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch clients" },
       { status: 500 }
@@ -124,7 +125,7 @@ export async function POST(request: Request) {
 
     const { salonId, firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
 
-    console.log(`[Clients API] Executing: INSERT INTO clients (salon_id, first_name, last_name, phone, email, notes, preferences, allergies, favorite_employee_id)`);
+    logger.info(`[Clients API] Executing: INSERT INTO clients (salon_id, first_name, last_name, phone, email, notes, preferences, allergies, favorite_employee_id)`);
     const [newClient] = await db
       .insert(clients)
       .values({
@@ -143,14 +144,14 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[Clients API] INSERT successful, created client with id: ${newClient?.id}`);
+    logger.info(`[Clients API] INSERT successful, created client with id: ${newClient?.id}`);
 
     return NextResponse.json({
       success: true,
       data: newClient,
     }, { status: 201 });
   } catch (error) {
-    console.error("[Clients API] Database error:", error);
+    logger.error("[Clients API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create client" },
       { status: 500 }

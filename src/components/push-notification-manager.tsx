@@ -50,8 +50,7 @@ export function PushNotificationManager() {
         permission,
         isLoading: false,
       }));
-    } catch (err) {
-      console.error("[PushManager] Check status error:", err);
+    } catch {
       setState((s) => ({
         ...s,
         isSupported: true,
@@ -121,8 +120,7 @@ export function PushNotificationManager() {
         isLoading: false,
         subscriptionCount: s.subscriptionCount + (data.data.created ? 1 : 0),
       }));
-    } catch (err) {
-      console.error("[PushManager] Subscribe error:", err);
+    } catch {
       setState((s) => ({
         ...s,
         isLoading: false,
@@ -159,8 +157,7 @@ export function PushNotificationManager() {
         isLoading: false,
         subscriptionCount: Math.max(0, s.subscriptionCount - 1),
       }));
-    } catch (err) {
-      console.error("[PushManager] Unsubscribe error:", err);
+    } catch {
       setState((s) => ({
         ...s,
         isLoading: false,
@@ -179,7 +176,6 @@ export function PushNotificationManager() {
       }
       setState((s) => ({ ...s, isLoading: false }));
     } catch (err) {
-      console.error("[PushManager] Test error:", err);
       setState((s) => ({
         ...s,
         isLoading: false,

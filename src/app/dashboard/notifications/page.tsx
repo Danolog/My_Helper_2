@@ -76,8 +76,7 @@ export default function NotificationsPage() {
         if (data.success && data.data.length > 0) {
           setSalonId(data.data[0].id);
         }
-      } catch (err) {
-        console.error("Failed to fetch salon:", err);
+      } catch {
         setError("Nie mozna zaladowac salonu");
         setLoading(false);
       }
@@ -102,8 +101,7 @@ export default function NotificationsPage() {
       } else {
         setError(data.error || "Blad ladowania powiadomien");
       }
-    } catch (err) {
-      console.error("Failed to fetch notifications:", err);
+    } catch {
       setError("Nie mozna zaladowac powiadomien");
     } finally {
       setLoading(false);
@@ -139,8 +137,7 @@ export default function NotificationsPage() {
           toast.info("Brak klientow z urodzinami dzisiaj");
         }
       }
-    } catch (err) {
-      console.error("Failed to check birthdays:", err);
+    } catch {
       toast.error("Blad sprawdzania urodzin");
     } finally {
       setLoadingBirthday(false);
@@ -183,8 +180,7 @@ export default function NotificationsPage() {
       } else {
         toast.error(data.error || "Blad wysylania powiadomien urodzinowych");
       }
-    } catch (err) {
-      console.error("Failed to send birthday notifications:", err);
+    } catch {
       toast.error("Blad wysylania powiadomien");
     } finally {
       setSendingBirthday(false);
@@ -209,8 +205,7 @@ export default function NotificationsPage() {
           toast.info("Brak nieaktywnych klientow");
         }
       }
-    } catch (err) {
-      console.error("Failed to check inactive clients:", err);
+    } catch {
       toast.error("Blad sprawdzania nieaktywnych klientow");
     } finally {
       setLoadingInactive(false);
@@ -242,8 +237,7 @@ export default function NotificationsPage() {
       } else {
         toast.error(data.error || "Blad wysylania powiadomien");
       }
-    } catch (err) {
-      console.error("Failed to send we-miss-you notifications:", err);
+    } catch {
       toast.error("Blad wysylania powiadomien");
     } finally {
       setSendingWeMissYou(false);

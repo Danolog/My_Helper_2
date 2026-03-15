@@ -117,8 +117,7 @@ export default function WaitingListPage() {
       if (data.success) {
         setEntries(data.data || []);
       }
-    } catch (error) {
-      console.error("Failed to fetch waiting list:", error);
+    } catch {
     } finally {
       setLoading(false);
     }
@@ -139,8 +138,7 @@ export default function WaitingListPage() {
       if (clientsData.success) setClients(clientsData.data || []);
       if (servicesData.success) setServices(servicesData.data || []);
       if (employeesData.success) setEmployees(employeesData.data || []);
-    } catch (error) {
-      console.error("Failed to fetch options:", error);
+    } catch {
     }
   }, []);
 

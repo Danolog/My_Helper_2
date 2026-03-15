@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/salons/mine
  *
@@ -44,7 +45,7 @@ export async function GET() {
       salon: salon ?? null,
     });
   } catch (error) {
-    console.error("[Salons Mine API] Error:", error);
+    logger.error("[Salons Mine API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac salonu" },
       { status: 500 },

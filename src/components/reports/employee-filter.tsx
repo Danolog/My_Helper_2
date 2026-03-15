@@ -45,8 +45,8 @@ export function EmployeeFilter({
           setEmployees(json.data || []);
         }
       }
-    } catch (err) {
-      console.error("[EmployeeFilter] Failed to fetch employees:", err);
+    } catch {
+      // Employee list unavailable — filter will remain empty
     } finally {
       setLoading(false);
     }

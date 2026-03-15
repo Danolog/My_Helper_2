@@ -5,6 +5,7 @@ import { eq, desc } from "drizzle-orm";
 import { validateBody, createPromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/promotions - List promotions with optional salonId filter
 export async function GET(request: Request) {
   try {
@@ -13,7 +14,21 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
-    let query = db.select().from(promotions).orderBy(desc(promotions.createdAt));
+    // Select only the columns needed by the promotions UI
+    const promotionColumns = {
+      id: promotions.id,
+      salonId: promotions.salonId,
+      name: promotions.name,
+      type: promotions.type,
+      value: promotions.value,
+      startDate: promotions.startDate,
+      endDate: promotions.endDate,
+      conditionsJson: promotions.conditionsJson,
+      isActive: promotions.isActive,
+      createdAt: promotions.createdAt,
+    };
+
+    let query = db.select(promotionColumns).from(promotions).orderBy(desc(promotions.createdAt));
 
     if (salonId) {
       query = query.where(eq(promotions.salonId, salonId)) as typeof query;
@@ -27,7 +42,7 @@ export async function GET(request: Request) {
       count: result.length,
     });
   } catch (error) {
-    console.error("[Promotions API] Database error:", error);
+    logger.error("[Promotions API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch promotions" },
       { status: 500 }
@@ -163,14 +178,14 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(`[Promotions API] Created promotion: ${newPromotion.name} (${newPromotion.id}) - type: ${newPromotion.type}, value: ${newPromotion.value}`);
+    logger.info(`[Promotions API] Created promotion: ${newPromotion.name} (${newPromotion.id}) - type: ${newPromotion.type}, value: ${newPromotion.value}`);
 
     return NextResponse.json({
       success: true,
       data: newPromotion,
     }, { status: 201 });
   } catch (error) {
-    console.error("[Promotions API] Database error:", error);
+    logger.error("[Promotions API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create promotion" },
       { status: 500 }

@@ -2,6 +2,7 @@ import { eq, and, desc, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 
 export type PlanSlug = "basic" | "pro";
 
@@ -53,7 +54,7 @@ export async function getCurrentPlan(salonId?: string): Promise<CurrentPlan> {
       status: row.status,
     };
   } catch (error) {
-    console.error("[Subscription] Error fetching current plan:", error);
+    logger.error("Error fetching current subscription plan", { error });
     return { slug: "basic", name: "Basic", status: "active" };
   }
 }

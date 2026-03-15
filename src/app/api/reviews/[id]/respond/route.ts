@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { validateBody, reviewRespondSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // PATCH /api/reviews/[id]/respond - Save owner response to a review
 export async function PATCH(
   request: Request,
@@ -80,9 +81,7 @@ export async function PATCH(
       .where(eq(reviews.id, reviewId))
       .returning();
 
-    console.log(
-      `[Reviews API] Owner response saved for review ${reviewId} by user ${userId} (salon ${salon.id})`
-    );
+    logger.info(`[Reviews API] Owner response saved for review ${reviewId} by user ${userId} (salon ${salon.id})`);
 
     return NextResponse.json({
       success: true,
@@ -90,7 +89,7 @@ export async function PATCH(
       message: "Odpowiedz zostala zapisana",
     });
   } catch (error) {
-    console.error("[Reviews API] PATCH Respond Error:", error);
+    logger.error("[Reviews API] PATCH Respond Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie zapisac odpowiedzi" },
       { status: 500 }
@@ -161,9 +160,7 @@ export async function DELETE(
       .where(eq(reviews.id, reviewId))
       .returning();
 
-    console.log(
-      `[Reviews API] Owner response removed for review ${reviewId} by user ${userId} (salon ${salon.id})`
-    );
+    logger.info(`[Reviews API] Owner response removed for review ${reviewId} by user ${userId} (salon ${salon.id})`);
 
     return NextResponse.json({
       success: true,
@@ -171,7 +168,7 @@ export async function DELETE(
       message: "Odpowiedz zostala usunieta",
     });
   } catch (error) {
-    console.error("[Reviews API] DELETE Respond Error:", error);
+    logger.error("[Reviews API] DELETE Respond Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie usunac odpowiedzi" },
       { status: 500 }

@@ -221,7 +221,6 @@ export default function ClientsPage() {
       } catch (error) {
         // Silently ignore aborted requests (component unmounted or deps changed)
         if (error instanceof Error && error.name === "AbortError") return;
-        console.error("Failed to fetch clients:", error);
         const errInfo = getNetworkErrorMessage(error);
         setFetchError(errInfo);
       }
@@ -355,7 +354,6 @@ export default function ClientsPage() {
         toast.error(data.error || "Nie udalo sie dodac klienta");
       }
     } catch (error) {
-      console.error("Failed to save client:", error);
       const errInfo = getNetworkErrorMessage(error);
       toast.error(errInfo.isNetwork
         ? errInfo.message

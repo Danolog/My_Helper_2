@@ -99,16 +99,17 @@ export default function EmployeeSchedulePage({
   const [deletingBlockId, setDeletingBlockId] = useState<string | null>(null);
 
   // Fetch time blocks
-  const fetchTimeBlocks = useCallback(async () => {
+  const fetchTimeBlocks = useCallback(async (signal: AbortSignal | null = null) => {
     setLoadingBlocks(true);
     try {
-      const res = await fetch(`/api/time-blocks?employeeId=${employeeId}`);
+      const res = await fetch(`/api/time-blocks?employeeId=${employeeId}`, { signal });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         setTimeBlocksList(data.data);
       }
     } catch (error) {
-      console.error("Failed to fetch time blocks:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
     } finally {
       setLoadingBlocks(false);
     }
@@ -116,15 +117,18 @@ export default function EmployeeSchedulePage({
 
   // Fetch employee info and existing schedule
   useEffect(() => {
+    const controller = new AbortController();
     async function fetchData() {
       try {
         // Fetch user's salon to get the real salon ID
-        const salonRes = await fetch("/api/salons/mine");
+        const salonRes = await fetch("/api/salons/mine", { signal: controller.signal });
+        if (!salonRes.ok) return;
         const salonData = await salonRes.json();
         const userSalonId = salonData.success && salonData.salon ? salonData.salon.id : null;
 
         if (userSalonId) {
-          const empRes = await fetch(`/api/employees?salonId=${userSalonId}`);
+          const empRes = await fetch(`/api/employees?salonId=${userSalonId}`, { signal: controller.signal });
+          if (!empRes.ok) return;
           const empData = await empRes.json();
           if (empData.success) {
             const emp = empData.data.find((e: Employee) => e.id === employeeId);
@@ -134,7 +138,8 @@ export default function EmployeeSchedulePage({
           }
         }
 
-        const schedRes = await fetch(`/api/work-schedules?employeeId=${employeeId}`);
+        const schedRes = await fetch(`/api/work-schedules?employeeId=${employeeId}`, { signal: controller.signal });
+        if (!schedRes.ok) return;
         const schedData = await schedRes.json();
         if (schedData.success && schedData.data.length > 0) {
           const existingDays = new Set(schedData.data.map((s: { dayOfWeek: number }) => s.dayOfWeek));
@@ -158,18 +163,21 @@ export default function EmployeeSchedulePage({
           setSchedule(merged);
         }
       } catch (error) {
-        console.error("Failed to fetch data:", error);
+        if (error instanceof Error && error.name === "AbortError") return;
         toast.error("Nie udalo sie pobrac danych");
       } finally {
         setLoading(false);
       }
     }
     fetchData();
+    return () => controller.abort();
   }, [employeeId]);
 
   // Fetch time blocks on mount
   useEffect(() => {
-    fetchTimeBlocks();
+    const controller = new AbortController();
+    fetchTimeBlocks(controller.signal);
+    return () => controller.abort();
   }, [fetchTimeBlocks]);
 
   const handleTimeChange = (dayOfWeek: number, field: "startTime" | "endTime", value: string) => {
@@ -222,8 +230,7 @@ export default function EmployeeSchedulePage({
           description: data.error,
         });
       }
-    } catch (error) {
-      console.error("Failed to save schedule:", error);
+    } catch {
       toast.error("Wystapil blad podczas zapisu");
     } finally {
       setSaving(false);
@@ -271,8 +278,7 @@ export default function EmployeeSchedulePage({
           description: data.error,
         });
       }
-    } catch (error) {
-      console.error("Failed to add vacation:", error);
+    } catch {
       toast.error("Wystapil blad podczas dodawania");
     } finally {
       setSavingVacation(false);
@@ -295,8 +301,7 @@ export default function EmployeeSchedulePage({
           description: data.error,
         });
       }
-    } catch (error) {
-      console.error("Failed to delete time block:", error);
+    } catch {
       toast.error("Wystapil blad podczas usuwania");
     } finally {
       setDeletingBlockId(null);

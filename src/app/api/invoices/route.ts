@@ -4,6 +4,7 @@ import { invoices, clients, appointments, employees, services, salons } from "@/
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/invoices
  *
@@ -136,7 +137,7 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("[Invoices API] GET Error:", error);
+    logger.error("[Invoices API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac faktur" },
       { status: 500 }

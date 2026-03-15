@@ -139,8 +139,7 @@ export default function EmployeePopularityReportPage() {
         throw new Error(json.error || "Failed to fetch report");
       }
       setReportData(json.data);
-    } catch (err) {
-      console.error("[Employee Popularity Report] Error:", err);
+    } catch {
       setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
@@ -179,8 +178,7 @@ export default function EmployeePopularityReportPage() {
       document.body.removeChild(a);
 
       toast.success("Raport wyeksportowany do CSV");
-    } catch (err) {
-      console.error("[Employee Popularity Report] Export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu");
     }
   };
@@ -240,8 +238,7 @@ export default function EmployeePopularityReportPage() {
         filename: `ranking-popularnosci-pracownikow-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
       });
       toast.success("Raport wyeksportowany do PDF");
-    } catch (err) {
-      console.error("[Employee Popularity Report] PDF export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu do PDF");
     }
   };

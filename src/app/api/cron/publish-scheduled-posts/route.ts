@@ -4,6 +4,7 @@ import { scheduledPosts } from "@/lib/schema";
 import { eq, and, lte } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/cron/publish-scheduled-posts
  *
@@ -70,10 +71,8 @@ export async function POST(request: Request) {
 
         const updated = rows[0];
 
-        console.log(
-          `[Cron] Published scheduled post ${post.id} on ${post.platform} ` +
-          `(scheduled for ${post.scheduledAt.toISOString()}, published at ${new Date().toISOString()})`
-        );
+        logger.info(`[Cron] Published scheduled post ${post.id} on ${post.platform} ` +
+          `(scheduled for ${post.scheduledAt.toISOString()}, published at ${new Date().toISOString()})`);
 
         publishedCount++;
         results.push({
@@ -82,10 +81,8 @@ export async function POST(request: Request) {
           status: "published",
         });
       } catch (err) {
-        console.error(
-          `[Cron] Failed to publish post ${post.id}:`,
-          err
-        );
+        logger.error(`[Cron] Failed to publish post ${post.id}`,
+          { error: err });
 
         // Mark as failed so it's not retried indefinitely
         await db
@@ -111,7 +108,7 @@ export async function POST(request: Request) {
       results,
     });
   } catch (error) {
-    console.error("[Cron] Error in publish-scheduled-posts:", error);
+    logger.error("[Cron] Error in publish-scheduled-posts", { error: error });
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

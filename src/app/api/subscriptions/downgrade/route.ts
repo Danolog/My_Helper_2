@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/subscriptions/downgrade
  *
@@ -124,9 +125,7 @@ export async function POST(request: Request) {
     }
 
     // eslint-disable-next-line no-console
-    console.log(
-      `[Subscriptions API] Downgrade scheduled: ${activeSub.plan.slug} → ${targetPlanSlug} at ${scheduledChangeAt}`,
-    );
+    logger.info(`[Subscriptions API] Downgrade scheduled: ${activeSub.plan.slug} → ${targetPlanSlug} at ${scheduledChangeAt}`,);
 
     return NextResponse.json({
       success: true,
@@ -136,7 +135,7 @@ export async function POST(request: Request) {
       targetPlan: targetPlanSlug,
     });
   } catch (error) {
-    console.error("[Subscriptions API] Downgrade error:", error);
+    logger.error("[Subscriptions API] Downgrade error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie zaplanowac obnizenia planu" },
       { status: 500 },
@@ -197,16 +196,14 @@ export async function DELETE() {
       .where(eq(salonSubscriptions.id, activeSub.id));
 
     // eslint-disable-next-line no-console
-    console.log(
-      `[Subscriptions API] Scheduled downgrade cancelled for subscription ${activeSub.id}`,
-    );
+    logger.info(`[Subscriptions API] Scheduled downgrade cancelled for subscription ${activeSub.id}`,);
 
     return NextResponse.json({
       success: true,
       message: "Zaplanowane obnizenie planu zostalo anulowane",
     });
   } catch (error) {
-    console.error("[Subscriptions API] Cancel downgrade error:", error);
+    logger.error("[Subscriptions API] Cancel downgrade error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie anulowac obnizenia planu" },
       { status: 500 },

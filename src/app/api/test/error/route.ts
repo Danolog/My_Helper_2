@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { logger } from "@/lib/logger";
 /**
  * Test endpoint to simulate various server error responses.
  * Used for testing error handling in the frontend.
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
   switch (type) {
     case "500":
       // Simulate internal server error - returns user-friendly message, no technical details
-      console.error("[Test Error API] Simulated 500 internal server error");
+      logger.error("[Test Error API] Simulated 500 internal server error");
       return NextResponse.json(
         { success: false, error: "Wystapil blad serwera. Sprobuj ponownie pozniej." },
         { status: 500 }
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
     await request.json();
 
     // Simulate a POST that fails with server error
-    console.error("[Test Error API] Simulated POST failure");
+    logger.error("[Test Error API] Simulated POST failure");
     return NextResponse.json(
       { success: false, error: "Nie udalo sie zapisac danych. Sprobuj ponownie." },
       { status: 500 }

@@ -10,6 +10,7 @@ import {
 import { eq, and, gte, lte, ne, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * Parses a time string like "09:00" into total minutes since midnight.
  */
@@ -385,7 +386,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Employee Occupancy Report API] Database error:", error);
+    logger.error("[Employee Occupancy Report API] Database error", { error: error });
     return NextResponse.json(
       {
         success: false,

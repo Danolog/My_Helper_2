@@ -203,9 +203,10 @@ export default function ServiceDetailPage() {
   // AI description generation state
   const [generatingDescription, setGeneratingDescription] = useState(false);
 
-  const fetchService = useCallback(async () => {
+  const fetchService = useCallback(async (signal: AbortSignal | null = null) => {
     try {
-      const res = await fetch(`/api/services/${serviceId}`);
+      const res = await fetch(`/api/services/${serviceId}`, { signal });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         setService(data.data);
@@ -214,16 +215,17 @@ export default function ServiceDetailPage() {
         router.replace("/dashboard/services");
       }
     } catch (error) {
-      console.error("Failed to fetch service:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
       toast.error("Blad podczas ladowania uslugi");
     } finally {
       setLoading(false);
     }
   }, [serviceId, router]);
 
-  const fetchEmployeeAssignments = useCallback(async () => {
+  const fetchEmployeeAssignments = useCallback(async (signal: AbortSignal | null = null) => {
     try {
-      const res = await fetch(`/api/services/${serviceId}/employee-assignments`);
+      const res = await fetch(`/api/services/${serviceId}/employee-assignments`, { signal });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         const ids = new Set<string>(
@@ -232,80 +234,95 @@ export default function ServiceDetailPage() {
         setAssignedEmployeeIds(ids);
       }
     } catch (error) {
-      console.error("Failed to fetch employee assignments:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
     }
   }, [serviceId]);
 
-  const fetchEmployeePrices = useCallback(async () => {
+  const fetchEmployeePrices = useCallback(async (signal: AbortSignal | null = null) => {
     try {
-      const res = await fetch(`/api/services/${serviceId}/employee-prices`);
+      const res = await fetch(`/api/services/${serviceId}/employee-prices`, { signal });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         setEmployeePrices(data.data);
       }
     } catch (error) {
-      console.error("Failed to fetch employee prices:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
     }
   }, [serviceId]);
 
-  const fetchEmployees = useCallback(async () => {
+  const fetchEmployees = useCallback(async (signal: AbortSignal | null = null) => {
     if (!salonId) return;
     try {
-      const res = await fetch(`/api/employees?salonId=${salonId}&activeOnly=true`);
+      const res = await fetch(`/api/employees?salonId=${salonId}&activeOnly=true`, { signal });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         setAllEmployees(data.data);
       }
     } catch (error) {
-      console.error("Failed to fetch employees:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
     }
   }, [salonId]);
 
-  const fetchServiceProductLinks = useCallback(async () => {
+  const fetchServiceProductLinks = useCallback(async (signal: AbortSignal | null = null) => {
     try {
-      const res = await fetch(`/api/services/${serviceId}/products`);
+      const res = await fetch(`/api/services/${serviceId}/products`, { signal });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         setServiceProductLinks(data.data);
       }
     } catch (error) {
-      console.error("Failed to fetch service product links:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
     }
   }, [serviceId]);
 
-  const fetchAllProducts = useCallback(async () => {
+  const fetchAllProducts = useCallback(async (signal: AbortSignal | null = null) => {
     if (!salonId) return;
     try {
-      const res = await fetch(`/api/products?salonId=${salonId}`);
+      const res = await fetch(`/api/products?salonId=${salonId}`, { signal });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         setAllProducts(data.data);
       }
     } catch (error) {
-      console.error("Failed to fetch products:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
     }
   }, [salonId]);
 
-  const fetchGalleryPhotos = useCallback(async () => {
+  const fetchGalleryPhotos = useCallback(async (signal: AbortSignal | null = null) => {
     if (!salonId) return;
     try {
-      const res = await fetch(`/api/gallery?salonId=${salonId}&serviceId=${serviceId}`);
+      const res = await fetch(`/api/gallery?salonId=${salonId}&serviceId=${serviceId}`, { signal });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         setGalleryPhotos(data.data);
       }
     } catch (error) {
-      console.error("Failed to fetch gallery photos:", error);
+      if (error instanceof Error && error.name === "AbortError") return;
     }
   }, [salonId, serviceId]);
 
   useEffect(() => {
+    const controller = new AbortController();
     async function loadData() {
       setLoading(true);
-      await Promise.all([fetchService(), fetchEmployeeAssignments(), fetchEmployeePrices(), fetchEmployees(), fetchGalleryPhotos(), fetchServiceProductLinks(), fetchAllProducts()]);
+      await Promise.all([
+        fetchService(controller.signal),
+        fetchEmployeeAssignments(controller.signal),
+        fetchEmployeePrices(controller.signal),
+        fetchEmployees(controller.signal),
+        fetchGalleryPhotos(controller.signal),
+        fetchServiceProductLinks(controller.signal),
+        fetchAllProducts(controller.signal),
+      ]);
       setLoading(false);
     }
     loadData();
+    return () => controller.abort();
   }, [fetchService, fetchEmployeeAssignments, fetchEmployeePrices, fetchEmployees, fetchGalleryPhotos, fetchServiceProductLinks, fetchAllProducts]);
 
   const handleToggleEmployeeAssignment = async (employeeId: string, isCurrentlyAssigned: boolean) => {
@@ -349,8 +366,7 @@ export default function ServiceDetailPage() {
           toast.error(data.error || "Nie udalo sie przypisac pracownika");
         }
       }
-    } catch (error) {
-      console.error("Failed to toggle employee assignment:", error);
+    } catch {
       toast.error("Blad podczas zmiany przypisania pracownika");
     } finally {
       setTogglingAssignment(null);
@@ -430,8 +446,7 @@ export default function ServiceDetailPage() {
       } else {
         toast.error(data.error || "Nie udalo sie zapisac wariantu");
       }
-    } catch (error) {
-      console.error("Failed to save variant:", error);
+    } catch {
       toast.error("Blad podczas zapisywania wariantu");
     } finally {
       setSavingVariant(false);
@@ -457,8 +472,7 @@ export default function ServiceDetailPage() {
       } else {
         toast.error(data.error || "Nie udalo sie usunac wariantu");
       }
-    } catch (error) {
-      console.error("Failed to delete variant:", error);
+    } catch {
       toast.error("Blad podczas usuwania wariantu");
     }
   };
@@ -523,8 +537,7 @@ export default function ServiceDetailPage() {
       } else {
         toast.error(data.error || "Nie udalo sie zapisac uslugi");
       }
-    } catch (error) {
-      console.error("Failed to save service:", error);
+    } catch {
       toast.error("Blad podczas zapisywania uslugi");
     } finally {
       setSavingService(false);
@@ -546,8 +559,7 @@ export default function ServiceDetailPage() {
       } else {
         toast.error(data.error || "Nie udalo sie usunac uslugi");
       }
-    } catch (error) {
-      console.error("Failed to delete service:", error);
+    } catch {
       toast.error("Blad podczas usuwania uslugi");
     } finally {
       setDeletingService(false);
@@ -585,8 +597,7 @@ export default function ServiceDetailPage() {
 
       setEditServiceDescription(data.description);
       toast.success("Opis wygenerowany przez AI");
-    } catch (error) {
-      console.error("Failed to generate AI description:", error);
+    } catch {
       toast.error("Blad podczas generowania opisu AI");
     } finally {
       setGeneratingDescription(false);
@@ -646,8 +657,7 @@ export default function ServiceDetailPage() {
       } else {
         toast.error(data.error || "Nie udalo sie zapisac ceny");
       }
-    } catch (error) {
-      console.error("Failed to save employee price:", error);
+    } catch {
       toast.error("Blad podczas zapisywania ceny pracownika");
     } finally {
       setSavingEmpPrice(false);
@@ -677,8 +687,7 @@ export default function ServiceDetailPage() {
       } else {
         toast.error(data.error || "Nie udalo sie usunac ceny");
       }
-    } catch (error) {
-      console.error("Failed to delete employee price:", error);
+    } catch {
       toast.error("Blad podczas usuwania ceny pracownika");
     }
   };
@@ -726,8 +735,7 @@ export default function ServiceDetailPage() {
       } else {
         toast.error(data.error || "Nie udalo sie powiazac produktu");
       }
-    } catch (error) {
-      console.error("Failed to save product link:", error);
+    } catch {
       toast.error("Blad podczas wiazania produktu z usluga");
     } finally {
       setSavingProductLink(false);
@@ -755,8 +763,7 @@ export default function ServiceDetailPage() {
       } else {
         toast.error(data.error || "Nie udalo sie usunac powiazania");
       }
-    } catch (error) {
-      console.error("Failed to delete product link:", error);
+    } catch {
       toast.error("Blad podczas usuwania powiazania");
     }
   };

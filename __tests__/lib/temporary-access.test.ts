@@ -136,24 +136,27 @@ describe("cleanupExpiredTemporaryAccess", () => {
 
   it("should return count of removed entries", async () => {
     mockDbReturning.mockResolvedValue([{ id: "1" }, { id: "2" }, { id: "3" }]);
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
     const count = await cleanupExpiredTemporaryAccess();
     expect(count).toBe(3);
   });
 
-  it("should log warning when entries are cleaned up", async () => {
+  it("should log info when entries are cleaned up", async () => {
     mockDbReturning.mockResolvedValue([{ id: "1" }]);
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The structured logger uses console.log for info-level messages in dev
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await cleanupExpiredTemporaryAccess();
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Removed 1 expired entries")
+    expect(logSpy).toHaveBeenCalledWith(
+      "[INFO]",
+      "Cleaned up expired temporary access entries",
+      expect.objectContaining({ count: 1 })
     );
   });
 
-  it("should not log warning when no entries are cleaned up", async () => {
+  it("should not log when no entries are cleaned up", async () => {
     mockDbReturning.mockResolvedValue([]);
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await cleanupExpiredTemporaryAccess();
-    expect(warnSpy).not.toHaveBeenCalled();
+    expect(logSpy).not.toHaveBeenCalled();
   });
 });

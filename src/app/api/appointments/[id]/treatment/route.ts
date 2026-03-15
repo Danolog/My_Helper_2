@@ -4,6 +4,7 @@ import { treatmentHistory, appointments } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/treatment - Get treatment record for an appointment
 export async function GET(
   _request: Request,
@@ -36,14 +37,14 @@ export async function GET(
       .where(eq(treatmentHistory.appointmentId, id))
       .limit(1);
 
-    console.log(`[Treatment API] GET treatment for appointment ${id}: ${treatment ? "found" : "not found"}`);
+    logger.info(`[Treatment API] GET treatment for appointment ${id}: ${treatment ? "found" : "not found"}`);
 
     return NextResponse.json({
       success: true,
       data: treatment || null,
     });
   } catch (error) {
-    console.error("[Treatment API] Database error:", error);
+    logger.error("[Treatment API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch treatment record" },
       { status: 500 }
@@ -101,7 +102,7 @@ export async function POST(
         .where(eq(treatmentHistory.id, existing.id))
         .returning();
 
-      console.log(`[Treatment API] Updated treatment record for appointment ${id}`);
+      logger.info(`[Treatment API] Updated treatment record for appointment ${id}`);
     } else {
       // Create new treatment record
       [treatment] = await db
@@ -115,7 +116,7 @@ export async function POST(
         })
         .returning();
 
-      console.log(`[Treatment API] Created treatment record for appointment ${id}`);
+      logger.info(`[Treatment API] Created treatment record for appointment ${id}`);
     }
 
     // If status is still "scheduled" or "confirmed", mark as "completed" automatically
@@ -124,7 +125,7 @@ export async function POST(
         .update(appointments)
         .set({ status: "completed" })
         .where(eq(appointments.id, id));
-      console.log(`[Treatment API] Auto-marked appointment ${id} as completed`);
+      logger.info(`[Treatment API] Auto-marked appointment ${id} as completed`);
     }
 
     return NextResponse.json({
@@ -133,7 +134,7 @@ export async function POST(
       message: existing ? "Treatment record updated" : "Treatment record created",
     }, { status: existing ? 200 : 201 });
   } catch (error) {
-    console.error("[Treatment API] Database error:", error);
+    logger.error("[Treatment API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to save treatment record" },
       { status: 500 }
@@ -164,7 +165,7 @@ export async function DELETE(
       );
     }
 
-    console.log(`[Treatment API] Deleted treatment record for appointment ${id}`);
+    logger.info(`[Treatment API] Deleted treatment record for appointment ${id}`);
 
     return NextResponse.json({
       success: true,
@@ -172,7 +173,7 @@ export async function DELETE(
       message: "Treatment record deleted",
     });
   } catch (error) {
-    console.error("[Treatment API] Database error:", error);
+    logger.error("[Treatment API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete treatment record" },
       { status: 500 }

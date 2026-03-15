@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { processAutomaticRefund } from "@/lib/refund";
 import { notifyWaitingList } from "@/lib/waiting-list";
 
+import { logger } from "@/lib/logger";
 // GET /api/client/appointments/[id]/cancel - Get cancellation policy info for client
 export async function GET(
   _request: Request,
@@ -114,7 +115,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Client Cancel API] Error:", error);
+    logger.error("[Client Cancel API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to get cancellation info" },
       { status: 500 }
@@ -220,7 +221,7 @@ export async function POST(
       .where(eq(appointments.id, id))
       .returning();
 
-    console.log(`[Client Cancel API] Client ${userId} cancelled appointment ${id}`, {
+    logger.info(`[Client Cancel API] Client ${userId} cancelled appointment ${id}`, {
       hoursUntilAppointment: hoursUntilAppointment.toFixed(1),
       isMoreThan24h,
       hasDeposit,
@@ -236,7 +237,7 @@ export async function POST(
         id,
         "Anulacja wizyty przez klienta - wiecej niz 24h przed terminem"
       );
-      console.log(`[Client Cancel API] Refund result for appointment ${id}:`, refundResult);
+      logger.info(`[Client Cancel API] Refund result for appointment ${id}`, { refundResult: refundResult as unknown as Record<string, unknown> });
     }
 
     // Mark deposit as forfeited if late cancellation (<24h)
@@ -249,9 +250,9 @@ export async function POST(
             refundReason: "Anulacja wizyty przez klienta mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
           })
           .where(eq(depositPayments.appointmentId, id));
-        console.log(`[Client Cancel API] Deposit marked as forfeited for appointment ${id}`);
+        logger.info(`[Client Cancel API] Deposit marked as forfeited for appointment ${id}`);
       } catch (forfeitError) {
-        console.error("[Client Cancel API] Failed to mark deposit as forfeited:", forfeitError);
+        logger.error("[Client Cancel API] Failed to mark deposit as forfeited", { error: forfeitError });
       }
     }
 
@@ -274,15 +275,9 @@ export async function POST(
         salonName,
       });
 
-      console.log(
-        `[Client Cancel API] Waiting list notification result:`,
-        waitingListResult
-      );
+      logger.info(`[Client Cancel API] Waiting list notification result`, { waitingListResult });
     } catch (waitingListError) {
-      console.error(
-        "[Client Cancel API] Failed to notify waiting list:",
-        waitingListError
-      );
+      logger.error("[Client Cancel API] Failed to notify waiting list", { error: waitingListError });
       // Don't fail the cancellation if waiting list notification fails
     }
 
@@ -307,7 +302,7 @@ export async function POST(
       },
     });
   } catch (error) {
-    console.error("[Client Cancel API] Error:", error);
+    logger.error("[Client Cancel API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to cancel appointment" },
       { status: 500 }

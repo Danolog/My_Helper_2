@@ -5,6 +5,7 @@ import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/reports/revenue - Revenue report with breakdowns by service/employee and trends
 export async function GET(request: Request) {
   try {
@@ -358,7 +359,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Revenue Report API] Database error:", error);
+    logger.error("[Revenue Report API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to generate revenue report" },
       { status: 500 }

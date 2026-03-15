@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { salons, employees, services, clients, appointments } from "@/lib/schema";
 
+import { logger } from "@/lib/logger";
 // POST /api/seed - Seed test data for development
 export async function POST() {
   if (process.env.NODE_ENV === "production") {
@@ -9,7 +10,7 @@ export async function POST() {
   }
 
   try {
-    console.log("[Seed API] Starting seed process...");
+    logger.info("[Seed API] Starting seed process...");
 
     // Create test salon
     const salonResult = await db
@@ -33,7 +34,7 @@ export async function POST() {
       throw new Error("Failed to create salon");
     }
 
-    console.log(`[Seed API] Created salon: ${salon.id}`);
+    logger.info(`[Seed API] Created salon: ${salon.id}`);
 
     // Create test employees
     const employeeData = [
@@ -59,7 +60,7 @@ export async function POST() {
         createdEmployees.push(result[0]);
       }
     }
-    console.log(`[Seed API] Created ${createdEmployees.length} employees`);
+    logger.info(`[Seed API] Created ${createdEmployees.length} employees`);
 
     // Create test services
     const serviceData = [
@@ -86,7 +87,7 @@ export async function POST() {
         createdServices.push(result[0]);
       }
     }
-    console.log(`[Seed API] Created ${createdServices.length} services`);
+    logger.info(`[Seed API] Created ${createdServices.length} services`);
 
     // Create test clients
     const clientData = [
@@ -110,7 +111,7 @@ export async function POST() {
         createdClients.push(result[0]);
       }
     }
-    console.log(`[Seed API] Created ${createdClients.length} clients`);
+    logger.info(`[Seed API] Created ${createdClients.length} clients`);
 
     // Create test appointments for today
     const today = new Date();
@@ -131,7 +132,7 @@ export async function POST() {
       const client = createdClients[apt.clientIndex];
 
       if (!employee || !service || !client) {
-        console.log("[Seed API] Skipping appointment due to missing reference data");
+        logger.info("[Seed API] Skipping appointment due to missing reference data");
         continue;
       }
 
@@ -150,7 +151,7 @@ export async function POST() {
       });
       createdAppointments++;
     }
-    console.log(`[Seed API] Created ${createdAppointments} appointments`);
+    logger.info(`[Seed API] Created ${createdAppointments} appointments`);
 
     return NextResponse.json({
       success: true,
@@ -164,7 +165,7 @@ export async function POST() {
       },
     });
   } catch (error) {
-    console.error("[Seed API] Error:", error);
+    logger.error("[Seed API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to seed data", details: String(error) },
       { status: 500 }

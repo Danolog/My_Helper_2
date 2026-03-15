@@ -144,6 +144,8 @@ describe("checkEnv", () => {
 
     checkEnv();
 
+    // Warnings are now emitted through the structured logger, which calls
+    // console.warn("[WARN]", message) in development mode
     expect(console.warn).toHaveBeenCalled();
   });
 
@@ -155,14 +157,9 @@ describe("checkEnv", () => {
 
     checkEnv();
 
-    // In production, console.warn is not called for env warnings
+    // In production, checkEnv() does not emit warnings at all
     // (Only development mode logs these warnings)
-    const warnCalls = (console.warn as ReturnType<typeof vi.fn>).mock.calls;
-    const envWarningCalls = warnCalls.filter(
-      (call: unknown[]) =>
-        typeof call[0] === "string" && call[0].includes("Environment warnings")
-    );
-    expect(envWarningCalls.length).toBe(0);
+    expect(console.warn).not.toHaveBeenCalled();
   });
 
   it("should not log warnings when all optional vars are set in development", () => {
@@ -177,12 +174,7 @@ describe("checkEnv", () => {
 
     checkEnv();
 
-    const warnCalls = (console.warn as ReturnType<typeof vi.fn>).mock.calls;
-    const envWarningCalls = warnCalls.filter(
-      (call: unknown[]) =>
-        typeof call[0] === "string" && call[0].includes("Environment warnings")
-    );
-    expect(envWarningCalls.length).toBe(0);
+    expect(console.warn).not.toHaveBeenCalled();
   });
 
   it("should warn about Google OAuth when only GOOGLE_CLIENT_ID is set", () => {
@@ -198,10 +190,12 @@ describe("checkEnv", () => {
 
     checkEnv();
 
+    // Warnings are now emitted through the structured logger, which calls
+    // console.warn("[WARN]", message) in development mode
     const warnCalls = (console.warn as ReturnType<typeof vi.fn>).mock.calls;
     const googleWarningCalls = warnCalls.filter(
       (call: unknown[]) =>
-        typeof call[0] === "string" && call[0].includes("Google OAuth")
+        typeof call[1] === "string" && call[1].includes("Google OAuth")
     );
     expect(googleWarningCalls.length).toBeGreaterThan(0);
   });

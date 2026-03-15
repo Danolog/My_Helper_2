@@ -62,8 +62,8 @@ export function SwRegister() {
             // Silently ignore update-check failures (e.g. offline).
           });
         }, SW_UPDATE_INTERVAL_MS);
-      } catch (_error) {
-        console.error("[SwRegister] Service worker registration failed");
+      } catch {
+        // Service worker registration failed — app will work without SW
       }
     };
 

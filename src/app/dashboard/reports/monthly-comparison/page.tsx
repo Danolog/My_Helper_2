@@ -229,8 +229,7 @@ export default function MonthlyComparisonPage() {
         throw new Error("Nie udalo sie pobrac porownania. Sprobuj ponownie pozniej.");
       }
       setComparisonData(json.data as ComparisonData);
-    } catch (err) {
-      console.error("[Monthly Comparison] Error:", err);
+    } catch {
       const message = "Nie udalo sie zaladowac porownania. Sprobuj ponownie pozniej.";
       setError(message);
       toast.error(message);
@@ -295,8 +294,7 @@ export default function MonthlyComparisonPage() {
         filename: `porownanie-miesieczne-${month1}-vs-${month2}.pdf`,
       });
       toast.success("Raport wyeksportowany do PDF");
-    } catch (err) {
-      console.error("[Monthly Comparison] PDF export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu do PDF");
     }
   };

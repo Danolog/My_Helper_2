@@ -5,6 +5,7 @@ import { scheduledPosts } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 
+import { logger } from "@/lib/logger";
 // GET - Get a single scheduled post by ID
 export async function GET(
   _req: Request,
@@ -34,7 +35,7 @@ export async function GET(
 
     return Response.json({ post });
   } catch (error) {
-    console.error("[Scheduled Posts] Error fetching post:", error);
+    logger.error("[Scheduled Posts] Error fetching post", { error: error });
     return Response.json({ error: "Failed to fetch post" }, { status: 500 });
   }
 }
@@ -92,7 +93,7 @@ export async function DELETE(
 
     return Response.json({ success: true, post: updated });
   } catch (error) {
-    console.error("[Scheduled Posts] Error cancelling post:", error);
+    logger.error("[Scheduled Posts] Error cancelling post", { error: error });
     return Response.json({ error: "Failed to cancel post" }, { status: 500 });
   }
 }

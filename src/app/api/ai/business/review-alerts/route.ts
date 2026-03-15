@@ -8,6 +8,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
 
+import { logger } from "@/lib/logger";
 /**
  * Severity classification for negative reviews.
  * - critical: 1-2 star reviews that require immediate attention
@@ -96,7 +97,7 @@ async function generateResponseSuggestion(
 
     return { text, type: "ai" };
   } catch (error) {
-    console.error("[Review Alerts] AI generation failed, using template:", error);
+    logger.error("[Review Alerts] AI generation failed, using template", { error: error });
     return {
       text: getTemplateResponse(review.rating, review.clientName),
       type: "template",
@@ -253,7 +254,7 @@ export async function GET(_request: Request) {
       generatedAt: now.toISOString(),
     });
   } catch (error) {
-    console.error("[AI Review Alerts] Error:", error);
+    logger.error("[AI Review Alerts] Error", { error: error });
     return NextResponse.json(
       { error: "Failed to generate review alerts" },
       { status: 500 }

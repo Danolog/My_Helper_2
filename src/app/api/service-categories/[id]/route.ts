@@ -4,6 +4,7 @@ import { serviceCategories, services } from "@/lib/schema";
 import { eq, and, count } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/service-categories/[id] - Get a single category
 export async function GET(
   _request: Request,
@@ -41,7 +42,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[ServiceCategories API] Database error:", error);
+    logger.error("[ServiceCategories API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch category" },
       { status: 500 }
@@ -111,14 +112,14 @@ export async function PUT(
       .where(eq(serviceCategories.id, id))
       .returning();
 
-    console.log(`[ServiceCategories API] Updated category: ${updated?.name}`);
+    logger.info(`[ServiceCategories API] Updated category: ${updated?.name}`);
 
     return NextResponse.json({
       success: true,
       data: updated,
     });
   } catch (error) {
-    console.error("[ServiceCategories API] Database error:", error);
+    logger.error("[ServiceCategories API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update category" },
       { status: 500 }
@@ -172,14 +173,14 @@ export async function DELETE(
       .delete(serviceCategories)
       .where(eq(serviceCategories.id, id));
 
-    console.log(`[ServiceCategories API] Deleted category: ${existing.name}`);
+    logger.info(`[ServiceCategories API] Deleted category: ${existing.name}`);
 
     return NextResponse.json({
       success: true,
       message: `Category "${existing.name}" deleted successfully`,
     });
   } catch (error) {
-    console.error("[ServiceCategories API] Database error:", error);
+    logger.error("[ServiceCategories API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to delete category" },
       { status: 500 }

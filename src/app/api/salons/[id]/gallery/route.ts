@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, desc, and, isNotNull } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 // GET /api/salons/[id]/gallery - Public gallery for clients (no auth required)
 export async function GET(
   request: Request,
@@ -90,7 +91,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Salon Gallery API] Database error:", error);
+    logger.error("[Salon Gallery API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch gallery photos" },
       { status: 500 }

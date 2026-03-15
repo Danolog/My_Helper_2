@@ -79,8 +79,7 @@ export default function ServiceDetailPage() {
       } else {
         setError(json.error || "Nie udalo sie zaladowac uslugi");
       }
-    } catch (err) {
-      console.error("Failed to fetch service:", err);
+    } catch {
       setError("Blad polaczenia z serwerem");
     } finally {
       setLoading(false);

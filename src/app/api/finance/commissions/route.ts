@@ -10,6 +10,7 @@ import {
 import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/finance/commissions - List commissions with employee totals
 export async function GET(request: Request) {
   try {
@@ -118,7 +119,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Finance Commissions API] Database error:", error);
+    logger.error("[Finance Commissions API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch commissions" },
       { status: 500 }

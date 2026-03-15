@@ -11,6 +11,7 @@ import {
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/reports/service-profitability - Service profit margins report
 export async function GET(request: Request) {
   try {
@@ -283,7 +284,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Service Profitability Report API] Database error:", error);
+    logger.error("[Service Profitability Report API] Database error", { error: error });
     return NextResponse.json(
       {
         success: false,

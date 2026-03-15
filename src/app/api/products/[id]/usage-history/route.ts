@@ -5,6 +5,7 @@ import { eq, desc } from "drizzle-orm";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/products/[id]/usage-history - Get usage history for a product
 export async function GET(
   _request: Request,
@@ -111,7 +112,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Product Usage History API] Database error:", error);
+    logger.error("[Product Usage History API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch product usage history" },
       { status: 500 }

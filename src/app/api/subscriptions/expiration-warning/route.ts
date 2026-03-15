@@ -9,6 +9,7 @@ import {
   notifications,
 } from "@/lib/schema";
 
+import { logger } from "@/lib/logger";
 const DEFAULT_WARNING_DAYS = 7;
 
 /**
@@ -114,7 +115,7 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error("[Subscription Expiration Warning] Error:", error);
+    logger.error("[Subscription Expiration Warning] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie sprawdzic statusu wygasniecia" },
       { status: 500 }
@@ -212,9 +213,7 @@ export async function POST(request: Request) {
       effectivePeriodEnd = simulatedEnd;
 
       // eslint-disable-next-line no-console
-      console.log(
-        `[Subscription Warning] SIMULATION: Period end moved to ${simulatedEnd.toISOString()} (${3} days from now)`
-      );
+      logger.info(`[Subscription Warning] SIMULATION: Period end moved to ${simulatedEnd.toISOString()} (${3} days from now)`);
     }
 
     if (!effectivePeriodEnd) {
@@ -288,11 +287,9 @@ export async function POST(request: Request) {
     const pushNotification = pushResults[0];
 
     // eslint-disable-next-line no-console
-    console.log(
-      `[Subscription Warning] Warning sent for subscription ${sub.id}. ` +
+    logger.info(`[Subscription Warning] Warning sent for subscription ${sub.id}. ` +
         `Plan: ${plan.name}, Days remaining: ${daysRemaining}, ` +
-        `Renewal amount: ${plan.priceMonthly} PLN`
-    );
+        `Renewal amount: ${plan.priceMonthly} PLN`);
 
     const warningsList: Array<{
       id: string;
@@ -334,7 +331,7 @@ export async function POST(request: Request) {
       message: `Wyslano ostrzezenie o wygasnieciu subskrypcji (${daysRemaining} dni do odnowienia)`,
     });
   } catch (error) {
-    console.error("[Subscription Expiration Warning] Error:", error);
+    logger.error("[Subscription Expiration Warning] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie wyslac ostrzezenia" },
       { status: 500 }

@@ -60,8 +60,7 @@ export default function SalonSettingsPage() {
           setAddress(data.salon.address || "");
           setIndustryType(data.salon.industryType || "");
         }
-      } catch (err) {
-        console.error("Failed to fetch salon:", err);
+      } catch {
         toast.error("Nie mozna zaladowac danych salonu");
       } finally {
         setLoading(false);
@@ -100,8 +99,7 @@ export default function SalonSettingsPage() {
       } else {
         toast.error(data.error || "Blad zapisywania danych");
       }
-    } catch (err) {
-      console.error("Failed to save salon:", err);
+    } catch {
       toast.error("Blad zapisywania danych");
     } finally {
       setSaving(false);

@@ -15,6 +15,7 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/appointments/[id]/fiscal-receipt
  *
@@ -58,7 +59,7 @@ export async function GET(
       hasReceipt: true,
     });
   } catch (error) {
-    console.error("[Fiscal Receipt API] GET Error:", error);
+    logger.error("[Fiscal Receipt API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch fiscal receipt" },
       { status: 500 }
@@ -346,15 +347,11 @@ export async function POST(
       .returning();
 
     // 10. Log print command (in production this would be sent to the fiscal printer)
-    console.log(
-      `[Fiscal Receipt] Printing receipt ${receiptNumber} for appointment ${id}:`,
-      JSON.stringify(receiptData, null, 2)
-    );
-    console.log(
-      `[Fiscal Receipt] Sent to printer: ${printerModel} (${
+    logger.info(`[Fiscal Receipt] Printing receipt ${receiptNumber} for appointment ${id}`,
+      { receiptData });
+    logger.info(`[Fiscal Receipt] Sent to printer: ${printerModel} (${
         (fiscalSettings.connectionType as string) || "not configured"
-      })`
-    );
+      })`);
 
     return NextResponse.json({
       success: true,
@@ -363,7 +360,7 @@ export async function POST(
       message: `Paragon fiskalny ${receiptNumber} zostal wyslany do drukarki`,
     });
   } catch (error) {
-    console.error("[Fiscal Receipt API] POST Error:", error);
+    logger.error("[Fiscal Receipt API] POST Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie wydrukowac paragonu fiskalnego" },
       { status: 500 }

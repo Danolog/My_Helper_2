@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/invoices/[id]
  *
@@ -80,7 +81,7 @@ export async function GET(
       data: rows[0],
     });
   } catch (error) {
-    console.error("[Invoice API] GET by ID Error:", error);
+    logger.error("[Invoice API] GET by ID Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac faktury" },
       { status: 500 }

@@ -4,6 +4,7 @@ import { albums, photoAlbums } from "@/lib/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/albums - List albums for a salon
 export async function GET(request: Request) {
   try {
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
       .groupBy(albums.id)
       .orderBy(desc(albums.createdAt));
 
-    console.log(`[Albums API] GET: ${albumsList.length} albums found for salon ${salonId}`);
+    logger.info(`[Albums API] GET: ${albumsList.length} albums found for salon ${salonId}`);
 
     return NextResponse.json({
       success: true,
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
       count: albumsList.length,
     });
   } catch (error) {
-    console.error("[Albums API] Database error:", error);
+    logger.error("[Albums API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch albums" },
       { status: 500 }
@@ -82,7 +83,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[Albums API] Created album: ${newAlbum?.id} - "${newAlbum?.name}"`);
+    logger.info(`[Albums API] Created album: ${newAlbum?.id} - "${newAlbum?.name}"`);
 
     return NextResponse.json(
       {
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("[Albums API] Database error:", error);
+    logger.error("[Albums API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create album" },
       { status: 500 }

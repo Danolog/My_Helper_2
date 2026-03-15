@@ -66,8 +66,8 @@ export async function GET(req: Request) {
         dbConnected = true;
 
         try {
-          // Touch a known table to verify migrations
-          await db.select().from(schema.user).limit(1);
+          // Touch a known table to verify migrations (only need id for schema check)
+          await db.select({ id: schema.user.id }).from(schema.user).limit(1);
           schemaApplied = true;
         } catch {
           schemaApplied = false;

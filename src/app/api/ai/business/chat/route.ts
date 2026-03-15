@@ -16,6 +16,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, gte, sql, count, desc } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 // Zod schema for message validation
 const messagePartSchema = z.object({
   type: z.string(),
@@ -443,7 +444,7 @@ ${lowStockStr}
       salonName: salonInfo.name,
     };
   } catch (error) {
-    console.error("[AI Business] Error gathering salon data:", error);
+    logger.error("[AI Business] Error gathering salon data", { error: error });
     return {
       data: "Nie udalo sie pobrac danych salonu. Prosze sprobowac ponownie.",
       industryType: null,

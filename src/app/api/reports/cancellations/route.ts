@@ -4,6 +4,7 @@ import { appointments, services, employees } from "@/lib/schema";
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 const DAY_LABELS_PL = [
   "Niedziela",
   "Poniedzialek",
@@ -562,7 +563,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Cancellation Report API] Database error:", error);
+    logger.error("[Cancellation Report API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to generate cancellation report" },
       { status: 500 }

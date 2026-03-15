@@ -251,8 +251,7 @@ export default function SalonProfilePage() {
       if (json.success) {
         setSalon(json.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch salon:", error);
+    } catch {
     } finally {
       setLoading(false);
     }
@@ -268,8 +267,7 @@ export default function SalonProfilePage() {
       if (json.success) {
         setIsFavorite(json.isFavorite);
       }
-    } catch (error) {
-      console.error("Failed to check favorite status:", error);
+    } catch {
     }
   }, [session, salonId]);
 
@@ -320,8 +318,7 @@ export default function SalonProfilePage() {
           setIsFavorite(true);
         }
       }
-    } catch (error) {
-      console.error("Failed to toggle favorite:", error);
+    } catch {
     } finally {
       setFavoriteLoading(false);
     }

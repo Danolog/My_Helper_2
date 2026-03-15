@@ -5,6 +5,7 @@ import { eq, and, isNull, isNotNull } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/newsletters/[id]/recipients
  *
@@ -111,7 +112,7 @@ export async function GET(
       totalClientsWithEmail: clientsWithEmail.length,
     });
   } catch (error) {
-    console.error("[Newsletter Recipients] Error:", error);
+    logger.error("[Newsletter Recipients] Error", { error: error });
     return Response.json(
       { error: "Blad podczas pobierania odbiorcow" },
       { status: 500 }

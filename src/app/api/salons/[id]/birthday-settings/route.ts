@@ -4,6 +4,7 @@ import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 export interface BirthdaySettings {
   enabled: boolean;
   giftType: "discount" | "product"; // discount percentage or free product
@@ -64,7 +65,7 @@ export async function GET(
       data: birthdaySettings,
     });
   } catch (error) {
-    console.error("[Birthday Settings API] GET Error:", error);
+    logger.error("[Birthday Settings API] GET Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch birthday settings" },
       { status: 500 }
@@ -156,10 +157,8 @@ export async function PUT(
       .where(eq(salons.id, id))
       .returning();
 
-    console.log(
-      `[Birthday Settings API] Updated birthday settings for salon ${id}:`,
-      newBirthdaySettings
-    );
+    logger.info(`[Birthday Settings API] Updated birthday settings for salon ${id}`,
+      { settings: newBirthdaySettings as unknown as Record<string, unknown> });
 
     return NextResponse.json({
       success: true,
@@ -167,7 +166,7 @@ export async function PUT(
       message: "Ustawienia urodzinowe zostaly zapisane",
     });
   } catch (error) {
-    console.error("[Birthday Settings API] PUT Error:", error);
+    logger.error("[Birthday Settings API] PUT Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update birthday settings" },
       { status: 500 }

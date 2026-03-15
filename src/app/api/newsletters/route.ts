@@ -4,6 +4,7 @@ import { newsletters } from "@/lib/schema";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 const saveSchema = z.object({
   subject: z.string().min(1, "Subject is required").max(500),
   content: z.string().min(1, "Content is required").max(10000),
@@ -58,7 +59,7 @@ export async function POST(req: Request) {
       savedId: saved.id,
     });
   } catch (error) {
-    console.error("[Newsletter Save] Error:", error);
+    logger.error("[Newsletter Save] Error", { error: error });
     return Response.json(
       { error: "Blad podczas zapisywania newslettera" },
       { status: 500 }

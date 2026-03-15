@@ -193,9 +193,8 @@ export default function PaymentsPage() {
       } else {
         setError(data.error || "Blad ladowania platnosci");
       }
-    } catch (err) {
+    } catch {
       setError("Blad polaczenia z serwerem");
-      console.error("Error fetching payments:", err);
     } finally {
       setLoading(false);
     }

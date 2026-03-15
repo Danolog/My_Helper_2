@@ -4,6 +4,7 @@ import { workSchedules, employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/work-schedules?employeeId=xxx
 export async function GET(request: Request) {
   try {
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
       );
     }
 
-    console.log("[WorkSchedules API] GET for employee:", employeeId);
+    logger.info("[WorkSchedules API] GET for employee", { employeeId });
 
     const schedules = await db
       .select()
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
       .where(eq(workSchedules.employeeId, employeeId))
       .orderBy(workSchedules.dayOfWeek);
 
-    console.log(`[WorkSchedules API] Found ${schedules.length} schedule entries`);
+    logger.info(`[WorkSchedules API] Found ${schedules.length} schedule entries`);
 
     return NextResponse.json({
       success: true,
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
       count: schedules.length,
     });
   } catch (error) {
-    console.error("[WorkSchedules API] Database error:", error);
+    logger.error("[WorkSchedules API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch work schedules" },
       { status: 500 }
@@ -80,7 +81,7 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(`[WorkSchedules API] Saving schedule for employee: ${employeeId}`);
+    logger.info(`[WorkSchedules API] Saving schedule for employee: ${employeeId}`);
 
     // Delete existing schedules for this employee
     await db
@@ -105,7 +106,7 @@ export async function POST(request: Request) {
         .returning();
     }
 
-    console.log(`[WorkSchedules API] Saved ${insertedSchedules.length} schedule entries`);
+    logger.info(`[WorkSchedules API] Saved ${insertedSchedules.length} schedule entries`);
 
     return NextResponse.json({
       success: true,
@@ -114,7 +115,7 @@ export async function POST(request: Request) {
       message: `Schedule saved with ${insertedSchedules.length} working days`,
     });
   } catch (error) {
-    console.error("[WorkSchedules API] Database error:", error);
+    logger.error("[WorkSchedules API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to save work schedule" },
       { status: 500 }

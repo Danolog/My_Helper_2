@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { appointments, workSchedules, timeBlocks } from "@/lib/schema";
 import { eq, and, gte, lt, not } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 // GET /api/available-slots?employeeId=xxx&date=2026-02-10&duration=60
 // Returns available time slots for booking
 export async function GET(request: Request) {
@@ -38,7 +39,7 @@ export async function GET(request: Request) {
 
     const dayOfWeek = requestedDate.getDay(); // 0=Sunday, 1=Monday, ...
 
-    console.log(`[AvailableSlots API] Query for employee=${employeeId}, date=${date}, duration=${duration}min, dayOfWeek=${dayOfWeek}`);
+    logger.info(`[AvailableSlots API] Query for employee=${employeeId}, date=${date}, duration=${duration}min, dayOfWeek=${dayOfWeek}`);
 
     // 1. Get employee's work schedule for this day of week
     const schedules = await db
@@ -88,7 +89,7 @@ export async function GET(request: Request) {
         )
       );
 
-    console.log(`[AvailableSlots API] Found ${existingAppointments.length} existing appointments`);
+    logger.info(`[AvailableSlots API] Found ${existingAppointments.length} existing appointments`);
 
     // 3. Get time blocks (vacations, breaks) for this employee on this date
     const existingBlocks = await db
@@ -103,7 +104,7 @@ export async function GET(request: Request) {
         )
       );
 
-    console.log(`[AvailableSlots API] Found ${existingBlocks.length} time blocks`);
+    logger.info(`[AvailableSlots API] Found ${existingBlocks.length} time blocks`);
 
     // 4. Build list of blocked time ranges
     interface TimeRange {
@@ -181,7 +182,7 @@ export async function GET(request: Request) {
 
     const availableSlots = slots.filter((s) => s.available);
 
-    console.log(`[AvailableSlots API] Generated ${slots.length} total slots, ${availableSlots.length} available`);
+    logger.info(`[AvailableSlots API] Generated ${slots.length} total slots, ${availableSlots.length} available`);
 
     return NextResponse.json({
       success: true,
@@ -203,7 +204,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[AvailableSlots API] Database error:", error);
+    logger.error("[AvailableSlots API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to calculate available slots" },
       { status: 500 }

@@ -4,6 +4,7 @@ import { serviceCategories } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/service-categories - List all service categories
 export async function GET(request: Request) {
   try {
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
-    console.log("[ServiceCategories API] GET with params:", { salonId });
+    logger.info("[ServiceCategories API] GET with params", { salonId });
 
     let result;
     if (salonId) {
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
         .orderBy(serviceCategories.sortOrder);
     }
 
-    console.log(`[ServiceCategories API] Query returned ${result.length} rows`);
+    logger.info(`[ServiceCategories API] Query returned ${result.length} rows`);
 
     return NextResponse.json({
       success: true,
@@ -37,7 +38,7 @@ export async function GET(request: Request) {
       count: result.length,
     });
   } catch (error) {
-    console.error("[ServiceCategories API] Database error:", error);
+    logger.error("[ServiceCategories API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch service categories" },
       { status: 500 }
@@ -61,7 +62,7 @@ export async function POST(request: Request) {
       );
     }
 
-    console.log(`[ServiceCategories API] Creating category: ${name}`);
+    logger.info(`[ServiceCategories API] Creating category: ${name}`);
     const [newCategory] = await db
       .insert(serviceCategories)
       .values({
@@ -71,7 +72,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(`[ServiceCategories API] Created category with id: ${newCategory?.id}`);
+    logger.info(`[ServiceCategories API] Created category with id: ${newCategory?.id}`);
 
     return NextResponse.json(
       {
@@ -81,7 +82,7 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error) {
-    console.error("[ServiceCategories API] Database error:", error);
+    logger.error("[ServiceCategories API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create service category" },
       { status: 500 }

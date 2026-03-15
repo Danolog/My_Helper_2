@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { promotions, appointments, clients, services } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/promotions/check-first-visit
  * Check if a client qualifies for a first-visit discount at a salon.
@@ -156,7 +157,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Promotions First Visit Check] Error:", error);
+    logger.error("[Promotions First Visit Check] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to check first visit promotion" },
       { status: 500 }

@@ -5,6 +5,7 @@ import { reviews, appointments, employees, services, salons } from "@/lib/schema
 import { eq, desc } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 
+import { logger } from "@/lib/logger";
 // GET /api/client/reviews - List all reviews by the authenticated user
 export async function GET() {
   try {
@@ -58,7 +59,7 @@ export async function GET() {
       count: formattedReviews.length,
     });
   } catch (error) {
-    console.error("[Client Reviews API] Error:", error);
+    logger.error("[Client Reviews API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac opinii" },
       { status: 500 }

@@ -113,8 +113,7 @@ export default function WaitingListPage() {
       if (data.success) {
         setEntries(data.data);
       }
-    } catch (error) {
-      console.error("Error fetching waiting list:", error);
+    } catch {
     } finally {
       setLoading(false);
     }
@@ -158,7 +157,6 @@ export default function WaitingListPage() {
         });
       }
     } catch (error) {
-      console.error("Error accepting:", error);
       setToast({
         message: "Wystapil blad podczas akceptacji terminu",
         type: "error",
@@ -190,7 +188,6 @@ export default function WaitingListPage() {
         });
       }
     } catch (error) {
-      console.error("Error declining:", error);
       setToast({
         message: "Wystapil blad podczas odrzucania terminu",
         type: "error",
@@ -220,7 +217,6 @@ export default function WaitingListPage() {
         });
       }
     } catch (error) {
-      console.error("Error removing:", error);
       setToast({
         message: "Wystapil blad podczas usuwania",
         type: "error",

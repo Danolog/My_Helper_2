@@ -20,8 +20,8 @@ export function GitHubStars({ repo }: GitHubStarsProps) {
           const data = await response.json();
           setStars(data.stargazers_count);
         }
-      } catch (error) {
-        console.error("Failed to fetch GitHub stars:", error);
+      } catch {
+        // GitHub API call failed — stars will show as 0
       } finally {
         setLoading(false);
       }

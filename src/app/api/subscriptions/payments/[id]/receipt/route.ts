@@ -11,6 +11,7 @@ import {
   salons,
 } from "@/lib/schema";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/subscriptions/payments/[id]/receipt
  *
@@ -250,7 +251,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Subscription Receipt] Error:", error);
+    logger.error("[Subscription Receipt] Error", { error: error });
     return NextResponse.json(
       {
         success: false,

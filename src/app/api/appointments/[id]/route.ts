@@ -8,6 +8,7 @@ import { validateBody, updateAppointmentSchema } from "@/lib/api-validation";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/appointments/[id] - Get a single appointment
 export async function GET(
   _request: Request,
@@ -59,7 +60,7 @@ export async function GET(
       data: formattedAppointment,
     });
   } catch (error) {
-    console.error("[Appointments API] Database error:", error);
+    logger.error("[Appointments API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch appointment" },
       { status: 500 }
@@ -95,8 +96,14 @@ export async function PUT(
 
     const { startTime, endTime, employeeId, clientId, serviceId, notes, status, depositAmount, depositPaid } = body;
 
-    // Check if appointment exists
-    const [existing] = await db.select()
+    // Check if appointment exists (need times and employeeId for conflict checks)
+    const [existing] = await db.select({
+      id: appointments.id,
+      startTime: appointments.startTime,
+      endTime: appointments.endTime,
+      employeeId: appointments.employeeId,
+      status: appointments.status,
+    })
       .from(appointments)
       .where(eq(appointments.id, id))
       .limit(1);
@@ -113,8 +120,8 @@ export async function PUT(
     const newEndTime = endTime ? new Date(endTime) : existing.endTime;
     const newEmployeeId = employeeId || existing.employeeId;
 
-    // Check for overlapping appointments (excluding current one)
-    const overlapping = await db.select()
+    // Check for overlapping appointments (excluding current one, only need id for existence check)
+    const overlapping = await db.select({ id: appointments.id })
       .from(appointments)
       .where(
         and(
@@ -157,7 +164,7 @@ export async function PUT(
     if (depositAmount !== undefined) updateData.depositAmount = depositAmount;
     if (depositPaid !== undefined) updateData.depositPaid = depositPaid;
 
-    console.log(`[Appointments API] Updating appointment ${id}:`, updateData);
+    logger.info(`[Appointments API] Updating appointment ${id}`, { updateData });
 
     const [updatedAppointment] = await db
       .update(appointments)
@@ -165,7 +172,7 @@ export async function PUT(
       .where(eq(appointments.id, id))
       .returning();
 
-    console.log(`[Appointments API] Updated appointment ${id} successfully`);
+    logger.info(`[Appointments API] Updated appointment ${id} successfully`);
 
     return NextResponse.json({
       success: true,
@@ -173,7 +180,7 @@ export async function PUT(
       message: "Appointment rescheduled successfully",
     });
   } catch (error) {
-    console.error("[Appointments API] Database error:", error);
+    logger.error("[Appointments API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to update appointment" },
       { status: 500 }
@@ -255,7 +262,7 @@ export async function DELETE(
       .where(eq(appointments.id, id))
       .returning();
 
-    console.log(`[Appointments API] Cancelled appointment ${id}`, {
+    logger.info(`[Appointments API] Cancelled appointment ${id}`, {
       hoursUntilAppointment: hoursUntilAppointment.toFixed(1),
       isMoreThan24h,
       hasDeposit,
@@ -272,7 +279,7 @@ export async function DELETE(
         id,
         "Anulacja wizyty przez personel - wiecej niz 24h przed terminem"
       );
-      console.log(`[Appointments API] Refund result for appointment ${id}:`, refundResult);
+      logger.info(`[Appointments API] Refund result for appointment ${id}`, { refundResult: refundResult as unknown as Record<string, unknown> });
 
       // Create refund notification for client
       if (refundResult.refunded && row.client) {
@@ -299,9 +306,9 @@ export async function DELETE(
             refundReason: "Anulacja wizyty mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
           })
           .where(eq(depositPayments.appointmentId, id));
-        console.log(`[Appointments API] Deposit marked as forfeited for appointment ${id}`);
+        logger.info(`[Appointments API] Deposit marked as forfeited for appointment ${id}`);
       } catch (forfeitError) {
-        console.error("[Appointments API] Failed to mark deposit as forfeited:", forfeitError);
+        logger.error("[Appointments API] Failed to mark deposit as forfeited", { error: forfeitError });
         // Don't fail the cancellation if deposit status update fails
       }
     }
@@ -335,18 +342,18 @@ export async function DELETE(
           message: notificationMessage,
           status: "pending",
         });
-        console.log(`[Appointments API] Created cancellation notification for client ${row.client.id}`);
+        logger.info(`[Appointments API] Created cancellation notification for client ${row.client.id}`);
       } catch (notifError) {
-        console.error("[Appointments API] Failed to create notification:", notifError);
+        logger.error("[Appointments API] Failed to create notification", { error: notifError });
         // Don't fail the cancellation if notification creation fails
       }
     }
 
     // Notify waiting list entries about the freed slot
     try {
-      // Get salon name for notification
+      // Get salon name for notification (only need name)
       const [salon] = await db
-        .select()
+        .select({ name: salons.name })
         .from(salons)
         .where(eq(salons.id, appointment.salonId))
         .limit(1);
@@ -368,15 +375,9 @@ export async function DELETE(
         salonName,
       });
 
-      console.log(
-        `[Appointments API] Waiting list notification result:`,
-        waitingListResult
-      );
+      logger.info(`[Appointments API] Waiting list notification result`, { waitingListResult });
     } catch (waitingListError) {
-      console.error(
-        "[Appointments API] Failed to notify waiting list:",
-        waitingListError
-      );
+      logger.error("[Appointments API] Failed to notify waiting list", { error: waitingListError });
       // Don't fail the cancellation if waiting list notification fails
     }
 
@@ -402,7 +403,7 @@ export async function DELETE(
       },
     });
   } catch (error) {
-    console.error("[Appointments API] Database error:", error);
+    logger.error("[Appointments API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to cancel appointment" },
       { status: 500 }

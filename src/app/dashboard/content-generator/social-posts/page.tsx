@@ -250,8 +250,7 @@ function SocialPostsContent() {
       setEditedPost(data.post);
       setIsEditing(false);
       toast.success("Post wygenerowany pomyslnie!");
-    } catch (error) {
-      console.error("Error generating post:", error);
+    } catch {
       toast.error("Nie udalo sie wygenerowac posta. Sprobuj ponownie.");
     } finally {
       setIsGenerating(false);
@@ -337,8 +336,7 @@ function SocialPostsContent() {
       );
       setShowScheduleDialog(false);
       setScheduleDate(getDefaultScheduleDate());
-    } catch (error) {
-      console.error("Error scheduling post:", error);
+    } catch {
       toast.error("Nie udalo sie zaplanowac posta. Sprobuj ponownie.");
     } finally {
       setIsScheduling(false);

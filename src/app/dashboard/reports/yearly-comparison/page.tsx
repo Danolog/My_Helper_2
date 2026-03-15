@@ -216,8 +216,7 @@ export default function YearlyComparisonPage() {
         throw new Error("Nie udalo sie pobrac porownania. Sprobuj ponownie pozniej.");
       }
       setComparisonData(json.data as ComparisonData);
-    } catch (err) {
-      console.error("[Yearly Comparison] Error:", err);
+    } catch {
       const message = "Nie udalo sie zaladowac porownania. Sprobuj ponownie pozniej.";
       setError(message);
       toast.error(message);
@@ -307,8 +306,7 @@ export default function YearlyComparisonPage() {
         filename: `porownanie-roczne-${year1}-vs-${year2}.pdf`,
       });
       toast.success("Raport wyeksportowany do PDF");
-    } catch (err) {
-      console.error("[Yearly Comparison] PDF export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu do PDF");
     }
   };

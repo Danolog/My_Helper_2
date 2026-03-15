@@ -179,7 +179,6 @@ export default function ServicesPage() {
       }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
-      console.error("Failed to fetch services:", error);
       const errInfo = getNetworkErrorMessage(error);
       setFetchError(errInfo);
     }
@@ -198,7 +197,6 @@ export default function ServicesPage() {
       }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
-      console.error("Failed to fetch categories:", error);
     }
   }, [salonId]);
 
@@ -299,7 +297,6 @@ export default function ServicesPage() {
         toast.error(data.error || "Nie udalo sie dodac uslugi");
       }
     } catch (error) {
-      console.error("Failed to save service:", error);
       const errInfo = getNetworkErrorMessage(error);
       toast.error(errInfo.isNetwork
         ? errInfo.message
@@ -330,8 +327,7 @@ export default function ServicesPage() {
       } else {
         toast.error(data.error || "Nie udalo sie usunac uslugi");
       }
-    } catch (error) {
-      console.error("Failed to delete service:", error);
+    } catch {
       toast.error("Blad podczas usuwania uslugi");
     } finally {
       setDeletingService(false);
@@ -403,8 +399,7 @@ export default function ServicesPage() {
           toast.error(data.error || "Nie udalo sie dodac kategorii");
         }
       }
-    } catch (error) {
-      console.error("Failed to save category:", error);
+    } catch {
       toast.error("Blad podczas zapisywania kategorii");
     } finally {
       setSavingCategory(false);
@@ -426,8 +421,7 @@ export default function ServicesPage() {
       } else {
         toast.error(data.error || "Nie mozna usunac kategorii");
       }
-    } catch (error) {
-      console.error("Failed to delete category:", error);
+    } catch {
       toast.error("Blad podczas usuwania kategorii");
     } finally {
       setDeletingCategory(false);
@@ -451,8 +445,7 @@ export default function ServicesPage() {
       } else {
         toast.error(data.error || "Nie udalo sie zmienic kategorii");
       }
-    } catch (error) {
-      console.error("Failed to assign category:", error);
+    } catch {
       toast.error("Blad podczas przypisywania kategorii");
     }
   };

@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { notifications } from "@/lib/schema";
+import { logger } from "@/lib/logger";
 
 export interface SmsMessage {
   to: string; // Phone number
@@ -25,13 +26,8 @@ export interface SmsResult {
  */
 export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
   try {
-    // Log to console in dev mode (no real SMS provider configured)
-    console.log("\n╔══════════════════════════════════════════════════╗");
-    console.log("║              📱  SMS NOTIFICATION                ║");
-    console.log("╠══════════════════════════════════════════════════╣");
-    console.log(`║  To:      ${msg.to}`);
-    console.log(`║  Message: ${msg.message}`);
-    console.log("╚══════════════════════════════════════════════════╝\n");
+    // Log SMS in dev mode (no real SMS provider configured)
+    logger.info("SMS notification", { to: msg.to, message: msg.message });
 
     // Save notification to database with 'sent' status
     // In dev mode we mark as 'sent' since the console log is the delivery mechanism
@@ -48,14 +44,14 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
       .returning();
 
     const notifId = notification?.id;
-    console.log(`[SMS] Notification saved: ${notifId}`);
+    logger.info("SMS notification saved", { notificationId: notifId });
 
     return {
       success: true,
       notificationId: notifId,
     };
   } catch (error) {
-    console.error("[SMS] Failed to send/save SMS:", error);
+    logger.error("Failed to send/save SMS", { error });
 
     // Try to save notification with failed status
     try {

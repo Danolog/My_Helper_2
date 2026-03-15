@@ -4,6 +4,7 @@ import { products, notifications } from "@/lib/schema";
 import { eq, and, isNotNull, sql } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/notifications/low-stock
  *
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Low Stock API] Error:", error);
+    logger.error("[Low Stock API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to check low stock" },
       { status: 500 }
@@ -127,9 +128,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    console.log(
-      `[Low Stock Alert] Notification sent for product "${productName}" (${productId}) - qty: ${quantity}, min: ${minQuantity}`
-    );
+    logger.info(`[Low Stock Alert] Notification sent for product "${productName}" (${productId}) - qty: ${quantity}, min: ${minQuantity}`);
 
     return NextResponse.json({
       success: true,
@@ -139,7 +138,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Low Stock Notification] Error:", error);
+    logger.error("[Low Stock Notification] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create low stock notification" },
       { status: 500 }

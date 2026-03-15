@@ -6,6 +6,7 @@ import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { isValidUuid } from "@/lib/validations";
 
+import { logger } from "@/lib/logger";
 // GET /api/client/appointments/[id] - Get appointment detail for the authenticated client user
 export async function GET(
   _request: Request,
@@ -134,7 +135,7 @@ export async function GET(
       data: formattedAppointment,
     });
   } catch (error) {
-    console.error("[Client Appointment Detail API] Error:", error);
+    logger.error("[Client Appointment Detail API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch appointment details" },
       { status: 500 }

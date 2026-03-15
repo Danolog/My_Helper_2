@@ -158,8 +158,7 @@ export function CompleteAppointmentDialog({
       } else {
         toast.error(data.error || "Nie udalo sie zakonczyc wizyty");
       }
-    } catch (error) {
-      console.error("Failed to complete appointment:", error);
+    } catch {
       toast.error("Blad podczas konczenia wizyty");
     } finally {
       setCompleting(false);

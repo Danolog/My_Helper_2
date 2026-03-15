@@ -69,8 +69,7 @@ export default function EmployeesPage() {
         } else {
           setLoading(false);
         }
-      } catch (err) {
-        console.error("Failed to fetch salon:", err);
+      } catch {
         setLoading(false);
       }
     }
@@ -87,8 +86,7 @@ export default function EmployeesPage() {
       if (data.success) {
         setEmployees(data.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch employees:", error);
+    } catch {
     } finally {
       setLoading(false);
     }
@@ -113,8 +111,7 @@ export default function EmployeesPage() {
         if (data.success) {
           setServices(data.data);
         }
-      } catch (err) {
-        console.error("Failed to fetch services:", err);
+      } catch {
       }
     }
     if (salonId) {

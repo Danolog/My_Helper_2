@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { TRIAL_DAYS } from "@/lib/constants";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * POST /api/register-subscription
  *
@@ -122,9 +123,7 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
-    console.log(
-      `[Register Subscription] Created subscription for salon ${salonId}: plan=${plan.name}, status=trialing, trial_ends=${trialEnd.toISOString()}`
-    );
+    logger.info(`[Register Subscription] Created subscription for salon ${salonId}: plan=${plan.name}, status=trialing, trial_ends=${trialEnd.toISOString()}`);
 
     return NextResponse.json({
       success: true,
@@ -137,7 +136,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("[Register Subscription] Error:", error);
+    logger.error("[Register Subscription] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create subscription" },
       { status: 500 }

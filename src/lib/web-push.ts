@@ -1,4 +1,5 @@
 import webpush from "web-push";
+import { logger } from "@/lib/logger";
 
 /**
  * Initialize web-push with VAPID details.
@@ -10,7 +11,7 @@ function getWebPush() {
   const vapidSubject = process.env.VAPID_SUBJECT || "mailto:admin@myhelper.pl";
 
   if (!vapidPublicKey || !vapidPrivateKey) {
-    console.warn("[WebPush] VAPID keys not configured. Push notifications disabled.");
+    logger.warn("VAPID keys not configured, push notifications disabled");
     return null;
   }
 
@@ -60,11 +61,11 @@ export async function sendPushNotification(
       }
     );
 
-    console.log(`[WebPush] Notification sent to ${subscription.endpoint.slice(0, 50)}... Status: ${result.statusCode}`);
+    logger.info("Web push notification sent", { endpoint: subscription.endpoint.slice(0, 50), statusCode: result.statusCode });
     return { success: true, statusCode: result.statusCode };
   } catch (error: unknown) {
     const err = error as { statusCode?: number; message?: string; body?: string };
-    console.error(`[WebPush] Failed to send notification:`, err.message || error);
+    logger.error("Failed to send web push notification", { error: err.message || error, statusCode: err.statusCode });
 
     // If the subscription is expired or invalid (410 Gone or 404 Not Found),
     // the caller should remove it from the database

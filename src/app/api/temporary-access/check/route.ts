@@ -6,6 +6,7 @@ import {
   getActiveTemporaryAccess,
 } from "@/lib/temporary-access";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/temporary-access/check
  *
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
       count: grants.length,
     });
   } catch (error) {
-    console.error("[Temporary Access Check] Error:", error);
+    logger.error("[Temporary Access Check] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udało się sprawdzić uprawnień tymczasowych" },
       { status: 500 }

@@ -129,7 +129,6 @@ export default function FinancePage() {
         setEmployeeRates(json.data);
       }
     } catch {
-      console.error("Failed to fetch rates");
     } finally {
       setRatesLoading(false);
     }

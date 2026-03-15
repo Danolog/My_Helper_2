@@ -132,8 +132,7 @@ function ScheduledPostsContent() {
       } else {
         toast.error(data.error || "Nie udalo sie pobrac postow");
       }
-    } catch (error) {
-      console.error("Error fetching scheduled posts:", error);
+    } catch {
       toast.error("Blad polaczenia z serwerem");
     } finally {
       setIsLoading(false);
@@ -157,8 +156,7 @@ function ScheduledPostsContent() {
       } else {
         toast.error(data.error || "Nie udalo sie anulowac posta");
       }
-    } catch (error) {
-      console.error("Error cancelling post:", error);
+    } catch {
       toast.error("Blad polaczenia z serwerem");
     } finally {
       setActionLoading(null);
@@ -178,8 +176,7 @@ function ScheduledPostsContent() {
       } else {
         toast.error(data.error || "Nie udalo sie opublikowac posta");
       }
-    } catch (error) {
-      console.error("Error publishing post:", error);
+    } catch {
       toast.error("Blad polaczenia z serwerem");
     } finally {
       setActionLoading(null);

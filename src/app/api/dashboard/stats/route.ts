@@ -11,6 +11,7 @@ import {
 import { eq, and, gte, lte, not, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * Compute date boundaries in the Europe/Warsaw timezone.
  * This ensures correct "today" boundaries regardless of the server's local timezone.
@@ -290,7 +291,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Dashboard Stats API] Error:", error);
+    logger.error("[Dashboard Stats API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac statystyk dashboardu" },
       { status: 500 }

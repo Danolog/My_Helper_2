@@ -306,8 +306,7 @@ describe("useFormRecovery", () => {
     );
   });
 
-  it("should warn to console when localStorage.setItem throws", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("should not crash when localStorage.setItem throws", () => {
     lsMock.mock.setItem = vi.fn(() => {
       throw new DOMException("QuotaExceededError");
     });
@@ -324,7 +323,8 @@ describe("useFormRecovery", () => {
       vi.advanceTimersByTime(500);
     });
 
-    expect(warnSpy).toHaveBeenCalled();
+    // Should not throw — localStorage failure is handled silently
+    expect(result.current.isDirty).toBe(false);
   });
 
   it("should handle localStorage.removeItem throwing silently in clearSavedForm", () => {

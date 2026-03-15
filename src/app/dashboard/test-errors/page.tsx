@@ -79,7 +79,6 @@ export default function TestErrorsPage() {
         }
       } catch (error) {
         // Network/timeout error - use centralized getNetworkErrorMessage
-        console.error(`Failed API call (${label}):`, error);
         const errInfo = getNetworkErrorMessage(error);
         const timeout = isTimeoutError(error);
 
@@ -139,7 +138,6 @@ export default function TestErrorsPage() {
         });
       }
     } catch (error) {
-      console.error("Failed POST request:", error);
       const errInfo = getNetworkErrorMessage(error);
       toast.error(
         errInfo.isNetwork

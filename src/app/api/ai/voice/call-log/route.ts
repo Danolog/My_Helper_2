@@ -6,6 +6,7 @@ import { eq, and, desc } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 /**
  * GET /api/ai/voice/call-log
  * Returns recent voice AI call logs for the salon.
@@ -64,7 +65,7 @@ export async function GET() {
 
     return NextResponse.json({ logs: formattedLogs });
   } catch (error) {
-    console.error("[Voice AI Call Log] Error:", error);
+    logger.error("[Voice AI Call Log] Error", { error: error });
     return NextResponse.json({ error: "Blad serwera" }, { status: 500 });
   }
 }

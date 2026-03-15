@@ -13,6 +13,7 @@ import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 interface Suggestion {
   id: string;
   type: "warning" | "opportunity" | "action" | "insight";
@@ -524,7 +525,7 @@ export async function GET(_request: Request) {
       },
     });
   } catch (error) {
-    console.error("[AI Business Suggestions] Error:", error);
+    logger.error("[AI Business Suggestions] Error", { error: error });
     return NextResponse.json(
       { error: "Failed to generate suggestions" },
       { status: 500 }

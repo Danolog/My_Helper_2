@@ -113,8 +113,7 @@ export default function EmployeePayrollReportPage() {
         throw new Error(json.error || "Failed to fetch report");
       }
       setReportData(json.data);
-    } catch (err) {
-      console.error("[Employee Payroll Report] Error:", err);
+    } catch {
       setError("Nie udalo sie zaladowac raportu. Sprobuj ponownie pozniej.");
     } finally {
       setLoading(false);
@@ -161,8 +160,7 @@ export default function EmployeePayrollReportPage() {
           ? "Raport wyeksportowany do Excel"
           : "Raport wyeksportowany do CSV"
       );
-    } catch (err) {
-      console.error("[Employee Payroll Report] Export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu");
     }
   };
@@ -232,8 +230,7 @@ export default function EmployeePayrollReportPage() {
         filename: `raport-wynagrodzen-${dateFrom || "all"}-${dateTo || "all"}.pdf`,
       });
       toast.success("Raport wyeksportowany do PDF");
-    } catch (err) {
-      console.error("[Employee Payroll Report] PDF export error:", err);
+    } catch {
       toast.error("Nie udalo sie wyeksportowac raportu do PDF");
     }
   };

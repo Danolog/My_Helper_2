@@ -131,8 +131,7 @@ export default function ClientAppointmentsPage() {
       if (json.success) {
         setAppointments(json.data);
       }
-    } catch (error) {
-      console.error("Failed to fetch appointments:", error);
+    } catch {
     } finally {
       setLoading(false);
     }

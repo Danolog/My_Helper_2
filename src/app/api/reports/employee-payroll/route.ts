@@ -10,6 +10,7 @@ import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/reports/employee-payroll - Employee payroll report with hours, commissions, and service breakdown
 export async function GET(request: Request) {
   try {
@@ -397,7 +398,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Employee Payroll Report API] Database error:", error);
+    logger.error("[Employee Payroll Report API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to generate employee payroll report" },
       { status: 500 }

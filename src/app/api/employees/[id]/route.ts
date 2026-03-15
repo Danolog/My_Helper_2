@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { validateBody, updateEmployeeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/employees/[id] - Get single employee with assigned services
 export async function GET(
   _request: Request,
@@ -41,7 +42,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Employees API] GET by id error:", error);
+    logger.error("[Employees API] GET by id error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie pobrac pracownika" },
       { status: 500 }
@@ -133,7 +134,7 @@ export async function PUT(
 
     return NextResponse.json({ success: true, data: updated });
   } catch (error) {
-    console.error("[Employees API] PUT error:", error);
+    logger.error("[Employees API] PUT error", { error: error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie zaktualizowac pracownika" },
       { status: 500 }

@@ -214,7 +214,6 @@ export default function ProductsPage() {
       }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
-      console.error("Failed to fetch products:", error);
       const errInfo = getNetworkErrorMessage(error);
       setFetchError(errInfo);
     } finally {
@@ -233,7 +232,6 @@ export default function ProductsPage() {
       }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
-      console.error("Failed to fetch categories:", error);
     } finally {
       setCategoriesLoading(false);
     }
@@ -256,7 +254,6 @@ export default function ProductsPage() {
       }
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
-      console.error("Failed to fetch notifications:", error);
     }
   }, [salonId]);
 
@@ -395,7 +392,6 @@ export default function ProductsPage() {
         toast.error(data.error || "Nie udalo sie zapisac produktu");
       }
     } catch (error) {
-      console.error("Failed to save product:", error);
       const errInfo = getNetworkErrorMessage(error);
       toast.error(errInfo.isNetwork
         ? errInfo.message
@@ -426,8 +422,7 @@ export default function ProductsPage() {
       } else {
         toast.error(data.error || "Nie udalo sie usunac produktu");
       }
-    } catch (error) {
-      console.error("Failed to delete product:", error);
+    } catch {
       toast.error("Blad podczas usuwania produktu");
     } finally {
       setDeleteDialogOpen(false);
@@ -502,8 +497,7 @@ export default function ProductsPage() {
       } else {
         toast.error(data.error || "Nie udalo sie zapisac kategorii");
       }
-    } catch (error) {
-      console.error("Failed to save category:", error);
+    } catch {
       toast.error("Blad podczas zapisywania kategorii");
     } finally {
       setSavingCategory(false);
@@ -524,8 +518,7 @@ export default function ProductsPage() {
       } else {
         toast.error(data.error || "Nie udalo sie usunac kategorii");
       }
-    } catch (error) {
-      console.error("Failed to delete category:", error);
+    } catch {
       toast.error("Blad podczas usuwania kategorii");
     } finally {
       setDeleteCategoryDialogOpen(false);

@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { validateBody, addAppointmentMaterialSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/materials - List materials for an appointment
 export async function GET(
   _request: Request,
@@ -51,7 +52,7 @@ export async function GET(
       count: formattedMaterials.length,
     });
   } catch (error) {
-    console.error("[Appointment Materials API] Database error:", error);
+    logger.error("[Appointment Materials API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to fetch appointment materials" },
       { status: 500 }
@@ -146,9 +147,7 @@ export async function POST(
       .where(eq(products.id, productId))
       .limit(1);
 
-    console.log(
-      `[Appointment Materials API] Added ${usedQty} ${product.unit || "szt."} of "${product.name}" to appointment ${id}. Stock: ${currentQty} -> ${updatedProduct?.quantity}`
-    );
+    logger.info(`[Appointment Materials API] Added ${usedQty} ${product.unit || "szt."} of "${product.name}" to appointment ${id}. Stock: ${currentQty} -> ${updatedProduct?.quantity}`);
 
     return NextResponse.json(
       {
@@ -162,7 +161,7 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    console.error("[Appointment Materials API] Database error:", error);
+    logger.error("[Appointment Materials API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to add material to appointment" },
       { status: 500 }
@@ -220,9 +219,7 @@ export async function DELETE(
       .where(eq(appointmentMaterials.id, materialId))
       .returning();
 
-    console.log(
-      `[Appointment Materials API] Removed material ${materialId}, restored ${usedQty} to inventory`
-    );
+    logger.info(`[Appointment Materials API] Removed material ${materialId}, restored ${usedQty} to inventory`);
 
     return NextResponse.json({
       success: true,
@@ -230,7 +227,7 @@ export async function DELETE(
       message: "Material removed and inventory restored",
     });
   } catch (error) {
-    console.error("[Appointment Materials API] Database error:", error);
+    logger.error("[Appointment Materials API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to remove material" },
       { status: 500 }

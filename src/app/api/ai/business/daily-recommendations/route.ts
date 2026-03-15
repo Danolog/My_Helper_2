@@ -15,6 +15,7 @@ import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
+import { logger } from "@/lib/logger";
 interface DailyRecommendation {
   id: string;
   type: "schedule" | "client" | "preparation" | "opportunity" | "warning";
@@ -584,7 +585,7 @@ export async function GET(_request: Request) {
       tomorrowDate: tomorrowStart.toISOString(),
     });
   } catch (error) {
-    console.error("[AI Daily Recommendations] Error:", error);
+    logger.error("[AI Daily Recommendations] Error", { error: error });
     return NextResponse.json(
       { error: "Failed to generate daily recommendations" },
       { status: 500 }
