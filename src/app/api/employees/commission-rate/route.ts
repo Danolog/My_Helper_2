@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, commissionRateSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // PUT /api/employees/commission-rate - Update employee's default commission rate
@@ -12,25 +13,13 @@ export async function PUT(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const body = await request.json();
+    const validationError = validateBody(commissionRateSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const { employeeId, commissionRate } = body;
 
-    if (!employeeId) {
-      return NextResponse.json(
-        { success: false, error: "Employee ID is required" },
-        { status: 400 }
-      );
-    }
-
     const rate = parseFloat(commissionRate);
-    if (isNaN(rate) || rate < 0 || rate > 100) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Commission rate must be a number between 0 and 100",
-        },
-        { status: 400 }
-      );
-    }
 
     // Check if employee exists
     const [employee] = await db

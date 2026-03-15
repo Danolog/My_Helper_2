@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { pushSubscriptions } from "@/lib/schema";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, pushUnsubscribeSchema } from "@/lib/api-validation";
 import { eq, and } from "drizzle-orm";
 
 import { logger } from "@/lib/logger";
@@ -17,14 +18,11 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { endpoint } = body;
-
-    if (!endpoint) {
-      return NextResponse.json(
-        { success: false, error: "Endpoint is required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(pushUnsubscribeSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { endpoint } = body;
 
     const deleted = await db
       .delete(pushSubscriptions)

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { serviceCategories, services } from "@/lib/schema";
 import { eq, and, count } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, updateServiceCategorySchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/service-categories/[id] - Get a single category
@@ -61,14 +62,11 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { name, sortOrder } = body;
-
-    if (!name || !name.trim()) {
-      return NextResponse.json(
-        { success: false, error: "Category name is required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(updateServiceCategorySchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { name, sortOrder } = body;
 
     // Check category exists
     const [existing] = await db

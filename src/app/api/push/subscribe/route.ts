@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { pushSubscriptions } from "@/lib/schema";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, pushSubscribeSchema } from "@/lib/api-validation";
 import { eq, and } from "drizzle-orm";
 
 import { logger } from "@/lib/logger";
@@ -18,14 +19,11 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const { subscription, userAgent } = body;
-
-    if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
-      return NextResponse.json(
-        { success: false, error: "Invalid push subscription data" },
-        { status: 400 }
-      );
+    const validationError = validateBody(pushSubscribeSchema, body.subscription || {});
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { subscription, userAgent } = body;
 
     // Check if this endpoint already exists for this user
     const existing = await db

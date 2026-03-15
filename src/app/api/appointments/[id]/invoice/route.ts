@@ -14,6 +14,7 @@ import { eq, and, count } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, invoiceSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -98,6 +99,10 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json().catch(() => ({}));
+    const validationError = validateBody(invoiceSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const {
       type = "paragon",
       clientName: inputClientName,

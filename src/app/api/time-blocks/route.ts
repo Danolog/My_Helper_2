@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { timeBlocks, employees } from "@/lib/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, createTimeBlockSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/time-blocks?employeeId=xxx&startDate=xxx&endDate=xxx
@@ -73,14 +74,11 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
     const body = await request.json();
-    const { employeeId, startTime, endTime, blockType, reason } = body;
-
-    if (!employeeId || !startTime || !endTime || !blockType) {
-      return NextResponse.json(
-        { success: false, error: "employeeId, startTime, endTime, and blockType are required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(createTimeBlockSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { employeeId, startTime, endTime, blockType, reason } = body;
 
     // Validate block type
     const validTypes = ["break", "vacation", "personal", "holiday", "other"];

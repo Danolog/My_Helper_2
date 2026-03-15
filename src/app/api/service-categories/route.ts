@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { serviceCategories } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, createServiceCategorySchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/service-categories - List all service categories
@@ -53,14 +54,11 @@ export async function POST(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const body = await request.json();
-    const { salonId, name, sortOrder } = body;
-
-    if (!salonId || !name) {
-      return NextResponse.json(
-        { success: false, error: "salonId and name are required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(createServiceCategorySchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { salonId, name, sortOrder } = body;
 
     logger.info(`[ServiceCategories API] Creating category: ${name}`);
     const [newCategory] = await db

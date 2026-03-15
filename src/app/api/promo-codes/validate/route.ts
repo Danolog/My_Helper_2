@@ -2,20 +2,18 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { validateBody, validatePromoCodeSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // POST /api/promo-codes/validate - Validate a promo code and return discount info
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { code, salonId } = body;
-
-    if (!code || !salonId) {
-      return NextResponse.json(
-        { success: false, error: "code and salonId are required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(validatePromoCodeSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { code, salonId } = body;
 
     const normalizedCode = code.toUpperCase().trim();
 

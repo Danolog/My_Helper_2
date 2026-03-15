@@ -4,6 +4,7 @@ import { appointments, depositPayments, clients, services, employees } from "@/l
 import { eq } from "drizzle-orm";
 import { sendPaymentConfirmationSms } from "@/lib/sms";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, depositConfirmSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -19,14 +20,11 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
     const body = await request.json();
-    const { depositPaymentId, sessionId } = body;
-
-    if (!depositPaymentId) {
-      return NextResponse.json(
-        { success: false, error: "depositPaymentId is required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(depositConfirmSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { depositPaymentId, sessionId } = body;
 
     // Get the deposit payment record
     const [payment] = await db

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, subscriptionConfirmSchema } from "@/lib/api-validation";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { salonSubscriptions, subscriptionPayments, subscriptionPlans } from "@/lib/schema";
@@ -30,16 +31,9 @@ export async function POST(request: Request) {
     }
 
     const body: unknown = await request.json();
-    if (
-      !body ||
-      typeof body !== "object" ||
-      !("sessionId" in body) ||
-      typeof (body as Record<string, unknown>).sessionId !== "string"
-    ) {
-      return NextResponse.json(
-        { success: false, error: "sessionId is required" },
-        { status: 400 },
-      );
+    const validationError = validateBody(subscriptionConfirmSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
 
     const { sessionId } = body as { sessionId: string };

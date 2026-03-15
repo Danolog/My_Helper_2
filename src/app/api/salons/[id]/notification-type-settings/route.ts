@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { validateBody, notificationTypeSettingsSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
@@ -88,6 +89,12 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
+
+    // Server-side validation with Zod schema
+    const validationError = validateBody(notificationTypeSettingsSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
 
     // Fetch current salon
     const [salon] = await db

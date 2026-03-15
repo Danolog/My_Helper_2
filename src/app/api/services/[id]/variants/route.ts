@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { serviceVariants, services } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, createServiceVariantSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/services/[id]/variants - List all variants for a service
@@ -59,14 +60,11 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const { name, priceModifier, durationModifier } = body;
-
-    if (!name || !name.trim()) {
-      return NextResponse.json(
-        { success: false, error: "Variant name is required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(createServiceVariantSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { name, priceModifier, durationModifier } = body;
 
     // Verify service exists
     const [service] = await db

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { salons, services, reviews } from "@/lib/schema";
 import { eq, and, isNotNull, ne, inArray, count, avg } from "drizzle-orm";
+import { validateBody, createSalonSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
@@ -116,14 +117,14 @@ export async function POST(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const body = await request.json();
-    const { name, phone, email, address, industryType, ownerId } = body;
 
-    if (!name) {
-      return NextResponse.json(
-        { success: false, error: "Salon name is required" },
-        { status: 400 }
-      );
+    // Server-side validation with Zod schema
+    const validationError = validateBody(createSalonSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const { name, phone, email, address, industryType, ownerId } = body;
 
     logger.info(`[Salons API] Executing: INSERT INTO salons (name, phone, email, address, industry_type, owner_id)`);
     const [newSalon] = await db
