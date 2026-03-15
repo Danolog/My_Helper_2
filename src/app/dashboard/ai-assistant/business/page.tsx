@@ -37,19 +37,19 @@ function BusinessAssistantContent() {
   const chat = useBusinessChat();
 
   return (
-    <div className="container mx-auto p-6">
+    <div className="container mx-auto p-4 sm:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" asChild>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" className="shrink-0" asChild>
             <Link href="/dashboard/ai-assistant">
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Brain className="h-6 w-6 text-primary" />
-              Asystent biznesowy AI
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2">
+              <Brain className="h-5 w-5 sm:h-6 sm:w-6 text-primary shrink-0" />
+              <span className="truncate">Asystent biznesowy AI</span>
             </h1>
             <p className="text-muted-foreground text-sm">
               Analizuj dane salonu i pytaj o wyniki biznesowe
@@ -61,6 +61,7 @@ function BusinessAssistantContent() {
           size="sm"
           onClick={refreshAnalytics}
           disabled={analyticsLoading}
+          className="self-start sm:self-auto shrink-0"
         >
           <RefreshCw
             className={`h-4 w-4 mr-2 ${analyticsLoading ? "animate-spin" : ""}`}
@@ -70,26 +71,29 @@ function BusinessAssistantContent() {
       </div>
 
       <Tabs defaultValue="alerts" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="alerts">
-            <Bell className="h-4 w-4 mr-2" />
+        <TabsList className="flex w-full overflow-x-auto no-scrollbar sm:grid sm:grid-cols-5">
+          <TabsTrigger value="alerts" className="flex-none sm:flex-1 gap-1 px-3 text-xs sm:text-sm">
+            <Bell className="h-4 w-4 shrink-0" />
             Alerty
           </TabsTrigger>
-          <TabsTrigger value="review-alerts">
-            <MessageSquareWarning className="h-4 w-4 mr-2" />
+          <TabsTrigger value="review-alerts" className="flex-none sm:flex-1 gap-1 px-3 text-xs sm:text-sm">
+            <MessageSquareWarning className="h-4 w-4 shrink-0" />
             Opinie
           </TabsTrigger>
-          <TabsTrigger value="suggestions">
-            <Lightbulb className="h-4 w-4 mr-2" />
-            Sugestie AI
+          <TabsTrigger value="suggestions" className="flex-none sm:flex-1 gap-1 px-3 text-xs sm:text-sm">
+            <Lightbulb className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Sugestie AI</span>
+            <span className="sm:hidden">Sugestie</span>
           </TabsTrigger>
-          <TabsTrigger value="chat">
-            <Sparkles className="h-4 w-4 mr-2" />
-            Asystent AI
+          <TabsTrigger value="chat" className="flex-none sm:flex-1 gap-1 px-3 text-xs sm:text-sm">
+            <Sparkles className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Asystent AI</span>
+            <span className="sm:hidden">Chat</span>
           </TabsTrigger>
-          <TabsTrigger value="dashboard">
-            <TrendingUp className="h-4 w-4 mr-2" />
-            Dane salonu
+          <TabsTrigger value="dashboard" className="flex-none sm:flex-1 gap-1 px-3 text-xs sm:text-sm">
+            <TrendingUp className="h-4 w-4 shrink-0" />
+            <span className="hidden sm:inline">Dane salonu</span>
+            <span className="sm:hidden">Dane</span>
           </TabsTrigger>
         </TabsList>
 
