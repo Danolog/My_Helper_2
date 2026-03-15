@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { salons, employees, services, clients, appointments } from "@/lib/schema";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
 // POST /api/seed - Seed test data for development
@@ -8,6 +9,9 @@ export async function POST() {
   if (process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "Seed route is disabled in production" }, { status: 403 });
   }
+
+  const authResult = await requireAuth("owner");
+  if (isAuthError(authResult)) return authResult;
 
   try {
     logger.info("[Seed API] Starting seed process...");
