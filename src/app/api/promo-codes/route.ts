@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { validateBody, createPromoCodeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
@@ -66,14 +67,14 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
     const body = await request.json();
-    const { salonId, code, promotionId, usageLimit, expiresAt } = body;
 
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
-      );
+    // Server-side validation with Zod schema
+    const validationError = validateBody(createPromoCodeSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const { salonId, code, promotionId, usageLimit, expiresAt } = body;
 
     // Generate code if not provided
     const promoCode = code

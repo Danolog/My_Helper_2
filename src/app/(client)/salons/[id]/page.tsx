@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -562,11 +563,15 @@ export default function SalonProfilePage() {
                     <div className="flex items-start gap-3 py-3 px-2 border rounded-lg hover:border-primary/40 hover:shadow-sm transition-all cursor-pointer">
                       {/* Employee Photo / Avatar */}
                       {emp.photoUrl ? (
-                        <img
-                          src={emp.photoUrl}
-                          alt={`${emp.firstName} ${emp.lastName}`}
-                          className="w-12 h-12 rounded-full object-cover flex-shrink-0"
-                        />
+                        <div className="relative w-12 h-12 flex-shrink-0">
+                          <Image
+                            src={emp.photoUrl}
+                            alt={`${emp.firstName} ${emp.lastName}`}
+                            fill
+                            className="rounded-full object-cover"
+                            sizes="48px"
+                          />
+                        </div>
                       ) : (
                         <div
                           className="w-12 h-12 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0"

@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq, and } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { DEFAULT_VAT_RATE } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import {
   subscriptionPayments,
   salonSubscriptions,
   subscriptionPlans,
   salons,
 } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { DEFAULT_VAT_RATE } from "@/lib/constants";
 
 /**
  * GET /api/subscriptions/payments/[id]/receipt
@@ -21,6 +22,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(

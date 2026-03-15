@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { services, appointments, depositPayments } from "@/lib/schema";
 import { eq, and, not, or, lte, gte, lt, gt } from "drizzle-orm";
 import { timeBlocks } from "@/lib/schema";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { logger } from "@/lib/logger";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
 /**
  * POST /api/deposits/create-session
@@ -14,6 +15,20 @@ import { auth } from "@/lib/auth";
  * For now, it creates a pending payment record and returns a session ID.
  */
 export async function POST(request: Request) {
+  // Rate limit: deposit payment creation is a sensitive operation
+  const ip = getClientIp(request);
+  const rateLimitResult = strictRateLimit.check(ip);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
+    );
+  }
+
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+  const { user } = authResult;
+
   try {
     const body = await request.json();
     const {
@@ -38,16 +53,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Try to get logged-in user ID from session
-    let bookedByUserId: string | null = null;
-    try {
-      const session = await auth.api.getSession({ headers: await headers() });
-      if (session?.user?.id) {
-        bookedByUserId = session.user.id;
-      }
-    } catch {
-      // Not authenticated, continue without user ID
-    }
+    const bookedByUserId = user.id;
 
     if (parseFloat(depositAmount) <= 0) {
       return NextResponse.json(
@@ -186,7 +192,14 @@ export async function POST(request: Request) {
     // For now, return a session with the payment ID as the session reference.
     const sessionId = `dep_session_${depositPayment.id}`;
 
-    console.log(`[Deposit API] Created payment session: ${sessionId} for appointment: ${newAppointment.id}, amount: ${depositAmount} PLN, method: ${paymentMethod || "stripe"}${paymentMethod === "blik" ? `, phone: ${blikPhoneNumber}` : ""}`);
+    logger.info("Deposit payment session created", {
+      sessionId,
+      appointmentId: newAppointment.id,
+      amount: depositAmount,
+      currency: "PLN",
+      paymentMethod: paymentMethod || "stripe",
+      ...(paymentMethod === "blik" ? { blikPhoneNumber } : {}),
+    });
 
     return NextResponse.json({
       success: true,
@@ -205,7 +218,7 @@ export async function POST(request: Request) {
       },
     }, { status: 201 });
   } catch (error) {
-    console.error("[Deposit API] Error creating session:", error);
+    logger.error("Deposit session creation failed", { error });
     return NextResponse.json(
       { success: false, error: "Failed to create deposit payment session" },
       { status: 500 }

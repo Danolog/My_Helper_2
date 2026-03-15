@@ -206,7 +206,8 @@ describe("POST /api/appointments/[id]/materials", () => {
 
     expect(status).toBe(400);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("productId and quantityUsed");
+    expect(body.error).toBe("Validation failed");
+    expect(body.details).toBeDefined();
   });
 
   it("should return 400 when quantityUsed is zero", async () => {

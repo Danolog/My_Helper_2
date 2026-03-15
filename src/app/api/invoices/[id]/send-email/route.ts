@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { invoices, clients } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
 /**
  * POST /api/invoices/[id]/send-email
@@ -24,7 +26,20 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // Rate limit: email sending is a sensitive operation
+  const ip = getClientIp(request);
+  const rateLimitResult = strictRateLimit.check(ip);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
+    );
+  }
+
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(

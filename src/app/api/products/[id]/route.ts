@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { products, notifications } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
+import { validateBody, updateProductSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
@@ -112,6 +113,13 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
+
+    // Server-side validation with Zod schema
+    const validationError = validateBody(updateProductSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
+
     const { name, category, quantity, minQuantity, unit, pricePerUnit } = body;
 
     const updateData: Record<string, unknown> = {};

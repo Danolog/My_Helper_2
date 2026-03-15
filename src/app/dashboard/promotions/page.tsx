@@ -55,6 +55,7 @@ import { useTabSync } from "@/hooks/use-tab-sync";
 import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useSalonId } from "@/hooks/use-salon-id";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface Promotion {
   id: string;
@@ -222,41 +223,47 @@ export default function PromotionsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Promotion | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const fetchPromotions = useCallback(async () => {
+  const fetchPromotions = useCallback(async (signal?: AbortSignal) => {
     if (!salonId) return;
     try {
       setLoading(true);
-      const res = await fetch(`/api/promotions?salonId=${salonId}`);
+      const res = await fetch(`/api/promotions?salonId=${salonId}`, signal ? { signal } : {});
       const data = await res.json();
       if (data.success) {
         setPromotionsList(data.data);
       } else {
         toast.error("Nie udalo sie pobrac promocji");
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       toast.error("Blad podczas pobierania promocji");
     } finally {
       setLoading(false);
     }
   }, [salonId]);
 
-  const fetchServices = useCallback(async () => {
+  const fetchServices = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(`/api/services?salonId=${salonId}&activeOnly=true`);
+      const res = await fetch(`/api/services?salonId=${salonId}&activeOnly=true`, signal ? { signal } : {});
       const data = await res.json();
       if (data.success) {
         setServicesList(data.data);
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error("Failed to fetch services for promotions");
     }
-  }, []);
+  }, [salonId]);
 
   useEffect(() => {
-    if (session) {
-      fetchPromotions();
-      fetchServices();
-    }
+    if (!session) return;
+
+    const abortController = new AbortController();
+
+    fetchPromotions(abortController.signal);
+    fetchServices(abortController.signal);
+
+    return () => abortController.abort();
   }, [session, fetchPromotions, fetchServices]);
 
   // Cross-tab sync: refetch when another tab modifies promotions
@@ -627,19 +634,16 @@ export default function PromotionsPage() {
       {loading ? (
         <div className="text-center py-12 text-muted-foreground">Ladowanie promocji...</div>
       ) : promotionsList.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Tag className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-            <h3 className="text-lg font-semibold mb-2">Brak promocji</h3>
-            <p className="text-muted-foreground mb-4">
-              Utworz pierwsza promocje, aby przyciagnac klientow
-            </p>
-            <Button onClick={openCreateDialog}>
-              <Plus className="w-4 h-4 mr-2" />
-              Utworz promocje
-            </Button>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Tag}
+          title="Brak promocji"
+          description="Utworz pierwsza promocje, aby przyciagnac klientow."
+          action={{
+            label: "Utworz promocje",
+            icon: Plus,
+            onClick: openCreateDialog,
+          }}
+        />
       ) : (
         <div className="space-y-4">
           {promotionsList.map((promo) => {

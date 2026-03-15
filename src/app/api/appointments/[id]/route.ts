@@ -4,6 +4,7 @@ import { appointments, clients, employees, services, notifications, depositPayme
 import { eq, and, not, or, lte, gte } from "drizzle-orm";
 import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
 import { notifyWaitingList } from "@/lib/waiting-list";
+import { validateBody, updateAppointmentSchema } from "@/lib/api-validation";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
@@ -85,6 +86,13 @@ export async function PUT(
     }
 
     const body = await request.json();
+
+    // Server-side validation with Zod schema
+    const validationError = validateBody(updateAppointmentSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
+
     const { startTime, endTime, employeeId, clientId, serviceId, notes, status, depositAmount, depositPaid } = body;
 
     // Check if appointment exists

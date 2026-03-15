@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -177,12 +178,15 @@ export default function EmployeeProfilePage() {
           <div className="flex items-start gap-4">
             {/* Photo / Avatar */}
             {employee.photoUrl ? (
-              <img
-                src={employee.photoUrl}
-                alt={`${employee.firstName} ${employee.lastName}`}
-                className="w-20 h-20 rounded-full object-cover flex-shrink-0"
-                data-testid="employee-photo"
-              />
+              <div className="relative w-20 h-20 flex-shrink-0" data-testid="employee-photo">
+                <Image
+                  src={employee.photoUrl}
+                  alt={`${employee.firstName} ${employee.lastName}`}
+                  fill
+                  className="rounded-full object-cover"
+                  sizes="80px"
+                />
+              </div>
             ) : (
               <div
                 className="w-20 h-20 rounded-full flex items-center justify-center text-white font-bold text-xl flex-shrink-0"
@@ -301,16 +305,20 @@ export default function EmployeeProfilePage() {
                     >
                       <div className="aspect-square relative">
                         {photo.afterPhotoUrl ? (
-                          <img
+                          <Image
                             src={photo.afterPhotoUrl}
                             alt={photo.description || "Portfolio photo"}
-                            className="w-full h-full object-cover"
+                            fill
+                            className="object-cover"
+                            sizes="(max-width: 768px) 50vw, 25vw"
                           />
                         ) : photo.beforePhotoUrl ? (
-                          <img
+                          <Image
                             src={photo.beforePhotoUrl}
                             alt={photo.description || "Portfolio photo"}
-                            className="w-full h-full object-cover"
+                            fill
+                            className="object-cover"
+                            sizes="(max-width: 768px) 50vw, 25vw"
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">

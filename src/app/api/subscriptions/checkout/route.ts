@@ -1,11 +1,12 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { subscriptionPlans, salonSubscriptions, subscriptionPayments } from "@/lib/schema";
 import { getStripe, isStripePricesConfigured } from "@/lib/stripe";
-import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * Map plan slugs to their corresponding Stripe price env variables.
@@ -65,10 +66,10 @@ async function createSimulatedSubscription(
       .returning();
 
     subscription = updated;
-    // eslint-disable-next-line no-console
-    console.log(
-      `[Subscriptions API] Reactivated ${existingReusable[0].status} subscription ${existingReusable[0].id} to active`,
-    );
+    logger.info("Reactivated subscription to active", {
+      previousStatus: existingReusable[0].status,
+      subscriptionId: existingReusable[0].id,
+    });
   } else {
     // Create new active subscription
     const [created] = await db
@@ -116,15 +117,20 @@ async function createSimulatedSubscription(
  * Response:     { url: string }
  */
 export async function POST(request: Request) {
+  // Rate limit: payment checkout is a sensitive operation
+  const ip = getClientIp(request);
+  const rateLimitResult = strictRateLimit.check(ip);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
+    );
+  }
+
   try {
-    // Authenticate the user via Better Auth session
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 },
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+    const { user } = authResult;
 
     const salonId = await getUserSalonId();
     if (!salonId) {
@@ -221,10 +227,10 @@ export async function POST(request: Request) {
         paidAt: now,
       });
 
-      // eslint-disable-next-line no-console
-      console.log(
-        `[Subscriptions API] Upgraded subscription ${existingSub.id} to plan ${plan.slug}`,
-      );
+      logger.info("Subscription upgraded", {
+        subscriptionId: existingSub.id,
+        planSlug: plan.slug,
+      });
 
       return NextResponse.json({
         success: true,
@@ -281,19 +287,19 @@ export async function POST(request: Request) {
           line_items: [lineItem],
           success_url: `${origin}/dashboard/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${origin}/pricing`,
-          customer_email: session.user.email,
+          customer_email: user.email,
           metadata: {
             salonId: salonId,
             planId: plan.id,
             planSlug: plan.slug,
-            userId: session.user.id,
+            userId: user.id,
           },
         });
 
-        // eslint-disable-next-line no-console
-        console.log(
-          `[Subscriptions API] Stripe Checkout created: ${checkoutSession.id} for plan ${plan.slug}`,
-        );
+        logger.info("Stripe Checkout session created", {
+          sessionId: checkoutSession.id,
+          planSlug: plan.slug,
+        });
 
         return NextResponse.json({
           success: true,
@@ -301,18 +307,16 @@ export async function POST(request: Request) {
         });
       } catch (stripeError) {
         // Stripe call failed -- fall through to dev-mode simulation
-        console.warn(
-          "[Subscriptions API] Stripe Checkout creation failed, using dev fallback:",
-          stripeError instanceof Error ? stripeError.message : stripeError,
-        );
+        logger.warn("Stripe Checkout creation failed, using dev fallback", {
+          error: stripeError instanceof Error ? stripeError.message : stripeError,
+        });
       }
     }
 
     // Dev-mode fallback: create a simulated subscription directly in DB
-    // eslint-disable-next-line no-console
-    console.log(
-      `[Subscriptions API] Creating simulated subscription for plan ${plan.slug} (dev fallback)`,
-    );
+    logger.info("Creating simulated subscription (dev fallback)", {
+      planSlug: plan.slug,
+    });
 
     await createSimulatedSubscription(plan.id, plan.priceMonthly, salonId);
 
@@ -321,7 +325,7 @@ export async function POST(request: Request) {
       url: "/dashboard/subscription?activated=true",
     });
   } catch (error) {
-    console.error("[Subscriptions API] Checkout error:", error);
+    logger.error("Subscription checkout error", { error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie utworzyc sesji platnosci" },
       { status: 500 },

@@ -82,6 +82,9 @@ export async function POST(request: Request) {
       error?: string | undefined;
     }> = [];
 
+    // Track appointment IDs that were successfully sent for batch update
+    const idsToMarkSent: string[] = [];
+
     for (const appt of upcomingAppointments) {
       // Skip if no client phone
       if (!appt.clientPhone || !appt.clientId) {
@@ -131,11 +134,8 @@ export async function POST(request: Request) {
       });
 
       if (smsResult.success) {
-        // Mark reminder as sent
-        await db
-          .update(appointments)
-          .set({ reminderSentAt: new Date() })
-          .where(eq(appointments.id, appt.appointmentId));
+        // Collect for batch update instead of individual UPDATE
+        idsToMarkSent.push(appt.appointmentId);
       }
 
       results.push({
@@ -144,6 +144,14 @@ export async function POST(request: Request) {
         success: smsResult.success,
         error: smsResult.error,
       });
+    }
+
+    // Batch-update all successfully sent appointments in a single query instead of N individual UPDATEs
+    if (idsToMarkSent.length > 0) {
+      await db
+        .update(appointments)
+        .set({ reminderSentAt: new Date() })
+        .where(inArray(appointments.id, idsToMarkSent));
     }
 
     const sent = results.filter((r) => r.success).length;

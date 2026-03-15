@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { clients, notifications, salons } from "@/lib/schema";
-import { eq, sql, and, isNotNull } from "drizzle-orm";
+import { eq, sql, and, isNotNull, inArray } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
 
 interface BirthdaySettings {
@@ -170,29 +170,52 @@ export async function POST(request: Request) {
       });
     }
 
-    // Check for existing birthday notifications sent today for this salon
+    // Batch-check for existing birthday notifications sent today for this salon
+    // (single query instead of N individual checks per client)
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayStartISO = todayStart.toISOString();
 
-    const createdNotifications = [];
+    const clientIds = birthdayClients.map((c) => c.id);
+    const alreadyNotifiedIds = new Set<string>();
 
-    for (const client of birthdayClients) {
-      // Check if we already sent a birthday notification to this client today
-      const [existing] = await db
-        .select({ id: notifications.id })
+    if (clientIds.length > 0) {
+      const existingNotifications = await db
+        .select({ clientId: notifications.clientId })
         .from(notifications)
         .where(
           and(
             eq(notifications.salonId, salonId),
-            eq(notifications.clientId, client.id),
+            inArray(notifications.clientId, clientIds),
             sql`${notifications.message} LIKE '%urodzin%'`,
             sql`${notifications.createdAt} >= ${todayStartISO}::timestamp`
           )
-        )
-        .limit(1);
+        );
+      for (const row of existingNotifications) {
+        if (row.clientId) {
+          alreadyNotifiedIds.add(row.clientId);
+        }
+      }
+    }
 
-      if (existing) {
+    // Build notification values for batch insert
+    const notificationValues: Array<{
+      salonId: string;
+      clientId: string;
+      type: string;
+      message: string;
+      status: string;
+      sentAt: Date;
+    }> = [];
+    // Track client metadata for the response
+    const clientMetadata: Array<{
+      clientId: string;
+      clientName: string;
+      clientPhone: string | null;
+    }> = [];
+
+    for (const client of birthdayClients) {
+      if (alreadyNotifiedIds.has(client.id)) {
         console.log(
           `[Birthday Notifications] Already sent birthday notification to ${client.firstName} ${client.lastName} today, skipping`
         );
@@ -221,34 +244,49 @@ export async function POST(request: Request) {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
       message += ` Zarezerwuj wizyte: ${appUrl}/salons/${salonId}/book`;
 
-      // Create notification - send via SMS if phone is available, otherwise email
+      // Determine notification channel - send via SMS if phone is available, otherwise email
       const notificationType = client.phone
         ? "sms"
         : client.email
           ? "email"
           : "push";
 
-      const [notification] = await db
-        .insert(notifications)
-        .values({
-          salonId,
-          clientId: client.id,
-          type: notificationType,
-          message,
-          status: "sent",
-          sentAt: new Date(),
-        })
-        .returning();
+      notificationValues.push({
+        salonId,
+        clientId: client.id,
+        type: notificationType,
+        message,
+        status: "sent",
+        sentAt: new Date(),
+      });
 
-      console.log(
-        `[Birthday Notifications] Sent birthday notification to ${client.firstName} ${client.lastName} (${notificationType}): ${message}`
-      );
-
-      createdNotifications.push({
-        ...notification,
+      clientMetadata.push({
+        clientId: client.id,
         clientName: `${client.firstName} ${client.lastName}`,
         clientPhone: client.phone,
       });
+
+      console.log(
+        `[Birthday Notifications] Queued birthday notification for ${client.firstName} ${client.lastName} (${notificationType})`
+      );
+    }
+
+    // Batch-insert all notifications in a single query instead of N individual INSERTs
+    const createdNotifications: Array<Record<string, unknown>> = [];
+    if (notificationValues.length > 0) {
+      const inserted = await db
+        .insert(notifications)
+        .values(notificationValues)
+        .returning();
+
+      for (let i = 0; i < inserted.length; i++) {
+        const meta = clientMetadata[i]!;
+        createdNotifications.push({
+          ...inserted[i],
+          clientName: meta.clientName,
+          clientPhone: meta.clientPhone,
+        });
+      }
     }
 
     return NextResponse.json({

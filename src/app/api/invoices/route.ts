@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { invoices, clients, appointments, employees, services, salons } from "@/lib/schema";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * GET /api/invoices
@@ -18,20 +17,14 @@ import { headers } from "next/headers";
  */
 export async function GET(request: NextRequest) {
   try {
-    // Verify authentication
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
     // Resolve salon from authenticated user
     const [salon] = await db
       .select({ id: salons.id })
       .from(salons)
-      .where(eq(salons.ownerId, session.user.id))
+      .where(eq(salons.ownerId, authResult.user.id))
       .limit(1);
 
     if (!salon) {

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { Star } from "lucide-react";
 
 export default function AuthLayout({
@@ -8,12 +9,13 @@ export default function AuthLayout({
   return (
     <div className="flex min-h-[calc(100vh-8rem)]">
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src="/auth-salon.jpg"
           alt=""
-          className="absolute inset-0 w-full h-full object-cover"
+          fill
+          className="object-cover"
           aria-hidden="true"
+          priority
         />
         <div
           className="absolute inset-0"

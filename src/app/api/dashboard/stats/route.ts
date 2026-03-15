@@ -9,8 +9,7 @@ import {
   workSchedules,
 } from "@/lib/schema";
 import { eq, and, gte, lte, not, inArray } from "drizzle-orm";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * Compute date boundaries in the Europe/Warsaw timezone.
@@ -50,16 +49,11 @@ function getWarsawDateBoundaries() {
 // GET /api/dashboard/stats - Dashboard overview data
 // Returns: today's appointments, employees working today, cancellation stats, and 30-day stats
 export async function GET(request: Request) {
-  try {
-    // Verify authentication
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 }
-      );
-    }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+  const { user } = authResult;
 
+  try {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -74,7 +68,7 @@ export async function GET(request: Request) {
     const [salon] = await db
       .select({ id: salons.id })
       .from(salons)
-      .where(and(eq(salons.id, salonId), eq(salons.ownerId, session.user.id)))
+      .where(and(eq(salons.id, salonId), eq(salons.ownerId, user.id)))
       .limit(1);
 
     if (!salon) {

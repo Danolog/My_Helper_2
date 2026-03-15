@@ -44,6 +44,7 @@ import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { useSalonId } from "@/hooks/use-salon-id";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface Client {
   id: string;
@@ -183,7 +184,7 @@ export default function ClientsPage() {
       lastVisitFrom: string;
       lastVisitTo: string;
       hasAllergies: boolean;
-    }) => {
+    }, signal?: AbortSignal) => {
       if (!salonId) return;
       try {
         const params = new URLSearchParams({
@@ -211,13 +212,15 @@ export default function ClientsPage() {
           params.set("hasAllergies", "true");
         }
 
-        const res = await fetch(`/api/clients?${params.toString()}`);
+        const res = await fetch(`/api/clients?${params.toString()}`, signal ? { signal } : {});
         const data = await res.json();
         if (data.success) {
           setClients(data.data);
           setFetchError(null);
         }
       } catch (error) {
+        // Silently ignore aborted requests (component unmounted or deps changed)
+        if (error instanceof Error && error.name === "AbortError") return;
         console.error("Failed to fetch clients:", error);
         const errInfo = getNetworkErrorMessage(error);
         setFetchError(errInfo);
@@ -227,12 +230,16 @@ export default function ClientsPage() {
   );
 
   useEffect(() => {
+    const abortController = new AbortController();
+
     async function loadData() {
       setLoading(true);
-      await fetchClients();
+      await fetchClients(undefined, abortController.signal);
       setLoading(false);
     }
     loadData();
+
+    return () => abortController.abort();
   }, [fetchClients]);
 
   // Cross-tab sync: refetch when another tab modifies clients
@@ -764,48 +771,35 @@ export default function ClientsPage() {
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
         </div>
       ) : clients.length === 0 && !hasActiveFilters ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <UserPlus className="w-12 h-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground mb-4">
-              Brak klientow. Dodaj pierwszego klienta, aby rozpoczac.
-            </p>
-            <Button
-              onClick={() => setDialogOpen(true)}
-              data-testid="empty-state-add-client-btn"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Dodaj klienta
-            </Button>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={UserPlus}
+          title="Brak klientow"
+          description="Dodaj pierwszego klienta, aby rozpoczac."
+          action={{
+            label: "Dodaj klienta",
+            icon: Plus,
+            onClick: () => setDialogOpen(true),
+            "data-testid": "empty-state-add-client-btn",
+          }}
+        />
       ) : clients.length === 0 && hasActiveFilters ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Filter className="w-12 h-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground mb-2" data-testid="no-filter-results">
-              Brak klientow pasujacych do wybranych filtrow
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleClearFilters}
-              className="mt-2"
-            >
-              <X className="h-4 w-4 mr-1" />
-              Wyczysc filtry
-            </Button>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Filter}
+          title="Brak wynikow"
+          description="Brak klientow pasujacych do wybranych filtrow."
+          action={{
+            label: "Wyczysc filtry",
+            icon: X,
+            onClick: handleClearFilters,
+            variant: "outline",
+          }}
+        />
       ) : filteredClients.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Search className="w-12 h-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">
-              Nie znaleziono klientow pasujacych do &quot;{searchQuery}&quot;
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Search}
+          title="Brak wynikow wyszukiwania"
+          description={`Nie znaleziono klientow pasujacych do "${searchQuery}"`}
+        />
       ) : (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground mb-2" data-testid="clients-count-text">

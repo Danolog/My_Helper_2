@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { clients, appointments, notifications, salons } from "@/lib/schema";
-import { eq, sql, and, lt, isNull, or } from "drizzle-orm";
+import { eq, sql, and, lt, isNull, or, inArray } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
 
 interface WeMissYouSettings {
@@ -223,22 +223,23 @@ export async function POST(request: Request) {
       });
     }
 
-    // Spam guard: calculate the date threshold (7 days ago)
+    // Spam guard: batch-check which clients already received a "we miss you" notification recently
+    // (single query instead of N individual checks per client)
     const spamGuardDate = new Date();
     spamGuardDate.setDate(spamGuardDate.getDate() - SPAM_GUARD_DAYS);
     const spamGuardISO = spamGuardDate.toISOString();
 
-    const createdNotifications = [];
+    const clientIds = inactiveClients.map((c) => c.id);
+    const recentlyNotifiedIds = new Set<string>();
 
-    for (const client of inactiveClients) {
-      // Check if we already sent a "we miss you" notification to this client recently
-      const [existing] = await db
-        .select({ id: notifications.id })
+    if (clientIds.length > 0) {
+      const recentNotifications = await db
+        .select({ clientId: notifications.clientId })
         .from(notifications)
         .where(
           and(
             eq(notifications.salonId, salonId),
-            eq(notifications.clientId, client.id),
+            inArray(notifications.clientId, clientIds),
             or(
               sql`${notifications.message} ILIKE '%tesknimy%'`,
               sql`${notifications.message} ILIKE '%tęsknimy%'`,
@@ -247,10 +248,32 @@ export async function POST(request: Request) {
             ),
             sql`${notifications.createdAt} >= ${spamGuardISO}::timestamp`
           )
-        )
-        .limit(1);
+        );
+      for (const row of recentNotifications) {
+        if (row.clientId) {
+          recentlyNotifiedIds.add(row.clientId);
+        }
+      }
+    }
 
-      if (existing) {
+    // Build notification values for batch insert
+    const notificationValues: Array<{
+      salonId: string;
+      clientId: string;
+      type: string;
+      message: string;
+      status: string;
+      sentAt: Date;
+    }> = [];
+    // Track client metadata for the response
+    const clientMetadataList: Array<{
+      clientId: string;
+      clientName: string;
+      clientPhone: string | null;
+    }> = [];
+
+    for (const client of inactiveClients) {
+      if (recentlyNotifiedIds.has(client.id)) {
         console.log(
           `[We Miss You Notifications] Already sent notification to ${client.firstName} ${client.lastName} in the last ${SPAM_GUARD_DAYS} days, skipping`
         );
@@ -270,34 +293,49 @@ export async function POST(request: Request) {
         message += ` Zarezerwuj teraz: ${appUrl}/salons/${salonId}/book`;
       }
 
-      // Create notification - send via SMS if phone is available, otherwise email, fallback to push
+      // Determine notification channel - send via SMS if phone is available, otherwise email, fallback to push
       const notificationType = client.phone
         ? "sms"
         : client.email
           ? "email"
           : "push";
 
-      const [notification] = await db
-        .insert(notifications)
-        .values({
-          salonId,
-          clientId: client.id,
-          type: notificationType,
-          message,
-          status: "sent",
-          sentAt: new Date(),
-        })
-        .returning();
+      notificationValues.push({
+        salonId,
+        clientId: client.id,
+        type: notificationType,
+        message,
+        status: "sent",
+        sentAt: new Date(),
+      });
 
-      console.log(
-        `[We Miss You Notifications] Sent notification to ${client.firstName} ${client.lastName} (${notificationType}): ${message}`
-      );
-
-      createdNotifications.push({
-        ...notification,
+      clientMetadataList.push({
+        clientId: client.id,
         clientName: `${client.firstName} ${client.lastName}`,
         clientPhone: client.phone,
       });
+
+      console.log(
+        `[We Miss You Notifications] Queued notification for ${client.firstName} ${client.lastName} (${notificationType})`
+      );
+    }
+
+    // Batch-insert all notifications in a single query instead of N individual INSERTs
+    const createdNotifications: Array<Record<string, unknown>> = [];
+    if (notificationValues.length > 0) {
+      const inserted = await db
+        .insert(notifications)
+        .values(notificationValues)
+        .returning();
+
+      for (let i = 0; i < inserted.length; i++) {
+        const meta = clientMetadataList[i]!;
+        createdNotifications.push({
+          ...inserted[i],
+          clientName: meta.clientName,
+          clientPhone: meta.clientPhone,
+        });
+      }
     }
 
     return NextResponse.json({

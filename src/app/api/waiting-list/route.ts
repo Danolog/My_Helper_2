@@ -10,10 +10,15 @@ import {
 } from "@/lib/schema";
 import { eq, and, desc, isNull, isNotNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { validateBody, createWaitingListSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/waiting-list - List waiting list entries for the salon owner's salon
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -123,6 +128,9 @@ export async function GET(request: Request) {
 // POST /api/waiting-list - Add a client to the waiting list (staff action)
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -148,14 +156,14 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { clientId, serviceId, preferredEmployeeId, preferredDate } = body;
 
-    if (!clientId) {
-      return NextResponse.json(
-        { success: false, error: "clientId jest wymagane" },
-        { status: 400 }
-      );
+    // Server-side validation with Zod schema
+    const validationError = validateBody(createWaitingListSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const { clientId, serviceId, preferredEmployeeId, preferredDate } = body;
 
     // Verify the client belongs to this salon
     const [client] = await db

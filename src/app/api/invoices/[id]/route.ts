@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { invoices, clients, appointments, employees, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * GET /api/invoices/[id]
@@ -15,6 +16,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(

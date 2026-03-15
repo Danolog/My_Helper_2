@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { TimeGrid } from "@/components/calendar/time-grid";
 import { WeekTimeGrid } from "@/components/calendar/week-time-grid";
-import { RescheduleDialog } from "@/components/calendar/reschedule-dialog";
 import { CalendarLegend } from "@/components/calendar/calendar-legend";
 import { getStartOfWeek, getEndOfWeek } from "@/lib/date-utils";
 import { ChevronLeft, ChevronRight, Calendar, Lock, Palette, Users, Plus, Ban } from "lucide-react";
@@ -18,12 +18,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { NewAppointmentDialog } from "@/components/appointments/new-appointment-dialog";
-import { CancelAppointmentDialog } from "@/components/appointments/cancel-appointment-dialog";
-import { CompleteAppointmentDialog } from "@/components/appointments/complete-appointment-dialog";
-import { BlockTimeDialog } from "@/components/calendar/block-time-dialog";
 import type { Appointment, CalendarEvent, CalendarView, Employee, TimeBlock, WorkSchedule } from "@/types/calendar";
 import { useTabSync } from "@/hooks/use-tab-sync";
+
+// Lazy-load dialog components (only rendered when user triggers an action)
+const RescheduleDialog = dynamic(
+  () => import("@/components/calendar/reschedule-dialog").then((m) => ({ default: m.RescheduleDialog })),
+  { ssr: false },
+);
+
+const NewAppointmentDialog = dynamic(
+  () => import("@/components/appointments/new-appointment-dialog").then((m) => ({ default: m.NewAppointmentDialog })),
+  { ssr: false },
+);
+
+const CancelAppointmentDialog = dynamic(
+  () => import("@/components/appointments/cancel-appointment-dialog").then((m) => ({ default: m.CancelAppointmentDialog })),
+  { ssr: false },
+);
+
+const CompleteAppointmentDialog = dynamic(
+  () => import("@/components/appointments/complete-appointment-dialog").then((m) => ({ default: m.CompleteAppointmentDialog })),
+  { ssr: false },
+);
+
+const BlockTimeDialog = dynamic(
+  () => import("@/components/calendar/block-time-dialog").then((m) => ({ default: m.BlockTimeDialog })),
+  { ssr: false },
+);
 
 export default function CalendarPage() {
   const { data: session, isPending } = useSession();

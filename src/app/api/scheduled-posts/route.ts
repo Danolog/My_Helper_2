@@ -1,5 +1,4 @@
-import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isProPlan } from "@/lib/subscription";
 import { db } from "@/lib/db";
 import { scheduledPosts } from "@/lib/schema";
@@ -34,10 +33,8 @@ const createSchema = z.object({
 
 // GET - List all scheduled posts for the salon
 export async function GET() {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
   const salonId = await getUserSalonId();
   if (!salonId) {
@@ -68,10 +65,8 @@ export async function GET() {
 
 // POST - Create a new scheduled post
 export async function POST(req: Request) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
   const salonId = await getUserSalonId();
   if (!salonId) {

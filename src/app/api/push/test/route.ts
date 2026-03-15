@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { sendPushNotification } from "@/lib/push";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
 /**
  * POST /api/push/test
@@ -9,16 +9,22 @@ import { sendPushNotification } from "@/lib/push";
  * Send a test push notification to the authenticated user.
  * Used for verifying push notification setup.
  */
-export async function POST() {
-  try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+export async function POST(request: Request) {
+  // Rate limit: push notification testing is a sensitive operation
+  const ip = getClientIp(request);
+  const rateLimitResult = strictRateLimit.check(ip);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
+    );
+  }
 
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+  const { user } = authResult;
+
+  try {
     // We need a salonId for the notification record.
     // For test notifications, use a placeholder or find the user's salon.
     const { db } = await import("@/lib/db");
@@ -33,7 +39,7 @@ export async function POST() {
       );
     }
 
-    const result = await sendPushNotification(session.user.id, {
+    const result = await sendPushNotification(user.id, {
       title: "Test powiadomienia push",
       body: "To jest testowe powiadomienie push z MyHelper. Dzialasz! 🎉",
       tag: "test-notification",

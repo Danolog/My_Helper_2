@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointments, clients, employees, services, salons } from "@/lib/schema";
 import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
-import { sendAppointmentReminderSms } from "@/lib/sms";
 import { requireCronSecret } from "@/lib/auth-middleware";
+import { logger } from "@/lib/logger";
+import { sendAppointmentReminderSms } from "@/lib/sms";
 
 /**
  * POST /api/cron/sms-reminders
@@ -32,8 +33,11 @@ export async function POST(request: Request) {
     const windowStart = new Date(now.getTime() + 30 * 60 * 1000); // 30 min from now
     const windowEnd = new Date(now.getTime() + 90 * 60 * 1000);   // 90 min from now
 
-    console.log(`[SMS Reminders] Running at ${now.toISOString()}`);
-    console.log(`[SMS Reminders] Looking for appointments between ${windowStart.toISOString()} and ${windowEnd.toISOString()}`);
+    logger.info("SMS reminders cron started", {
+      timestamp: now.toISOString(),
+      windowStart: windowStart.toISOString(),
+      windowEnd: windowEnd.toISOString(),
+    });
 
     // Find appointments in the window that haven't received a 1h reminder
     const upcomingAppointments = await db
@@ -67,7 +71,9 @@ export async function POST(request: Request) {
         )
       );
 
-    console.log(`[SMS Reminders] Found ${upcomingAppointments.length} appointments needing 1h reminder`);
+    logger.info("Appointments found for SMS reminder", {
+      count: upcomingAppointments.length,
+    });
 
     const results: Array<{
       appointmentId: string;
@@ -76,13 +82,19 @@ export async function POST(request: Request) {
       error?: string | undefined;
     }> = [];
 
+    // Track appointment IDs that should be marked as sent after processing
+    const idsToMarkSent: string[] = [];
+
     for (const appt of upcomingAppointments) {
       const clientName = `${appt.clientFirstName} ${appt.clientLastName}`;
       const employeeName = `${appt.employeeFirstName} ${appt.employeeLastName}`;
       const serviceName = appt.serviceName || "wizyta";
 
       if (!appt.clientPhone) {
-        console.log(`[SMS Reminders] Skipping appointment ${appt.appointmentId} - client ${clientName} has no phone number`);
+        logger.debug("Skipping SMS reminder - client has no phone number", {
+          appointmentId: appt.appointmentId,
+          clientName,
+        });
         results.push({
           appointmentId: appt.appointmentId,
           clientName,
@@ -105,14 +117,15 @@ export async function POST(request: Request) {
           clientId: appt.clientId,
         });
 
-        // Mark reminder as sent regardless of SMS delivery status
-        // to prevent retry loops (the notification is logged to DB either way)
-        await db
-          .update(appointments)
-          .set({ reminder1hSentAt: new Date() })
-          .where(eq(appointments.id, appt.appointmentId));
+        // Collect for batch update instead of individual UPDATE
+        // Mark regardless of SMS delivery status to prevent retry loops
+        idsToMarkSent.push(appt.appointmentId);
 
-        console.log(`[SMS Reminders] Reminder sent for appointment ${appt.appointmentId} to ${clientName}: ${smsResult.success ? "OK" : "FAILED"}`);
+        logger.info("SMS reminder sent", {
+          appointmentId: appt.appointmentId,
+          clientName,
+          success: smsResult.success,
+        });
 
         results.push({
           appointmentId: appt.appointmentId,
@@ -121,7 +134,10 @@ export async function POST(request: Request) {
           error: smsResult.error,
         });
       } catch (error) {
-        console.error(`[SMS Reminders] Error processing appointment ${appt.appointmentId}:`, error);
+        logger.error("SMS reminder processing failed", {
+          appointmentId: appt.appointmentId,
+          error,
+        });
         results.push({
           appointmentId: appt.appointmentId,
           clientName,
@@ -131,10 +147,22 @@ export async function POST(request: Request) {
       }
     }
 
+    // Batch-update all processed appointments in a single query instead of N individual UPDATEs
+    if (idsToMarkSent.length > 0) {
+      await db
+        .update(appointments)
+        .set({ reminder1hSentAt: new Date() })
+        .where(inArray(appointments.id, idsToMarkSent));
+    }
+
     const sent = results.filter((r) => r.success).length;
     const failed = results.filter((r) => !r.success).length;
 
-    console.log(`[SMS Reminders] Complete: ${sent} sent, ${failed} failed out of ${upcomingAppointments.length} total`);
+    logger.info("SMS reminders cron completed", {
+      sent,
+      failed,
+      total: upcomingAppointments.length,
+    });
 
     return NextResponse.json({
       success: true,
@@ -150,7 +178,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[SMS Reminders] Fatal error:", error);
+    logger.error("SMS reminders cron fatal error", { error });
     return NextResponse.json(
       { success: false, error: "Failed to process SMS reminders" },
       { status: 500 }
@@ -207,7 +235,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[SMS Reminders] Error checking status:", error);
+    logger.error("SMS reminders status check failed", { error });
     return NextResponse.json(
       { success: false, error: "Failed to check SMS reminder status" },
       { status: 500 }

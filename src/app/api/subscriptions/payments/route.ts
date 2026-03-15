@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq, and, desc, gte, lte } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import {
   subscriptionPayments,
   salonSubscriptions,
   subscriptionPlans,
 } from "@/lib/schema";
-import { eq, and, desc, gte, lte } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * GET /api/subscriptions/payments
@@ -22,6 +23,9 @@ import { getUserSalonId } from "@/lib/get-user-salon";
  */
 export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(

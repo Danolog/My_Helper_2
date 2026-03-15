@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees, employeeServices } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { validateBody, updateEmployeeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/employees/[id] - Get single employee with assigned services
@@ -60,13 +61,26 @@ export async function PUT(
     const { id } = await params;
     const body = await request.json();
 
+    // Server-side validation with Zod schema
+    const validationError = validateBody(updateEmployeeSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
+
     const { firstName, lastName, email, phone, role, isActive, serviceIds } =
       body;
 
-    // Validate required fields
-    if (!firstName?.trim() || !lastName?.trim()) {
+    // Validate required fields for update — at least one of firstName or lastName
+    // must be non-empty when provided
+    if (firstName !== undefined && !firstName?.trim()) {
       return NextResponse.json(
-        { success: false, error: "Imie i nazwisko sa wymagane" },
+        { success: false, error: "Imie nie moze byc puste" },
+        { status: 400 }
+      );
+    }
+    if (lastName !== undefined && !lastName?.trim()) {
+      return NextResponse.json(
+        { success: false, error: "Nazwisko nie moze byc puste" },
         { status: 400 }
       );
     }

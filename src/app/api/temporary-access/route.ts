@@ -4,6 +4,7 @@ import { temporaryAccess, employees, salons } from "@/lib/schema";
 import { eq, and, gt, lt, inArray } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * Available feature names that can be granted temporarily.
@@ -48,6 +49,9 @@ async function cleanupExpiredAccess(): Promise<number> {
 // Query params: userId (optional - filter by user)
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     // Verify the caller is authenticated
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
@@ -135,6 +139,9 @@ export async function GET(request: Request) {
 // Body: { userId, featureName, durationMinutes }
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     // Verify the caller is authenticated and is a salon owner
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
@@ -322,6 +329,9 @@ export async function POST(request: Request) {
 // Body: { grantId } or query param: ?grantId=xxx
 export async function DELETE(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     // Verify the caller is authenticated
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {

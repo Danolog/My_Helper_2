@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointmentMaterials, products, appointments } from "@/lib/schema";
 import { eq, sql } from "drizzle-orm";
+import { validateBody, addAppointmentMaterialSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/appointments/[id]/materials - List materials for an appointment
@@ -69,14 +70,14 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
-    const { productId, quantityUsed, notes } = body;
 
-    if (!productId || !quantityUsed || parseFloat(quantityUsed) <= 0) {
-      return NextResponse.json(
-        { success: false, error: "productId and quantityUsed (> 0) are required" },
-        { status: 400 }
-      );
+    // Server-side validation with Zod schema
+    const validationError = validateBody(addAppointmentMaterialSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const { productId, quantityUsed, notes } = body;
 
     // Verify appointment exists
     const [appointment] = await db

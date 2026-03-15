@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
 import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";
+import { validateBody, updateSalonSchema } from "@/lib/api-validation";
 
 // GET /api/salons/[id] - Get salon details with services, employees, and rating
 export async function GET(
@@ -222,16 +223,14 @@ export async function PUT(
 
     const body = await request.json();
 
-    // Validate name (required)
-    const name = typeof body.name === "string" ? body.name.trim() : "";
-    if (!name || name.length > 100) {
-      return NextResponse.json(
-        { success: false, error: "Nazwa salonu jest wymagana (maks. 100 znakow)" },
-        { status: 400 }
-      );
+    // Server-side validation with Zod schema
+    const validationError = validateBody(updateSalonSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
 
-    // Sanitize optional fields
+    // Sanitize validated fields
+    const name = body.name.trim();
     const phone = typeof body.phone === "string" ? body.phone.trim().slice(0, 20) : null;
     const email = typeof body.email === "string" ? body.email.trim().slice(0, 100) : null;
     const address = typeof body.address === "string" ? body.address.trim().slice(0, 200) : null;

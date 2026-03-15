@@ -54,6 +54,7 @@ import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { useSalonId } from "@/hooks/use-salon-id";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface Product {
   id: string;
@@ -202,16 +203,17 @@ export default function ProductsPage() {
   const [lowStockNotifications, setLowStockNotifications] = useState<LowStockNotification[]>([]);
   const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean; isTimeout: boolean } | null>(null);
 
-  const fetchProducts = useCallback(async () => {
+  const fetchProducts = useCallback(async (signal?: AbortSignal) => {
     if (!salonId) return;
     try {
-      const res = await fetch(`/api/products?salonId=${salonId}`);
+      const res = await fetch(`/api/products?salonId=${salonId}`, signal ? { signal } : {});
       const data = await res.json();
       if (data.success) {
         setProductsData(data.data);
         setFetchError(null);
       }
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error("Failed to fetch products:", error);
       const errInfo = getNetworkErrorMessage(error);
       setFetchError(errInfo);
@@ -220,27 +222,29 @@ export default function ProductsPage() {
     }
   }, [salonId]);
 
-  const fetchCategories = useCallback(async () => {
+  const fetchCategories = useCallback(async (signal?: AbortSignal) => {
     if (!salonId) return;
     try {
       setCategoriesLoading(true);
-      const res = await fetch(`/api/product-categories?salonId=${salonId}`);
+      const res = await fetch(`/api/product-categories?salonId=${salonId}`, signal ? { signal } : {});
       const data = await res.json();
       if (data.success) {
         setCategories(data.data);
       }
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error("Failed to fetch categories:", error);
     } finally {
       setCategoriesLoading(false);
     }
   }, [salonId]);
 
-  const fetchLowStockNotifications = useCallback(async () => {
+  const fetchLowStockNotifications = useCallback(async (signal?: AbortSignal) => {
     if (!salonId) return;
     try {
       const res = await fetch(
-        `/api/notifications?salonId=${salonId}&type=system&limit=10`
+        `/api/notifications?salonId=${salonId}&type=system&limit=10`,
+        signal ? { signal } : {}
       );
       const data = await res.json();
       if (data.success) {
@@ -251,14 +255,19 @@ export default function ProductsPage() {
         setLowStockNotifications(lowStockNotifs);
       }
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error("Failed to fetch notifications:", error);
     }
   }, [salonId]);
 
   useEffect(() => {
-    fetchProducts();
-    fetchCategories();
-    fetchLowStockNotifications();
+    const abortController = new AbortController();
+
+    fetchProducts(abortController.signal);
+    fetchCategories(abortController.signal);
+    fetchLowStockNotifications(abortController.signal);
+
+    return () => abortController.abort();
   }, [fetchProducts, fetchCategories, fetchLowStockNotifications]);
 
   // Cross-tab sync: refetch when another tab modifies products
@@ -769,19 +778,13 @@ export default function ProductsPage() {
 
           {/* Products list */}
           {filteredProducts.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <Package className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-                <p className="text-muted-foreground text-lg font-medium">
-                  {productsData.length === 0 ? "Brak produktow" : "Brak wynikow"}
-                </p>
-                <p className="text-muted-foreground text-sm mt-1">
-                  {productsData.length === 0
-                    ? "Dodaj pierwszy produkt do magazynu"
-                    : "Zmien kryteria wyszukiwania"}
-                </p>
-              </CardContent>
-            </Card>
+            <EmptyState
+              icon={Package}
+              title={productsData.length === 0 ? "Brak produktow" : "Brak wynikow"}
+              description={productsData.length === 0
+                ? "Dodaj pierwszy produkt do magazynu."
+                : "Zmien kryteria wyszukiwania."}
+            />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="products-grid">
               {filteredProducts.map((product) => {

@@ -37,6 +37,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import Image from "next/image";
 import Link from "next/link";
 import {
   Lock,
@@ -1693,16 +1694,20 @@ export default function ServiceDetailPage() {
                 >
                   <div className="aspect-square relative">
                     {photo.afterPhotoUrl ? (
-                      <img
+                      <Image
                         src={photo.afterPhotoUrl}
                         alt={photo.description || "Zdjecie uslugi"}
-                        className="w-full h-full object-cover"
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                       />
                     ) : photo.beforePhotoUrl ? (
-                      <img
+                      <Image
                         src={photo.beforePhotoUrl}
                         alt={photo.description || "Zdjecie uslugi"}
-                        className="w-full h-full object-cover"
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center bg-muted">

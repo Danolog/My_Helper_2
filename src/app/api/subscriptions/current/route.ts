@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { eq, and, desc, inArray } from "drizzle-orm";
-import { db } from "@/lib/db";
-import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 import { alias } from "drizzle-orm/pg-core";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 
 /**
  * GET /api/subscriptions/current
@@ -21,6 +22,9 @@ import { getUserSalonId } from "@/lib/get-user-salon";
  */
 export async function GET() {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
