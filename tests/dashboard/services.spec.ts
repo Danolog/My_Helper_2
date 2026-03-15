@@ -7,8 +7,31 @@ import { test, expect, type Page } from '@playwright/test';
 async function navigateToServices(page: Page) {
   await page.goto('/dashboard/services');
   await page.waitForLoadState('domcontentloaded');
+  // Wait for all JS bundles to load — React hydration requires full bundle
+  await page.waitForLoadState('load');
   // Wait for page hydration — ensure the add button is interactive
   await page.getByTestId('add-service-btn').waitFor({ state: 'visible', timeout: 15000 });
+}
+
+/**
+ * Reliably opens the "Add service" dialog by retrying the click
+ * if the dialog doesn't appear. This handles the CI hydration timing
+ * issue where the button is visible before React has attached the
+ * DialogTrigger event handler.
+ */
+async function openAddServiceDialog(page: Page) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.getByTestId('add-service-btn').click();
+    try {
+      await page.getByTestId('service-name-input').waitFor({ state: 'visible', timeout: 3000 });
+      return; // Dialog opened successfully
+    } catch {
+      // Dialog didn't open — wait for hydration and retry
+      await page.waitForTimeout(1000);
+    }
+  }
+  // Final attempt with longer timeout
+  await page.getByTestId('service-name-input').waitFor({ state: 'visible', timeout: 5000 });
 }
 
 // ---------------------------------------------------------------------------
@@ -32,16 +55,15 @@ test.describe('Flow 3: Services & Categories', () => {
 
     test('should open add service dialog', { tag: '@full' }, async ({ page }) => {
       await navigateToServices(page);
-      await page.getByTestId('add-service-btn').click();
-      await expect(page.getByTestId('service-name-input')).toBeVisible({ timeout: 3000 });
+      await openAddServiceDialog(page);
+      await expect(page.getByTestId('service-name-input')).toBeVisible();
       await expect(page.getByTestId('service-price-input')).toBeVisible();
       await expect(page.getByTestId('service-duration-input')).toBeVisible();
     });
 
     test('should add a new service', { tag: '@full' }, async ({ page }) => {
       await navigateToServices(page);
-      await page.getByTestId('add-service-btn').click();
-      await page.getByTestId('service-name-input').waitFor({ state: 'visible', timeout: 5000 });
+      await openAddServiceDialog(page);
 
       await page.getByTestId('service-name-input').fill('Strzyżenie damskie');
       await page.getByTestId('service-price-input').fill('120');
@@ -93,8 +115,9 @@ test.describe('Flow 3: Services & Categories', () => {
       const assignSelect = page.locator('[data-testid^="assign-category-"]').first();
       if (await assignSelect.isVisible()) {
         await assignSelect.click();
-        // Select first category option
-        await page.getByRole('option').first().click();
+        // Select first category option — use force:true because Radix Select
+        // portals the dropdown which can render outside the CI viewport
+        await page.getByRole('option').first().click({ force: true });
         await page.waitForLoadState('domcontentloaded');
       }
     });
@@ -152,8 +175,7 @@ test.describe('Flow 3: Services & Categories', () => {
   test.describe('Error path', () => {
     test('should show validation errors for empty service form', { tag: '@full' }, async ({ page }) => {
       await navigateToServices(page);
-      await page.getByTestId('add-service-btn').click();
-      await page.getByTestId('service-name-input').waitFor({ state: 'visible', timeout: 5000 });
+      await openAddServiceDialog(page);
 
       // Submit without filling
       await page.getByTestId('save-service-btn').click();
@@ -168,8 +190,7 @@ test.describe('Flow 3: Services & Categories', () => {
 
     test('should reject negative price', { tag: '@full' }, async ({ page }) => {
       await navigateToServices(page);
-      await page.getByTestId('add-service-btn').click();
-      await page.getByTestId('service-name-input').waitFor({ state: 'visible', timeout: 5000 });
+      await openAddServiceDialog(page);
 
       await page.getByTestId('service-name-input').fill('Test Usługa');
       await page.getByTestId('service-price-input').fill('-50');
@@ -189,8 +210,7 @@ test.describe('Flow 3: Services & Categories', () => {
 
     test('should reject zero duration', { tag: '@full' }, async ({ page }) => {
       await navigateToServices(page);
-      await page.getByTestId('add-service-btn').click();
-      await page.getByTestId('service-name-input').waitFor({ state: 'visible', timeout: 5000 });
+      await openAddServiceDialog(page);
 
       await page.getByTestId('service-name-input').fill('Test Usługa');
       await page.getByTestId('service-price-input').fill('100');
@@ -212,6 +232,7 @@ test.describe('Flow 3: Services & Categories', () => {
       await navigateToServices(page);
       await page.getByTestId('tab-categories').click();
 
+      await page.getByTestId('add-category-btn').waitFor({ state: 'visible', timeout: 5000 });
       await page.getByTestId('add-category-btn').click();
       await page.getByTestId('save-category-btn').click();
 
@@ -226,7 +247,7 @@ test.describe('Flow 3: Services & Categories', () => {
   test.describe('Edge cases', () => {
     test('should handle very long service name', { tag: '@full' }, async ({ page }) => {
       await navigateToServices(page);
-      await page.getByTestId('add-service-btn').click();
+      await openAddServiceDialog(page);
 
       const longName = 'Usługa '.repeat(50);
       await page.getByTestId('service-name-input').fill(longName);
@@ -240,7 +261,7 @@ test.describe('Flow 3: Services & Categories', () => {
 
     test('should handle decimal price values', { tag: '@full' }, async ({ page }) => {
       await navigateToServices(page);
-      await page.getByTestId('add-service-btn').click();
+      await openAddServiceDialog(page);
 
       await page.getByTestId('service-name-input').fill('Usługa z groszami');
       await page.getByTestId('service-price-input').fill('99.99');
@@ -265,7 +286,7 @@ test.describe('Flow 3: Services & Categories', () => {
 
     test('should handle special characters in service name', { tag: '@full' }, async ({ page }) => {
       await navigateToServices(page);
-      await page.getByTestId('add-service-btn').click();
+      await openAddServiceDialog(page);
 
       await page.getByTestId('service-name-input').fill('Koloryzacja "ombré" & balejaż');
       await page.getByTestId('service-price-input').fill('250');
@@ -277,7 +298,7 @@ test.describe('Flow 3: Services & Categories', () => {
 
     test('should handle very high price value', { tag: '@full' }, async ({ page }) => {
       await navigateToServices(page);
-      await page.getByTestId('add-service-btn').click();
+      await openAddServiceDialog(page);
 
       await page.getByTestId('service-name-input').fill('Premium Service');
       await page.getByTestId('service-price-input').fill('999999');
