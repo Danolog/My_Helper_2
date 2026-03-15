@@ -7,6 +7,7 @@ import path from "path";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, updateGalleryPhotoSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 type RouteParams = { params: Promise<{ id: string }> };
@@ -125,6 +126,10 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     }
 
     const body = await request.json();
+    const validationError = validateBody(updateGalleryPhotoSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const {
       description,
       techniques,

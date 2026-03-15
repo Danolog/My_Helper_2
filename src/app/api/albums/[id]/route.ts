@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { albums, photoAlbums } from "@/lib/schema";
 import { eq, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, updateAlbumSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/albums/[id] - Get single album with photo count
@@ -59,6 +60,10 @@ export async function PATCH(
     if (isAuthError(authResult)) return authResult;
     const { id } = await params;
     const body = await request.json();
+    const validationError = validateBody(updateAlbumSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const { name, category } = body;
 
     const updateData: Record<string, string | null> = {};

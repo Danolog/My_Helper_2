@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
 import { eq, and, not, lte, gte, or, lt, gt, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, bookPackageSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -22,14 +23,11 @@ export async function POST(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const body = await request.json();
-    const { promotionId, employeeId, clientId, startTime } = body;
-
-    if (!promotionId || !employeeId || !startTime) {
-      return NextResponse.json(
-        { success: false, error: "promotionId, employeeId, and startTime are required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(bookPackageSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { promotionId, employeeId, clientId, startTime } = body;
 
     // Use the authenticated user's ID for tracking who booked
     const bookedByUserId: string | null = authResult.user.id || null;

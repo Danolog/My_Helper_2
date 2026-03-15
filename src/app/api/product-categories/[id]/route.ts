@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { productCategories, products } from "@/lib/schema";
 import { eq, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, updateProductCategorySchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/product-categories/[id] - Get a single category with product count
@@ -62,14 +63,11 @@ export async function PUT(
 
     const { id } = await params;
     const body = await request.json();
-    const { name } = body;
-
-    if (!name?.trim()) {
-      return NextResponse.json(
-        { success: false, error: "name is required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(updateProductCategorySchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { name } = body;
 
     // Get the existing category
     const [existing] = await db

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { employeeServices, employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, employeeAssignmentSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/services/[id]/employee-assignments - List employees assigned to this service
@@ -55,14 +56,11 @@ export async function POST(
 
     const { id: serviceId } = await params;
     const body = await request.json();
-    const { employeeId } = body;
-
-    if (!employeeId) {
-      return NextResponse.json(
-        { success: false, error: "employeeId is required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(employeeAssignmentSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { employeeId } = body;
 
     // Check if already assigned
     const existing = await db

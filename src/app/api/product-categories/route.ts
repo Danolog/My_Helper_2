@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { productCategories, products } from "@/lib/schema";
 import { eq, asc, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, createProductCategorySchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/product-categories - List product categories with product counts
@@ -58,14 +59,11 @@ export async function POST(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const body = await request.json();
-    const { salonId, name } = body;
-
-    if (!salonId || !name?.trim()) {
-      return NextResponse.json(
-        { success: false, error: "salonId and name are required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(createProductCategorySchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { salonId, name } = body;
 
     // Check for duplicate name within salon
     const existing = await db

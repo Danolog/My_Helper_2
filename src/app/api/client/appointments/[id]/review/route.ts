@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { appointments, reviews } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { validateBody, clientReviewSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/client/appointments/[id]/review - Check if a review exists for this appointment
@@ -83,6 +84,10 @@ export async function POST(
 
     // Parse and validate request body
     const body = await request.json();
+    const validationError = validateBody(clientReviewSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const { rating, comment } = body;
 
     // Rating is optional (null for text-only reviews), but if provided must be 1-5

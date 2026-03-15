@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { albums, photoAlbums, galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, albumPhotosSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/albums/[id]/photos - Get all photos in an album
@@ -86,14 +87,11 @@ export async function POST(
     if (isAuthError(authResult)) return authResult;
     const { id } = await params;
     const body = await request.json();
-    const { photoIds } = body;
-
-    if (!photoIds || !Array.isArray(photoIds) || photoIds.length === 0) {
-      return NextResponse.json(
-        { success: false, error: "photoIds array is required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(albumPhotosSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { photoIds } = body;
 
     // Verify album exists
     const [album] = await db

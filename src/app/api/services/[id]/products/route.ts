@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { serviceProducts, products } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, serviceProductLinkSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/services/[id]/products - List products linked to a service (for auto-deduction)
@@ -58,14 +59,11 @@ export async function POST(
 
     const { id: serviceId } = await params;
     const body = await request.json();
-    const { productId, defaultQuantity } = body;
-
-    if (!productId) {
-      return NextResponse.json(
-        { success: false, error: "productId is required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(serviceProductLinkSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { productId, defaultQuantity } = body;
 
     // Check if this product is already linked to this service
     const [existing] = await db

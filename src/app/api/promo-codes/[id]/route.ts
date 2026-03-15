@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, updatePromoCodeSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/promo-codes/:id - Get a single promo code with joined promotion data
@@ -58,6 +59,10 @@ export async function PUT(
     if (isAuthError(authResult)) return authResult;
     const { id } = await params;
     const body = await request.json();
+    const validationError = validateBody(updatePromoCodeSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const { code, promotionId, usageLimit, expiresAt } = body;
 
     // Check that the promo code exists

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { employeeServicePrices, employees, serviceVariants } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, employeePriceSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/services/[id]/employee-prices - List all employee-specific prices for a service
@@ -58,14 +59,11 @@ export async function POST(
 
     const { id: serviceId } = await params;
     const body = await request.json();
-    const { employeeId, variantId, customPrice } = body;
-
-    if (!employeeId || customPrice === undefined || customPrice === null) {
-      return NextResponse.json(
-        { success: false, error: "employeeId and customPrice are required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(employeePriceSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { employeeId, variantId, customPrice } = body;
 
     // Check if an employee price already exists for this employee + service + variant combo
     const conditions = [

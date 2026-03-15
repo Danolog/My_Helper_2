@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, createGalleryPhotoSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/gallery - List gallery photos
@@ -76,6 +77,10 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
     const body = await request.json();
+    const validationError = validateBody(createGalleryPhotoSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const {
       salonId,
       employeeId,
@@ -87,20 +92,6 @@ export async function POST(request: Request) {
       techniques,
       duration,
     } = body;
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!afterPhotoUrl && !beforePhotoUrl) {
-      return NextResponse.json(
-        { success: false, error: "At least one photo URL is required" },
-        { status: 400 }
-      );
-    }
 
     const [newPhoto] = await db
       .insert(galleryPhotos)

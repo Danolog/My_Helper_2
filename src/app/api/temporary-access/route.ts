@@ -5,6 +5,7 @@ import { eq, and, gt, lt, inArray } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, temporaryAccessSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -188,22 +189,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const { userId, featureName, durationMinutes } = body;
-
-    // Validate required fields
-    if (!userId) {
-      return NextResponse.json(
-        { success: false, error: "userId jest wymagane" },
-        { status: 400 }
-      );
+    const validationError = validateBody(temporaryAccessSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
 
-    if (!featureName) {
-      return NextResponse.json(
-        { success: false, error: "featureName jest wymagane" },
-        { status: 400 }
-      );
-    }
+    const userId = body.userId!;
+    const featureName = body.featureName!;
+    const durationMinutes = body.durationMinutes;
 
     if (
       !VALID_FEATURES.includes(featureName as (typeof VALID_FEATURES)[number])

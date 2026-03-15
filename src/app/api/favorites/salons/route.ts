@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { favoriteSalons, salons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { validateBody, favoriteSalonSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/favorites/salons - List favorite salons for authenticated user
@@ -61,14 +62,11 @@ export async function POST(request: Request) {
 
     const userId = session.user.id;
     const body = await request.json();
-    const { salonId } = body;
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
-      );
+    const validationError = validateBody(favoriteSalonSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { salonId } = body;
 
     // Check if salon exists (only need id for existence check)
     const [salon] = await db.select({ id: salons.id }).from(salons).where(eq(salons.id, salonId));

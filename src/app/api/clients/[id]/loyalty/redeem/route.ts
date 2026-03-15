@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import type { LoyaltySettings, RewardTier } from "@/app/api/salons/[id]/loyalty-settings/route";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, loyaltyRedeemSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -31,6 +32,10 @@ export async function POST(
 
     const { id: clientId } = await params;
     const body = await request.json();
+    const validationError = validateBody(loyaltyRedeemSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const { rewardTierId } = body;
 
     const salonId = await getUserSalonId();
@@ -38,13 +43,6 @@ export async function POST(
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
-      );
-    }
-
-    if (!rewardTierId) {
-      return NextResponse.json(
-        { success: false, error: "Nie podano ID nagrody" },
-        { status: 400 }
       );
     }
 

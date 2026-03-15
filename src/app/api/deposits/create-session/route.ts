@@ -4,6 +4,7 @@ import { services, appointments, depositPayments } from "@/lib/schema";
 import { eq, and, not, or, lte, gte, lt, gt } from "drizzle-orm";
 import { timeBlocks } from "@/lib/schema";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, depositCreateSessionSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
@@ -31,6 +32,10 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
+    const validationError = validateBody(depositCreateSessionSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const {
       salonId,
       clientId,
@@ -44,14 +49,6 @@ export async function POST(request: Request) {
       paymentMethod,
       blikPhoneNumber,
     } = body;
-
-    // Validate required fields
-    if (!salonId || !employeeId || !startTime || !endTime || !depositAmount) {
-      return NextResponse.json(
-        { success: false, error: "salonId, employeeId, startTime, endTime, and depositAmount are required" },
-        { status: 400 }
-      );
-    }
 
     const bookedByUserId = user.id;
 

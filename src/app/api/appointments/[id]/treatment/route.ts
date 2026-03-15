@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { treatmentHistory, appointments } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, treatmentSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/treatment - Get treatment record for an appointment
@@ -63,6 +64,10 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json();
+    const validationError = validateBody(treatmentSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const { recipe, techniques, materialsJson, notes } = body;
 
     // Verify appointment exists

@@ -204,7 +204,8 @@ describe("POST /api/work-schedules", () => {
 
     expect(status).toBe(400);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("employeeId is required");
+    expect(body.error).toBe("Validation failed");
+    expect((body as Record<string, unknown>).details).toBeDefined();
   });
 
   it("should return 400 when schedules array is missing", async () => {
@@ -220,7 +221,8 @@ describe("POST /api/work-schedules", () => {
 
     expect(status).toBe(400);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("schedules array is required");
+    expect(body.error).toBe("Validation failed");
+    expect((body as Record<string, unknown>).details).toBeDefined();
   });
 
   it("should return 404 when employee not found", async () => {

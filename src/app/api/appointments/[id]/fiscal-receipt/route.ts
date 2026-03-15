@@ -14,6 +14,7 @@ import { eq, and, count } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, fiscalReceiptSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -96,6 +97,10 @@ export async function POST(
 
     const { id } = await params;
     const body = await request.json().catch(() => ({}));
+    const validationError = validateBody(fiscalReceiptSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const paymentMethod = body.paymentMethod || "cash";
 
     // 1. Fetch appointment with all related data

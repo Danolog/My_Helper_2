@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { albums, photoAlbums } from "@/lib/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, createAlbumSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/albums - List albums for a salon
@@ -58,21 +59,11 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
     const body = await request.json();
+    const validationError = validateBody(createAlbumSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const { salonId, name, category } = body;
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!name || !name.trim()) {
-      return NextResponse.json(
-        { success: false, error: "Album name is required" },
-        { status: 400 }
-      );
-    }
 
     const [newAlbum] = await db
       .insert(albums)

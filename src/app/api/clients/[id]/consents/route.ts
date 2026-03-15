@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { marketingConsents, clients } from "@/lib/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { validateBody, clientConsentsSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 const VALID_CONSENT_TYPES = ["email", "sms", "phone"] as const;
@@ -118,14 +119,11 @@ export async function PUT(
 
   try {
     const body = await request.json();
-    const { consents } = body as { consents: Record<string, boolean> };
-
-    if (!consents || typeof consents !== "object") {
-      return Response.json(
-        { error: "Nieprawidlowe dane zgod - oczekiwano obiektu consents" },
-        { status: 400 }
-      );
+    const validationError = validateBody(clientConsentsSchema, body);
+    if (validationError) {
+      return Response.json(validationError, { status: 400 });
     }
+    const { consents } = body as { consents: Record<string, boolean> };
 
     // Verify client exists
     const [client] = await db

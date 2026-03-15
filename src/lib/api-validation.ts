@@ -446,3 +446,339 @@ export const reviewModerateSchema = z.object({
     message: "Akcja musi byc 'approve' lub 'reject'",
   }),
 });
+
+// ==========================================
+// Salon Schemas
+// ==========================================
+
+export const createSalonSchema = z.object({
+  name: requiredString("Nazwa salonu"),
+  phone: z.string().nullable().optional(),
+  email: emailField,
+  address: z.string().nullable().optional(),
+  industryType: z.enum(["hair_salon", "beauty_salon", "nails", "barbershop", "spa", "medical"], {
+    message: "Nieprawidlowy typ branzy",
+  }).nullable().optional(),
+  ownerId: z.string().nullable().optional(),
+});
+
+export const birthdaySettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  giftType: z.enum(["discount", "product"]).optional(),
+  discountPercentage: z.number().min(0).max(100).optional(),
+  productName: z.string().optional(),
+  customMessage: z.string().optional(),
+  autoSend: z.boolean().optional(),
+});
+
+export const fiscalSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  connectionType: z.enum(["network", "usb", "serial"]).optional(),
+  printerModel: z.string().max(100).optional(),
+  ipAddress: z.string().max(45).optional(),
+  port: z.number().int().min(1).max(65535).optional(),
+  serialPort: z.string().max(50).optional(),
+  baudRate: z.number().optional(),
+  autoprint: z.boolean().optional(),
+  printCopy: z.boolean().optional(),
+  nip: z.string().max(13).optional(),
+  headerLine1: z.string().max(40).optional(),
+  headerLine2: z.string().max(40).optional(),
+  headerLine3: z.string().max(40).optional(),
+});
+
+const rewardTierSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(1, "Nazwa nagrody jest wymagana"),
+  pointsRequired: z.number().int().positive("Wymagane punkty musza byc wieksze od 0"),
+  rewardType: z.enum(["discount", "free_service", "product"]),
+  rewardValue: z.number().positive("Wartosc nagrody musi byc wieksza od 0"),
+  description: z.string().optional().default(""),
+});
+
+export const loyaltySettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  pointsPerCurrencyUnit: z.number().int().min(1).max(100).optional(),
+  currencyUnit: z.number().int().min(1).max(100).optional(),
+  pointsExpiryDays: z.number().int().min(30).max(3650).nullable().optional(),
+  rewardTiers: z.array(rewardTierSchema).optional(),
+});
+
+export const notificationTypeSettingsSchema = z.object({
+  smsReminders: z.boolean().optional(),
+  pushReminders: z.boolean().optional(),
+  birthdayNotifications: z.boolean().optional(),
+  weMissYouNotifications: z.boolean().optional(),
+  paymentConfirmations: z.boolean().optional(),
+});
+
+export const weMissYouSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  inactiveDays: z.number().int().min(1).max(365).optional(),
+  customMessage: z.string().min(1).optional(),
+  includeBookingLink: z.boolean().optional(),
+  autoSend: z.boolean().optional(),
+});
+
+// ==========================================
+// Service Sub-resource Schemas
+// ==========================================
+
+export const createServiceCategorySchema = z.object({
+  salonId: requiredString("Salon ID"),
+  name: requiredString("Nazwa kategorii"),
+  description: z.string().nullable().optional(),
+  sortOrder: z.number().int().nonnegative().optional(),
+});
+
+export const updateServiceCategorySchema = z.object({
+  name: z.string().min(1, "Nazwa kategorii jest wymagana").optional(),
+  description: z.string().nullable().optional(),
+  sortOrder: z.number().int().nonnegative().optional(),
+});
+
+export const employeeAssignmentSchema = z.object({
+  employeeId: requiredString("Pracownik"),
+});
+
+export const employeePriceSchema = z.object({
+  employeeId: requiredString("Pracownik"),
+  variantId: z.string().nullable().optional(),
+  customPrice: z.union([
+    z.string().refine((v) => !isNaN(parseFloat(v)) && parseFloat(v) >= 0, { message: "Cena musi byc nieujemna" }),
+    z.number().nonnegative("Cena musi byc nieujemna"),
+  ]),
+});
+
+export const serviceProductLinkSchema = z.object({
+  productId: requiredString("Produkt"),
+  defaultQuantity: z.union([z.string(), z.number()]).optional(),
+});
+
+export const createServiceVariantSchema = z.object({
+  name: requiredString("Nazwa wariantu"),
+  priceModifier: z.union([z.string(), z.number()]).optional(),
+  durationModifier: z.union([z.string(), z.number()]).optional(),
+});
+
+export const updateServiceVariantSchema = z.object({
+  name: z.string().min(1, "Nazwa wariantu jest wymagana").optional(),
+  priceModifier: z.union([z.string(), z.number()]).optional(),
+  durationModifier: z.union([z.string(), z.number()]).optional(),
+});
+
+// ==========================================
+// Appointment Sub-resource Schemas
+// ==========================================
+
+export const treatmentSchema = z.object({
+  recipe: z.string().nullable().optional(),
+  techniques: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  materialsJson: z.any().optional(),
+});
+
+export const fiscalReceiptSchema = z.object({
+  items: z.array(z.object({
+    name: z.string(),
+    quantity: z.number().positive(),
+    price: z.number().nonnegative(),
+    vatRate: z.string().optional(),
+  })).min(1, "Wymagana co najmniej jedna pozycja"),
+  paymentMethod: z.enum(["cash", "card", "transfer", "mixed"]).optional(),
+  nip: z.string().optional(),
+});
+
+export const invoiceSchema = z.object({
+  buyerName: requiredString("Nazwa nabywcy"),
+  buyerNip: z.string().optional(),
+  buyerAddress: z.string().optional(),
+  items: z.array(z.object({
+    name: z.string(),
+    quantity: z.number().positive(),
+    unitPrice: z.number().nonnegative(),
+    vatRate: z.string().optional(),
+  })).optional(),
+  notes: z.string().nullable().optional(),
+  dueDate: z.string().optional(),
+  paymentMethod: z.string().optional(),
+});
+
+export const bookPackageSchema = z.object({
+  salonId: requiredString("Salon ID"),
+  clientId: requiredString("Klient"),
+  employeeId: requiredString("Pracownik"),
+  serviceId: requiredString("Usluga"),
+  dates: z.array(z.string()).min(1, "Wymagana co najmniej jedna data"),
+  notes: z.string().nullable().optional(),
+});
+
+// ==========================================
+// Client Sub-resource Schemas
+// ==========================================
+
+export const clientConsentsSchema = z.object({
+  marketingEmail: z.boolean().optional(),
+  marketingSms: z.boolean().optional(),
+  marketingPush: z.boolean().optional(),
+});
+
+export const loyaltyRedeemSchema = z.object({
+  tierId: requiredString("Nagroda"),
+  pointsToRedeem: z.number().int().positive("Liczba punktow musi byc wieksza od 0"),
+});
+
+export const clientReviewSchema = z.object({
+  rating: z.number().int().min(1).max(5, "Ocena musi byc od 1 do 5"),
+  comment: z.string().max(2000).optional(),
+});
+
+export const clientWaitingListSchema = z.object({
+  salonId: requiredString("Salon ID"),
+  serviceId: z.string().nullable().optional(),
+  preferredEmployeeId: z.string().nullable().optional(),
+  preferredDate: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+});
+
+// ==========================================
+// Product Category Schemas
+// ==========================================
+
+export const createProductCategorySchema = z.object({
+  salonId: requiredString("Salon ID"),
+  name: requiredString("Nazwa kategorii"),
+});
+
+export const updateProductCategorySchema = z.object({
+  name: z.string().min(1, "Nazwa kategorii jest wymagana").optional(),
+});
+
+// ==========================================
+// Album & Gallery Schemas
+// ==========================================
+
+export const createAlbumSchema = z.object({
+  salonId: requiredString("Salon ID"),
+  name: requiredString("Nazwa albumu"),
+  description: z.string().nullable().optional(),
+});
+
+export const updateAlbumSchema = z.object({
+  name: z.string().min(1, "Nazwa albumu jest wymagana").optional(),
+  description: z.string().nullable().optional(),
+});
+
+export const albumPhotosSchema = z.object({
+  photoIds: z.array(z.string()).min(1, "Wymagane co najmniej jedno zdjecie"),
+});
+
+export const createGalleryPhotoSchema = z.object({
+  salonId: requiredString("Salon ID"),
+  employeeId: z.string().nullable().optional(),
+  imageUrl: requiredString("URL zdjecia"),
+  title: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+export const updateGalleryPhotoSchema = z.object({
+  title: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  tags: z.array(z.string()).optional(),
+  employeeId: z.string().nullable().optional(),
+});
+
+// ==========================================
+// Payment & Subscription Schemas
+// ==========================================
+
+export const depositCreateSessionSchema = z.object({
+  appointmentId: requiredString("Wizyta"),
+  amount: z.number().positive("Kwota musi byc wieksza od 0"),
+  successUrl: z.string().url().optional(),
+  cancelUrl: z.string().url().optional(),
+});
+
+export const depositConfirmSchema = z.object({
+  sessionId: requiredString("ID sesji"),
+});
+
+export const subscriptionCheckoutSchema = z.object({
+  salonId: requiredString("Salon ID"),
+  planId: requiredString("Plan"),
+  successUrl: z.string().url().optional(),
+  cancelUrl: z.string().url().optional(),
+});
+
+export const subscriptionConfirmSchema = z.object({
+  sessionId: requiredString("ID sesji"),
+});
+
+// ==========================================
+// Other Schemas
+// ==========================================
+
+export const commissionRateSchema = z.object({
+  employeeId: requiredString("Pracownik"),
+  commissionRate: z.union([
+    z.string().refine((v) => !isNaN(parseFloat(v)) && parseFloat(v) >= 0 && parseFloat(v) <= 100, { message: "Prowizja musi byc 0-100" }),
+    z.number().min(0).max(100, "Prowizja musi byc 0-100"),
+  ]),
+});
+
+export const favoriteSalonSchema = z.object({
+  salonId: requiredString("Salon ID"),
+});
+
+export const updatePromoCodeSchema = z.object({
+  code: z.string().optional(),
+  promotionId: z.string().nullable().optional(),
+  usageLimit: z.number().int().nonnegative().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const validatePromoCodeSchema = z.object({
+  code: requiredString("Kod promocyjny"),
+  salonId: requiredString("Salon ID"),
+  serviceId: z.string().optional(),
+});
+
+export const pushSubscribeSchema = z.object({
+  endpoint: requiredString("Endpoint"),
+  keys: z.object({
+    p256dh: requiredString("Klucz p256dh"),
+    auth: requiredString("Klucz auth"),
+  }),
+  salonId: z.string().optional(),
+});
+
+export const pushUnsubscribeSchema = z.object({
+  endpoint: requiredString("Endpoint"),
+});
+
+export const temporaryAccessSchema = z.object({
+  userId: requiredString("Uzytkownik"),
+  featureName: requiredString("Funkcja"),
+  durationMinutes: z.number().int().positive().optional(),
+});
+
+export const createTimeBlockSchema = z.object({
+  salonId: requiredString("Salon ID"),
+  employeeId: requiredString("Pracownik"),
+  startTime: requiredString("Czas rozpoczecia"),
+  endTime: requiredString("Czas zakonczenia"),
+  reason: z.string().nullable().optional(),
+  isRecurring: z.boolean().optional(),
+});
+
+export const createWorkScheduleSchema = z.object({
+  employeeId: requiredString("Pracownik"),
+  schedules: z.array(z.object({
+    dayOfWeek: z.number().int().min(0).max(6, "Dzien tygodnia musi byc 0-6"),
+    startTime: z.string().optional(),
+    endTime: z.string().optional(),
+    isDayOff: z.boolean().optional(),
+  })),
+});

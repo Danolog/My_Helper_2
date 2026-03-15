@@ -10,6 +10,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { validateBody, clientWaitingListSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/client/waiting-list - List waiting list entries for the authenticated client
@@ -143,14 +144,11 @@ export async function POST(request: Request) {
 
     const userEmail = session.user.email;
     const body = await request.json();
-    const { salonId, serviceId, preferredEmployeeId, preferredDate } = body;
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId jest wymagane" },
-        { status: 400 }
-      );
+    const validationError = validateBody(clientWaitingListSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { salonId, serviceId, preferredEmployeeId, preferredDate } = body;
 
     const [salon] = await db
       .select()

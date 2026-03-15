@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { workSchedules, employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, createWorkScheduleSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/work-schedules?employeeId=xxx
@@ -51,21 +52,11 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
     const body = await request.json();
+    const validationError = validateBody(createWorkScheduleSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const { employeeId, schedules } = body;
-
-    if (!employeeId) {
-      return NextResponse.json(
-        { success: false, error: "employeeId is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!schedules || !Array.isArray(schedules)) {
-      return NextResponse.json(
-        { success: false, error: "schedules array is required" },
-        { status: 400 }
-      );
-    }
 
     // Verify employee exists
     const [employee] = await db

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, subscriptionCheckoutSchema } from "@/lib/api-validation";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
@@ -141,16 +142,9 @@ export async function POST(request: Request) {
     }
 
     const body: unknown = await request.json();
-    if (
-      !body ||
-      typeof body !== "object" ||
-      !("planSlug" in body) ||
-      typeof (body as Record<string, unknown>).planSlug !== "string"
-    ) {
-      return NextResponse.json(
-        { success: false, error: "planSlug is required" },
-        { status: 400 },
-      );
+    const validationError = validateBody(subscriptionCheckoutSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
 
     const { planSlug } = body as { planSlug: string };

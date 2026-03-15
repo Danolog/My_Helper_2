@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { serviceVariants } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { validateBody, updateServiceVariantSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // PUT /api/services/[id]/variants/[variantId] - Update a variant
@@ -16,6 +17,10 @@ export async function PUT(
 
     const { id, variantId } = await params;
     const body = await request.json();
+    const validationError = validateBody(updateServiceVariantSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
     const { name, priceModifier, durationModifier } = body;
 
     const updateData: Record<string, unknown> = {};
