@@ -8,11 +8,15 @@ import {
   services,
 } from "@/lib/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/reports/materials-profitloss - Material profit/loss report
 // Tracks product costs vs. revenue generated from appointments using those products
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");

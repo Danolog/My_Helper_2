@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { subscriptionPlans, salonSubscriptions, salons, user as userTable } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { TRIAL_DAYS } from "@/lib/constants";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * POST /api/register-subscription
@@ -14,6 +15,8 @@ import { TRIAL_DAYS } from "@/lib/constants";
  */
 export async function POST(request: NextRequest) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const body = await request.json();
     const { planSlug, email } = body;
 

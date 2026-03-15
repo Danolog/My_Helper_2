@@ -3,10 +3,14 @@ import { db } from "@/lib/db";
 import { appointments, services, employees, clients } from "@/lib/schema";
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/reports/revenue - Revenue report with breakdowns by service/employee and trends
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");

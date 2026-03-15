@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { appointments, depositPayments, clients, services, employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { sendPaymentConfirmationSms } from "@/lib/sms";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * POST /api/deposits/confirm
@@ -14,6 +15,8 @@ import { sendPaymentConfirmationSms } from "@/lib/sms";
  */
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const body = await request.json();
     const { depositPaymentId, sessionId } = body;
 

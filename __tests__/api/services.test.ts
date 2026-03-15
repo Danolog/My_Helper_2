@@ -58,6 +58,14 @@ vi.mock("@/lib/validations", () => ({
   isValidUuid: vi.fn((id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)),
 }));
 
+vi.mock("@/lib/auth-middleware", () => ({
+  requireAuth: vi.fn().mockResolvedValue({
+    session: { user: { id: "test-user-id", email: "test@test.com", name: "Test User" } },
+    user: { id: "test-user-id", email: "test@test.com", name: "Test User" },
+  }),
+  isAuthError: vi.fn().mockReturnValue(false),
+}));
+
 // -------------------------------------------------------
 // Chain builder
 // -------------------------------------------------------

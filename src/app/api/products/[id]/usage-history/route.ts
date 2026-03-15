@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { appointmentMaterials, products, appointments, clients, employees, services } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { isValidUuid } from "@/lib/validations";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/products/[id]/usage-history - Get usage history for a product
 export async function GET(
@@ -10,6 +11,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
 
     if (!isValidUuid(id)) {

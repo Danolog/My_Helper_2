@@ -12,6 +12,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, gte, lt, not } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 type VoiceAiConfig = {
   enabled: boolean;
@@ -38,6 +39,9 @@ type VoiceAiConfig = {
  * For now, it simulates the voice AI processing a caller's message.
  */
 export async function POST(req: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   const salonId = await getUserSalonId();
   if (!salonId) {
     return NextResponse.json({ error: "Salon not found" }, { status: 404 });

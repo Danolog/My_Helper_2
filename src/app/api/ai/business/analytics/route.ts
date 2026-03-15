@@ -11,8 +11,12 @@ import {
 import { eq, and, gte, lte, sql, count, desc } from "drizzle-orm";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 export async function GET(_request: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   // Auth check and resolve salon
   const salonId = await getUserSalonId();
   if (!salonId) {

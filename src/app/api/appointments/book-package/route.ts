@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
 import { eq, and, not, lte, gte, or, lt, gt, inArray } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * POST /api/appointments/book-package
@@ -18,6 +17,9 @@ import { auth } from "@/lib/auth";
  */
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const body = await request.json();
     const { promotionId, employeeId, clientId, startTime } = body;
 
@@ -28,16 +30,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Try to get logged-in user ID from session
-    let bookedByUserId: string | null = null;
-    try {
-      const session = await auth.api.getSession({ headers: await headers() });
-      if (session?.user?.id) {
-        bookedByUserId = session.user.id;
-      }
-    } catch {
-      // Not authenticated, that's ok for staff-created appointments
-    }
+    // Use the authenticated user's ID for tracking who booked
+    const bookedByUserId: string | null = authResult.user.id || null;
 
     // 1. Get the package promotion
     const [promotion] = await db

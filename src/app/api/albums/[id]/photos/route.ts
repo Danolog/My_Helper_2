@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { albums, photoAlbums, galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/albums/[id]/photos - Get all photos in an album
 export async function GET(
@@ -9,6 +10,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { id } = await params;
 
     // Verify album exists
@@ -78,6 +81,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { id } = await params;
     const body = await request.json();
     const { photoIds } = body;
@@ -152,6 +157,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const photoId = searchParams.get("photoId");

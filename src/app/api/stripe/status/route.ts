@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { testStripeConnection } from "@/lib/stripe";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * GET /api/stripe/status
@@ -12,6 +13,8 @@ import { testStripeConnection } from "@/lib/stripe";
  */
 export async function GET() {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const status = await testStripeConnection();
 
     console.log("[Stripe Status API] Connection test result:", {

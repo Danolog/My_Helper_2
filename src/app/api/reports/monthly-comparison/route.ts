@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointments, services, employees } from "@/lib/schema";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 const MONTH_NAMES_PL = [
   "Styczen",
@@ -242,6 +243,9 @@ function computeChange(val1: number, val2: number, decimals: number = 2): Change
 // GET /api/reports/monthly-comparison - Compare metrics between two months side by side
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const month1Str = searchParams.get("month1");

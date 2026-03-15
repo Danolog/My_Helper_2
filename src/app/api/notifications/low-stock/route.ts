@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { products, notifications } from "@/lib/schema";
 import { eq, and, isNotNull, sql } from "drizzle-orm";
+import { requireCronSecret } from "@/lib/auth-middleware";
 
 /**
  * GET /api/notifications/low-stock
@@ -18,6 +19,8 @@ import { eq, and, isNotNull, sql } from "drizzle-orm";
  */
 export async function GET(request: Request) {
   try {
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -72,6 +75,8 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
     const body = await request.json();
     const { salonId, productId, productName, quantity, minQuantity, unit } = body;
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { clients, notifications, salons } from "@/lib/schema";
 import { eq, sql, and, isNotNull } from "drizzle-orm";
+import { requireCronSecret } from "@/lib/auth-middleware";
 
 interface BirthdaySettings {
   enabled: boolean;
@@ -20,6 +21,8 @@ interface BirthdaySettings {
  */
 export async function GET(request: Request) {
   try {
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -99,6 +102,8 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
     const body = await request.json();
     const { salonId } = body;
 

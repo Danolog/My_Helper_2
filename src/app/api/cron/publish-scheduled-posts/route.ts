@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { scheduledPosts } from "@/lib/schema";
 import { eq, and, lte } from "drizzle-orm";
+import { requireCronSecret } from "@/lib/auth-middleware";
 
 /**
  * POST /api/cron/publish-scheduled-posts
@@ -16,18 +17,8 @@ import { eq, and, lte } from "drizzle-orm";
  */
 export async function POST(request: Request) {
   try {
-    // Optional: verify cron secret for production security
-    const { searchParams } = new URL(request.url);
-    const cronSecret = searchParams.get("secret");
-    const expectedSecret = process.env.CRON_SECRET;
-
-    // In production, verify the cron secret. In dev, allow without secret.
-    if (expectedSecret && cronSecret !== expectedSecret) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
 
     const now = new Date();
 

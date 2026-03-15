@@ -4,12 +4,16 @@ import { db } from "@/lib/db";
 import { aiConversations } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * GET /api/ai/voice/call-log
  * Returns recent voice AI call logs for the salon.
  */
 export async function GET() {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   const salonId = await getUserSalonId();
   if (!salonId) {
     return NextResponse.json({ error: "Salon not found" }, { status: 404 });

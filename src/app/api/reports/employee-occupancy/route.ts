@@ -8,6 +8,7 @@ import {
   timeBlocks,
 } from "@/lib/schema";
 import { eq, and, gte, lte, ne, inArray } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * Parses a time string like "09:00" into total minutes since midnight.
@@ -36,6 +37,9 @@ function calculateOverlapMinutes(
 // GET /api/reports/employee-occupancy - Employee occupancy/utilization report
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");

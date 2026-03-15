@@ -2,10 +2,14 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // PUT /api/employees/commission-rate - Update employee's default commission rate
 export async function PUT(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const body = await request.json();
     const { employeeId, commissionRate } = body;
 
@@ -78,6 +82,9 @@ export async function PUT(request: Request) {
 // GET /api/employees/commission-rate - Get all employees with their commission rates
 export async function GET() {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const result = await db
       .select({
         id: employees.id,

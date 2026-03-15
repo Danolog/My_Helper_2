@@ -145,6 +145,14 @@ vi.mock("@/lib/validations", () => ({
   isValidDateString: vi.fn((d: string) => !isNaN(new Date(d).getTime())),
 }));
 
+vi.mock("@/lib/auth-middleware", () => ({
+  requireAuth: vi.fn().mockResolvedValue({
+    session: { user: { id: "test-user-id", email: "test@test.com", name: "Test User" } },
+    user: { id: "test-user-id", email: "test@test.com", name: "Test User" },
+  }),
+  isAuthError: vi.fn().mockReturnValue(false),
+}));
+
 // -------------------------------------------------------
 // Helper to build a chainable mock with specific result
 // -------------------------------------------------------

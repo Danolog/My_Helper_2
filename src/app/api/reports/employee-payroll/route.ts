@@ -8,10 +8,14 @@ import {
 } from "@/lib/schema";
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/reports/employee-payroll - Employee payroll report with hours, commissions, and service breakdown
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");

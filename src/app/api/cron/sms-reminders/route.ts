@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { appointments, clients, employees, services, salons } from "@/lib/schema";
 import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
 import { sendAppointmentReminderSms } from "@/lib/sms";
+import { requireCronSecret } from "@/lib/auth-middleware";
 
 /**
  * POST /api/cron/sms-reminders
@@ -21,18 +22,8 @@ import { sendAppointmentReminderSms } from "@/lib/sms";
  */
 export async function POST(request: Request) {
   try {
-    // Optional: verify cron secret for production security
-    const { searchParams } = new URL(request.url);
-    const cronSecret = searchParams.get("secret");
-    const expectedSecret = process.env.CRON_SECRET;
-
-    // In production, verify the cron secret. In dev, allow without secret.
-    if (expectedSecret && cronSecret !== expectedSecret) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
 
     const now = new Date();
     // Window: appointments starting between 30 minutes and 90 minutes from now
@@ -173,8 +164,11 @@ export async function POST(request: Request) {
  * Returns status information about the SMS reminder system.
  * Useful for monitoring and debugging.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
+
     const now = new Date();
     const windowStart = new Date(now.getTime() + 30 * 60 * 1000);
     const windowEnd = new Date(now.getTime() + 90 * 60 * 1000);

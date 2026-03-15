@@ -45,6 +45,14 @@ vi.mock("drizzle-orm", () => ({
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
 }));
 
+vi.mock("@/lib/auth-middleware", () => ({
+  requireAuth: vi.fn().mockResolvedValue({
+    session: { user: { id: "test-user-id", email: "test@test.com", name: "Test User" } },
+    user: { id: "test-user-id", email: "test@test.com", name: "Test User" },
+  }),
+  isAuthError: vi.fn().mockReturnValue(false),
+}));
+
 // -------------------------------------------------------
 // Chain builder
 // -------------------------------------------------------

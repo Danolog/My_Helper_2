@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { serviceProducts, products } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/services/[id]/products - List products linked to a service (for auto-deduction)
 export async function GET(
@@ -9,6 +10,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id: serviceId } = await params;
 
     const result = await db
@@ -48,6 +52,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id: serviceId } = await params;
     const body = await request.json();
     const { productId, defaultQuantity } = body;
@@ -126,6 +133,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id: serviceId } = await params;
     const { searchParams } = new URL(request.url);
     const linkId = searchParams.get("linkId");

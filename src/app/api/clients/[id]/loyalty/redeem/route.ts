@@ -4,6 +4,7 @@ import { loyaltyPoints, loyaltyTransactions, salons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import type { LoyaltySettings, RewardTier } from "@/app/api/salons/[id]/loyalty-settings/route";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * POST /api/clients/[id]/loyalty/redeem
@@ -24,6 +25,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id: clientId } = await params;
     const body = await request.json();
     const { rewardTierId } = body;
@@ -188,6 +192,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id: clientId } = await params;
 
     const salonId = await getUserSalonId();

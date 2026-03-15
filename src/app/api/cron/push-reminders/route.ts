@@ -10,6 +10,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
 import { sendAppointmentReminderPush } from "@/lib/push";
+import { requireCronSecret } from "@/lib/auth-middleware";
 
 /**
  * POST /api/cron/push-reminders
@@ -26,17 +27,8 @@ import { sendAppointmentReminderPush } from "@/lib/push";
  */
 export async function POST(request: Request) {
   try {
-    // Optional: verify cron secret for production security
-    const { searchParams } = new URL(request.url);
-    const cronSecret = searchParams.get("secret");
-    const expectedSecret = process.env.CRON_SECRET;
-
-    if (expectedSecret && cronSecret !== expectedSecret) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
 
     const now = new Date();
     // Window: appointments starting between 30 minutes and 90 minutes from now
@@ -226,8 +218,11 @@ export async function POST(request: Request) {
  *
  * Returns status information about the push reminder system.
  */
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
+
     const now = new Date();
     const windowStart = new Date(now.getTime() + 30 * 60 * 1000);
     const windowEnd = new Date(now.getTime() + 90 * 60 * 1000);

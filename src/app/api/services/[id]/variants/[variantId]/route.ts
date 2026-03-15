@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { serviceVariants } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // PUT /api/services/[id]/variants/[variantId] - Update a variant
 export async function PUT(
@@ -9,6 +10,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string; variantId: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id, variantId } = await params;
     const body = await request.json();
     const { name, priceModifier, durationModifier } = body;
@@ -55,6 +59,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; variantId: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id, variantId } = await params;
 
     const [deleted] = await db

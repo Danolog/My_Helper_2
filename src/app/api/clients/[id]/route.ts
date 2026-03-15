@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { verifyPassword } from "better-auth/crypto";
 import { isValidUuid } from "@/lib/validations";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/clients/[id] - Get a single client by ID
 export async function GET(
@@ -13,6 +14,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
 
     if (!isValidUuid(id)) {
@@ -57,6 +61,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
 
     if (!isValidUuid(id)) {

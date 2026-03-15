@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { z } from "zod";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { salons, galleryPhotos, employees, services } from "@/lib/schema";
 import { eq } from "drizzle-orm";
@@ -59,6 +60,9 @@ const TONE_DESCRIPTIONS: Record<string, string> = {
 };
 
 export async function POST(req: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   // Verify authentication and resolve salon
   const salonId = await getUserSalonId();
   if (!salonId) {

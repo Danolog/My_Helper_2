@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { products, notifications } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { validateBody, createProductSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * Check if a product has low stock and create a notification if needed.
@@ -65,6 +66,9 @@ async function checkAndNotifyLowStock(product: {
 // GET /api/products - List products with optional salonId filter
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -93,6 +97,9 @@ export async function GET(request: Request) {
 // POST /api/products - Create a new product
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const body = await request.json();
 
     // Server-side validation with Zod schema

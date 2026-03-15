@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { depositPayments, subscriptionPayments, appointments, clients, services, salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * GET /api/payments
@@ -18,6 +19,8 @@ import { eq, and, gte, lte, desc } from "drizzle-orm";
  */
 export async function GET(request: NextRequest) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { searchParams } = request.nextUrl;
     const salonId = searchParams.get("salonId");
     const type = searchParams.get("type") || "all";

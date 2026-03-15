@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { validateBody, createEmployeeSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // Predefined palette of distinct colors for employees
 const EMPLOYEE_COLORS = [
@@ -48,6 +49,9 @@ async function getNextAvailableColor(salonId: string): Promise<string> {
 // GET /api/employees - List all employees
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const activeOnly = searchParams.get("activeOnly") === "true";
@@ -93,6 +97,9 @@ export async function GET(request: Request) {
 // POST /api/employees - Create a new employee
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const body = await request.json();
 
     // Server-side validation with Zod schema

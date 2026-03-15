@@ -13,6 +13,7 @@ import {
 import { eq, and, count } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * GET /api/appointments/[id]/invoice
@@ -24,6 +25,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const userSalonId = await getUserSalonId();
     if (!userSalonId) {
       return NextResponse.json(
@@ -80,6 +84,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const userSalonId = await getUserSalonId();
     if (!userSalonId) {
       return NextResponse.json(
