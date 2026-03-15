@@ -4,6 +4,7 @@ import { appointments, services, employees, clients, reviews } from "@/lib/schem
 import { eq, and, gte, lte, sql, count } from "drizzle-orm";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /** Trend direction based on percentage change relative to a threshold. */
 function classifyTrend(
@@ -52,6 +53,9 @@ function formatYearMonth(date: Date): string {
 }
 
 export async function GET(_request: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   // Auth check and resolve salon
   const salonId = await getUserSalonId();
   if (!salonId) {

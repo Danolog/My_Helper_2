@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { serviceCategories, services } from "@/lib/schema";
 import { eq, and, count } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/service-categories/[id] - Get a single category
 export async function GET(
@@ -9,6 +10,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
 
     const [category] = await db
@@ -51,6 +55,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
     const body = await request.json();
     const { name, sortOrder } = body;
@@ -125,6 +132,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
 
     // Check category exists

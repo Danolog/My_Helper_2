@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { z } from "zod";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import {
   salons,
@@ -66,6 +67,9 @@ const INDUSTRY_LABELS: Record<string, string> = {
 };
 
 export async function POST(req: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   // Verify authentication and resolve salon
   const salonId = await getUserSalonId();
   if (!salonId) {
@@ -313,6 +317,9 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
 
 // GET - list saved newsletters
 export async function GET() {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   const salonId = await getUserSalonId();
   if (!salonId) {
     return Response.json({ error: "Salon not found" }, { status: 404 });

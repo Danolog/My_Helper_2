@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { z } from "zod";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { salons, reviews, clients, employees, services, appointments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
@@ -21,6 +22,9 @@ const INDUSTRY_LABELS: Record<string, string> = {
 };
 
 export async function POST(req: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   // Verify authentication and resolve salon
   const salonId = await getUserSalonId();
   if (!salonId) {

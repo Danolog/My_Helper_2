@@ -18,6 +18,7 @@ import {
 import { eq, and, sql } from "drizzle-orm";
 import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/route";
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * Check if a product has low stock and create a notification if needed.
@@ -85,6 +86,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
     const body = await request.json();
     const { recipe, techniques, notes, commissionPercentage } = body;

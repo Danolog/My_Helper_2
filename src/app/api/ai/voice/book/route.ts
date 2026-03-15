@@ -15,6 +15,7 @@ import {
 import { eq, and, gte, lt, not } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /** Slot interval in minutes used when generating available time slots. */
 const SLOT_INTERVAL = 15;
@@ -41,6 +42,9 @@ interface BookingRequestBody {
  * 6. Logging the conversation for audit.
  */
 export async function POST(req: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   // --- Authentication & salon resolution ---
   const salonId = await getUserSalonId();
   if (!salonId) {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { salons, services, reviews } from "@/lib/schema";
 import { eq, and, isNotNull, ne, inArray, count, avg } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/salons - List all salons (filtered to exclude test/incomplete salons)
 export async function GET() {
@@ -110,6 +111,9 @@ export async function GET() {
 // POST /api/salons - Create a new salon
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const body = await request.json();
     const { name, phone, email, address, industryType, ownerId } = body;
 
@@ -151,6 +155,9 @@ export async function POST(request: Request) {
 // DELETE /api/salons?id=<uuid> - Delete a salon by ID
 export async function DELETE(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 

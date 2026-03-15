@@ -6,12 +6,15 @@ import { unlink } from "fs/promises";
 import path from "path";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 // GET /api/gallery/[id] - Get a single gallery photo
 export async function GET(_request: Request, { params }: RouteParams) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { id } = await params;
 
     const [photo] = await db

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { promotions } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/promotions/:id - Get a single promotion
 export async function GET(
@@ -9,6 +10,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { id } = await params;
 
     const [promotion] = await db
@@ -43,6 +46,8 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { id } = await params;
     const body = await request.json();
     const { name, type, value, startDate, endDate, conditionsJson, isActive } = body;
@@ -145,6 +150,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { id } = await params;
 
     const [deleted] = await db

@@ -13,6 +13,7 @@ import {
 import { eq, and, gte, lte, sql, desc, asc } from "drizzle-orm";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 interface DailyRecommendation {
   id: string;
@@ -38,6 +39,9 @@ interface TomorrowSummary {
 }
 
 export async function GET(_request: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   // Auth check and resolve salon
   const salonId = await getUserSalonId();
   if (!salonId) {

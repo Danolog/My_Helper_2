@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { serviceVariants, services } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/services/[id]/variants - List all variants for a service
 export async function GET(
@@ -9,6 +10,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
 
     // Verify service exists
@@ -49,6 +53,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
     const body = await request.json();
     const { name, priceModifier, durationModifier } = body;

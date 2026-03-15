@@ -2,10 +2,14 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { productCategories, products } from "@/lib/schema";
 import { eq, asc, sql } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/product-categories - List product categories with product counts
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -49,6 +53,9 @@ export async function GET(request: Request) {
 // POST /api/product-categories - Create a new product category
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const body = await request.json();
     const { salonId, name } = body;
 

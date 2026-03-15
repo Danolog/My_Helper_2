@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import type { FiscalPrinterSettings } from "../route";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * POST /api/salons/[id]/fiscal-settings/test-connection
@@ -19,6 +20,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
 
     // Fetch current salon settings

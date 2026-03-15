@@ -3,10 +3,13 @@ import { db } from "@/lib/db";
 import { promotions } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { validateBody, createPromotionSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/promotions - List promotions with optional salonId filter
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -35,6 +38,8 @@ export async function GET(request: Request) {
 // POST /api/promotions - Create a new promotion
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const body = await request.json();
     const { salonId, name, type, value, startDate, endDate, conditionsJson, isActive } = body;
 

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { appointments, clients, salons, services, employees } from "@/lib/schema";
 import { and, eq, gte, lte, isNull, inArray } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
+import { requireCronSecret } from "@/lib/auth-middleware";
 
 /**
  * POST /api/reminders/appointment
@@ -22,6 +23,8 @@ import { sendSms } from "@/lib/sms";
  */
 export async function POST(request: Request) {
   try {
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -180,6 +183,9 @@ export async function POST(request: Request) {
  */
 export async function GET(request: Request) {
   try {
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 

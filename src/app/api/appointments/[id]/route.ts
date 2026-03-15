@@ -5,6 +5,7 @@ import { eq, and, not, or, lte, gte } from "drizzle-orm";
 import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
 import { notifyWaitingList } from "@/lib/waiting-list";
 import { isValidUuid } from "@/lib/validations";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/appointments/[id] - Get a single appointment
 export async function GET(
@@ -12,6 +13,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
 
     if (!isValidUuid(id)) {
@@ -68,6 +72,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
 
     if (!isValidUuid(id)) {
@@ -172,6 +179,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id } = await params;
     const url = new URL(request.url);
     const notifyClient = url.searchParams.get("notifyClient") === "true";

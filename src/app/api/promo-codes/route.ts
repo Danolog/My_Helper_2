@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * Generate a random 8-character alphanumeric uppercase code.
@@ -17,6 +18,8 @@ function generatePromoCode(): string {
 // GET /api/promo-codes - List promo codes with optional salonId filter
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -60,6 +63,8 @@ export async function GET(request: Request) {
 // POST /api/promo-codes - Create a new promo code
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const body = await request.json();
     const { salonId, code, promotionId, usageLimit, expiresAt } = body;
 

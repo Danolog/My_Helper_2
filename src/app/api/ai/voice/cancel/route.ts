@@ -16,6 +16,7 @@ import { sendSms } from "@/lib/sms";
 import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
 import { notifyWaitingList } from "@/lib/waiting-list";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 interface CancelRequestBody {
   appointmentId?: string; // Direct appointment ID if known
@@ -36,6 +37,9 @@ interface CancelRequestBody {
  * 6. Log the conversation.
  */
 export async function POST(req: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   // --- Authentication & salon resolution ---
   const salonId = await getUserSalonId();
   if (!salonId) {

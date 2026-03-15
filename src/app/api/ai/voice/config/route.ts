@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 export type VoiceAiConfig = {
   enabled: boolean;
@@ -42,6 +43,9 @@ const DEFAULT_CONFIG: VoiceAiConfig = {
 };
 
 export async function GET() {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   const salonId = await getUserSalonId();
   if (!salonId) {
     return NextResponse.json({ error: "Salon not found" }, { status: 404 });
@@ -73,6 +77,9 @@ export async function GET() {
 }
 
 export async function PUT(req: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   const salonId = await getUserSalonId();
   if (!salonId) {
     return NextResponse.json({ error: "Salon not found" }, { status: 404 });

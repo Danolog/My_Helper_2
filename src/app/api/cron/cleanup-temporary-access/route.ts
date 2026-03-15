@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cleanupExpiredTemporaryAccess } from "@/lib/temporary-access";
+import { requireCronSecret } from "@/lib/auth-middleware";
 
 /**
  * POST /api/cron/cleanup-temporary-access
@@ -13,17 +14,8 @@ import { cleanupExpiredTemporaryAccess } from "@/lib/temporary-access";
  */
 export async function POST(request: Request) {
   try {
-    // Verify cron secret via Authorization header (Bearer token)
-    const authHeader = request.headers.get("authorization");
-    const expectedSecret = process.env.CRON_SECRET;
-
-    // In production, verify the cron secret. In dev, allow without secret.
-    if (expectedSecret && authHeader !== `Bearer ${expectedSecret}`) {
-      return NextResponse.json(
-        { success: false, error: "Brak autoryzacji" },
-        { status: 401 }
-      );
-    }
+    const cronError = await requireCronSecret(request);
+    if (cronError) return cronError;
 
     const removedCount = await cleanupExpiredTemporaryAccess();
 

@@ -7,10 +7,14 @@ import {
   services,
 } from "@/lib/schema";
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/reports/employee-popularity - Employee popularity ranking report
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");

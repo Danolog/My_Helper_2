@@ -2,10 +2,14 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { promotions, promoCodes, appointments, services, clients } from "@/lib/schema";
 import { eq, and, gte, lte, desc, sql, isNotNull } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/reports/promotions - Promotion effectiveness report (ROI on promotions)
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");

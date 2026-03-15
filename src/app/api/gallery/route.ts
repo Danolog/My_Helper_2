@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, desc, and } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/gallery - List gallery photos
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const employeeId = searchParams.get("employeeId");
@@ -69,6 +72,8 @@ export async function GET(request: Request) {
 // POST /api/gallery - Create a gallery photo entry
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const body = await request.json();
     const {
       salonId,

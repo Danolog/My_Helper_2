@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { workSchedules, employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/work-schedules/by-salon?salonId=xxx&dayOfWeek=1
 // Returns all work schedules for active employees in a salon, optionally filtered by day
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const dayOfWeekStr = searchParams.get("dayOfWeek");

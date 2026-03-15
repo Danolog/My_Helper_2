@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { aiConversations } from "@/lib/schema";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 interface MessageRequestBody {
   callerPhone: string;
@@ -17,6 +18,9 @@ interface MessageRequestBody {
  * Stores the message in the aiConversations table for later follow-up.
  */
 export async function POST(req: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   const salonId = await getUserSalonId();
   if (!salonId) {
     return NextResponse.json({ error: "Salon not found" }, { status: 404 });

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { services, employeeServicePrices, serviceVariants, employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/services/[id]/price?employeeId=xxx&variantId=yyy
 // Returns the effective price for a service based on employee-specific pricing
@@ -10,6 +11,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id: serviceId } = await params;
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");

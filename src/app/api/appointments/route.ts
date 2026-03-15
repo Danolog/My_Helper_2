@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
 import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { validateBody, createAppointmentSchema } from "@/lib/api-validation";
 import { isValidUuid, isValidDateString } from "@/lib/validations";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/appointments - List appointments with optional date range filter
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
@@ -108,21 +110,14 @@ export async function GET(request: Request) {
 // POST /api/appointments - Create a new appointment
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const body = await request.json();
     const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId, promoCodeId, discountAmount, guestName, guestPhone, guestEmail } = body;
 
-    // Try to get logged-in user ID from session (for client portal bookings)
-    let bookedByUserId: string | null = bodyUserId || null;
-    if (!bookedByUserId) {
-      try {
-        const session = await auth.api.getSession({ headers: await headers() });
-        if (session?.user?.id) {
-          bookedByUserId = session.user.id;
-        }
-      } catch {
-        // Not authenticated, that's ok for staff-created appointments
-      }
-    }
+    // Use provided bookedByUserId or fall back to the authenticated user's ID
+    const bookedByUserId: string | null = bodyUserId || authResult.user.id || null;
 
     // Server-side validation with Zod schema
     const validationError = validateBody(createAppointmentSchema, body);

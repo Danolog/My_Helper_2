@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { loyaltyPoints, loyaltyTransactions } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 /**
  * GET /api/clients/[id]/loyalty
@@ -17,6 +18,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { id: clientId } = await params;
     const { searchParams } = new URL(request.url);
     const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100);

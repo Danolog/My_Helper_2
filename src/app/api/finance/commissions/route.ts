@@ -8,10 +8,13 @@ import {
   clients,
 } from "@/lib/schema";
 import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/finance/commissions - List commissions with employee totals
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { searchParams } = new URL(request.url);
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");

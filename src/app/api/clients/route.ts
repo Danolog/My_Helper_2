@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { clients, appointments } from "@/lib/schema";
 import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { validateBody, createClientSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/clients - List all clients with optional filtering
 // Supported query params:
@@ -14,6 +15,9 @@ import { validateBody, createClientSchema } from "@/lib/api-validation";
 //   hasAllergies   - "true" to return only clients with allergies set
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const dateAddedFrom = searchParams.get("dateAddedFrom");
@@ -107,6 +111,9 @@ export async function GET(request: Request) {
 // POST /api/clients - Create a new client
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const body = await request.json();
 
     // Server-side validation with Zod schema

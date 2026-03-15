@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { timeBlocks, employees } from "@/lib/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/time-blocks?employeeId=xxx&startDate=xxx&endDate=xxx
 export async function GET(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
     const startDate = searchParams.get("startDate");
@@ -66,6 +69,8 @@ export async function GET(request: Request) {
 // POST /api/time-blocks - Create a new time block (vacation, break, etc.)
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const body = await request.json();
     const { employeeId, startTime, endTime, blockType, reason } = body;
 
@@ -143,6 +148,8 @@ export async function POST(request: Request) {
 // DELETE /api/time-blocks - Delete a time block
 export async function DELETE(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
