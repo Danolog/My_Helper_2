@@ -136,6 +136,7 @@ export const clients = pgTable(
     index("clients_salon_id_idx").on(table.salonId),
     index("clients_email_idx").on(table.email),
     index("clients_phone_idx").on(table.phone),
+    index("clients_birthday_idx").on(table.birthday),
   ]
 );
 
@@ -373,7 +374,9 @@ export const appointmentMaterials = pgTable(
     appointmentId: uuid("appointment_id")
       .notNull()
       .references(() => appointments.id, { onDelete: "cascade" }),
-    productId: uuid("product_id").notNull(), // will reference products table
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
     quantityUsed: numeric("quantity_used", { precision: 10, scale: 2 }).notNull(),
     notes: text("notes"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -975,8 +978,12 @@ export const fiscalReceipts = pgTable(
   "fiscal_receipts",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    appointmentId: uuid("appointment_id").notNull(),
-    salonId: uuid("salon_id").notNull(),
+    appointmentId: uuid("appointment_id")
+      .notNull()
+      .references(() => appointments.id, { onDelete: "cascade" }),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
     receiptNumber: text("receipt_number").notNull(), // Sequential receipt number
     nip: text("nip"), // Tax ID printed on receipt
     clientName: text("client_name"),

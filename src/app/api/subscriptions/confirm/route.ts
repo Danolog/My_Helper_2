@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
-import { salonSubscriptions, subscriptionPayments, subscriptionPlans } from "@/lib/schema";
-import { getStripe } from "@/lib/stripe";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { salonSubscriptions, subscriptionPayments, subscriptionPlans } from "@/lib/schema";
+import { logger } from "@/lib/logger";
+import { getStripe } from "@/lib/stripe";
 
 /**
  * POST /api/subscriptions/confirm
@@ -16,6 +18,9 @@ import { getUserSalonId } from "@/lib/get-user-salon";
  */
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const currentSalonId = await getUserSalonId();
     if (!currentSalonId) {
       return NextResponse.json(
@@ -88,7 +93,7 @@ export async function POST(request: Request) {
         expand: ["subscription", "line_items"],
       });
     } catch (stripeError) {
-      console.error("[Subscriptions API] Failed to retrieve Stripe session:", stripeError);
+      logger.error("Failed to retrieve Stripe session", { error: stripeError });
       return NextResponse.json(
         { success: false, error: "Nie udalo sie zweryfikowac sesji Stripe" },
         { status: 502 },
@@ -139,56 +144,77 @@ export async function POST(request: Request) {
         ? checkoutSession.customer
         : checkoutSession.customer?.id ?? null;
 
-    // Check if subscription already exists for this salon (update vs insert)
-    const existingSubs = await db
-      .select()
-      .from(salonSubscriptions)
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          eq(salonSubscriptions.status, "active"),
-        ),
-      );
-
+    // Wrap the subscription upsert and payment recording in a transaction
+    // so they succeed or fail atomically.
     const now = new Date();
     const periodEnd = new Date(now);
     periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-    let subscriptionRecord;
+    const subscriptionRecord = await db.transaction(async (tx) => {
+      // Check if subscription already exists for this salon (update vs insert)
+      const existingSubs = await tx
+        .select()
+        .from(salonSubscriptions)
+        .where(
+          and(
+            eq(salonSubscriptions.salonId, salonId),
+            eq(salonSubscriptions.status, "active"),
+          ),
+        );
 
-    if (existingSubs.length > 0 && existingSubs[0]) {
-      // Update existing subscription
-      const [updated] = await db
-        .update(salonSubscriptions)
-        .set({
-          planId,
-          stripeSubscriptionId: stripeSubId,
-          stripeCustomerId,
-          status: "active",
-          currentPeriodStart: now,
-          currentPeriodEnd: periodEnd,
-        })
-        .where(eq(salonSubscriptions.id, existingSubs[0].id))
-        .returning();
+      let record;
 
-      subscriptionRecord = updated;
-    } else {
-      // Create new subscription
-      const [created] = await db
-        .insert(salonSubscriptions)
-        .values({
-          salonId,
-          planId,
-          stripeSubscriptionId: stripeSubId,
-          stripeCustomerId,
-          status: "active",
-          currentPeriodStart: now,
-          currentPeriodEnd: periodEnd,
-        })
-        .returning();
+      if (existingSubs.length > 0 && existingSubs[0]) {
+        // Update existing subscription
+        const [updated] = await tx
+          .update(salonSubscriptions)
+          .set({
+            planId,
+            stripeSubscriptionId: stripeSubId,
+            stripeCustomerId,
+            status: "active",
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+          })
+          .where(eq(salonSubscriptions.id, existingSubs[0].id))
+          .returning();
 
-      subscriptionRecord = created;
-    }
+        record = updated;
+      } else {
+        // Create new subscription
+        const [created] = await tx
+          .insert(salonSubscriptions)
+          .values({
+            salonId,
+            planId,
+            stripeSubscriptionId: stripeSubId,
+            stripeCustomerId,
+            status: "active",
+            currentPeriodStart: now,
+            currentPeriodEnd: periodEnd,
+          })
+          .returning();
+
+        record = created;
+      }
+
+      if (!record) {
+        throw new Error("Failed to create or update subscription record");
+      }
+
+      // Record the payment
+      await tx.insert(subscriptionPayments).values({
+        subscriptionId: record.id,
+        salonId,
+        amount: plan.priceMonthly,
+        currency: "PLN",
+        stripePaymentIntentId: sessionId,
+        status: "succeeded",
+        paidAt: now,
+      });
+
+      return record;
+    });
 
     if (!subscriptionRecord) {
       return NextResponse.json(
@@ -197,21 +223,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // Record the payment
-    await db.insert(subscriptionPayments).values({
+    logger.info("Subscription confirmed", {
       subscriptionId: subscriptionRecord.id,
-      salonId,
-      amount: plan.priceMonthly,
-      currency: "PLN",
-      stripePaymentIntentId: sessionId,
-      status: "succeeded",
-      paidAt: now,
+      planSlug: plan.slug,
     });
-
-    // eslint-disable-next-line no-console
-    console.log(
-      `[Subscriptions API] Subscription confirmed: ${subscriptionRecord.id}, plan: ${plan.slug}`,
-    );
 
     return NextResponse.json({
       success: true,
@@ -224,7 +239,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Subscriptions API] Confirm error:", error);
+    logger.error("Subscription confirm error", { error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie potwierdzic subskrypcji" },
       { status: 500 },

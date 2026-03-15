@@ -1,14 +1,13 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { eq, and, sql } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import {
   salonSubscriptions,
   subscriptionPlans,
   notifications,
 } from "@/lib/schema";
-import { getUserSalonId } from "@/lib/get-user-salon";
 
 const DEFAULT_WARNING_DAYS = 7;
 
@@ -24,13 +23,8 @@ const DEFAULT_WARNING_DAYS = 7;
  */
 export async function GET() {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
     const salonId = await getUserSalonId();
     if (!salonId) {
@@ -142,13 +136,8 @@ export async function GET() {
  */
 export async function POST(request: Request) {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
     const salonId = await getUserSalonId();
     if (!salonId) {

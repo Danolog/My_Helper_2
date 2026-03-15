@@ -23,13 +23,29 @@ const mockDbSelect = vi.fn();
 const mockDbInsert = vi.fn();
 const mockDbUpdate = vi.fn();
 
-vi.mock("@/lib/db", () => ({
-  db: {
+interface MockTx {
+  select: (...args: unknown[]) => ReturnType<typeof mockDbSelect>;
+  insert: (...args: unknown[]) => ReturnType<typeof mockDbInsert>;
+  update: (...args: unknown[]) => ReturnType<typeof mockDbUpdate>;
+}
+
+vi.mock("@/lib/db", () => {
+  // The tx object passed into db.transaction() reuses the same mock fns
+  // so that existing mockReturnValueOnce chains work identically.
+  const tx: MockTx = {
     select: (...args: unknown[]) => mockDbSelect(...args),
     insert: (...args: unknown[]) => mockDbInsert(...args),
     update: (...args: unknown[]) => mockDbUpdate(...args),
-  },
-}));
+  };
+  return {
+    db: {
+      select: (...args: unknown[]) => mockDbSelect(...args),
+      insert: (...args: unknown[]) => mockDbInsert(...args),
+      update: (...args: unknown[]) => mockDbUpdate(...args),
+      transaction: async (cb: (tx: MockTx) => Promise<unknown>) => cb(tx),
+    },
+  };
+});
 
 vi.mock("@/lib/schema", () => {
   const createTable = (name: string) =>

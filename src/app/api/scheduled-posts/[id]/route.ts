@@ -1,5 +1,4 @@
-import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isProPlan } from "@/lib/subscription";
 import { db } from "@/lib/db";
 import { scheduledPosts } from "@/lib/schema";
@@ -11,10 +10,8 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
   const salonId = await getUserSalonId();
   if (!salonId) {
@@ -47,10 +44,8 @@ export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
   const salonId = await getUserSalonId();
   if (!salonId) {

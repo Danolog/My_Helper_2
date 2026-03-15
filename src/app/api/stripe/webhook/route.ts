@@ -6,6 +6,7 @@ import {
   subscriptionPayments,
   subscriptionPlans,
 } from "@/lib/schema";
+import { logger } from "@/lib/logger";
 import { getStripe, isStripeWebhookConfigured } from "@/lib/stripe";
 import Stripe from "stripe";
 
@@ -117,10 +118,9 @@ export async function POST(request: Request) {
           process.env.STRIPE_WEBHOOK_SECRET!
         );
       } catch (err) {
-        console.error(
-          "[Stripe Webhook] Signature verification failed:",
-          err instanceof Error ? err.message : err
-        );
+        logger.error("Stripe webhook signature verification failed", {
+          error: err instanceof Error ? err.message : err,
+        });
         return NextResponse.json(
           { error: "Webhook signature verification failed" },
           { status: 400 }
@@ -138,8 +138,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // eslint-disable-next-line no-console
-    console.log(`[Stripe Webhook] Received event: ${event.type} (${event.id})`);
+    logger.info("Stripe webhook event received", { eventType: event.type, eventId: event.id });
 
     switch (event.type) {
       case "invoice.paid":
@@ -159,15 +158,12 @@ export async function POST(request: Request) {
         break;
 
       default:
-        // eslint-disable-next-line no-console
-        console.log(
-          `[Stripe Webhook] Unhandled event type: ${event.type}`
-        );
+        logger.debug("Unhandled Stripe webhook event type", { eventType: event.type });
     }
 
     return NextResponse.json({ received: true });
   } catch (error) {
-    console.error("[Stripe Webhook] Error processing webhook:", error);
+    logger.error("Stripe webhook processing failed", { error });
     return NextResponse.json(
       { error: "Webhook processing failed" },
       { status: 500 }
@@ -185,17 +181,13 @@ async function handleInvoicePaid(event: Stripe.Event) {
   const stripeSubscriptionId = getSubscriptionIdFromInvoice(invoice);
 
   if (!stripeSubscriptionId) {
-    // eslint-disable-next-line no-console
-    console.log("[Stripe Webhook] invoice.paid without subscription ID, skipping");
+    logger.debug("invoice.paid without subscription ID, skipping");
     return;
   }
 
   // Skip the first invoice (initial subscription creation is handled by checkout/confirm)
   if (invoice.billing_reason === "subscription_create") {
-    // eslint-disable-next-line no-console
-    console.log(
-      "[Stripe Webhook] Skipping subscription_create invoice (handled by checkout)"
-    );
+    logger.debug("Skipping subscription_create invoice (handled by checkout)");
     return;
   }
 
@@ -206,9 +198,7 @@ async function handleInvoicePaid(event: Stripe.Event) {
     .where(eq(salonSubscriptions.stripeSubscriptionId, stripeSubscriptionId));
 
   if (!sub) {
-    console.error(
-      `[Stripe Webhook] No subscription found for stripe ID: ${stripeSubscriptionId}`
-    );
+    logger.error("No subscription found for Stripe ID", { stripeSubscriptionId });
     return;
   }
 
@@ -230,10 +220,7 @@ async function handleInvoicePaid(event: Stripe.Event) {
     const changeAt = new Date(sub.scheduledChangeAt);
     if (changeAt <= new Date()) {
       newPlanId = sub.scheduledPlanId;
-      // eslint-disable-next-line no-console
-      console.log(
-        `[Stripe Webhook] Applying scheduled plan change for subscription ${sub.id}`
-      );
+      logger.info("Applying scheduled plan change", { subscriptionId: sub.id });
     }
   }
 
@@ -278,10 +265,11 @@ async function handleInvoicePaid(event: Stripe.Event) {
     paidAt: new Date(),
   });
 
-  // eslint-disable-next-line no-console
-  console.log(
-    `[Stripe Webhook] Subscription ${sub.id} renewed. New period: ${periodStart.toISOString()} - ${periodEnd.toISOString()}`
-  );
+  logger.info("Subscription renewed", {
+    subscriptionId: sub.id,
+    periodStart: periodStart.toISOString(),
+    periodEnd: periodEnd.toISOString(),
+  });
 }
 
 /**
@@ -299,9 +287,7 @@ async function handleInvoicePaymentFailed(event: Stripe.Event) {
     .where(eq(salonSubscriptions.stripeSubscriptionId, stripeSubscriptionId));
 
   if (!sub) {
-    console.error(
-      `[Stripe Webhook] No subscription found for stripe ID: ${stripeSubscriptionId}`
-    );
+    logger.error("No subscription found for Stripe ID (payment failed)", { stripeSubscriptionId });
     return;
   }
 
@@ -331,10 +317,7 @@ async function handleInvoicePaymentFailed(event: Stripe.Event) {
     paidAt: null,
   });
 
-  // eslint-disable-next-line no-console
-  console.log(
-    `[Stripe Webhook] Payment failed for subscription ${sub.id}. Status set to past_due.`
-  );
+  logger.warn("Payment failed, subscription set to past_due", { subscriptionId: sub.id });
 }
 
 /**
@@ -349,10 +332,7 @@ async function handleSubscriptionUpdated(event: Stripe.Event) {
     .where(eq(salonSubscriptions.stripeSubscriptionId, stripeSub.id));
 
   if (!sub) {
-    // eslint-disable-next-line no-console
-    console.log(
-      `[Stripe Webhook] No local subscription found for stripe ID: ${stripeSub.id}`
-    );
+    logger.debug("No local subscription found for Stripe ID (updated)", { stripeSubscriptionId: stripeSub.id });
     return;
   }
 
@@ -383,10 +363,7 @@ async function handleSubscriptionUpdated(event: Stripe.Event) {
     })
     .where(eq(salonSubscriptions.id, sub.id));
 
-  // eslint-disable-next-line no-console
-  console.log(
-    `[Stripe Webhook] Subscription ${sub.id} updated. Status: ${status}`
-  );
+  logger.info("Subscription updated", { subscriptionId: sub.id, status });
 }
 
 /**
@@ -401,10 +378,7 @@ async function handleSubscriptionDeleted(event: Stripe.Event) {
     .where(eq(salonSubscriptions.stripeSubscriptionId, stripeSub.id));
 
   if (!sub) {
-    // eslint-disable-next-line no-console
-    console.log(
-      `[Stripe Webhook] No local subscription found for stripe ID: ${stripeSub.id}`
-    );
+    logger.debug("No local subscription found for Stripe ID (deleted)", { stripeSubscriptionId: stripeSub.id });
     return;
   }
 
@@ -416,8 +390,5 @@ async function handleSubscriptionDeleted(event: Stripe.Event) {
     })
     .where(eq(salonSubscriptions.id, sub.id));
 
-  // eslint-disable-next-line no-console
-  console.log(
-    `[Stripe Webhook] Subscription ${sub.id} deleted/canceled via Stripe.`
-  );
+  logger.info("Subscription deleted/canceled via Stripe", { subscriptionId: sub.id });
 }

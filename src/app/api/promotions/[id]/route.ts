@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { promotions } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { validateBody, updatePromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/promotions/:id - Get a single promotion
@@ -50,6 +51,13 @@ export async function PUT(
     if (isAuthError(authResult)) return authResult;
     const { id } = await params;
     const body = await request.json();
+
+    // Server-side validation with Zod schema
+    const validationError = validateBody(updatePromotionSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
+
     const { name, type, value, startDate, endDate, conditionsJson, isActive } = body;
 
     // Check promotion exists

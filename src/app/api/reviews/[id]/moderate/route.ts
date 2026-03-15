@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { reviews, salons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { validateBody, reviewModerateSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // PATCH /api/reviews/[id]/moderate - Approve or reject a review
 export async function PATCH(
@@ -11,6 +13,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -22,16 +27,15 @@ export async function PATCH(
     const userId = session.user.id;
     const { id: reviewId } = await params;
 
-    // Parse request body
+    // Parse and validate request body
     const body = await request.json();
-    const { action } = body; // 'approve' or 'reject'
 
-    if (!action || !["approve", "reject"].includes(action)) {
-      return NextResponse.json(
-        { success: false, error: "Akcja musi byc 'approve' lub 'reject'" },
-        { status: 400 }
-      );
+    const validationError = validateBody(reviewModerateSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const { action } = body;
 
     // Find the salon owned by the current user
     const [salon] = await db

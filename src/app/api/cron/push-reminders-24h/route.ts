@@ -9,8 +9,9 @@ import {
   pushSubscriptions,
 } from "@/lib/schema";
 import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
-import { sendAppointmentReminder24hPush } from "@/lib/push";
 import { requireCronSecret } from "@/lib/auth-middleware";
+import { logger } from "@/lib/logger";
+import { sendAppointmentReminder24hPush } from "@/lib/push";
 
 /**
  * POST /api/cron/push-reminders-24h
@@ -39,10 +40,11 @@ export async function POST(request: Request) {
     const windowStart = new Date(now.getTime() + 20 * 60 * 60 * 1000); // 20h from now
     const windowEnd = new Date(now.getTime() + 28 * 60 * 60 * 1000); // 28h from now
 
-    console.log(`[Push 24h Reminders] Running at ${now.toISOString()}`);
-    console.log(
-      `[Push 24h Reminders] Looking for appointments between ${windowStart.toISOString()} and ${windowEnd.toISOString()}`
-    );
+    logger.info("Push 24h reminders cron started", {
+      timestamp: now.toISOString(),
+      windowStart: windowStart.toISOString(),
+      windowEnd: windowEnd.toISOString(),
+    });
 
     // Find appointments in the window that haven't received a 24h push reminder
     const upcomingAppointments = await db
@@ -75,9 +77,9 @@ export async function POST(request: Request) {
         )
       );
 
-    console.log(
-      `[Push 24h Reminders] Found ${upcomingAppointments.length} appointments needing 24h push reminder`
-    );
+    logger.info("Appointments found for 24h push reminder", {
+      count: upcomingAppointments.length,
+    });
 
     const results: Array<{
       appointmentId: string;
@@ -88,6 +90,31 @@ export async function POST(request: Request) {
       error?: string | undefined;
     }> = [];
 
+    // Collect all unique userIds to batch-check push subscriptions
+    const userIds = [
+      ...new Set(
+        upcomingAppointments
+          .map((a) => a.bookedByUserId)
+          .filter((id): id is string => id !== null)
+      ),
+    ];
+
+    // Batch-fetch which users have push subscriptions (single query instead of N)
+    const usersWithSubs = new Set<string>();
+    if (userIds.length > 0) {
+      const subsRows = await db
+        .select({ userId: pushSubscriptions.userId })
+        .from(pushSubscriptions)
+        .where(inArray(pushSubscriptions.userId, userIds))
+        .groupBy(pushSubscriptions.userId);
+      for (const row of subsRows) {
+        usersWithSubs.add(row.userId);
+      }
+    }
+
+    // Track appointment IDs that should be marked as sent after processing
+    const idsToMarkSent: string[] = [];
+
     for (const appt of upcomingAppointments) {
       const clientName = `${appt.clientFirstName} ${appt.clientLastName}`;
       const employeeName = `${appt.employeeFirstName} ${appt.employeeLastName}`;
@@ -95,9 +122,9 @@ export async function POST(request: Request) {
       const userId = appt.bookedByUserId;
 
       if (!userId) {
-        console.log(
-          `[Push 24h Reminders] Skipping appointment ${appt.appointmentId} - no user account linked`
-        );
+        logger.debug("Skipping 24h push reminder - no user account linked", {
+          appointmentId: appt.appointmentId,
+        });
         results.push({
           appointmentId: appt.appointmentId,
           clientName,
@@ -107,24 +134,15 @@ export async function POST(request: Request) {
           error: "No user account linked",
         });
         // Mark as sent to avoid retrying
-        await db
-          .update(appointments)
-          .set({ reminderPushSentAt: new Date() })
-          .where(eq(appointments.id, appt.appointmentId));
+        idsToMarkSent.push(appt.appointmentId);
         continue;
       }
 
-      // Check if user has push subscriptions
-      const subs = await db
-        .select({ id: pushSubscriptions.id })
-        .from(pushSubscriptions)
-        .where(eq(pushSubscriptions.userId, userId))
-        .limit(1);
-
-      if (subs.length === 0) {
-        console.log(
-          `[Push 24h Reminders] Skipping appointment ${appt.appointmentId} - user ${userId} has no push subscriptions`
-        );
+      if (!usersWithSubs.has(userId)) {
+        logger.debug("Skipping 24h push reminder - no push subscriptions", {
+          appointmentId: appt.appointmentId,
+          userId,
+        });
         results.push({
           appointmentId: appt.appointmentId,
           clientName,
@@ -134,10 +152,7 @@ export async function POST(request: Request) {
           error: "No push subscriptions",
         });
         // Mark as sent to avoid retrying
-        await db
-          .update(appointments)
-          .set({ reminderPushSentAt: new Date() })
-          .where(eq(appointments.id, appt.appointmentId));
+        idsToMarkSent.push(appt.appointmentId);
         continue;
       }
 
@@ -154,15 +169,14 @@ export async function POST(request: Request) {
           appointmentId: appt.appointmentId,
         });
 
-        // Mark 24h push reminder as sent
-        await db
-          .update(appointments)
-          .set({ reminderPushSentAt: new Date() })
-          .where(eq(appointments.id, appt.appointmentId));
+        // Collect for batch update instead of individual UPDATE
+        idsToMarkSent.push(appt.appointmentId);
 
-        console.log(
-          `[Push 24h Reminders] Push sent for appointment ${appt.appointmentId} to ${clientName}: ${pushResult.sent} devices`
-        );
+        logger.info("24h push reminder sent", {
+          appointmentId: appt.appointmentId,
+          clientName,
+          devicesSent: pushResult.sent,
+        });
 
         results.push({
           appointmentId: appt.appointmentId,
@@ -173,10 +187,10 @@ export async function POST(request: Request) {
           error: pushResult.error,
         });
       } catch (error) {
-        console.error(
-          `[Push 24h Reminders] Error processing appointment ${appt.appointmentId}:`,
-          error
-        );
+        logger.error("24h push reminder processing failed", {
+          appointmentId: appt.appointmentId,
+          error,
+        });
         results.push({
           appointmentId: appt.appointmentId,
           clientName,
@@ -188,12 +202,22 @@ export async function POST(request: Request) {
       }
     }
 
+    // Batch-update all processed appointments in a single query instead of N individual UPDATEs
+    if (idsToMarkSent.length > 0) {
+      await db
+        .update(appointments)
+        .set({ reminderPushSentAt: new Date() })
+        .where(inArray(appointments.id, idsToMarkSent));
+    }
+
     const sent = results.filter((r) => r.success).length;
     const failed = results.filter((r) => !r.success).length;
 
-    console.log(
-      `[Push 24h Reminders] Complete: ${sent} sent, ${failed} failed out of ${upcomingAppointments.length} total`
-    );
+    logger.info("Push 24h reminders cron completed", {
+      sent,
+      failed,
+      total: upcomingAppointments.length,
+    });
 
     return NextResponse.json({
       success: true,
@@ -209,7 +233,7 @@ export async function POST(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Push 24h Reminders] Fatal error:", error);
+    logger.error("Push 24h reminders cron fatal error", { error });
     return NextResponse.json(
       { success: false, error: "Failed to process 24h push reminders" },
       { status: 500 }
@@ -274,7 +298,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    console.error("[Push 24h Reminders] Error checking status:", error);
+    logger.error("Push 24h reminders status check failed", { error });
     return NextResponse.json(
       { success: false, error: "Failed to check 24h push reminder status" },
       { status: 500 }

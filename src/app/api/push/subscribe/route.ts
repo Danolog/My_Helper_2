@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { pushSubscriptions } from "@/lib/schema";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { eq, and } from "drizzle-orm";
 
 /**
@@ -12,15 +11,11 @@ import { eq, and } from "drizzle-orm";
  * Accepts a PushSubscription object from the browser Push API.
  */
 export async function POST(request: Request) {
-  try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+  const { user } = authResult;
 
+  try {
     const body = await request.json();
     const { subscription, userAgent } = body;
 
@@ -37,7 +32,7 @@ export async function POST(request: Request) {
       .from(pushSubscriptions)
       .where(
         and(
-          eq(pushSubscriptions.userId, session.user.id),
+          eq(pushSubscriptions.userId, user.id),
           eq(pushSubscriptions.endpoint, subscription.endpoint)
         )
       );
@@ -54,7 +49,7 @@ export async function POST(request: Request) {
         })
         .where(eq(pushSubscriptions.id, existingRow.id));
 
-      console.log(`[Push] Updated subscription for user ${session.user.id}`);
+      console.log(`[Push] Updated subscription for user ${user.id}`);
 
       return NextResponse.json({
         success: true,
@@ -66,7 +61,7 @@ export async function POST(request: Request) {
     const [sub] = await db
       .insert(pushSubscriptions)
       .values({
-        userId: session.user.id,
+        userId: user.id,
         endpoint: subscription.endpoint,
         p256dh: subscription.keys.p256dh,
         auth: subscription.keys.auth,
@@ -75,7 +70,7 @@ export async function POST(request: Request) {
       .returning();
 
     const subId = sub?.id;
-    console.log(`[Push] New subscription registered for user ${session.user.id}: ${subId}`);
+    console.log(`[Push] New subscription registered for user ${user.id}: ${subId}`);
 
     return NextResponse.json({
       success: true,
@@ -96,15 +91,11 @@ export async function POST(request: Request) {
  * Check if the current user has any push subscriptions registered.
  */
 export async function GET() {
-  try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+  const { user } = authResult;
 
+  try {
     const subs = await db
       .select({
         id: pushSubscriptions.id,
@@ -113,7 +104,7 @@ export async function GET() {
         createdAt: pushSubscriptions.createdAt,
       })
       .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.userId, session.user.id));
+      .where(eq(pushSubscriptions.userId, user.id));
 
     return NextResponse.json({
       success: true,

@@ -10,6 +10,8 @@ import {
 } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { validateBody, updateWaitingListSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // GET /api/waiting-list/[id] - Get a single waiting list entry
 export async function GET(
@@ -17,6 +19,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -107,6 +112,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -149,18 +157,19 @@ export async function PUT(
     }
 
     const body = await request.json();
+
+    // Server-side validation with Zod schema
+    const validationError = validateBody(updateWaitingListSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
+
     const { accepted, serviceId, preferredEmployeeId, preferredDate } = body;
 
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {};
 
     if (accepted !== undefined) {
-      if (typeof accepted !== "boolean") {
-        return NextResponse.json(
-          { success: false, error: "Pole 'accepted' musi byc wartoscia logiczna (true/false)" },
-          { status: 400 }
-        );
-      }
       updateData.accepted = accepted;
     }
 
@@ -216,6 +225,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(

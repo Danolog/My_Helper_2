@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { services, serviceCategories, serviceVariants } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { validateBody, updateServiceSchema } from "@/lib/api-validation";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
@@ -81,6 +82,13 @@ export async function PUT(
     }
 
     const body = await request.json();
+
+    // Server-side validation with Zod schema
+    const validationError = validateBody(updateServiceSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
+
     const { name, description, basePrice, baseDuration, isActive, categoryId, depositRequired, depositPercentage } = body;
 
     const updateData: Record<string, unknown> = {};

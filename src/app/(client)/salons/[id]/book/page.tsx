@@ -38,6 +38,7 @@ import { Separator } from "@/components/ui/separator";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
+import { BookingProgressBar } from "@/components/booking/booking-progress-bar";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -368,14 +369,15 @@ export default function ClientBookingPage() {
   // Data fetching
   // ---------------------------------------------------------------------------
 
-  const fetchSalon = useCallback(async () => {
+  const fetchSalon = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(`/api/salons/${salonId}`);
+      const res = await fetch(`/api/salons/${salonId}`, signal ? { signal } : {});
       const json = await res.json();
       if (json.success) {
         setSalon(json.data);
       }
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error("Failed to fetch salon:", error);
     } finally {
       setLoadingSalon(false);
@@ -383,37 +385,46 @@ export default function ClientBookingPage() {
   }, [salonId]);
 
   useEffect(() => {
-    fetchSalon();
+    const abortController = new AbortController();
+    fetchSalon(abortController.signal);
+    return () => abortController.abort();
   }, [fetchSalon]);
 
   // Fetch client-specific deposit settings when session and salon are available
   useEffect(() => {
+    if (!session?.user?.email || !salonId) return;
+
+    const abortController = new AbortController();
+
     async function fetchClientDepositSettings() {
-      if (!session?.user?.email || !salonId) return;
       try {
         const res = await fetch(
-          `/api/clients/deposit-settings?salonId=${salonId}&email=${encodeURIComponent(session.user.email)}`
+          `/api/clients/deposit-settings?salonId=${salonId}&email=${encodeURIComponent(session!.user!.email!)}`,
+          { signal: abortController.signal }
         );
         const json = await res.json();
         if (json.success) {
           setClientDepositSettings(json.data);
         }
       } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
         console.error("Failed to fetch client deposit settings:", error);
       }
     }
     fetchClientDepositSettings();
+
+    return () => abortController.abort();
   }, [session?.user?.email, salonId]);
 
   const fetchAssignedEmployees = useCallback(
-    async (serviceId: string) => {
+    async (serviceId: string, signal?: AbortSignal) => {
       if (!serviceId) {
         setAssignedEmployees([]);
         return;
       }
       setLoadingEmployees(true);
       try {
-        const res = await fetch(`/api/services/${serviceId}/employee-assignments`);
+        const res = await fetch(`/api/services/${serviceId}/employee-assignments`, signal ? { signal } : {});
         const json = await res.json();
         if (json.success) {
           const emps: AssignedEmployee[] = json.data
@@ -428,6 +439,7 @@ export default function ClientBookingPage() {
           setAssignedEmployees(emps);
         }
       } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
         console.error("Failed to fetch assigned employees:", error);
       } finally {
         setLoadingEmployees(false);
@@ -437,7 +449,7 @@ export default function ClientBookingPage() {
   );
 
   const fetchAvailableSlots = useCallback(
-    async (employeeId: string, date: string, duration: number) => {
+    async (employeeId: string, date: string, duration: number, signal?: AbortSignal) => {
       if (!employeeId || !date || !duration) {
         setSlotsData(null);
         return;
@@ -446,7 +458,8 @@ export default function ClientBookingPage() {
       setSelectedTimeSlot("");
       try {
         const res = await fetch(
-          `/api/available-slots?employeeId=${employeeId}&date=${date}&duration=${duration}`
+          `/api/available-slots?employeeId=${employeeId}&date=${date}&duration=${duration}`,
+          signal ? { signal } : {}
         );
         const json = await res.json();
         if (json.success) {
@@ -456,6 +469,7 @@ export default function ClientBookingPage() {
           setSlotsData(null);
         }
       } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
         console.error("Failed to fetch available slots:", error);
         toast.error("Blad pobierania dostepnych terminow");
         setSlotsData(null);
@@ -469,58 +483,75 @@ export default function ClientBookingPage() {
   // Auto-fetch slots when employee, date or effective duration changes
   useEffect(() => {
     if (selectedEmployeeId && selectedDate && effectiveDuration > 0) {
-      fetchAvailableSlots(selectedEmployeeId, selectedDate, effectiveDuration);
-    } else {
-      setSlotsData(null);
-      setSelectedTimeSlot("");
+      const abortController = new AbortController();
+      fetchAvailableSlots(selectedEmployeeId, selectedDate, effectiveDuration, abortController.signal);
+      return () => abortController.abort();
     }
+
+    setSlotsData(null);
+    setSelectedTimeSlot("");
+    return undefined;
   }, [selectedEmployeeId, selectedDate, effectiveDuration, fetchAvailableSlots]);
 
   // Check first visit promotion when service is selected
   useEffect(() => {
+    const emailForCheck = session?.user?.email || guestEmail;
+    if (!salonId || !selectedServiceId || !emailForCheck) {
+      setFirstVisitPromo(null);
+      return;
+    }
+
+    const abortController = new AbortController();
+
     async function checkFirstVisit() {
-      const emailForCheck = session?.user?.email || guestEmail;
-      if (!salonId || !selectedServiceId || !emailForCheck) {
-        setFirstVisitPromo(null);
-        return;
-      }
       try {
         const res = await fetch(
-          `/api/promotions/check-first-visit?salonId=${salonId}&email=${encodeURIComponent(emailForCheck)}&serviceId=${selectedServiceId}`
+          `/api/promotions/check-first-visit?salonId=${salonId}&email=${encodeURIComponent(emailForCheck!)}&serviceId=${selectedServiceId}`,
+          { signal: abortController.signal }
         );
         const json = await res.json();
         if (json.success) {
           setFirstVisitPromo(json.data);
         }
       } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
         console.error("Failed to check first visit promotion:", error);
         setFirstVisitPromo(null);
       }
     }
     checkFirstVisit();
+
+    return () => abortController.abort();
   }, [salonId, session?.user?.email, guestEmail, selectedServiceId]);
 
   // Check happy hours promotion when time slot is selected
   useEffect(() => {
+    if (!selectedDate || !selectedTimeSlot || !salonId) {
+      setHappyHoursPromo(null);
+      return;
+    }
+
+    const abortController = new AbortController();
+
     async function checkHappyHours() {
-      if (!selectedDate || !selectedTimeSlot || !salonId) {
-        setHappyHoursPromo(null);
-        return;
-      }
       try {
         const res = await fetch(
-          `/api/promotions/check-happy-hours?salonId=${salonId}&date=${selectedDate}&time=${selectedTimeSlot}`
+          `/api/promotions/check-happy-hours?salonId=${salonId}&date=${selectedDate}&time=${selectedTimeSlot}`,
+          { signal: abortController.signal }
         );
         const json = await res.json();
         if (json.success) {
           setHappyHoursPromo(json.data);
         }
       } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") return;
         console.error("Failed to check happy hours:", error);
         setHappyHoursPromo(null);
       }
     }
     checkHappyHours();
+
+    return () => abortController.abort();
   }, [selectedDate, selectedTimeSlot, salonId]);
 
   // ---------------------------------------------------------------------------
@@ -536,33 +567,37 @@ export default function ClientBookingPage() {
 
     const hasServiceVariants = service.variants.length > 0;
     const targetRef = hasServiceVariants ? variantStepRef : employeeStepRef;
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       targetRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 100);
+    return () => clearTimeout(timer);
   }, [selectedServiceId, salon?.services]);
 
   // After selecting a variant, scroll to the employee step
   useEffect(() => {
     if (!selectedVariantId) return;
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       employeeStepRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 100);
+    return () => clearTimeout(timer);
   }, [selectedVariantId]);
 
   // After selecting an employee, scroll to the date/time step
   useEffect(() => {
     if (!selectedEmployeeId) return;
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       dateStepRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 100);
+    return () => clearTimeout(timer);
   }, [selectedEmployeeId]);
 
   // After selecting a time slot, scroll to the summary step
   useEffect(() => {
     if (!selectedTimeSlot) return;
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       summaryStepRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 100);
+    return () => clearTimeout(timer);
   }, [selectedTimeSlot]);
 
   // ---------------------------------------------------------------------------
@@ -620,6 +655,29 @@ export default function ClientBookingPage() {
     const mm = String(current.getMonth() + 1).padStart(2, "0");
     const dd = String(current.getDate()).padStart(2, "0");
     handleDateChange(`${yyyy}-${mm}-${dd}`);
+  }
+
+  function handleBackToService() {
+    setSelectedServiceId("");
+    setSelectedVariantId("");
+    setSelectedEmployeeId("");
+    setSelectedDate("");
+    setSelectedTimeSlot("");
+    setSlotsData(null);
+    setAssignedEmployees([]);
+  }
+
+  function handleBackToEmployee() {
+    setSelectedEmployeeId("");
+    setSelectedDate("");
+    setSelectedTimeSlot("");
+    setSlotsData(null);
+  }
+
+  function handleBackToDateTime() {
+    setSelectedDate("");
+    setSelectedTimeSlot("");
+    setSlotsData(null);
   }
 
   function toggleServiceExpanded(serviceId: string) {
@@ -1032,6 +1090,32 @@ export default function ClientBookingPage() {
         </div>
       </div>
 
+      {/* Progress bar */}
+      <BookingProgressBar
+        steps={[
+          {
+            label: "Usluga",
+            completed: selectedServiceId !== "" && variantStepSatisfied,
+            active: selectedServiceId === "" || !variantStepSatisfied,
+          },
+          {
+            label: "Pracownik",
+            completed: selectedEmployeeId !== "",
+            active: canShowEmployeeStep && selectedEmployeeId === "",
+          },
+          {
+            label: "Termin",
+            completed: selectedDate !== "" && selectedTimeSlot !== "",
+            active: canShowDateStep && (selectedDate === "" || selectedTimeSlot === ""),
+          },
+          {
+            label: "Potwierdzenie",
+            completed: bookingSuccess,
+            active: canShowSummaryStep && !bookingSuccess,
+          },
+        ]}
+      />
+
       {/* ------------------------------------------------------------------ */}
       {/* Step 1: Select Service                                              */}
       {/* ------------------------------------------------------------------ */}
@@ -1165,19 +1249,27 @@ export default function ClientBookingPage() {
       {/* ------------------------------------------------------------------ */}
       <Card ref={employeeStepRef} className="mb-6" data-testid="booking-step-employee">
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <Badge
-              variant={selectedEmployeeId ? "default" : "outline"}
-              className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs"
-            >
-              {hasVariants ? 3 : 2}
-            </Badge>
-            <Users className="h-5 w-5 text-primary" />
-            <CardTitle className="text-lg">Wybierz pracownika</CardTitle>
-            {canShowEmployeeStep && assignedEmployees.length > 0 && (
-              <Badge variant="outline">
-                {assignedEmployees.length} dostepnych
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Badge
+                variant={selectedEmployeeId ? "default" : "outline"}
+                className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs"
+              >
+                {hasVariants ? 3 : 2}
               </Badge>
+              <Users className="h-5 w-5 text-primary" />
+              <CardTitle className="text-lg">Wybierz pracownika</CardTitle>
+              {canShowEmployeeStep && assignedEmployees.length > 0 && (
+                <Badge variant="outline">
+                  {assignedEmployees.length} dostepnych
+                </Badge>
+              )}
+            </div>
+            {canShowEmployeeStep && (
+              <Button variant="ghost" size="sm" onClick={handleBackToService}>
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+                Zmien usluge
+              </Button>
             )}
           </div>
         </CardHeader>
@@ -1246,15 +1338,23 @@ export default function ClientBookingPage() {
       {/* ------------------------------------------------------------------ */}
       <Card ref={dateStepRef} className="mb-6" data-testid="booking-step-datetime">
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <Badge
-              variant={selectedDate && selectedTimeSlot ? "default" : "outline"}
-              className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs"
-            >
-              {hasVariants ? 4 : 3}
-            </Badge>
-            <CalendarDays className="h-5 w-5 text-primary" />
-            <CardTitle className="text-lg">Wybierz date i godzine</CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Badge
+                variant={selectedDate && selectedTimeSlot ? "default" : "outline"}
+                className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs"
+              >
+                {hasVariants ? 4 : 3}
+              </Badge>
+              <CalendarDays className="h-5 w-5 text-primary" />
+              <CardTitle className="text-lg">Wybierz date i godzine</CardTitle>
+            </div>
+            {canShowDateStep && (
+              <Button variant="ghost" size="sm" onClick={handleBackToEmployee}>
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+                Zmien pracownika
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -1446,15 +1546,23 @@ export default function ClientBookingPage() {
         data-testid="booking-step-summary"
       >
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <Badge
-              variant={canShowSummaryStep ? "default" : "outline"}
-              className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs"
-            >
-              {hasVariants ? 5 : 4}
-            </Badge>
-            <Check className="h-5 w-5 text-primary" />
-            <CardTitle className="text-lg">Podsumowanie i potwierdzenie</CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Badge
+                variant={canShowSummaryStep ? "default" : "outline"}
+                className="w-6 h-6 rounded-full p-0 flex items-center justify-center text-xs"
+              >
+                {hasVariants ? 5 : 4}
+              </Badge>
+              <Check className="h-5 w-5 text-primary" />
+              <CardTitle className="text-lg">Podsumowanie i potwierdzenie</CardTitle>
+            </div>
+            {canShowSummaryStep && (
+              <Button variant="ghost" size="sm" onClick={handleBackToDateTime}>
+                <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+                Zmien termin
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -1692,7 +1800,12 @@ export default function ClientBookingPage() {
                       value={guestName}
                       onChange={(e) => setGuestName(e.target.value)}
                       placeholder="Twoje imie"
+                      required
+                      aria-invalid={guestName.length > 0 && guestName.trim().length < 2}
                     />
+                    {guestName.length > 0 && guestName.trim().length < 2 && (
+                      <p className="text-xs text-destructive mt-1">Imie musi miec co najmniej 2 znaki.</p>
+                    )}
                   </div>
                   <div>
                     <label className="text-sm font-medium mb-1 block">Telefon *</label>
@@ -1701,7 +1814,12 @@ export default function ClientBookingPage() {
                       onChange={(e) => setGuestPhone(e.target.value)}
                       placeholder="+48 123 456 789"
                       type="tel"
+                      required
+                      aria-invalid={guestPhone.length > 0 && guestPhone.replace(/\D/g, "").length < 9}
                     />
+                    {guestPhone.length > 0 && guestPhone.replace(/\D/g, "").length < 9 && (
+                      <p className="text-xs text-destructive mt-1">Podaj poprawny numer telefonu (min. 9 cyfr).</p>
+                    )}
                   </div>
                   <div>
                     <label className="text-sm font-medium mb-1 block">Email (opcjonalnie)</label>
@@ -1710,7 +1828,11 @@ export default function ClientBookingPage() {
                       onChange={(e) => setGuestEmail(e.target.value)}
                       placeholder="twoj@email.pl"
                       type="email"
+                      aria-invalid={guestEmail.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)}
                     />
+                    {guestEmail.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail) && (
+                      <p className="text-xs text-destructive mt-1">Podaj poprawny adres email.</p>
+                    )}
                   </div>
                 </div>
               )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
@@ -48,10 +49,19 @@ import {
   Receipt,
 } from "lucide-react";
 import { toast } from "sonner";
-import { EditAppointmentDialog } from "@/components/appointments/edit-appointment-dialog";
-import { CompleteAppointmentDialog } from "@/components/appointments/complete-appointment-dialog";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { useSalonId } from "@/hooks/use-salon-id";
+
+// Lazy-load dialog components (only rendered when user triggers an action)
+const EditAppointmentDialog = dynamic(
+  () => import("@/components/appointments/edit-appointment-dialog").then((m) => ({ default: m.EditAppointmentDialog })),
+  { ssr: false },
+);
+
+const CompleteAppointmentDialog = dynamic(
+  () => import("@/components/appointments/complete-appointment-dialog").then((m) => ({ default: m.CompleteAppointmentDialog })),
+  { ssr: false },
+);
 
 interface AppointmentDetail {
   id: string;

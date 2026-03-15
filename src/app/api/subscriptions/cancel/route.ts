@@ -1,11 +1,11 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import { salonSubscriptions } from "@/lib/schema";
 import { getStripe } from "@/lib/stripe";
-import { getUserSalonId } from "@/lib/get-user-salon";
 
 /**
  * POST /api/subscriptions/cancel
@@ -22,14 +22,9 @@ import { getUserSalonId } from "@/lib/get-user-salon";
  */
 export async function POST() {
   try {
-    // Authenticate the user
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 },
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+    const { user } = authResult;
 
     const salonId = await getUserSalonId();
     if (!salonId) {
@@ -73,32 +68,23 @@ export async function POST() {
           );
           stripeCanceled = true;
 
-          // eslint-disable-next-line no-console
-          console.log(
-            `[Subscriptions API] Stripe subscription ${activeSub.stripeSubscriptionId} set to cancel at period end`,
-            {
-              cancel_at_period_end: canceledStripeSub.cancel_at_period_end,
-              current_period_end: canceledStripeSub.items.data[0]?.current_period_end
-                ? new Date(canceledStripeSub.items.data[0].current_period_end * 1000).toISOString()
-                : null,
-            },
-          );
+          logger.info("Stripe subscription set to cancel at period end", {
+            stripeSubscriptionId: activeSub.stripeSubscriptionId,
+            cancelAtPeriodEnd: canceledStripeSub.cancel_at_period_end,
+            currentPeriodEnd: canceledStripeSub.items.data[0]?.current_period_end
+              ? new Date(canceledStripeSub.items.data[0].current_period_end * 1000).toISOString()
+              : null,
+          });
         } catch (err) {
           stripeError = err instanceof Error ? err.message : "Stripe cancellation failed";
-          console.error("[Subscriptions API] Stripe cancel error:", err);
+          logger.error("Stripe subscription cancel error", { error: err });
           // Continue with local DB update even if Stripe fails
         }
       } else {
-        // eslint-disable-next-line no-console
-        console.log(
-          "[Subscriptions API] Stripe not configured, skipping Stripe cancellation (dev mode)",
-        );
+        logger.info("Stripe not configured, skipping Stripe cancellation (dev mode)");
       }
     } else {
-      // eslint-disable-next-line no-console
-      console.log(
-        "[Subscriptions API] No Stripe subscription ID, local-only cancellation (dev mode)",
-      );
+      logger.info("No Stripe subscription ID, local-only cancellation (dev mode)");
     }
 
     // Update the subscription status to canceled in our database
@@ -118,11 +104,11 @@ export async function POST() {
       );
     }
 
-    // eslint-disable-next-line no-console
-    console.log(
-      `[Subscriptions API] Subscription ${activeSub.id} canceled by user ${session.user.id}` +
-        (stripeCanceled ? " (Stripe canceled at period end)" : " (local only)"),
-    );
+    logger.info("Subscription canceled", {
+      subscriptionId: activeSub.id,
+      userId: user.id,
+      stripeCanceled,
+    });
 
     return NextResponse.json({
       success: true,
@@ -137,7 +123,7 @@ export async function POST() {
       stripeError,
     });
   } catch (error) {
-    console.error("[Subscriptions API] Cancel error:", error);
+    logger.error("Subscription cancel error", { error });
     return NextResponse.json(
       { success: false, error: "Nie udalo sie anulowac subskrypcji" },
       { status: 500 },

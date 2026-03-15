@@ -4,6 +4,9 @@ import { subscriptionPlans } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { PLANS } from "@/lib/constants";
 
+// Subscription plans rarely change — revalidate every hour to reduce DB queries
+export const revalidate = 3600;
+
 /**
  * Default plan data - used to seed the database if no plans exist.
  * Prices are in PLN.

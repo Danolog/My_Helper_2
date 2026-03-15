@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -115,7 +116,8 @@ function ComparisonSlider({
       onClick={(e) => handleMove(e.clientX)}
       data-testid="comparison-slider"
     >
-      {/* After photo (full width background) */}
+      {/* After photo (full width background) -- raw img required for slider dragging */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={afterUrl}
         alt="Po zabiegu"
@@ -123,11 +125,12 @@ function ComparisonSlider({
         draggable={false}
       />
 
-      {/* Before photo (clipped) */}
+      {/* Before photo (clipped) -- raw img required for dynamic width via slider */}
       <div
         className="absolute inset-0 overflow-hidden"
         style={{ width: `${sliderPosition}%` }}
       >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={beforeUrl}
           alt="Przed zabiegiem"
@@ -297,31 +300,41 @@ function PhotoLightbox({
                   <p className="text-sm font-medium mb-2 text-center bg-orange-500/80 text-white rounded py-1">
                     Przed
                   </p>
-                  <img
-                    src={photo.beforePhotoUrl!}
-                    alt="Przed"
-                    className="w-full rounded-lg"
-                  />
+                  <div className="relative aspect-[3/4]">
+                    <Image
+                      src={photo.beforePhotoUrl!}
+                      alt="Przed"
+                      fill
+                      className="rounded-lg object-cover"
+                      sizes="(max-width: 768px) 45vw, 30vw"
+                    />
+                  </div>
                 </div>
                 <div>
                   <p className="text-sm font-medium mb-2 text-center bg-green-500/80 text-white rounded py-1">
                     Po
                   </p>
-                  <img
-                    src={photo.afterPhotoUrl!}
-                    alt="Po"
-                    className="w-full rounded-lg"
-                  />
+                  <div className="relative aspect-[3/4]">
+                    <Image
+                      src={photo.afterPhotoUrl!}
+                      alt="Po"
+                      fill
+                      className="rounded-lg object-cover"
+                      sizes="(max-width: 768px) 45vw, 30vw"
+                    />
+                  </div>
                 </div>
               </div>
             )}
           </div>
         ) : (
-          <div className="flex justify-center">
-            <img
+          <div className="relative w-full" style={{ height: "60vh" }}>
+            <Image
               src={photo.afterPhotoUrl || photo.beforePhotoUrl || ""}
               alt={photo.description || "Zdjecie galerii"}
-              className="max-h-[60vh] rounded-lg object-contain"
+              fill
+              className="rounded-lg object-contain"
+              sizes="(max-width: 768px) 100vw, 80vw"
             />
           </div>
         )}
@@ -653,9 +666,10 @@ export default function SalonGalleryPage() {
               >
                 <div className="aspect-square relative">
                   {isPair ? (
-                    /* Split preview for before/after pairs */
+                    /* Split preview for before/after pairs -- raw img for w-[200%] crop trick */
                     <div className="w-full h-full flex">
                       <div className="w-1/2 h-full relative overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={photo.beforePhotoUrl!}
                           alt="Przed"
@@ -664,6 +678,7 @@ export default function SalonGalleryPage() {
                       </div>
                       <div className="w-0.5 bg-white z-10 relative" />
                       <div className="w-1/2 h-full relative overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={photo.afterPhotoUrl!}
                           alt="Po"
@@ -672,16 +687,20 @@ export default function SalonGalleryPage() {
                       </div>
                     </div>
                   ) : photo.afterPhotoUrl ? (
-                    <img
+                    <Image
                       src={photo.afterPhotoUrl}
                       alt={photo.description || "Zdjecie galerii"}
-                      className="w-full h-full object-cover"
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                     />
                   ) : photo.beforePhotoUrl ? (
-                    <img
+                    <Image
                       src={photo.beforePhotoUrl}
                       alt={photo.description || "Zdjecie galerii"}
-                      className="w-full h-full object-cover"
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center bg-muted">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { ArrowLeft, Upload, Trash2, Image as ImageIcon, Plus, X, Loader2, Pencil, Check, Filter, Users, Scissors, SlidersHorizontal, Link2, Eye, EyeOff, FolderPlus, FolderOpen, Folder, FolderMinus, Sparkles, Copy, Instagram, Facebook, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
 import { useSalonId } from "@/hooks/use-salon-id";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type CaptionPlatform = "instagram" | "facebook" | "tiktok";
 
@@ -126,7 +128,8 @@ function ComparisonSlider({
       onClick={(e) => handleMove(e.clientX)}
       data-testid="comparison-slider"
     >
-      {/* After photo (full width background) */}
+      {/* After photo (full width background) -- raw img required for slider dragging */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={afterUrl}
         alt="Po zabiegu"
@@ -134,11 +137,12 @@ function ComparisonSlider({
         draggable={false}
       />
 
-      {/* Before photo (clipped) */}
+      {/* Before photo (clipped) -- raw img required for dynamic width via slider */}
       <div
         className="absolute inset-0 overflow-hidden"
         style={{ width: `${sliderPosition}%` }}
       >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={beforeUrl}
           alt="Przed zabiegiem"
@@ -319,7 +323,7 @@ export default function GalleryPage() {
     }
   };
 
-  const fetchPhotos = useCallback(async (employeeFilter?: string, serviceFilter?: string) => {
+  const fetchPhotos = useCallback(async (employeeFilter?: string, serviceFilter?: string, signal?: AbortSignal) => {
     if (!salonId) return;
     try {
       let url = `/api/gallery?salonId=${salonId}`;
@@ -329,54 +333,58 @@ export default function GalleryPage() {
       if (serviceFilter) {
         url += `&serviceId=${serviceFilter}`;
       }
-      const res = await fetch(url);
+      const res = await fetch(url, signal ? { signal } : {});
       const data = await res.json();
       if (data.success) {
         setPhotos(data.data);
       }
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error("Failed to fetch photos:", error);
     } finally {
       setLoading(false);
     }
   }, [salonId]);
 
-  const fetchEmployees = useCallback(async () => {
+  const fetchEmployees = useCallback(async (signal?: AbortSignal) => {
     if (!salonId) return;
     try {
-      const res = await fetch(`/api/employees?salonId=${salonId}`);
+      const res = await fetch(`/api/employees?salonId=${salonId}`, signal ? { signal } : {});
       const data = await res.json();
       if (data.success) {
         setEmployees(data.data);
       }
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error("Failed to fetch employees:", error);
     }
   }, [salonId]);
 
-  const fetchServices = useCallback(async () => {
+  const fetchServices = useCallback(async (signal?: AbortSignal) => {
     if (!salonId) return;
     try {
-      const res = await fetch(`/api/services?salonId=${salonId}`);
+      const res = await fetch(`/api/services?salonId=${salonId}`, signal ? { signal } : {});
       const data = await res.json();
       if (data.success) {
         setServices(data.data);
       }
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error("Failed to fetch services:", error);
     }
   }, [salonId]);
 
-  const fetchAlbums = useCallback(async () => {
+  const fetchAlbums = useCallback(async (signal?: AbortSignal) => {
     if (!salonId) return;
     setAlbumsLoading(true);
     try {
-      const res = await fetch(`/api/albums?salonId=${salonId}`);
+      const res = await fetch(`/api/albums?salonId=${salonId}`, signal ? { signal } : {});
       const data = await res.json();
       if (data.success) {
         setAlbumsList(data.data);
       }
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error("Failed to fetch albums:", error);
     } finally {
       setAlbumsLoading(false);
@@ -507,10 +515,14 @@ export default function GalleryPage() {
   };
 
   useEffect(() => {
-    fetchPhotos();
-    fetchEmployees();
-    fetchServices();
-    fetchAlbums();
+    const abortController = new AbortController();
+
+    fetchPhotos(undefined, undefined, abortController.signal);
+    fetchEmployees(abortController.signal);
+    fetchServices(abortController.signal);
+    fetchAlbums(abortController.signal);
+
+    return () => abortController.abort();
   }, [fetchPhotos, fetchEmployees, fetchServices, fetchAlbums]);
 
   // Helper to get active filter values
@@ -840,6 +852,7 @@ export default function GalleryPage() {
                 />
                 {beforePreview ? (
                   <div className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- data URI from FileReader */}
                     <img
                       src={beforePreview}
                       alt="Podglad przed"
@@ -891,6 +904,7 @@ export default function GalleryPage() {
                 />
                 {uploadPreview ? (
                   <div className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- data URI from FileReader */}
                     <img
                       src={uploadPreview}
                       alt="Podglad po"
@@ -937,10 +951,12 @@ export default function GalleryPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- data URI from FileReader */}
                       <img src={beforePreview} alt="Przed" className="w-full h-20 object-cover rounded border" />
                       <span className="absolute bottom-1 left-1 bg-orange-500 text-white text-[10px] px-1 rounded">PRZED</span>
                     </div>
                     <div className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- data URI from FileReader */}
                       <img src={uploadPreview} alt="Po" className="w-full h-20 object-cover rounded border" />
                       <span className="absolute bottom-1 left-1 bg-green-500 text-white text-[10px] px-1 rounded">PO</span>
                     </div>
@@ -1198,17 +1214,19 @@ export default function GalleryPage() {
                       {isPair ? (
                         <div className="w-full h-full flex">
                           <div className="w-1/2 h-full relative overflow-hidden">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={photo.beforePhotoUrl!} alt="Przed" className="absolute inset-0 w-[200%] h-full object-cover" />
                           </div>
                           <div className="w-0.5 bg-white z-10 relative" />
                           <div className="w-1/2 h-full relative overflow-hidden">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img src={photo.afterPhotoUrl!} alt="Po" className="absolute inset-0 w-[200%] h-full object-cover object-right" />
                           </div>
                         </div>
                       ) : photo.afterPhotoUrl ? (
-                        <img src={photo.afterPhotoUrl} alt={photo.description || "Zdjecie"} className="w-full h-full object-cover" />
+                        <Image src={photo.afterPhotoUrl} alt={photo.description || "Zdjecie"} fill className="object-cover" sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw" />
                       ) : photo.beforePhotoUrl ? (
-                        <img src={photo.beforePhotoUrl} alt={photo.description || "Zdjecie"} className="w-full h-full object-cover" />
+                        <Image src={photo.beforePhotoUrl} alt={photo.description || "Zdjecie"} fill className="object-cover" sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center bg-muted">
                           <ImageIcon className="w-12 h-12 text-muted-foreground" />
@@ -1337,21 +1355,18 @@ export default function GalleryPage() {
           <Loader2 className="w-8 h-8 animate-spin" />
         </div>
       ) : displayPhotos.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 text-center">
-          <ImageIcon className="w-16 h-16 text-muted-foreground mb-4" />
-          <h2 className="text-lg font-semibold mb-2">
-            {filterPairsOnly ? "Brak par przed/po" : "Galeria jest pusta"}
-          </h2>
-          <p className="text-muted-foreground mb-4">
-            {filterPairsOnly
-              ? "Dodaj zdjecia przed i po zabiegu, aby utworzyc pary"
-              : "Dodaj pierwsze zdjecie do portfolio salonu"}
-          </p>
-          <Button onClick={() => setDialogOpen(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Dodaj zdjecie
-          </Button>
-        </div>
+        <EmptyState
+          icon={ImageIcon}
+          title={filterPairsOnly ? "Brak par przed/po" : "Galeria jest pusta"}
+          description={filterPairsOnly
+            ? "Dodaj zdjecia przed i po zabiegu, aby utworzyc pary."
+            : "Dodaj pierwsze zdjecie do portfolio salonu."}
+          action={{
+            label: "Dodaj zdjecie",
+            icon: Plus,
+            onClick: () => setDialogOpen(true),
+          }}
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {displayPhotos.map((photo) => {
@@ -1367,9 +1382,10 @@ export default function GalleryPage() {
               >
                 <div className="aspect-square relative">
                   {isPair ? (
-                    /* Show split preview for pairs */
+                    /* Show split preview for pairs -- keep raw img for w-[200%] crop trick */
                     <div className="w-full h-full flex">
                       <div className="w-1/2 h-full relative overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={photo.beforePhotoUrl!}
                           alt="Przed"
@@ -1378,6 +1394,7 @@ export default function GalleryPage() {
                       </div>
                       <div className="w-0.5 bg-white z-10 relative" />
                       <div className="w-1/2 h-full relative overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={photo.afterPhotoUrl!}
                           alt="Po"
@@ -1386,16 +1403,20 @@ export default function GalleryPage() {
                       </div>
                     </div>
                   ) : photo.afterPhotoUrl ? (
-                    <img
+                    <Image
                       src={photo.afterPhotoUrl}
                       alt={photo.description || "Zdjecie galerii"}
-                      className="w-full h-full object-cover"
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                     />
                   ) : photo.beforePhotoUrl ? (
-                    <img
+                    <Image
                       src={photo.beforePhotoUrl}
                       alt={photo.description || "Zdjecie galerii"}
-                      className="w-full h-full object-cover"
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center bg-muted">
@@ -1544,19 +1565,27 @@ export default function GalleryPage() {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <p className="text-sm font-medium mb-2 text-center bg-orange-100 text-orange-700 rounded py-1">Przed</p>
-                        <img
-                          src={selectedPhoto.beforePhotoUrl}
-                          alt="Przed"
-                          className="w-full rounded-lg"
-                        />
+                        <div className="relative aspect-[3/4]">
+                          <Image
+                            src={selectedPhoto.beforePhotoUrl}
+                            alt="Przed"
+                            fill
+                            className="rounded-lg object-cover"
+                            sizes="(max-width: 768px) 45vw, 30vw"
+                          />
+                        </div>
                       </div>
                       <div>
                         <p className="text-sm font-medium mb-2 text-center bg-green-100 text-green-700 rounded py-1">Po</p>
-                        <img
-                          src={selectedPhoto.afterPhotoUrl}
-                          alt="Po"
-                          className="w-full rounded-lg"
-                        />
+                        <div className="relative aspect-[3/4]">
+                          <Image
+                            src={selectedPhoto.afterPhotoUrl}
+                            alt="Po"
+                            fill
+                            className="rounded-lg object-cover"
+                            sizes="(max-width: 768px) 45vw, 30vw"
+                          />
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1564,11 +1593,15 @@ export default function GalleryPage() {
               ) : (
                 <div>
                   {/* Single photo with option to add matching */}
-                  <img
-                    src={selectedPhoto.afterPhotoUrl || selectedPhoto.beforePhotoUrl || ""}
-                    alt={selectedPhoto.description || "Zdjecie"}
-                    className="w-full max-h-[50vh] object-contain rounded-lg"
-                  />
+                  <div className="relative w-full" style={{ height: "50vh" }}>
+                    <Image
+                      src={selectedPhoto.afterPhotoUrl || selectedPhoto.beforePhotoUrl || ""}
+                      alt={selectedPhoto.description || "Zdjecie"}
+                      fill
+                      className="object-contain rounded-lg"
+                      sizes="(max-width: 768px) 100vw, 60vw"
+                    />
+                  </div>
                   {/* Show badge for single photos */}
                   {selectedPhoto.beforePhotoUrl && !selectedPhoto.afterPhotoUrl && (
                     <div className="mt-2 p-3 bg-orange-50 border border-orange-200 rounded-lg flex items-center justify-between">
@@ -1726,11 +1759,13 @@ export default function GalleryPage() {
                 <Label className="mb-2 block text-sm text-muted-foreground">
                   Istniejace zdjecie ({linkingPhoto.beforePhotoUrl ? "przed" : "po"}):
                 </Label>
-                <div className="relative">
-                  <img
+                <div className="relative h-40 rounded-lg border overflow-hidden">
+                  <Image
                     src={linkingPhoto.beforePhotoUrl || linkingPhoto.afterPhotoUrl || ""}
                     alt="Istniejace zdjecie"
-                    className="w-full h-40 object-cover rounded-lg border"
+                    fill
+                    className="object-cover"
+                    sizes="(max-width: 768px) 100vw, 448px"
                   />
                   <div className={`absolute top-2 left-2 text-white text-xs font-semibold px-2 py-1 rounded ${
                     linkingPhoto.beforePhotoUrl ? "bg-orange-500" : "bg-green-500"
@@ -1765,6 +1800,7 @@ export default function GalleryPage() {
                 />
                 {linkPreview ? (
                   <div className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element -- data URI from FileReader */}
                     <img
                       src={linkPreview}
                       alt="Nowe zdjecie"
@@ -1814,6 +1850,7 @@ export default function GalleryPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- may be data URI from FileReader */}
                       <img
                         src={linkingPhoto.beforePhotoUrl || linkPreview}
                         alt="Przed"
@@ -1822,6 +1859,7 @@ export default function GalleryPage() {
                       <span className="absolute bottom-1 left-1 bg-orange-500 text-white text-[10px] px-1 rounded">PRZED</span>
                     </div>
                     <div className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- may be data URI from FileReader */}
                       <img
                         src={linkingPhoto.beforePhotoUrl ? linkPreview : (linkingPhoto.afterPhotoUrl || "")}
                         alt="Po"
@@ -1865,11 +1903,13 @@ export default function GalleryPage() {
             </DialogHeader>
             <div className="space-y-4 mt-4">
               {/* Photo preview */}
-              <div className="rounded-lg overflow-hidden border">
-                <img
+              <div className="relative h-40 rounded-lg overflow-hidden border">
+                <Image
                   src={editingPhoto.afterPhotoUrl || editingPhoto.beforePhotoUrl || ""}
                   alt="Edytowane zdjecie"
-                  className="w-full h-40 object-cover"
+                  fill
+                  className="object-cover"
+                  sizes="(max-width: 768px) 100vw, 448px"
                 />
               </div>
 
@@ -2162,11 +2202,13 @@ export default function GalleryPage() {
             <div className="space-y-4 mt-4">
               {/* Photo preview */}
               <div className="flex gap-4">
-                <div className="w-32 h-32 rounded-lg overflow-hidden border flex-shrink-0">
-                  <img
+                <div className="relative w-32 h-32 rounded-lg overflow-hidden border flex-shrink-0">
+                  <Image
                     src={captionPhoto.afterPhotoUrl || captionPhoto.beforePhotoUrl || ""}
                     alt={captionPhoto.description || "Zdjecie"}
-                    className="w-full h-full object-cover"
+                    fill
+                    className="object-cover"
+                    sizes="128px"
                   />
                 </div>
                 <div className="flex-1 min-w-0 space-y-1">

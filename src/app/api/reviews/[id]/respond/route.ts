@@ -4,6 +4,8 @@ import { db } from "@/lib/db";
 import { reviews, salons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
+import { validateBody, reviewRespondSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 // PATCH /api/reviews/[id]/respond - Save owner response to a review
 export async function PATCH(
@@ -11,6 +13,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -22,23 +27,15 @@ export async function PATCH(
     const userId = session.user.id;
     const { id: reviewId } = await params;
 
-    // Parse request body
+    // Parse and validate request body
     const body = await request.json();
+
+    const validationError = validateBody(reviewRespondSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
+
     const { response } = body;
-
-    if (!response || typeof response !== "string" || response.trim().length === 0) {
-      return NextResponse.json(
-        { success: false, error: "Odpowiedz nie moze byc pusta" },
-        { status: 400 }
-      );
-    }
-
-    if (response.trim().length > 2000) {
-      return NextResponse.json(
-        { success: false, error: "Odpowiedz nie moze byc dluzsza niz 2000 znakow" },
-        { status: 400 }
-      );
-    }
 
     // Find the salon owned by the current user
     const [salon] = await db
@@ -107,6 +104,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
+
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(

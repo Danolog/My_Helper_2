@@ -1,10 +1,9 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
-import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 
 /**
  * POST /api/subscriptions/downgrade
@@ -17,14 +16,8 @@ import { getUserSalonId } from "@/lib/get-user-salon";
  */
 export async function POST(request: Request) {
   try {
-    // Authenticate the user via Better Auth session
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 },
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
     const salonId = await getUserSalonId();
     if (!salonId) {
@@ -158,13 +151,8 @@ export async function POST(request: Request) {
  */
 export async function DELETE() {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 },
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
     const salonId = await getUserSalonId();
     if (!salonId) {

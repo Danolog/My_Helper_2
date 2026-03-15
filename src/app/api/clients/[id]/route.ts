@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { verifyPassword } from "better-auth/crypto";
+import { validateBody, updateClientSchema } from "@/lib/api-validation";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
@@ -74,6 +75,13 @@ export async function PUT(
     }
 
     const body = await request.json();
+
+    // Server-side validation with Zod schema
+    const validationError = validateBody(updateClientSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
+    }
+
     const { firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
 
     // Build update object with only provided fields

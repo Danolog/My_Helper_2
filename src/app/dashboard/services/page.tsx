@@ -55,6 +55,7 @@ import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { useSalonId } from "@/hooks/use-salon-id";
+import { EmptyState } from "@/components/ui/empty-state";
 
 interface ServiceCategory {
   id: string;
@@ -167,44 +168,54 @@ export default function ServicesPage() {
   // Network error state
   const [fetchError, setFetchError] = useState<{ message: string; isNetwork: boolean; isTimeout: boolean } | null>(null);
 
-  const fetchServices = useCallback(async () => {
+  const fetchServices = useCallback(async (signal?: AbortSignal) => {
     if (!salonId) return;
     try {
-      const res = await fetch(`/api/services?salonId=${salonId}`);
+      const res = await fetch(`/api/services?salonId=${salonId}`, signal ? { signal } : {});
       const data = await res.json();
       if (data.success) {
         setServices(data.data);
         setFetchError(null);
       }
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error("Failed to fetch services:", error);
       const errInfo = getNetworkErrorMessage(error);
       setFetchError(errInfo);
     }
   }, [salonId]);
 
-  const fetchCategories = useCallback(async () => {
+  const fetchCategories = useCallback(async (signal?: AbortSignal) => {
     if (!salonId) return;
     try {
       const res = await fetch(
-        `/api/service-categories?salonId=${salonId}`
+        `/api/service-categories?salonId=${salonId}`,
+        signal ? { signal } : {}
       );
       const data = await res.json();
       if (data.success) {
         setCategories(data.data);
       }
     } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
       console.error("Failed to fetch categories:", error);
     }
   }, [salonId]);
 
   useEffect(() => {
+    const abortController = new AbortController();
+
     async function loadData() {
       setLoading(true);
-      await Promise.all([fetchServices(), fetchCategories()]);
+      await Promise.all([
+        fetchServices(abortController.signal),
+        fetchCategories(abortController.signal),
+      ]);
       setLoading(false);
     }
     loadData();
+
+    return () => abortController.abort();
   }, [fetchServices, fetchCategories]);
 
   // Cross-tab sync: refetch when another tab modifies services
@@ -823,21 +834,17 @@ export default function ServicesPage() {
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
             </div>
           ) : services.length === 0 ? (
-            <Card>
-              <CardContent className="flex flex-col items-center justify-center py-12">
-                <Scissors className="w-12 h-12 text-muted-foreground mb-4" />
-                <p className="text-muted-foreground mb-4">
-                  Brak uslug. Dodaj pierwsza usluge, aby rozpoczac.
-                </p>
-                <Button
-                  onClick={() => setDialogOpen(true)}
-                  data-testid="empty-state-add-btn"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Dodaj usluge
-                </Button>
-              </CardContent>
-            </Card>
+            <EmptyState
+              icon={Scissors}
+              title="Brak uslug"
+              description="Dodaj pierwsza usluge, aby rozpoczac."
+              action={{
+                label: "Dodaj usluge",
+                icon: Plus,
+                onClick: () => setDialogOpen(true),
+                "data-testid": "empty-state-add-btn",
+              }}
+            />
           ) : categories.length > 0 ? (
             // Grouped by category view
             <div className="space-y-6">

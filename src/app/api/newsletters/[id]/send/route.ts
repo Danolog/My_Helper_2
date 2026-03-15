@@ -1,7 +1,5 @@
-import { NextRequest } from "next/server";
-import { headers } from "next/headers";
+import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
   clients,
@@ -11,6 +9,9 @@ import {
 } from "@/lib/schema";
 import { eq, and, isNull, isNotNull } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { logger } from "@/lib/logger";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
 const sendSchema = z.object({
   // Optional: send only to specific client IDs. If not provided, send to all consented.
@@ -31,11 +32,18 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Verify authentication
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  // Rate limit: mass email sending is a sensitive operation
+  const ip = getClientIp(request);
+  const rateLimitResult = strictRateLimit.check(ip);
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
+    );
   }
+
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
   const salonId = await getUserSalonId();
   if (!salonId) {
@@ -127,7 +135,7 @@ export async function POST(
       );
     }
 
-    // Send emails (dev mode: log to console, save to notifications)
+    // Process email sends first (external side-effects stay outside the transaction)
     let sentCount = 0;
     let failedCount = 0;
     const sentDetails: {
@@ -138,32 +146,16 @@ export async function POST(
     }[] = [];
 
     for (const recipient of recipients) {
+      const fullName = `${recipient.firstName} ${recipient.lastName}`;
+      const email = recipient.email || "";
+
       try {
-        const fullName = `${recipient.firstName} ${recipient.lastName}`;
-        const email = recipient.email!;
-
-        // Log email to console (dev mode)
-        console.log(`
-╔══════════════════════════════════════════════════════════════╗
-║               📧  NEWSLETTER EMAIL SENT                     ║
-╠══════════════════════════════════════════════════════════════╣
-║  To:      ${email}
-║  Name:    ${fullName}
-║  Subject: ${newsletter.subject}
-╠══════════════════════════════════════════════════════════════╣
-║  Content preview:
-║  ${newsletter.content.substring(0, 200).replace(/\n/g, "\n║  ")}...
-╚══════════════════════════════════════════════════════════════╝
-`);
-
-        // Save to notifications table
-        await db.insert(notifications).values({
-          salonId: salonId,
-          clientId: recipient.clientId,
-          type: "email",
-          message: `Newsletter: ${newsletter.subject}`,
-          status: "sent",
-          sentAt: new Date(),
+        // Log email send (dev mode — replace with real email service in production)
+        logger.info("Newsletter email sent", {
+          to: email,
+          recipientName: fullName,
+          subject: newsletter.subject,
+          contentPreview: newsletter.content.substring(0, 200),
         });
 
         sentCount++;
@@ -174,41 +166,48 @@ export async function POST(
           status: "sent",
         });
       } catch (err) {
-        console.error(
-          `[Newsletter Send] Failed for client ${recipient.clientId}:`,
-          err
-        );
+        logger.error("Newsletter send failed for client", {
+          clientId: recipient.clientId,
+          error: err,
+        });
         failedCount++;
         sentDetails.push({
           clientId: recipient.clientId,
-          email: recipient.email || "",
-          name: `${recipient.firstName} ${recipient.lastName}`,
+          email,
+          name: fullName,
           status: "failed",
         });
-
-        // Save failed notification
-        try {
-          await db.insert(notifications).values({
-            salonId: salonId,
-            clientId: recipient.clientId,
-            type: "email",
-            message: `Newsletter (failed): ${newsletter.subject}`,
-            status: "failed",
-          });
-        } catch {
-          // Ignore save failure
-        }
       }
     }
 
-    // Update newsletter with sent info
-    await db
-      .update(newsletters)
-      .set({
-        sentAt: new Date(),
-        recipientsCount: sentCount,
-      })
-      .where(eq(newsletters.id, newsletterId));
+    // Wrap all database writes in a transaction for atomicity:
+    // - batch insert notification records for each recipient
+    // - update the newsletter with sent timestamp and recipient count
+    await db.transaction(async (tx) => {
+      const notificationRows = sentDetails.map((detail) => ({
+        salonId: salonId,
+        clientId: detail.clientId,
+        type: "email" as const,
+        message:
+          detail.status === "sent"
+            ? `Newsletter: ${newsletter.subject}`
+            : `Newsletter (failed): ${newsletter.subject}`,
+        status: detail.status === "sent" ? ("sent" as const) : ("failed" as const),
+        sentAt: detail.status === "sent" ? new Date() : undefined,
+      }));
+
+      if (notificationRows.length > 0) {
+        await tx.insert(notifications).values(notificationRows);
+      }
+
+      await tx
+        .update(newsletters)
+        .set({
+          sentAt: new Date(),
+          recipientsCount: sentCount,
+        })
+        .where(eq(newsletters.id, newsletterId));
+    });
 
     return Response.json({
       success: true,
@@ -219,7 +218,7 @@ export async function POST(
       details: sentDetails,
     });
   } catch (error) {
-    console.error("[Newsletter Send] Error:", error);
+    logger.error("Newsletter send error", { error });
     return Response.json(
       { error: "Blad podczas wysylania newslettera" },
       { status: 500 }
