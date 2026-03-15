@@ -2,8 +2,6 @@
 
 import { Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -11,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -18,9 +17,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { POST_TYPES, TONES } from "../_types";
-import type { Platform, PostType, Tone } from "../_types";
 import { PLATFORMS } from "./platforms";
+import type { Platform, PostType, Tone } from "../_types";
 
 type PostConfigCardProps = {
   platform: Platform;

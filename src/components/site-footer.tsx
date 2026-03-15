@@ -4,9 +4,10 @@ import { Scissors } from "lucide-react";
 export function SiteFooter() {
   return (
     <footer className="border-t bg-[oklch(0.22_0.03_55)]" role="contentinfo">
-      <div className="container mx-auto px-4 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-          <div className="md:col-span-1">
+      <div className="container mx-auto px-4 py-8 md:py-12">
+        {/* Mobile: compact single-column, Desktop: 4-column grid */}
+        <div className="hidden md:grid md:grid-cols-4 gap-8">
+          <div>
             <Link href="/" className="flex items-center gap-2 mb-3">
               <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
                 <Scissors className="h-4 w-4 text-primary" />
@@ -43,9 +44,27 @@ export function SiteFooter() {
             </ul>
           </div>
         </div>
-        <div className="border-t border-white/8 mt-8 pt-6 text-center text-sm text-[oklch(0.50_0.03_55)]">
+
+        {/* Mobile: minimal footer */}
+        <div className="flex flex-col items-center gap-3 md:hidden">
+          <Link href="/" className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
+              <Scissors className="h-3.5 w-3.5 text-primary" />
+            </div>
+            <span className="font-[family-name:var(--font-playfair)] text-lg font-bold text-gradient-rose">
+              MyHelper
+            </span>
+          </Link>
+          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-xs text-[oklch(0.60_0.03_55)]">
+            <Link href="/salons" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Salony</Link>
+            <Link href="/pricing" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Cennik</Link>
+            <Link href="/privacy" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Prywatnosc</Link>
+            <Link href="/terms" className="hover:text-[oklch(0.95_0.01_70)] transition-colors">Regulamin</Link>
+          </div>
+        </div>
+
+        <div className="border-t border-white/8 mt-6 md:mt-8 pt-4 md:pt-6 text-center text-xs md:text-sm text-[oklch(0.50_0.03_55)]">
           <p>&copy; {new Date().getFullYear()} MyHelper. Wszelkie prawa zastrzezone.</p>
-          <p className="mt-1 text-xs text-[oklch(0.40_0.03_55)]">Stworzone z miloscia w Polsce</p>
         </div>
       </div>
     </footer>
