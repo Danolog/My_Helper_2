@@ -9,12 +9,14 @@ import { EmployeeFilterCard } from "./_components/employee-filter-card";
 import { SummaryCards } from "./_components/summary-cards";
 import { PeriodComparisonCard } from "./_components/period-comparison-card";
 import { TabNavigation } from "./_components/tab-navigation";
-import { LostRevenueTab } from "./_components/lost-revenue-tab";
-import { ReasonTab } from "./_components/reason-tab";
-import { EmployeeTab } from "./_components/employee-tab";
-import { ServiceTab } from "./_components/service-tab";
-import { DayOfWeekTab } from "./_components/day-of-week-tab";
-import { TrendTab } from "./_components/trend-tab";
+import dynamic from "next/dynamic";
+
+const LostRevenueTab = dynamic(() => import("./_components/lost-revenue-tab").then((m) => m.LostRevenueTab));
+const ReasonTab = dynamic(() => import("./_components/reason-tab").then((m) => m.ReasonTab));
+const EmployeeTab = dynamic(() => import("./_components/employee-tab").then((m) => m.EmployeeTab));
+const ServiceTab = dynamic(() => import("./_components/service-tab").then((m) => m.ServiceTab));
+const DayOfWeekTab = dynamic(() => import("./_components/day-of-week-tab").then((m) => m.DayOfWeekTab));
+const TrendTab = dynamic(() => import("./_components/trend-tab").then((m) => m.TrendTab));
 
 export default function CancellationReportPage() {
   const {

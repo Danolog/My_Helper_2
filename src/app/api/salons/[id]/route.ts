@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
+import { unstable_cache } from "next/cache";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
@@ -7,15 +8,16 @@ import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";
 import { validateBody, updateSalonSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
-// GET /api/salons/[id] - Get salon details with services, employees, and rating
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
 
-    // Select all salon columns needed for the detail view
+// Revalidate salon detail every 30 seconds
+export const revalidate = 30;
+
+/**
+ * Cached salon detail query — avoids re-running 7+ DB queries on every request.
+ * Cache is keyed by salonId and revalidated every 30s or on-demand via tag.
+ */
+const getCachedSalonDetail = unstable_cache(
+  async (id: string) => {
     const salonColumns = {
       id: salons.id,
       name: salons.name,
@@ -30,15 +32,9 @@ export async function GET(
     };
 
     const [salon] = await db.select(salonColumns).from(salons).where(eq(salons.id, id));
+    if (!salon) return null;
 
-    if (!salon) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
-    // Get active services with explicit columns
+    // Get active services
     const serviceColumns = {
       id: services.id,
       salonId: services.salonId,
@@ -58,7 +54,7 @@ export async function GET(
       .from(services)
       .where(and(eq(services.salonId, id), eq(services.isActive, true)));
 
-    // Get service categories for this salon
+    // Get service categories
     const categories = await db
       .select({
         id: serviceCategories.id,
@@ -93,7 +89,7 @@ export async function GET(
       variants: variants.filter((v) => v.serviceId === service.id),
     }));
 
-    // Get active employees (only columns used in enrichedEmployees mapping)
+    // Get active employees
     const salonEmployees = await db
       .select({
         id: employees.id,
@@ -106,10 +102,9 @@ export async function GET(
       .from(employees)
       .where(and(eq(employees.salonId, id), eq(employees.isActive, true)));
 
-    // Get employee IDs for enrichment
     const employeeIds = salonEmployees.map((e) => e.id);
 
-    // Get specialties (services assigned to each employee)
+    // Get specialties
     let employeeServiceMap: Record<string, string[]> = {};
     if (employeeIds.length > 0) {
       const empServices = await db
@@ -129,7 +124,7 @@ export async function GET(
       }
     }
 
-    // Get individual employee ratings
+    // Get employee ratings
     let employeeRatingMap: Record<string, { avgRating: number; reviewCount: number }> = {};
     if (employeeIds.length > 0) {
       const empRatings = await db
@@ -182,7 +177,7 @@ export async function GET(
       }
     }
 
-    // Enrich employees with specialties, ratings, gallery counts
+    // Enrich employees
     const enrichedEmployees = salonEmployees.map((emp) => ({
       id: emp.id,
       firstName: emp.firstName,
@@ -202,18 +197,37 @@ export async function GET(
       .from(reviews)
       .where(and(eq(reviews.salonId, id), eq(reviews.status, "approved")));
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        ...salon,
-        services: servicesWithVariants,
-        categories,
-        employees: enrichedEmployees,
-        averageRating: ratingResult?.avgRating
-          ? parseFloat(String(ratingResult.avgRating))
-          : null,
-      },
-    });
+    return {
+      ...salon,
+      services: servicesWithVariants,
+      categories,
+      employees: enrichedEmployees,
+      averageRating: ratingResult?.avgRating
+        ? parseFloat(String(ratingResult.avgRating))
+        : null,
+    };
+  },
+  ["salon-detail"],
+  { revalidate: 30, tags: ["salon-detail"] }
+);
+
+// GET /api/salons/[id] - Get salon details with services, employees, and rating
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const data = await getCachedSalonDetail(id);
+
+    if (!data) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ success: true, data });
   } catch (error) {
     logger.error("[Salon Detail API] Error", { error: error });
     return NextResponse.json(

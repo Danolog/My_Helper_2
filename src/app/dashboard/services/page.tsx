@@ -4,11 +4,13 @@ import { Lock, Scissors, FolderOpen } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
-import { AddServiceDialog } from "./_components/add-service-dialog";
-import { CategoriesTab } from "./_components/categories-tab";
-import { CategoryDialog } from "./_components/category-dialog";
-import { DeleteCategoryDialog } from "./_components/delete-category-dialog";
-import { DeleteServiceDialog } from "./_components/delete-service-dialog";
+import dynamic from "next/dynamic";
+
+const AddServiceDialog = dynamic(() => import("./_components/add-service-dialog").then((m) => m.AddServiceDialog));
+const CategoriesTab = dynamic(() => import("./_components/categories-tab").then((m) => m.CategoriesTab));
+const CategoryDialog = dynamic(() => import("./_components/category-dialog").then((m) => m.CategoryDialog));
+const DeleteCategoryDialog = dynamic(() => import("./_components/delete-category-dialog").then((m) => m.DeleteCategoryDialog));
+const DeleteServiceDialog = dynamic(() => import("./_components/delete-service-dialog").then((m) => m.DeleteServiceDialog));
 import { ServicesTab } from "./_components/services-tab";
 import { useCategoriesData } from "./_hooks/use-categories-data";
 import { useServicesData } from "./_hooks/use-services-data";

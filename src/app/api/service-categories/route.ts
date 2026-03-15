@@ -33,11 +33,13 @@ export async function GET(request: Request) {
 
     logger.info(`[ServiceCategories API] Query returned ${result.length} rows`);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       data: result,
       count: result.length,
     });
+    response.headers.set("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
+    return response;
   } catch (error) {
     logger.error("[ServiceCategories API] Database error", { error: error });
     return NextResponse.json(

@@ -25,7 +25,7 @@ export async function GET() {
 
     const responseTime = Date.now() - startTime;
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       status: 'healthy',
       timestamp: new Date().toISOString(),
       responseTimeMs: responseTime,
@@ -34,6 +34,8 @@ export async function GET() {
         type: 'postgresql'
       }
     });
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   } catch (error) {
     logger.error('Health check failed', { error: error });
     const responseTime = Date.now() - startTime;

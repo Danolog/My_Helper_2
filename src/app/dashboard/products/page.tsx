@@ -15,11 +15,13 @@ import { ProductStats } from "./_components/product-stats";
 import { LowStockWarning } from "./_components/low-stock-warning";
 import { LowStockNotifications } from "./_components/low-stock-notifications";
 import { ProductList } from "./_components/product-list";
-import { ProductDialog } from "./_components/product-dialog";
-import { DeleteProductDialog } from "./_components/delete-product-dialog";
-import { CategoriesTab } from "./_components/categories-tab";
-import { CategoryDialog } from "./_components/category-dialog";
-import { DeleteCategoryDialog } from "./_components/delete-category-dialog";
+import dynamic from "next/dynamic";
+
+const ProductDialog = dynamic(() => import("./_components/product-dialog").then((m) => m.ProductDialog));
+const DeleteProductDialog = dynamic(() => import("./_components/delete-product-dialog").then((m) => m.DeleteProductDialog));
+const CategoriesTab = dynamic(() => import("./_components/categories-tab").then((m) => m.CategoriesTab));
+const CategoryDialog = dynamic(() => import("./_components/category-dialog").then((m) => m.CategoryDialog));
+const DeleteCategoryDialog = dynamic(() => import("./_components/delete-category-dialog").then((m) => m.DeleteCategoryDialog));
 
 export default function ProductsPage() {
   const { data: session, isPending } = useSession();
