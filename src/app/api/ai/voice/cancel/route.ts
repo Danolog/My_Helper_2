@@ -17,14 +17,9 @@ import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
 import { notifyWaitingList } from "@/lib/waiting-list";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { voiceCancelSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
-interface CancelRequestBody {
-  appointmentId?: string; // Direct appointment ID if known
-  callerPhone: string; // Phone to look up client
-  callerName?: string;
-  notes?: string;
-}
 
 /**
  * POST /api/ai/voice/cancel
@@ -56,17 +51,20 @@ export async function POST(req: Request) {
     );
   }
 
-  // --- Parse request body ---
-  let body: CancelRequestBody;
+  // --- Parse and validate request body ---
+  let rawBody: unknown;
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (!body.callerPhone || typeof body.callerPhone !== "string") {
-    return NextResponse.json({ error: "callerPhone is required" }, { status: 400 });
+  const validationError = validateBody(voiceCancelSchema, rawBody);
+  if (validationError) {
+    return NextResponse.json(validationError, { status: 400 });
   }
+
+  const body = rawBody as { appointmentId?: string; callerPhone: string; callerName?: string; notes?: string };
 
   try {
     // ------------------------------------------------------------------

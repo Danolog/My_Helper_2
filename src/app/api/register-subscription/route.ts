@@ -4,6 +4,7 @@ import { subscriptionPlans, salonSubscriptions, salons, user as userTable } from
 import { eq } from "drizzle-orm";
 import { TRIAL_DAYS } from "@/lib/constants";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { registerSubscriptionSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -18,15 +19,12 @@ export async function POST(request: NextRequest) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
-    const body = await request.json();
-    const { planSlug, email } = body;
-
-    if (!planSlug || !email) {
-      return NextResponse.json(
-        { success: false, error: "planSlug and email are required" },
-        { status: 400 }
-      );
+    const rawBody = await request.json();
+    const validationError = validateBody(registerSubscriptionSchema, rawBody);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { planSlug, email } = rawBody as { planSlug: string; email: string };
 
     // Find the subscription plan
     const [plan] = await db

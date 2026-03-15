@@ -8,6 +8,7 @@ import {
   subscriptionPlans,
   notifications,
 } from "@/lib/schema";
+import { expirationWarningSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 const DEFAULT_WARNING_DAYS = 7;
@@ -152,7 +153,12 @@ export async function POST(request: Request) {
     let simulate = false;
 
     try {
-      const body = await request.json();
+      const rawBody = await request.json();
+      const validationError = validateBody(expirationWarningSchema, rawBody);
+      if (validationError) {
+        return NextResponse.json(validationError, { status: 400 });
+      }
+      const body = rawBody as { warningDays?: number; simulate?: boolean };
       if (body.warningDays && typeof body.warningDays === "number") {
         warningDays = Math.max(1, Math.min(30, body.warningDays));
       }

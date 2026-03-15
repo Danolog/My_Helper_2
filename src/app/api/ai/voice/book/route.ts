@@ -16,20 +16,11 @@ import { eq, and, gte, lt, not } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { voiceBookSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /** Slot interval in minutes used when generating available time slots. */
 const SLOT_INTERVAL = 15;
-
-interface BookingRequestBody {
-  serviceId: string;
-  employeeId?: string;
-  preferredDate?: string; // YYYY-MM-DD
-  preferredTime?: string; // HH:MM
-  callerPhone: string;
-  callerName?: string;
-  notes?: string;
-}
 
 /**
  * POST /api/ai/voice/book
@@ -61,21 +52,20 @@ export async function POST(req: Request) {
     );
   }
 
-  // --- Parse request body ---
-  let body: BookingRequestBody;
+  // --- Parse and validate request body ---
+  let rawBody: unknown;
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (!body.serviceId || typeof body.serviceId !== "string") {
-    return NextResponse.json({ error: "serviceId is required" }, { status: 400 });
+  const validationError = validateBody(voiceBookSchema, rawBody);
+  if (validationError) {
+    return NextResponse.json(validationError, { status: 400 });
   }
 
-  if (!body.callerPhone || typeof body.callerPhone !== "string") {
-    return NextResponse.json({ error: "callerPhone is required" }, { status: 400 });
-  }
+  const body = rawBody as { serviceId: string; employeeId?: string; preferredDate?: string; preferredTime?: string; callerPhone: string; callerName?: string; notes?: string };
 
   try {
     // ------------------------------------------------------------------

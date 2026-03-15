@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { sendInvoiceEmailSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -54,8 +55,13 @@ export async function POST(
     // Parse optional body for email override
     let overrideEmail: string | null = null;
     try {
-      const body = await request.json();
-      if (body.email && typeof body.email === "string") {
+      const rawBody = await request.json();
+      const validationError = validateBody(sendInvoiceEmailSchema, rawBody);
+      if (validationError) {
+        return NextResponse.json(validationError, { status: 400 });
+      }
+      const body = rawBody as { email?: string };
+      if (body.email) {
         overrideEmail = body.email.trim();
       }
     } catch {

@@ -8,6 +8,7 @@ import {
   acceptEarlierSlot,
   declineEarlierSlot,
 } from "@/lib/waiting-list";
+import { clientWaitingListResponseSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // POST /api/client/waiting-list/[id] - Client accepts or declines a notified slot
@@ -27,18 +28,12 @@ export async function POST(
     const userEmail = session.user.email;
     const { id } = await params;
 
-    const body = await request.json();
-    const { accepted } = body;
-
-    if (typeof accepted !== "boolean") {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Pole 'accepted' jest wymagane i musi byc wartoscia logiczna (true/false)",
-        },
-        { status: 400 }
-      );
+    const rawBody = await request.json();
+    const validationError = validateBody(clientWaitingListResponseSchema, rawBody);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+    const { accepted } = rawBody as { accepted: boolean };
 
     // Find the waiting list entry with client info for ownership verification
     const [entry] = await db
