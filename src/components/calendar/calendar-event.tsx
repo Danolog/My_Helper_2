@@ -98,6 +98,19 @@ export const CalendarEventComponent = memo(function CalendarEventComponent({
   const isCancellable = status === "scheduled" || status === "confirmed";
   const isCompletable = status === "scheduled" || status === "confirmed";
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      onClick(event);
+    }
+  };
+
+  const clientName = event.appointment.client
+    ? `${event.appointment.client.firstName} ${event.appointment.client.lastName}`
+    : "";
+  const ariaLabel = `${event.title}, ${formatTime(startTime)}-${formatTime(endTime)}${clientName ? `, ${clientName}` : ""}, ${STATUS_LABELS[status]}`;
+
   return (
     <div
       {...(isDraggable ? dragProps : {})}
@@ -105,12 +118,17 @@ export const CalendarEventComponent = memo(function CalendarEventComponent({
         e.stopPropagation();
         onClick(event);
       }}
+      onKeyDown={handleKeyDown}
+      role="button"
+      tabIndex={0}
+      aria-label={ariaLabel}
       className={`
         group/event absolute left-1 right-1 rounded-md px-2 py-1 text-xs overflow-hidden
         transition-all duration-200 border-l-4
         ${isDraggable ? "cursor-grab" : "cursor-pointer"}
         ${isDragging ? "opacity-50 cursor-grabbing shadow-lg scale-105 z-50" : "hover:shadow-md"}
         ${isCancelled ? "opacity-60" : ""}
+        focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1
       `}
       style={{
         backgroundColor,
@@ -133,8 +151,9 @@ export const CalendarEventComponent = memo(function CalendarEventComponent({
               e.stopPropagation();
               onComplete(event);
             }}
-            className="opacity-0 group-hover/event:opacity-100 transition-opacity shrink-0 w-4 h-4 rounded-full bg-white/30 hover:bg-green-500 flex items-center justify-center"
+            className="opacity-0 group-hover/event:opacity-100 focus:opacity-100 transition-opacity shrink-0 w-4 h-4 rounded-full bg-white/30 hover:bg-green-500 flex items-center justify-center"
             title="Zakoncz wizyte"
+            aria-label={`Zakoncz wizyte: ${event.title}`}
             data-testid="complete-event-btn"
           >
             <span className="text-[10px] leading-none font-bold">✓</span>
@@ -147,8 +166,9 @@ export const CalendarEventComponent = memo(function CalendarEventComponent({
               e.stopPropagation();
               onCancel(event);
             }}
-            className="opacity-0 group-hover/event:opacity-100 transition-opacity shrink-0 w-4 h-4 rounded-full bg-white/30 hover:bg-red-500 flex items-center justify-center"
+            className="opacity-0 group-hover/event:opacity-100 focus:opacity-100 transition-opacity shrink-0 w-4 h-4 rounded-full bg-white/30 hover:bg-red-500 flex items-center justify-center"
             title="Anuluj wizyte"
+            aria-label={`Anuluj wizyte: ${event.title}`}
             data-testid="cancel-event-btn"
           >
             <span className="text-[10px] leading-none font-bold">✕</span>

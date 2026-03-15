@@ -169,7 +169,7 @@ export function TimeGrid({
   };
 
   return (
-    <div className="flex flex-col border border-border rounded-lg overflow-hidden bg-background">
+    <div className="flex flex-col border border-border rounded-lg overflow-hidden bg-background" role="grid" aria-label="Kalendarz wizyt">
       {/* Header with employee names */}
       <div className="flex border-b border-border bg-muted/50 sticky top-0 z-10">
         <div className="w-20 flex-shrink-0 border-r border-border p-2 text-xs font-medium text-muted-foreground">

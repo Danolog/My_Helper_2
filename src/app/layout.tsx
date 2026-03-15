@@ -119,8 +119,10 @@ export default function RootLayout({
           attribute="class"
           defaultTheme="system"
           enableSystem
-          disableTransitionOnChange
         >
+          <a href="#main-content" className="skip-link">
+            Przejdź do treści
+          </a>
           <OfflineBanner />
           <SiteHeader />
           <main id="main-content">{children}</main>

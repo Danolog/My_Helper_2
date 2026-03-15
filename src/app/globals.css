@@ -115,34 +115,31 @@
 
 .dark {
   /* Warm Terracotta Dark Mode — warm browns (hue ~50) */
-  --background: oklch(0.15 0.02 50);
-  /* #1A1410 */
+  /* Background hierarchy: sidebar < bg < card */
+  --background: oklch(0.14 0.02 50);
   --foreground: oklch(0.95 0.01 70);
-  /* #F5EDE6 */
-  --card: oklch(0.20 0.02 50);
-  /* #221B14 */
+  --card: oklch(0.18 0.025 50);
   --card-foreground: oklch(0.95 0.01 70);
-  --popover: oklch(0.20 0.02 50);
+  --popover: oklch(0.18 0.025 50);
   --popover-foreground: oklch(0.95 0.01 70);
-  --primary: oklch(0.70 0.10 55);
-  /* #D4956E */
-  --primary-foreground: oklch(0.15 0.02 50);
+  --primary: oklch(0.72 0.10 55);
+  --primary-foreground: oklch(0.14 0.02 50);
   --secondary: oklch(0.24 0.02 50);
-  /* #2A2118 */
   --secondary-foreground: oklch(0.90 0.02 70);
   --muted: oklch(0.24 0.02 50);
-  --muted-foreground: oklch(0.60 0.02 50);
+  --muted-foreground: oklch(0.68 0.02 55);
   --accent: oklch(0.24 0.02 50);
   --accent-foreground: oklch(0.90 0.02 70);
   --destructive: oklch(0.60 0.15 25);
-  --border: oklch(0.95 0.01 70 / 10%);
+  --border: oklch(0.95 0.01 70 / 15%);
   --input: oklch(0.95 0.01 70 / 15%);
-  --ring: oklch(0.70 0.10 55 / 40%);
-  --chart-1: oklch(0.70 0.10 55);
-  --chart-2: oklch(0.65 0.08 45);
-  --chart-3: oklch(0.50 0.08 145);
-  --chart-4: oklch(0.60 0.05 50);
-  --chart-5: oklch(0.40 0.05 50);
+  --ring: oklch(0.72 0.10 55 / 50%);
+  /* Charts — jaśniejsze dla czytelności */
+  --chart-1: oklch(0.75 0.10 55);
+  --chart-2: oklch(0.68 0.10 45);
+  --chart-3: oklch(0.58 0.10 145);
+  --chart-4: oklch(0.65 0.06 50);
+  --chart-5: oklch(0.48 0.06 50);
   /* Supplementary dark */
   --rose: oklch(0.65 0.08 45);
   --rose-light: oklch(0.50 0.06 45);
@@ -151,18 +148,18 @@
   --gold: oklch(0.73 0.12 80);
   --gold-light: oklch(0.55 0.08 80);
   --burgundy: oklch(0.45 0.06 45);
-  --cream: oklch(0.15 0.02 50);
+  --cream: oklch(0.14 0.02 50);
   --blush: oklch(0.24 0.02 50);
   --rose-gold: oklch(0.70 0.08 50);
-  /* Sidebar dark */
-  --sidebar: oklch(0.17 0.02 50);
+  /* Sidebar dark — ciemniejszy od bg dla separacji */
+  --sidebar: oklch(0.11 0.02 50);
   --sidebar-foreground: oklch(0.95 0.01 70);
-  --sidebar-primary: oklch(0.70 0.10 55);
-  --sidebar-primary-foreground: oklch(0.15 0.02 50);
+  --sidebar-primary: oklch(0.72 0.10 55);
+  --sidebar-primary-foreground: oklch(0.14 0.02 50);
   --sidebar-accent: oklch(0.24 0.02 50);
   --sidebar-accent-foreground: oklch(0.90 0.02 70);
-  --sidebar-border: oklch(0.95 0.01 70 / 10%);
-  --sidebar-ring: oklch(0.70 0.10 55);
+  --sidebar-border: oklch(0.95 0.01 70 / 12%);
+  --sidebar-ring: oklch(0.72 0.10 55);
 }
 
 @layer base {
@@ -197,9 +194,10 @@
 }
 
 .dark .glass {
-  background: oklch(0.15 0.02 50 / 92%);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: oklch(0.14 0.02 50 / 85%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid oklch(0.95 0.01 70 / 8%);
 }
 
 @keyframes fade-up {
@@ -224,4 +222,48 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: oklch(from var(--primary) l c h);
+}
+
+/* Dark mode warm shadows → glow */
+.dark {
+  --shadow-warm-sm: 0 0 8px oklch(0.72 0.10 55 / 0.08);
+  --shadow-warm-md: 0 0 16px oklch(0.72 0.10 55 / 0.10);
+  --shadow-warm-lg: 0 0 24px oklch(0.72 0.10 55 / 0.12);
+  --shadow-warm-xl: 0 0 40px oklch(0.72 0.10 55 / 0.15);
+}
+
+/* ==================== */
+/* Accessibility        */
+/* ==================== */
+
+/* Skip link */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  z-index: 100;
+  padding: 8px 16px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  transition: top 0.3s;
+}
+.skip-link:focus {
+  top: 0;
+}
+
+/* Focus visible */
+:focus-visible {
+  outline: 2px solid oklch(from var(--primary) l c h);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

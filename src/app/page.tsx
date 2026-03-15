@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion, MotionConfig } from "framer-motion";
 import {
   Scissors,
   Crown,
@@ -130,13 +130,14 @@ const TESTIMONIALS = [
 
 export default function Home() {
   return (
+    <MotionConfig reducedMotion="user">
     <div className="flex-1">
       {/* Hero */}
-      <section className="relative overflow-hidden min-h-[90vh] flex items-center">
+      <section className="relative overflow-hidden min-h-[90vh] flex items-center" aria-label="Strona glowna MyHelper">
         {/* Warm background matching design system */}
-        <div className="absolute inset-0 -z-10 bg-gradient-to-b from-card to-background overflow-hidden">
-          <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-primary/[0.04] blur-[100px]" />
-          <div className="absolute bottom-[-10%] left-[-5%] w-[400px] h-[400px] rounded-full bg-gold/[0.06] blur-[80px]" />
+        <div className="absolute inset-0 -z-10 bg-gradient-to-b from-card to-background overflow-hidden" aria-hidden="true">
+          <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-primary/[0.04] dark:bg-primary/[0.08] blur-[100px]" />
+          <div className="absolute bottom-[-10%] left-[-5%] w-[400px] h-[400px] rounded-full bg-gold/[0.06] dark:bg-gold/[0.10] blur-[80px]" />
         </div>
 
         <div className="container mx-auto px-4 pt-20 pb-24 md:pt-32 md:pb-32 relative z-10">
@@ -147,7 +148,7 @@ export default function Home() {
               transition={{ duration: 0.8, ease: "easeOut" }}
               className="inline-flex items-center gap-2 px-5 py-2 rounded-full border border-primary/30 bg-primary/5 text-sm text-primary mb-10 shadow-[0_0_15px_rgba(var(--primary),0.1)] backdrop-blur-md"
             >
-              <Sparkles className="h-4 w-4" />
+              <Sparkles className="h-4 w-4" aria-hidden="true" />
               <span className="font-medium tracking-wide">Alternatywa Premium dla Booksy z AI</span>
             </motion.div>
 
@@ -155,7 +156,7 @@ export default function Home() {
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.8, delay: 0.1, ease: "easeOut" }}
-              className="font-[family-name:var(--font-playfair)] text-6xl sm:text-7xl md:text-8xl lg:text-9xl font-bold tracking-tight leading-[1] mb-8"
+              className="font-[family-name:var(--font-playfair)] text-4xl sm:text-6xl md:text-7xl lg:text-8xl xl:text-9xl font-bold tracking-tight leading-[1] mb-8"
             >
               Twój Salon,<br />
               znacznie więcej
@@ -194,8 +195,8 @@ export default function Home() {
             {/* Hero Illustration — Dashboard Mockup */}
             <div className="relative max-w-3xl mx-auto">
               <div className="aspect-[16/9] rounded-3xl bg-gradient-to-br from-primary/[0.07] via-primary/[0.03] to-gold/[0.06] border border-primary/10 overflow-hidden relative shadow-[var(--shadow-warm-xl)]">
-                <div className="absolute top-[-20%] right-[-15%] w-[50%] h-[70%] rounded-full bg-primary/[0.08] blur-[80px]" />
-                <div className="absolute bottom-[-20%] left-[-10%] w-[40%] h-[60%] rounded-full bg-gold/[0.10] blur-[60px]" />
+                <div className="absolute top-[-20%] right-[-15%] w-[50%] h-[70%] rounded-full bg-primary/[0.08] blur-[80px]" aria-hidden="true" />
+                <div className="absolute bottom-[-20%] left-[-10%] w-[40%] h-[60%] rounded-full bg-gold/[0.10] blur-[60px]" aria-hidden="true" />
                 <div className="absolute inset-0 flex items-center justify-center p-6 md:p-10">
                   <div className="relative w-full max-w-md">
                     {/* Calendar card */}
@@ -266,7 +267,7 @@ export default function Home() {
       </section>
 
       {/* Trust bar */}
-      <section className="border-y bg-muted/30">
+      <section className="border-y bg-muted/30 dark:bg-muted/50 dark:border-y-border/20">
         <div className="container mx-auto px-4 py-8">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
             {TRUST_STATS.map((stat) => (
@@ -282,7 +283,7 @@ export default function Home() {
       </section>
 
       {/* Features */}
-      <section id="features" className="container mx-auto px-4 py-20 md:py-28">
+      <section id="features" className="container mx-auto px-4 py-20 md:py-28" aria-labelledby="features-heading">
         <div className="text-center mb-20">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -294,7 +295,7 @@ export default function Home() {
               <Sparkles className="h-4 w-4 mr-2" />
               Ekskluzywne Funkcje
             </Badge>
-            <h2 className="font-[family-name:var(--font-playfair)] text-4xl md:text-6xl font-bold tracking-tight mb-6">
+            <h2 id="features-heading" className="font-[family-name:var(--font-playfair)] text-4xl md:text-6xl font-bold tracking-tight mb-6">
               Wszystko czego potrzebujesz
             </h2>
             <p className="text-muted-foreground max-w-2xl mx-auto text-xl font-light">
@@ -326,11 +327,11 @@ export default function Home() {
                 transition={{ duration: 0.5, delay: index * 0.1 }}
               >
                 <Card
-                  className="group relative overflow-hidden bg-card/50 backdrop-blur-xl border-border/40 hover:border-primary/40 hover:shadow-[var(--shadow-warm-lg)] transition-all duration-500 h-full"
+                  className="group relative overflow-hidden bg-card/50 dark:bg-card/80 backdrop-blur-xl border-border/40 hover:border-primary/40 hover:shadow-[var(--shadow-warm-lg)] transition-all duration-500 h-full"
                 >
-                  <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-white/0 dark:from-white/5 dark:to-white/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                  <div className="absolute inset-0 bg-gradient-to-br from-white/40 to-white/0 dark:from-white/5 dark:to-white/0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" aria-hidden="true" />
                   <CardHeader className="pb-4 relative z-10">
-                    <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center mb-6 transition-all duration-500 group-hover:scale-110", colorMap[feature.color])}>
+                    <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center mb-6 transition-all duration-500 group-hover:scale-110", colorMap[feature.color])} aria-hidden="true">
                       <Icon className={cn("h-6 w-6 transition-colors duration-500", iconColorMap[feature.color])} />
                     </div>
                     <CardTitle className="font-[family-name:var(--font-playfair)] text-2xl font-semibold">
@@ -394,7 +395,7 @@ export default function Home() {
           <Card className="border-border/40 bg-card/40 backdrop-blur-xl max-w-3xl mx-auto shadow-[0_8px_30px_rgb(0,0,0,0.06)] overflow-hidden relative group">
             <div className="absolute inset-0 bg-gradient-to-br from-primary/10 via-transparent to-primary/5 opacity-50 group-hover:opacity-100 transition-opacity duration-500" />
             <CardHeader className="text-center pb-4 relative z-10 pt-10">
-              <div className="flex items-center justify-center gap-3 mb-6">
+              <div className="flex items-center justify-center gap-3 mb-6" aria-hidden="true">
                 <div className="p-3 rounded-full bg-primary/10">
                   <Search className="h-6 w-6 text-primary" />
                 </div>
@@ -428,8 +429,8 @@ export default function Home() {
 
       {/* Pricing */}
       <section id="pricing" className="bg-background relative py-24 md:py-32 overflow-hidden" aria-labelledby="pricing-heading">
-        <div className="absolute inset-0 bg-gradient-to-b from-muted/30 to-background/20 -z-10" />
-        <div className="absolute top-[20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-primary/5 blur-[100px] -z-10" />
+        <div className="absolute inset-0 bg-gradient-to-b from-muted/30 to-background/20 -z-10" aria-hidden="true" />
+        <div className="absolute top-[20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-primary/5 blur-[100px] -z-10" aria-hidden="true" />
         <div className="container mx-auto px-4">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -456,10 +457,10 @@ export default function Home() {
               viewport={{ once: true, margin: "-100px" }}
               transition={{ duration: 0.6 }}
             >
-              <Card className="relative flex flex-col border-border/40 hover:border-primary/30 bg-card/60 backdrop-blur-xl hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-500 h-full">
+              <Card className="relative flex flex-col border-border/40 hover:border-primary/30 bg-card/60 dark:bg-card/80 backdrop-blur-xl hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:hover:shadow-[var(--shadow-warm-lg)] transition-all duration-500 h-full">
                 <CardHeader className="pb-6 pt-10 px-8">
                   <div className="flex items-center gap-4 mb-4">
-                    <div className="w-12 h-12 rounded-2xl bg-secondary flex items-center justify-center">
+                    <div className="w-12 h-12 rounded-2xl bg-secondary flex items-center justify-center" aria-hidden="true">
                       <Scissors className="h-6 w-6 text-foreground/70" />
                     </div>
                     <CardTitle className="font-[family-name:var(--font-playfair)] text-3xl">
@@ -502,7 +503,7 @@ export default function Home() {
               viewport={{ once: true, margin: "-100px" }}
               transition={{ duration: 0.6, delay: 0.2 }}
             >
-              <Card className="relative flex flex-col border border-primary/30 hover:border-primary/60 bg-gradient-to-b from-card to-card/60 backdrop-blur-xl hover:shadow-[0_8px_40px_rgba(var(--gold),0.15)] transition-all duration-500 h-full overflow-hidden">
+              <Card className="relative flex flex-col border border-primary/30 hover:border-primary/60 bg-gradient-to-b from-card to-card/60 dark:from-card/90 dark:to-card/70 backdrop-blur-xl hover:shadow-[0_8px_40px_rgba(var(--gold),0.15)] dark:hover:shadow-[var(--shadow-warm-lg)] transition-all duration-500 h-full overflow-hidden">
                 <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-primary/40 via-primary to-primary/40" />
                 <div className="absolute -top-4 left-1/2 -translate-x-1/2 z-10">
                   <Badge variant="default" className="px-5 py-1.5 text-sm shadow-md rounded-full bg-primary hover:bg-primary/80 text-primary-foreground border-none">
@@ -512,7 +513,7 @@ export default function Home() {
                 </div>
                 <CardHeader className="pb-6 pt-12 px-8 relative z-10">
                   <div className="flex items-center gap-4 mb-4">
-                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
+                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center" aria-hidden="true">
                       <Crown className="h-6 w-6 text-primary" />
                     </div>
                     <CardTitle className="font-[family-name:var(--font-playfair)] text-3xl">
@@ -563,7 +564,7 @@ export default function Home() {
       </section>
 
       {/* Testimonials */}
-      <section className="container mx-auto px-4 py-24 md:py-32">
+      <section className="container mx-auto px-4 py-24 md:py-32" aria-labelledby="testimonials-heading">
         <div className="text-center mb-20">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -571,10 +572,10 @@ export default function Home() {
             viewport={{ once: true, margin: "-100px" }}
           >
             <Badge variant="outline" className="text-sm px-5 py-2 mb-6 border-primary/20 text-primary">
-              <MessageCircle className="h-4 w-4 mr-2" />
+              <MessageCircle className="h-4 w-4 mr-2" aria-hidden="true" />
               Opinie
             </Badge>
-            <h2 className="font-[family-name:var(--font-playfair)] text-4xl md:text-6xl font-bold tracking-tight mb-6">
+            <h2 id="testimonials-heading" className="font-[family-name:var(--font-playfair)] text-4xl md:text-6xl font-bold tracking-tight mb-6">
               Co mówią nasi klienci
             </h2>
             <p className="text-muted-foreground/90 max-w-2xl mx-auto text-xl font-light">
@@ -614,9 +615,10 @@ export default function Home() {
       </section>
 
       {/* Final CTA */}
-      <section className="relative overflow-hidden">
+      <section className="relative overflow-hidden" aria-label="Zacheta do rejestracji">
         <div
           className="absolute inset-0 -z-10"
+          aria-hidden="true"
           style={{
             background: `
               radial-gradient(ellipse 70% 50% at 30% 50%, oklch(0.60 0.12 45 / 6%) 0%, transparent 70%),
@@ -649,5 +651,6 @@ export default function Home() {
         </div>
       </section>
     </div>
+    </MotionConfig>
   );
 }
