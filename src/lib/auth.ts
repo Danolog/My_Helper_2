@@ -48,7 +48,7 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8, // Minimum 8 characters per spec
-    requireEmailVerification: true,
+    requireEmailVerification: false,
     sendResetPassword: async ({ user, url }) => {
       // Log password reset URL (no email integration yet)
       logger.info("Password reset requested", { email: user.email, resetUrl: url })
