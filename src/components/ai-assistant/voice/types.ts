@@ -160,6 +160,82 @@ export type CancelResult = {
   conversationId: string | null;
 };
 
+export type MessageResult = {
+  success: boolean;
+  referenceNumber: string;
+};
+
+// ---------------------------------------------------------------------------
+// Return type for the useVoiceCall hook — every piece of state and handler
+// that the decomposed sub-components consume.
+// ---------------------------------------------------------------------------
+
+export type UseVoiceCallReturn = {
+  // Call simulation
+  callerMessage: string;
+  setCallerMessage: (value: string) => void;
+  simulating: boolean;
+  callResult: CallSimulationResult | null;
+  simulateCall: () => Promise<void>;
+
+  // Booking flow
+  selectedServiceId: string;
+  setSelectedServiceId: (value: string) => void;
+  bookingDate: string;
+  setBookingDate: (value: string) => void;
+  bookingTime: string;
+  setBookingTime: (value: string) => void;
+  bookingPhone: string;
+  setBookingPhone: (value: string) => void;
+  bookingName: string;
+  setBookingName: (value: string) => void;
+  bookingInProgress: boolean;
+  bookingResult: BookingResult | null;
+  setBookingResult: (value: BookingResult | null) => void;
+  showBookingForm: boolean;
+  setShowBookingForm: (value: boolean) => void;
+  handleVoiceBooking: () => Promise<void>;
+
+  // Reschedule flow
+  reschedulePhone: string;
+  setReschedulePhone: (value: string) => void;
+  rescheduleDate: string;
+  setRescheduleDate: (value: string) => void;
+  rescheduleTime: string;
+  setRescheduleTime: (value: string) => void;
+  rescheduleAppointmentId: string;
+  setRescheduleAppointmentId: (value: string) => void;
+  rescheduleInProgress: boolean;
+  rescheduleResult: RescheduleResult | null;
+  setRescheduleResult: (value: RescheduleResult | null) => void;
+  showRescheduleForm: boolean;
+  setShowRescheduleForm: (value: boolean) => void;
+  handleVoiceReschedule: () => Promise<void>;
+
+  // Cancel flow
+  cancelPhone: string;
+  setCancelPhone: (value: string) => void;
+  cancelAppointmentId: string;
+  setCancelAppointmentId: (value: string) => void;
+  cancelInProgress: boolean;
+  cancelResult: CancelResult | null;
+  setCancelResult: (value: CancelResult | null) => void;
+  showCancelForm: boolean;
+  setShowCancelForm: (value: boolean) => void;
+  handleVoiceCancel: () => Promise<void>;
+
+  // Leave-message (escalation)
+  msgName: string;
+  setMsgName: (value: string) => void;
+  msgPhone: string;
+  setMsgPhone: (value: string) => void;
+  msgText: string;
+  setMsgText: (value: string) => void;
+  sendingMessage: boolean;
+  messageResult: MessageResult | null;
+  handleLeaveMessage: () => Promise<void>;
+};
+
 export const DEFAULT_CONFIG: VoiceAiConfig = {
   enabled: false,
   greeting:
