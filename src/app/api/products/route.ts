@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { products, notifications } from "@/lib/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, like, sql } from "drizzle-orm";
 import { validateBody, createProductSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
@@ -29,7 +29,7 @@ async function checkAndNotifyLowStock(product: {
       .where(
         and(
           eq(notifications.salonId, product.salonId),
-          sql`${notifications.message} LIKE ${"%" + product.id + "%"}`,
+          like(notifications.message, `%${product.id}%`),
           sql`${notifications.createdAt} > NOW() - INTERVAL '24 hours'`,
           sql`${notifications.type} = 'system'`
         )

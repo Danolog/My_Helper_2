@@ -15,7 +15,7 @@ import {
   loyaltyTransactions,
   salons,
 } from "@/lib/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, like, sql } from "drizzle-orm";
 import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/route";
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 import { validateBody, completeAppointmentSchema } from "@/lib/api-validation";
@@ -58,7 +58,7 @@ async function checkAndNotifyLowStock(
       .where(
         and(
           eq(notifications.salonId, product.salonId),
-          sql`${notifications.message} LIKE ${"%" + product.id + "%"}`,
+          like(notifications.message, `%${product.id}%`),
           sql`${notifications.createdAt} > NOW() - INTERVAL '24 hours'`,
           sql`${notifications.type} = 'system'`
         )

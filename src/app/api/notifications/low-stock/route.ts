@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { products, notifications } from "@/lib/schema";
-import { eq, and, isNotNull, sql } from "drizzle-orm";
+import { eq, and, isNotNull, like, sql } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
       .where(
         and(
           eq(notifications.salonId, salonId),
-          sql`${notifications.message} LIKE ${"%" + productId + "%"}`,
+          like(notifications.message, `%${productId}%`),
           sql`${notifications.createdAt} > NOW() - INTERVAL '24 hours'`,
           sql`${notifications.type} = 'system'`
         )

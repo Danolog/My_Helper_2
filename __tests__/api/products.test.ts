@@ -52,6 +52,7 @@ vi.mock("@/lib/schema", () => {
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  like: vi.fn((...args: unknown[]) => ({ type: "like", args })),
   sql: vi.fn((...args: unknown[]) => ({ type: "sql", args })),
 }));
 
