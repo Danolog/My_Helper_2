@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useSession } from "@/lib/auth-client";
+import { mutationFetch } from "@/lib/api-client";
 
 interface FavoriteSalon {
   id: string;
@@ -56,7 +57,7 @@ export default function FavoritesPage() {
 
   async function removeFavorite(salonId: string) {
     try {
-      const res = await fetch(`/api/favorites/salons?salonId=${salonId}`, {
+      const res = await mutationFetch(`/api/favorites/salons?salonId=${salonId}`, {
         method: "DELETE",
       });
       const json = await res.json();

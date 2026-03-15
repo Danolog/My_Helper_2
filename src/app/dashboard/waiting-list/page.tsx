@@ -44,6 +44,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 
 interface WaitingListEntry {
   id: string;
@@ -162,7 +163,7 @@ export default function WaitingListPage() {
       if (selectedEmployeeId) body.preferredEmployeeId = selectedEmployeeId;
       if (preferredDate) body.preferredDate = new Date(preferredDate).toISOString();
 
-      const res = await fetch("/api/waiting-list", {
+      const res = await mutationFetch("/api/waiting-list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -188,7 +189,7 @@ export default function WaitingListPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/waiting-list/${id}`, { method: "DELETE" });
+      const res = await mutationFetch(`/api/waiting-list/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
         toast.success("Usunieto z listy oczekujacych");

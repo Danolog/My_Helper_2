@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { mutationFetch } from "@/lib/api-client";
 import type { GalleryPhoto } from "./gallery-types";
 
 interface PhotoLinkDialogProps {
@@ -27,7 +28,7 @@ interface PhotoLinkDialogProps {
 async function uploadFileToServer(file: File): Promise<string | null> {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch("/api/gallery/upload", {
+  const res = await mutationFetch("/api/gallery/upload", {
     method: "POST",
     body: formData,
   });
@@ -71,7 +72,7 @@ export function PhotoLinkDialog({
         ? { beforePhotoUrl: url }
         : { afterPhotoUrl: url };
 
-      const res = await fetch(`/api/gallery/${photo.id}`, {
+      const res = await mutationFetch(`/api/gallery/${photo.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatePayload),

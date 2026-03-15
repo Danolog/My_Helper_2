@@ -8,6 +8,7 @@ import { RescheduleDialog } from "@/components/calendar/reschedule-dialog";
 import { CalendarLegend } from "@/components/calendar/calendar-legend";
 import { ChevronLeft, ChevronRight, Calendar, Lock, Palette, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 import type { Appointment, CalendarEvent, Employee } from "@/types/calendar";
 import Link from "next/link";
 
@@ -199,7 +200,7 @@ export default function CalendarAllPage() {
       const duration = new Date(event.end).getTime() - new Date(event.start).getTime();
       const newEndTime = new Date(newStartTime.getTime() + duration);
 
-      const response = await fetch(`/api/appointments/${event.id}`, {
+      const response = await mutationFetch(`/api/appointments/${event.id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

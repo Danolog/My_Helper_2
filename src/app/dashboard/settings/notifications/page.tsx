@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { useSession } from "@/lib/auth-client";
 import { Switch } from "@/components/ui/switch";
+import { mutationFetch } from "@/lib/api-client";
 
 interface BirthdaySettings {
   enabled: boolean;
@@ -164,7 +165,7 @@ export default function NotificationSettingsPage() {
     setSaving(true);
     setSavedSuccessfully(false);
     try {
-      const res = await fetch(`/api/salons/${salonId}/birthday-settings`, {
+      const res = await mutationFetch(`/api/salons/${salonId}/birthday-settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
@@ -207,7 +208,7 @@ export default function NotificationSettingsPage() {
     setSavingWeMissYou(true);
     setWeMissYouSavedSuccessfully(false);
     try {
-      const res = await fetch(`/api/salons/${salonId}/we-miss-you-settings`, {
+      const res = await mutationFetch(`/api/salons/${salonId}/we-miss-you-settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(weMissYouSettings),
@@ -233,7 +234,7 @@ export default function NotificationSettingsPage() {
     setSavingChannels(true);
     setChannelsSavedSuccessfully(false);
     try {
-      const res = await fetch(`/api/salons/${salonId}/notification-type-settings`, {
+      const res = await mutationFetch(`/api/salons/${salonId}/notification-type-settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(channelSettings),

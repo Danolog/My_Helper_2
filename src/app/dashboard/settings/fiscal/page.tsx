@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { useSession } from "@/lib/auth-client";
+import { mutationFetch } from "@/lib/api-client";
 
 interface FiscalPrinterSettings {
   enabled: boolean;
@@ -141,7 +142,7 @@ export default function FiscalSettingsPage() {
     if (!salonId) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/salons/${salonId}/fiscal-settings`, {
+      const res = await mutationFetch(`/api/salons/${salonId}/fiscal-settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
@@ -167,7 +168,7 @@ export default function FiscalSettingsPage() {
     // First save settings, then test
     setSaving(true);
     try {
-      const saveRes = await fetch(`/api/salons/${salonId}/fiscal-settings`, {
+      const saveRes = await mutationFetch(`/api/salons/${salonId}/fiscal-settings`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings),
@@ -187,7 +188,7 @@ export default function FiscalSettingsPage() {
 
     setTesting(true);
     try {
-      const res = await fetch(`/api/salons/${salonId}/fiscal-settings/test-connection`, {
+      const res = await mutationFetch(`/api/salons/${salonId}/fiscal-settings/test-connection`, {
         method: "POST",
       });
       const data = await res.json();
@@ -220,7 +221,7 @@ export default function FiscalSettingsPage() {
     if (!salonId) return;
     setPrinting(true);
     try {
-      const res = await fetch(`/api/salons/${salonId}/fiscal-settings/test-print`, {
+      const res = await mutationFetch(`/api/salons/${salonId}/fiscal-settings/test-print`, {
         method: "POST",
       });
       const data = await res.json();

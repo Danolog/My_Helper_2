@@ -1,5 +1,6 @@
 import { Analytics } from "@vercel/analytics/react";
 import { Playfair_Display, DM_Sans } from "next/font/google";
+import { headers } from "next/headers";
 import "./globals.css";
 import { OfflineBanner } from "@/components/offline-banner";
 import { InstallPrompt } from "@/components/pwa/install-prompt";
@@ -95,11 +96,13 @@ const jsonLd = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const nonce = (await headers()).get("x-nonce") ?? "";
+
   return (
     <html lang="pl" suppressHydrationWarning>
       <head>
@@ -108,6 +111,7 @@ export default function RootLayout({
         <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
         <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
         <script
+          nonce={nonce}
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />

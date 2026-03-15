@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { ArrowLeft, FileText, Printer, Mail, Send, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 
 interface InvoiceItem {
   name: string;
@@ -140,7 +141,7 @@ export default function InvoicePreviewPage() {
 
     setSending(true);
     try {
-      const res = await fetch(`/api/invoices/${invoiceId}/send-email`, {
+      const res = await mutationFetch(`/api/invoices/${invoiceId}/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: emailTo.trim() }),

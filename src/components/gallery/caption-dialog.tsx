@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { mutationFetch } from "@/lib/api-client";
 import type { GalleryPhoto, CaptionPlatform } from "./gallery-types";
 
 interface CaptionDialogProps {
@@ -56,7 +57,7 @@ export function CaptionDialog({
     setCopied(false);
 
     try {
-      const res = await fetch("/api/ai/content/photo-caption", {
+      const res = await mutationFetch("/api/ai/content/photo-caption", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

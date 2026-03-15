@@ -5,6 +5,7 @@ import { Building2, Crown, Loader2, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { mutationFetch } from "@/lib/api-client";
 import { PLANS, TRIAL_DAYS } from "@/lib/constants";
 
 interface CreateSalonPromptProps {
@@ -48,7 +49,7 @@ export function CreateSalonPrompt({ session, onCreated }: CreateSalonPromptProps
     setError("");
 
     try {
-      const res = await fetch("/api/register-subscription", {
+      const res = await mutationFetch("/api/register-subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

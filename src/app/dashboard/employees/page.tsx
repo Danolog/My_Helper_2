@@ -21,6 +21,7 @@ import {
 import { Lock, Users, Clock, UserPlus, Pencil } from "lucide-react";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 
 interface Employee {
   id: string;
@@ -163,7 +164,7 @@ export default function EmployeesPage() {
     if (!editData) return;
     setSaving(true);
     try {
-      const res = await fetch(`/api/employees/${editData.id}`, {
+      const res = await mutationFetch(`/api/employees/${editData.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

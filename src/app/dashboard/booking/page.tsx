@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Lock, CalendarPlus, Scissors, Users, User, Star, Clock, CalendarDays, Check, AlertCircle, ChevronLeft, ChevronRight, Gift, Package, Tag, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 
 const NO_CLIENT = "__no_client__";
 
@@ -334,7 +335,7 @@ export default function BookingPage() {
 
     setValidatingPromoCode(true);
     try {
-      const res = await fetch("/api/promo-codes/validate", {
+      const res = await mutationFetch("/api/promo-codes/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -507,7 +508,7 @@ export default function BookingPage() {
         appointmentBody.discountAmount = promoDiscount.discountAmount.toFixed(2);
       }
 
-      const res = await fetch("/api/appointments", {
+      const res = await mutationFetch("/api/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(appointmentBody),
@@ -596,7 +597,7 @@ export default function BookingPage() {
     try {
       const startTime = new Date(`${packageDate}T${packageTimeSlot}:00`);
 
-      const res = await fetch("/api/appointments/book-package", {
+      const res = await mutationFetch("/api/appointments/book-package", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

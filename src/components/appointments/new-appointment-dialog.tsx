@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 import { CalendarPlus, User, Scissors, Clock, AlertTriangle } from "lucide-react";
 
 interface Client {
@@ -344,7 +345,7 @@ export function NewAppointmentDialog({
       if (selectedVariantId) body.variantId = selectedVariantId;
       if (notes.trim()) body.notes = notes.trim();
 
-      const res = await fetch("/api/appointments", {
+      const res = await mutationFetch("/api/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

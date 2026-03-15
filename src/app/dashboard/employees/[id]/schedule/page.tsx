@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Clock, Save, Lock, CheckCircle2, Palmtree, Plus, Trash2, CalendarDays } from "lucide-react";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 
 const DAY_NAMES = [
   "Niedziela",
@@ -210,7 +211,7 @@ export default function EmployeeSchedulePage({
 
     setSaving(true);
     try {
-      const res = await fetch("/api/work-schedules", {
+      const res = await mutationFetch("/api/work-schedules", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -253,7 +254,7 @@ export default function EmployeeSchedulePage({
 
     setSavingVacation(true);
     try {
-      const res = await fetch("/api/time-blocks", {
+      const res = await mutationFetch("/api/time-blocks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -288,7 +289,7 @@ export default function EmployeeSchedulePage({
   const handleDeleteBlock = async (blockId: string) => {
     setDeletingBlockId(blockId);
     try {
-      const res = await fetch(`/api/time-blocks?id=${blockId}`, {
+      const res = await mutationFetch(`/api/time-blocks?id=${blockId}`, {
         method: "DELETE",
       });
 

@@ -56,6 +56,7 @@ import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { EmptyState } from "@/components/ui/empty-state";
+import { mutationFetch } from "@/lib/api-client";
 
 interface Promotion {
   id: string;
@@ -456,13 +457,13 @@ export default function PromotionsPage() {
 
       let res: Response;
       if (editingPromotion) {
-        res = await fetch(`/api/promotions/${editingPromotion.id}`, {
+        res = await mutationFetch(`/api/promotions/${editingPromotion.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
       } else {
-        res = await fetch("/api/promotions", {
+        res = await mutationFetch("/api/promotions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -493,7 +494,7 @@ export default function PromotionsPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/promotions/${deleteTarget.id}`, {
+      const res = await mutationFetch(`/api/promotions/${deleteTarget.id}`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -514,7 +515,7 @@ export default function PromotionsPage() {
 
   const handleToggleActive = async (promo: Promotion) => {
     try {
-      const res = await fetch(`/api/promotions/${promo.id}`, {
+      const res = await mutationFetch(`/api/promotions/${promo.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isActive: !promo.isActive }),

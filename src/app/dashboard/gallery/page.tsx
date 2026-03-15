@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
+import { mutationFetch } from "@/lib/api-client";
 
 export default function GalleryPage() {
   const { data: session, isPending } = useSession();
@@ -151,7 +152,7 @@ export default function GalleryPage() {
 
   const handleDelete = async (id: string) => {
     try {
-      const res = await fetch(`/api/gallery/${id}`, { method: "DELETE" });
+      const res = await mutationFetch(`/api/gallery/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
         setPhotos((prev) => prev.filter((p) => p.id !== id));

@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 import { Pencil, User, Scissors, Clock, AlertTriangle, Bell } from "lucide-react";
 
 interface Client {
@@ -327,7 +328,7 @@ export function EditAppointmentDialog({
         notes: notes.trim() || null,
       };
 
-      const res = await fetch(`/api/appointments/${appointment.id}`, {
+      const res = await mutationFetch(`/api/appointments/${appointment.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

@@ -57,6 +57,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useSalonId } from "@/hooks/use-salon-id";
+import { mutationFetch } from "@/lib/api-client";
 
 interface ServiceVariant {
   id: string;
@@ -330,7 +331,7 @@ export default function ServiceDetailPage() {
     try {
       if (isCurrentlyAssigned) {
         // Unassign
-        const res = await fetch(
+        const res = await mutationFetch(
           `/api/services/${serviceId}/employee-assignments?employeeId=${employeeId}`,
           { method: "DELETE" }
         );
@@ -350,7 +351,7 @@ export default function ServiceDetailPage() {
         }
       } else {
         // Assign
-        const res = await fetch(`/api/services/${serviceId}/employee-assignments`, {
+        const res = await mutationFetch(`/api/services/${serviceId}/employee-assignments`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ employeeId }),
@@ -422,7 +423,7 @@ export default function ServiceDetailPage() {
 
       const method = editingVariant ? "PUT" : "POST";
 
-      const res = await fetch(url, {
+      const res = await mutationFetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -459,7 +460,7 @@ export default function ServiceDetailPage() {
     }
 
     try {
-      const res = await fetch(
+      const res = await mutationFetch(
         `/api/services/${serviceId}/variants/${variant.id}`,
         { method: "DELETE" }
       );
@@ -516,7 +517,7 @@ export default function ServiceDetailPage() {
 
     setSavingService(true);
     try {
-      const res = await fetch(`/api/services/${serviceId}`, {
+      const res = await mutationFetch(`/api/services/${serviceId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -548,7 +549,7 @@ export default function ServiceDetailPage() {
   const handleDeleteService = async () => {
     setDeletingService(true);
     try {
-      const res = await fetch(`/api/services/${serviceId}`, {
+      const res = await mutationFetch(`/api/services/${serviceId}`, {
         method: "DELETE",
       });
       const data = await res.json();
@@ -572,7 +573,7 @@ export default function ServiceDetailPage() {
     if (!service) return;
     setGeneratingDescription(true);
     try {
-      const res = await fetch("/api/ai/content/generate-description", {
+      const res = await mutationFetch("/api/ai/content/generate-description", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -630,7 +631,7 @@ export default function ServiceDetailPage() {
 
     setSavingEmpPrice(true);
     try {
-      const res = await fetch(`/api/services/${serviceId}/employee-prices`, {
+      const res = await mutationFetch(`/api/services/${serviceId}/employee-prices`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -674,7 +675,7 @@ export default function ServiceDetailPage() {
     }
 
     try {
-      const res = await fetch(
+      const res = await mutationFetch(
         `/api/services/${serviceId}/employee-prices?priceId=${price.id}`,
         { method: "DELETE" }
       );
@@ -710,7 +711,7 @@ export default function ServiceDetailPage() {
 
     setSavingProductLink(true);
     try {
-      const res = await fetch(`/api/services/${serviceId}/products`, {
+      const res = await mutationFetch(`/api/services/${serviceId}/products`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -750,7 +751,7 @@ export default function ServiceDetailPage() {
     }
 
     try {
-      const res = await fetch(
+      const res = await mutationFetch(
         `/api/services/${serviceId}/products?linkId=${link.id}`,
         { method: "DELETE" }
       );

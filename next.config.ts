@@ -57,20 +57,7 @@ const nextConfig: NextConfig = {
             key: "Strict-Transport-Security",
             value: "max-age=63072000; includeSubDomains; preload",
           },
-          {
-            key: "Content-Security-Policy",
-            value: [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' storage.googleapis.com",
-              "style-src 'self' 'unsafe-inline' fonts.googleapis.com",
-              "font-src 'self' fonts.gstatic.com",
-              "img-src 'self' data: blob: lh3.googleusercontent.com avatars.githubusercontent.com *.public.blob.vercel-storage.com images.unsplash.com",
-              "connect-src 'self' *.googleapis.com accounts.google.com",
-              "form-action 'self' accounts.google.com",
-              "worker-src 'self'",
-              "frame-ancestors 'none'",
-            ].join("; "),
-          },
+          // CSP is set in middleware.ts with per-request nonce
         ],
       },
       {

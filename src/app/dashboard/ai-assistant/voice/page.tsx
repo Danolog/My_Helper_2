@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
+import { mutationFetch } from "@/lib/api-client";
 
 // ---------------------------------------------------------------------------
 // Inner content component — owns all state that the child components need
@@ -118,7 +119,7 @@ function VoiceAiContent() {
   const saveConfig = async () => {
     setSaving(true);
     try {
-      const res = await fetch("/api/ai/voice/config", {
+      const res = await mutationFetch("/api/ai/voice/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),

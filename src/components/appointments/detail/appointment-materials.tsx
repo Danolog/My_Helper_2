@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { mutationFetch } from "@/lib/api-client";
 import type { AppointmentDetail, MaterialRecord, Product } from "./types";
 
 interface AppointmentMaterialsProps {
@@ -68,7 +69,7 @@ export function AppointmentMaterials({
 
     setAddingMaterial(true);
     try {
-      const res = await fetch(`/api/appointments/${appointment.id}/materials`, {
+      const res = await mutationFetch(`/api/appointments/${appointment.id}/materials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -98,7 +99,7 @@ export function AppointmentMaterials({
 
   const handleRemoveMaterial = async (materialId: string) => {
     try {
-      const res = await fetch(
+      const res = await mutationFetch(
         `/api/appointments/${appointment.id}/materials?materialId=${materialId}`,
         { method: "DELETE" }
       );

@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useSession } from "@/lib/auth-client";
+import { mutationFetch } from "@/lib/api-client";
 import { toast } from "sonner";
 
 interface TreatmentInfo {
@@ -286,7 +287,7 @@ export default function AppointmentDetailPage() {
     }
     setSubmittingReview(true);
     try {
-      const res = await fetch(`/api/client/appointments/${appointmentId}/review`, {
+      const res = await mutationFetch(`/api/client/appointments/${appointmentId}/review`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -364,7 +365,7 @@ export default function AppointmentDetailPage() {
   const handleCancelAppointment = async () => {
     setCancelling(true);
     try {
-      const res = await fetch(`/api/client/appointments/${appointmentId}/cancel`, {
+      const res = await mutationFetch(`/api/client/appointments/${appointmentId}/cancel`, {
         method: "POST",
       });
       const data = await res.json();

@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { mutationFetch } from "@/lib/api-client";
 import type { AppointmentDetail, FiscalReceiptData } from "./types";
 
 interface FiscalReceiptDialogProps {
@@ -47,7 +48,7 @@ export function FiscalReceiptDialog({
   const handlePrintReceipt = async () => {
     setPrintingReceipt(true);
     try {
-      const res = await fetch(`/api/appointments/${appointment.id}/fiscal-receipt`, {
+      const res = await mutationFetch(`/api/appointments/${appointment.id}/fiscal-receipt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ paymentMethod: selectedPaymentMethod }),

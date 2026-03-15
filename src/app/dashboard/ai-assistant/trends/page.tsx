@@ -27,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { getUserFriendlyMessage } from "@/lib/error-messages";
+import { mutationFetch } from "@/lib/api-client";
 
 // Types for trends API response
 type TrendDirection = "up" | "down" | "stable";
@@ -347,7 +348,7 @@ function TrendsContent() {
         parts: [{ type: "text", text }],
       };
 
-      const res = await fetch("/api/ai/business/chat", {
+      const res = await mutationFetch("/api/ai/business/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

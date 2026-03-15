@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { mutationFetch } from "@/lib/api-client";
 import type { Employee, Service } from "./gallery-types";
 
 interface PhotoUploadDialogProps {
@@ -38,7 +39,7 @@ interface PhotoUploadDialogProps {
 async function uploadFileToServer(file: File): Promise<string | null> {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch("/api/gallery/upload", {
+  const res = await mutationFetch("/api/gallery/upload", {
     method: "POST",
     body: formData,
   });
@@ -132,7 +133,7 @@ export function PhotoUploadDialog({
       }
 
       // Create gallery entry
-      const res = await fetch("/api/gallery", {
+      const res = await mutationFetch("/api/gallery", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { NetworkErrorHandler } from "@/components/network-error-handler";
 import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 import { isTimeoutError } from "@/hooks/use-network-status";
+import { mutationFetch } from "@/lib/api-client";
 
 type ErrorResult = {
   type: "success" | "error";
@@ -115,7 +116,7 @@ export default function TestErrorsPage() {
     setFetchError(null);
 
     try {
-      const res = await fetch("/api/test/error", {
+      const res = await mutationFetch("/api/test/error", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ test: "data" }),

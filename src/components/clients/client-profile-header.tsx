@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { mutationFetch } from "@/lib/api-client";
 import type { ClientData } from "./types";
 
 interface ClientProfileHeaderProps {
@@ -65,7 +66,7 @@ export function ClientProfileHeader({
     setDeleteError("");
 
     try {
-      const res = await fetch(`/api/clients/${clientId}`, {
+      const res = await mutationFetch(`/api/clients/${clientId}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: deletePassword }),

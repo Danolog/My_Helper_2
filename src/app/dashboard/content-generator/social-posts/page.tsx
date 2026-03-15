@@ -51,6 +51,7 @@ import {
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { toast } from "sonner";
 import { getTemplateById } from "@/lib/content-templates";
+import { mutationFetch } from "@/lib/api-client";
 
 type Platform = "instagram" | "facebook" | "tiktok";
 type PostType =
@@ -226,7 +227,7 @@ function SocialPostsContent() {
     setGeneratedPost(null);
 
     try {
-      const response = await fetch("/api/ai/content/social-post", {
+      const response = await mutationFetch("/api/ai/content/social-post", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -305,7 +306,7 @@ function SocialPostsContent() {
     setIsScheduling(true);
 
     try {
-      const response = await fetch("/api/scheduled-posts", {
+      const response = await mutationFetch("/api/scheduled-posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

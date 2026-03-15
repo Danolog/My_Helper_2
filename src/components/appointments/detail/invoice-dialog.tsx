@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { mutationFetch } from "@/lib/api-client";
 import type { AppointmentDetail, InvoiceData } from "./types";
 
 interface InvoiceDialogProps {
@@ -78,7 +79,7 @@ export function InvoiceDialog({
     }
     setGeneratingInvoice(true);
     try {
-      const res = await fetch(`/api/appointments/${appointment.id}/invoice`, {
+      const res = await mutationFetch(`/api/appointments/${appointment.id}/invoice`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

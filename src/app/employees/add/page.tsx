@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ArrowLeft, Lock, UserPlus, Palette } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import { mutationFetch } from "@/lib/api-client";
 import { validatePhone } from "@/lib/validations";
 import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { FormRecoveryBanner } from "@/components/form-recovery-banner";
@@ -173,7 +174,7 @@ export default function AddEmployeePage() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch("/api/employees", {
+      const response = await mutationFetch("/api/employees", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -23,6 +23,7 @@ import {
   Scissors,
 } from "lucide-react";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 
 interface CancellationInfo {
   appointmentId: string;
@@ -115,7 +116,7 @@ export function CancelAppointmentDialog({
         params.set("notifyClient", "true");
       }
 
-      const res = await fetch(`/api/appointments/${appointmentId}?${params}`, {
+      const res = await mutationFetch(`/api/appointments/${appointmentId}?${params}`, {
         method: "DELETE",
       });
       const data = await res.json();

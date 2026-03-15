@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 import { Ban, User, Clock } from "lucide-react";
 
 interface Employee {
@@ -109,7 +110,7 @@ export function BlockTimeDialog({
       const startDateTime = new Date(`${blockDate}T${startTime}:00`);
       const endDateTime = new Date(`${blockDate}T${endTime}:00`);
 
-      const response = await fetch("/api/time-blocks", {
+      const response = await mutationFetch("/api/time-blocks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
