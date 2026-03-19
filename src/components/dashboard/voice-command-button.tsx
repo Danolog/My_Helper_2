@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { cn } from "@/lib/utils";
+import { mutationFetch } from "@/lib/api-client";
 
 /**
  * Floating microphone button that captures voice commands, sends them
@@ -35,7 +36,7 @@ export function VoiceCommandButton() {
       setInterpreting(true);
 
       try {
-        const res = await fetch("/api/ai/voice/interpret-command", {
+        const res = await mutationFetch("/api/ai/voice/interpret-command", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ transcript: text }),

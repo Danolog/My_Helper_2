@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { mutationFetch } from "@/lib/api-client";
 
 // ────────────────────────────────────────────────────────────
 // Option constants
@@ -159,7 +160,7 @@ export function VideoGenerator() {
     }
 
     try {
-      const res = await fetch("/api/ai/video/generate", {
+      const res = await mutationFetch("/api/ai/video/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, aspectRatio, duration, autoPrompt }),

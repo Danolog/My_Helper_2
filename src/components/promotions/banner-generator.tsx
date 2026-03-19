@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { mutationFetch } from "@/lib/api-client";
 import {
   Select,
   SelectContent,
@@ -91,7 +92,7 @@ export function BannerGenerator() {
 
     setGenerating(true);
     try {
-      const res = await fetch("/api/ai/image/banner", {
+      const res = await mutationFetch("/api/ai/image/banner", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

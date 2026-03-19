@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { mutationFetch } from "@/lib/api-client";
 
 // ────────────────────────────────────────────────────────────
 // Option constants
@@ -239,7 +240,7 @@ export function StoryGenerator() {
     }
 
     try {
-      const res = await fetch("/api/ai/video/story", {
+      const res = await mutationFetch("/api/ai/video/story", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
