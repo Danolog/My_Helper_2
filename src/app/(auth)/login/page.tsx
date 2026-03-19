@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { hasActiveSession } from "@/lib/session"
+import { getOptionalSession } from "@/lib/session"
 
 /**
  * Validate returnTo URL to prevent open redirects.
@@ -25,11 +25,11 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ reset?: string; returnTo?: string }>
 }) {
-  const isLoggedIn = await hasActiveSession()
+  const session = await getOptionalSession()
 
   const { reset, returnTo } = await searchParams
 
-  if (isLoggedIn) {
+  if (session) {
     redirect(isSafeReturnTo(returnTo))
   }
 
