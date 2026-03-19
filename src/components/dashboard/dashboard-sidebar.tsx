@@ -129,7 +129,8 @@ export const NAV_GROUPS: NavGroup[] = [
         isActive: (pathname: string) =>
           pathname.startsWith("/dashboard/ai-assistant") ||
           pathname.startsWith("/dashboard/ai-recommendations") ||
-          pathname.startsWith("/dashboard/content-generator"),
+          pathname.startsWith("/dashboard/content-generator") ||
+          pathname.startsWith("/dashboard/ai-usage"),
       },
     ],
   },

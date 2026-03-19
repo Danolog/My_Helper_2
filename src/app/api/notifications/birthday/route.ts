@@ -254,6 +254,28 @@ export async function POST(request: Request) {
         message += ` Z tej okazji przygotowalismy dla Ciebie prezent: ${productName}. Zapraszamy!`;
       }
 
+      // Try AI personalization if salon has Pro plan (non-blocking)
+      try {
+        const { isProPlan } = await import("@/lib/subscription");
+        const hasPro = await isProPlan(salonId);
+        if (hasPro) {
+          const { createAIClient, getAIModel } = await import("@/lib/ai/openrouter");
+          const { generateText } = await import("ai");
+          const openrouter = createAIClient();
+          const aiResult = await generateText({
+            model: openrouter(getAIModel()),
+            prompt: `Spersonalizuj te zyczenia urodzinowe dla klienta ${client.firstName} salonu ${salonName}. Oryginalna wiadomosc: "${message}". Zachowaj informacje o prezencie/rabacie. Zwroc TYLKO tekst wiadomosci, bez komentarzy. Max 300 znakow.`,
+            maxOutputTokens: 200,
+          });
+          const aiMessage = aiResult.text.trim();
+          if (aiMessage && aiMessage.length > 10) {
+            message = aiMessage;
+          }
+        }
+      } catch (aiError) {
+        logger.warn("[Birthday Notifications] AI personalization failed, using default message", { error: aiError });
+      }
+
       // Append booking link so the client can directly book their next visit
       const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
       message += ` Zarezerwuj wizyte: ${appUrl}/salons/${salonId}/book`;

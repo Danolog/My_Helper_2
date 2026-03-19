@@ -3,6 +3,7 @@ import { CommandPalette } from "@/components/dashboard/command-palette";
 import { DashboardBottomNav } from "@/components/dashboard/dashboard-bottom-nav";
 import { DashboardBreadcrumbs } from "@/components/dashboard/dashboard-breadcrumbs";
 import { DashboardSidebar, DashboardMobileHeader } from "@/components/dashboard/dashboard-sidebar";
+import { VoiceCommandButton } from "@/components/dashboard/voice-command-button";
 import { requireAdmin } from "@/lib/session";
 
 export default async function DashboardLayout({
@@ -25,6 +26,7 @@ export default async function DashboardLayout({
       </div>
       <DashboardBottomNav />
       <CommandPalette />
+      <VoiceCommandButton />
     </div>
   );
 }

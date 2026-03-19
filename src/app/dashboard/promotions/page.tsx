@@ -1,16 +1,19 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Lock, Plus, Ticket } from "lucide-react";
+import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { Button } from "@/components/ui/button";
-import { usePromotionsData } from "./_hooks/use-promotions-data";
-import { usePromotionForm } from "./_hooks/use-promotion-form";
-import { PromotionSummaryCards } from "./_components/promotion-summary-cards";
+import { Separator } from "@/components/ui/separator";
 import { PromotionList } from "./_components/promotion-list";
-import dynamic from "next/dynamic";
+import { PromotionSummaryCards } from "./_components/promotion-summary-cards";
+import { usePromotionForm } from "./_hooks/use-promotion-form";
+import { usePromotionsData } from "./_hooks/use-promotions-data";
 
 const PromotionDialog = dynamic(() => import("./_components/promotion-dialog").then((m) => m.PromotionDialog));
 const DeletePromotionDialog = dynamic(() => import("./_components/delete-promotion-dialog").then((m) => m.DeletePromotionDialog));
+const BannerGenerator = dynamic(() => import("@/components/promotions/banner-generator").then((m) => m.BannerGenerator));
 
 export default function PromotionsPage() {
   const {
@@ -95,6 +98,21 @@ export default function PromotionsPage() {
         onDelete={setDeleteTarget}
         onToggleActive={handleToggleActive}
       />
+
+      {/* AI Banner Generator (Pro plan only) */}
+      <Separator className="my-8" />
+      <ProPlanGate
+        featureName="Generator banerow AI"
+        featureDescription="Tworzenie profesjonalnych banerow promocyjnych z pomoca AI — tlo generowane przez Imagen, tekst nakladany automatycznie."
+        proBenefits={[
+          "Generowanie tla baneru za pomoca AI (Google Imagen)",
+          "Automatyczna nakladka tekstu na obraz",
+          "Formaty: Instagram, Facebook Post, Facebook Cover",
+          "Rozne style: nowoczesny, vintage, luksusowy i wiecej",
+        ]}
+      >
+        <BannerGenerator />
+      </ProPlanGate>
 
       {/* Create/Edit Dialog */}
       <PromotionDialog

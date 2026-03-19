@@ -7,4 +7,5 @@ export { PhotoLinkDialog } from "./photo-link-dialog";
 export { PhotoLightbox } from "./photo-lightbox";
 export { AlbumManager } from "./album-manager";
 export { CaptionDialog } from "./caption-dialog";
+export { PhotoEnhanceDialog } from "./photo-enhance-dialog";
 export type { GalleryPhoto, Employee, Service, Album, CaptionPlatform } from "./gallery-types";
