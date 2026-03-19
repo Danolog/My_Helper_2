@@ -12,14 +12,16 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
 
 export function SiteHeaderMobileMenu() {
   const { data: session, isPending } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
   const [open, setOpen] = useState(false);
 
   const role = (session?.user as { role?: string } | undefined)?.role;
-  const isOwner = role === "admin" || role === "owner";
+  const isOwner = role === "admin" || role === "owner" || !!salonId;
 
   const ownerLinks = [
     { href: "/dashboard", label: "Pulpit" },
@@ -39,7 +41,7 @@ export function SiteHeaderMobileMenu() {
     { href: "/dla-klientow", label: "Dla klientów" },
   ];
 
-  const navLinks = isPending
+  const navLinks = isPending || salonLoading
     ? []
     : session
       ? isOwner

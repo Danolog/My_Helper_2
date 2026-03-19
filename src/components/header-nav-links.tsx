@@ -1,16 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
 
 export function HeaderNavLinks() {
   const { data: session, isPending } = useSession();
+  const { salonId, loading: salonLoading } = useSalonId();
 
-  if (isPending) return null;
+  if (isPending || salonLoading) return null;
 
   if (session) {
     const role = (session.user as { role?: string }).role;
-    const isOwner = role === "admin" || role === "owner";
+    const isOwner = role === "admin" || role === "owner" || !!salonId;
 
     if (isOwner) {
       return (
