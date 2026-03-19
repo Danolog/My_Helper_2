@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   LayoutDashboard,
@@ -34,11 +34,14 @@ import {
   Receipt,
   Brain,
   Mic,
+  Loader2,
   MessageSquare,
   PenTool,
   Lightbulb,
   Search,
+  Sparkles,
 } from "lucide-react";
+import { toast } from "sonner";
 import {
   CommandDialog,
   CommandEmpty,
@@ -48,6 +51,9 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
+import { useAISearch } from "@/hooks/use-ai-search";
+import { useVoiceInput } from "@/hooks/use-voice-input";
+import { cn } from "@/lib/utils";
 
 interface CommandPage {
   label: string;
@@ -107,6 +113,7 @@ const AI_PAGES: CommandPage[] = [
   { label: "Asystent biznesowy", href: "/dashboard/ai-assistant/business", icon: Brain },
   { label: "Rekomendacje AI", href: "/dashboard/ai-recommendations", icon: Lightbulb },
   { label: "Generator tresci", href: "/dashboard/content-generator", icon: PenTool },
+  { label: "Koszty AI", href: "/dashboard/ai-usage", icon: DollarSign, keywords: ["monitoring", "zuzycie", "koszt"] },
   { label: "Chat AI", href: "/chat", icon: MessageSquare },
 ];
 
@@ -118,7 +125,51 @@ const QUICK_ACTIONS: CommandPage[] = [
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const router = useRouter();
+
+  // Voice input integration: transcribed text populates the search field
+  const handleVoiceTranscript = useCallback((text: string) => {
+    setSearch(text);
+  }, []);
+
+  const {
+    isListening,
+    isProcessing: sttProcessing,
+    startListening,
+    stopListening,
+    isSupported: voiceSupported,
+  } = useVoiceInput({
+    onTranscript: handleVoiceTranscript,
+    onError: (error) => toast.error(error),
+  });
+
+  // AI-powered natural language search (activates for queries > 3 words)
+  const {
+    results: aiResults,
+    isSearching: aiSearching,
+    description: aiDescription,
+  } = useAISearch(search);
+
+  // Stop voice recording when the dialog closes
+  const prevOpenRef = useRef(open);
+  useEffect(() => {
+    if (prevOpenRef.current && !open && isListening) {
+      stopListening();
+    }
+    prevOpenRef.current = open;
+  }, [open, isListening, stopListening]);
+
+  // Reset search when dialog reopens
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      setOpen(nextOpen);
+      if (!nextOpen) {
+        setSearch("");
+      }
+    },
+    [],
+  );
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -137,11 +188,64 @@ export function CommandPalette() {
     router.push(href);
   };
 
+  const handleVoiceToggle = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
+
   return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Szukaj stron, raportow, ustawien..." />
+    <CommandDialog open={open} onOpenChange={handleOpenChange}>
+      <CommandInput
+        placeholder="Szukaj stron, raportow, ustawien..."
+        value={search}
+        onValueChange={setSearch}
+      />
       <CommandList>
         <CommandEmpty>Nie znaleziono wynikow.</CommandEmpty>
+
+        {/* AI Search Results — shown when the query is natural language (> 3 words) */}
+        {(aiResults.length > 0 || aiSearching) && (
+          <>
+            <CommandGroup
+              heading={
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="h-3 w-3" />
+                  {aiSearching
+                    ? "Szukanie AI..."
+                    : `AI: ${aiDescription}`}
+                </span>
+              }
+            >
+              {aiResults.flatMap((group) =>
+                group.items.map((item) => (
+                  <CommandItem
+                    key={`ai-${item.id}`}
+                    value={`ai ${item.title} ${item.subtitle}`}
+                    onSelect={() => navigateTo(item.href)}
+                  >
+                    <Sparkles className="mr-2 h-4 w-4 shrink-0 text-primary" />
+                    <div className="flex flex-col">
+                      <span>{item.title}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {item.subtitle}
+                      </span>
+                    </div>
+                  </CommandItem>
+                )),
+              )}
+              {aiSearching && (
+                <CommandItem value="ai-loading" disabled>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Przeszukiwanie bazy danych...
+                </CommandItem>
+              )}
+            </CommandGroup>
+            <CommandSeparator />
+          </>
+        )}
 
         <CommandGroup heading="Szybkie akcje">
           {QUICK_ACTIONS.map((page) => {
@@ -238,6 +342,24 @@ export function CommandPalette() {
           <span className="text-xs">⌘</span>K
         </kbd>
         <span>aby otworzyc</span>
+        {voiceSupported && (
+          <button
+            type="button"
+            className={cn(
+              "ml-auto p-1 rounded hover:bg-muted transition-colors",
+              isListening && "text-red-500",
+            )}
+            onClick={handleVoiceToggle}
+            disabled={sttProcessing}
+            aria-label={isListening ? "Zatrzymaj dyktowanie" : "Dyktuj wyszukiwanie"}
+          >
+            {sttProcessing ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Mic className="h-3 w-3" />
+            )}
+          </button>
+        )}
       </div>
     </CommandDialog>
   );

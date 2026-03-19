@@ -2,6 +2,9 @@
 
 import { Suspense } from "react";
 import { Loader2 } from "lucide-react";
+import { ImageGenerator } from "@/components/content-generator/image-generator";
+import { StoryGenerator } from "@/components/content-generator/story-generator";
+import { VideoGenerator } from "@/components/content-generator/video-generator";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { PostConfigCard } from "./_components/post-config-card";
 import { PostPreviewCard } from "./_components/post-preview-card";
@@ -58,6 +61,21 @@ function SocialPostsContent() {
           onSchedule={sp.handleSchedule}
           onOpenScheduleDialog={sp.handleOpenScheduleDialog}
         />
+      </div>
+
+      {/* AI Image Generator */}
+      <div className="mt-8">
+        <ImageGenerator />
+      </div>
+
+      {/* AI Video Generator */}
+      <div className="mt-8">
+        <VideoGenerator />
+      </div>
+
+      {/* AI Animated Stories Generator */}
+      <div className="mt-8">
+        <StoryGenerator />
       </div>
     </div>
   );

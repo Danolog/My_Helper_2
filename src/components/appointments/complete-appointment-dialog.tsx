@@ -12,9 +12,9 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { VoiceTextarea } from "@/components/ui/voice-textarea";
 import {
   CheckCircle,
   Scissors,
@@ -23,6 +23,8 @@ import {
   ClipboardList,
   CalendarPlus,
   CalendarClock,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
@@ -93,6 +95,32 @@ export function CompleteAppointmentDialog({
   const [commissionPercentage, setCommissionPercentage] = useState(String(DEFAULT_COMMISSION_RATE));
   const [completing, setCompleting] = useState(false);
   const [completedSuccessfully, setCompletedSuccessfully] = useState(false);
+  const [generatingSummary, setGeneratingSummary] = useState(false);
+  const [aiSummaryText, setAiSummaryText] = useState<string | null>(null);
+
+  const handleGenerateAISummary = async () => {
+    setGeneratingSummary(true);
+    try {
+      const res = await fetch("/api/ai/appointments/auto-summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appointmentId: appointment.id }),
+      });
+      const data = await res.json();
+      if (data.success && data.summary) {
+        setAiSummaryText(data.summary.fullSummary);
+        toast.success("Podsumowanie AI wygenerowane");
+      } else if (data.code === "PLAN_UPGRADE_REQUIRED") {
+        toast.error("Podsumowanie AI dostepne tylko w Planie Pro");
+      } else {
+        toast.error(data.error || "Nie udalo sie wygenerowac podsumowania");
+      }
+    } catch {
+      toast.error("Blad generowania podsumowania AI");
+    } finally {
+      setGeneratingSummary(false);
+    }
+  };
 
   // Calculate material cost
   const totalMaterialCost = materials.reduce((sum, m) => {
@@ -188,6 +216,7 @@ export function CompleteAppointmentDialog({
       setTechniques("");
       setNotes("");
       setCommissionPercentage("50");
+      setAiSummaryText(null);
     }, 300);
 
     onScheduleNext(data);
@@ -202,6 +231,7 @@ export function CompleteAppointmentDialog({
       setTechniques("");
       setNotes("");
       setCommissionPercentage("50");
+      setAiSummaryText(null);
     }, 300);
   };
 
@@ -241,6 +271,40 @@ export function CompleteAppointmentDialog({
                 <p className="text-sm text-green-700 dark:text-green-400">
                   Pracownik: {appointment.employee.firstName} {appointment.employee.lastName}
                 </p>
+              )}
+            </div>
+
+            {/* AI Summary generation */}
+            <div className="space-y-2" data-testid="ai-summary-prompt">
+              {aiSummaryText ? (
+                <div className="rounded-lg border p-3 bg-primary/5 border-primary/20">
+                  <div className="flex items-center gap-2 text-sm mb-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <span className="font-medium">Podsumowanie AI</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{aiSummaryText}</p>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGenerateAISummary}
+                  disabled={generatingSummary}
+                  className="w-full"
+                  data-testid="generate-summary-btn"
+                >
+                  {generatingSummary ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Generowanie podsumowania...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4 mr-2" />
+                      Generuj podsumowanie AI
+                    </>
+                  )}
+                </Button>
               )}
             </div>
 
@@ -364,10 +428,11 @@ export function CompleteAppointmentDialog({
 
             <div>
               <Label htmlFor="recipe">Receptura</Label>
-              <Textarea
+              <VoiceTextarea
                 id="recipe"
                 value={recipe}
                 onChange={(e) => setRecipe(e.target.value)}
+                onValueChange={setRecipe}
                 placeholder="np. Kolor 6/0 + 7/0 w proporcji 1:1, utleniacz 6%"
                 rows={2}
                 data-testid="treatment-recipe-input"
@@ -376,10 +441,11 @@ export function CompleteAppointmentDialog({
 
             <div>
               <Label htmlFor="techniques">Techniki</Label>
-              <Textarea
+              <VoiceTextarea
                 id="techniques"
                 value={techniques}
                 onChange={(e) => setTechniques(e.target.value)}
+                onValueChange={setTechniques}
                 placeholder="np. Baleyage, cieniowanie"
                 rows={2}
                 data-testid="treatment-techniques-input"
@@ -388,10 +454,11 @@ export function CompleteAppointmentDialog({
 
             <div>
               <Label htmlFor="treatment-notes">Notatki dodatkowe</Label>
-              <Textarea
+              <VoiceTextarea
                 id="treatment-notes"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
+                onValueChange={setNotes}
                 placeholder="np. Klientka preferuje cieplejsze odcienie, nastepna wizyta za 6 tygodni"
                 rows={2}
                 data-testid="treatment-notes-input"

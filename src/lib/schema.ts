@@ -812,6 +812,36 @@ export const aiConversations = pgTable(
   ]
 );
 
+// AI Generated Media - tracks AI-generated images, videos, etc.
+export const aiGeneratedMedia = pgTable(
+  "ai_generated_media",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id")
+      .notNull()
+      .references(() => salons.id, { onDelete: "cascade" }),
+    type: text("type").notNull(), // 'image', 'video', 'banner'
+    sourceUrl: text("source_url"), // Input image/video URL (if applicable)
+    resultUrl: text("result_url"), // Generated output URL
+    provider: text("provider").notNull(), // 'google_imagen', 'google_veo', 'sharp'
+    prompt: text("prompt"),
+    status: text("status").default("pending").notNull(), // 'pending', 'processing', 'completed', 'failed'
+    taskId: text("task_id"), // External provider task ID (for async operations like Veo)
+    metadata: jsonb("metadata").default({}), // Style, size, duration, resolution, etc.
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("ai_generated_media_salon_id_idx").on(table.salonId),
+    index("ai_generated_media_status_idx").on(table.status),
+    index("ai_generated_media_task_id_idx").on(table.taskId),
+  ]
+);
+
 // Newsletters - email campaigns
 export const newsletters = pgTable(
   "newsletters",

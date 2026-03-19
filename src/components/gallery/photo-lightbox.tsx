@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { Trash2, Pencil, SlidersHorizontal, Link2, Eye, EyeOff, FolderPlus, Sparkles } from "lucide-react";
+import { Trash2, Pencil, SlidersHorizontal, Link2, Eye, EyeOff, FolderPlus, Sparkles, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,6 +21,7 @@ interface PhotoLightboxProps {
   onLink: (photo: GalleryPhoto) => void;
   onAddToAlbum: (photoId: string) => void;
   onGenerateCaption: (photo: GalleryPhoto) => void;
+  onEnhancePhoto: (photo: GalleryPhoto) => void;
 }
 
 export function PhotoLightbox({
@@ -31,6 +32,7 @@ export function PhotoLightbox({
   onLink,
   onAddToAlbum,
   onGenerateCaption,
+  onEnhancePhoto,
 }: PhotoLightboxProps) {
   const [comparisonMode, setComparisonMode] = useState<"slider" | "side-by-side">("slider");
 
@@ -206,6 +208,15 @@ export function PhotoLightbox({
           </div>
 
           <div className="flex flex-wrap gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onEnhancePhoto(photo)}
+              className="text-amber-600 border-amber-200 hover:bg-amber-50"
+            >
+              <Wand2 className="w-4 h-4 mr-2" />
+              Ulepsz zdjecie
+            </Button>
             <Button
               variant="outline"
               size="sm"

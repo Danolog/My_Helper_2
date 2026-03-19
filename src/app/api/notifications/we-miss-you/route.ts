@@ -301,6 +301,28 @@ export async function POST(request: Request) {
         .replace("{salon}", salonName)
         .replace("{dni}", String(client.daysSinceVisit));
 
+      // Try AI personalization if salon has Pro plan (non-blocking)
+      try {
+        const { isProPlan } = await import("@/lib/subscription");
+        const hasPro = await isProPlan(salonId);
+        if (hasPro) {
+          const { createAIClient, getAIModel } = await import("@/lib/ai/openrouter");
+          const { generateText } = await import("ai");
+          const openrouter = createAIClient();
+          const aiResult = await generateText({
+            model: openrouter(getAIModel()),
+            prompt: `Spersonalizuj te wiadomosc "tesknimy" dla klienta ${client.firstName} salonu ${salonName}. Klient nie odwiedzal salonu od ${client.daysSinceVisit} dni. Oryginalna wiadomosc: "${message}". Zwroc TYLKO tekst wiadomosci, bez komentarzy. Max 300 znakow.`,
+            maxOutputTokens: 200,
+          });
+          const aiMessage = aiResult.text.trim();
+          if (aiMessage && aiMessage.length > 10) {
+            message = aiMessage;
+          }
+        }
+      } catch (aiError) {
+        logger.warn("[We Miss You Notifications] AI personalization failed, using default message", { error: aiError });
+      }
+
       // Append booking link if enabled
       if (includeBookingLink) {
         const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";

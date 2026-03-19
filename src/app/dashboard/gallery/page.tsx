@@ -12,6 +12,7 @@ import {
   PhotoLightbox,
   AlbumManager,
   CaptionDialog,
+  PhotoEnhanceDialog,
 } from "@/components/gallery";
 import type { GalleryPhoto, Employee, Service, Album } from "@/components/gallery";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,10 @@ export default function GalleryPage() {
   // Caption dialog state
   const [captionPhoto, setCaptionPhoto] = useState<GalleryPhoto | null>(null);
   const [captionDialogOpen, setCaptionDialogOpen] = useState(false);
+
+  // Enhance dialog state
+  const [enhancePhoto, setEnhancePhoto] = useState<GalleryPhoto | null>(null);
+  const [enhanceDialogOpen, setEnhanceDialogOpen] = useState(false);
 
   // ---- Data fetching ----
 
@@ -178,6 +183,27 @@ export default function GalleryPage() {
     setCaptionPhoto(photo);
     setCaptionDialogOpen(true);
     setSelectedPhoto(null);
+  };
+
+  const openEnhanceDialog = (photo: GalleryPhoto) => {
+    setEnhancePhoto(photo);
+    setEnhanceDialogOpen(true);
+    setSelectedPhoto(null);
+  };
+
+  const handlePhotoEnhanced = (enhancedUrl: string) => {
+    // When a photo is enhanced, update the photo in state with the new URL.
+    // The enhanced version replaces the "after" photo URL (or "before" if only before exists).
+    if (enhancePhoto) {
+      const updated: GalleryPhoto = {
+        ...enhancePhoto,
+        afterPhotoUrl: enhancedUrl,
+      };
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === updated.id ? updated : p)),
+      );
+    }
+    setEnhancePhoto(null);
   };
 
   const handlePhotoSaved = (updatedPhoto: GalleryPhoto) => {
@@ -342,6 +368,7 @@ export default function GalleryPage() {
             onLink={openLinkDialog}
             onAddToAlbum={handleAddToAlbumFromLightbox}
             onGenerateCaption={openCaptionDialog}
+            onEnhancePhoto={openEnhanceDialog}
           />
 
           {/* Link matching photo dialog */}
@@ -407,6 +434,17 @@ export default function GalleryPage() {
           setCaptionDialogOpen(open);
           if (!open) setCaptionPhoto(null);
         }}
+      />
+
+      {/* Enhance dialog (shared across tabs) */}
+      <PhotoEnhanceDialog
+        photo={enhancePhoto}
+        open={enhanceDialogOpen}
+        onOpenChange={(open) => {
+          setEnhanceDialogOpen(open);
+          if (!open) setEnhancePhoto(null);
+        }}
+        onEnhanced={handlePhotoEnhanced}
       />
 
     </div>

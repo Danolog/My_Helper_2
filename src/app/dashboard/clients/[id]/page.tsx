@@ -9,9 +9,11 @@ import {
   AlertTriangle,
   History,
   Award,
+  Brain,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ClientHistoryTab } from "@/components/clients/client-history-tab";
+import { ClientInsightsTab } from "@/components/clients/client-insights-tab";
 import { ClientLoyaltyTab } from "@/components/clients/client-loyalty-tab";
 import { ClientProfileHeader } from "@/components/clients/client-profile-header";
 import { ClientProfileTab } from "@/components/clients/client-profile-tab";
@@ -302,6 +304,10 @@ export default function ClientProfilePage() {
             <Award className="h-4 w-4 mr-1" />
             Punkty lojalnosciowe
           </TabsTrigger>
+          <TabsTrigger value="ai-insights" data-testid="tab-ai-insights">
+            <Brain className="h-4 w-4 mr-1" />
+            AI Insights
+          </TabsTrigger>
         </TabsList>
 
         {/* Profile Tab */}
@@ -350,6 +356,13 @@ export default function ClientProfilePage() {
         <TabsContent value="loyalty">
           {activatedTabs.has("loyalty") && salonId && (
             <ClientLoyaltyTab clientId={clientId} salonId={salonId} />
+          )}
+        </TabsContent>
+
+        {/* AI Insights Tab */}
+        <TabsContent value="ai-insights">
+          {activatedTabs.has("ai-insights") && (
+            <ClientInsightsTab clientId={clientId} />
           )}
         </TabsContent>
       </Tabs>
