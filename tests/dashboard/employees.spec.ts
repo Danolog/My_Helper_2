@@ -78,7 +78,7 @@ test.describe('Flow 2: Employee Management', () => {
       await navigateToEmployees(page);
 
       // Click edit on the first employee
-      const editButton = page.locator('button').filter({ has: page.locator('svg') }).first();
+      const editButton = page.locator('[data-testid^="edit-employee-"]').first();
       await editButton.click();
 
       // Modify a field
@@ -107,7 +107,7 @@ test.describe('Flow 2: Employee Management', () => {
       await navigateToEmployees(page);
 
       // Open edit dialog
-      const editButton = page.locator('button').filter({ has: page.locator('svg') }).first();
+      const editButton = page.locator('[data-testid^="edit-employee-"]').first();
       await editButton.click();
 
       // Look for service checkboxes
@@ -124,7 +124,7 @@ test.describe('Flow 2: Employee Management', () => {
       await navigateToEmployees(page);
 
       // Open edit dialog
-      const editButton = page.locator('button').filter({ has: page.locator('svg') }).first();
+      const editButton = page.locator('[data-testid^="edit-employee-"]').first();
       await editButton.click();
 
       const activeSwitch = page.locator('#edit-active');

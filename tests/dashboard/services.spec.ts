@@ -115,9 +115,10 @@ test.describe('Flow 3: Services & Categories', () => {
       const assignSelect = page.locator('[data-testid^="assign-category-"]').first();
       if (await assignSelect.isVisible()) {
         await assignSelect.click();
-        // Select first category option — use force:true because Radix Select
-        // portals the dropdown which can render outside the CI viewport
-        await page.getByRole('option').first().click({ force: true });
+        // Use keyboard navigation because Radix Select portals the dropdown
+        // which can render outside the CI viewport, causing click failures
+        await page.keyboard.press('ArrowDown');
+        await page.keyboard.press('Enter');
         await page.waitForLoadState('domcontentloaded');
       }
     });

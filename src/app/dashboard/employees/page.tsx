@@ -296,6 +296,8 @@ export default function EmployeesPage() {
                   <Button
                     variant="ghost"
                     size="sm"
+                    data-testid={`edit-employee-${emp.id}`}
+                    aria-label="Edytuj pracownika"
                     onClick={() => openEditDialog(emp)}
                   >
                     <Pencil className="h-4 w-4" />
