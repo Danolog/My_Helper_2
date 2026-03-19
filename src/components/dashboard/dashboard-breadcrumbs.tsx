@@ -42,6 +42,11 @@ const LABELS: Record<string, string> = {
   trends: "Trendy",
   loyalty: "Lojalnosc",
   salon: "Salon",
+  "promo-codes": "Kody promocyjne",
+  finance: "Prowizje",
+  reviews: "Opinie",
+  "waiting-list": "Lista oczekujacych",
+  fiscal: "Ustawienia fiskalne",
 };
 
 function isUuid(segment: string) {

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { CommandPalette } from "@/components/dashboard/command-palette";
 import { DashboardBottomNav } from "@/components/dashboard/dashboard-bottom-nav";
 import { DashboardBreadcrumbs } from "@/components/dashboard/dashboard-breadcrumbs";
 import { DashboardSidebar, DashboardMobileHeader } from "@/components/dashboard/dashboard-sidebar";
@@ -23,6 +24,7 @@ export default async function DashboardLayout({
         {children}
       </div>
       <DashboardBottomNav />
+      <CommandPalette />
     </div>
   );
 }

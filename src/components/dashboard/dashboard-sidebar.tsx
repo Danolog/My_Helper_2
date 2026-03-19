@@ -7,16 +7,20 @@ import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard,
   Calendar,
+  CalendarPlus,
   UserRound,
   Scissors,
   UserCog,
-  Image,
-  BarChart3,
-  CreditCard,
   Package,
+  Bell,
+  Image,
   Percent,
-  Menu,
   Bot,
+  BarChart3,
+  FileText,
+  CreditCard,
+  Settings,
+  Menu,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +63,12 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: Calendar,
         isActive: (pathname: string) => pathname.startsWith("/dashboard/calendar"),
       },
+      {
+        label: "Rezerwacja",
+        href: "/dashboard/booking",
+        icon: CalendarPlus,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/booking"),
+      },
     ],
   },
   {
@@ -87,6 +97,12 @@ export const NAV_GROUPS: NavGroup[] = [
         href: "/dashboard/products",
         icon: Package,
         isActive: (pathname: string) => pathname.startsWith("/dashboard/products"),
+      },
+      {
+        label: "Powiadomienia",
+        href: "/dashboard/notifications",
+        icon: Bell,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/notifications"),
       },
     ],
   },
@@ -122,21 +138,32 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       {
         label: "Raporty",
-        href: "/dashboard/reports/revenue",
+        href: "/dashboard/reports",
         icon: BarChart3,
         isActive: (pathname: string) => pathname.startsWith("/dashboard/reports"),
+      },
+      {
+        label: "Faktury",
+        href: "/dashboard/invoices",
+        icon: FileText,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/invoices"),
       },
       {
         label: "Subskrypcja",
         href: "/dashboard/subscription",
         icon: CreditCard,
-        isActive: (pathname: string) =>
-          pathname.startsWith("/dashboard/subscription") ||
-          pathname.startsWith("/dashboard/settings"),
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/subscription"),
       },
     ],
   },
 ];
+
+const SETTINGS_ITEM: NavItem = {
+  label: "Ustawienia",
+  href: "/dashboard/settings",
+  icon: Settings,
+  isActive: (pathname: string) => pathname.startsWith("/dashboard/settings"),
+};
 
 function NavLink({
   item,
@@ -182,27 +209,34 @@ export function SidebarNav({
 }) {
   return (
     <nav
-      className="flex flex-col gap-1"
+      className="flex flex-col gap-1 h-full"
       role="navigation"
       aria-label="Panel nawigacyjny"
     >
-      {NAV_GROUPS.map((group, groupIndex) => (
-        <div key={group.title} className={cn(groupIndex > 0 && "mt-4")}>
-          <h3 className="px-3 mb-1 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
-            {group.title}
-          </h3>
-          <div className="flex flex-col gap-0.5">
-            {group.items.map((item) => (
-              <NavLink
-                key={item.href}
-                item={item}
-                pathname={pathname}
-                onClick={onClick}
-              />
-            ))}
+      <div className="flex-1">
+        {NAV_GROUPS.map((group, groupIndex) => (
+          <div key={group.title} className={cn(groupIndex > 0 && "mt-4")}>
+            <h3 className="px-3 mb-1 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
+              {group.title}
+            </h3>
+            <div className="flex flex-col gap-0.5">
+              {group.items.map((item) => (
+                <NavLink
+                  key={item.href}
+                  item={item}
+                  pathname={pathname}
+                  onClick={onClick}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
+
+      {/* Settings pinned at the bottom */}
+      <div className="mt-4 pt-4 border-t border-sidebar-border">
+        <NavLink item={SETTINGS_ITEM} pathname={pathname} onClick={onClick} />
+      </div>
     </nav>
   );
 }
@@ -249,7 +283,7 @@ export function DashboardMobileHeader() {
             <SheetTitle className="text-sidebar-foreground">Menu</SheetTitle>
           </SheetHeader>
           <Separator className="bg-sidebar-border" />
-          <div className="p-4 overflow-y-auto">
+          <div className="p-4 overflow-y-auto h-[calc(100%-65px)]">
             <SidebarNav pathname={pathname} onClick={() => setOpen(false)} />
           </div>
         </SheetContent>
