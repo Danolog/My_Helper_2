@@ -7,6 +7,7 @@ import {
   requireProAI,
   isProAIError,
   getSalonContext,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
@@ -138,6 +139,8 @@ Zasady:
     }
 
     logger.info(`[AI Content] Generated review response for review ${reviewId} (rating: ${review.rating})`);
+
+    void trackAIUsage(salonId, "review_response");
 
     return Response.json({
       success: true,

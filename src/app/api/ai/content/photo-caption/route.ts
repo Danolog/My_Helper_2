@@ -7,6 +7,7 @@ import {
   requireProAI,
   isProAIError,
   getSalonContext,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
@@ -220,6 +221,8 @@ Wygeneruj TYLKO tresc podpisu, bez zadnych dodatkowych komentarzy.`;
       "g"
     );
     const hashtags = caption.match(hashtagRegex) || [];
+
+    void trackAIUsage(salonId, "photo_caption");
 
     return Response.json({
       success: true,

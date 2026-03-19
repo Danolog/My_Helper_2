@@ -7,6 +7,7 @@ import {
   requireProAI,
   isProAIError,
   getSalonContext,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
@@ -212,6 +213,8 @@ Wygeneruj TYLKO tresc posta, bez zadnych dodatkowych komentarzy.`;
     // Extract hashtags from the generated content
     const hashtagRegex = new RegExp("#[\\w\\u00C0-\\u024F\\u0100-\\u017F]+", "g");
     const hashtags = postContent.match(hashtagRegex) || [];
+
+    void trackAIUsage(salonId, "social_post");
 
     return Response.json({
       success: true,

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { MessageSquareWarning, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { logger } from "@/lib/logger";
 
 export default function ChatError({
   error,
@@ -12,7 +13,7 @@ export default function ChatError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("Chat error:", error);
+    logger.error("[Chat] Unhandled error in chat page", { error });
   }, [error]);
 
   return (

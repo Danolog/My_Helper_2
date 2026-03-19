@@ -5,6 +5,7 @@ import {
   getAIModel,
   requireProAI,
   isProAIError,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 
@@ -83,6 +84,7 @@ export async function POST(req: Request) {
   // Combined auth + salon + Pro plan check
   const proResult = await requireProAI();
   if (isProAIError(proResult)) return proResult;
+  const { salonId } = proResult;
 
   // Parse request body
   let body: unknown;
@@ -133,6 +135,8 @@ export async function POST(req: Request) {
         displayText: "Nie udalo sie rozpoznac komendy. Sprobuj ponownie.",
       };
     }
+
+    void trackAIUsage(salonId, "voice_command");
 
     return Response.json({
       success: true,

@@ -909,6 +909,42 @@ export const fiscalTestSchema = z.object({
 });
 
 // ==========================================
+// Notification Cron Schemas
+// ==========================================
+
+/**
+ * Schema for POST /api/notifications/birthday — send birthday notifications.
+ * Only salonId is required; other fields override saved salon settings.
+ */
+export const birthdayNotificationSchema = z.object({
+  salonId: z.string().uuid("Nieprawidlowy salonId"),
+  birthdayDiscount: z.number().min(0).max(100).optional(),
+  customMessage: z.string().max(500).optional(),
+  giftType: z.enum(["discount", "product"]).optional(),
+  productName: z.string().max(200).optional(),
+});
+
+/**
+ * Schema for POST /api/notifications/low-stock — create a low-stock notification.
+ */
+export const lowStockNotificationSchema = z.object({
+  salonId: z.string().uuid("Nieprawidlowy salonId"),
+  productId: z.string().uuid("Nieprawidlowy productId"),
+  productName: z.string().min(1, "Nazwa produktu jest wymagana").max(200),
+  quantity: z.union([z.string(), z.number()]).optional(),
+  minQuantity: z.union([z.string(), z.number()]).optional(),
+  unit: z.string().max(50).optional(),
+});
+
+/**
+ * Schema for POST /api/notifications/we-miss-you — send re-engagement notifications.
+ * Only salonId is required; notification settings come from salon's settingsJson.
+ */
+export const weMissYouNotificationSchema = z.object({
+  salonId: z.string().uuid("Nieprawidlowy salonId"),
+});
+
+// ==========================================
 // UUID Param Validation Helper
 // ==========================================
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { logger } from "@/lib/logger";
 
 /**
  * Global error boundary - catches errors in the root layout itself.
@@ -15,7 +16,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    console.error("Global application error:", error);
+    logger.error("[App] Global unhandled error (root layout failure)", { error });
   }, [error]);
 
   return (

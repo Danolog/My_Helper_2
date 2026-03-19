@@ -1,9 +1,8 @@
 import { NextRequest } from "next/server";
-import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { marketingConsents, clients } from "@/lib/schema";
 import { eq, and, isNull } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, clientConsentsSchema } from "@/lib/api-validation";
 
@@ -27,10 +26,8 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
   const salonId = await getUserSalonId();
   if (!salonId) {
@@ -105,10 +102,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
   const salonId = await getUserSalonId();
   if (!salonId) {

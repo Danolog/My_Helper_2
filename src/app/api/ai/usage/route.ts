@@ -9,11 +9,14 @@ import { aiGeneratedMedia } from "@/lib/schema";
 // ────────────────────────────────────────────────────────────
 
 const COST_MAP: Record<string, number> = {
+  // Media generation costs
   "image:google_imagen": 0.01, // Social graphics (Imagen)
   "image:sharp": 0, // Photo enhancement — server-side, no API cost
   "banner:google_imagen": 0.01, // Banner generation
   "banner:sharp": 0, // Server-side banner compositing
   "video:google_veo": 0.15, // Video clips (Veo)
+  // Text AI costs (OpenRouter — Claude Sonnet)
+  "text:openrouter": 0.002,
 };
 
 /** Fallback cost when the type:provider combination is not in the map. */
@@ -87,7 +90,7 @@ export async function GET(req: Request) {
       startDate: startDate.toISOString(),
       usage,
       totalMediaCost: totalCost.toFixed(2),
-      note: "Koszty tekstu AI (podsumowania, wyszukiwanie, kategoryzacja) nie sa jeszcze sledzone. Szacunek: ~$0.002/zapytanie.",
+      note: "Koszty obejmuja media (obrazy, wideo, banery) oraz tekst AI (podsumowania, wyszukiwanie, kategoryzacja itp.). Szacunek tekstu: ~$0.002/zapytanie.",
     });
   } catch (error) {
     logger.error("[AI Usage] Error fetching usage stats", { error });

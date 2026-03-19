@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
+import { logger } from "@/lib/logger";
 
 const STORAGE_PREFIX = "form_recovery_";
 const DEBOUNCE_MS = 500;
@@ -133,7 +134,7 @@ export function useFormRecovery<T extends Record<string, unknown>>(
           // because a user could lose data on refresh without knowing.
           // localStorage may be full or unavailable — form recovery will not persist
           if (process.env.NODE_ENV === "development") {
-            console.warn("[useFormRecovery] Failed to save form state to localStorage", e);
+            logger.warn("[useFormRecovery] Failed to save form state to localStorage", { error: e });
           }
         }
       }, debounceMs);

@@ -7,6 +7,7 @@ import {
   requireProAI,
   isProAIError,
   getSalonContext,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
@@ -281,6 +282,8 @@ Zasady:
         summary: responseText || "Nie udalo sie wygenerowac podsumowania.",
       };
     }
+
+    void trackAIUsage(salonId, "client_insights");
 
     return Response.json({ success: true, insights });
   } catch (error) {

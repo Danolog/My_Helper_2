@@ -6,6 +6,7 @@ import {
   requireProAI,
   isProAIError,
   getSalonContext,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 
@@ -105,6 +106,8 @@ Zasady:
         reason: "Nie udalo sie przetworzyc odpowiedzi AI",
       };
     }
+
+    void trackAIUsage(salonId, "categorize");
 
     return Response.json({ success: true, ...categorization });
   } catch (error) {

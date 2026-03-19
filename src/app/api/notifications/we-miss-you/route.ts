@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { clients, appointments, notifications, salons } from "@/lib/schema";
 import { eq, sql, and, lt, isNull, or, inArray } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
-import { isValidUuid } from "@/lib/api-validation";
+import { isValidUuid, validateBody, weMissYouNotificationSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 interface WeMissYouSettings {
@@ -189,22 +189,24 @@ export async function POST(request: Request) {
   try {
     const cronError = await requireCronSecret(request);
     if (cronError) return cronError;
-    const body = await request.json();
-    const { salonId } = body;
 
-    if (!salonId) {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
+        { success: false, error: "Invalid JSON" },
         { status: 400 }
       );
     }
 
-    if (!isValidUuid(salonId)) {
-      return NextResponse.json(
-        { success: false, error: "Nieprawidłowy salonId" },
-        { status: 400 }
-      );
+    // Validate request body with Zod schema
+    const validationError = validateBody(weMissYouNotificationSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const { salonId } = body as { salonId: string };
 
     // Get salon name and settings
     const [salon] = await db

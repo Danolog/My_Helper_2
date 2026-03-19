@@ -7,6 +7,7 @@ import {
   requireProAI,
   isProAIError,
   getSalonContext,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
@@ -162,6 +163,8 @@ Zasady:
     if (smsMessage.length > SMS_MAX_LENGTH) {
       smsMessage = smsMessage.slice(0, SMS_MAX_LENGTH - 3) + "...";
     }
+
+    void trackAIUsage(salonId, "notifications_personalize");
 
     return Response.json({ success: true, message, smsMessage });
   } catch (error) {

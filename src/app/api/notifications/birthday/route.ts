@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { clients, notifications, salons } from "@/lib/schema";
 import { eq, sql, and, isNotNull, inArray, like } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
-import { isValidUuid } from "@/lib/api-validation";
+import { isValidUuid, validateBody, birthdayNotificationSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 interface BirthdaySettings {
@@ -113,22 +113,31 @@ export async function POST(request: Request) {
   try {
     const cronError = await requireCronSecret(request);
     if (cronError) return cronError;
-    const body = await request.json();
-    const { salonId } = body;
 
-    if (!salonId) {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
+        { success: false, error: "Invalid JSON" },
         { status: 400 }
       );
     }
 
-    if (!isValidUuid(salonId)) {
-      return NextResponse.json(
-        { success: false, error: "Nieprawidłowy salonId" },
-        { status: 400 }
-      );
+    // Validate request body with Zod schema
+    const validationError = validateBody(birthdayNotificationSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const validated = body as {
+      salonId: string;
+      birthdayDiscount?: number;
+      customMessage?: string;
+      giftType?: string;
+      productName?: string;
+    };
+    const { salonId } = validated;
 
     // Get salon name and settings
     const [salon] = await db
@@ -144,13 +153,13 @@ export async function POST(request: Request) {
     const savedSettings = (salonSettings?.birthdayGift || {}) as Partial<BirthdaySettings>;
 
     // Merge saved settings with any overrides from the request body
-    const giftType = body.giftType || savedSettings.giftType || "discount";
+    const giftType = validated.giftType || savedSettings.giftType || "discount";
     const birthdayDiscount =
-      body.birthdayDiscount !== undefined
-        ? body.birthdayDiscount
+      validated.birthdayDiscount !== undefined
+        ? validated.birthdayDiscount
         : savedSettings.discountPercentage || 0;
-    const productName = body.productName || savedSettings.productName || "";
-    const customMessage = body.customMessage || savedSettings.customMessage || "";
+    const productName = validated.productName || savedSettings.productName || "";
+    const customMessage = validated.customMessage || savedSettings.customMessage || "";
 
     // Find clients with birthday today
     const today = new Date();

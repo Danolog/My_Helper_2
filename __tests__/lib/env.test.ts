@@ -171,6 +171,8 @@ describe("checkEnv", () => {
     process.env.OPENROUTER_API_KEY = "openrouter-key";
     process.env.BLOB_READ_WRITE_TOKEN = "blob-token";
     process.env.STRIPE_SECRET_KEY = "stripe-key";
+    process.env.TWILIO_ACCOUNT_SID = "AC_test_sid";
+    process.env.TWILIO_AUTH_TOKEN = "test_auth_token";
 
     checkEnv();
 

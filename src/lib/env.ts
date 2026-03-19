@@ -31,6 +31,11 @@ const serverEnvSchema = z.object({
   STRIPE_PRICE_BASIC: z.string().optional(),
   STRIPE_PRICE_PRO: z.string().optional(),
 
+  // Twilio (telephony — voice AI calls)
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_PHONE_NUMBER: z.string().optional(),
+
   // Push notifications (VAPID keys)
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_SUBJECT: z.string().optional(),
@@ -123,6 +128,10 @@ export function checkEnv(): void {
 
   if (!process.env.STRIPE_SECRET_KEY) {
     warnings.push("STRIPE_SECRET_KEY is not set. Subscription and payment features will not work.");
+  }
+
+  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
+    warnings.push("Twilio credentials are not set. Voice telephony features will be disabled.");
   }
 
   // Log warnings in development
