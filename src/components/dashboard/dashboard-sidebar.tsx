@@ -247,7 +247,7 @@ export function SidebarNav({
 function DesktopSidebar({ pathname }: { pathname: string }) {
   return (
     <aside
-      className="hidden md:flex md:w-64 md:flex-col md:border-r border-sidebar-border bg-sidebar"
+      className="hidden md:flex md:w-64 md:flex-col md:border-r border-sidebar-border bg-sidebar sticky top-0 h-screen"
       aria-label="Panel nawigacyjny"
     >
       <div className="flex h-full flex-col p-4 overflow-y-auto">
