@@ -7,11 +7,15 @@ MyHelper to alternatywa dla Booksy dla malych firm uslugowych (salony kosmetyczn
 ## Technology Stack
 
 - **Frontend**: Next.js 16.1.6 + React 19.2.4, Tailwind CSS 4 + shadcn/ui 3.7, Framer Motion, next-themes
-- **Backend**: Node.js 22+, Next.js API Routes (~160 endpointow), PostgreSQL 18 (pgvector, Docker)
-- **ORM**: Drizzle ORM 0.44.7, schema: `src/lib/schema.ts` (1057 lines, 44 tabele)
+- **Backend**: Node.js 22+, Next.js API Routes (~190 endpointow), PostgreSQL 18 (pgvector, Docker)
+- **ORM**: Drizzle ORM 0.44.7, schema: `src/lib/schema.ts` (1057 lines, 45 tabele)
 - **Auth**: Better Auth 1.4.18 (email/password + Google OAuth), 15-min session timeout
 - **Payments**: Stripe 20.3.1 (subskrypcje + zadatki) + Blik P2P
 - **AI**: Vercel AI SDK 5 + OpenRouter (anthropic/claude-sonnet-4-5-20250929) — tylko plan Pro
+- **Voice AI**: ElevenLabs (TTS, STT) via `elevenlabs` SDK
+- **Image AI**: Google Imagen 3 via `@google/genai` SDK
+- **Video AI**: Google Veo 3.1 via `@google/genai` SDK
+- **Telephony**: Twilio (voice calls, optional)
 - **Validation**: Zod 4.3.6
 - **PWA**: Service Worker, install prompt, offline fallback
 - **Package manager**: pnpm
@@ -23,7 +27,7 @@ MyHelper to alternatywa dla Booksy dla malych firm uslugowych (salony kosmetyczn
 src/app/(auth)/          # logowanie, rejestracja, reset hasla
 src/app/(client)/        # portal klienta (salony, rezerwacja, wizyty, ulubione)
 src/app/dashboard/       # panel wlasciciela (~50 podstron, ~82 page.tsx total)
-src/app/api/             # ~160 endpointow REST (~176 katalogow)
+src/app/api/             # ~190 endpointow REST (~200 katalogow)
 src/app/calendar/        # widok kalendarza pracownikow
 src/components/ui/       # shadcn/ui
 src/components/calendar/ # time-grid, week-time-grid, event, legend, dialogi
@@ -32,8 +36,12 @@ src/components/appointments/ # dialogi wizyt
 src/components/reports/  # filtry dat, filtry pracownikow
 src/components/subscription/ # bramka planu Pro
 src/components/pwa/      # install prompt, service worker
+src/components/content-generator/ # image, video, story, testimonial generators
+src/components/promotions/       # banner generator
+src/components/services/         # service illustration button
 src/hooks/               # custom React hooks
 src/lib/                 # core utilities, auth config, schema, server logic
+src/lib/ai/              # AI provider abstractions (openrouter, elevenlabs, google-imagen, google-veo)
 src/types/               # definicje typow TypeScript
 drizzle/                 # migracje SQL
 docs/                    # dokumentacja biznesowa i techniczna
@@ -77,6 +85,8 @@ pnpm db:seed:test         # seed danych testowych
 - `__tests__/api/` — testy API (appointments, clients, employees, services, products, health, work-schedules, appointment-materials, appointment-complete)
 - `__tests__/lib/` — testy utilities (validations, utils, date-utils, session, stripe, refund, subscription, sms, push, storage, env, excel-export, fetch-with-retry, api-validation, content-templates, error-messages, notification-settings, temporary-access, web-push, get-user-salon)
 - `__tests__/hooks/` — testy hooks (use-diagnostics, use-draggable, use-salon-id, use-unsaved-changes, use-subscription, use-form-recovery, use-network-status, use-tab-sync)
+- `__tests__/api/ai-*.test.ts` — testy AI endpoints (categorize, auto-summary, search, notifications)
+- `__tests__/hooks/use-ai-search.test.ts` — test AI search hook
 - `__tests__/components/` — testy komponentow (Calendar*, DateRangeFilter, EmployeeFilter, auth forms, PWA, ProPlanGate, UnsavedChangesDialog)
 
 ### E2E Tests (Playwright)
@@ -84,6 +94,7 @@ pnpm db:seed:test         # seed danych testowych
 - `tests/dashboard/` — services, inventory, appointments, employees, reports, subscriptions
 - `tests/client-portal/client-flows.spec.ts` — flow klienta
 - `tests/ai-tools/ai-features.spec.ts` — AI (plan Pro)
+- `tests/ai-features/ai-smoke.spec.ts` — smoke testy stron AI
 - `tests/production/health.spec.ts` — health checks produkcyjne (@production tag)
 - Tags: `@smoke` (szybkie), `@full` (pelne), `@production` (health checks)
 - Global auth: `tests/.auth/` — storageState dla zalogowanego uzytkownika
@@ -130,7 +141,7 @@ pnpm db:seed:test         # seed danych testowych
 | **receptionist** | Umawianie wizyt, klienci, podglad kalendarza |
 | **client** | Przegladanie salonow, rezerwacja, platnosci, opinie, ulubione |
 
-## Database Schema (44 tabele)
+## Database Schema (45 tabele)
 
 - **Auth**: user, session, account, verification (text PKs)
 - **Core**: salons, clients, employees, serviceCategories, services, serviceVariants, appointments, timeBlocks (UUID PKs)
@@ -140,15 +151,67 @@ pnpm db:seed:test         # seed danych testowych
 - **Marketing**: promotions, promoCodes, loyaltyPoints, loyaltyTransactions, newsletters, marketingConsents, scheduledPosts
 - **Notifications**: notifications, waitingList, temporaryAccess, pushSubscriptions
 - **Payments**: subscriptionPlans, salonSubscriptions, subscriptionPayments, depositPayments, invoices, fiscalReceipts
-- **AI & Other**: aiConversations, favoriteSalons
+- **AI & Other**: aiConversations, aiGeneratedMedia, favoriteSalons
 
 ## API Domains
 
-- **AI (Pro)**: Business (alerts, analytics, chat, recommendations), Content (descriptions, social-post, newsletter), Voice (book, cancel, reschedule)
+- **AI (Pro)**: Business (alerts, analytics, chat, recommendations, categorize, search, insights), Content (descriptions, social-post, newsletter, auto-summary), Voice (book, cancel, reschedule, tts, stt, interpret-command, twilio), Image (generate, enhance, banner, service-illustration), Video (generate, status, story, testimonial-template), Usage monitoring
 - **Core CRUD**: appointments, clients, employees, services, products, salons, gallery, invoices, promotions, promo-codes, reviews, work-schedules, time-blocks, waiting-list, scheduled-posts, temporary-access
 - **Client Portal**: /api/client/appointments, reviews, waiting-list, /api/favorites/salons
 - **Finance**: deposits, subscriptions, stripe webhooks, reports (revenue, occupancy, payroll, popularity, profitability, materials, promotions, cancellations, monthly/yearly comparison)
 - **Notifications & Cron**: birthday, low-stock, we-miss-you, push, reminders, cron jobs
+
+## AI Features (Pro Plan)
+
+All AI features require Pro plan (149 PLN/mies). Gated by `requireProAI()` server-side and `ProPlanGate` component client-side.
+
+### Shared Utilities (`src/lib/ai/`)
+- `openrouter.ts` — createAIClient(), getAIModel(), requireProAI(), isProAIError(), getSalonContext(), gatherSalonData(), trackAIUsage()
+- `elevenlabs.ts` — createElevenLabsClient(), DEFAULT_VOICE_ID, DEFAULT_TTS_MODEL
+- `google-imagen.ts` — createGoogleAIClient(), generateImage(), IMAGE_STYLE_PRESETS, IMAGE_SIZES
+- `google-veo.ts` — startVideoGeneration(), checkVideoStatus(), VEO_MODEL
+- `twilio.ts` — createTwilioClient(), getTwilioPhoneNumber(), isTwilioConfigured()
+
+### AI API Endpoints
+| Endpoint | Purpose |
+|----------|---------|
+| POST /api/ai/appointments/auto-summary | AI summary after appointment completion |
+| POST /api/ai/categorize | Auto-categorize services/products |
+| POST /api/ai/clients/insights | Client analysis (churn risk, trends) |
+| POST /api/ai/search | Natural language search (Cmd+K) |
+| POST /api/ai/notifications/personalize | Personalize notification messages |
+| POST /api/ai/voice/tts | ElevenLabs Text-to-Speech |
+| POST /api/ai/voice/stt | ElevenLabs Speech-to-Text |
+| POST /api/ai/voice/interpret-command | Voice command interpretation |
+| POST /api/ai/image/generate | Google Imagen image generation |
+| POST /api/ai/image/enhance | Sharp photo enhancement (7 presets) |
+| POST /api/ai/image/banner | Promotional banner (AI bg + text overlay) |
+| POST /api/ai/image/service-illustration | Service placeholder illustration |
+| POST /api/ai/video/generate | Google Veo async video generation |
+| GET /api/ai/video/status/[taskId] | Video generation polling |
+| POST /api/ai/video/story | Animated Instagram Stories (9:16) |
+| POST /api/ai/video/testimonial-template | Video testimonial text scripts |
+| GET /api/ai/usage | AI cost monitoring stats |
+| POST /api/ai/voice/twilio/webhook | Twilio incoming call handler |
+| POST /api/ai/voice/twilio/status | Twilio call status callback |
+
+### AI Components
+- `VoiceTextarea` — Textarea with ElevenLabs mic button
+- `ReadAloudButton` — TTS playback button
+- `VoiceCommandButton` — Floating mic for voice commands
+- `ClientInsightsTab` — AI analysis tab on client profile
+- `ImageGenerator` — Social media graphics generator
+- `VideoGenerator` — Promotional video clips (Veo)
+- `StoryGenerator` — Animated Instagram Stories
+- `TestimonialTemplate` — Video testimonial scripts
+- `BannerGenerator` — Promotional banners
+- `PhotoEnhanceDialog` — Gallery photo enhancement
+- `ServiceIllustrationButton` — Service image generation
+
+### AI Hooks
+- `useVoiceInput` — MediaRecorder + ElevenLabs STT
+- `useTextToSpeech` — ElevenLabs TTS playback
+- `useAISearch` — Debounced natural language search (>3 words)
 
 ## Environment Variables
 
@@ -164,6 +227,11 @@ BLOB_READ_WRITE_TOKEN                 # Vercel Blob (opcjonalnie)
 STRIPE_SECRET_KEY / NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
 STRIPE_WEBHOOK_SECRET
 STRIPE_PRICE_BASIC / STRIPE_PRICE_PRO
+ELEVENLABS_API_KEY                    # ElevenLabs voice AI (TTS, STT)
+GOOGLE_AI_API_KEY                     # Google Imagen + Veo (images, video)
+TWILIO_ACCOUNT_SID                    # Twilio telephony (optional)
+TWILIO_AUTH_TOKEN                     # Twilio telephony (optional)
+TWILIO_PHONE_NUMBER                   # Twilio phone number (optional)
 ```
 
 ## Key Config Files
@@ -274,17 +342,3 @@ Pełny raport: docs/AUDIT_2026-03.md
 - Nie commituj z czerwonymi testami
 - Jeden commit = jedna naprawa (atomic commits)
 - Czytaj docs/AUDIT_2026-03.md przed każdym zadaniem
-```
-
-Czyli plik będzie wyglądał tak na końcu:
-```
-...
-## Znane problemy do naprawienia     ← istniejąca sekcja
-- [ ] Weryfikacja autorów sesji...
-- [ ] Walidacje formularzy...
-- [ ] Obsługa błędów w endpointach AI
-- [ ] Testy responsywności mobile-first
-
-## Aktywny Audit (marzec 2026)       ← NOWA SEKCJA
-Pełny raport: docs/AUDIT_2026-03.md
-...

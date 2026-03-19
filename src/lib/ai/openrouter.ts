@@ -4,6 +4,7 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import {
+  aiGeneratedMedia,
   appointments,
   clients,
   employees,
@@ -409,4 +410,35 @@ export async function parseJSON(
  */
 export function isParseError(result: unknown): result is Response {
   return result instanceof Response;
+}
+
+// ────────────────────────────────────────────────────────────
+// AI usage tracking
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Track an AI text generation call for cost monitoring.
+ * Non-blocking — errors are logged but never propagated to the caller.
+ *
+ * @param salonId  - Salon that initiated the AI call
+ * @param feature  - Feature identifier for grouping (e.g. "auto_summary", "search")
+ * @param metadata - Optional extra context stored in the JSONB metadata column
+ */
+export async function trackAIUsage(
+  salonId: string,
+  feature: string,
+  metadata?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await db.insert(aiGeneratedMedia).values({
+      salonId,
+      type: "text",
+      provider: "openrouter",
+      prompt: feature,
+      status: "completed",
+      metadata: { feature, ...metadata },
+    });
+  } catch (error) {
+    logger.warn("[AI] Failed to track usage", { error, feature });
+  }
 }

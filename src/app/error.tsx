@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { AlertCircle, RefreshCw, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { logger } from "@/lib/logger";
 
 export default function Error({
   error,
@@ -12,8 +13,8 @@ export default function Error({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Log the error to an error reporting service (console only, never shown to user)
-    console.error("Application error:", error);
+    // Log the error to an error reporting service (never shown to user)
+    logger.error("[App] Unhandled application error", { error });
   }, [error]);
 
   return (

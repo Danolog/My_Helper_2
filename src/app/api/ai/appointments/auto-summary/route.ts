@@ -7,6 +7,7 @@ import {
   requireProAI,
   isProAIError,
   getSalonContext,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
@@ -238,6 +239,8 @@ Zasady:
         fullSummary: responseText,
       };
     }
+
+    void trackAIUsage(salonId, "auto_summary");
 
     return Response.json({ success: true, summary });
   } catch (error) {

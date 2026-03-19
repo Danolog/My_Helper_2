@@ -6,6 +6,7 @@ import {
   requireProAI,
   isProAIError,
   getSalonContext,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 
@@ -82,6 +83,8 @@ Zasady:
         { status: 500 }
       );
     }
+
+    void trackAIUsage(salonId, "generate_description");
 
     return Response.json({ success: true, description });
   } catch (error) {

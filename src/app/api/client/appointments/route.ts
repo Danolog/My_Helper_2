@@ -1,23 +1,17 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { appointments, employees, services, salons } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
 // GET /api/client/appointments - List appointments for the authenticated client user
 export async function GET() {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
-    const userId = session.user.id;
+    const userId = authResult.user.id;
     logger.info(`[Client Appointments API] Fetching appointments for user: ${userId}`);
 
     const result = await db

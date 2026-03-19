@@ -1,23 +1,17 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { reviews, appointments, employees, services, salons } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
 // GET /api/client/reviews - List all reviews by the authenticated user
 export async function GET() {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Brak autoryzacji" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
-    const userId = session.user.id;
+    const userId = authResult.user.id;
 
     // Join reviews with appointments to find reviews belonging to this user,
     // and include related salon, employee, and service info for display

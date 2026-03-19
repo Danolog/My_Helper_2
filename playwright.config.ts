@@ -42,6 +42,15 @@ export default defineConfig({
         storageState: 'tests/.auth/owner.json',
       },
     },
+    // AI features smoke tests use owner session
+    {
+      name: 'ai-features',
+      testMatch: /ai-features\/.*\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        storageState: 'tests/.auth/owner.json',
+      },
+    },
     // Client portal — mixed auth (some tests need login, some don't)
     {
       name: 'client-portal',

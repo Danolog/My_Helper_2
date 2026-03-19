@@ -131,7 +131,7 @@ export function validateFile(
  * @example
  * ```ts
  * const result = await upload(fileBuffer, "avatar.png", "avatars");
- * console.log(result.url); // https://blob.vercel.io/... or /uploads/avatars/avatar.png
+ * logger.info("[Storage] File uploaded", { url: result.url }); // https://blob.vercel.io/... or /uploads/avatars/avatar.png
  * ```
  */
 export async function upload(

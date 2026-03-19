@@ -26,6 +26,7 @@ vi.mock("@/lib/ai/openrouter", () => ({
   isProAIError: (...args: unknown[]) => mockIsProAIError(...args),
   createAIClient: (...args: unknown[]) => mockCreateAIClient(...args),
   getAIModel: (...args: unknown[]) => mockGetAIModel(...args),
+  trackAIUsage: vi.fn().mockResolvedValue(undefined),
 }));
 
 const mockGenerateText = vi.fn();

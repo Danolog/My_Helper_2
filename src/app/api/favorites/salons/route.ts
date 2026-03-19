@@ -1,24 +1,18 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { favoriteSalons, salons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, favoriteSalonSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/favorites/salons - List favorite salons for authenticated user
 export async function GET() {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
-    const userId = session.user.id;
+    const userId = authResult.user.id;
 
     const favorites = await db
       .select({
@@ -52,15 +46,10 @@ export async function GET() {
 // POST /api/favorites/salons - Add a salon to favorites
 export async function POST(request: Request) {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
-    const userId = session.user.id;
+    const userId = authResult.user.id;
     const body = await request.json();
     const validationError = validateBody(favoriteSalonSchema, body);
     if (validationError) {
@@ -122,15 +111,10 @@ export async function POST(request: Request) {
 // DELETE /api/favorites/salons?salonId=<uuid> - Remove a salon from favorites
 export async function DELETE(request: Request) {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
-    const userId = session.user.id;
+    const userId = authResult.user.id;
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 

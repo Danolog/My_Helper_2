@@ -57,12 +57,14 @@ const TYPE_LABELS: Record<
   image: { label: "Obrazy", icon: Image },
   video: { label: "Wideo", icon: Video },
   banner: { label: "Banery", icon: Image },
+  text: { label: "Tekst AI", icon: Sparkles },
 };
 
 const PROVIDER_LABELS: Record<string, string> = {
   google_imagen: "Google Imagen",
   google_veo: "Google Veo",
   sharp: "Sharp (serwer)",
+  openrouter: "OpenRouter (Claude)",
 };
 
 const PERIOD_LABELS: Record<string, string> = {
@@ -218,7 +220,7 @@ function AIUsageContent() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Wygenerowane media
+                  Zapytania AI
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -241,7 +243,7 @@ function AIUsageContent() {
                   {formatCost(totalCost)}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Tylko media (obrazy, wideo, banery)
+                  Media + tekst AI
                 </p>
               </CardContent>
             </Card>
@@ -303,7 +305,7 @@ function AIUsageContent() {
                   <BarChart3 className="h-10 w-10 mx-auto mb-3 opacity-30" />
                   <p>Brak danych o zuzyciu w wybranym okresie.</p>
                   <p className="text-xs mt-1">
-                    Generuj obrazy, banery lub wideo, aby zobaczyc statystyki.
+                    Korzystaj z funkcji AI (tekst, obrazy, banery, wideo), aby zobaczyc statystyki.
                   </p>
                 </CardContent>
               </Card>
@@ -399,7 +401,7 @@ function AIUsageContent() {
             )}
           </div>
 
-          {/* Text AI note + cost reference table */}
+          {/* Cost reference table */}
           <Card className="border-dashed">
             <CardContent className="py-4">
               <div className="flex gap-3">
@@ -407,7 +409,7 @@ function AIUsageContent() {
                 <div className="space-y-3">
                   <div>
                     <p className="text-sm font-medium">
-                      Koszty tekstowe AI nie sa sledzone indywidualnie
+                      Informacje o kosztach
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
                       {data.note}

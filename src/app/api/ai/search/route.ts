@@ -6,6 +6,7 @@ import {
   getAIModel,
   requireProAI,
   isProAIError,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
@@ -429,6 +430,8 @@ Odpowiadaj TYLKO po polsku w polu description.`;
         items,
       },
     ];
+
+    void trackAIUsage(salonId, "search");
 
     return Response.json({
       success: true,

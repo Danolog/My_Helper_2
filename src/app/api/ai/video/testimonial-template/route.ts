@@ -6,6 +6,7 @@ import {
   requireProAI,
   isProAIError,
   getSalonContext,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 
@@ -131,6 +132,8 @@ Zasady:
         estimatedDuration: `${duration}s`,
       };
     }
+
+    void trackAIUsage(salonId, "testimonial_template");
 
     return Response.json({ success: true, template });
   } catch (error) {

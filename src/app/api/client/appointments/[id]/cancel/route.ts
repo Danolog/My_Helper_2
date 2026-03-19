@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { appointments, employees, services, salons, depositPayments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
 import { processAutomaticRefund } from "@/lib/refund";
 import { notifyWaitingList } from "@/lib/waiting-list";
@@ -15,15 +14,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
-    const userId = session.user.id;
+    const userId = authResult.user.id;
     const { id } = await params;
 
     if (!isValidUuid(id)) {
@@ -137,15 +131,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
-    const userId = session.user.id;
+    const userId = authResult.user.id;
     const { id } = await params;
 
     if (!isValidUuid(id)) {

@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { waitingList, clients } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import {
   acceptEarlierSlot,
   declineEarlierSlot,
@@ -17,15 +16,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Brak autoryzacji" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
-    const userEmail = session.user.email;
+    const userEmail = authResult.user.email;
     const { id } = await params;
 
     const rawBody = await request.json();
@@ -126,7 +120,7 @@ export async function POST(
       .returning();
 
     const action = accepted ? "zaakceptowal" : "odrzucil";
-    logger.info(`[Client WaitingList API] POST [id]: User ${session.user.id} ${action} entry ${id}`);
+    logger.info(`[Client WaitingList API] POST [id]: User ${authResult.user.id} ${action} entry ${id}`);
 
     return NextResponse.json({
       success: true,
@@ -150,15 +144,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Brak autoryzacji" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
-    const userEmail = session.user.email;
+    const userEmail = authResult.user.email;
     const { id } = await params;
 
     // Find the waiting list entry with client info for ownership verification
@@ -192,7 +181,7 @@ export async function DELETE(
       .where(eq(waitingList.id, id))
       .returning();
 
-    logger.info(`[Client WaitingList API] DELETE: User ${session.user.id} removed entry ${id}`);
+    logger.info(`[Client WaitingList API] DELETE: User ${authResult.user.id} removed entry ${id}`);
 
     return NextResponse.json({
       success: true,

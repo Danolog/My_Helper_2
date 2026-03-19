@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import {
   waitingList,
@@ -9,22 +8,17 @@ import {
   salons,
 } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, clientWaitingListSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/client/waiting-list - List waiting list entries for the authenticated client
 export async function GET() {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Brak autoryzacji" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
-    const userEmail = session.user.email;
+    const userEmail = authResult.user.email;
 
     // Find all client records linked to this user's email across all salons
     const clientRecords = await db
@@ -115,7 +109,7 @@ export async function GET() {
       createdAt: row.entry.createdAt,
     }));
 
-    logger.info(`[Client WaitingList API] GET: ${formattedEntries.length} entries for user ${session.user.id}`);
+    logger.info(`[Client WaitingList API] GET: ${formattedEntries.length} entries for user ${authResult.user.id}`);
 
     return NextResponse.json({
       success: true,
@@ -134,15 +128,10 @@ export async function GET() {
 // POST /api/client/waiting-list - Client joins a waiting list for a service at a salon
 export async function POST(request: Request) {
   try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Brak autoryzacji" },
-        { status: 401 }
-      );
-    }
+    const authResult = await requireAuth();
+    if (isAuthError(authResult)) return authResult;
 
-    const userEmail = session.user.email;
+    const userEmail = authResult.user.email;
     const body = await request.json();
     const validationError = validateBody(clientWaitingListSchema, body);
     if (validationError) {
@@ -172,7 +161,7 @@ export async function POST(request: Request) {
       .limit(1);
 
     if (!clientRecord) {
-      const userName = session.user.name || "";
+      const userName = authResult.user.name || "";
       const nameParts = userName.split(" ");
       const firstName = nameParts[0] || "Klient";
       const lastName = nameParts.slice(1).join(" ") || "";
@@ -184,7 +173,7 @@ export async function POST(request: Request) {
           firstName,
           lastName,
           email: userEmail,
-          phone: session.user.phone || null,
+          phone: (authResult.user as unknown as Record<string, string | null>).phone || null,
         })
         .returning();
 
@@ -196,7 +185,7 @@ export async function POST(request: Request) {
       }
 
       clientRecord = newClient;
-      logger.info(`[Client WaitingList API] Auto-created client ${clientRecord.id} for user ${session.user.id} at salon ${salonId}`);
+      logger.info(`[Client WaitingList API] Auto-created client ${clientRecord.id} for user ${authResult.user.id} at salon ${salonId}`);
     }
 
     if (serviceId) {
@@ -253,7 +242,7 @@ export async function POST(request: Request) {
       })
       .returning();
 
-    logger.info(`[Client WaitingList API] POST: User ${session.user.id} joined waiting list at salon ${salonId}, entry ${newEntry?.id}`);
+    logger.info(`[Client WaitingList API] POST: User ${authResult.user.id} joined waiting list at salon ${salonId}, entry ${newEntry?.id}`);
 
     return NextResponse.json(
       {

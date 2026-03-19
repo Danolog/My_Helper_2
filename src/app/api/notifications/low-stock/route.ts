@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { products, notifications } from "@/lib/schema";
 import { eq, and, isNotNull, like, sql } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
-import { isValidUuid } from "@/lib/api-validation";
+import { isValidUuid, validateBody, lowStockNotificationSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 /**
@@ -86,22 +86,31 @@ export async function POST(request: Request) {
   try {
     const cronError = await requireCronSecret(request);
     if (cronError) return cronError;
-    const body = await request.json();
-    const { salonId, productId, productName, quantity, minQuantity, unit } = body;
 
-    if (!salonId || !productId || !productName) {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
       return NextResponse.json(
-        { success: false, error: "salonId, productId, and productName are required" },
+        { success: false, error: "Invalid JSON" },
         { status: 400 }
       );
     }
 
-    if (!isValidUuid(salonId)) {
-      return NextResponse.json(
-        { success: false, error: "Nieprawidłowy salonId" },
-        { status: 400 }
-      );
+    // Validate request body with Zod schema
+    const validationError = validateBody(lowStockNotificationSchema, body);
+    if (validationError) {
+      return NextResponse.json(validationError, { status: 400 });
     }
+
+    const { salonId, productId, productName, quantity, minQuantity, unit } = body as {
+      salonId: string;
+      productId: string;
+      productName: string;
+      quantity?: string | number;
+      minQuantity?: string | number;
+      unit?: string;
+    };
 
     // Check for existing low-stock notification for this product in the last 24h
     // to avoid duplicate notifications
