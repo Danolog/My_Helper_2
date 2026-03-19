@@ -94,13 +94,21 @@ export async function POST(req: Request) {
   try {
     const result = await generateImage(finalPrompt, { style, aspectRatio });
 
-    // Persist the generated image via the storage abstraction
+    // Persist the generated image — or return a data URI in local dev
     const filename = `ai-image-${salonId}-${Date.now()}.png`;
-    const stored = await upload(result.imageData, filename, "ai-images");
+    const hasVercelBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+
+    let imageUrl: string;
+    if (hasVercelBlob) {
+      const stored = await upload(result.imageData, filename, "ai-images");
+      imageUrl = stored.url;
+    } else {
+      imageUrl = `data:image/png;base64,${result.imageData.toString("base64")}`;
+    }
 
     return Response.json({
       success: true,
-      imageUrl: stored.url,
+      imageUrl,
       prompt: result.prompt,
       style,
       size,

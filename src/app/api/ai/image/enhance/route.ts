@@ -128,12 +128,20 @@ export async function POST(req: Request) {
       .jpeg({ quality: 90 })
       .toBuffer();
 
-    // Upload enhanced image to storage
+    // Upload enhanced image to storage (or return data URI in local dev)
     const filename = `enhanced-${salonId}-${Date.now()}.jpg`;
-    const stored = await upload(enhancedBuffer, filename, "enhanced", {
-      maxSize: MAX_IMAGE_SIZE_BYTES,
-      allowedTypes: ["image/jpeg"],
-    });
+    const hasVercelBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+
+    let enhancedUrl: string;
+    if (hasVercelBlob) {
+      const stored = await upload(enhancedBuffer, filename, "enhanced", {
+        maxSize: MAX_IMAGE_SIZE_BYTES,
+        allowedTypes: ["image/jpeg"],
+      });
+      enhancedUrl = stored.url;
+    } else {
+      enhancedUrl = `data:image/jpeg;base64,${enhancedBuffer.toString("base64")}`;
+    }
 
     logger.info("[AI Image] Photo enhanced", {
       salonId,
@@ -144,7 +152,7 @@ export async function POST(req: Request) {
 
     return Response.json({
       success: true,
-      enhancedUrl: stored.url,
+      enhancedUrl,
       originalUrl: imageUrl,
       preset,
       metadata: {
