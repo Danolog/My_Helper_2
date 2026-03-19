@@ -110,8 +110,12 @@ test.describe('Flow 2: Employee Management', () => {
       const editButton = page.locator('[data-testid^="edit-employee-"]').first();
       await editButton.click();
 
+      // Wait for dialog to fully load (async fetch of employee data)
+      await page.locator('#edit-firstName').waitFor({ state: 'visible', timeout: 15000 });
+
       // Look for service checkboxes
       const serviceCheckbox = page.locator('[id^="service-"]').first();
+      await serviceCheckbox.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
       if (await serviceCheckbox.isVisible()) {
         const isChecked = await serviceCheckbox.isChecked();
         await serviceCheckbox.setChecked(!isChecked);

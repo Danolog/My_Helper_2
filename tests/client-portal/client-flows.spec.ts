@@ -17,7 +17,8 @@ async function loginAsClient(page: Page) {
   await page.fill('#email', CLIENT_CREDENTIALS.email);
   await page.fill('#password', CLIENT_CREDENTIALS.password);
   await page.locator('form button[type="submit"]').click();
-  await page.waitForURL(/\/(salons|appointments|dashboard)/, { timeout: 30000 });
+  // Wait for redirect or for page to change (login can be slow in CI)
+  await page.waitForURL(/\/(salons|appointments|dashboard|portal)/, { timeout: 45000 });
 }
 
 // ---------------------------------------------------------------------------

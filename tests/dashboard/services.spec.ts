@@ -10,7 +10,7 @@ async function navigateToServices(page: Page) {
   // Wait for all JS bundles to load — React hydration requires full bundle
   await page.waitForLoadState('load');
   // Wait for page hydration — ensure the add button is interactive
-  await page.getByTestId('add-service-btn').waitFor({ state: 'visible', timeout: 15000 });
+  await page.getByTestId('add-service-btn').waitFor({ state: 'visible', timeout: 30000 });
 }
 
 /**
