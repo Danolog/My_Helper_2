@@ -198,9 +198,20 @@ export async function POST(req: Request) {
       .jpeg({ quality: 90 })
       .toBuffer();
 
-    // ── Step 6: Upload to storage ──
+    // ── Step 6: Upload to storage (or return data URI in local dev) ──
     const filename = `banner-${salonId}-${Date.now()}.jpg`;
-    const stored = await upload(banner, filename, "banners");
+    const hasVercelBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+
+    let bannerUrl: string;
+    if (hasVercelBlob) {
+      const stored = await upload(banner, filename, "banners");
+      bannerUrl = stored.url;
+    } else {
+      // In local dev without Vercel Blob, return the image as a data URI
+      // so the browser can display it without relying on static file serving,
+      // which doesn't pick up files written to public/ during server runtime.
+      bannerUrl = `data:image/jpeg;base64,${banner.toString("base64")}`;
+    }
 
     logger.info("[AI Image] Banner generated", {
       salonId,
@@ -211,7 +222,7 @@ export async function POST(req: Request) {
 
     return Response.json({
       success: true,
-      bannerUrl: stored.url,
+      bannerUrl,
       prompt: bgPrompt,
       size,
       style,
