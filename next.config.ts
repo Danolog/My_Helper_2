@@ -6,6 +6,11 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: false,
   },
 
+  // Prevent bundling of native Node.js modules — required for sharp on Vercel.
+  // Without this, Next.js tries to bundle sharp but cannot include native binaries,
+  // causing image generation/enhancement to silently fail in production.
+  serverExternalPackages: ["sharp"],
+
   // Image optimization configuration
   images: {
     remotePatterns: [
