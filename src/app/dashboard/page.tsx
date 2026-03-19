@@ -41,19 +41,6 @@ const CreateSalonPrompt = dynamic(
   },
 );
 
-// Lazy-load navigation cards (below the fold)
-const DashboardNavCards = dynamic(
-  () => import("@/components/dashboard/dashboard-nav-cards").then((m) => ({ default: m.DashboardNavCards })),
-  {
-    loading: () => (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} className="h-40 rounded-lg" />
-        ))}
-      </div>
-    ),
-  },
-);
 
 export default function DashboardPage() {
   const { data: session, isPending } = useSession();
@@ -172,9 +159,6 @@ export default function DashboardPage() {
       <DashboardTodayAppointments stats={stats} statsLoading={statsLoading} statsError={statsError} />
 
       <DashboardEmployeesToday stats={stats} statsLoading={statsLoading} statsError={statsError} />
-
-      {/* Navigation cards grid - lazy loaded (below the fold) */}
-      <DashboardNavCards isProPlan={isProPlan} />
     </div>
   );
 }
