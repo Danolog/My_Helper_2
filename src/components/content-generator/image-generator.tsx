@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { mutationFetch } from "@/lib/api-client";
 
 // ────────────────────────────────────────────────────────────
 // Option constants
@@ -88,7 +89,7 @@ export function ImageGenerator() {
 
     setGenerating(true);
     try {
-      const res = await fetch("/api/ai/image/generate", {
+      const res = await mutationFetch("/api/ai/image/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, style, size, autoPrompt }),

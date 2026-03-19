@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ReadAloudButton } from "@/components/ui/read-aloud-button";
 import { useSubscription } from "@/hooks/use-subscription";
+import { mutationFetch } from "@/lib/api-client";
 
 interface ClientInsights {
   churnRisk: number;
@@ -48,7 +49,7 @@ export function ClientInsightsTab({ clientId }: ClientInsightsTabProps) {
   const fetchInsights = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/ai/clients/insights", {
+      const res = await mutationFetch("/api/ai/clients/insights", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientId }),
