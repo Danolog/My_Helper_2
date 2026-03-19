@@ -50,7 +50,8 @@ export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registe
   }
 
   if (session) {
-    return null
+    router.replace(redirectTo)
+    return <Button disabled>Przekierowanie...</Button>
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
