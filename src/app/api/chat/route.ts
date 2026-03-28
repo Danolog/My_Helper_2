@@ -1,8 +1,7 @@
-import { headers } from "next/headers";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { streamText, UIMessage, convertToModelMessages } from "ai";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isProPlan } from "@/lib/subscription";
 
 // Zod schema for message validation
@@ -23,14 +22,8 @@ const chatRequestSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  // Verify user is authenticated
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
   // Check Pro plan requirement - AI features are Pro-only
   const hasPro = await isProPlan();
