@@ -694,10 +694,29 @@ export const updateGalleryPhotoSchema = z.object({
 // ==========================================
 
 export const depositCreateSessionSchema = z.object({
-  appointmentId: requiredString("Wizyta"),
-  amount: z.number().positive("Kwota musi byc wieksza od 0"),
-  successUrl: z.string().url().optional(),
-  cancelUrl: z.string().url().optional(),
+  salonId: z.string().uuid("salonId musi byc poprawnym UUID"),
+  employeeId: z.string().uuid("employeeId musi byc poprawnym UUID"),
+  serviceId: z.string().uuid("serviceId musi byc poprawnym UUID").optional(),
+  variantId: z.string().uuid("variantId musi byc poprawnym UUID").optional(),
+  clientId: z.string().uuid("clientId musi byc poprawnym UUID").optional(),
+  startTime: z.string().min(1, "startTime jest wymagane"),
+  endTime: z.string().min(1, "endTime jest wymagane"),
+  depositAmount: z.preprocess(
+    (v) => (typeof v === "string" ? parseFloat(v) : v),
+    z.number().positive("Kwota zadatku musi byc wieksza od 0")
+  ),
+  paymentMethod: z.enum(["stripe", "blik"], { message: "paymentMethod musi byc 'stripe' lub 'blik'" }).optional(),
+  blikPhoneNumber: z
+    .string()
+    .regex(/^(\+48)?[0-9]{9}$/, "Nieprawidlowy numer telefonu BLIK (9 cyfr)")
+    .optional(),
+  guestName: z.string().min(2, "Imie i nazwisko musi miec min. 2 znaki").optional(),
+  guestPhone: z
+    .string()
+    .regex(/^(\+48)?[0-9]{9}$/, "Podaj prawidlowy numer telefonu (9 cyfr)")
+    .optional(),
+  guestEmail: z.string().email("Podaj prawidlowy adres email").optional(),
+  notes: z.string().optional(),
 });
 
 export const depositConfirmSchema = z.object({
