@@ -1,23 +1,17 @@
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { reviews, salons, clients, employees, services, appointments } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
 // GET /api/reviews - List reviews for the owner's salon with optional status filter
 export async function GET(request: Request) {
-  try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Brak autoryzacji" },
-        { status: 401 }
-      );
-    }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
-    const userId = session.user.id;
+  try {
+    const userId = authResult.user.id;
 
     // Find the salon owned by the current user
     const [salon] = await db

@@ -1,7 +1,6 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
 
@@ -18,15 +17,10 @@ import { logger } from "@/lib/logger";
  *   { success: false, error: "..." }                -- auth or server error
  */
 export async function GET() {
-  try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 },
-      );
-    }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
+  try {
     const [salon] = await db
       .select({
         id: salons.id,
@@ -37,7 +31,7 @@ export async function GET() {
         industryType: salons.industryType,
       })
       .from(salons)
-      .where(eq(salons.ownerId, session.user.id))
+      .where(eq(salons.ownerId, authResult.user.id))
       .limit(1);
 
     return NextResponse.json({

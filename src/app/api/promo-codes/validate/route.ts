@@ -3,10 +3,14 @@ import { db } from "@/lib/db";
 import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { validateBody, validatePromoCodeSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
 // POST /api/promo-codes/validate - Validate a promo code and return discount info
 export async function POST(request: Request) {
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
+
   try {
     const body = await request.json();
     const validationError = validateBody(validatePromoCodeSchema, body);

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import {
   hasTemporaryAccess,
   getActiveTemporaryAccess,
@@ -20,21 +19,16 @@ import { logger } from "@/lib/logger";
  *   { success: true, hasAccess: boolean, grants: [...] }
  */
 export async function GET(request: Request) {
-  try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 }
-      );
-    }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
+  try {
     const { searchParams } = new URL(request.url);
     const featureName = searchParams.get("featureName");
 
     if (featureName) {
       // Check specific feature access
-      const access = await hasTemporaryAccess(session.user.id, featureName);
+      const access = await hasTemporaryAccess(authResult.user.id, featureName);
 
       return NextResponse.json({
         success: true,
@@ -44,7 +38,7 @@ export async function GET(request: Request) {
     }
 
     // Return all active grants for the user
-    const grants = await getActiveTemporaryAccess(session.user.id);
+    const grants = await getActiveTemporaryAccess(authResult.user.id);
 
     return NextResponse.json({
       success: true,

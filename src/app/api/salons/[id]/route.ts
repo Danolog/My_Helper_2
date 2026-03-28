@@ -1,7 +1,6 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
-import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
 import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";
@@ -251,15 +250,10 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 }
-      );
-    }
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
+  try {
     const { id } = await params;
 
     // Verify ownership
@@ -275,7 +269,7 @@ export async function PUT(
       );
     }
 
-    if (salon.ownerId !== session.user.id) {
+    if (salon.ownerId !== authResult.user.id) {
       return NextResponse.json(
         { success: false, error: "Brak uprawnien" },
         { status: 403 }
