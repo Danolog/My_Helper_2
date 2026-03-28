@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 type StatusLevel = "ok" | "warn" | "error";
 
@@ -31,10 +32,9 @@ interface DiagnosticsResponse {
   overallStatus: StatusLevel;
 }
 
-// This endpoint is intentionally public (no auth required) because it's used
-// by the setup checklist on the homepage before users are logged in.
-// It only returns boolean flags about configuration status, not sensitive data.
 export async function GET(req: Request) {
+  const authResult = await requireAuth("owner");
+  if (isAuthError(authResult)) return authResult;
   const env = {
     POSTGRES_URL: Boolean(process.env.POSTGRES_URL),
     BETTER_AUTH_SECRET: Boolean(process.env.BETTER_AUTH_SECRET),
