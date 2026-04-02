@@ -68,5 +68,13 @@ claude-progress.txt
 
 # test artifacts
 test-results/
+test-results*/
+test-results.json
 playwright-report/
 tests/.auth/
+
+# Claude memory (per-user)
+memory/
+
+# Personal Claude instructions
+CLAUDE.local.md

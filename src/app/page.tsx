@@ -7,14 +7,14 @@ import { motion, MotionConfig } from "framer-motion";
 export default function RoleSelector() {
   return (
     <MotionConfig reducedMotion="user">
-      <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12 relative overflow-hidden">
+      <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-4 py-12">
         {/* Background */}
         <div
-          className="absolute inset-0 -z-10 bg-gradient-to-b from-card to-background"
+          className="from-card to-background absolute inset-0 -z-10 bg-gradient-to-b"
           aria-hidden="true"
         >
-          <div className="absolute top-[-10%] right-[-5%] w-[500px] h-[500px] rounded-full bg-primary/[0.04] dark:bg-primary/[0.08] blur-[100px]" />
-          <div className="absolute bottom-[-10%] left-[-5%] w-[400px] h-[400px] rounded-full bg-gold/[0.06] dark:bg-gold/[0.10] blur-[80px]" />
+          <div className="bg-primary/[0.04] dark:bg-primary/[0.08] absolute top-[-10%] right-[-5%] h-[500px] w-[500px] rounded-full blur-[100px]" />
+          <div className="bg-gold/[0.06] dark:bg-gold/[0.10] absolute bottom-[-10%] left-[-5%] h-[400px] w-[400px] rounded-full blur-[80px]" />
         </div>
 
         {/* Logo */}
@@ -22,18 +22,18 @@ export default function RoleSelector() {
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
-          className="flex items-center gap-2.5 mb-12"
+          className="mb-12 flex items-center gap-2.5"
         >
-          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-primary/10">
-            <Scissors className="h-5 w-5 text-primary" />
+          <div className="bg-primary/10 flex h-10 w-10 items-center justify-center rounded-xl">
+            <Scissors className="text-primary h-5 w-5" />
           </div>
-          <span className="font-[family-name:var(--font-playfair)] text-3xl font-bold tracking-tight text-gradient-rose">
+          <span className="text-gradient-rose font-[family-name:var(--font-playfair)] text-3xl font-bold tracking-tight">
             MyHelper
           </span>
         </motion.div>
 
         {/* Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 max-w-2xl w-full">
+        <div className="grid w-full max-w-2xl grid-cols-1 gap-6 sm:grid-cols-2">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
@@ -41,12 +41,12 @@ export default function RoleSelector() {
           >
             <Link
               href="/dla-salonow"
-              className="group block rounded-3xl border border-border/40 bg-card/60 backdrop-blur-xl p-8 text-center hover:border-primary/40 hover:shadow-[var(--shadow-warm-lg)] transition-all duration-500"
+              className="group border-border/40 bg-card/60 hover:border-primary/40 block rounded-3xl border p-8 text-center backdrop-blur-xl transition-all duration-500 hover:shadow-[var(--shadow-warm-lg)]"
             >
-              <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 group-hover:bg-primary/20 group-hover:scale-110 transition-all duration-500">
-                <Scissors className="h-8 w-8 text-primary" />
+              <div className="bg-primary/10 group-hover:bg-primary/20 mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl transition-all duration-500 group-hover:scale-110">
+                <Scissors className="text-primary h-8 w-8" />
               </div>
-              <h2 className="font-[family-name:var(--font-playfair)] text-2xl font-bold mb-2">
+              <h2 className="mb-2 font-[family-name:var(--font-playfair)] text-2xl font-bold">
                 Prowadzę salon
               </h2>
               <p className="text-muted-foreground text-sm font-light">
@@ -62,12 +62,12 @@ export default function RoleSelector() {
           >
             <Link
               href="/dla-klientow"
-              className="group block rounded-3xl border border-border/40 bg-card/60 backdrop-blur-xl p-8 text-center hover:border-primary/40 hover:shadow-[var(--shadow-warm-lg)] transition-all duration-500"
+              className="group border-border/40 bg-card/60 hover:border-primary/40 block rounded-3xl border p-8 text-center backdrop-blur-xl transition-all duration-500 hover:shadow-[var(--shadow-warm-lg)]"
             >
-              <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 group-hover:bg-primary/20 group-hover:scale-110 transition-all duration-500">
-                <Search className="h-8 w-8 text-primary" />
+              <div className="bg-primary/10 group-hover:bg-primary/20 mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl transition-all duration-500 group-hover:scale-110">
+                <Search className="text-primary h-8 w-8" />
               </div>
-              <h2 className="font-[family-name:var(--font-playfair)] text-2xl font-bold mb-2">
+              <h2 className="mb-2 font-[family-name:var(--font-playfair)] text-2xl font-bold">
                 Szukam salonu
               </h2>
               <p className="text-muted-foreground text-sm font-light">
@@ -86,7 +86,7 @@ export default function RoleSelector() {
         >
           <Link
             href="/login"
-            className="text-sm text-muted-foreground hover:text-primary transition-colors"
+            className="text-muted-foreground hover:text-primary text-sm transition-colors"
           >
             Mam konto — zaloguj się
           </Link>

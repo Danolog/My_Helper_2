@@ -1,102 +1,112 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { signIn, useSession } from "@/lib/auth-client"
-import { sanitizeAuthError } from "@/lib/error-messages"
+import { useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { signIn, useSession } from "@/lib/auth-client";
+import { sanitizeAuthError } from "@/lib/error-messages";
 
 /**
  * Validate returnTo URL to prevent open redirects.
  * Only allows relative paths that start with "/" but not "//".
  */
 function isSafeReturnTo(url: string | null | undefined, fallback: string = "/dashboard"): string {
-  if (!url) return fallback
-  if (url.startsWith("/") && !url.startsWith("//")) return url
-  return fallback
+  if (!url) return fallback;
+  if (url.startsWith("/") && !url.startsWith("//")) return url;
+  return fallback;
 }
 
 interface SignInButtonProps {
-  returnTo?: string | undefined
-  defaultRedirect?: string
-  registerHref?: string
+  returnTo?: string | undefined;
+  defaultRedirect?: string;
+  registerHref?: string;
 }
 
-export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registerHref = "/register" }: SignInButtonProps) {
-  const { data: session, isPending: sessionPending } = useSession()
-  const router = useRouter()
+export function SignInButton({
+  returnTo,
+  defaultRedirect = "/dashboard",
+  registerHref = "/register",
+}: SignInButtonProps) {
+  const { data: session, isPending: sessionPending } = useSession();
+  const router = useRouter();
   // Determine the redirect destination after login, with open-redirect protection
-  const redirectTo = isSafeReturnTo(returnTo, defaultRedirect)
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState("")
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-  const [isPending, setIsPending] = useState(false)
-  const [isGooglePending, setIsGooglePending] = useState(false)
+  const redirectTo = isSafeReturnTo(returnTo, defaultRedirect);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [isPending, setIsPending] = useState(false);
+  const [isGooglePending, setIsGooglePending] = useState(false);
 
   const clearFieldError = (field: string) => {
     setFieldErrors((prev) => {
-      const next = { ...prev }
-      delete next[field]
-      return next
-    })
-  }
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
 
   if (sessionPending) {
-    return <Button disabled>Ladowanie...</Button>
+    return <Button disabled>Ladowanie...</Button>;
   }
 
   if (session) {
-    router.replace(redirectTo)
-    return <Button disabled>Przekierowanie...</Button>
+    router.replace(redirectTo);
+    return null;
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError("")
+    e.preventDefault();
+    setError("");
 
     // Validate required fields
-    const errors: Record<string, string> = {}
+    const errors: Record<string, string> = {};
     if (!email.trim()) {
-      errors.email = "Wpisz adres email powiazany z kontem, np. jan@example.com"
+      errors.email = "Wpisz adres email powiazany z kontem, np. jan@example.com";
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errors.email = "Nieprawidlowy format email. Wpisz adres w formacie: nazwa@domena.pl"
+      errors.email = "Nieprawidlowy format email. Wpisz adres w formacie: nazwa@domena.pl";
     }
     if (!password) {
-      errors.password = "Wpisz haslo do logowania. Jesli nie pamietasz, uzyj opcji 'Nie pamietam hasla'"
+      errors.password =
+        "Wpisz haslo do logowania. Jesli nie pamietasz, uzyj opcji 'Nie pamietam hasla'";
     }
-    setFieldErrors(errors)
+    setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
-      return
+      return;
     }
 
-    setIsPending(true)
+    setIsPending(true);
 
     try {
       const result = await signIn.email({
         email,
         password,
         callbackURL: redirectTo,
-      })
+      });
 
       if (result.error) {
-        setError(sanitizeAuthError(result.error.message, "Nie udalo sie zalogowac. Sprawdz dane i sprobuj ponownie."))
+        setError(
+          sanitizeAuthError(
+            result.error.message,
+            "Nie udalo sie zalogowac. Sprawdz dane i sprobuj ponownie."
+          )
+        );
       } else {
-        router.replace(redirectTo)
-        router.refresh()
+        router.replace(redirectTo);
+        router.refresh();
       }
     } catch {
-      setError("Wystapil nieoczekiwany blad. Sprobuj ponownie pozniej.")
+      setError("Wystapil nieoczekiwany blad. Sprobuj ponownie pozniej.");
     } finally {
-      setIsPending(false)
+      setIsPending(false);
     }
-  }
+  };
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="space-y-4 w-full max-w-sm">
+    <form onSubmit={handleSubmit} noValidate className="w-full max-w-sm space-y-4">
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input
@@ -105,16 +115,14 @@ export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registe
           placeholder="you@example.com"
           value={email}
           onChange={(e) => {
-            setEmail(e.target.value)
-            clearFieldError("email")
+            setEmail(e.target.value);
+            clearFieldError("email");
           }}
           required
           aria-invalid={!!fieldErrors.email}
           disabled={isPending}
         />
-        {fieldErrors.email && (
-          <p className="text-sm text-destructive">{fieldErrors.email}</p>
-        )}
+        {fieldErrors.email && <p className="text-destructive text-sm">{fieldErrors.email}</p>}
       </div>
       <div className="space-y-2">
         <Label htmlFor="password">Haslo</Label>
@@ -124,20 +132,16 @@ export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registe
           placeholder="Twoje haslo"
           value={password}
           onChange={(e) => {
-            setPassword(e.target.value)
-            clearFieldError("password")
+            setPassword(e.target.value);
+            clearFieldError("password");
           }}
           required
           aria-invalid={!!fieldErrors.password}
           disabled={isPending}
         />
-        {fieldErrors.password && (
-          <p className="text-sm text-destructive">{fieldErrors.password}</p>
-        )}
+        {fieldErrors.password && <p className="text-destructive text-sm">{fieldErrors.password}</p>}
       </div>
-      {error && (
-        <p className="text-sm text-destructive">{error}</p>
-      )}
+      {error && <p className="text-destructive text-sm">{error}</p>}
       <Button type="submit" className="w-full" disabled={isPending || isGooglePending}>
         {isPending ? "Logowanie..." : "Zaloguj sie"}
       </Button>
@@ -146,7 +150,7 @@ export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registe
           <span className="w-full border-t" />
         </div>
         <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-card px-2 text-muted-foreground">lub</span>
+          <span className="bg-card text-muted-foreground px-2">lub</span>
         </div>
       </div>
       <Button
@@ -155,16 +159,16 @@ export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registe
         className="w-full"
         disabled={isPending || isGooglePending}
         onClick={async () => {
-          setIsGooglePending(true)
+          setIsGooglePending(true);
           try {
             await signIn.social({
               provider: "google",
               callbackURL: redirectTo,
-            })
+            });
           } catch {
-            setError("Nie udalo sie zalogowac przez Google. Sprobuj ponownie.")
+            setError("Nie udalo sie zalogowac przez Google. Sprobuj ponownie.");
           } finally {
-            setIsGooglePending(false)
+            setIsGooglePending(false);
           }
         }}
       >
@@ -188,17 +192,17 @@ export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registe
         </svg>
         {isGooglePending ? "Logowanie..." : "Zaloguj sie przez Google"}
       </Button>
-      <div className="text-center text-sm text-muted-foreground">
+      <div className="text-muted-foreground text-center text-sm">
         <Link href="/forgot-password" className="hover:underline">
           Nie pamietam hasla
         </Link>
       </div>
-      <div className="text-center text-sm text-muted-foreground">
+      <div className="text-muted-foreground text-center text-sm">
         Nie masz konta?{" "}
         <Link href={registerHref} className="text-primary hover:underline">
           Zarejestruj sie
         </Link>
       </div>
     </form>
-  )
+  );
 }

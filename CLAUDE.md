@@ -63,6 +63,10 @@ pnpm lint                 # ESLint
 pnpm typecheck            # TypeScript strict check
 pnpm check                # lint + typecheck
 
+# Formatting
+pnpm format               # Prettier (auto-format all files)
+pnpm format:check         # Prettier (check without writing)
+
 # Testing
 pnpm test                 # testy jednostkowe (Vitest)
 pnpm test:watch           # Vitest w trybie watch
@@ -90,6 +94,7 @@ pnpm db:seed:test         # seed danych testowych
 7. Every time the user corrects you, reflect on the mistake and plan to avoid it
 8. When explaining code, reference specific file paths and line numbers
 9. Search the codebase to find relevant information before answering
+10. Never start the dev server yourself — assume it's already running on localhost:3000
 
 ## Testing Rules
 
