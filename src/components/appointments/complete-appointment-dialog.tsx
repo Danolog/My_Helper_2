@@ -101,7 +101,7 @@ export function CompleteAppointmentDialog({
   const handleGenerateAISummary = async () => {
     setGeneratingSummary(true);
     try {
-      const res = await fetch("/api/ai/appointments/auto-summary", {
+      const res = await mutationFetch("/api/ai/appointments/auto-summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ appointmentId: appointment.id }),
@@ -125,18 +125,13 @@ export function CompleteAppointmentDialog({
   // Calculate material cost
   const totalMaterialCost = materials.reduce((sum, m) => {
     if (m.product?.pricePerUnit) {
-      return (
-        sum +
-        parseFloat(m.quantityUsed) * parseFloat(m.product.pricePerUnit)
-      );
+      return sum + parseFloat(m.quantityUsed) * parseFloat(m.product.pricePerUnit);
     }
     return sum;
   }, 0);
 
   // Calculate commission
-  const servicePrice = appointment.service
-    ? parseFloat(appointment.service.basePrice)
-    : 0;
+  const servicePrice = appointment.service ? parseFloat(appointment.service.basePrice) : 0;
   const commPct = parseFloat(commissionPercentage) || 0;
   const commissionAmount = (servicePrice * commPct) / 100;
 
@@ -165,19 +160,16 @@ export function CompleteAppointmentDialog({
   const handleComplete = async () => {
     setCompleting(true);
     try {
-      const res = await mutationFetch(
-        `/api/appointments/${appointment.id}/complete`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            recipe: recipe || null,
-            techniques: techniques || null,
-            notes: notes || null,
-            commissionPercentage: commPct,
-          }),
-        }
-      );
+      const res = await mutationFetch(`/api/appointments/${appointment.id}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipe: recipe || null,
+          techniques: techniques || null,
+          notes: notes || null,
+          commissionPercentage: commPct,
+        }),
+      });
 
       const data = await res.json();
       if (data.success) {
@@ -239,24 +231,19 @@ export function CompleteAppointmentDialog({
   if (completedSuccessfully) {
     return (
       <Dialog open={open} onOpenChange={handleClose}>
-        <DialogContent
-          className="max-w-md"
-          data-testid="complete-appointment-dialog"
-        >
+        <DialogContent className="max-w-md" data-testid="complete-appointment-dialog">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle className="h-5 w-5 text-green-600" />
               Wizyta zakonczona
             </DialogTitle>
-            <DialogDescription>
-              Wizyta zostala pomyslnie zakonczona
-            </DialogDescription>
+            <DialogDescription>Wizyta zostala pomyslnie zakonczona</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             {/* Summary of completed appointment */}
-            <div className="rounded-lg border p-4 bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800">
-              <div className="flex items-center gap-2 text-sm mb-2">
+            <div className="rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-950/20">
+              <div className="mb-2 flex items-center gap-2 text-sm">
                 <Scissors className="h-4 w-4 text-green-700 dark:text-green-400" />
                 <span className="font-medium text-green-800 dark:text-green-300">
                   {appointment.service?.name || "Wizyta"}
@@ -277,12 +264,12 @@ export function CompleteAppointmentDialog({
             {/* AI Summary generation */}
             <div className="space-y-2" data-testid="ai-summary-prompt">
               {aiSummaryText ? (
-                <div className="rounded-lg border p-3 bg-primary/5 border-primary/20">
-                  <div className="flex items-center gap-2 text-sm mb-2">
-                    <Sparkles className="h-4 w-4 text-primary" />
+                <div className="bg-primary/5 border-primary/20 rounded-lg border p-3">
+                  <div className="mb-2 flex items-center gap-2 text-sm">
+                    <Sparkles className="text-primary h-4 w-4" />
                     <span className="font-medium">Podsumowanie AI</span>
                   </div>
-                  <p className="text-sm text-muted-foreground">{aiSummaryText}</p>
+                  <p className="text-muted-foreground text-sm">{aiSummaryText}</p>
                 </div>
               ) : (
                 <Button
@@ -295,12 +282,12 @@ export function CompleteAppointmentDialog({
                 >
                   {generatingSummary ? (
                     <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Generowanie podsumowania...
                     </>
                   ) : (
                     <>
-                      <Sparkles className="h-4 w-4 mr-2" />
+                      <Sparkles className="mr-2 h-4 w-4" />
                       Generuj podsumowanie AI
                     </>
                   )}
@@ -313,23 +300,22 @@ export function CompleteAppointmentDialog({
             {/* Schedule next appointment prompt */}
             <div className="space-y-3" data-testid="schedule-next-prompt">
               <div className="flex items-center gap-2">
-                <CalendarClock className="h-5 w-5 text-primary" />
+                <CalendarClock className="text-primary h-5 w-5" />
                 <h3 className="font-semibold">Umow nastepna wizyte?</h3>
               </div>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-muted-foreground text-sm">
                 Sugerowany termin nastepnej wizyty: za{" "}
-                <span className="font-medium text-foreground">
-                  {getSuggestedDaysLabel()}
-                </span>{" "}
-                ({new Date(getSuggestedDate()).toLocaleDateString("pl-PL", {
+                <span className="text-foreground font-medium">{getSuggestedDaysLabel()}</span> (
+                {new Date(getSuggestedDate()).toLocaleDateString("pl-PL", {
                   day: "numeric",
                   month: "long",
                   year: "numeric",
-                })})
+                })}
+                )
               </p>
 
               {appointment.client && appointment.service && (
-                <div className="rounded-lg border p-3 bg-muted/30 text-sm space-y-1">
+                <div className="bg-muted/30 space-y-1 rounded-lg border p-3 text-sm">
                   <p>
                     <span className="text-muted-foreground">Klient:</span>{" "}
                     <span className="font-medium">
@@ -354,11 +340,7 @@ export function CompleteAppointmentDialog({
           </div>
 
           <DialogFooter className="mt-4 flex gap-2">
-            <Button
-              variant="outline"
-              onClick={handleClose}
-              data-testid="skip-schedule-next-btn"
-            >
+            <Button variant="outline" onClick={handleClose} data-testid="skip-schedule-next-btn">
               Nie teraz
             </Button>
             <Button
@@ -366,7 +348,7 @@ export function CompleteAppointmentDialog({
               disabled={!onScheduleNext}
               data-testid="schedule-next-btn"
             >
-              <CalendarPlus className="h-4 w-4 mr-2" />
+              <CalendarPlus className="mr-2 h-4 w-4" />
               Umow nastepna wizyte
             </Button>
           </DialogFooter>
@@ -378,7 +360,7 @@ export function CompleteAppointmentDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-lg max-h-[90vh] overflow-y-auto"
+        className="max-h-[90vh] max-w-lg overflow-y-auto"
         data-testid="complete-appointment-dialog"
       >
         <DialogHeader>
@@ -393,26 +375,20 @@ export function CompleteAppointmentDialog({
 
         <div className="space-y-5">
           {/* Appointment summary */}
-          <div className="rounded-lg border p-3 bg-muted/30">
-            <div className="flex items-center gap-2 text-sm mb-1">
-              <Scissors className="h-4 w-4 text-primary" />
-              <span className="font-medium">
-                {appointment.service?.name || "Wizyta"}
-              </span>
-              <Badge variant="secondary">
-                {servicePrice.toFixed(2)} PLN
-              </Badge>
+          <div className="bg-muted/30 rounded-lg border p-3">
+            <div className="mb-1 flex items-center gap-2 text-sm">
+              <Scissors className="text-primary h-4 w-4" />
+              <span className="font-medium">{appointment.service?.name || "Wizyta"}</span>
+              <Badge variant="secondary">{servicePrice.toFixed(2)} PLN</Badge>
             </div>
             {appointment.client && (
-              <p className="text-sm text-muted-foreground">
-                Klient: {appointment.client.firstName}{" "}
-                {appointment.client.lastName}
+              <p className="text-muted-foreground text-sm">
+                Klient: {appointment.client.firstName} {appointment.client.lastName}
               </p>
             )}
             {appointment.employee && (
-              <p className="text-sm text-muted-foreground">
-                Pracownik: {appointment.employee.firstName}{" "}
-                {appointment.employee.lastName}
+              <p className="text-muted-foreground text-sm">
+                Pracownik: {appointment.employee.firstName} {appointment.employee.lastName}
               </p>
             )}
           </div>
@@ -422,8 +398,8 @@ export function CompleteAppointmentDialog({
           {/* Treatment notes section */}
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <ClipboardList className="h-4 w-4 text-primary" />
-              <h3 className="font-semibold text-sm">Notatki z zabiegu</h3>
+              <ClipboardList className="text-primary h-4 w-4" />
+              <h3 className="text-sm font-semibold">Notatki z zabiegu</h3>
             </div>
 
             <div>
@@ -471,39 +447,30 @@ export function CompleteAppointmentDialog({
           {/* Materials summary */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <Package className="h-4 w-4 text-primary" />
-              <h3 className="font-semibold text-sm">
-                Uzyte materialy ({materials.length})
-              </h3>
+              <Package className="text-primary h-4 w-4" />
+              <h3 className="text-sm font-semibold">Uzyte materialy ({materials.length})</h3>
             </div>
             {materials.length === 0 ? (
-              <p className="text-sm text-muted-foreground italic">
-                Brak dodanych materialow
-              </p>
+              <p className="text-muted-foreground text-sm italic">Brak dodanych materialow</p>
             ) : (
               <div className="space-y-1">
                 {materials.map((m) => (
-                  <div
-                    key={m.id}
-                    className="flex justify-between text-sm"
-                  >
+                  <div key={m.id} className="flex justify-between text-sm">
                     <span>
-                      {m.product?.name || "Nieznany"} ({m.quantityUsed}{" "}
-                      {m.product?.unit || "szt."})
+                      {m.product?.name || "Nieznany"} ({m.quantityUsed} {m.product?.unit || "szt."})
                     </span>
                     {m.product?.pricePerUnit && (
                       <span className="text-muted-foreground">
-                        {(
-                          parseFloat(m.quantityUsed) *
-                          parseFloat(m.product.pricePerUnit)
-                        ).toFixed(2)}{" "}
+                        {(parseFloat(m.quantityUsed) * parseFloat(m.product.pricePerUnit)).toFixed(
+                          2
+                        )}{" "}
                         PLN
                       </span>
                     )}
                   </div>
                 ))}
                 {totalMaterialCost > 0 && (
-                  <div className="flex justify-between text-sm font-medium pt-1 border-t">
+                  <div className="flex justify-between border-t pt-1 text-sm font-medium">
                     <span>Laczny koszt materialow:</span>
                     <span>{totalMaterialCost.toFixed(2)} PLN</span>
                   </div>
@@ -517,8 +484,8 @@ export function CompleteAppointmentDialog({
           {/* Commission section */}
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <DollarSign className="h-4 w-4 text-primary" />
-              <h3 className="font-semibold text-sm">Prowizja pracownika</h3>
+              <DollarSign className="text-primary h-4 w-4" />
+              <h3 className="text-sm font-semibold">Prowizja pracownika</h3>
             </div>
             <div className="flex items-center gap-3">
               <div className="flex-1">
@@ -537,16 +504,16 @@ export function CompleteAppointmentDialog({
               <div className="flex-1">
                 <Label>Kwota prowizji</Label>
                 <div
-                  className="h-9 flex items-center px-3 rounded-md border bg-muted text-sm font-medium"
+                  className="bg-muted flex h-9 items-center rounded-md border px-3 text-sm font-medium"
                   data-testid="commission-amount-display"
                 >
                   {commissionAmount.toFixed(2)} PLN
                 </div>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Cena uslugi: {servicePrice.toFixed(2)} PLN x{" "}
-              {commPct.toFixed(0)}% = {commissionAmount.toFixed(2)} PLN
+            <p className="text-muted-foreground text-xs">
+              Cena uslugi: {servicePrice.toFixed(2)} PLN x {commPct.toFixed(0)}% ={" "}
+              {commissionAmount.toFixed(2)} PLN
             </p>
           </div>
         </div>
@@ -555,16 +522,12 @@ export function CompleteAppointmentDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Anuluj
           </Button>
-          <Button
-            onClick={handleComplete}
-            disabled={completing}
-            data-testid="confirm-complete-btn"
-          >
+          <Button onClick={handleComplete} disabled={completing} data-testid="confirm-complete-btn">
             {completing ? (
               "Konczenie..."
             ) : (
               <>
-                <CheckCircle className="h-4 w-4 mr-2" />
+                <CheckCircle className="mr-2 h-4 w-4" />
                 Potwierdz zakonczenie
               </>
             )}

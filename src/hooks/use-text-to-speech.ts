@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { mutationFetch } from "@/lib/api-client";
 
 // ---------------------------------------------------------------------------
 // useTextToSpeech — sends text to the ElevenLabs TTS API route
@@ -27,9 +28,7 @@ interface UseTextToSpeechReturn {
   isLoading: boolean;
 }
 
-export function useTextToSpeech(
-  options: UseTextToSpeechOptions = {}
-): UseTextToSpeechReturn {
+export function useTextToSpeech(options: UseTextToSpeechOptions = {}): UseTextToSpeechReturn {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -70,7 +69,7 @@ export function useTextToSpeech(
       abortRef.current = controller;
 
       try {
-        const res = await fetch("/api/ai/voice/tts", {
+        const res = await mutationFetch("/api/ai/voice/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text }),
@@ -78,9 +77,9 @@ export function useTextToSpeech(
         });
 
         if (!res.ok) {
-          const data = await res
-            .json()
-            .catch(() => ({ error: "Blad TTS" })) as { error?: string };
+          const data = (await res.json().catch(() => ({ error: "Blad TTS" }))) as {
+            error?: string;
+          };
           throw new Error(data.error ?? "Blad generowania mowy");
         }
 
@@ -115,10 +114,7 @@ export function useTextToSpeech(
 
         setIsLoading(false);
         setIsSpeaking(false);
-        const msg =
-          error instanceof Error
-            ? error.message
-            : "Blad generowania mowy";
+        const msg = error instanceof Error ? error.message : "Blad generowania mowy";
         onErrorRef.current?.(msg);
       }
     },

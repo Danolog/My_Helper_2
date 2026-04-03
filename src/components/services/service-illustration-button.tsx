@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { ImageIcon, Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -78,7 +79,7 @@ export function ServiceIllustrationButton({
     setPreviewUrl(null);
 
     try {
-      const res = await fetch("/api/ai/image/service-illustration", {
+      const res = await mutationFetch("/api/ai/image/service-illustration", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ serviceName, categoryName, style }),
@@ -109,21 +110,18 @@ export function ServiceIllustrationButton({
     }
   }, [previewUrl, onGenerated]);
 
-  const handleOpenChange = useCallback(
-    (nextOpen: boolean) => {
-      setOpen(nextOpen);
-      // Reset preview when closing the dialog
-      if (!nextOpen) {
-        setPreviewUrl(null);
-      }
-    },
-    [],
-  );
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    setOpen(nextOpen);
+    // Reset preview when closing the dialog
+    if (!nextOpen) {
+      setPreviewUrl(null);
+    }
+  }, []);
 
   return (
     <>
       <Button variant={variant} size={size} onClick={() => setOpen(true)}>
-        <Sparkles className="h-4 w-4 mr-1" />
+        <Sparkles className="mr-1 h-4 w-4" />
         Generuj ilustracje
       </Button>
 
@@ -159,17 +157,17 @@ export function ServiceIllustrationButton({
 
             {/* Preview area */}
             {previewUrl ? (
-              <div className="rounded-lg border overflow-hidden bg-muted">
+              <div className="bg-muted overflow-hidden rounded-lg border">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={previewUrl}
                   alt={`Ilustracja uslugi: ${serviceName}`}
-                  className="w-full h-auto"
+                  className="h-auto w-full"
                 />
               </div>
             ) : (
-              <div className="rounded-lg border bg-muted flex items-center justify-center py-16">
-                <ImageIcon className="h-12 w-12 text-muted-foreground/30" />
+              <div className="bg-muted flex items-center justify-center rounded-lg border py-16">
+                <ImageIcon className="text-muted-foreground/30 h-12 w-12" />
               </div>
             )}
           </div>
@@ -180,14 +178,8 @@ export function ServiceIllustrationButton({
             </Button>
             {previewUrl ? (
               <>
-                <Button
-                  variant="outline"
-                  onClick={handleGenerate}
-                  disabled={generating}
-                >
-                  {generating && (
-                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                  )}
+                <Button variant="outline" onClick={handleGenerate} disabled={generating}>
+                  {generating && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
                   Regeneruj
                 </Button>
                 <Button onClick={handleAccept}>Zastosuj</Button>
@@ -196,12 +188,12 @@ export function ServiceIllustrationButton({
               <Button onClick={handleGenerate} disabled={generating}>
                 {generating ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Generowanie...
                   </>
                 ) : (
                   <>
-                    <Sparkles className="h-4 w-4 mr-2" />
+                    <Sparkles className="mr-2 h-4 w-4" />
                     Generuj
                   </>
                 )}

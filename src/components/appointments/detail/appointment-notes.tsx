@@ -24,10 +24,7 @@ interface AppointmentNotesProps {
   onNotesSaved: () => void;
 }
 
-export function AppointmentNotes({
-  appointment,
-  onNotesSaved,
-}: AppointmentNotesProps) {
+export function AppointmentNotes({ appointment, onNotesSaved }: AppointmentNotesProps) {
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesValue, setNotesValue] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
@@ -37,7 +34,7 @@ export function AppointmentNotes({
   const handleGenerateSummary = async () => {
     setGeneratingSummary(true);
     try {
-      const res = await fetch("/api/ai/appointments/auto-summary", {
+      const res = await mutationFetch("/api/ai/appointments/auto-summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ appointmentId: appointment.id }),
@@ -95,7 +92,7 @@ export function AppointmentNotes({
       <CardHeader>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <FileText className="h-5 w-5 text-primary" />
+            <FileText className="text-primary h-5 w-5" />
             <CardTitle className="text-lg">Notatki wewnetrzne</CardTitle>
           </div>
           {!editingNotes && appointment.status !== "cancelled" && (
@@ -105,7 +102,7 @@ export function AppointmentNotes({
               onClick={handleStartEditingNotes}
               data-testid="edit-notes-btn"
             >
-              <Pencil className="h-4 w-4 mr-1" />
+              <Pencil className="mr-1 h-4 w-4" />
               {appointment.notes ? "Edytuj" : "Dodaj notatke"}
             </Button>
           )}
@@ -122,7 +119,7 @@ export function AppointmentNotes({
               data-testid="notes-textarea"
               autoFocus
             />
-            <div className="flex items-center gap-2 justify-end">
+            <div className="flex items-center justify-end gap-2">
               <Button
                 variant="outline"
                 size="sm"
@@ -130,7 +127,7 @@ export function AppointmentNotes({
                 disabled={savingNotes}
                 data-testid="cancel-notes-btn"
               >
-                <X className="h-4 w-4 mr-1" />
+                <X className="mr-1 h-4 w-4" />
                 Anuluj
               </Button>
               <Button
@@ -139,7 +136,7 @@ export function AppointmentNotes({
                 disabled={savingNotes}
                 data-testid="save-notes-btn"
               >
-                <Save className="h-4 w-4 mr-1" />
+                <Save className="mr-1 h-4 w-4" />
                 {savingNotes ? "Zapisywanie..." : "Zapisz notatki"}
               </Button>
             </div>
@@ -149,10 +146,10 @@ export function AppointmentNotes({
             {appointment.notes}
           </p>
         ) : (
-          <div className="text-center py-6" data-testid="no-notes">
-            <FileText className="h-10 w-10 mx-auto mb-3 text-muted-foreground/50" />
+          <div className="py-6 text-center" data-testid="no-notes">
+            <FileText className="text-muted-foreground/50 mx-auto mb-3 h-10 w-10" />
             <p className="text-muted-foreground">Brak notatek wewnetrznych</p>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-muted-foreground mt-1 text-sm">
               Dodaj notatki widoczne dla calego personelu
             </p>
           </div>
@@ -160,14 +157,16 @@ export function AppointmentNotes({
 
         {/* AI Summary section */}
         {appointment.status === "completed" && (
-          <div className="mt-4 pt-4 border-t" data-testid="ai-summary-section">
+          <div className="mt-4 border-t pt-4" data-testid="ai-summary-section">
             {aiSummary ? (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-primary" />
-                    <span className="font-semibold text-sm">Podsumowanie AI</span>
-                    <Badge variant="secondary" className="text-xs">Pro</Badge>
+                    <Sparkles className="text-primary h-4 w-4" />
+                    <span className="text-sm font-semibold">Podsumowanie AI</span>
+                    <Badge variant="secondary" className="text-xs">
+                      Pro
+                    </Badge>
                   </div>
                   <div className="flex items-center gap-1">
                     <ReadAloudButton text={aiSummary.fullSummary} />
@@ -177,20 +176,20 @@ export function AppointmentNotes({
                       onClick={handleGenerateSummary}
                       disabled={generatingSummary}
                     >
-                      <Sparkles className="h-3 w-3 mr-1" />
+                      <Sparkles className="mr-1 h-3 w-3" />
                       Generuj ponownie
                     </Button>
                   </div>
                 </div>
 
-                <p className="text-sm text-muted-foreground">
-                  {aiSummary.fullSummary}
-                </p>
+                <p className="text-muted-foreground text-sm">{aiSummary.fullSummary}</p>
 
                 {aiSummary.keyPoints.length > 0 && (
                   <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-1">Kluczowe punkty:</p>
-                    <ul className="text-sm space-y-1">
+                    <p className="text-muted-foreground mb-1 text-xs font-medium">
+                      Kluczowe punkty:
+                    </p>
+                    <ul className="space-y-1 text-sm">
                       {aiSummary.keyPoints.map((point, i) => (
                         <li key={i} className="flex items-start gap-1.5">
                           <span className="text-primary mt-0.5 shrink-0">•</span>
@@ -203,8 +202,10 @@ export function AppointmentNotes({
 
                 {aiSummary.productRecommendations.length > 0 && (
                   <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-1">Rekomendacje produktow:</p>
-                    <ul className="text-sm space-y-1">
+                    <p className="text-muted-foreground mb-1 text-xs font-medium">
+                      Rekomendacje produktow:
+                    </p>
+                    <ul className="space-y-1 text-sm">
                       {aiSummary.productRecommendations.map((rec, i) => (
                         <li key={i} className="flex items-start gap-1.5">
                           <span className="text-primary mt-0.5 shrink-0">•</span>
@@ -215,7 +216,7 @@ export function AppointmentNotes({
                   </div>
                 )}
 
-                <p className="text-xs text-muted-foreground">
+                <p className="text-muted-foreground text-xs">
                   <span className="font-medium">Nastepna wizyta:</span> {aiSummary.followUpTiming}
                 </p>
               </div>
@@ -230,12 +231,12 @@ export function AppointmentNotes({
               >
                 {generatingSummary ? (
                   <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Generowanie podsumowania...
                   </>
                 ) : (
                   <>
-                    <Sparkles className="h-4 w-4 mr-2" />
+                    <Sparkles className="mr-2 h-4 w-4" />
                     Generuj podsumowanie AI
                   </>
                 )}

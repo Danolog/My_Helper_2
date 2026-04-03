@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { mutationFetch } from "@/lib/api-client";
 
 // ────────────────────────────────────────────────────────────
 // useAISearch — debounced hook that sends natural language queries
@@ -62,7 +63,7 @@ export function useAISearch(query: string): UseAISearchReturn {
 
       setIsSearching(true);
       try {
-        const res = await fetch("/api/ai/search", {
+        const res = await mutationFetch("/api/ai/search", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: trimmed }),

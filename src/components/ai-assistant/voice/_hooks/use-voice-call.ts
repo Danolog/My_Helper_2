@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
+import { mutationFetch } from "@/lib/api-client";
 import type {
   VoiceAiConfig,
   CallSimulationResult,
@@ -92,7 +93,7 @@ export function useVoiceCall({
     setMessageResult(null);
     setMsgText("");
     try {
-      const res = await fetch("/api/ai/voice/incoming", {
+      const res = await mutationFetch("/api/ai/voice/incoming", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -152,7 +153,7 @@ export function useVoiceCall({
     setBookingInProgress(true);
     setBookingResult(null);
     try {
-      const res = await fetch("/api/ai/voice/book", {
+      const res = await mutationFetch("/api/ai/voice/book", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -204,7 +205,7 @@ export function useVoiceCall({
     setSendingMessage(true);
     setMessageResult(null);
     try {
-      const res = await fetch("/api/ai/voice/message", {
+      const res = await mutationFetch("/api/ai/voice/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -257,7 +258,7 @@ export function useVoiceCall({
     setRescheduleInProgress(true);
     setRescheduleResult(null);
     try {
-      const res = await fetch("/api/ai/voice/reschedule", {
+      const res = await mutationFetch("/api/ai/voice/reschedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -302,7 +303,7 @@ export function useVoiceCall({
     setCancelInProgress(true);
     setCancelResult(null);
     try {
-      const res = await fetch("/api/ai/voice/cancel", {
+      const res = await mutationFetch("/api/ai/voice/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

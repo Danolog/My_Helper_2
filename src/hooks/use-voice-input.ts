@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { mutationFetch } from "@/lib/api-client";
 
 // ---------------------------------------------------------------------------
 // useVoiceInput — captures audio via MediaRecorder, sends it to the
@@ -32,9 +33,7 @@ interface UseVoiceInputReturn {
   isSupported: boolean;
 }
 
-export function useVoiceInput(
-  options: UseVoiceInputOptions = {}
-): UseVoiceInputReturn {
+export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInputReturn {
   const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -53,9 +52,7 @@ export function useVoiceInput(
     onErrorRef.current = options.onError;
   }, [options.onTranscript, options.onError]);
 
-  const isSupported =
-    typeof navigator !== "undefined" &&
-    !!navigator.mediaDevices?.getUserMedia;
+  const isSupported = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
 
   // Centralized cleanup: stop all media tracks and reset refs
   const cleanupStream = useCallback(() => {
@@ -68,9 +65,7 @@ export function useVoiceInput(
 
   const startListening = useCallback(async () => {
     if (!isSupported) {
-      onErrorRef.current?.(
-        "Nagrywanie glosu nie jest wspierane w tej przegladarce"
-      );
+      onErrorRef.current?.("Nagrywanie glosu nie jest wspierane w tej przegladarce");
       return;
     }
 
@@ -108,7 +103,7 @@ export function useVoiceInput(
           const formData = new FormData();
           formData.append("audio", audioBlob, "recording.webm");
 
-          const res = await fetch("/api/ai/voice/stt", {
+          const res = await mutationFetch("/api/ai/voice/stt", {
             method: "POST",
             body: formData,
           });
@@ -124,10 +119,7 @@ export function useVoiceInput(
             onTranscriptRef.current?.(data.text);
           }
         } catch (error) {
-          const msg =
-            error instanceof Error
-              ? error.message
-              : "Blad rozpoznawania mowy";
+          const msg = error instanceof Error ? error.message : "Blad rozpoznawania mowy";
           onErrorRef.current?.(msg);
         } finally {
           setIsProcessing(false);
@@ -141,10 +133,7 @@ export function useVoiceInput(
     } catch (error) {
       cleanupStream();
 
-      if (
-        error instanceof DOMException &&
-        error.name === "NotAllowedError"
-      ) {
+      if (error instanceof DOMException && error.name === "NotAllowedError") {
         onErrorRef.current?.(
           "Brak dostepu do mikrofonu. Zezwol na dostep w ustawieniach przegladarki."
         );
@@ -155,10 +144,7 @@ export function useVoiceInput(
   }, [isSupported, cleanupStream]);
 
   const stopListening = useCallback(() => {
-    if (
-      mediaRecorderRef.current &&
-      mediaRecorderRef.current.state === "recording"
-    ) {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
       mediaRecorderRef.current.stop();
     }
     setIsListening(false);
@@ -167,10 +153,7 @@ export function useVoiceInput(
   // Cleanup on unmount: stop recording and release the microphone
   useEffect(() => {
     return () => {
-      if (
-        mediaRecorderRef.current &&
-        mediaRecorderRef.current.state === "recording"
-      ) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
         mediaRecorderRef.current.stop();
       }
       if (streamRef.current) {
