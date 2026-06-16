@@ -37,11 +37,11 @@ export async function GET(
   const { id: clientId } = await params;
 
   try {
-    // Verify client exists
+    // Verify client exists in the caller's salon
     const [client] = await db
       .select({ id: clients.id, firstName: clients.firstName, lastName: clients.lastName })
       .from(clients)
-      .where(eq(clients.id, clientId))
+      .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
       .limit(1);
 
     if (!client) {
@@ -120,11 +120,11 @@ export async function PUT(
     }
     const { consents } = body as { consents: Record<string, boolean> };
 
-    // Verify client exists
+    // Verify client exists in the caller's salon
     const [client] = await db
       .select({ id: clients.id, firstName: clients.firstName, lastName: clients.lastName })
       .from(clients)
-      .where(eq(clients.id, clientId))
+      .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
       .limit(1);
 
     if (!client) {
