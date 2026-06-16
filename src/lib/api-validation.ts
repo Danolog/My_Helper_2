@@ -720,6 +720,7 @@ export const depositCreateSessionSchema = z.object({
 });
 
 export const depositConfirmSchema = z.object({
+  depositPaymentId: z.string().uuid("Nieprawidlowy identyfikator platnosci zadatku"),
   sessionId: requiredString("ID sesji"),
 });
 
