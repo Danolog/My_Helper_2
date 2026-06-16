@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointmentMaterials, products, appointments } from "@/lib/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { validateBody, addAppointmentMaterialSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/materials - List materials for an appointment
@@ -15,13 +16,21 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
-    // Verify appointment exists
+    // Verify appointment exists in the caller's salon
     const [appointment] = await db
       .select()
       .from(appointments)
-      .where(eq(appointments.id, id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
       .limit(1);
 
     if (!appointment) {
@@ -69,6 +78,14 @@ export async function POST(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
 
@@ -80,11 +97,11 @@ export async function POST(
 
     const { productId, quantityUsed, notes } = body;
 
-    // Verify appointment exists
+    // Verify appointment exists in the caller's salon
     const [appointment] = await db
       .select()
       .from(appointments)
-      .where(eq(appointments.id, id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
       .limit(1);
 
     if (!appointment) {
@@ -94,11 +111,11 @@ export async function POST(
       );
     }
 
-    // Verify product exists and check stock
+    // Verify product exists in the caller's salon and check stock
     const [product] = await db
       .select()
       .from(products)
-      .where(eq(products.id, productId))
+      .where(and(eq(products.id, productId), eq(products.salonId, salonId)))
       .limit(1);
 
     if (!product) {
@@ -178,7 +195,15 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const { id: _appointmentId } = await params;
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
+    const { id: appointmentId } = await params;
     const { searchParams } = new URL(request.url);
     const materialId = searchParams.get("materialId");
 
@@ -189,11 +214,30 @@ export async function DELETE(
       );
     }
 
-    // Find the material record
+    // Verify the appointment belongs to the caller's salon
+    const [appointment] = await db
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(and(eq(appointments.id, appointmentId), eq(appointments.salonId, salonId)))
+      .limit(1);
+
+    if (!appointment) {
+      return NextResponse.json(
+        { success: false, error: "Appointment not found" },
+        { status: 404 }
+      );
+    }
+
+    // Find the material record (must belong to this appointment)
     const [material] = await db
       .select()
       .from(appointmentMaterials)
-      .where(eq(appointmentMaterials.id, materialId))
+      .where(
+        and(
+          eq(appointmentMaterials.id, materialId),
+          eq(appointmentMaterials.appointmentId, appointmentId)
+        )
+      )
       .limit(1);
 
     if (!material) {
@@ -205,13 +249,13 @@ export async function DELETE(
 
     const usedQty = parseFloat(material.quantityUsed);
 
-    // Restore inventory
+    // Restore inventory (scoped to caller's salon)
     await db
       .update(products)
       .set({
         quantity: sql`${products.quantity}::numeric + ${usedQty}`,
       })
-      .where(eq(products.id, material.productId));
+      .where(and(eq(products.id, material.productId), eq(products.salonId, salonId)));
 
     // Delete the material record
     const [deletedMaterial] = await db

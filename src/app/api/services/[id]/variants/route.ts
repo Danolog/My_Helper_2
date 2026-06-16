@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { serviceVariants, services } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, createServiceVariantSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
@@ -15,13 +16,21 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
-    // Verify service exists
+    // Verify service exists in the caller's salon
     const [service] = await db
       .select()
       .from(services)
-      .where(eq(services.id, id));
+      .where(and(eq(services.id, id), eq(services.salonId, salonId)));
 
     if (!service) {
       return NextResponse.json(
@@ -58,6 +67,14 @@ export async function POST(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
     const validationError = validateBody(createServiceVariantSchema, body);
@@ -66,11 +83,11 @@ export async function POST(
     }
     const { name, priceModifier, durationModifier } = body;
 
-    // Verify service exists
+    // Verify service exists in the caller's salon
     const [service] = await db
       .select()
       .from(services)
-      .where(eq(services.id, id));
+      .where(and(eq(services.id, id), eq(services.salonId, salonId)));
 
     if (!service) {
       return NextResponse.json(

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { albums, photoAlbums, galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, albumPhotosSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
@@ -14,13 +15,22 @@ export async function GET(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
-    // Verify album exists
+    // Verify album exists in the caller's salon
     const [album] = await db
       .select()
       .from(albums)
-      .where(eq(albums.id, id));
+      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)));
 
     if (!album) {
       return NextResponse.json(
@@ -85,6 +95,15 @@ export async function POST(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
     const validationError = validateBody(albumPhotosSchema, body);
@@ -93,11 +112,11 @@ export async function POST(
     }
     const { photoIds } = body;
 
-    // Verify album exists
+    // Verify album exists in the caller's salon
     const [album] = await db
       .select()
       .from(albums)
-      .where(eq(albums.id, id));
+      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)));
 
     if (!album) {
       return NextResponse.json(
@@ -106,6 +125,14 @@ export async function POST(
       );
     }
 
+    // Only allow photos that belong to the caller's salon
+    const ownedPhotos = await db
+      .select({ id: galleryPhotos.id })
+      .from(galleryPhotos)
+      .where(and(eq(galleryPhotos.salonId, salonId)));
+    const ownedPhotoIds = new Set(ownedPhotos.map((p) => p.id));
+    const requestedOwned = (photoIds as string[]).filter((pid) => ownedPhotoIds.has(pid));
+
     // Check which photos are already in the album to avoid duplicates
     const existing = await db
       .select({ photoId: photoAlbums.photoId })
@@ -113,7 +140,7 @@ export async function POST(
       .where(eq(photoAlbums.albumId, id));
 
     const existingIds = new Set(existing.map((e) => e.photoId));
-    const newPhotoIds = photoIds.filter((pid: string) => !existingIds.has(pid));
+    const newPhotoIds = requestedOwned.filter((pid: string) => !existingIds.has(pid));
 
     if (newPhotoIds.length === 0) {
       return NextResponse.json({
@@ -158,6 +185,15 @@ export async function DELETE(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const { searchParams } = new URL(request.url);
     const photoId = searchParams.get("photoId");
@@ -166,6 +202,19 @@ export async function DELETE(
       return NextResponse.json(
         { success: false, error: "photoId query parameter is required" },
         { status: 400 }
+      );
+    }
+
+    // Verify the album belongs to the caller's salon
+    const [album] = await db
+      .select({ id: albums.id })
+      .from(albums)
+      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)))
+      .limit(1);
+    if (!album) {
+      return NextResponse.json(
+        { success: false, error: "Album not found" },
+        { status: 404 }
       );
     }
 

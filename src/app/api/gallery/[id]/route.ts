@@ -7,6 +7,7 @@ import path from "path";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, updateGalleryPhotoSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
@@ -17,6 +18,15 @@ export async function GET(_request: Request, { params }: RouteParams) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     const [photo] = await db
@@ -39,7 +49,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
       .from(galleryPhotos)
       .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
       .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-      .where(eq(galleryPhotos.id, id));
+      .where(and(eq(galleryPhotos.id, id), eq(galleryPhotos.salonId, salonId)));
 
     if (!photo) {
       return NextResponse.json(

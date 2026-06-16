@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { treatmentHistory, appointments } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, treatmentSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
@@ -15,13 +16,21 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
-    // Verify appointment exists
+    // Verify appointment exists in the caller's salon
     const [appointment] = await db
       .select()
       .from(appointments)
-      .where(eq(appointments.id, id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
       .limit(1);
 
     if (!appointment) {
@@ -62,6 +71,14 @@ export async function POST(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
     const validationError = validateBody(treatmentSchema, body);
@@ -70,11 +87,11 @@ export async function POST(
     }
     const { recipe, techniques, materialsJson, notes } = body;
 
-    // Verify appointment exists
+    // Verify appointment exists in the caller's salon
     const [appointment] = await db
       .select()
       .from(appointments)
-      .where(eq(appointments.id, id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
       .limit(1);
 
     if (!appointment) {
@@ -156,7 +173,29 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
+
+    // Verify the appointment belongs to the caller's salon before touching its treatment
+    const [appointment] = await db
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+      .limit(1);
+
+    if (!appointment) {
+      return NextResponse.json(
+        { success: false, error: "Appointment not found" },
+        { status: 404 }
+      );
+    }
 
     const [deleted] = await db
       .delete(treatmentHistory)

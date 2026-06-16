@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { depositPayments, appointments } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/refund-status - Get refund status for an appointment
@@ -14,13 +15,21 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
-    // Check if appointment exists
+    // Check if appointment exists in the caller's salon
     const [appointment] = await db
       .select()
       .from(appointments)
-      .where(eq(appointments.id, id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
       .limit(1);
 
     if (!appointment) {

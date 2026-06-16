@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { services, employeeServicePrices, serviceVariants, employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 // GET /api/services/[id]/price?employeeId=xxx&variantId=yyy
@@ -15,16 +16,24 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id: serviceId } = await params;
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
     const variantId = searchParams.get("variantId");
 
-    // Get the base service
+    // Get the base service (scoped to the caller's salon)
     const [service] = await db
       .select()
       .from(services)
-      .where(eq(services.id, serviceId));
+      .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)));
 
     if (!service) {
       return NextResponse.json(

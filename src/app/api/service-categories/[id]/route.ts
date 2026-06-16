@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { serviceCategories, services } from "@/lib/schema";
 import { eq, and, count } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, updateServiceCategorySchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
@@ -15,12 +16,20 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     const [category] = await db
       .select()
       .from(serviceCategories)
-      .where(eq(serviceCategories.id, id));
+      .where(and(eq(serviceCategories.id, id), eq(serviceCategories.salonId, salonId)));
 
     if (!category) {
       return NextResponse.json(
@@ -60,6 +69,14 @@ export async function PUT(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
     const validationError = validateBody(updateServiceCategorySchema, body);
@@ -68,11 +85,11 @@ export async function PUT(
     }
     const { name, sortOrder } = body;
 
-    // Check category exists
+    // Check category exists in the caller's salon
     const [existing] = await db
       .select()
       .from(serviceCategories)
-      .where(eq(serviceCategories.id, id));
+      .where(and(eq(serviceCategories.id, id), eq(serviceCategories.salonId, salonId)));
 
     if (!existing) {
       return NextResponse.json(
@@ -107,7 +124,7 @@ export async function PUT(
     const [updated] = await db
       .update(serviceCategories)
       .set(updateData)
-      .where(eq(serviceCategories.id, id))
+      .where(and(eq(serviceCategories.id, id), eq(serviceCategories.salonId, salonId)))
       .returning();
 
     logger.info(`[ServiceCategories API] Updated category: ${updated?.name}`);
@@ -134,13 +151,21 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
-    // Check category exists
+    // Check category exists in the caller's salon
     const [existing] = await db
       .select()
       .from(serviceCategories)
-      .where(eq(serviceCategories.id, id));
+      .where(and(eq(serviceCategories.id, id), eq(serviceCategories.salonId, salonId)));
 
     if (!existing) {
       return NextResponse.json(
@@ -166,10 +191,10 @@ export async function DELETE(
       );
     }
 
-    // Delete the empty category
+    // Delete the empty category (scoped to caller's salon)
     await db
       .delete(serviceCategories)
-      .where(eq(serviceCategories.id, id));
+      .where(and(eq(serviceCategories.id, id), eq(serviceCategories.salonId, salonId)));
 
     logger.info(`[ServiceCategories API] Deleted category: ${existing.name}`);
 
