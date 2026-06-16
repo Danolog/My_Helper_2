@@ -8,6 +8,7 @@ import { verifyPassword } from "better-auth/crypto";
 import { validateBody, updateClientSchema } from "@/lib/api-validation";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 // GET /api/clients/[id] - Get a single client by ID
@@ -19,6 +20,14 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     if (!isValidUuid(id)) {
@@ -28,11 +37,10 @@ export async function GET(
       );
     }
 
-    logger.info(`[Clients API] Executing: SELECT * FROM clients WHERE id = '${id}'`);
     const [client] = await db
       .select()
       .from(clients)
-      .where(eq(clients.id, id))
+      .where(and(eq(clients.id, id), eq(clients.salonId, salonId)))
       .limit(1);
 
     if (!client) {
@@ -65,6 +73,14 @@ export async function PUT(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     const { id } = await params;
 
@@ -104,7 +120,7 @@ export async function PUT(
     const [updated] = await db
       .update(clients)
       .set(updateData)
-      .where(eq(clients.id, id))
+      .where(and(eq(clients.id, id), eq(clients.salonId, salonId)))
       .returning();
 
     if (!updated) {
@@ -150,6 +166,15 @@ export async function DELETE(
       return NextResponse.json(
         { success: false, error: "Musisz byc zalogowany, aby usunac klienta" },
         { status: 401 }
+      );
+    }
+
+    // 1a. Resolve the caller's salon — tenant isolation
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
       );
     }
 
@@ -203,10 +228,10 @@ export async function DELETE(
       );
     }
 
-    // 5. Password verified - proceed with deletion
+    // 5. Password verified - proceed with deletion (scoped to caller's salon)
     const [deleted] = await db
       .delete(clients)
-      .where(eq(clients.id, id))
+      .where(and(eq(clients.id, id), eq(clients.salonId, salonId)))
       .returning();
 
     if (!deleted) {
