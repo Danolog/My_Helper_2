@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { promotions } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
 import { validateBody, updatePromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/promotions/:id - Get a single promotion
@@ -26,11 +25,7 @@ export async function GET(
 
     const { id } = await params;
 
-    const [promotion] = await db
-      .select()
-      .from(promotions)
-      .where(and(eq(promotions.id, id), eq(promotions.salonId, salonId)))
-      .limit(1);
+    const promotion = await forSalon(salonId).findOne(promotions, id);
 
     if (!promotion) {
       return NextResponse.json(
@@ -81,11 +76,7 @@ export async function PUT(
     const { name, type, value, startDate, endDate, conditionsJson, isActive } = body;
 
     // Check promotion exists in the caller's salon
-    const [existing] = await db
-      .select()
-      .from(promotions)
-      .where(and(eq(promotions.id, id), eq(promotions.salonId, salonId)))
-      .limit(1);
+    const existing = await forSalon(salonId).findOne(promotions, id);
 
     if (!existing) {
       return NextResponse.json(
@@ -144,11 +135,7 @@ export async function PUT(
       );
     }
 
-    const [updated] = await db
-      .update(promotions)
-      .set(updateData)
-      .where(and(eq(promotions.id, id), eq(promotions.salonId, salonId)))
-      .returning();
+    const updated = await forSalon(salonId).updateOwned(promotions, id, updateData);
 
     if (!updated) {
       return NextResponse.json(
@@ -191,10 +178,7 @@ export async function DELETE(
 
     const { id } = await params;
 
-    const [deleted] = await db
-      .delete(promotions)
-      .where(and(eq(promotions.id, id), eq(promotions.salonId, salonId)))
-      .returning();
+    const deleted = await forSalon(salonId).deleteOwned(promotions, id);
 
     if (!deleted) {
       return NextResponse.json(

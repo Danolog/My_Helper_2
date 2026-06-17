@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { productCategories, products } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, updateProductCategorySchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/product-categories/[id] - Get a single category with product count
@@ -26,20 +26,22 @@ export async function GET(
 
     const { id } = await params;
 
-    const result = await db
-      .select({
-        id: productCategories.id,
-        salonId: productCategories.salonId,
-        name: productCategories.name,
-        sortOrder: productCategories.sortOrder,
-        createdAt: productCategories.createdAt,
-        productCount: sql<number>`count(${products.id})::int`,
-      })
-      .from(productCategories)
-      .leftJoin(products, eq(products.category, productCategories.name))
-      .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
-      .groupBy(productCategories.id)
-      .limit(1);
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          id: productCategories.id,
+          salonId: productCategories.salonId,
+          name: productCategories.name,
+          sortOrder: productCategories.sortOrder,
+          createdAt: productCategories.createdAt,
+          productCount: sql<number>`count(${products.id})::int`,
+        })
+        .from(productCategories)
+        .leftJoin(products, eq(products.category, productCategories.name))
+        .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
+        .groupBy(productCategories.id)
+        .limit(1)
+    );
 
     if (result.length === 0) {
       return NextResponse.json(
@@ -87,11 +89,7 @@ export async function PUT(
     const { name } = body;
 
     // Get the existing category in the caller's salon
-    const [existing] = await db
-      .select()
-      .from(productCategories)
-      .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
-      .limit(1);
+    const existing = await forSalon(salonId).findOne(productCategories, id);
 
     if (!existing) {
       return NextResponse.json(
@@ -105,13 +103,15 @@ export async function PUT(
 
     // Check for duplicate name within same salon (excluding current category)
     if (oldName.toLowerCase() !== newName.toLowerCase()) {
-      const duplicate = await db
-        .select({ id: productCategories.id })
-        .from(productCategories)
-        .where(
-          sql`${productCategories.salonId} = ${existing.salonId} AND LOWER(${productCategories.name}) = LOWER(${newName}) AND ${productCategories.id} != ${id}`
-        )
-        .limit(1);
+      const duplicate = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({ id: productCategories.id })
+          .from(productCategories)
+          .where(
+            sql`${productCategories.salonId} = ${existing.salonId} AND LOWER(${productCategories.name}) = LOWER(${newName}) AND ${productCategories.id} != ${id}`
+          )
+          .limit(1)
+      );
 
       if (duplicate.length > 0) {
         return NextResponse.json(
@@ -121,22 +121,26 @@ export async function PUT(
       }
     }
 
-    // Update category name (scoped to caller's salon)
-    const [updated] = await db
-      .update(productCategories)
-      .set({ name: newName })
-      .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
-      .returning();
+    // Zmiana nazwy kategorii + kaskada na produkty atomowo w jednej transakcji RLS.
+    const updated = await forSalon(salonId).raw(async (tx) => {
+      const [row] = await tx
+        .update(productCategories)
+        .set({ name: newName })
+        .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
+        .returning();
 
-    // Also update all products in this salon that reference the old name
-    if (oldName !== newName) {
-      await db
-        .update(products)
-        .set({ category: newName })
-        .where(and(eq(products.category, oldName), eq(products.salonId, salonId)));
+      // Also update all products in this salon that reference the old name
+      if (oldName !== newName) {
+        await tx
+          .update(products)
+          .set({ category: newName })
+          .where(and(eq(products.category, oldName), eq(products.salonId, salonId)));
 
-      logger.info(`[Product Categories API] Renamed "${oldName}" -> "${newName}", updated associated products`);
-    }
+        logger.info(`[Product Categories API] Renamed "${oldName}" -> "${newName}", updated associated products`);
+      }
+
+      return row;
+    });
 
     return NextResponse.json({
       success: true,
@@ -171,11 +175,7 @@ export async function DELETE(
     const { id } = await params;
 
     // Get the category in the caller's salon
-    const [category] = await db
-      .select()
-      .from(productCategories)
-      .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
-      .limit(1);
+    const category = await forSalon(salonId).findOne(productCategories, id);
 
     if (!category) {
       return NextResponse.json(
@@ -185,10 +185,12 @@ export async function DELETE(
     }
 
     // Check if category has products (within this salon)
-    const productCount = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(products)
-      .where(and(eq(products.category, category.name), eq(products.salonId, salonId)));
+    const productCount = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(products)
+        .where(and(eq(products.category, category.name), eq(products.salonId, salonId)))
+    );
 
     if ((productCount[0]?.count || 0) > 0) {
       return NextResponse.json(
@@ -201,10 +203,7 @@ export async function DELETE(
     }
 
     // Delete the category (scoped to caller's salon)
-    const [deleted] = await db
-      .delete(productCategories)
-      .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
-      .returning();
+    const deleted = await forSalon(salonId).deleteOwned(productCategories, id);
 
     logger.info(`[Product Categories API] Deleted category: ${deleted!.name} (${deleted!.id})`);
 

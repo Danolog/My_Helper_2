@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { appointments, clients, employees, services, treatmentHistory, appointmentMaterials, products } from "@/lib/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/clients/[id]/appointments - Get all appointments for a specific client
@@ -26,11 +26,7 @@ export async function GET(
     const { id } = await params;
 
     // First verify the client belongs to the caller's salon
-    const [client] = await db
-      .select()
-      .from(clients)
-      .where(and(eq(clients.id, id), eq(clients.salonId, salonId)))
-      .limit(1);
+    const client = await forSalon(salonId).findOne(clients, id);
 
     if (!client) {
       return NextResponse.json(
@@ -40,19 +36,21 @@ export async function GET(
     }
 
     // Fetch all appointments for this client with joined employee, service, and treatment data
-    const result = await db
-      .select({
-        appointment: appointments,
-        employee: employees,
-        service: services,
-        treatment: treatmentHistory,
-      })
-      .from(appointments)
-      .leftJoin(employees, eq(appointments.employeeId, employees.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .leftJoin(treatmentHistory, eq(appointments.id, treatmentHistory.appointmentId))
-      .where(and(eq(appointments.clientId, id), eq(appointments.salonId, salonId)))
-      .orderBy(desc(appointments.startTime));
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          appointment: appointments,
+          employee: employees,
+          service: services,
+          treatment: treatmentHistory,
+        })
+        .from(appointments)
+        .leftJoin(employees, eq(appointments.employeeId, employees.id))
+        .leftJoin(services, eq(appointments.serviceId, services.id))
+        .leftJoin(treatmentHistory, eq(appointments.id, treatmentHistory.appointmentId))
+        .where(and(eq(appointments.clientId, id), eq(appointments.salonId, salonId)))
+        .orderBy(desc(appointments.startTime))
+    );
 
     // Fetch materials for all appointments using inArray for efficiency
     const appointmentIds = result.map((row) => row.appointment.id);
@@ -74,14 +72,16 @@ export async function GET(
     }>> = {};
 
     if (appointmentIds.length > 0) {
-      const allMaterials = await db
-        .select({
-          material: appointmentMaterials,
-          product: products,
-        })
-        .from(appointmentMaterials)
-        .leftJoin(products, eq(appointmentMaterials.productId, products.id))
-        .where(inArray(appointmentMaterials.appointmentId, appointmentIds));
+      const allMaterials = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({
+            material: appointmentMaterials,
+            product: products,
+          })
+          .from(appointmentMaterials)
+          .leftJoin(products, eq(appointmentMaterials.productId, products.id))
+          .where(inArray(appointmentMaterials.appointmentId, appointmentIds))
+      );
 
       // Group materials by appointmentId
       for (const row of allMaterials) {

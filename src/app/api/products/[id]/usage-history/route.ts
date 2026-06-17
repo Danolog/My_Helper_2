@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { appointmentMaterials, products, appointments, clients, employees, services } from "@/lib/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/products/[id]/usage-history - Get usage history for a product
@@ -34,11 +34,7 @@ export async function GET(
     }
 
     // Verify product exists in the caller's salon
-    const [product] = await db
-      .select()
-      .from(products)
-      .where(and(eq(products.id, id), eq(products.salonId, salonId)))
-      .limit(1);
+    const product = await forSalon(salonId).findOne(products, id);
 
     if (!product) {
       return NextResponse.json(
@@ -47,22 +43,26 @@ export async function GET(
       );
     }
 
-    // Get all usage records for this product with appointment details
-    const usageRecords = await db
-      .select({
-        material: appointmentMaterials,
-        appointment: appointments,
-        client: clients,
-        employee: employees,
-        service: services,
-      })
-      .from(appointmentMaterials)
-      .innerJoin(appointments, eq(appointmentMaterials.appointmentId, appointments.id))
-      .leftJoin(clients, eq(appointments.clientId, clients.id))
-      .leftJoin(employees, eq(appointments.employeeId, employees.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(eq(appointmentMaterials.productId, id))
-      .orderBy(desc(appointmentMaterials.createdAt));
+    // Get all usage records for this product with appointment details.
+    // Tabele zlaczone (appointments/clients/...) sa salon-scoped — RLS w
+    // kontekscie odcina cudze wiersze; product juz zweryfikowany jako wlasny.
+    const usageRecords = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          material: appointmentMaterials,
+          appointment: appointments,
+          client: clients,
+          employee: employees,
+          service: services,
+        })
+        .from(appointmentMaterials)
+        .innerJoin(appointments, eq(appointmentMaterials.appointmentId, appointments.id))
+        .leftJoin(clients, eq(appointments.clientId, clients.id))
+        .leftJoin(employees, eq(appointments.employeeId, employees.id))
+        .leftJoin(services, eq(appointments.serviceId, services.id))
+        .where(eq(appointmentMaterials.productId, id))
+        .orderBy(desc(appointmentMaterials.createdAt))
+    );
 
     const formattedHistory = usageRecords.map((row) => ({
       id: row.material.id,

@@ -1,10 +1,10 @@
 import { NextRequest } from "next/server";
-import { db } from "@/lib/db";
 import { marketingConsents, clients } from "@/lib/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, clientConsentsSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 const VALID_CONSENT_TYPES = ["email", "sms", "phone"] as const;
@@ -38,30 +38,28 @@ export async function GET(
 
   try {
     // Verify client exists in the caller's salon
-    const [client] = await db
-      .select({ id: clients.id, firstName: clients.firstName, lastName: clients.lastName })
-      .from(clients)
-      .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
-      .limit(1);
+    const client = await forSalon(salonId).findOne(clients, clientId);
 
     if (!client) {
       return Response.json({ error: "Klient nie zostal znaleziony" }, { status: 404 });
     }
 
     // Get all active consents for this client+salon
-    const activeConsents = await db
-      .select({
-        consentType: marketingConsents.consentType,
-        grantedAt: marketingConsents.grantedAt,
-      })
-      .from(marketingConsents)
-      .where(
-        and(
-          eq(marketingConsents.clientId, clientId),
-          eq(marketingConsents.salonId, salonId),
-          isNull(marketingConsents.revokedAt)
+    const activeConsents = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          consentType: marketingConsents.consentType,
+          grantedAt: marketingConsents.grantedAt,
+        })
+        .from(marketingConsents)
+        .where(
+          and(
+            eq(marketingConsents.clientId, clientId),
+            eq(marketingConsents.salonId, salonId),
+            isNull(marketingConsents.revokedAt)
+          )
         )
-      );
+    );
 
     // Build consent status for each type
     const consentMap = new Map<string, Date>();
@@ -121,81 +119,80 @@ export async function PUT(
     const { consents } = body as { consents: Record<string, boolean> };
 
     // Verify client exists in the caller's salon
-    const [client] = await db
-      .select({ id: clients.id, firstName: clients.firstName, lastName: clients.lastName })
-      .from(clients)
-      .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
-      .limit(1);
+    const client = await forSalon(salonId).findOne(clients, clientId);
 
     if (!client) {
       return Response.json({ error: "Klient nie zostal znaleziony" }, { status: 404 });
     }
 
-    // Get current active consents
-    const activeConsents = await db
-      .select({
-        id: marketingConsents.id,
-        consentType: marketingConsents.consentType,
-        grantedAt: marketingConsents.grantedAt,
-      })
-      .from(marketingConsents)
-      .where(
-        and(
-          eq(marketingConsents.clientId, clientId),
-          eq(marketingConsents.salonId, salonId),
-          isNull(marketingConsents.revokedAt)
-        )
-      );
+    // Odczyt + grant/revoke + ponowny odczyt atomowo w jednej transakcji RLS.
+    const updatedConsents = await forSalon(salonId).raw(async (tx) => {
+      // Get current active consents
+      const activeConsents = await tx
+        .select({
+          id: marketingConsents.id,
+          consentType: marketingConsents.consentType,
+          grantedAt: marketingConsents.grantedAt,
+        })
+        .from(marketingConsents)
+        .where(
+          and(
+            eq(marketingConsents.clientId, clientId),
+            eq(marketingConsents.salonId, salonId),
+            isNull(marketingConsents.revokedAt)
+          )
+        );
 
-    const activeConsentMap = new Map<string, string>(); // type -> id
-    for (const consent of activeConsents) {
-      activeConsentMap.set(consent.consentType, consent.id);
-    }
-
-    const now = new Date();
-
-    // Process each consent type
-    for (const type of VALID_CONSENT_TYPES) {
-      const shouldBeGranted = consents[type];
-      if (shouldBeGranted === undefined) continue; // Skip if not provided
-
-      const isCurrentlyGranted = activeConsentMap.has(type);
-
-      if (shouldBeGranted && !isCurrentlyGranted) {
-        // Grant new consent
-        await db.insert(marketingConsents).values({
-          clientId,
-          salonId: salonId,
-          consentType: type,
-          grantedAt: now,
-        });
-        logger.info(`[Client Consents] Granted ${type} consent for client ${clientId}`);
-      } else if (!shouldBeGranted && isCurrentlyGranted) {
-        // Revoke existing consent
-        const consentId = activeConsentMap.get(type)!;
-        await db
-          .update(marketingConsents)
-          .set({ revokedAt: now })
-          .where(eq(marketingConsents.id, consentId));
-        logger.info(`[Client Consents] Revoked ${type} consent for client ${clientId}`);
+      const activeConsentMap = new Map<string, string>(); // type -> id
+      for (const consent of activeConsents) {
+        activeConsentMap.set(consent.consentType, consent.id);
       }
-      // If shouldBeGranted === isCurrentlyGranted, no change needed
-    }
 
-    // Re-fetch to return updated status
-    const updatedConsents = await db
-      .select({
-        consentType: marketingConsents.consentType,
-        grantedAt: marketingConsents.grantedAt,
-      })
-      .from(marketingConsents)
-      .where(
-        and(
-          eq(marketingConsents.clientId, clientId),
-          eq(marketingConsents.salonId, salonId),
-          isNull(marketingConsents.revokedAt)
-        )
-      );
+      const now = new Date();
+
+      // Process each consent type
+      for (const type of VALID_CONSENT_TYPES) {
+        const shouldBeGranted = consents[type];
+        if (shouldBeGranted === undefined) continue; // Skip if not provided
+
+        const isCurrentlyGranted = activeConsentMap.has(type);
+
+        if (shouldBeGranted && !isCurrentlyGranted) {
+          // Grant new consent
+          await tx.insert(marketingConsents).values({
+            clientId,
+            salonId: salonId,
+            consentType: type,
+            grantedAt: now,
+          });
+          logger.info(`[Client Consents] Granted ${type} consent for client ${clientId}`);
+        } else if (!shouldBeGranted && isCurrentlyGranted) {
+          // Revoke existing consent
+          const consentId = activeConsentMap.get(type)!;
+          await tx
+            .update(marketingConsents)
+            .set({ revokedAt: now })
+            .where(eq(marketingConsents.id, consentId));
+          logger.info(`[Client Consents] Revoked ${type} consent for client ${clientId}`);
+        }
+        // If shouldBeGranted === isCurrentlyGranted, no change needed
+      }
+
+      // Re-fetch to return updated status
+      return tx
+        .select({
+          consentType: marketingConsents.consentType,
+          grantedAt: marketingConsents.grantedAt,
+        })
+        .from(marketingConsents)
+        .where(
+          and(
+            eq(marketingConsents.clientId, clientId),
+            eq(marketingConsents.salonId, salonId),
+            isNull(marketingConsents.revokedAt)
+          )
+        );
+    });
 
     const updatedMap = new Map<string, Date>();
     for (const consent of updatedConsents) {
