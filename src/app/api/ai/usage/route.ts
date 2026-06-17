@@ -1,8 +1,8 @@
 import { eq, and, gte, count } from "drizzle-orm";
 import { requireProAI, isProAIError } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { aiGeneratedMedia } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 // ────────────────────────────────────────────────────────────
 // Cost-per-use map keyed by "type:provider"
@@ -49,20 +49,22 @@ export async function GET(req: Request) {
 
   try {
     // Count generated media grouped by type and provider
-    const mediaStats = await db
-      .select({
-        type: aiGeneratedMedia.type,
-        provider: aiGeneratedMedia.provider,
-        count: count(),
-      })
-      .from(aiGeneratedMedia)
-      .where(
-        and(
-          eq(aiGeneratedMedia.salonId, salonId),
-          gte(aiGeneratedMedia.createdAt, startDate),
-        ),
-      )
-      .groupBy(aiGeneratedMedia.type, aiGeneratedMedia.provider);
+    const mediaStats = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          type: aiGeneratedMedia.type,
+          provider: aiGeneratedMedia.provider,
+          count: count(),
+        })
+        .from(aiGeneratedMedia)
+        .where(
+          and(
+            eq(aiGeneratedMedia.salonId, salonId),
+            gte(aiGeneratedMedia.createdAt, startDate),
+          ),
+        )
+        .groupBy(aiGeneratedMedia.type, aiGeneratedMedia.provider)
+    );
 
     // Build usage summary with estimated costs
     const usage = mediaStats.map((stat) => {
