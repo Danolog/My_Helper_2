@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { forSalon } from "@/lib/server/repository";
 import {
   appointments,
   clients,
@@ -71,9 +71,9 @@ export async function GET(_request: Request) {
       topServices,
       underperformingEmployees,
       noAppointmentClients,
-    ] = await Promise.all([
+    ] = await forSalon(salonId).raw((tx) => Promise.all([
       // Recent appointments count (last 30 days)
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -86,7 +86,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Previous period appointments (30-60 days ago)
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -99,7 +99,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Appointments by status (last 30 days)
-      db
+      tx
         .select({
           status: appointments.status,
           count: count(),
@@ -114,7 +114,7 @@ export async function GET(_request: Request) {
         .groupBy(appointments.status),
 
       // Revenue from completed appointments (last 30 days)
-      db
+      tx
         .select({
           total: sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric)), 0)`,
         })
@@ -131,7 +131,7 @@ export async function GET(_request: Request) {
         .then((r) => parseFloat(r[0]?.total ?? "0")),
 
       // Previous period revenue (30-60 days ago)
-      db
+      tx
         .select({
           total: sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric)), 0)`,
         })
@@ -148,7 +148,7 @@ export async function GET(_request: Request) {
         .then((r) => parseFloat(r[0]?.total ?? "0")),
 
       // Low stock products
-      db
+      tx
         .select({
           name: products.name,
           quantity: products.quantity,
@@ -165,7 +165,7 @@ export async function GET(_request: Request) {
         .limit(10),
 
       // Average rating
-      db
+      tx
         .select({
           avg: sql<string>`COALESCE(AVG(${reviews.rating}), 0)`,
           count: count(),
@@ -183,7 +183,7 @@ export async function GET(_request: Request) {
         })),
 
       // Recent low reviews (1-3 stars, last 30 days)
-      db
+      tx
         .select({
           rating: reviews.rating,
           comment: reviews.comment,
@@ -201,14 +201,14 @@ export async function GET(_request: Request) {
         .limit(5),
 
       // Total clients
-      db
+      tx
         .select({ count: count() })
         .from(clients)
         .where(eq(clients.salonId, salonId))
         .then((r) => r[0]?.count ?? 0),
 
       // New clients this month
-      db
+      tx
         .select({ count: count() })
         .from(clients)
         .where(
@@ -223,7 +223,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Upcoming appointments (next 7 days)
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -237,7 +237,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Top services by count (last 30 days)
-      db
+      tx
         .select({
           serviceName: services.name,
           count: count(),
@@ -256,7 +256,7 @@ export async function GET(_request: Request) {
         .limit(5),
 
       // Underperforming employees (less than average appointments)
-      db
+      tx
         .select({
           firstName: employees.firstName,
           lastName: employees.lastName,
@@ -275,7 +275,7 @@ export async function GET(_request: Request) {
         .orderBy(count()),
 
       // Clients with no appointments in last 60 days
-      db
+      tx
         .select({ count: count() })
         .from(clients)
         .where(
@@ -291,7 +291,7 @@ export async function GET(_request: Request) {
           )
         )
         .then((r) => r[0]?.count ?? 0),
-    ]);
+    ]));
 
     // Generate suggestions based on data analysis
     const suggestions: Suggestion[] = [];

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { forSalon } from "@/lib/server/repository";
 import {
   appointments,
   clients,
@@ -100,9 +100,9 @@ export async function GET(_request: Request) {
       tomorrowWorkSchedules,
       lowStockProducts,
       recentClientHistory,
-    ] = await Promise.all([
+    ] = await forSalon(salonId).raw((tx) => Promise.all([
       // Tomorrow's appointments with full details
-      db
+      tx
         .select({
           appointmentId: appointments.id,
           startTime: appointments.startTime,
@@ -135,7 +135,7 @@ export async function GET(_request: Request) {
         .orderBy(asc(appointments.startTime)),
 
       // All active employees
-      db
+      tx
         .select({
           id: employees.id,
           firstName: employees.firstName,
@@ -150,7 +150,7 @@ export async function GET(_request: Request) {
         ),
 
       // Time blocks tomorrow (vacations, breaks)
-      db
+      tx
         .select({
           employeeId: timeBlocks.employeeId,
           startTime: timeBlocks.startTime,
@@ -171,7 +171,7 @@ export async function GET(_request: Request) {
         ),
 
       // Work schedules for tomorrow's day of week
-      db
+      tx
         .select({
           employeeId: workSchedules.employeeId,
           startTime: workSchedules.startTime,
@@ -187,7 +187,7 @@ export async function GET(_request: Request) {
         ),
 
       // Low stock products that may be needed tomorrow
-      db
+      tx
         .select({
           name: products.name,
           quantity: products.quantity,
@@ -204,7 +204,7 @@ export async function GET(_request: Request) {
         .limit(10),
 
       // Recent reviews from clients who have appointments tomorrow
-      db
+      tx
         .select({
           clientId: reviews.clientId,
           rating: reviews.rating,
@@ -220,7 +220,7 @@ export async function GET(_request: Request) {
         )
         .orderBy(desc(reviews.createdAt))
         .limit(50),
-    ]);
+    ]));
 
     // Process data and generate recommendations
     const recommendations: DailyRecommendation[] = [];
