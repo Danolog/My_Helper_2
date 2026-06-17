@@ -1,18 +1,14 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { employeeServices, employees, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, employeeAssignmentSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 /** Verify the service belongs to the caller's salon. */
 async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {
-  const [service] = await db
-    .select({ id: services.id })
-    .from(services)
-    .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
-    .limit(1);
+  const service = await forSalon(salonId).findOne(services, serviceId);
   return !!service;
 }
 
@@ -43,14 +39,16 @@ export async function GET(
       );
     }
 
-    const assignments = await db
-      .select({
-        assignment: employeeServices,
-        employee: employees,
-      })
-      .from(employeeServices)
-      .leftJoin(employees, eq(employeeServices.employeeId, employees.id))
-      .where(eq(employeeServices.serviceId, serviceId));
+    const assignments = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          assignment: employeeServices,
+          employee: employees,
+        })
+        .from(employeeServices)
+        .leftJoin(employees, eq(employeeServices.employeeId, employees.id))
+        .where(eq(employeeServices.serviceId, serviceId))
+    );
 
     const formatted = assignments.map((row) => ({
       ...row.assignment,
@@ -104,11 +102,7 @@ export async function POST(
     }
 
     // Verify the employee belongs to the caller's salon
-    const [ownedEmployee] = await db
-      .select({ id: employees.id })
-      .from(employees)
-      .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
-      .limit(1);
+    const ownedEmployee = await forSalon(salonId).findOne(employees, employeeId);
     if (!ownedEmployee) {
       return NextResponse.json(
         { success: false, error: "Employee not found" },
@@ -116,37 +110,45 @@ export async function POST(
       );
     }
 
-    // Check if already assigned
-    const existing = await db
-      .select()
-      .from(employeeServices)
-      .where(
-        and(
-          eq(employeeServices.employeeId, employeeId),
-          eq(employeeServices.serviceId, serviceId)
-        )
-      );
+    // Sprawdzenie istniejacego przypisania + insert atomowo w transakcji RLS.
+    const { row, alreadyAssigned } = await forSalon(salonId).raw(async (tx) => {
+      // Check if already assigned
+      const existing = await tx
+        .select()
+        .from(employeeServices)
+        .where(
+          and(
+            eq(employeeServices.employeeId, employeeId),
+            eq(employeeServices.serviceId, serviceId)
+          )
+        );
 
-    if (existing.length > 0) {
+      if (existing.length > 0) {
+        return { row: existing[0], alreadyAssigned: true };
+      }
+
+      const [newAssignment] = await tx
+        .insert(employeeServices)
+        .values({
+          employeeId,
+          serviceId,
+        })
+        .returning();
+      return { row: newAssignment, alreadyAssigned: false };
+    });
+
+    if (alreadyAssigned) {
       return NextResponse.json({
         success: true,
-        data: existing[0],
+        data: row,
         message: "Employee already assigned to this service",
       });
     }
 
-    const [newAssignment] = await db
-      .insert(employeeServices)
-      .values({
-        employeeId,
-        serviceId,
-      })
-      .returning();
-
     return NextResponse.json(
       {
         success: true,
-        data: newAssignment,
+        data: row,
       },
       { status: 201 }
     );
@@ -194,15 +196,17 @@ export async function DELETE(
       );
     }
 
-    const deleted = await db
-      .delete(employeeServices)
-      .where(
-        and(
-          eq(employeeServices.employeeId, employeeId),
-          eq(employeeServices.serviceId, serviceId)
+    const deleted = await forSalon(salonId).raw((tx) =>
+      tx
+        .delete(employeeServices)
+        .where(
+          and(
+            eq(employeeServices.employeeId, employeeId),
+            eq(employeeServices.serviceId, serviceId)
+          )
         )
-      )
-      .returning();
+        .returning()
+    );
 
     if (deleted.length === 0) {
       return NextResponse.json(

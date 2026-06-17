@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { albums, photoAlbums } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, updateAlbumSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/albums/[id] - Get single album with photo count
@@ -26,19 +26,21 @@ export async function GET(
 
     const { id } = await params;
 
-    const [album] = await db
-      .select({
-        id: albums.id,
-        salonId: albums.salonId,
-        name: albums.name,
-        category: albums.category,
-        createdAt: albums.createdAt,
-        photoCount: sql<number>`COALESCE(COUNT(${photoAlbums.id}), 0)::int`,
-      })
-      .from(albums)
-      .leftJoin(photoAlbums, eq(albums.id, photoAlbums.albumId))
-      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)))
-      .groupBy(albums.id);
+    const [album] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          id: albums.id,
+          salonId: albums.salonId,
+          name: albums.name,
+          category: albums.category,
+          createdAt: albums.createdAt,
+          photoCount: sql<number>`COALESCE(COUNT(${photoAlbums.id}), 0)::int`,
+        })
+        .from(albums)
+        .leftJoin(photoAlbums, eq(albums.id, photoAlbums.albumId))
+        .where(and(eq(albums.id, id), eq(albums.salonId, salonId)))
+        .groupBy(albums.id)
+    );
 
     if (!album) {
       return NextResponse.json(
@@ -99,11 +101,7 @@ export async function PATCH(
       updateData.category = category?.trim() || null;
     }
 
-    const [updated] = await db
-      .update(albums)
-      .set(updateData)
-      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)))
-      .returning();
+    const updated = await forSalon(salonId).updateOwned(albums, id, updateData);
 
     if (!updated) {
       return NextResponse.json(
@@ -147,10 +145,7 @@ export async function DELETE(
     const { id } = await params;
 
     // Check album exists in the caller's salon
-    const [album] = await db
-      .select()
-      .from(albums)
-      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)));
+    const album = await forSalon(salonId).findOne(albums, id);
 
     if (!album) {
       return NextResponse.json(
@@ -160,7 +155,7 @@ export async function DELETE(
     }
 
     // Delete album (cascade will remove photo_albums entries)
-    await db.delete(albums).where(and(eq(albums.id, id), eq(albums.salonId, salonId)));
+    await forSalon(salonId).deleteOwned(albums, id);
 
     logger.info(`[Albums API] Deleted album: ${id} - "${album.name}"`);
 
