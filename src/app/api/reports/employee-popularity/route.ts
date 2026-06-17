@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import {
   appointments,
   employees,
@@ -8,6 +7,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/reports/employee-popularity - Employee popularity ranking report
@@ -41,7 +41,8 @@ export async function GET(request: Request) {
         );
 
     // 1. Get all active employees for the salon
-    const activeEmployees = await db
+    const activeEmployees = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: employees.id,
         firstName: employees.firstName,
@@ -51,7 +52,8 @@ export async function GET(request: Request) {
       .from(employees)
       .where(
         and(eq(employees.salonId, salonId), eq(employees.isActive, true))
-      );
+      )
+    );
 
     if (activeEmployees.length === 0) {
       return NextResponse.json({
@@ -76,7 +78,8 @@ export async function GET(request: Request) {
     const employeeIds = activeEmployees.map((e) => e.id);
 
     // 2. Batch: Get ALL appointments for all employees in date range (1 query instead of N)
-    const allAppointments = await db
+    const allAppointments = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         employeeId: appointments.employeeId,
         id: appointments.id,
@@ -96,7 +99,8 @@ export async function GET(request: Request) {
           gte(appointments.startTime, startDate),
           lte(appointments.startTime, endDate)
         )
-      );
+      )
+    );
 
     // Group appointments by employee
     const appointmentsByEmployee: Record<string, typeof allAppointments> = {};
@@ -105,7 +109,8 @@ export async function GET(request: Request) {
     }
 
     // 3. Batch: Get ALL approved reviews for all employees in date range (1 query instead of N)
-    const allReviews = await db
+    const allReviews = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         employeeId: reviews.employeeId,
         rating: reviews.rating,
@@ -119,7 +124,8 @@ export async function GET(request: Request) {
           gte(reviews.createdAt, startDate),
           lte(reviews.createdAt, endDate)
         )
-      );
+      )
+    );
 
     // Group reviews by employee
     const reviewsByEmployee: Record<string, typeof allReviews> = {};

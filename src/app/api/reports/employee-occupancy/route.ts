@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import {
   appointments,
   employees,
@@ -9,6 +8,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, gte, lte, ne, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -62,7 +62,8 @@ export async function GET(request: Request) {
     endDate.setHours(23, 59, 59, 999);
 
     // 1. Get all active employees for the salon
-    const activeEmployees = await db
+    const activeEmployees = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: employees.id,
         firstName: employees.firstName,
@@ -72,7 +73,8 @@ export async function GET(request: Request) {
       .from(employees)
       .where(
         and(eq(employees.salonId, salonId), eq(employees.isActive, true))
-      );
+      )
+    );
 
     if (activeEmployees.length === 0) {
       return NextResponse.json({
@@ -97,7 +99,8 @@ export async function GET(request: Request) {
     const employeeIds = activeEmployees.map((e) => e.id);
 
     // 2. Batch: Get work schedules for ALL employees (1 query instead of N)
-    const allSchedules = await db
+    const allSchedules = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         employeeId: workSchedules.employeeId,
         dayOfWeek: workSchedules.dayOfWeek,
@@ -105,7 +108,8 @@ export async function GET(request: Request) {
         endTime: workSchedules.endTime,
       })
       .from(workSchedules)
-      .where(inArray(workSchedules.employeeId, employeeIds));
+      .where(inArray(workSchedules.employeeId, employeeIds))
+    );
 
     const schedulesByEmployee: Record<
       string,
@@ -116,7 +120,8 @@ export async function GET(request: Request) {
     }
 
     // 3. Batch: Get time blocks for ALL employees in date range (1 query instead of N)
-    const allBlocks = await db
+    const allBlocks = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         employeeId: timeBlocks.employeeId,
         startTime: timeBlocks.startTime,
@@ -130,7 +135,8 @@ export async function GET(request: Request) {
           lte(timeBlocks.startTime, endDate),
           gte(timeBlocks.endTime, startDate)
         )
-      );
+      )
+    );
 
     const blocksByEmployee: Record<
       string,
@@ -141,7 +147,8 @@ export async function GET(request: Request) {
     }
 
     // 4. Batch: Get all non-cancelled appointments in the date range (1 query instead of N)
-    const allAppointments = await db
+    const allAppointments = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         employeeId: appointments.employeeId,
         startTime: appointments.startTime,
@@ -160,7 +167,8 @@ export async function GET(request: Request) {
           gte(appointments.startTime, startDate),
           lte(appointments.startTime, endDate)
         )
-      );
+      )
+    );
 
     const appointmentsByEmployee: Record<
       string,

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import {
   appointments,
   services,
@@ -10,6 +9,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/reports/service-profitability - Service profit margins report
@@ -47,7 +47,8 @@ export async function GET(request: Request) {
     }
 
     // 1. Get all completed appointments with service and employee details
-    const completedAppointments = await db
+    const completedAppointments = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         appointmentId: appointments.id,
         startTime: appointments.startTime,
@@ -64,7 +65,8 @@ export async function GET(request: Request) {
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .where(and(...conditions))
-      .orderBy(desc(appointments.startTime));
+      .orderBy(desc(appointments.startTime))
+    );
 
     // 2. Get all material usage for these appointments
     const appointmentIds = completedAppointments.map((a) => a.appointmentId);
@@ -75,7 +77,8 @@ export async function GET(request: Request) {
 
     if (appointmentIds.length > 0) {
       // Get material usage records for completed appointments
-      const materialUsage = await db
+      const materialUsage = await forSalon(salonId).raw((tx) =>
+        tx
         .select({
           appointmentId: appointmentMaterials.appointmentId,
           quantityUsed: appointmentMaterials.quantityUsed,
@@ -83,7 +86,8 @@ export async function GET(request: Request) {
         })
         .from(appointmentMaterials)
         .innerJoin(products, eq(appointmentMaterials.productId, products.id))
-        .where(inArray(appointmentMaterials.appointmentId, appointmentIds));
+        .where(inArray(appointmentMaterials.appointmentId, appointmentIds))
+      );
 
       for (const usage of materialUsage) {
         const cost =
@@ -94,13 +98,15 @@ export async function GET(request: Request) {
       }
 
       // 3. Get commissions for these appointments (labor costs)
-      const commissions = await db
+      const commissions = await forSalon(salonId).raw((tx) =>
+        tx
         .select({
           appointmentId: employeeCommissions.appointmentId,
           amount: employeeCommissions.amount,
         })
         .from(employeeCommissions)
-        .where(inArray(employeeCommissions.appointmentId, appointmentIds));
+        .where(inArray(employeeCommissions.appointmentId, appointmentIds))
+      );
 
       for (const comm of commissions) {
         laborCostByAppointment[comm.appointmentId] =
