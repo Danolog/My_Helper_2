@@ -31,10 +31,19 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE O
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO myhelper_app;
 --> statement-breakpoint
 
--- 3. ENABLE RLS + polityka tenant_isolation na 25 tabelach z bezpośrednim salon_id.
+-- 2b. GRANT roli app DO ownera — bez tego `SET LOCAL ROLE myhelper_app` z połączenia
+--     ownera rzuca „permission denied to set role". Ścieżka żądania (wrapper forSalon)
+--     loguje się ownerem i przełącza na app per transakcję; ten GRANT to umożliwia.
+--     current_user = owner/migrator wykonujący tę migrację (dev_user lokalnie).
+GRANT myhelper_app TO current_user;
+--> statement-breakpoint
+
+-- 3. ENABLE RLS + polityka tenant_isolation na 26 tabelach z bezpośrednim salon_id.
 --    USING chroni odczyt/update/delete (widać tylko swoje); WITH CHECK chroni
 --    insert/update (nie wstawisz wiersza do cudzego salonu). 'true' w current_setting
 --    = nie rzucaj, gdy zmienna nieustawiona (zwróci NULL => 0 wierszy, nie błąd).
+--    Naprawa W3: dopisana `ai_generated_media` (salon_id NOT NULL, schema.ts:820) —
+--    była jedyną tabelą z bezpośrednim salon_id bez polityki.
 DO $$
 DECLARE
   t text;
@@ -44,10 +53,16 @@ DECLARE
     'product_categories','products','promotions','promo_codes','loyalty_points',
     'invoices','newsletters','marketing_consents','favorite_salons',
     'salon_subscriptions','subscription_payments','deposit_payments',
-    'fiscal_receipts','scheduled_posts','ai_conversations'
+    'fiscal_receipts','scheduled_posts','ai_conversations','ai_generated_media'
   ];
 BEGIN
   FOREACH t IN ARRAY direct_tables LOOP
+    -- Pomiń, jeśli tabela nie istnieje na tej bazie (lokalny model bywa węższy niż
+    -- schema.ts — np. ai_generated_media nie ma jeszcze migracji tworzącej; gdy
+    -- powstanie, ta polityka założy się na kolejnym migrate bez twardego błędu tu).
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=t) THEN
+      CONTINUE;
+    END IF;
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY;', t);
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I;', t);
     EXECUTE format(
