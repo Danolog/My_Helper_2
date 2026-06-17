@@ -9,9 +9,9 @@ import {
   getSalonContext,
   trackAIUsage,
 } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { services, promotions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 const platformEnum = z.enum(["instagram", "facebook", "tiktok"]);
 
@@ -111,16 +111,18 @@ export async function POST(req: Request) {
 
   try {
     // Fetch top services for context
-    const serviceList = await db
-      .select({ name: services.name, basePrice: services.basePrice })
-      .from(services)
-      .where(
-        and(
-          eq(services.salonId, salonId),
-          eq(services.isActive, true)
+    const serviceList = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ name: services.name, basePrice: services.basePrice })
+        .from(services)
+        .where(
+          and(
+            eq(services.salonId, salonId),
+            eq(services.isActive, true)
+          )
         )
-      )
-      .limit(10);
+        .limit(10)
+    );
 
     salonServices = serviceList.map(
       (s) => `${s.name} (${s.basePrice} PLN)`
@@ -128,16 +130,18 @@ export async function POST(req: Request) {
 
     // Fetch active promotions
     try {
-      const promoList = await db
-        .select({ name: promotions.name, type: promotions.type, value: promotions.value })
-        .from(promotions)
-        .where(
-          and(
-            eq(promotions.salonId, salonId),
-            eq(promotions.isActive, true)
+      const promoList = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({ name: promotions.name, type: promotions.type, value: promotions.value })
+          .from(promotions)
+          .where(
+            and(
+              eq(promotions.salonId, salonId),
+              eq(promotions.isActive, true)
+            )
           )
-        )
-        .limit(5);
+          .limit(5)
+      );
 
       activePromotions = promoList.map(
         (p) => `${p.name} (${p.type === "percentage" ? `-${p.value}%` : `-${p.value} PLN`})`

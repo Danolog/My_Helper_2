@@ -9,7 +9,6 @@ import {
   getSalonContext,
   trackAIUsage,
 } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import {
   appointments,
@@ -18,6 +17,7 @@ import {
   reviews,
   loyaltyPoints,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 const requestSchema = z.object({
   clientId: z.string().uuid("Nieprawidlowy format ID klienta"),
@@ -52,11 +52,13 @@ export async function POST(req: Request) {
 
   try {
     // Fetch client profile, scoped to the salon
-    const [clientData] = await db
-      .select()
-      .from(clients)
-      .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
-      .limit(1);
+    const [clientData] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
+        .limit(1)
+    );
 
     if (!clientData) {
       return Response.json(
@@ -67,102 +69,112 @@ export async function POST(req: Request) {
 
     // Fetch aggregate appointment statistics
     // COUNT aggregation always returns a row, but TS doesn't know that, so provide a default
-    const appointmentStats = await db
-      .select({
-        totalVisits: count(),
-        completedVisits:
-          sql<number>`COUNT(*) FILTER (WHERE ${appointments.status} = 'completed')`,
-        cancelledVisits:
-          sql<number>`COUNT(*) FILTER (WHERE ${appointments.status} = 'cancelled')`,
-        noShowVisits:
-          sql<number>`COUNT(*) FILTER (WHERE ${appointments.status} = 'no_show')`,
-        firstVisit: sql<Date | null>`MIN(${appointments.startTime})`,
-        lastVisit: sql<Date | null>`MAX(${appointments.startTime})`,
-      })
-      .from(appointments)
-      .where(
-        and(
-          eq(appointments.clientId, clientId),
-          eq(appointments.salonId, salonId),
-        ),
-      )
-      .then((r) => r[0] ?? {
-        totalVisits: 0,
-        completedVisits: 0,
-        cancelledVisits: 0,
-        noShowVisits: 0,
-        firstVisit: null,
-        lastVisit: null,
-      });
+    const appointmentStats = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          totalVisits: count(),
+          completedVisits:
+            sql<number>`COUNT(*) FILTER (WHERE ${appointments.status} = 'completed')`,
+          cancelledVisits:
+            sql<number>`COUNT(*) FILTER (WHERE ${appointments.status} = 'cancelled')`,
+          noShowVisits:
+            sql<number>`COUNT(*) FILTER (WHERE ${appointments.status} = 'no_show')`,
+          firstVisit: sql<Date | null>`MIN(${appointments.startTime})`,
+          lastVisit: sql<Date | null>`MAX(${appointments.startTime})`,
+        })
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.clientId, clientId),
+            eq(appointments.salonId, salonId),
+          ),
+        )
+        .then((r) => r[0] ?? {
+          totalVisits: 0,
+          completedVisits: 0,
+          cancelledVisits: 0,
+          noShowVisits: 0,
+          firstVisit: null,
+          lastVisit: null,
+        })
+    );
 
     // Fetch top services used by this client (completed visits only)
-    const topServices = await db
-      .select({
-        serviceName: services.name,
-        servicePrice: services.basePrice,
-        visitCount: count(),
-      })
-      .from(appointments)
-      .innerJoin(services, eq(appointments.serviceId, services.id))
-      .where(
-        and(
-          eq(appointments.clientId, clientId),
-          eq(appointments.salonId, salonId),
-          eq(appointments.status, "completed"),
-        ),
-      )
-      .groupBy(services.name, services.basePrice)
-      .orderBy(desc(count()))
-      .limit(5);
+    const topServices = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          serviceName: services.name,
+          servicePrice: services.basePrice,
+          visitCount: count(),
+        })
+        .from(appointments)
+        .innerJoin(services, eq(appointments.serviceId, services.id))
+        .where(
+          and(
+            eq(appointments.clientId, clientId),
+            eq(appointments.salonId, salonId),
+            eq(appointments.status, "completed"),
+          ),
+        )
+        .groupBy(services.name, services.basePrice)
+        .orderBy(desc(count()))
+        .limit(5)
+    );
 
     // Fetch recent reviews left by this client
-    const clientReviews = await db
-      .select({
-        rating: reviews.rating,
-        comment: reviews.comment,
-      })
-      .from(reviews)
-      .where(
-        and(eq(reviews.clientId, clientId), eq(reviews.salonId, salonId)),
-      )
-      .orderBy(desc(reviews.createdAt))
-      .limit(5);
+    const clientReviews = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          rating: reviews.rating,
+          comment: reviews.comment,
+        })
+        .from(reviews)
+        .where(
+          and(eq(reviews.clientId, clientId), eq(reviews.salonId, salonId)),
+        )
+        .orderBy(desc(reviews.createdAt))
+        .limit(5)
+    );
 
     // Fetch loyalty points balance (may not exist for this client)
     let loyaltyBalance = 0;
     try {
-      const [loyaltyData] = await db
-        .select({ points: loyaltyPoints.points })
-        .from(loyaltyPoints)
-        .where(
-          and(
-            eq(loyaltyPoints.clientId, clientId),
-            eq(loyaltyPoints.salonId, salonId),
-          ),
-        )
-        .limit(1);
+      const [loyaltyData] = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({ points: loyaltyPoints.points })
+          .from(loyaltyPoints)
+          .where(
+            and(
+              eq(loyaltyPoints.clientId, clientId),
+              eq(loyaltyPoints.salonId, salonId),
+            ),
+          )
+          .limit(1)
+      );
       loyaltyBalance = loyaltyData ? Number(loyaltyData.points) : 0;
     } catch {
       // Table may not have data for this client — default to 0
     }
 
     // Calculate average spending from completed visits with service prices
-    const [spendingData] = await db
-      .select({
-        totalSpent:
-          sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric)), 0)`,
-        avgSpent:
-          sql<string>`COALESCE(AVG(CAST(${services.basePrice} AS numeric)), 0)`,
-      })
-      .from(appointments)
-      .innerJoin(services, eq(appointments.serviceId, services.id))
-      .where(
-        and(
-          eq(appointments.clientId, clientId),
-          eq(appointments.salonId, salonId),
-          eq(appointments.status, "completed"),
-        ),
-      );
+    const [spendingData] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          totalSpent:
+            sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric)), 0)`,
+          avgSpent:
+            sql<string>`COALESCE(AVG(CAST(${services.basePrice} AS numeric)), 0)`,
+        })
+        .from(appointments)
+        .innerJoin(services, eq(appointments.serviceId, services.id))
+        .where(
+          and(
+            eq(appointments.clientId, clientId),
+            eq(appointments.salonId, salonId),
+            eq(appointments.status, "completed"),
+          ),
+        )
+    );
 
     const { salonName, industryLabel } = await getSalonContext(salonId);
 

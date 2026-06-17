@@ -8,7 +8,6 @@ import {
   isProAIError,
   trackAIUsage,
 } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import {
   clients,
@@ -17,6 +16,7 @@ import {
   services,
   products,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 // ────────────────────────────────────────────────────────────
 // Request validation
@@ -102,18 +102,20 @@ async function searchClients(
     );
   }
 
-  const rows = await db
-    .select({
-      id: clients.id,
-      firstName: clients.firstName,
-      lastName: clients.lastName,
-      phone: clients.phone,
-      email: clients.email,
-    })
-    .from(clients)
-    .where(and(...conditions))
-    .orderBy(desc(clients.updatedAt))
-    .limit(intent.limit);
+  const rows = await forSalon(salonId).raw((tx) =>
+    tx
+      .select({
+        id: clients.id,
+        firstName: clients.firstName,
+        lastName: clients.lastName,
+        phone: clients.phone,
+        email: clients.email,
+      })
+      .from(clients)
+      .where(and(...conditions))
+      .orderBy(desc(clients.updatedAt))
+      .limit(intent.limit)
+  );
 
   return rows.map((r) => ({
     id: r.id,
@@ -151,22 +153,24 @@ async function searchAppointments(
     ? desc(appointments.startTime)
     : desc(appointments.startTime);
 
-  const rows = await db
-    .select({
-      id: appointments.id,
-      startTime: appointments.startTime,
-      status: appointments.status,
-      clientFirstName: clients.firstName,
-      clientLastName: clients.lastName,
-      serviceName: services.name,
-      guestName: appointments.guestName,
-    })
-    .from(appointments)
-    .leftJoin(clients, eq(appointments.clientId, clients.id))
-    .leftJoin(services, eq(appointments.serviceId, services.id))
-    .where(and(...conditions))
-    .orderBy(orderBy)
-    .limit(intent.limit);
+  const rows = await forSalon(salonId).raw((tx) =>
+    tx
+      .select({
+        id: appointments.id,
+        startTime: appointments.startTime,
+        status: appointments.status,
+        clientFirstName: clients.firstName,
+        clientLastName: clients.lastName,
+        serviceName: services.name,
+        guestName: appointments.guestName,
+      })
+      .from(appointments)
+      .leftJoin(clients, eq(appointments.clientId, clients.id))
+      .leftJoin(services, eq(appointments.serviceId, services.id))
+      .where(and(...conditions))
+      .orderBy(orderBy)
+      .limit(intent.limit)
+  );
 
   return rows.map((r) => {
     const clientName = r.clientFirstName
@@ -210,17 +214,19 @@ async function searchServices(
     ? desc(sql`CAST(${services.basePrice} AS numeric)`)
     : services.name;
 
-  const rows = await db
-    .select({
-      id: services.id,
-      name: services.name,
-      basePrice: services.basePrice,
-      baseDuration: services.baseDuration,
-    })
-    .from(services)
-    .where(and(...conditions))
-    .orderBy(orderBy)
-    .limit(intent.limit);
+  const rows = await forSalon(salonId).raw((tx) =>
+    tx
+      .select({
+        id: services.id,
+        name: services.name,
+        basePrice: services.basePrice,
+        baseDuration: services.baseDuration,
+      })
+      .from(services)
+      .where(and(...conditions))
+      .orderBy(orderBy)
+      .limit(intent.limit)
+  );
 
   return rows.map((r) => ({
     id: r.id,
@@ -246,17 +252,19 @@ async function searchEmployees(
     );
   }
 
-  const rows = await db
-    .select({
-      id: employees.id,
-      firstName: employees.firstName,
-      lastName: employees.lastName,
-      role: employees.role,
-    })
-    .from(employees)
-    .where(and(...conditions))
-    .orderBy(employees.firstName)
-    .limit(intent.limit);
+  const rows = await forSalon(salonId).raw((tx) =>
+    tx
+      .select({
+        id: employees.id,
+        firstName: employees.firstName,
+        lastName: employees.lastName,
+        role: employees.role,
+      })
+      .from(employees)
+      .where(and(...conditions))
+      .orderBy(employees.firstName)
+      .limit(intent.limit)
+  );
 
   return rows.map((r) => ({
     id: r.id,
@@ -289,17 +297,19 @@ async function searchProducts(
     );
   }
 
-  const rows = await db
-    .select({
-      id: products.id,
-      name: products.name,
-      quantity: products.quantity,
-      unit: products.unit,
-    })
-    .from(products)
-    .where(and(...conditions))
-    .orderBy(products.name)
-    .limit(intent.limit);
+  const rows = await forSalon(salonId).raw((tx) =>
+    tx
+      .select({
+        id: products.id,
+        name: products.name,
+        quantity: products.quantity,
+        unit: products.unit,
+      })
+      .from(products)
+      .where(and(...conditions))
+      .orderBy(products.name)
+      .limit(intent.limit)
+  );
 
   return rows.map((r) => ({
     id: r.id,

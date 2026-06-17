@@ -9,7 +9,6 @@ import {
   getSalonContext,
   trackAIUsage,
 } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import {
   appointments,
@@ -20,6 +19,7 @@ import {
   appointmentMaterials,
   products,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 const requestSchema = z.object({
   appointmentId: z.string().uuid("Nieprawidlowy format ID wizyty"),
@@ -54,24 +54,26 @@ export async function POST(req: Request) {
 
   try {
     // Fetch appointment with related data (client, employee, service)
-    const [appointmentData] = await db
-      .select({
-        appointment: appointments,
-        client: clients,
-        employee: employees,
-        service: services,
-      })
-      .from(appointments)
-      .leftJoin(clients, eq(appointments.clientId, clients.id))
-      .leftJoin(employees, eq(appointments.employeeId, employees.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(
-        and(
-          eq(appointments.id, appointmentId),
-          eq(appointments.salonId, salonId),
-        ),
-      )
-      .limit(1);
+    const [appointmentData] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          appointment: appointments,
+          client: clients,
+          employee: employees,
+          service: services,
+        })
+        .from(appointments)
+        .leftJoin(clients, eq(appointments.clientId, clients.id))
+        .leftJoin(employees, eq(appointments.employeeId, employees.id))
+        .leftJoin(services, eq(appointments.serviceId, services.id))
+        .where(
+          and(
+            eq(appointments.id, appointmentId),
+            eq(appointments.salonId, salonId),
+          ),
+        )
+        .limit(1)
+    );
 
     if (!appointmentData) {
       return Response.json(
@@ -80,23 +82,30 @@ export async function POST(req: Request) {
       );
     }
 
-    // Fetch treatment history for this appointment
-    const treatments = await db
-      .select()
-      .from(treatmentHistory)
-      .where(eq(treatmentHistory.appointmentId, appointmentId));
+    // Fetch treatment history for this appointment. treatment_history nie ma
+    // wlasnej kolumny salon_id — izolacje wymusza polityka RLS posrednia
+    // (EXISTS na appointments.salon_id, migracja 0005), aktywna w kontekscie raw().
+    const treatments = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(treatmentHistory)
+        .where(eq(treatmentHistory.appointmentId, appointmentId))
+    );
 
-    // Fetch materials used during this appointment (with product names)
-    const materials = await db
-      .select({
-        quantityUsed: appointmentMaterials.quantityUsed,
-        notes: appointmentMaterials.notes,
-        productName: products.name,
-        productUnit: products.unit,
-      })
-      .from(appointmentMaterials)
-      .leftJoin(products, eq(appointmentMaterials.productId, products.id))
-      .where(eq(appointmentMaterials.appointmentId, appointmentId));
+    // Fetch materials used during this appointment (with product names).
+    // appointment_materials rowniez bez salon_id — izolacja przez RLS posrednia.
+    const materials = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          quantityUsed: appointmentMaterials.quantityUsed,
+          notes: appointmentMaterials.notes,
+          productName: products.name,
+          productUnit: products.unit,
+        })
+        .from(appointmentMaterials)
+        .leftJoin(products, eq(appointmentMaterials.productId, products.id))
+        .where(eq(appointmentMaterials.appointmentId, appointmentId))
+    );
 
     // Fetch client's previous completed appointments (last 5) for context
     let previousAppointments: Array<{
@@ -105,23 +114,25 @@ export async function POST(req: Request) {
       notes: string | null;
     }> = [];
     if (appointmentData.client) {
-      previousAppointments = await db
-        .select({
-          serviceName: services.name,
-          startTime: appointments.startTime,
-          notes: appointments.notes,
-        })
-        .from(appointments)
-        .leftJoin(services, eq(appointments.serviceId, services.id))
-        .where(
-          and(
-            eq(appointments.clientId, appointmentData.client.id),
-            eq(appointments.salonId, salonId),
-            eq(appointments.status, "completed"),
-          ),
-        )
-        .orderBy(desc(appointments.startTime))
-        .limit(5);
+      previousAppointments = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({
+            serviceName: services.name,
+            startTime: appointments.startTime,
+            notes: appointments.notes,
+          })
+          .from(appointments)
+          .leftJoin(services, eq(appointments.serviceId, services.id))
+          .where(
+            and(
+              eq(appointments.clientId, appointmentData.client!.id),
+              eq(appointments.salonId, salonId),
+              eq(appointments.status, "completed"),
+            ),
+          )
+          .orderBy(desc(appointments.startTime))
+          .limit(5)
+      );
     }
 
     const { salonName, industryLabel } = await getSalonContext(salonId);

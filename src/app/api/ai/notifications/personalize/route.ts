@@ -9,9 +9,9 @@ import {
   getSalonContext,
   trackAIUsage,
 } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { clients, appointments, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 const requestSchema = z.object({
   clientId: z.string().uuid("Nieprawidlowy format ID klienta"),
@@ -53,30 +53,34 @@ export async function POST(req: Request) {
   const { clientId, notificationType, context } = parsed.data;
 
   // Fetch client data, ensuring the client belongs to this salon
-  const [clientData] = await db
-    .select()
-    .from(clients)
-    .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
-    .limit(1);
+  const [clientData] = await forSalon(salonId).raw((tx) =>
+    tx
+      .select()
+      .from(clients)
+      .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)))
+      .limit(1)
+  );
 
   if (!clientData) {
     return Response.json({ error: "Klient nie znaleziony" }, { status: 404 });
   }
 
   // Fetch last 3 appointments with service names for personalization context
-  const recentAppointments = await db
-    .select({
-      serviceName: services.name,
-      startTime: appointments.startTime,
-      status: appointments.status,
-    })
-    .from(appointments)
-    .leftJoin(services, eq(appointments.serviceId, services.id))
-    .where(
-      and(eq(appointments.clientId, clientId), eq(appointments.salonId, salonId))
-    )
-    .orderBy(desc(appointments.startTime))
-    .limit(3);
+  const recentAppointments = await forSalon(salonId).raw((tx) =>
+    tx
+      .select({
+        serviceName: services.name,
+        startTime: appointments.startTime,
+        status: appointments.status,
+      })
+      .from(appointments)
+      .leftJoin(services, eq(appointments.serviceId, services.id))
+      .where(
+        and(eq(appointments.clientId, clientId), eq(appointments.salonId, salonId))
+      )
+      .orderBy(desc(appointments.startTime))
+      .limit(3)
+  );
 
   const { salonName, industryLabel } = await getSalonContext(salonId);
 
