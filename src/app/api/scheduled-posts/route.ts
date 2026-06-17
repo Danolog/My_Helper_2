@@ -1,12 +1,11 @@
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { isProPlan } from "@/lib/subscription";
-import { db } from "@/lib/db";
-import { scheduledPosts } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-
 import { logger } from "@/lib/logger";
+import { scheduledPosts } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isProPlan } from "@/lib/subscription";
 const createSchema = z.object({
   platform: z.enum(["instagram", "facebook", "tiktok"]),
   postType: z.enum([
@@ -51,11 +50,13 @@ export async function GET() {
   }
 
   try {
-    const posts = await db
-      .select()
-      .from(scheduledPosts)
-      .where(eq(scheduledPosts.salonId, salonId))
-      .orderBy(desc(scheduledPosts.scheduledAt));
+    const posts = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(scheduledPosts)
+        .where(eq(scheduledPosts.salonId, salonId))
+        .orderBy(desc(scheduledPosts.scheduledAt))
+    );
 
     return Response.json({ posts });
   } catch (error) {
@@ -100,19 +101,21 @@ export async function POST(req: Request) {
   const { platform, postType, content, hashtags, tone, scheduledAt } = parsed.data;
 
   try {
-    const [newPost] = await db
-      .insert(scheduledPosts)
-      .values({
-        salonId,
-        platform,
-        postType,
-        content,
-        hashtags,
-        tone: tone || null,
-        status: "scheduled",
-        scheduledAt: new Date(scheduledAt),
-      })
-      .returning();
+    const [newPost] = await forSalon(salonId).raw((tx) =>
+      tx
+        .insert(scheduledPosts)
+        .values({
+          salonId,
+          platform,
+          postType,
+          content,
+          hashtags,
+          tone: tone || null,
+          status: "scheduled",
+          scheduledAt: new Date(scheduledAt),
+        })
+        .returning()
+    );
 
     return Response.json({ success: true, post: newPost }, { status: 201 });
   } catch (error) {

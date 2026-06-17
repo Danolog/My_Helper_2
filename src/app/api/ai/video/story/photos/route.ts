@@ -1,8 +1,8 @@
 import { eq, desc } from "drizzle-orm";
 import { requireProAI, isProAIError } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { galleryPhotos, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 // ────────────────────────────────────────────────────────────
 // GET /api/ai/video/story/photos
@@ -21,19 +21,21 @@ export async function GET() {
   const { salonId } = proResult;
 
   try {
-    const photos = await db
-      .select({
-        id: galleryPhotos.id,
-        afterPhotoUrl: galleryPhotos.afterPhotoUrl,
-        beforePhotoUrl: galleryPhotos.beforePhotoUrl,
-        description: galleryPhotos.description,
-        serviceName: services.name,
-      })
-      .from(galleryPhotos)
-      .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-      .where(eq(galleryPhotos.salonId, salonId))
-      .orderBy(desc(galleryPhotos.createdAt))
-      .limit(MAX_PHOTOS);
+    const photos = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          id: galleryPhotos.id,
+          afterPhotoUrl: galleryPhotos.afterPhotoUrl,
+          beforePhotoUrl: galleryPhotos.beforePhotoUrl,
+          description: galleryPhotos.description,
+          serviceName: services.name,
+        })
+        .from(galleryPhotos)
+        .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
+        .where(eq(galleryPhotos.salonId, salonId))
+        .orderBy(desc(galleryPhotos.createdAt))
+        .limit(MAX_PHOTOS)
+    );
 
     // Only return photos that have at least one image URL
     const withImages = photos.filter(
