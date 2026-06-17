@@ -1,0 +1,14 @@
+# Override dla testów integracyjnych izolacji salonów.
+# Mapuje lokalnego Postgresa z docker-compose.yml na port hosta 5440,
+# żeby ominąć kolizję z innym (natywnym) Postgresem czasem nasłuchującym
+# na 5432 na maszynie dewelopera (klasyczna pułapka portu Win/Mac).
+#
+# Użycie:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+#
+# DSN testowy wskazuje wtedy na localhost:5440 (NADAL localhost — baza
+# lokalna i efemeryczna, zero kontaktu z produkcją).
+services:
+  postgres:
+    ports:
+      - "5440:5432"
