@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { reviews, clients, employees, services, appointments } from "@/lib/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
@@ -132,7 +132,8 @@ export async function GET(_request: Request) {
     // Query negative reviews (rating <= 3) from the last 30 days,
     // joining with clients, employees, services, and appointments
     // to provide full context for each alert.
-    const negativeReviews = await db
+    const negativeReviews = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         reviewId: reviews.id,
         rating: reviews.rating,
@@ -158,9 +159,11 @@ export async function GET(_request: Request) {
         )
       )
       .orderBy(desc(reviews.createdAt))
-      .limit(5);
+      .limit(5)
+    );
 
-    const totalNegativeReviewsResult = await db
+    const totalNegativeReviewsResult = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         reviewId: reviews.id,
       })
@@ -171,7 +174,8 @@ export async function GET(_request: Request) {
           lte(reviews.rating, 3),
           gte(reviews.createdAt, thirtyDaysAgo)
         )
-      );
+      )
+    );
 
     const totalNegativeReviews = totalNegativeReviewsResult.length;
 

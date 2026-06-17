@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { forSalon } from "@/lib/server/repository";
 import {
   appointments,
   clients,
@@ -108,9 +108,9 @@ export async function GET(_request: Request) {
       activePromotions,
       totalClients,
       inactiveClients,
-    ] = await Promise.all([
+    ] = await forSalon(salonId).raw((tx) => Promise.all([
       // Appointments for the upcoming week with full details
-      db
+      tx
         .select({
           appointmentId: appointments.id,
           startTime: appointments.startTime,
@@ -141,7 +141,7 @@ export async function GET(_request: Request) {
         .orderBy(asc(appointments.startTime)),
 
       // Previous week appointment count for comparison
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -155,7 +155,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Time blocks (vacations, breaks) for the upcoming week
-      db
+      tx
         .select({
           employeeId: timeBlocks.employeeId,
           startTime: timeBlocks.startTime,
@@ -176,7 +176,7 @@ export async function GET(_request: Request) {
         ),
 
       // All active employees
-      db
+      tx
         .select({
           id: employees.id,
           firstName: employees.firstName,
@@ -191,7 +191,7 @@ export async function GET(_request: Request) {
         ),
 
       // Work schedules for all days
-      db
+      tx
         .select({
           employeeId: workSchedules.employeeId,
           dayOfWeek: workSchedules.dayOfWeek,
@@ -203,7 +203,7 @@ export async function GET(_request: Request) {
         .where(eq(employees.salonId, salonId)),
 
       // Low stock products
-      db
+      tx
         .select({
           name: products.name,
           quantity: products.quantity,
@@ -220,7 +220,7 @@ export async function GET(_request: Request) {
         .limit(10),
 
       // Average rating
-      db
+      tx
         .select({
           avg: sql<string>`COALESCE(AVG(${reviews.rating}), 0)`,
           count: count(),
@@ -238,7 +238,7 @@ export async function GET(_request: Request) {
         })),
 
       // Cancellations last 30 days
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -251,7 +251,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Revenue from completed appointments (last 30 days)
-      db
+      tx
         .select({
           total: sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric)), 0)`,
         })
@@ -268,7 +268,7 @@ export async function GET(_request: Request) {
         .then((r) => parseFloat(r[0]?.total ?? "0")),
 
       // Revenue from previous 30-day period (for trend)
-      db
+      tx
         .select({
           total: sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric)), 0)`,
         })
@@ -288,7 +288,7 @@ export async function GET(_request: Request) {
         .then((r) => parseFloat(r[0]?.total ?? "0")),
 
       // Top services last 30 days
-      db
+      tx
         .select({
           serviceName: services.name,
           count: count(),
@@ -307,7 +307,7 @@ export async function GET(_request: Request) {
         .limit(5),
 
       // Active promotions
-      db
+      tx
         .select({
           id: promotions.id,
           name: promotions.name,
@@ -326,14 +326,14 @@ export async function GET(_request: Request) {
         .limit(5),
 
       // Total clients count
-      db
+      tx
         .select({ count: count() })
         .from(clients)
         .where(eq(clients.salonId, salonId))
         .then((r) => r[0]?.count ?? 0),
 
       // Inactive clients (no appointment in 60 days)
-      db
+      tx
         .select({ count: count() })
         .from(clients)
         .where(
@@ -349,7 +349,7 @@ export async function GET(_request: Request) {
           )
         )
         .then((r) => r[0]?.count ?? 0),
-    ]);
+    ]));
 
     // ────────────────────────────────────────────────────────────
     // Analyze weekly data
