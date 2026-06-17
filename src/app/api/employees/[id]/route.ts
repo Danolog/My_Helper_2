@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { employees, employeeServices } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { validateBody, updateEmployeeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/employees/[id] - Get single employee with assigned services
@@ -26,10 +26,7 @@ export async function GET(
 
     const { id } = await params;
 
-    const [employee] = await db
-      .select()
-      .from(employees)
-      .where(and(eq(employees.id, id), eq(employees.salonId, salonId)));
+    const employee = await forSalon(salonId).findOne(employees, id);
 
     if (!employee) {
       return NextResponse.json(
@@ -38,10 +35,14 @@ export async function GET(
       );
     }
 
-    const assignedServices = await db
-      .select({ serviceId: employeeServices.serviceId })
-      .from(employeeServices)
-      .where(eq(employeeServices.employeeId, id));
+    // employeeServices jest salon-scoped POSREDNIO (przez employees.salon_id) —
+    // czytamy w kontekscie RLS przez raw; wlasciciel juz zweryfikowany powyzej.
+    const assignedServices = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ serviceId: employeeServices.serviceId })
+        .from(employeeServices)
+        .where(eq(employeeServices.employeeId, id))
+    );
 
     return NextResponse.json({
       success: true,
@@ -104,10 +105,7 @@ export async function PUT(
     }
 
     // Check employee exists in the caller's salon
-    const [existing] = await db
-      .select()
-      .from(employees)
-      .where(and(eq(employees.id, id), eq(employees.salonId, salonId)));
+    const existing = await forSalon(salonId).findOne(employees, id);
 
     if (!existing) {
       return NextResponse.json(
@@ -116,38 +114,43 @@ export async function PUT(
       );
     }
 
-    // Update employee
-    const [updated] = await db
-      .update(employees)
-      .set({
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: email?.trim() || null,
-        phone: phone?.trim() || null,
-        role: role || existing.role,
-        isActive: typeof isActive === "boolean" ? isActive : existing.isActive,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(employees.id, id), eq(employees.salonId, salonId)))
-      .returning();
+    // Aktualizacja pracownika + przypisan uslug atomowo w jednej transakcji
+    // z kontekstem RLS (employeeServices salon-scoped posrednio przez employees).
+    const updated = await forSalon(salonId).raw(async (tx) => {
+      const [row] = await tx
+        .update(employees)
+        .set({
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          email: email?.trim() || null,
+          phone: phone?.trim() || null,
+          role: role || existing.role,
+          isActive: typeof isActive === "boolean" ? isActive : existing.isActive,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(employees.id, id), eq(employees.salonId, salonId)))
+        .returning();
 
-    // Update service assignments if provided
-    if (Array.isArray(serviceIds)) {
-      // Remove all existing assignments
-      await db
-        .delete(employeeServices)
-        .where(eq(employeeServices.employeeId, id));
+      // Update service assignments if provided
+      if (Array.isArray(serviceIds)) {
+        // Remove all existing assignments
+        await tx
+          .delete(employeeServices)
+          .where(eq(employeeServices.employeeId, id));
 
-      // Insert new assignments
-      if (serviceIds.length > 0) {
-        await db.insert(employeeServices).values(
-          serviceIds.map((serviceId: string) => ({
-            employeeId: id,
-            serviceId,
-          }))
-        );
+        // Insert new assignments
+        if (serviceIds.length > 0) {
+          await tx.insert(employeeServices).values(
+            serviceIds.map((serviceId: string) => ({
+              employeeId: id,
+              serviceId,
+            }))
+          );
+        }
       }
-    }
+
+      return row;
+    });
 
     return NextResponse.json({ success: true, data: updated });
   } catch (error) {

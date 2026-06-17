@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { loyaltyPoints, loyaltyTransactions } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -35,16 +35,18 @@ export async function GET(
     }
 
     // Get loyalty points record
-    const [loyaltyRecord] = await db
-      .select()
-      .from(loyaltyPoints)
-      .where(
-        and(
-          eq(loyaltyPoints.clientId, clientId),
-          eq(loyaltyPoints.salonId, salonId)
+    const [loyaltyRecord] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(loyaltyPoints)
+        .where(
+          and(
+            eq(loyaltyPoints.clientId, clientId),
+            eq(loyaltyPoints.salonId, salonId)
+          )
         )
-      )
-      .limit(1);
+        .limit(1)
+    );
 
     if (!loyaltyRecord) {
       return NextResponse.json({
@@ -60,13 +62,15 @@ export async function GET(
       });
     }
 
-    // Get transaction history
-    const transactions = await db
-      .select()
-      .from(loyaltyTransactions)
-      .where(eq(loyaltyTransactions.loyaltyId, loyaltyRecord.id))
-      .orderBy(desc(loyaltyTransactions.createdAt))
-      .limit(limit);
+    // Get transaction history (loyaltyTransactions salon-scoped posrednio przez loyaltyPoints)
+    const transactions = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(loyaltyTransactions)
+        .where(eq(loyaltyTransactions.loyaltyId, loyaltyRecord.id))
+        .orderBy(desc(loyaltyTransactions.createdAt))
+        .limit(limit)
+    );
 
     return NextResponse.json({
       success: true,

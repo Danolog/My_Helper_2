@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, updatePromoCodeSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/promo-codes/:id - Get a single promo code with joined promotion data
@@ -26,15 +26,17 @@ export async function GET(
 
     const { id } = await params;
 
-    const [result] = await db
-      .select({
-        promoCode: promoCodes,
-        promotion: promotions,
-      })
-      .from(promoCodes)
-      .leftJoin(promotions, eq(promoCodes.promotionId, promotions.id))
-      .where(and(eq(promoCodes.id, id), eq(promoCodes.salonId, salonId)))
-      .limit(1);
+    const [result] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          promoCode: promoCodes,
+          promotion: promotions,
+        })
+        .from(promoCodes)
+        .leftJoin(promotions, eq(promoCodes.promotionId, promotions.id))
+        .where(and(eq(promoCodes.id, id), eq(promoCodes.salonId, salonId)))
+        .limit(1)
+    );
 
     if (!result) {
       return NextResponse.json(
@@ -85,11 +87,7 @@ export async function PUT(
     const { code, promotionId, usageLimit, expiresAt } = body;
 
     // Check that the promo code exists in the caller's salon
-    const [existing] = await db
-      .select()
-      .from(promoCodes)
-      .where(and(eq(promoCodes.id, id), eq(promoCodes.salonId, salonId)))
-      .limit(1);
+    const existing = await forSalon(salonId).findOne(promoCodes, id);
 
     if (!existing) {
       return NextResponse.json(
@@ -113,16 +111,18 @@ export async function PUT(
 
       // Check uniqueness within the salon (excluding the current record)
       if (normalizedCode !== existing.code) {
-        const [duplicate] = await db
-          .select()
-          .from(promoCodes)
-          .where(
-            and(
-              eq(promoCodes.salonId, existing.salonId),
-              eq(promoCodes.code, normalizedCode)
+        const [duplicate] = await forSalon(salonId).raw((tx) =>
+          tx
+            .select()
+            .from(promoCodes)
+            .where(
+              and(
+                eq(promoCodes.salonId, existing.salonId),
+                eq(promoCodes.code, normalizedCode)
+              )
             )
-          )
-          .limit(1);
+            .limit(1)
+        );
 
         if (duplicate && duplicate.id !== id) {
           return NextResponse.json(
@@ -141,16 +141,18 @@ export async function PUT(
         updateData.promotionId = null;
       } else {
         // Validate that the promotion exists and belongs to the same salon
-        const [promotion] = await db
-          .select()
-          .from(promotions)
-          .where(
-            and(
-              eq(promotions.id, promotionId),
-              eq(promotions.salonId, existing.salonId)
+        const [promotion] = await forSalon(salonId).raw((tx) =>
+          tx
+            .select()
+            .from(promotions)
+            .where(
+              and(
+                eq(promotions.id, promotionId),
+                eq(promotions.salonId, existing.salonId)
+              )
             )
-          )
-          .limit(1);
+            .limit(1)
+        );
 
         if (!promotion) {
           return NextResponse.json(
@@ -178,11 +180,7 @@ export async function PUT(
       );
     }
 
-    const [updated] = await db
-      .update(promoCodes)
-      .set(updateData)
-      .where(and(eq(promoCodes.id, id), eq(promoCodes.salonId, salonId)))
-      .returning();
+    const updated = await forSalon(salonId).updateOwned(promoCodes, id, updateData);
 
     if (!updated) {
       return NextResponse.json(
@@ -225,10 +223,7 @@ export async function DELETE(
 
     const { id } = await params;
 
-    const [deleted] = await db
-      .delete(promoCodes)
-      .where(and(eq(promoCodes.id, id), eq(promoCodes.salonId, salonId)))
-      .returning();
+    const deleted = await forSalon(salonId).deleteOwned(promoCodes, id);
 
     if (!deleted) {
       return NextResponse.json(
