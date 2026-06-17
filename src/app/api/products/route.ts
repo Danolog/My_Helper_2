@@ -5,6 +5,7 @@ import { eq, and, like, sql } from "drizzle-orm";
 import { validateBody, createProductSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -133,7 +134,8 @@ export async function POST(request: Request) {
 
     const { salonId, name, category, quantity, minQuantity, unit, pricePerUnit } = body;
 
-    const [newProduct] = await db
+    const [newProduct] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(products)
       .values({
         salonId,
@@ -144,7 +146,8 @@ export async function POST(request: Request) {
         unit: unit || null,
         pricePerUnit: pricePerUnit?.toString() || null,
       })
-      .returning();
+      .returning()
+    );
 
     if (!newProduct) {
       return NextResponse.json(

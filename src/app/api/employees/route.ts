@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { validateBody, createEmployeeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // Predefined palette of distinct colors for employees
@@ -139,7 +140,8 @@ export async function POST(request: Request) {
     const employeeColor = color || await getNextAvailableColor(salonId);
 
     logger.info(`[Employees API] Creating employee: ${firstName} ${lastName} with color ${employeeColor}`);
-    const [newEmployee] = await db
+    const [newEmployee] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(employees)
       .values({
         salonId,
@@ -153,7 +155,8 @@ export async function POST(request: Request) {
         color: employeeColor,
         isActive: true,
       })
-      .returning();
+      .returning()
+    );
 
     logger.info(`[Employees API] Created employee with id: ${newEmployee?.id}`);
 

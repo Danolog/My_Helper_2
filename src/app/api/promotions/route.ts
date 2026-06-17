@@ -5,6 +5,7 @@ import { eq, desc } from "drizzle-orm";
 import { validateBody, createPromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/promotions - List promotions with optional salonId filter
@@ -167,7 +168,8 @@ export async function POST(request: Request) {
       conditions.applicableServiceIds = body.applicableServiceIds;
     }
 
-    const [newPromotion] = await db
+    const [newPromotion] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(promotions)
       .values({
         salonId,
@@ -179,7 +181,8 @@ export async function POST(request: Request) {
         conditionsJson: conditions,
         isActive: isActive !== undefined ? isActive : true,
       })
-      .returning();
+      .returning()
+    );
 
     if (!newPromotion) {
       return NextResponse.json(

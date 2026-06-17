@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { validateBody, createServiceSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/services - List all services
@@ -85,7 +86,8 @@ export async function POST(request: Request) {
     const parsedDuration = parseInt(baseDuration, 10);
 
     logger.info(`[Services API] Creating service: ${name}`);
-    const [newService] = await db
+    const [newService] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(services)
       .values({
         salonId,
@@ -96,7 +98,8 @@ export async function POST(request: Request) {
         baseDuration: parsedDuration,
         isActive: true,
       })
-      .returning();
+      .returning()
+    );
 
     logger.info(`[Services API] Created service with id: ${newService?.id}`);
 
