@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { isProPlan } from "@/lib/subscription";
-import { db } from "@/lib/db";
-import { aiConversations } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { aiConversations } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isProPlan } from "@/lib/subscription";
 /**
  * GET /api/ai/voice/call-log
  * Returns recent voice AI call logs for the salon.
@@ -29,21 +28,23 @@ export async function GET() {
   }
 
   try {
-    const logs = await db
-      .select({
-        id: aiConversations.id,
-        transcript: aiConversations.transcript,
-        createdAt: aiConversations.createdAt,
-      })
-      .from(aiConversations)
-      .where(
-        and(
-          eq(aiConversations.salonId, salonId),
-          eq(aiConversations.channel, "voice")
+    const logs = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          id: aiConversations.id,
+          transcript: aiConversations.transcript,
+          createdAt: aiConversations.createdAt,
+        })
+        .from(aiConversations)
+        .where(
+          and(
+            eq(aiConversations.salonId, salonId),
+            eq(aiConversations.channel, "voice")
+          )
         )
-      )
-      .orderBy(desc(aiConversations.createdAt))
-      .limit(20);
+        .orderBy(desc(aiConversations.createdAt))
+        .limit(20)
+    );
 
     const formattedLogs = logs.map((log) => {
       let parsed: Record<string, unknown> = {};

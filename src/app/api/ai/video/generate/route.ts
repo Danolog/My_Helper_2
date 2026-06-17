@@ -8,9 +8,9 @@ import {
   isProAIError,
   getSalonContext,
 } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { aiGeneratedMedia } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 // ────────────────────────────────────────────────────────────
 // Request validation
@@ -89,22 +89,24 @@ export async function POST(req: Request) {
     });
 
     // Persist the task to the DB for status tracking
-    const rows = await db
-      .insert(aiGeneratedMedia)
-      .values({
-        salonId,
-        type: "video",
-        provider: "google_veo",
-        prompt: finalPrompt,
-        status: "processing",
-        taskId: operationName,
-        metadata: {
-          aspectRatio,
-          duration: durationSeconds,
-          originalPrompt: prompt,
-        },
-      })
-      .returning();
+    const rows = await forSalon(salonId).raw((tx) =>
+      tx
+        .insert(aiGeneratedMedia)
+        .values({
+          salonId,
+          type: "video",
+          provider: "google_veo",
+          prompt: finalPrompt,
+          status: "processing",
+          taskId: operationName,
+          metadata: {
+            aspectRatio,
+            duration: durationSeconds,
+            originalPrompt: prompt,
+          },
+        })
+        .returning()
+    );
 
     const media = rows[0];
     if (!media) {

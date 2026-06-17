@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { aiConversations } from "@/lib/schema";
-import { isProPlan } from "@/lib/subscription";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { voiceMessageSchema, validateBody } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { aiConversations } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isProPlan } from "@/lib/subscription";
 
 /**
  * POST /api/ai/voice/message
@@ -54,22 +53,24 @@ export async function POST(req: Request) {
     const randomPart = Math.floor(1000 + Math.random() * 9000).toString();
     const referenceNumber = `MSG-${datePart}-${randomPart}`;
 
-    const conversationRows = await db
-      .insert(aiConversations)
-      .values({
-        salonId: salonId,
-        channel: "voice",
-        transcript: JSON.stringify({
-          type: "message_taken",
-          callerPhone: body.callerPhone,
-          callerName: body.callerName || null,
-          message: body.message,
-          referenceNumber,
-          linkedConversationId: body.conversationId || null,
-          timestamp: now.toISOString(),
-        }),
-      })
-      .returning();
+    const conversationRows = await forSalon(salonId).raw((tx) =>
+      tx
+        .insert(aiConversations)
+        .values({
+          salonId: salonId,
+          channel: "voice",
+          transcript: JSON.stringify({
+            type: "message_taken",
+            callerPhone: body.callerPhone,
+            callerName: body.callerName || null,
+            message: body.message,
+            referenceNumber,
+            linkedConversationId: body.conversationId || null,
+            timestamp: now.toISOString(),
+          }),
+        })
+        .returning()
+    );
 
     const conversation = conversationRows[0];
 
