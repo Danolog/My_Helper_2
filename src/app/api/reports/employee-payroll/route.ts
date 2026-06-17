@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import {
   appointments,
   services,
@@ -9,6 +8,7 @@ import {
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/reports/employee-payroll - Employee payroll report with hours, commissions, and service breakdown
@@ -55,7 +55,8 @@ export async function GET(request: Request) {
     }
 
     // Get all completed appointments with service, employee, and commission details
-    const completedAppointments = await db
+    const completedAppointments = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         appointmentId: appointments.id,
         startTime: appointments.startTime,
@@ -79,7 +80,8 @@ export async function GET(request: Request) {
         employeeCommissions,
         eq(appointments.id, employeeCommissions.appointmentId)
       )
-      .where(and(...conditions));
+      .where(and(...conditions))
+    );
 
     // Build per-employee payroll data
     const employeePayroll: Record<
