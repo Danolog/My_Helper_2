@@ -171,6 +171,12 @@ vi.mock("@/lib/auth-middleware", () => ({
   isAuthError: vi.fn().mockReturnValue(false),
 }));
 
+// Tenant isolation (P0-A): GET routes resolve the salon from the session.
+vi.mock("@/lib/get-user-salon", () => ({
+  getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
+  getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
+}));
+
 // -------------------------------------------------------
 // Helper to build a chainable mock with specific result
 // -------------------------------------------------------
@@ -203,6 +209,11 @@ import {
   PUT as updateAppointment,
   DELETE as deleteAppointment,
 } from "@/app/api/appointments/[id]/route";
+
+// Mocked tenant resolver — referenced directly so cross-tenant tests can
+// flip the resolved salon (simulate "the caller has no salon" / wrong tenant).
+import { getUserSalonId } from "@/lib/get-user-salon";
+const mockGetUserSalonId = vi.mocked(getUserSalonId);
 
 // -------------------------------------------------------
 // Tests
@@ -267,14 +278,19 @@ describe("GET /api/appointments", () => {
     expect(body.error).toContain("Invalid endDate format");
   });
 
-  it("should return 400 for invalid salonId UUID", async () => {
+  it("should ignore a client-supplied salonId and scope by the session salon (P0-A)", async () => {
+    // After the tenant-isolation fix the route derives the salon from the
+    // session and ignores any salonId in the query string. A bogus query
+    // salonId must NOT cause a 400 nor leak another salon's data.
+    mockDbSelect.mockReturnValue(chainMock([]));
+
     const request = createMockRequest("http://localhost:3000/api/appointments?salonId=not-uuid");
     const response = await listAppointments(request);
     const { status, body } = await parseResponse(response);
 
-    expect(status).toBe(400);
-    expect(body.success).toBe(false);
-    expect(body.error).toContain("Invalid salonId format");
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveLength(0);
   });
 
   it("should return 400 for invalid employeeId UUID", async () => {
@@ -1449,5 +1465,110 @@ describe("DELETE /api/appointments/[id]", () => {
     expect(status).toBe(500);
     expect(body.success).toBe(false);
     expect(body.error).toContain("Failed to cancel appointment");
+  });
+});
+
+// =======================================================
+// P0-A · Tenant isolation regression (IDOR)
+//
+// These are the regression witnesses for the cross-tenant fix:
+//   - the salon is ALWAYS derived from the session (getUserSalonId),
+//   - when the caller has no salon the [id] routes refuse to query (404),
+//   - a record from another salon is invisible (db WHERE scopes by salonId,
+//     so a foreign record resolves to empty -> 404 "not found").
+// Without the fix these routes filtered only by record id and leaked/mutated
+// data across salons.
+// =======================================================
+describe("P0-A tenant isolation — /api/appointments/[id]", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: caller belongs to SALON_UUID.
+    mockGetUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
+  });
+
+  it("GET resolves the salon from the session, not from the request", async () => {
+    mockDbSelect.mockReturnValue(chainMock([{ appointment: makeAppointment(), client: null, employee: null, service: null }]));
+
+    const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`);
+    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
+    await getAppointment(request, params);
+
+    // The route must derive the tenant server-side.
+    expect(mockGetUserSalonId).toHaveBeenCalled();
+  });
+
+  it("GET returns 404 when the caller has no salon (unresolved tenant) and never queries", async () => {
+    mockGetUserSalonId.mockResolvedValue(null);
+
+    const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`);
+    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
+    const response = await getAppointment(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Salon not found");
+    // Hard guard: no DB read happens before the tenant is known.
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it("GET returns 404 for an appointment owned by another salon (foreign record invisible)", async () => {
+    // Caller is SALON_UUID; the scoped WHERE (id AND salonId) matches nothing
+    // because the appointment belongs to a different salon.
+    mockDbSelect.mockReturnValue(chainMock([]));
+
+    const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`);
+    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
+    const response = await getAppointment(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(mockGetUserSalonId).toHaveBeenCalled();
+  });
+
+  it("PUT returns 404 for an appointment owned by another salon (no cross-tenant mutation)", async () => {
+    // Existing-check select returns empty -> foreign appointment, refuse update.
+    mockDbSelect.mockReturnValue(chainMock([]));
+
+    const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+      method: "PUT",
+      body: { notes: "updated" },
+    });
+    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
+    const response = await updateAppointment(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    // The update must never run for a foreign record.
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("DELETE returns 404 for an appointment owned by another salon (no cross-tenant delete)", async () => {
+    // The scoped fetch returns empty -> foreign appointment.
+    mockDbSelect.mockReturnValue(chainMock([]));
+
+    const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`);
+    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
+    const response = await deleteAppointment(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(mockGetUserSalonId).toHaveBeenCalled();
+  });
+
+  it("DELETE returns 404 when the caller has no salon", async () => {
+    mockGetUserSalonId.mockResolvedValue(null);
+
+    const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`);
+    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
+    const response = await deleteAppointment(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Salon not found");
   });
 });

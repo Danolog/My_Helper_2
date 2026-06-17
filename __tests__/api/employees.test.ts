@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   createMockRequest,
+  createRouteParams,
   parseResponse,
   makeEmployee,
   TEST_IDS,
@@ -53,6 +54,12 @@ vi.mock("@/lib/auth-middleware", () => ({
   isAuthError: vi.fn().mockReturnValue(false),
 }));
 
+// Tenant isolation (P0-A): scoped routes resolve the salon from the session.
+vi.mock("@/lib/get-user-salon", () => ({
+  getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
+  getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
+}));
+
 // -------------------------------------------------------
 // Chain builder
 // -------------------------------------------------------
@@ -77,6 +84,11 @@ function chainMock(result: unknown[] = []) {
 // -------------------------------------------------------
 
 import { GET as listEmployees, POST as createEmployee } from "@/app/api/employees/route";
+import { GET as getEmployee, PUT as updateEmployee } from "@/app/api/employees/[id]/route";
+
+// Mocked tenant resolver — flip it to simulate "no salon" / wrong tenant.
+import { getUserSalonId } from "@/lib/get-user-salon";
+const mockGetUserSalonId = vi.mocked(getUserSalonId);
 
 // -------------------------------------------------------
 // Tests
@@ -362,5 +374,62 @@ describe("POST /api/employees", () => {
     expect(status).toBe(201);
     expect(body.success).toBe(true);
     expect((body as any).data.color).toBe("#3b82f6");
+  });
+});
+
+// =======================================================
+// P0-A · Tenant isolation regression (IDOR) — employees/[id]
+// The salon is derived from the session; a foreign-salon record is invisible
+// (scoped WHERE -> empty -> 404), and a caller without a salon never queries.
+// =======================================================
+describe("P0-A tenant isolation — /api/employees/[id]", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
+  });
+
+  it("GET returns 404 when the caller has no salon and never queries", async () => {
+    mockGetUserSalonId.mockResolvedValue(null);
+
+    const request = createMockRequest(`http://localhost:3000/api/employees/${TEST_IDS.EMPLOYEE_UUID}`);
+    const params = createRouteParams(TEST_IDS.EMPLOYEE_UUID);
+    const response = await getEmployee(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Salon not found");
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it("GET returns 404 for an employee owned by another salon (foreign record invisible)", async () => {
+    mockDbSelect.mockReturnValue(chainMock([]));
+
+    const request = createMockRequest(`http://localhost:3000/api/employees/${TEST_IDS.EMPLOYEE_UUID}`);
+    const params = createRouteParams(TEST_IDS.EMPLOYEE_UUID);
+    const response = await getEmployee(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(mockGetUserSalonId).toHaveBeenCalled();
+  });
+
+  it("PUT returns 404 for an employee owned by another salon (no cross-tenant mutation)", async () => {
+    // The scoped existence check returns empty -> the employee belongs to
+    // another salon, so the update is refused with 404.
+    mockDbSelect.mockReturnValue(chainMock([]));
+
+    const request = createMockRequest(`http://localhost:3000/api/employees/${TEST_IDS.EMPLOYEE_UUID}`, {
+      method: "PUT",
+      body: { firstName: "X" },
+    });
+    const params = createRouteParams(TEST_IDS.EMPLOYEE_UUID);
+    const response = await updateEmployee(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(mockGetUserSalonId).toHaveBeenCalled();
   });
 });
