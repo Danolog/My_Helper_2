@@ -1,9 +1,8 @@
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isProPlan } from "@/lib/subscription";
-import { db } from "@/lib/db";
 import { scheduledPosts } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET - Get a single scheduled post by ID
@@ -22,12 +21,7 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const [post] = await db
-      .select()
-      .from(scheduledPosts)
-      .where(
-        and(eq(scheduledPosts.id, id), eq(scheduledPosts.salonId, salonId))
-      );
+    const post = await forSalon(salonId).findOne(scheduledPosts, id);
 
     if (!post) {
       return Response.json({ error: "Post not found" }, { status: 404 });
@@ -64,12 +58,7 @@ export async function DELETE(
   const { id } = await params;
 
   try {
-    const [post] = await db
-      .select()
-      .from(scheduledPosts)
-      .where(
-        and(eq(scheduledPosts.id, id), eq(scheduledPosts.salonId, salonId))
-      );
+    const post = await forSalon(salonId).findOne(scheduledPosts, id);
 
     if (!post) {
       return Response.json({ error: "Post not found" }, { status: 404 });
@@ -82,14 +71,10 @@ export async function DELETE(
       );
     }
 
-    const [updated] = await db
-      .update(scheduledPosts)
-      .set({
-        status: "cancelled",
-        cancelledAt: new Date(),
-      })
-      .where(eq(scheduledPosts.id, id))
-      .returning();
+    const updated = await forSalon(salonId).updateOwned(scheduledPosts, id, {
+      status: "cancelled",
+      cancelledAt: new Date(),
+    });
 
     return Response.json({ success: true, post: updated });
   } catch (error) {

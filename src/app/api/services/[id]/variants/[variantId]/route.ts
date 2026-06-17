@@ -1,18 +1,14 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { serviceVariants, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, updateServiceVariantSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 /** Verify the service belongs to the caller's salon. */
 async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {
-  const [service] = await db
-    .select({ id: services.id })
-    .from(services)
-    .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
-    .limit(1);
+  const service = await forSalon(salonId).findOne(services, serviceId);
   return !!service;
 }
 
@@ -54,16 +50,18 @@ export async function PUT(
     if (priceModifier !== undefined) updateData.priceModifier = priceModifier.toString();
     if (durationModifier !== undefined) updateData.durationModifier = parseInt(durationModifier, 10);
 
-    const [updated] = await db
-      .update(serviceVariants)
-      .set(updateData)
-      .where(
-        and(
-          eq(serviceVariants.id, variantId),
-          eq(serviceVariants.serviceId, id)
+    const [updated] = await forSalon(salonId).raw((tx) =>
+      tx
+        .update(serviceVariants)
+        .set(updateData)
+        .where(
+          and(
+            eq(serviceVariants.id, variantId),
+            eq(serviceVariants.serviceId, id)
+          )
         )
-      )
-      .returning();
+        .returning()
+    );
 
     if (!updated) {
       return NextResponse.json(
@@ -111,15 +109,17 @@ export async function DELETE(
       );
     }
 
-    const [deleted] = await db
-      .delete(serviceVariants)
-      .where(
-        and(
-          eq(serviceVariants.id, variantId),
-          eq(serviceVariants.serviceId, id)
+    const [deleted] = await forSalon(salonId).raw((tx) =>
+      tx
+        .delete(serviceVariants)
+        .where(
+          and(
+            eq(serviceVariants.id, variantId),
+            eq(serviceVariants.serviceId, id)
+          )
         )
-      )
-      .returning();
+        .returning()
+    );
 
     if (!deleted) {
       return NextResponse.json(

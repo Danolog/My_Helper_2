@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { albums, photoAlbums, galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, albumPhotosSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/albums/[id]/photos - Get all photos in an album
@@ -27,10 +27,7 @@ export async function GET(
     const { id } = await params;
 
     // Verify album exists in the caller's salon
-    const [album] = await db
-      .select()
-      .from(albums)
-      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)));
+    const album = await forSalon(salonId).findOne(albums, id);
 
     if (!album) {
       return NextResponse.json(
@@ -39,8 +36,9 @@ export async function GET(
       );
     }
 
-    // Get photos in this album with metadata
-    const photos = await db
+    // Get photos in this album with metadata (tabele salon-scoped — RLS w kontekscie)
+    const photos = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: galleryPhotos.id,
         salonId: galleryPhotos.salonId,
@@ -64,7 +62,8 @@ export async function GET(
       .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
       .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
       .where(eq(photoAlbums.albumId, id))
-      .orderBy(desc(galleryPhotos.createdAt));
+      .orderBy(desc(galleryPhotos.createdAt))
+    );
 
     logger.info(`[Albums API] GET photos: ${photos.length} photos in album "${album.name}"`);
 
@@ -113,10 +112,7 @@ export async function POST(
     const { photoIds } = body;
 
     // Verify album exists in the caller's salon
-    const [album] = await db
-      .select()
-      .from(albums)
-      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)));
+    const album = await forSalon(salonId).findOne(albums, id);
 
     if (!album) {
       return NextResponse.json(
@@ -125,22 +121,36 @@ export async function POST(
       );
     }
 
-    // Only allow photos that belong to the caller's salon
-    const ownedPhotos = await db
-      .select({ id: galleryPhotos.id })
-      .from(galleryPhotos)
-      .where(and(eq(galleryPhotos.salonId, salonId)));
-    const ownedPhotoIds = new Set(ownedPhotos.map((p) => p.id));
-    const requestedOwned = (photoIds as string[]).filter((pid) => ownedPhotoIds.has(pid));
+    // Walidacja wlasnosci zdjec + dedup + insert atomowo w jednej transakcji RLS.
+    const newPhotoIds = await forSalon(salonId).raw(async (tx) => {
+      // Only allow photos that belong to the caller's salon
+      const ownedPhotos = await tx
+        .select({ id: galleryPhotos.id })
+        .from(galleryPhotos)
+        .where(and(eq(galleryPhotos.salonId, salonId)));
+      const ownedPhotoIds = new Set(ownedPhotos.map((p) => p.id));
+      const requestedOwned = (photoIds as string[]).filter((pid) => ownedPhotoIds.has(pid));
 
-    // Check which photos are already in the album to avoid duplicates
-    const existing = await db
-      .select({ photoId: photoAlbums.photoId })
-      .from(photoAlbums)
-      .where(eq(photoAlbums.albumId, id));
+      // Check which photos are already in the album to avoid duplicates
+      const existing = await tx
+        .select({ photoId: photoAlbums.photoId })
+        .from(photoAlbums)
+        .where(eq(photoAlbums.albumId, id));
 
-    const existingIds = new Set(existing.map((e) => e.photoId));
-    const newPhotoIds = requestedOwned.filter((pid: string) => !existingIds.has(pid));
+      const existingIds = new Set(existing.map((e) => e.photoId));
+      const toAdd = requestedOwned.filter((pid: string) => !existingIds.has(pid));
+
+      if (toAdd.length > 0) {
+        // Insert photo-album associations
+        const values = toAdd.map((photoId: string) => ({
+          photoId,
+          albumId: id,
+        }));
+        await tx.insert(photoAlbums).values(values);
+      }
+
+      return toAdd;
+    });
 
     if (newPhotoIds.length === 0) {
       return NextResponse.json({
@@ -149,14 +159,6 @@ export async function POST(
         added: 0,
       });
     }
-
-    // Insert photo-album associations
-    const values = newPhotoIds.map((photoId: string) => ({
-      photoId,
-      albumId: id,
-    }));
-
-    await db.insert(photoAlbums).values(values);
 
     logger.info(`[Albums API] Added ${newPhotoIds.length} photos to album "${album.name}"`);
 
@@ -206,11 +208,7 @@ export async function DELETE(
     }
 
     // Verify the album belongs to the caller's salon
-    const [album] = await db
-      .select({ id: albums.id })
-      .from(albums)
-      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)))
-      .limit(1);
+    const album = await forSalon(salonId).findOne(albums, id);
     if (!album) {
       return NextResponse.json(
         { success: false, error: "Album not found" },
@@ -218,16 +216,18 @@ export async function DELETE(
       );
     }
 
-    // Delete the photo-album association
-    const deleted = await db
-      .delete(photoAlbums)
-      .where(
-        and(
-          eq(photoAlbums.albumId, id),
-          eq(photoAlbums.photoId, photoId)
+    // Delete the photo-album association (photoAlbums salon-scoped posrednio — RLS w kontekscie)
+    const deleted = await forSalon(salonId).raw((tx) =>
+      tx
+        .delete(photoAlbums)
+        .where(
+          and(
+            eq(photoAlbums.albumId, id),
+            eq(photoAlbums.photoId, photoId)
+          )
         )
-      )
-      .returning();
+        .returning()
+    );
 
     if (deleted.length === 0) {
       return NextResponse.json(

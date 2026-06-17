@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { services, serviceCategories, serviceVariants } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { validateBody, updateServiceSchema } from "@/lib/api-validation";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/services/[id] - Get a single service with its variants
@@ -34,14 +34,16 @@ export async function GET(
       );
     }
 
-    const [serviceRow] = await db
-      .select({
-        service: services,
-        category: serviceCategories,
-      })
-      .from(services)
-      .leftJoin(serviceCategories, eq(services.categoryId, serviceCategories.id))
-      .where(and(eq(services.id, id), eq(services.salonId, salonId)));
+    const [serviceRow] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          service: services,
+          category: serviceCategories,
+        })
+        .from(services)
+        .leftJoin(serviceCategories, eq(services.categoryId, serviceCategories.id))
+        .where(and(eq(services.id, id), eq(services.salonId, salonId)))
+    );
 
     if (!serviceRow) {
       return NextResponse.json(
@@ -50,11 +52,13 @@ export async function GET(
       );
     }
 
-    // Fetch variants for this service
-    const variants = await db
-      .select()
-      .from(serviceVariants)
-      .where(eq(serviceVariants.serviceId, id));
+    // Fetch variants for this service (serviceVariants salon-scoped posrednio — RLS w kontekscie)
+    const variants = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(serviceVariants)
+        .where(eq(serviceVariants.serviceId, id))
+    );
 
     return NextResponse.json({
       success: true,
@@ -119,11 +123,7 @@ export async function PUT(
     if (depositRequired !== undefined) updateData.depositRequired = depositRequired;
     if (depositPercentage !== undefined) updateData.depositPercentage = parseInt(depositPercentage, 10);
 
-    const [updated] = await db
-      .update(services)
-      .set(updateData)
-      .where(and(eq(services.id, id), eq(services.salonId, salonId)))
-      .returning();
+    const updated = await forSalon(salonId).updateOwned(services, id, updateData);
 
     if (!updated) {
       return NextResponse.json(
@@ -176,10 +176,7 @@ export async function DELETE(
       );
     }
 
-    const [deleted] = await db
-      .delete(services)
-      .where(and(eq(services.id, id), eq(services.salonId, salonId)))
-      .returning();
+    const deleted = await forSalon(salonId).deleteOwned(services, id);
 
     if (!deleted) {
       return NextResponse.json(

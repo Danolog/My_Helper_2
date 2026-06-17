@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { invoices, clients, appointments, employees, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -30,7 +30,8 @@ export async function GET(
 
     const { id } = await params;
 
-    const rows = await db
+    const rows = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: invoices.id,
         invoiceNumber: invoices.invoiceNumber,
@@ -67,7 +68,8 @@ export async function GET(
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .where(and(eq(invoices.id, id), eq(invoices.salonId, salonId)))
-      .limit(1);
+      .limit(1)
+    );
 
     if (rows.length === 0) {
       return NextResponse.json(
