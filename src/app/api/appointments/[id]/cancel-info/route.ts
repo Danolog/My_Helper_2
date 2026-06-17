@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { appointments, clients, employees, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/cancel-info - Get cancellation policy details for an appointment
@@ -25,18 +25,20 @@ export async function GET(
 
     const { id } = await params;
 
-    const result = await db.select({
-      appointment: appointments,
-      client: clients,
-      employee: employees,
-      service: services,
-    })
-    .from(appointments)
-    .leftJoin(clients, eq(appointments.clientId, clients.id))
-    .leftJoin(employees, eq(appointments.employeeId, employees.id))
-    .leftJoin(services, eq(appointments.serviceId, services.id))
-    .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-    .limit(1);
+    const result = await forSalon(salonId).raw((tx) =>
+      tx.select({
+        appointment: appointments,
+        client: clients,
+        employee: employees,
+        service: services,
+      })
+      .from(appointments)
+      .leftJoin(clients, eq(appointments.clientId, clients.id))
+      .leftJoin(employees, eq(appointments.employeeId, employees.id))
+      .leftJoin(services, eq(appointments.serviceId, services.id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+      .limit(1)
+    );
 
     const row = result[0];
     if (!row) {

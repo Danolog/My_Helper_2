@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { treatmentHistory, appointments } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, treatmentSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/treatment - Get treatment record for an appointment
@@ -27,11 +27,7 @@ export async function GET(
     const { id } = await params;
 
     // Verify appointment exists in the caller's salon
-    const [appointment] = await db
-      .select()
-      .from(appointments)
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .limit(1);
+    const appointment = await forSalon(salonId).findOne(appointments, id);
 
     if (!appointment) {
       return NextResponse.json(
@@ -40,12 +36,14 @@ export async function GET(
       );
     }
 
-    // Fetch treatment record for this appointment
-    const [treatment] = await db
-      .select()
-      .from(treatmentHistory)
-      .where(eq(treatmentHistory.appointmentId, id))
-      .limit(1);
+    // Fetch treatment record for this appointment (treatmentHistory salon-scoped posrednio)
+    const [treatment] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(treatmentHistory)
+        .where(eq(treatmentHistory.appointmentId, id))
+        .limit(1)
+    );
 
     logger.info(`[Treatment API] GET treatment for appointment ${id}: ${treatment ? "found" : "not found"}`);
 
@@ -88,11 +86,7 @@ export async function POST(
     const { recipe, techniques, materialsJson, notes } = body;
 
     // Verify appointment exists in the caller's salon
-    const [appointment] = await db
-      .select()
-      .from(appointments)
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .limit(1);
+    const appointment = await forSalon(salonId).findOne(appointments, id);
 
     if (!appointment) {
       return NextResponse.json(
@@ -101,54 +95,59 @@ export async function POST(
       );
     }
 
-    // Check if treatment record already exists for this appointment
-    const [existing] = await db
-      .select()
-      .from(treatmentHistory)
-      .where(eq(treatmentHistory.appointmentId, id))
-      .limit(1);
+    // Upsert rekordu zabiegu + auto-complete wizyty atomowo w transakcji RLS.
+    const { treatment, existing } = await forSalon(salonId).raw(async (tx) => {
+      // Check if treatment record already exists for this appointment
+      const [existingRow] = await tx
+        .select()
+        .from(treatmentHistory)
+        .where(eq(treatmentHistory.appointmentId, id))
+        .limit(1);
 
-    let treatment;
+      let row;
 
-    if (existing) {
-      // Update existing treatment record
-      const updateData: Record<string, unknown> = {};
-      if (recipe !== undefined) updateData.recipe = recipe;
-      if (techniques !== undefined) updateData.techniques = techniques;
-      if (materialsJson !== undefined) updateData.materialsJson = materialsJson;
-      if (notes !== undefined) updateData.notes = notes;
+      if (existingRow) {
+        // Update existing treatment record
+        const updateData: Record<string, unknown> = {};
+        if (recipe !== undefined) updateData.recipe = recipe;
+        if (techniques !== undefined) updateData.techniques = techniques;
+        if (materialsJson !== undefined) updateData.materialsJson = materialsJson;
+        if (notes !== undefined) updateData.notes = notes;
 
-      [treatment] = await db
-        .update(treatmentHistory)
-        .set(updateData)
-        .where(eq(treatmentHistory.id, existing.id))
-        .returning();
+        [row] = await tx
+          .update(treatmentHistory)
+          .set(updateData)
+          .where(eq(treatmentHistory.id, existingRow.id))
+          .returning();
 
-      logger.info(`[Treatment API] Updated treatment record for appointment ${id}`);
-    } else {
-      // Create new treatment record
-      [treatment] = await db
-        .insert(treatmentHistory)
-        .values({
-          appointmentId: id,
-          recipe: recipe || null,
-          techniques: techniques || null,
-          materialsJson: materialsJson || [],
-          notes: notes || null,
-        })
-        .returning();
+        logger.info(`[Treatment API] Updated treatment record for appointment ${id}`);
+      } else {
+        // Create new treatment record
+        [row] = await tx
+          .insert(treatmentHistory)
+          .values({
+            appointmentId: id,
+            recipe: recipe || null,
+            techniques: techniques || null,
+            materialsJson: materialsJson || [],
+            notes: notes || null,
+          })
+          .returning();
 
-      logger.info(`[Treatment API] Created treatment record for appointment ${id}`);
-    }
+        logger.info(`[Treatment API] Created treatment record for appointment ${id}`);
+      }
 
-    // If status is still "scheduled" or "confirmed", mark as "completed" automatically
-    if (appointment.status === "scheduled" || appointment.status === "confirmed") {
-      await db
-        .update(appointments)
-        .set({ status: "completed" })
-        .where(eq(appointments.id, id));
-      logger.info(`[Treatment API] Auto-marked appointment ${id} as completed`);
-    }
+      // If status is still "scheduled" or "confirmed", mark as "completed" automatically
+      if (appointment.status === "scheduled" || appointment.status === "confirmed") {
+        await tx
+          .update(appointments)
+          .set({ status: "completed" })
+          .where(eq(appointments.id, id));
+        logger.info(`[Treatment API] Auto-marked appointment ${id} as completed`);
+      }
+
+      return { treatment: row, existing: !!existingRow };
+    });
 
     return NextResponse.json({
       success: true,
@@ -184,11 +183,7 @@ export async function DELETE(
     const { id } = await params;
 
     // Verify the appointment belongs to the caller's salon before touching its treatment
-    const [appointment] = await db
-      .select({ id: appointments.id })
-      .from(appointments)
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .limit(1);
+    const appointment = await forSalon(salonId).findOne(appointments, id);
 
     if (!appointment) {
       return NextResponse.json(
@@ -197,10 +192,12 @@ export async function DELETE(
       );
     }
 
-    const [deleted] = await db
-      .delete(treatmentHistory)
-      .where(eq(treatmentHistory.appointmentId, id))
-      .returning();
+    const [deleted] = await forSalon(salonId).raw((tx) =>
+      tx
+        .delete(treatmentHistory)
+        .where(eq(treatmentHistory.appointmentId, id))
+        .returning()
+    );
 
     if (!deleted) {
       return NextResponse.json(

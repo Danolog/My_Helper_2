@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { appointmentMaterials, products, appointments } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { validateBody, addAppointmentMaterialSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/materials - List materials for an appointment
@@ -27,11 +27,7 @@ export async function GET(
     const { id } = await params;
 
     // Verify appointment exists in the caller's salon
-    const [appointment] = await db
-      .select()
-      .from(appointments)
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .limit(1);
+    const appointment = await forSalon(salonId).findOne(appointments, id);
 
     if (!appointment) {
       return NextResponse.json(
@@ -40,15 +36,17 @@ export async function GET(
       );
     }
 
-    // Get materials with product details
-    const result = await db
-      .select({
-        material: appointmentMaterials,
-        product: products,
-      })
-      .from(appointmentMaterials)
-      .leftJoin(products, eq(appointmentMaterials.productId, products.id))
-      .where(eq(appointmentMaterials.appointmentId, id));
+    // Get materials with product details (appointmentMaterials salon-scoped posrednio)
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          material: appointmentMaterials,
+          product: products,
+        })
+        .from(appointmentMaterials)
+        .leftJoin(products, eq(appointmentMaterials.productId, products.id))
+        .where(eq(appointmentMaterials.appointmentId, id))
+    );
 
     const formattedMaterials = result.map((row) => ({
       ...row.material,
@@ -98,11 +96,7 @@ export async function POST(
     const { productId, quantityUsed, notes } = body;
 
     // Verify appointment exists in the caller's salon
-    const [appointment] = await db
-      .select()
-      .from(appointments)
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .limit(1);
+    const appointment = await forSalon(salonId).findOne(appointments, id);
 
     if (!appointment) {
       return NextResponse.json(
@@ -112,11 +106,7 @@ export async function POST(
     }
 
     // Verify product exists in the caller's salon and check stock
-    const [product] = await db
-      .select()
-      .from(products)
-      .where(and(eq(products.id, productId), eq(products.salonId, salonId)))
-      .limit(1);
+    const product = await forSalon(salonId).findOne(products, productId);
 
     if (!product) {
       return NextResponse.json(
@@ -138,31 +128,36 @@ export async function POST(
       );
     }
 
-    // 1. Add material record
-    const [newMaterial] = await db
-      .insert(appointmentMaterials)
-      .values({
-        appointmentId: id,
-        productId,
-        quantityUsed: quantityUsed.toString(),
-        notes: notes || null,
-      })
-      .returning();
+    // Dodanie materialu + potracenie z magazynu + odczyt stanu atomowo w transakcji RLS.
+    const { newMaterial, updatedProduct } = await forSalon(salonId).raw(async (tx) => {
+      // 1. Add material record
+      const [material] = await tx
+        .insert(appointmentMaterials)
+        .values({
+          appointmentId: id,
+          productId,
+          quantityUsed: quantityUsed.toString(),
+          notes: notes || null,
+        })
+        .returning();
 
-    // 2. Deduct inventory
-    await db
-      .update(products)
-      .set({
-        quantity: sql`${products.quantity}::numeric - ${usedQty}`,
-      })
-      .where(eq(products.id, productId));
+      // 2. Deduct inventory
+      await tx
+        .update(products)
+        .set({
+          quantity: sql`${products.quantity}::numeric - ${usedQty}`,
+        })
+        .where(eq(products.id, productId));
 
-    // 3. Fetch updated product to return current stock
-    const [updatedProduct] = await db
-      .select()
-      .from(products)
-      .where(eq(products.id, productId))
-      .limit(1);
+      // 3. Fetch updated product to return current stock
+      const [updated] = await tx
+        .select()
+        .from(products)
+        .where(eq(products.id, productId))
+        .limit(1);
+
+      return { newMaterial: material, updatedProduct: updated };
+    });
 
     logger.info(`[Appointment Materials API] Added ${usedQty} ${product.unit || "szt."} of "${product.name}" to appointment ${id}. Stock: ${currentQty} -> ${updatedProduct?.quantity}`);
 
@@ -215,11 +210,7 @@ export async function DELETE(
     }
 
     // Verify the appointment belongs to the caller's salon
-    const [appointment] = await db
-      .select({ id: appointments.id })
-      .from(appointments)
-      .where(and(eq(appointments.id, appointmentId), eq(appointments.salonId, salonId)))
-      .limit(1);
+    const appointment = await forSalon(salonId).findOne(appointments, appointmentId);
 
     if (!appointment) {
       return NextResponse.json(
@@ -228,46 +219,54 @@ export async function DELETE(
       );
     }
 
-    // Find the material record (must belong to this appointment)
-    const [material] = await db
-      .select()
-      .from(appointmentMaterials)
-      .where(
-        and(
-          eq(appointmentMaterials.id, materialId),
-          eq(appointmentMaterials.appointmentId, appointmentId)
+    // Odczyt materialu + zwrot do magazynu + usuniecie atomowo w transakcji RLS.
+    const result = await forSalon(salonId).raw(async (tx) => {
+      // Find the material record (must belong to this appointment)
+      const [material] = await tx
+        .select()
+        .from(appointmentMaterials)
+        .where(
+          and(
+            eq(appointmentMaterials.id, materialId),
+            eq(appointmentMaterials.appointmentId, appointmentId)
+          )
         )
-      )
-      .limit(1);
+        .limit(1);
 
-    if (!material) {
+      if (!material) {
+        return { notFound: true as const };
+      }
+
+      const usedQty = parseFloat(material.quantityUsed);
+
+      // Restore inventory (scoped to caller's salon)
+      await tx
+        .update(products)
+        .set({
+          quantity: sql`${products.quantity}::numeric + ${usedQty}`,
+        })
+        .where(and(eq(products.id, material.productId), eq(products.salonId, salonId)));
+
+      // Delete the material record
+      const [deletedMaterial] = await tx
+        .delete(appointmentMaterials)
+        .where(eq(appointmentMaterials.id, materialId))
+        .returning();
+
+      logger.info(`[Appointment Materials API] Removed material ${materialId}, restored ${usedQty} to inventory`);
+      return { notFound: false as const, deletedMaterial };
+    });
+
+    if (result.notFound) {
       return NextResponse.json(
         { success: false, error: "Material record not found" },
         { status: 404 }
       );
     }
 
-    const usedQty = parseFloat(material.quantityUsed);
-
-    // Restore inventory (scoped to caller's salon)
-    await db
-      .update(products)
-      .set({
-        quantity: sql`${products.quantity}::numeric + ${usedQty}`,
-      })
-      .where(and(eq(products.id, material.productId), eq(products.salonId, salonId)));
-
-    // Delete the material record
-    const [deletedMaterial] = await db
-      .delete(appointmentMaterials)
-      .where(eq(appointmentMaterials.id, materialId))
-      .returning();
-
-    logger.info(`[Appointment Materials API] Removed material ${materialId}, restored ${usedQty} to inventory`);
-
     return NextResponse.json({
       success: true,
-      data: deletedMaterial,
+      data: result.deletedMaterial,
       message: "Material removed and inventory restored",
     });
   } catch (error) {
