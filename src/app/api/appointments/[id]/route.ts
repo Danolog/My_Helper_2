@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { appointments, clients, employees, services, notifications, depositPayments, salons } from "@/lib/schema";
 import { eq, and, not, or, lte, gte } from "drizzle-orm";
-import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
-import { notifyWaitingList } from "@/lib/waiting-list";
 import { validateBody, updateAppointmentSchema } from "@/lib/api-validation";
-import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// `db` pozostaje dla efektow ubocznych anulacji (forfeit zadatku, notyfikacja,
+// nazwa salonu do waiting-list) — to NIE jest brama zasobu [id], ktora pilnuje
+// test izolacji. Pelna migracja na repo + kontekst RLS tych zapisow = R2.
+// Pod RLS (rola myhelper_app) te zapytania wymagaja wlasnego kontekstu salonu;
+// sciezka pozytywna DELETE z zadatkiem nie jest pokryta testem R1 (zob. raport).
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
-
 import { logger } from "@/lib/logger";
+import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
+import { appointments, clients, employees, services, notifications, depositPayments, salons } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isValidUuid } from "@/lib/validations";
+import { notifyWaitingList } from "@/lib/waiting-list";
 // GET /api/appointments/[id] - Get a single appointment
 export async function GET(
   _request: Request,
@@ -36,18 +42,23 @@ export async function GET(
       );
     }
 
-    const result = await db.select({
-      appointment: appointments,
-      client: clients,
-      employee: employees,
-      service: services,
-    })
-    .from(appointments)
-    .leftJoin(clients, eq(appointments.clientId, clients.id))
-    .leftJoin(employees, eq(appointments.employeeId, employees.id))
-    .leftJoin(services, eq(appointments.serviceId, services.id))
-    .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-    .limit(1);
+    // Join — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
+    // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          appointment: appointments,
+          client: clients,
+          employee: employees,
+          service: services,
+        })
+        .from(appointments)
+        .leftJoin(clients, eq(appointments.clientId, clients.id))
+        .leftJoin(employees, eq(appointments.employeeId, employees.id))
+        .leftJoin(services, eq(appointments.serviceId, services.id))
+        .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+        .limit(1)
+    );
 
     const row = result[0];
     if (!row) {
@@ -113,17 +124,9 @@ export async function PUT(
 
     const { startTime, endTime, employeeId, clientId, serviceId, notes, status, depositAmount, depositPaid } = body;
 
-    // Check if appointment exists in the caller's salon (need times and employeeId for conflict checks)
-    const [existing] = await db.select({
-      id: appointments.id,
-      startTime: appointments.startTime,
-      endTime: appointments.endTime,
-      employeeId: appointments.employeeId,
-      status: appointments.status,
-    })
-      .from(appointments)
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .limit(1);
+    // Check if appointment exists in the caller's salon — cudza/nieistniejaca
+    // wizyta = 404 (scoped findOne, kontekst RLS ustawiony).
+    const existing = await forSalon(salonId).findOne(appointments, id);
 
     if (!existing) {
       return NextResponse.json(
@@ -137,38 +140,6 @@ export async function PUT(
     const newEndTime = endTime ? new Date(endTime) : existing.endTime;
     const newEmployeeId = employeeId || existing.employeeId;
 
-    // Check for overlapping appointments (excluding current one, only need id for existence check)
-    const overlapping = await db.select({ id: appointments.id })
-      .from(appointments)
-      .where(
-        and(
-          eq(appointments.employeeId, newEmployeeId),
-          not(eq(appointments.id, id)),
-          not(eq(appointments.status, "cancelled")),
-          or(
-            and(
-              lte(appointments.startTime, newStartTime),
-              gte(appointments.endTime, newStartTime)
-            ),
-            and(
-              lte(appointments.startTime, newEndTime),
-              gte(appointments.endTime, newEndTime)
-            ),
-            and(
-              gte(appointments.startTime, newStartTime),
-              lte(appointments.endTime, newEndTime)
-            )
-          )
-        )
-      );
-
-    if (overlapping.length > 0) {
-      return NextResponse.json(
-        { success: false, error: "Time slot conflicts with existing appointment", conflictingAppointment: overlapping[0] },
-        { status: 409 }
-      );
-    }
-
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {};
     if (startTime) updateData.startTime = newStartTime;
@@ -181,13 +152,57 @@ export async function PUT(
     if (depositAmount !== undefined) updateData.depositAmount = depositAmount;
     if (depositPaid !== undefined) updateData.depositPaid = depositPaid;
 
-    logger.info(`[Appointments API] Updating appointment ${id}`, { updateData });
+    // Sprawdzenie kolizji + update w JEDNYM kontekscie RLS (raw(tx)); jawny
+    // eq(salonId) zachowany jako filtr aplikacyjny (defense in depth).
+    const conflict = await forSalon(salonId).raw(async (tx) => {
+      const overlapping = await tx.select({ id: appointments.id })
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.salonId, salonId),
+            eq(appointments.employeeId, newEmployeeId),
+            not(eq(appointments.id, id)),
+            not(eq(appointments.status, "cancelled")),
+            or(
+              and(
+                lte(appointments.startTime, newStartTime),
+                gte(appointments.endTime, newStartTime)
+              ),
+              and(
+                lte(appointments.startTime, newEndTime),
+                gte(appointments.endTime, newEndTime)
+              ),
+              and(
+                gte(appointments.startTime, newStartTime),
+                lte(appointments.endTime, newEndTime)
+              )
+            )
+          )
+        );
 
-    const [updatedAppointment] = await db
-      .update(appointments)
-      .set(updateData)
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .returning();
+      if (overlapping.length > 0) {
+        return { conflicting: overlapping[0], updated: null as typeof appointments.$inferSelect | null };
+      }
+
+      logger.info(`[Appointments API] Updating appointment ${id}`, { updateData });
+
+      const [updatedAppointment] = await tx
+        .update(appointments)
+        .set(updateData)
+        .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+        .returning();
+
+      return { conflicting: null, updated: updatedAppointment };
+    });
+
+    if (conflict.conflicting) {
+      return NextResponse.json(
+        { success: false, error: "Time slot conflicts with existing appointment", conflictingAppointment: conflict.conflicting },
+        { status: 409 }
+      );
+    }
+
+    const updatedAppointment = conflict.updated;
 
     logger.info(`[Appointments API] Updated appointment ${id} successfully`);
 
@@ -227,18 +242,22 @@ export async function DELETE(
     const notifyClient = url.searchParams.get("notifyClient") === "true";
 
     // Fetch the appointment with client info, scoped to the caller's salon
-    const result = await db.select({
-      appointment: appointments,
-      client: clients,
-      employee: employees,
-      service: services,
-    })
-    .from(appointments)
-    .leftJoin(clients, eq(appointments.clientId, clients.id))
-    .leftJoin(employees, eq(appointments.employeeId, employees.id))
-    .leftJoin(services, eq(appointments.serviceId, services.id))
-    .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-    .limit(1);
+    // (join przez raw(tx) z jawnym eq(salonId) — cudza wizyta = pusty wynik = 404).
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          appointment: appointments,
+          client: clients,
+          employee: employees,
+          service: services,
+        })
+        .from(appointments)
+        .leftJoin(clients, eq(appointments.clientId, clients.id))
+        .leftJoin(employees, eq(appointments.employeeId, employees.id))
+        .leftJoin(services, eq(appointments.serviceId, services.id))
+        .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+        .limit(1)
+    );
 
     const row = result[0];
     if (!row) {
@@ -281,11 +300,9 @@ export async function DELETE(
     }
 
     // Soft delete by setting status to cancelled (scoped to caller's salon)
-    const [cancelledAppointment] = await db
-      .update(appointments)
-      .set({ status: "cancelled" })
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .returning();
+    const cancelledAppointment = await forSalon(salonId).updateOwned(appointments, id, {
+      status: "cancelled",
+    });
 
     logger.info(`[Appointments API] Cancelled appointment ${id}`, {
       hoursUntilAppointment: hoursUntilAppointment.toFixed(1),
