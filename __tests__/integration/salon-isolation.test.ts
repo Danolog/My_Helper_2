@@ -198,11 +198,12 @@ describe("Izolacja salonów na REALNEJ bazie — właściciel A nie sięga zasob
       expect(unchanged?.firstName).toBe("Klient");
     });
 
-    it("DELETE cudzego klienta (salon B) -> 403/404 i wiersz B zostaje", async () => {
+    it("DELETE cudzego klienta (salon B) -> 404 i wiersz B zostaje", async () => {
       asOwnerA();
       const res = await clientDELETE(req("DELETE", cookieA, { password: PW }), routeParams(B.client.id));
-      // 403 (złe hasło lub brak) lub 404 (scoped) — nigdy 200; w obu wariantach wiersz B żyje.
-      expect([403, 404]).toContain(res.status);
+      // ADR-001 sekcja 2.4: cudzy zasób = 404 ZANIM weryfikacja hasła — istnienie
+      // cudzego klienta nie przecieka przez kod statusu (dawniej tolerowano [403,404]).
+      expect(res.status).toBe(404);
       const [stillThere] = await db.select().from(clients).where(eq(clients.id, B.client.id)).limit(1);
       expect(stillThere).toBeDefined();
     });

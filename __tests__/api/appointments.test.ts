@@ -30,12 +30,23 @@ const mockDbInsert = vi.fn();
 const mockDbUpdate = vi.fn();
 const mockDbDelete = vi.fn();
 
+// `tx` deleguje do tych samych mocków co `db` — warstwa repo (forSalon) otwiera
+// db.transaction() i woła tx.select/update/delete + tx.execute (SET LOCAL).
+const mockTx = {
+  select: (...args: unknown[]) => mockDbSelect(...args),
+  insert: (...args: unknown[]) => mockDbInsert(...args),
+  update: (...args: unknown[]) => mockDbUpdate(...args),
+  delete: (...args: unknown[]) => mockDbDelete(...args),
+  execute: vi.fn().mockResolvedValue(undefined),
+};
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
     insert: (...args: unknown[]) => mockDbInsert(...args),
     update: (...args: unknown[]) => mockDbUpdate(...args),
     delete: (...args: unknown[]) => mockDbDelete(...args),
+    transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
 }));
 

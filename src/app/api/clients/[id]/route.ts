@@ -1,16 +1,19 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { clients, account } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
+import { NextResponse } from "next/server";
 import { verifyPassword } from "better-auth/crypto";
+import { eq, and } from "drizzle-orm";
 import { validateBody, updateClientSchema } from "@/lib/api-validation";
-import { isValidUuid } from "@/lib/validations";
+import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// `account` pozostaje surowym `db` (weryfikacja hasła nie jest salon-scoped):
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
-
 import { logger } from "@/lib/logger";
+import { clients, account } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isValidUuid } from "@/lib/validations";
+
 // GET /api/clients/[id] - Get a single client by ID
 export async function GET(
   _request: Request,
@@ -37,11 +40,7 @@ export async function GET(
       );
     }
 
-    const [client] = await db
-      .select()
-      .from(clients)
-      .where(and(eq(clients.id, id), eq(clients.salonId, salonId)))
-      .limit(1);
+    const client = await forSalon(salonId).findOne(clients, id);
 
     if (!client) {
       return NextResponse.json(
@@ -117,11 +116,7 @@ export async function PUT(
 
     logger.info(`[Clients API] Updating client ${id}`, { updateData });
 
-    const [updated] = await db
-      .update(clients)
-      .set(updateData)
-      .where(and(eq(clients.id, id), eq(clients.salonId, salonId)))
-      .returning();
+    const updated = await forSalon(salonId).updateOwned(clients, id, updateData);
 
     if (!updated) {
       return NextResponse.json(
@@ -178,6 +173,17 @@ export async function DELETE(
       );
     }
 
+    // 1b. (ADR-001 sekcja 2.4) Cudzy/nieistniejacy zasob = 404 ZANIM dojdzie do
+    // weryfikacji hasla — istnienie cudzego klienta nie moze przeciekac przez
+    // kod statusu (dawniej DELETE zwracal 403 po nietrafionym hasle = mikrowyciek).
+    const owned = await forSalon(salonId).findOne(clients, id);
+    if (!owned) {
+      return NextResponse.json(
+        { success: false, error: "Client not found" },
+        { status: 404 }
+      );
+    }
+
     // 2. Parse request body for password
     let body: { password?: string } = {};
     try {
@@ -196,6 +202,7 @@ export async function DELETE(
     }
 
     // 3. Get the user's password hash from the account table
+    // (account nie jest salon-scoped — to dane uwierzytelniajace uzytkownika)
     const [userAccount] = await db
       .select()
       .from(account)
@@ -229,10 +236,7 @@ export async function DELETE(
     }
 
     // 5. Password verified - proceed with deletion (scoped to caller's salon)
-    const [deleted] = await db
-      .delete(clients)
-      .where(and(eq(clients.id, id), eq(clients.salonId, salonId)))
-      .returning();
+    const deleted = await forSalon(salonId).deleteOwned(clients, id);
 
     if (!deleted) {
       return NextResponse.json(
