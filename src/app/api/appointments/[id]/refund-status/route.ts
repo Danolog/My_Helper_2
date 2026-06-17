@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { depositPayments, appointments } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/refund-status - Get refund status for an appointment
@@ -26,11 +26,7 @@ export async function GET(
     const { id } = await params;
 
     // Check if appointment exists in the caller's salon
-    const [appointment] = await db
-      .select()
-      .from(appointments)
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .limit(1);
+    const appointment = await forSalon(salonId).findOne(appointments, id);
 
     if (!appointment) {
       return NextResponse.json(
@@ -39,11 +35,13 @@ export async function GET(
       );
     }
 
-    // Find deposit payment for this appointment
-    const [payment] = await db
-      .select()
-      .from(depositPayments)
-      .where(eq(depositPayments.appointmentId, id));
+    // Find deposit payment for this appointment (depositPayments salon-scoped — RLS w kontekscie)
+    const [payment] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(depositPayments)
+        .where(eq(depositPayments.appointmentId, id))
+    );
 
     if (!payment) {
       return NextResponse.json({
