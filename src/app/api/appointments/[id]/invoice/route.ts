@@ -43,7 +43,7 @@ export async function GET(
     const existingInvoices = await db
       .select()
       .from(invoices)
-      .where(eq(invoices.appointmentId, id))
+      .where(and(eq(invoices.appointmentId, id), eq(invoices.salonId, userSalonId)))
       .limit(1);
 
     if (existingInvoices.length === 0) {
@@ -158,7 +158,7 @@ export async function POST(
         serviceId: appointments.serviceId,
       })
       .from(appointments)
-      .where(eq(appointments.id, id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, userSalonId)))
       .limit(1);
 
     if (!appointment) {
@@ -178,11 +178,11 @@ export async function POST(
       );
     }
 
-    // 2. Check if invoice already exists
+    // 2. Check if invoice already exists (scoped to caller's salon)
     const existingInvoices = await db
       .select()
       .from(invoices)
-      .where(eq(invoices.appointmentId, id))
+      .where(and(eq(invoices.appointmentId, id), eq(invoices.salonId, userSalonId)))
       .limit(1);
 
     if (existingInvoices.length > 0) {

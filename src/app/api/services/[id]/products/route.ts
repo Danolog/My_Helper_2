@@ -1,9 +1,20 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { serviceProducts, products } from "@/lib/schema";
+import { serviceProducts, products, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, serviceProductLinkSchema } from "@/lib/api-validation";
+
+/** Verify the service belongs to the caller's salon; returns true if owned. */
+async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {
+  const [service] = await db
+    .select({ id: services.id })
+    .from(services)
+    .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
+    .limit(1);
+  return !!service;
+}
 
 import { logger } from "@/lib/logger";
 // GET /api/services/[id]/products - List products linked to a service (for auto-deduction)
@@ -15,7 +26,22 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id: serviceId } = await params;
+
+    if (!(await serviceBelongsToSalon(serviceId, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Service not found" },
+        { status: 404 }
+      );
+    }
 
     const result = await db
       .select({
@@ -57,6 +83,14 @@ export async function POST(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id: serviceId } = await params;
     const body = await request.json();
     const validationError = validateBody(serviceProductLinkSchema, body);
@@ -64,6 +98,26 @@ export async function POST(
       return NextResponse.json(validationError, { status: 400 });
     }
     const { productId, defaultQuantity } = body;
+
+    if (!(await serviceBelongsToSalon(serviceId, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Service not found" },
+        { status: 404 }
+      );
+    }
+
+    // Verify the product also belongs to the caller's salon
+    const [ownedProduct] = await db
+      .select({ id: products.id })
+      .from(products)
+      .where(and(eq(products.id, productId), eq(products.salonId, salonId)))
+      .limit(1);
+    if (!ownedProduct) {
+      return NextResponse.json(
+        { success: false, error: "Product not found" },
+        { status: 404 }
+      );
+    }
 
     // Check if this product is already linked to this service
     const [existing] = await db
@@ -131,6 +185,14 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id: serviceId } = await params;
     const { searchParams } = new URL(request.url);
     const linkId = searchParams.get("linkId");
@@ -139,6 +201,13 @@ export async function DELETE(
       return NextResponse.json(
         { success: false, error: "linkId query parameter is required" },
         { status: 400 }
+      );
+    }
+
+    if (!(await serviceBelongsToSalon(serviceId, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Service not found" },
+        { status: 404 }
       );
     }
 

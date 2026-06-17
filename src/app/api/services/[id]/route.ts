@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { services, serviceCategories, serviceVariants } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { validateBody, updateServiceSchema } from "@/lib/api-validation";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 // GET /api/services/[id] - Get a single service with its variants
@@ -15,6 +16,14 @@ export async function GET(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     const { id } = await params;
 
@@ -32,7 +41,7 @@ export async function GET(
       })
       .from(services)
       .leftJoin(serviceCategories, eq(services.categoryId, serviceCategories.id))
-      .where(eq(services.id, id));
+      .where(and(eq(services.id, id), eq(services.salonId, salonId)));
 
     if (!serviceRow) {
       return NextResponse.json(
@@ -73,6 +82,14 @@ export async function PUT(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     if (!isValidUuid(id)) {
@@ -105,7 +122,7 @@ export async function PUT(
     const [updated] = await db
       .update(services)
       .set(updateData)
-      .where(eq(services.id, id))
+      .where(and(eq(services.id, id), eq(services.salonId, salonId)))
       .returning();
 
     if (!updated) {
@@ -142,6 +159,14 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     if (!isValidUuid(id)) {
@@ -153,7 +178,7 @@ export async function DELETE(
 
     const [deleted] = await db
       .delete(services)
-      .where(eq(services.id, id))
+      .where(and(eq(services.id, id), eq(services.salonId, salonId)))
       .returning();
 
     if (!deleted) {

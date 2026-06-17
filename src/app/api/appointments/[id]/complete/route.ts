@@ -20,6 +20,7 @@ import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/rou
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 import { validateBody, completeAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 
 /**
@@ -105,6 +106,14 @@ export async function POST(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
 
@@ -116,7 +125,7 @@ export async function POST(
 
     const { recipe, techniques, notes, commissionPercentage } = body;
 
-    // Fetch the appointment with service info
+    // Fetch the appointment with service info, scoped to the caller's salon
     const result = await db
       .select({
         appointment: appointments,
@@ -124,7 +133,7 @@ export async function POST(
       })
       .from(appointments)
       .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(eq(appointments.id, id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
       .limit(1);
 
     const row = result[0];

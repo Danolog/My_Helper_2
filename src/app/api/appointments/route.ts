@@ -5,6 +5,7 @@ import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
 import { validateBody, createAppointmentSchema } from "@/lib/api-validation";
 import { isValidUuid, isValidDateString } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { getOptionalSession } from "@/lib/session";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
@@ -15,10 +16,19 @@ export async function GET(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    // Tenant isolation: derive the salon from the session, never trust a
+    // client-supplied salonId in the query string (IDOR risk).
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
-    const salonId = searchParams.get("salonId");
     const employeeId = searchParams.get("employeeId");
 
     logger.info("[Appointments API] GET with params", { startDate, endDate, salonId, employeeId });
@@ -38,12 +48,6 @@ export async function GET(request: Request) {
     }
 
     // Validate UUID parameters
-    if (salonId && !isValidUuid(salonId)) {
-      return NextResponse.json(
-        { success: false, error: "Invalid salonId format" },
-        { status: 400 }
-      );
-    }
     if (employeeId && !isValidUuid(employeeId)) {
       return NextResponse.json(
         { success: false, error: "Invalid employeeId format" },
@@ -62,11 +66,8 @@ export async function GET(request: Request) {
     .leftJoin(employees, eq(appointments.employeeId, employees.id))
     .leftJoin(services, eq(appointments.serviceId, services.id));
 
-    const conditions = [];
+    const conditions = [eq(appointments.salonId, salonId)];
 
-    if (salonId) {
-      conditions.push(eq(appointments.salonId, salonId));
-    }
     if (employeeId) {
       conditions.push(eq(appointments.employeeId, employeeId));
     }

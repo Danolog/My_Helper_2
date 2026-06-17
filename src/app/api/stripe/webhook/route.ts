@@ -101,41 +101,38 @@ export async function POST(request: Request) {
 
     let event: Stripe.Event;
 
-    // Verify webhook signature if configured
-    if (isStripeWebhookConfigured() && stripe) {
-      const signature = request.headers.get("stripe-signature");
-      if (!signature) {
-        return NextResponse.json(
-          { error: "Missing stripe-signature header" },
-          { status: 400 }
-        );
-      }
+    // Webhook signature verification is MANDATORY. There is no dev fallback —
+    // an unsigned event could fake payments / activate plans (P0-C).
+    if (!isStripeWebhookConfigured() || !stripe) {
+      logger.error("Stripe webhook rejected: secret or client not configured");
+      return NextResponse.json(
+        { error: "Webhook not configured" },
+        { status: 503 }
+      );
+    }
 
-      try {
-        event = stripe.webhooks.constructEvent(
-          body,
-          signature,
-          process.env.STRIPE_WEBHOOK_SECRET!
-        );
-      } catch (err) {
-        logger.error("Stripe webhook signature verification failed", {
-          error: err instanceof Error ? err.message : err,
-        });
-        return NextResponse.json(
-          { error: "Webhook signature verification failed" },
-          { status: 400 }
-        );
-      }
-    } else {
-      // Dev mode: parse the body as JSON directly (no signature verification)
-      try {
-        event = JSON.parse(body) as Stripe.Event;
-      } catch {
-        return NextResponse.json(
-          { error: "Invalid JSON body" },
-          { status: 400 }
-        );
-      }
+    const signature = request.headers.get("stripe-signature");
+    if (!signature) {
+      return NextResponse.json(
+        { error: "Missing stripe-signature header" },
+        { status: 400 }
+      );
+    }
+
+    try {
+      event = stripe.webhooks.constructEvent(
+        body,
+        signature,
+        process.env.STRIPE_WEBHOOK_SECRET!
+      );
+    } catch (err) {
+      logger.error("Stripe webhook signature verification failed", {
+        error: err instanceof Error ? err.message : err,
+      });
+      return NextResponse.json(
+        { error: "Webhook signature verification failed" },
+        { status: 400 }
+      );
     }
 
     logger.info("Stripe webhook event received", { eventType: event.type, eventId: event.id });

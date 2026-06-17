@@ -91,6 +91,13 @@ vi.mock("@/lib/auth-middleware", () => ({
   isAuthError: vi.fn().mockReturnValue(false),
 }));
 
+// Tenant isolation (P0-A): the route resolves the salon from the session.
+// Without this mock the route hits the real DB-backed resolver and throws.
+vi.mock("@/lib/get-user-salon", () => ({
+  getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
+  getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
+}));
+
 // -------------------------------------------------------
 // Chain builder
 // -------------------------------------------------------

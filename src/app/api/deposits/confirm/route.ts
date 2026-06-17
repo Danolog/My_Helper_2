@@ -3,25 +3,33 @@ import { db } from "@/lib/db";
 import { appointments, depositPayments, clients, services, employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { sendPaymentConfirmationSms } from "@/lib/sms";
-import { validateBody, depositConfirmSchema } from "@/lib/api-validation";
+import { depositConfirmSchema } from "@/lib/api-validation";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
 import { logger } from "@/lib/logger";
 /**
  * POST /api/deposits/confirm
  *
- * Confirms a deposit payment and updates the appointment status.
- * Sends SMS confirmation to the client with payment and appointment details.
- * In production, this would be called by Stripe webhook or after redirect from Stripe Checkout.
- * For development, this simulates the payment confirmation.
+ * DEV-ONLY simulator for confirming a deposit payment. In production the
+ * source of truth for deposit confirmation is the SIGNED Stripe webhook
+ * (`/api/stripe/webhook`), never this open endpoint — confirming a payment
+ * by record id alone, without a verified Stripe signature, would let anyone
+ * mark a deposit "paid" without paying (P0-D). Therefore this route is
+ * disabled when NODE_ENV === "production".
  *
- * Auth: This endpoint uses token-based verification (depositPaymentId + sessionId)
- * instead of session auth, because it's called by Stripe redirect or webhook.
- * Rate limiting (strictRateLimit) prevents brute-force token guessing.
+ * Rate limiting (strictRateLimit) additionally throttles abuse in dev.
  */
 export async function POST(request: Request) {
   try {
-    // Rate limit instead of auth — confirmation is protected by depositPaymentId + sessionId tokens
+    // Hard production guard: confirmation in prod only via signed Stripe webhook.
+    if (process.env.NODE_ENV === "production") {
+      return NextResponse.json(
+        { success: false, error: "Not found" },
+        { status: 404 }
+      );
+    }
+
+    // Rate limit to throttle brute-force of the deposit id in dev.
     const ip = getClientIp(request);
     const rateLimitResult = strictRateLimit.check(ip);
     if (!rateLimitResult.success) {
@@ -32,11 +40,20 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const validationError = validateBody(depositConfirmSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
+    const parsed = depositConfirmSchema.safeParse(body);
+    if (!parsed.success) {
+      const details: Record<string, string> = {};
+      for (const issue of parsed.error.issues) {
+        const path = issue.path.join(".") || "_root";
+        if (!details[path]) details[path] = issue.message;
+      }
+      return NextResponse.json(
+        { success: false, error: "Validation failed", details },
+        { status: 400 }
+      );
     }
-    const { depositPaymentId, sessionId } = body;
+    // Read ONLY validated data — never the raw body (P0-D / P1).
+    const { depositPaymentId, sessionId } = parsed.data;
 
     // Get the deposit payment record
     const [payment] = await db

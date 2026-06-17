@@ -104,6 +104,12 @@ vi.mock("@/lib/auth-middleware", () => ({
   isAuthError: vi.fn().mockReturnValue(false),
 }));
 
+// Tenant isolation (P0-A): scoped routes resolve the salon from the session.
+vi.mock("@/lib/get-user-salon", () => ({
+  getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
+  getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
+}));
+
 // -------------------------------------------------------
 // Chain builder helper
 // -------------------------------------------------------
@@ -145,6 +151,10 @@ import {
   PUT as updateClient,
   DELETE as deleteClient,
 } from "@/app/api/clients/[id]/route";
+
+// Mocked tenant resolver — flip it to simulate "no salon" / wrong tenant.
+import { getUserSalonId } from "@/lib/get-user-salon";
+const mockGetUserSalonId = vi.mocked(getUserSalonId);
 
 // -------------------------------------------------------
 // Tests
@@ -705,5 +715,60 @@ describe("DELETE /api/clients/[id]", () => {
     expect(status).toBe(400);
     expect(body.success).toBe(false);
     expect(body.error).toContain("Nie mozna zweryfikowac hasla");
+  });
+});
+
+// =======================================================
+// P0-A · Tenant isolation regression (IDOR) — clients/[id]
+// The salon is derived from the session; a foreign-salon record is invisible
+// (scoped WHERE -> empty -> 404), and a caller without a salon never queries.
+// =======================================================
+describe("P0-A tenant isolation — /api/clients/[id]", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
+  });
+
+  it("GET returns 404 when the caller has no salon and never queries", async () => {
+    mockGetUserSalonId.mockResolvedValue(null);
+
+    const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`);
+    const params = createRouteParams(TEST_IDS.CLIENT_UUID);
+    const response = await getClient(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Salon not found");
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it("GET returns 404 for a client owned by another salon (foreign record invisible)", async () => {
+    mockDbSelect.mockReturnValue(chainMock([]));
+
+    const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`);
+    const params = createRouteParams(TEST_IDS.CLIENT_UUID);
+    const response = await getClient(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(mockGetUserSalonId).toHaveBeenCalled();
+  });
+
+  it("PUT returns 404 for a client owned by another salon (no cross-tenant mutation)", async () => {
+    mockDbUpdate.mockReturnValue(chainMock([]));
+
+    const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`, {
+      method: "PUT",
+      body: { firstName: "X" },
+    });
+    const params = createRouteParams(TEST_IDS.CLIENT_UUID);
+    const response = await updateClient(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(mockGetUserSalonId).toHaveBeenCalled();
   });
 });

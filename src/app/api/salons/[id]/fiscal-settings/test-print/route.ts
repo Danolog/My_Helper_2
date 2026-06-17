@@ -39,6 +39,7 @@ export async function POST(
       .select({
         id: salons.id,
         name: salons.name,
+        ownerId: salons.ownerId,
         settingsJson: salons.settingsJson,
       })
       .from(salons)
@@ -49,6 +50,13 @@ export async function POST(
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
+      );
+    }
+
+    if (salon.ownerId !== authResult.user.id) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
       );
     }
 

@@ -43,7 +43,7 @@ export async function GET(
     const receipts = await db
       .select()
       .from(fiscalReceipts)
-      .where(eq(fiscalReceipts.appointmentId, id))
+      .where(and(eq(fiscalReceipts.appointmentId, id), eq(fiscalReceipts.salonId, userSalonId)))
       .limit(1);
 
     if (receipts.length === 0) {
@@ -117,7 +117,7 @@ export async function POST(
         serviceId: appointments.serviceId,
       })
       .from(appointments)
-      .where(eq(appointments.id, id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, userSalonId)))
       .limit(1);
 
     if (!appointment) {
@@ -137,11 +137,11 @@ export async function POST(
       );
     }
 
-    // 2. Check if receipt already exists
+    // 2. Check if receipt already exists (scoped to caller's salon)
     const existingReceipts = await db
       .select()
       .from(fiscalReceipts)
-      .where(eq(fiscalReceipts.appointmentId, id))
+      .where(and(eq(fiscalReceipts.appointmentId, id), eq(fiscalReceipts.salonId, userSalonId)))
       .limit(1);
 
     if (existingReceipts.length > 0) {

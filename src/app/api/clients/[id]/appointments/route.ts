@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointments, clients, employees, services, treatmentHistory, appointmentMaterials, products } from "@/lib/schema";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 // GET /api/clients/[id]/appointments - Get all appointments for a specific client
@@ -14,13 +15,21 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
-    // First verify client exists
+    // First verify the client belongs to the caller's salon
     const [client] = await db
       .select()
       .from(clients)
-      .where(eq(clients.id, id))
+      .where(and(eq(clients.id, id), eq(clients.salonId, salonId)))
       .limit(1);
 
     if (!client) {
@@ -29,8 +38,6 @@ export async function GET(
         { status: 404 }
       );
     }
-
-    logger.info(`[Client Appointments API] Fetching appointments for client: ${client.firstName} ${client.lastName} (${id})`);
 
     // Fetch all appointments for this client with joined employee, service, and treatment data
     const result = await db
@@ -44,7 +51,7 @@ export async function GET(
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .leftJoin(treatmentHistory, eq(appointments.id, treatmentHistory.appointmentId))
-      .where(eq(appointments.clientId, id))
+      .where(and(eq(appointments.clientId, id), eq(appointments.salonId, salonId)))
       .orderBy(desc(appointments.startTime));
 
     // Fetch materials for all appointments using inArray for efficiency

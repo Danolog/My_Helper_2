@@ -52,6 +52,9 @@ vi.mock("@/lib/schema", () => {
 
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
+  // `and` is required since the P0-A tenant-isolation fix scopes the [id]
+  // queries with `and(eq(id), eq(salonId))`. Without it the route throws -> 500.
+  and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
 }));
 
 vi.mock("@/lib/validations", () => ({
@@ -64,6 +67,12 @@ vi.mock("@/lib/auth-middleware", () => ({
     user: { id: "test-user-id", email: "test@test.com", name: "Test User" },
   }),
   isAuthError: vi.fn().mockReturnValue(false),
+}));
+
+// Tenant isolation (P0-A): scoped routes resolve the salon from the session.
+vi.mock("@/lib/get-user-salon", () => ({
+  getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
+  getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
 }));
 
 // -------------------------------------------------------
@@ -95,6 +104,10 @@ import {
   PUT as updateService,
   DELETE as deleteService,
 } from "@/app/api/services/[id]/route";
+
+// Mocked tenant resolver — flip it to simulate "no salon" / wrong tenant.
+import { getUserSalonId } from "@/lib/get-user-salon";
+const mockGetUserSalonId = vi.mocked(getUserSalonId);
 
 // -------------------------------------------------------
 // Tests
@@ -476,5 +489,60 @@ describe("DELETE /api/services/[id]", () => {
     expect(status).toBe(500);
     expect(body.success).toBe(false);
     expect(body.error).toContain("Failed to delete service");
+  });
+});
+
+// =======================================================
+// P0-A · Tenant isolation regression (IDOR) — services/[id]
+// The salon is derived from the session; a foreign-salon record is invisible
+// (scoped WHERE -> empty -> 404), and a caller without a salon never queries.
+// =======================================================
+describe("P0-A tenant isolation — /api/services/[id]", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
+  });
+
+  it("GET returns 404 when the caller has no salon and never queries", async () => {
+    mockGetUserSalonId.mockResolvedValue(null);
+
+    const request = createMockRequest(`http://localhost:3000/api/services/${TEST_IDS.SERVICE_UUID}`);
+    const params = createRouteParams(TEST_IDS.SERVICE_UUID);
+    const response = await getService(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Salon not found");
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it("GET returns 404 for a service owned by another salon (foreign record invisible)", async () => {
+    mockDbSelect.mockReturnValue(chainMock([]));
+
+    const request = createMockRequest(`http://localhost:3000/api/services/${TEST_IDS.SERVICE_UUID}`);
+    const params = createRouteParams(TEST_IDS.SERVICE_UUID);
+    const response = await getService(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(mockGetUserSalonId).toHaveBeenCalled();
+  });
+
+  it("PUT returns 404 for a service owned by another salon (no cross-tenant mutation)", async () => {
+    mockDbUpdate.mockReturnValue(chainMock([]));
+
+    const request = createMockRequest(`http://localhost:3000/api/services/${TEST_IDS.SERVICE_UUID}`, {
+      method: "PUT",
+      body: { name: "X" },
+    });
+    const params = createRouteParams(TEST_IDS.SERVICE_UUID);
+    const response = await updateService(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(mockGetUserSalonId).toHaveBeenCalled();
   });
 });

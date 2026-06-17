@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, updatePromoCodeSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
@@ -14,6 +15,15 @@ export async function GET(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     const [result] = await db
@@ -23,7 +33,7 @@ export async function GET(
       })
       .from(promoCodes)
       .leftJoin(promotions, eq(promoCodes.promotionId, promotions.id))
-      .where(eq(promoCodes.id, id))
+      .where(and(eq(promoCodes.id, id), eq(promoCodes.salonId, salonId)))
       .limit(1);
 
     if (!result) {
@@ -57,6 +67,15 @@ export async function PUT(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
     const validationError = validateBody(updatePromoCodeSchema, body);
@@ -65,11 +84,11 @@ export async function PUT(
     }
     const { code, promotionId, usageLimit, expiresAt } = body;
 
-    // Check that the promo code exists
+    // Check that the promo code exists in the caller's salon
     const [existing] = await db
       .select()
       .from(promoCodes)
-      .where(eq(promoCodes.id, id))
+      .where(and(eq(promoCodes.id, id), eq(promoCodes.salonId, salonId)))
       .limit(1);
 
     if (!existing) {
@@ -162,7 +181,7 @@ export async function PUT(
     const [updated] = await db
       .update(promoCodes)
       .set(updateData)
-      .where(eq(promoCodes.id, id))
+      .where(and(eq(promoCodes.id, id), eq(promoCodes.salonId, salonId)))
       .returning();
 
     if (!updated) {
@@ -195,11 +214,20 @@ export async function DELETE(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     const [deleted] = await db
       .delete(promoCodes)
-      .where(eq(promoCodes.id, id))
+      .where(and(eq(promoCodes.id, id), eq(promoCodes.salonId, salonId)))
       .returning();
 
     if (!deleted) {

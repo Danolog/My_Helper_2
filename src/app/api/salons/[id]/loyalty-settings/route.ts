@@ -48,7 +48,7 @@ export async function GET(
     const { id } = await params;
 
     const [salon] = await db
-      .select({ id: salons.id, settingsJson: salons.settingsJson })
+      .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
       .from(salons)
       .where(eq(salons.id, id))
       .limit(1);
@@ -57,6 +57,13 @@ export async function GET(
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
+      );
+    }
+
+    if (salon.ownerId !== authResult.user.id) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
       );
     }
 
@@ -107,7 +114,7 @@ export async function PUT(
 
     // Fetch current salon
     const [salon] = await db
-      .select({ id: salons.id, settingsJson: salons.settingsJson })
+      .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
       .from(salons)
       .where(eq(salons.id, id))
       .limit(1);
@@ -116,6 +123,13 @@ export async function PUT(
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
+      );
+    }
+
+    if (salon.ownerId !== authResult.user.id) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
       );
     }
 

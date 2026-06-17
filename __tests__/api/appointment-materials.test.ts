@@ -51,6 +51,9 @@ vi.mock("@/lib/schema", () => {
 
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
+  // `and` is required since the P0-A tenant-isolation fix scopes the queries
+  // with `and(eq(id), eq(salonId))`. Without it the route throws -> 500.
+  and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
   sql: vi.fn((...args: unknown[]) => ({ type: "sql", args })),
 }));
 
@@ -60,6 +63,13 @@ vi.mock("@/lib/auth-middleware", () => ({
     user: { id: "test-user-id", email: "test@test.com", name: "Test User" },
   }),
   isAuthError: vi.fn().mockReturnValue(false),
+}));
+
+// Tenant isolation (P0-A): the route resolves the salon from the session.
+// Without this mock the route hits the real DB-backed resolver and throws.
+vi.mock("@/lib/get-user-salon", () => ({
+  getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
+  getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
 }));
 
 // -------------------------------------------------------

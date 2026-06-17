@@ -4,6 +4,7 @@ import { products, notifications } from "@/lib/schema";
 import { eq, and, like, sql } from "drizzle-orm";
 import { validateBody, updateProductSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 /**
@@ -73,12 +74,20 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     const [product] = await db
       .select()
       .from(products)
-      .where(eq(products.id, id))
+      .where(and(eq(products.id, id), eq(products.salonId, salonId)))
       .limit(1);
 
     if (!product) {
@@ -110,6 +119,14 @@ export async function PUT(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
 
@@ -132,7 +149,7 @@ export async function PUT(
     const [updatedProduct] = await db
       .update(products)
       .set(updateData)
-      .where(eq(products.id, id))
+      .where(and(eq(products.id, id), eq(products.salonId, salonId)))
       .returning();
 
     if (!updatedProduct) {
@@ -175,11 +192,19 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     const [deletedProduct] = await db
       .delete(products)
-      .where(eq(products.id, id))
+      .where(and(eq(products.id, id), eq(products.salonId, salonId)))
       .returning();
 
     if (!deletedProduct) {

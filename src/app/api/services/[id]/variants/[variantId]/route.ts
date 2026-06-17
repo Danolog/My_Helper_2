@@ -1,9 +1,20 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { serviceVariants } from "@/lib/schema";
+import { serviceVariants, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, updateServiceVariantSchema } from "@/lib/api-validation";
+
+/** Verify the service belongs to the caller's salon. */
+async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {
+  const [service] = await db
+    .select({ id: services.id })
+    .from(services)
+    .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
+    .limit(1);
+  return !!service;
+}
 
 import { logger } from "@/lib/logger";
 // PUT /api/services/[id]/variants/[variantId] - Update a variant
@@ -15,6 +26,14 @@ export async function PUT(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id, variantId } = await params;
     const body = await request.json();
     const validationError = validateBody(updateServiceVariantSchema, body);
@@ -22,6 +41,13 @@ export async function PUT(
       return NextResponse.json(validationError, { status: 400 });
     }
     const { name, priceModifier, durationModifier } = body;
+
+    if (!(await serviceBelongsToSalon(id, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Variant not found" },
+        { status: 404 }
+      );
+    }
 
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name.trim();
@@ -68,7 +94,22 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id, variantId } = await params;
+
+    if (!(await serviceBelongsToSalon(id, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Variant not found" },
+        { status: 404 }
+      );
+    }
 
     const [deleted] = await db
       .delete(serviceVariants)

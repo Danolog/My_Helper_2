@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointmentMaterials, products, appointments, clients, employees, services } from "@/lib/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 // GET /api/products/[id]/usage-history - Get usage history for a product
@@ -15,6 +16,14 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     if (!isValidUuid(id)) {
@@ -24,11 +33,11 @@ export async function GET(
       );
     }
 
-    // Verify product exists
+    // Verify product exists in the caller's salon
     const [product] = await db
       .select()
       .from(products)
-      .where(eq(products.id, id))
+      .where(and(eq(products.id, id), eq(products.salonId, salonId)))
       .limit(1);
 
     if (!product) {

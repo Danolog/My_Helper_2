@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { appointments, clients, employees, services } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 // GET /api/appointments/[id]/cancel-info - Get cancellation policy details for an appointment
@@ -13,6 +14,14 @@ export async function GET(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     const { id } = await params;
 
@@ -26,7 +35,7 @@ export async function GET(
     .leftJoin(clients, eq(appointments.clientId, clients.id))
     .leftJoin(employees, eq(appointments.employeeId, employees.id))
     .leftJoin(services, eq(appointments.serviceId, services.id))
-    .where(eq(appointments.id, id))
+    .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
     .limit(1);
 
     const row = result[0];

@@ -7,6 +7,7 @@ import { notifyWaitingList } from "@/lib/waiting-list";
 import { validateBody, updateAppointmentSchema } from "@/lib/api-validation";
 import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 // GET /api/appointments/[id] - Get a single appointment
@@ -17,6 +18,14 @@ export async function GET(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     const { id } = await params;
 
@@ -37,7 +46,7 @@ export async function GET(
     .leftJoin(clients, eq(appointments.clientId, clients.id))
     .leftJoin(employees, eq(appointments.employeeId, employees.id))
     .leftJoin(services, eq(appointments.serviceId, services.id))
-    .where(eq(appointments.id, id))
+    .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
     .limit(1);
 
     const row = result[0];
@@ -77,6 +86,14 @@ export async function PUT(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     if (!isValidUuid(id)) {
@@ -96,7 +113,7 @@ export async function PUT(
 
     const { startTime, endTime, employeeId, clientId, serviceId, notes, status, depositAmount, depositPaid } = body;
 
-    // Check if appointment exists (need times and employeeId for conflict checks)
+    // Check if appointment exists in the caller's salon (need times and employeeId for conflict checks)
     const [existing] = await db.select({
       id: appointments.id,
       startTime: appointments.startTime,
@@ -105,7 +122,7 @@ export async function PUT(
       status: appointments.status,
     })
       .from(appointments)
-      .where(eq(appointments.id, id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
       .limit(1);
 
     if (!existing) {
@@ -169,7 +186,7 @@ export async function PUT(
     const [updatedAppointment] = await db
       .update(appointments)
       .set(updateData)
-      .where(eq(appointments.id, id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
       .returning();
 
     logger.info(`[Appointments API] Updated appointment ${id} successfully`);
@@ -197,11 +214,19 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const url = new URL(request.url);
     const notifyClient = url.searchParams.get("notifyClient") === "true";
 
-    // Fetch the appointment with client info
+    // Fetch the appointment with client info, scoped to the caller's salon
     const result = await db.select({
       appointment: appointments,
       client: clients,
@@ -212,7 +237,7 @@ export async function DELETE(
     .leftJoin(clients, eq(appointments.clientId, clients.id))
     .leftJoin(employees, eq(appointments.employeeId, employees.id))
     .leftJoin(services, eq(appointments.serviceId, services.id))
-    .where(eq(appointments.id, id))
+    .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
     .limit(1);
 
     const row = result[0];
@@ -255,11 +280,11 @@ export async function DELETE(
       }
     }
 
-    // Soft delete by setting status to cancelled
+    // Soft delete by setting status to cancelled (scoped to caller's salon)
     const [cancelledAppointment] = await db
       .update(appointments)
       .set({ status: "cancelled" })
-      .where(eq(appointments.id, id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
       .returning();
 
     logger.info(`[Appointments API] Cancelled appointment ${id}`, {

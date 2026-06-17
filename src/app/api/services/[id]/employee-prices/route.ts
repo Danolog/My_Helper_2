@@ -1,9 +1,20 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { employeeServicePrices, employees, serviceVariants } from "@/lib/schema";
+import { employeeServicePrices, employees, serviceVariants, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, employeePriceSchema } from "@/lib/api-validation";
+
+/** Verify the service belongs to the caller's salon. */
+async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {
+  const [service] = await db
+    .select({ id: services.id })
+    .from(services)
+    .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
+    .limit(1);
+  return !!service;
+}
 
 import { logger } from "@/lib/logger";
 // GET /api/services/[id]/employee-prices - List all employee-specific prices for a service
@@ -15,7 +26,22 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id: serviceId } = await params;
+
+    if (!(await serviceBelongsToSalon(serviceId, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Service not found" },
+        { status: 404 }
+      );
+    }
 
     const prices = await db
       .select({
@@ -57,6 +83,14 @@ export async function POST(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id: serviceId } = await params;
     const body = await request.json();
     const validationError = validateBody(employeePriceSchema, body);
@@ -64,6 +98,26 @@ export async function POST(
       return NextResponse.json(validationError, { status: 400 });
     }
     const { employeeId, variantId, customPrice } = body;
+
+    if (!(await serviceBelongsToSalon(serviceId, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Service not found" },
+        { status: 404 }
+      );
+    }
+
+    // Verify the employee belongs to the caller's salon
+    const [ownedEmployee] = await db
+      .select({ id: employees.id })
+      .from(employees)
+      .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
+      .limit(1);
+    if (!ownedEmployee) {
+      return NextResponse.json(
+        { success: false, error: "Employee not found" },
+        { status: 404 }
+      );
+    }
 
     // Check if an employee price already exists for this employee + service + variant combo
     const conditions = [
@@ -137,7 +191,15 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    await params; // consume params
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
+    const { id: serviceId } = await params;
     const { searchParams } = new URL(request.url);
     const priceId = searchParams.get("priceId");
 
@@ -148,9 +210,22 @@ export async function DELETE(
       );
     }
 
+    if (!(await serviceBelongsToSalon(serviceId, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Service not found" },
+        { status: 404 }
+      );
+    }
+
+    // Only delete a price that belongs to this (salon-owned) service
     const [deleted] = await db
       .delete(employeeServicePrices)
-      .where(eq(employeeServicePrices.id, priceId))
+      .where(
+        and(
+          eq(employeeServicePrices.id, priceId),
+          eq(employeeServicePrices.serviceId, serviceId)
+        )
+      )
       .returning();
 
     if (!deleted) {

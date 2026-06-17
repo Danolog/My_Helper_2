@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { employees, employeeServices } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { validateBody, updateEmployeeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 // GET /api/employees/[id] - Get single employee with assigned services
@@ -15,12 +16,20 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     const [employee] = await db
       .select()
       .from(employees)
-      .where(eq(employees.id, id));
+      .where(and(eq(employees.id, id), eq(employees.salonId, salonId)));
 
     if (!employee) {
       return NextResponse.json(
@@ -59,6 +68,14 @@ export async function PUT(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
 
@@ -86,11 +103,11 @@ export async function PUT(
       );
     }
 
-    // Check employee exists
+    // Check employee exists in the caller's salon
     const [existing] = await db
       .select()
       .from(employees)
-      .where(eq(employees.id, id));
+      .where(and(eq(employees.id, id), eq(employees.salonId, salonId)));
 
     if (!existing) {
       return NextResponse.json(
@@ -111,7 +128,7 @@ export async function PUT(
         isActive: typeof isActive === "boolean" ? isActive : existing.isActive,
         updatedAt: new Date(),
       })
-      .where(eq(employees.id, id))
+      .where(and(eq(employees.id, id), eq(employees.salonId, salonId)))
       .returning();
 
     // Update service assignments if provided

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { productCategories, products } from "@/lib/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, updateProductCategorySchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
@@ -14,6 +15,14 @@ export async function GET(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     const { id } = await params;
 
@@ -28,7 +37,7 @@ export async function GET(
       })
       .from(productCategories)
       .leftJoin(products, eq(products.category, productCategories.name))
-      .where(eq(productCategories.id, id))
+      .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
       .groupBy(productCategories.id)
       .limit(1);
 
@@ -61,6 +70,14 @@ export async function PUT(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
     const validationError = validateBody(updateProductCategorySchema, body);
@@ -69,11 +86,11 @@ export async function PUT(
     }
     const { name } = body;
 
-    // Get the existing category
+    // Get the existing category in the caller's salon
     const [existing] = await db
       .select()
       .from(productCategories)
-      .where(eq(productCategories.id, id))
+      .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
       .limit(1);
 
     if (!existing) {
@@ -104,19 +121,19 @@ export async function PUT(
       }
     }
 
-    // Update category name
+    // Update category name (scoped to caller's salon)
     const [updated] = await db
       .update(productCategories)
       .set({ name: newName })
-      .where(eq(productCategories.id, id))
+      .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
       .returning();
 
-    // Also update all products that reference the old name
+    // Also update all products in this salon that reference the old name
     if (oldName !== newName) {
       await db
         .update(products)
         .set({ category: newName })
-        .where(eq(products.category, oldName));
+        .where(and(eq(products.category, oldName), eq(products.salonId, salonId)));
 
       logger.info(`[Product Categories API] Renamed "${oldName}" -> "${newName}", updated associated products`);
     }
@@ -143,13 +160,21 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
-    // Get the category
+    // Get the category in the caller's salon
     const [category] = await db
       .select()
       .from(productCategories)
-      .where(eq(productCategories.id, id))
+      .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
       .limit(1);
 
     if (!category) {
@@ -159,11 +184,11 @@ export async function DELETE(
       );
     }
 
-    // Check if category has products
+    // Check if category has products (within this salon)
     const productCount = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(products)
-      .where(eq(products.category, category.name));
+      .where(and(eq(products.category, category.name), eq(products.salonId, salonId)));
 
     if ((productCount[0]?.count || 0) > 0) {
       return NextResponse.json(
@@ -175,10 +200,10 @@ export async function DELETE(
       );
     }
 
-    // Delete the category
+    // Delete the category (scoped to caller's salon)
     const [deleted] = await db
       .delete(productCategories)
-      .where(eq(productCategories.id, id))
+      .where(and(eq(productCategories.id, id), eq(productCategories.salonId, salonId)))
       .returning();
 
     logger.info(`[Product Categories API] Deleted category: ${deleted!.name} (${deleted!.id})`);

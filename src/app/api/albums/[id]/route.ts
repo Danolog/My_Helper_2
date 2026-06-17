@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { albums, photoAlbums } from "@/lib/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, updateAlbumSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
@@ -14,6 +15,15 @@ export async function GET(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
     const [album] = await db
@@ -27,7 +37,7 @@ export async function GET(
       })
       .from(albums)
       .leftJoin(photoAlbums, eq(albums.id, photoAlbums.albumId))
-      .where(eq(albums.id, id))
+      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)))
       .groupBy(albums.id);
 
     if (!album) {
@@ -58,6 +68,15 @@ export async function PATCH(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
     const body = await request.json();
     const validationError = validateBody(updateAlbumSchema, body);
@@ -83,7 +102,7 @@ export async function PATCH(
     const [updated] = await db
       .update(albums)
       .set(updateData)
-      .where(eq(albums.id, id))
+      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)))
       .returning();
 
     if (!updated) {
@@ -116,13 +135,22 @@ export async function DELETE(
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { id } = await params;
 
-    // Check album exists
+    // Check album exists in the caller's salon
     const [album] = await db
       .select()
       .from(albums)
-      .where(eq(albums.id, id));
+      .where(and(eq(albums.id, id), eq(albums.salonId, salonId)));
 
     if (!album) {
       return NextResponse.json(
@@ -132,7 +160,7 @@ export async function DELETE(
     }
 
     // Delete album (cascade will remove photo_albums entries)
-    await db.delete(albums).where(eq(albums.id, id));
+    await db.delete(albums).where(and(eq(albums.id, id), eq(albums.salonId, salonId)));
 
     logger.info(`[Albums API] Deleted album: ${id} - "${album.name}"`);
 
