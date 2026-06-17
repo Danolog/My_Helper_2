@@ -24,6 +24,11 @@ Sekrety nie wchodzą do repo. Utwórz plik **poza repozytorium** (np.
   baza `pos_dev`, user `dev_user` (creds dev z `docker-compose.yml`).
 - `BETTER_AUTH_SECRET` — dowolny ciąg min. 32 znaki na potrzeby testu.
 - `BETTER_AUTH_URL` — `http://localhost:3000`.
+- `MYHELPER_APP_DB_ROLE` — *opcjonalne*; nazwa roli aplikacyjnej bez BYPASSRLS
+  (domyślnie `myhelper_app`). Migracja `0005` tworzy tę rolę i nadaje ją ownerowi
+  (`GRANT myhelper_app TO current_user`), żeby wrapper `forSalon` mógł zrobić
+  `SET LOCAL ROLE` na ścieżce żądania. Bez tego GRANT-a `SET ROLE` rzuca
+  „permission denied" — i RLS na ścieżce żądania nie zadziała.
 
 ## Uruchomienie
 
