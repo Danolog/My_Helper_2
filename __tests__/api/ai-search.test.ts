@@ -35,9 +35,18 @@ vi.mock("ai", () => ({
 }));
 
 const mockDbSelect = vi.fn();
+// `tx` w transakcji deleguje do tych samych mocków co `db` — warstwa repo
+// (forSalon) otwiera db.transaction() i woła tx.select(...). Po migracji tras
+// na forSalon(salonId).raw(tx => ...) istniejące asercje na mockDbSelect dalej
+// działają (ADR-001 R2).
+const mockTx = {
+  select: (...args: unknown[]) => mockDbSelect(...args),
+  execute: vi.fn().mockResolvedValue(undefined), // SET LOCAL ROLE + app.current_salon_id
+};
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
+    transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
 }));
 
