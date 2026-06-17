@@ -5,6 +5,7 @@ import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { validateBody, createClientSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/clients - List all clients with optional filtering
@@ -136,7 +137,8 @@ export async function POST(request: Request) {
     const { salonId, firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
 
     logger.info(`[Clients API] Executing: INSERT INTO clients (salon_id, first_name, last_name, phone, email, notes, preferences, allergies, favorite_employee_id)`);
-    const [newClient] = await db
+    const [newClient] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(clients)
       .values({
         salonId,
@@ -152,7 +154,8 @@ export async function POST(request: Request) {
         depositType: depositType || "percentage",
         depositValue: depositValue || null,
       })
-      .returning();
+      .returning()
+    );
 
     logger.info(`[Clients API] INSERT successful, created client with id: ${newClient?.id}`);
 
