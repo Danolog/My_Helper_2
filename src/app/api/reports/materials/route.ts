@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { appointmentMaterials, products, appointments, employees, services } from "@/lib/schema";
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/reports/materials - Materials consumption report
@@ -47,7 +47,8 @@ export async function GET(request: Request) {
     }
 
     // Get all usage records with product and appointment details
-    const usageRecords = await db
+    const usageRecords = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         usageId: appointmentMaterials.id,
         productId: products.id,
@@ -71,7 +72,8 @@ export async function GET(request: Request) {
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .where(and(...conditions))
-      .orderBy(desc(appointmentMaterials.createdAt));
+      .orderBy(desc(appointmentMaterials.createdAt))
+    );
 
     // Aggregate by product
     const productSummary: Record<

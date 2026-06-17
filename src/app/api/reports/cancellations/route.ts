@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { appointments, services, employees } from "@/lib/schema";
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 const DAY_LABELS_PL = [
@@ -406,7 +406,8 @@ export async function GET(request: Request) {
         conditions.push(inArray(appointments.employeeId, employeeIds));
       }
 
-      return db
+      return forSalon(salonId!).raw((tx) =>
+        tx
         .select({
           appointmentId: appointments.id,
           startTime: appointments.startTime,
@@ -422,7 +423,8 @@ export async function GET(request: Request) {
         .from(appointments)
         .leftJoin(services, eq(appointments.serviceId, services.id))
         .leftJoin(employees, eq(appointments.employeeId, employees.id))
-        .where(and(...conditions));
+        .where(and(...conditions))
+      );
     }
 
     // Fetch primary period appointments

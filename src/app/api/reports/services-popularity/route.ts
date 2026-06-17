@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { appointments, services, employees, clients, reviews, serviceCategories } from "@/lib/schema";
 import { eq, and, gte, lte, desc, ne, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/reports/services-popularity - Service popularity report: most booked services
@@ -49,7 +49,8 @@ export async function GET(request: Request) {
     }
 
     // Get all non-cancelled appointments with service details
-    const appointmentData = await db
+    const appointmentData = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         appointmentId: appointments.id,
         startTime: appointments.startTime,
@@ -72,10 +73,12 @@ export async function GET(request: Request) {
       .leftJoin(clients, eq(appointments.clientId, clients.id))
       .leftJoin(serviceCategories, eq(services.categoryId, serviceCategories.id))
       .where(and(...conditions))
-      .orderBy(desc(appointments.startTime));
+      .orderBy(desc(appointments.startTime))
+    );
 
     // Get average ratings for services from approved reviews
-    const reviewData = await db
+    const reviewData = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         appointmentId: reviews.appointmentId,
         rating: reviews.rating,
@@ -86,7 +89,8 @@ export async function GET(request: Request) {
           eq(reviews.salonId, salonId),
           eq(reviews.status, "approved")
         )
-      );
+      )
+    );
 
     // Build a map of appointmentId -> rating
     const appointmentRatings = new Map<string, number>();

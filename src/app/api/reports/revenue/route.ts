@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { appointments, services, employees, clients } from "@/lib/schema";
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/reports/revenue - Revenue report with breakdowns by service/employee and trends
@@ -50,7 +50,8 @@ export async function GET(request: Request) {
     }
 
     // Get all completed appointments with service and employee details
-    const completedAppointments = await db
+    const completedAppointments = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         appointmentId: appointments.id,
         startTime: appointments.startTime,
@@ -73,7 +74,8 @@ export async function GET(request: Request) {
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .leftJoin(clients, eq(appointments.clientId, clients.id))
       .where(and(...conditions))
-      .orderBy(desc(appointments.startTime));
+      .orderBy(desc(appointments.startTime))
+    );
 
     // Calculate total revenue
     let totalRevenue = 0;
