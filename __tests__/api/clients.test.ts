@@ -26,12 +26,25 @@ const mockDbInsert = vi.fn();
 const mockDbUpdate = vi.fn();
 const mockDbDelete = vi.fn();
 
+// `tx` w transakcji deleguje do tych samych mocków co `db` — warstwa repo
+// (forSalon) otwiera db.transaction() i woła tx.select/update/delete. Dzięki
+// temu istniejące asercje na mockDbSelect/Update/Delete dalej działają po
+// migracji tras na repozytorium (ADR-001 R1).
+const mockTx = {
+  select: (...args: unknown[]) => mockDbSelect(...args),
+  insert: (...args: unknown[]) => mockDbInsert(...args),
+  update: (...args: unknown[]) => mockDbUpdate(...args),
+  delete: (...args: unknown[]) => mockDbDelete(...args),
+  execute: vi.fn().mockResolvedValue(undefined), // SET LOCAL app.current_salon_id
+};
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
     insert: (...args: unknown[]) => mockDbInsert(...args),
     update: (...args: unknown[]) => mockDbUpdate(...args),
     delete: (...args: unknown[]) => mockDbDelete(...args),
+    transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
 }));
 
@@ -556,6 +569,10 @@ describe("DELETE /api/clients/[id]", () => {
     mockGetSession.mockResolvedValue({
       user: { id: "user-1", email: "owner@test.com" },
     });
+
+    // ADR-001 2.4: brama "zasób mój?" (findOne) wykonuje się PRZED kontrolą
+    // hasła — musi zwrócić własnego klienta, by dojść do gate 400 brak hasła.
+    mockDbSelect.mockReturnValue(chainMock([makeClient()]));
 
     const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`, {
       method: "DELETE",

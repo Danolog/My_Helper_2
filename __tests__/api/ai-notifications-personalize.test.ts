@@ -46,9 +46,18 @@ vi.mock("ai", () => ({
 }));
 
 const mockDbSelect = vi.fn();
+// `tx` w transakcji deleguje do tych samych mocków co `db` — warstwa repo
+// (forSalon) otwiera db.transaction() i woła tx.select(...). Po migracji tras
+// na forSalon(salonId).raw(tx => ...) istniejące asercje na mockDbSelect dalej
+// działają (ADR-001 R2).
+const mockTx = {
+  select: (...args: unknown[]) => mockDbSelect(...args),
+  execute: vi.fn().mockResolvedValue(undefined),
+};
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
+    transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
 }));
 
@@ -74,6 +83,12 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
   desc: vi.fn((...args: unknown[]) => ({ type: "desc", args })),
+  // sql + sql.raw — używane przez warstwę repo (withSalonContext: SET LOCAL ROLE
+  // + set_config). Bez tego forSalon().raw() rzuca i trasa zwraca 500.
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args, as: vi.fn(() => "sql_column") })),
+    { raw: vi.fn((...args: unknown[]) => ({ type: "sql_raw", args })) },
+  ),
 }));
 
 vi.mock("@/lib/logger", () => ({

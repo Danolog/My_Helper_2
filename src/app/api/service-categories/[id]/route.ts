@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { serviceCategories, services } from "@/lib/schema";
 import { eq, and, count } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, updateServiceCategorySchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/service-categories/[id] - Get a single category
@@ -26,10 +26,7 @@ export async function GET(
 
     const { id } = await params;
 
-    const [category] = await db
-      .select()
-      .from(serviceCategories)
-      .where(and(eq(serviceCategories.id, id), eq(serviceCategories.salonId, salonId)));
+    const category = await forSalon(salonId).findOne(serviceCategories, id);
 
     if (!category) {
       return NextResponse.json(
@@ -38,11 +35,13 @@ export async function GET(
       );
     }
 
-    // Get count of services in this category
-    const [serviceCount] = await db
-      .select({ count: count() })
-      .from(services)
-      .where(eq(services.categoryId, id));
+    // Get count of services in this category (services salon-scoped — RLS w kontekscie)
+    const [serviceCount] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ count: count() })
+        .from(services)
+        .where(eq(services.categoryId, id))
+    );
 
     return NextResponse.json({
       success: true,
@@ -86,10 +85,7 @@ export async function PUT(
     const { name, sortOrder } = body;
 
     // Check category exists in the caller's salon
-    const [existing] = await db
-      .select()
-      .from(serviceCategories)
-      .where(and(eq(serviceCategories.id, id), eq(serviceCategories.salonId, salonId)));
+    const existing = await forSalon(salonId).findOne(serviceCategories, id);
 
     if (!existing) {
       return NextResponse.json(
@@ -99,15 +95,17 @@ export async function PUT(
     }
 
     // Check for duplicate name in same salon
-    const [duplicate] = await db
-      .select()
-      .from(serviceCategories)
-      .where(
-        and(
-          eq(serviceCategories.salonId, existing.salonId),
-          eq(serviceCategories.name, name.trim())
+    const [duplicate] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(serviceCategories)
+        .where(
+          and(
+            eq(serviceCategories.salonId, existing.salonId),
+            eq(serviceCategories.name, name.trim())
+          )
         )
-      );
+    );
 
     if (duplicate && duplicate.id !== id) {
       return NextResponse.json(
@@ -121,11 +119,7 @@ export async function PUT(
       updateData.sortOrder = sortOrder;
     }
 
-    const [updated] = await db
-      .update(serviceCategories)
-      .set(updateData)
-      .where(and(eq(serviceCategories.id, id), eq(serviceCategories.salonId, salonId)))
-      .returning();
+    const updated = await forSalon(salonId).updateOwned(serviceCategories, id, updateData);
 
     logger.info(`[ServiceCategories API] Updated category: ${updated?.name}`);
 
@@ -162,10 +156,7 @@ export async function DELETE(
     const { id } = await params;
 
     // Check category exists in the caller's salon
-    const [existing] = await db
-      .select()
-      .from(serviceCategories)
-      .where(and(eq(serviceCategories.id, id), eq(serviceCategories.salonId, salonId)));
+    const existing = await forSalon(salonId).findOne(serviceCategories, id);
 
     if (!existing) {
       return NextResponse.json(
@@ -174,11 +165,13 @@ export async function DELETE(
       );
     }
 
-    // Check if category has services assigned
-    const [serviceCount] = await db
-      .select({ count: count() })
-      .from(services)
-      .where(eq(services.categoryId, id));
+    // Check if category has services assigned (services salon-scoped — RLS w kontekscie)
+    const [serviceCount] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ count: count() })
+        .from(services)
+        .where(eq(services.categoryId, id))
+    );
 
     if (serviceCount && serviceCount.count > 0) {
       return NextResponse.json(
@@ -192,9 +185,7 @@ export async function DELETE(
     }
 
     // Delete the empty category (scoped to caller's salon)
-    await db
-      .delete(serviceCategories)
-      .where(and(eq(serviceCategories.id, id), eq(serviceCategories.salonId, salonId)));
+    await forSalon(salonId).deleteOwned(serviceCategories, id);
 
     logger.info(`[ServiceCategories API] Deleted category: ${existing.name}`);
 

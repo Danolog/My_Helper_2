@@ -3,22 +3,21 @@ import { db } from "@/lib/db";
 import { productCategories, products } from "@/lib/schema";
 import { eq, asc, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, createProductCategorySchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
 // GET /api/product-categories - List product categories with product counts
-export async function GET(request: Request) {
+export async function GET(_request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
-
+    const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
+        { success: false, error: "Salon not found" },
+        { status: 404 }
       );
     }
 
@@ -58,12 +57,20 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const body = await request.json();
     const validationError = validateBody(createProductCategorySchema, body);
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
     }
-    const { salonId, name } = body;
+    const { name } = body;
 
     // Check for duplicate name within salon
     const existing = await db

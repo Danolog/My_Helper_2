@@ -70,6 +70,25 @@ const config = [
       eqeqeq: ["error", "always", { null: "ignore" }],
     },
   },
+  {
+    // ADR-001 sekcja 2.3 — zakaz surowego `db` w trasach API poza warstwą repo.
+    // Trasa importuje forSalon(salonId) z @/lib/server/repository (wymusza
+    // izolację salonu), nie surowy `db`. Faza R1: poziom `warn` — 53 trasy
+    // jeszcze go łamią (migracja w R2). R3 podniesie do `error` (łamie build CI),
+    // gdy 0 tras importuje `db` poza zadeklarowanymi wyjątkami systemowymi.
+    files: ["src/app/api/**/*.ts"],
+    ignores: ["src/app/api/**/*.test.ts"],
+    rules: {
+      "no-restricted-imports": ["warn", {
+        paths: [{
+          name: "@/lib/db",
+          importNames: ["db"],
+          message:
+            "Trasy API nie importują surowego `db`. Użyj forSalon(salonId) z @/lib/server/repository — to wymusza izolację salonu. Wyjątki (webhooki/cron/seed) deklarują kontekst jawnie (patrz ADR-001 sekcja 4).",
+        }],
+      }],
+    },
+  },
 ];
 
 export default config;

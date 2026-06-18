@@ -1,0 +1,39 @@
+Dowod wykonania RLS R1 z CZYSTEJ lokalnej bazy
+================================================
+Weryfikator: Leo (Tech Lead Engineering, nordsignal)
+Data: 2026-06-17
+Branch: feat/repo-layer-rls
+Repo: My_Helper_2_work
+Warunek operacyjny Ryana: dowod wykonania z czystej bazy przed mergem.
+
+Uwaga: DSN, haslo bazy i tokeny weryfikacyjne USUNIETE z logu (guard-secrets +
+zasada repo: zero literalow sekretow w repozytorium). Baza WYLACZNIE lokalna,
+Docker, host=localhost:5440 (mapowanie na kontener 5432). Produkcja nietknieta.
+
+1. CZYSTA BAZA OD ZERA
+   docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
+   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d
+   pg_isready: READY
+   Tabele w public PRZED migracja: 0  (potwierdzona pustka)
+   Host bazy: localhost  (guard host != prod: OK)
+
+2. MIGRACJA (drizzle-kit migrate, jawny DSN localhost przez plik env poza repo)
+   Wynik: [v] migrations applied successfully!
+   Zastosowane wpisy w drizzle.__drizzle_migrations: 6
+   Lancuch: 0000 -> 0001 -> 0002 -> 0003 -> 0004 -> 0005_rls_tenant_isolation
+   Przeszedl CALY lancuch lacznie z 0005: TAK
+
+3. LICZBA POLITYK RLS
+   SELECT count(*) FROM pg_policies;  ->  38
+   38 tabel, po 1 polityce kazda.
+   Zgodne z korekta Ryana (38 na czystej bazie; bez ai_generated_media,
+   ktorej migracja nie tworzy — tabela nieobecna na liscie pg_policies).
+
+4. SUITE INTEGRACYJNY (vitest.integration.config.ts, realna lokalna baza)
+   __tests__/integration/salon-isolation.test.ts  -> 12 passed
+   __tests__/integration/rls-tenant.test.ts        ->  5 passed
+   Razem: 17/17 passed
+   GUARD setup-real-db: host=localhost (zalogowany dwukrotnie)
+
+WNIOSEK: GO dla warunku Ryana. Migracja na czystej bazie przechodzi z 0005,
+38 polityk, suite 17/17. Prod nietkniety, kod niezmieniony.

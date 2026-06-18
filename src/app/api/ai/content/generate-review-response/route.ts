@@ -9,9 +9,9 @@ import {
   getSalonContext,
   trackAIUsage,
 } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { reviews, clients, employees, services, appointments } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 const requestSchema = z.object({
   reviewId: z.string().uuid("Nieprawidlowe ID opinii"),
@@ -41,26 +41,28 @@ export async function POST(req: Request) {
   const { reviewId } = parsed.data;
 
   // Fetch the review with related data
-  const [reviewData] = await db
-    .select({
-      review: reviews,
-      client: clients,
-      employee: employees,
-      service: services,
-      appointment: appointments,
-    })
-    .from(reviews)
-    .leftJoin(clients, eq(reviews.clientId, clients.id))
-    .leftJoin(employees, eq(reviews.employeeId, employees.id))
-    .leftJoin(appointments, eq(reviews.appointmentId, appointments.id))
-    .leftJoin(services, eq(appointments.serviceId, services.id))
-    .where(
-      and(
-        eq(reviews.id, reviewId),
-        eq(reviews.salonId, salonId)
+  const [reviewData] = await forSalon(salonId).raw((tx) =>
+    tx
+      .select({
+        review: reviews,
+        client: clients,
+        employee: employees,
+        service: services,
+        appointment: appointments,
+      })
+      .from(reviews)
+      .leftJoin(clients, eq(reviews.clientId, clients.id))
+      .leftJoin(employees, eq(reviews.employeeId, employees.id))
+      .leftJoin(appointments, eq(reviews.appointmentId, appointments.id))
+      .leftJoin(services, eq(appointments.serviceId, services.id))
+      .where(
+        and(
+          eq(reviews.id, reviewId),
+          eq(reviews.salonId, salonId)
+        )
       )
-    )
-    .limit(1);
+      .limit(1)
+  );
 
   if (!reviewData) {
     return Response.json(

@@ -26,12 +26,23 @@ const mockDbInsert = vi.fn();
 const mockDbUpdate = vi.fn();
 const mockDbDelete = vi.fn();
 
+// `tx` deleguje do tych samych mocków co `db` — warstwa repo (forSalon) otwiera
+// db.transaction() i woła tx.select/update/delete/insert + tx.execute (SET LOCAL).
+const mockTx = {
+  select: (...args: unknown[]) => mockDbSelect(...args),
+  insert: (...args: unknown[]) => mockDbInsert(...args),
+  update: (...args: unknown[]) => mockDbUpdate(...args),
+  delete: (...args: unknown[]) => mockDbDelete(...args),
+  execute: vi.fn().mockResolvedValue(undefined),
+};
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
     insert: (...args: unknown[]) => mockDbInsert(...args),
     update: (...args: unknown[]) => mockDbUpdate(...args),
     delete: (...args: unknown[]) => mockDbDelete(...args),
+    transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
 }));
 
@@ -49,12 +60,18 @@ vi.mock("@/lib/schema", () => {
   };
 });
 
-vi.mock("drizzle-orm", () => ({
-  eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
-  and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
-  like: vi.fn((...args: unknown[]) => ({ type: "like", args })),
-  sql: vi.fn((...args: unknown[]) => ({ type: "sql", args })),
-}));
+vi.mock("drizzle-orm", () => {
+  const sql = Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((s: string) => ({ type: "sql.raw", s })) }
+  );
+  return {
+    eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
+    and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+    like: vi.fn((...args: unknown[]) => ({ type: "like", args })),
+    sql,
+  };
+});
 
 vi.mock("@/lib/auth-middleware", () => ({
   requireAuth: vi.fn().mockResolvedValue({

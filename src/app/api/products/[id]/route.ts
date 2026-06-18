@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { products, notifications } from "@/lib/schema";
 import { eq, and, like, sql } from "drizzle-orm";
 import { validateBody, updateProductSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -25,41 +25,45 @@ async function checkAndNotifyLowStock(product: {
   if (minQty === null) return null;
 
   if (qty <= minQty) {
-    // Check for existing notification in the last 24h to avoid duplicates
-    const existingRecent = await db
-      .select({ id: notifications.id })
-      .from(notifications)
-      .where(
-        and(
-          eq(notifications.salonId, product.salonId),
-          like(notifications.message, `%${product.id}%`),
-          sql`${notifications.createdAt} > NOW() - INTERVAL '24 hours'`,
-          sql`${notifications.type} = 'system'`
+    // notifications jest salon-scoped (product.salonId = salon wlasciciela) —
+    // czytamy/piszemy przez forSalon(...).raw, kontekst RLS + jawne eq(salonId).
+    return forSalon(product.salonId).raw(async (tx) => {
+      // Check for existing notification in the last 24h to avoid duplicates
+      const existingRecent = await tx
+        .select({ id: notifications.id })
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.salonId, product.salonId),
+            like(notifications.message, `%${product.id}%`),
+            sql`${notifications.createdAt} > NOW() - INTERVAL '24 hours'`,
+            sql`${notifications.type} = 'system'`
+          )
         )
-      )
-      .limit(1);
+        .limit(1);
 
-    if (existingRecent.length > 0) {
-      return { notificationSent: false, reason: "duplicate" };
-    }
+      if (existingRecent.length > 0) {
+        return { notificationSent: false, reason: "duplicate" };
+      }
 
-    const unitLabel = product.unit || "szt.";
-    const message = `Niski stan magazynowy: "${product.name}" - pozostalo ${qty} ${unitLabel} (minimum: ${minQty} ${unitLabel}). Uzupelnij zapasy! [product:${product.id}]`;
+      const unitLabel = product.unit || "szt.";
+      const message = `Niski stan magazynowy: "${product.name}" - pozostalo ${qty} ${unitLabel} (minimum: ${minQty} ${unitLabel}). Uzupelnij zapasy! [product:${product.id}]`;
 
-    const [notification] = await db
-      .insert(notifications)
-      .values({
-        salonId: product.salonId,
-        type: "system",
-        message,
-        status: "sent",
-        sentAt: new Date(),
-      })
-      .returning();
+      const [notification] = await tx
+        .insert(notifications)
+        .values({
+          salonId: product.salonId,
+          type: "system",
+          message,
+          status: "sent",
+          sentAt: new Date(),
+        })
+        .returning();
 
-    logger.info(`[Low Stock Alert] Notification sent for "${product.name}" (${product.id}) - qty: ${qty}, min: ${minQty}`);
+      logger.info(`[Low Stock Alert] Notification sent for "${product.name}" (${product.id}) - qty: ${qty}, min: ${minQty}`);
 
-    return { notificationSent: true, notification };
+      return { notificationSent: true, notification };
+    });
   }
 
   return { notificationSent: false, reason: "stock_ok" };
@@ -84,11 +88,7 @@ export async function GET(
 
     const { id } = await params;
 
-    const [product] = await db
-      .select()
-      .from(products)
-      .where(and(eq(products.id, id), eq(products.salonId, salonId)))
-      .limit(1);
+    const product = await forSalon(salonId).findOne(products, id);
 
     if (!product) {
       return NextResponse.json(
@@ -146,11 +146,7 @@ export async function PUT(
     if (unit !== undefined) updateData.unit = unit;
     if (pricePerUnit !== undefined) updateData.pricePerUnit = pricePerUnit?.toString() || null;
 
-    const [updatedProduct] = await db
-      .update(products)
-      .set(updateData)
-      .where(and(eq(products.id, id), eq(products.salonId, salonId)))
-      .returning();
+    const updatedProduct = await forSalon(salonId).updateOwned(products, id, updateData);
 
     if (!updatedProduct) {
       return NextResponse.json(
@@ -202,10 +198,7 @@ export async function DELETE(
 
     const { id } = await params;
 
-    const [deletedProduct] = await db
-      .delete(products)
-      .where(and(eq(products.id, id), eq(products.salonId, salonId)))
-      .returning();
+    const deletedProduct = await forSalon(salonId).deleteOwned(products, id);
 
     if (!deletedProduct) {
       return NextResponse.json(

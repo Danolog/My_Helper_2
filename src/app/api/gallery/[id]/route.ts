@@ -1,16 +1,16 @@
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { galleryPhotos, employees, services } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
 import { unlink } from "fs/promises";
 import path from "path";
-import { headers } from "next/headers";
+import { eq, and } from "drizzle-orm";
+import { validateBody, updateGalleryPhotoSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, updateGalleryPhotoSchema } from "@/lib/api-validation";
-
 import { logger } from "@/lib/logger";
+import { galleryPhotos, employees, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+
 type RouteParams = { params: Promise<{ id: string }> };
 
 // GET /api/gallery/[id] - Get a single gallery photo
@@ -29,27 +29,30 @@ export async function GET(_request: Request, { params }: RouteParams) {
 
     const { id } = await params;
 
-    const [photo] = await db
-      .select({
-        id: galleryPhotos.id,
-        salonId: galleryPhotos.salonId,
-        employeeId: galleryPhotos.employeeId,
-        serviceId: galleryPhotos.serviceId,
-        beforePhotoUrl: galleryPhotos.beforePhotoUrl,
-        afterPhotoUrl: galleryPhotos.afterPhotoUrl,
-        description: galleryPhotos.description,
-        productsUsed: galleryPhotos.productsUsed,
-        techniques: galleryPhotos.techniques,
-        duration: galleryPhotos.duration,
-        createdAt: galleryPhotos.createdAt,
-        employeeFirstName: employees.firstName,
-        employeeLastName: employees.lastName,
-        serviceName: services.name,
-      })
-      .from(galleryPhotos)
-      .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
-      .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-      .where(and(eq(galleryPhotos.id, id), eq(galleryPhotos.salonId, salonId)));
+    // Join — przez raw(tx) z jawnym eq(salonId); cudze zdjecie = pusty wynik = 404.
+    const [photo] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          id: galleryPhotos.id,
+          salonId: galleryPhotos.salonId,
+          employeeId: galleryPhotos.employeeId,
+          serviceId: galleryPhotos.serviceId,
+          beforePhotoUrl: galleryPhotos.beforePhotoUrl,
+          afterPhotoUrl: galleryPhotos.afterPhotoUrl,
+          description: galleryPhotos.description,
+          productsUsed: galleryPhotos.productsUsed,
+          techniques: galleryPhotos.techniques,
+          duration: galleryPhotos.duration,
+          createdAt: galleryPhotos.createdAt,
+          employeeFirstName: employees.firstName,
+          employeeLastName: employees.lastName,
+          serviceName: services.name,
+        })
+        .from(galleryPhotos)
+        .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
+        .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
+        .where(and(eq(galleryPhotos.id, id), eq(galleryPhotos.salonId, salonId)))
+    );
 
     if (!photo) {
       return NextResponse.json(
@@ -99,12 +102,11 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       );
     }
 
+    const repo = forSalon(salonId);
+
     // Get the photo scoped to the caller's salon — a foreign record yields
     // an empty result and is reported as 404 (no existence disclosure).
-    const [photo] = await db
-      .select()
-      .from(galleryPhotos)
-      .where(and(eq(galleryPhotos.id, id), eq(galleryPhotos.salonId, salonId)));
+    const photo = await repo.findOne(galleryPhotos, id);
 
     if (!photo) {
       return NextResponse.json(
@@ -120,16 +122,18 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     const isOwner = userRole === "owner" || userRole === "admin";
 
     if (!isOwner) {
-      // Check if user is an employee linked to this photo
-      const [employeeRecord] = await db
-        .select()
-        .from(employees)
-        .where(
-          and(
-            eq(employees.userId, session.user.id),
-            eq(employees.salonId, photo.salonId)
+      // Check if user is an employee linked to this photo (salon-scoped lookup).
+      const [employeeRecord] = await repo.raw((tx) =>
+        tx
+          .select()
+          .from(employees)
+          .where(
+            and(
+              eq(employees.userId, session.user.id),
+              eq(employees.salonId, salonId)
+            )
           )
-        );
+      );
 
       if (!employeeRecord) {
         return NextResponse.json(
@@ -182,34 +186,32 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       );
     }
 
-    await db
-      .update(galleryPhotos)
-      .set(updateData)
-      .where(and(eq(galleryPhotos.id, id), eq(galleryPhotos.salonId, salonId)))
-      .returning();
+    await repo.updateOwned(galleryPhotos, id, updateData);
 
-    // Fetch with joins for the response
-    const [fullPhoto] = await db
-      .select({
-        id: galleryPhotos.id,
-        salonId: galleryPhotos.salonId,
-        employeeId: galleryPhotos.employeeId,
-        serviceId: galleryPhotos.serviceId,
-        beforePhotoUrl: galleryPhotos.beforePhotoUrl,
-        afterPhotoUrl: galleryPhotos.afterPhotoUrl,
-        description: galleryPhotos.description,
-        productsUsed: galleryPhotos.productsUsed,
-        techniques: galleryPhotos.techniques,
-        duration: galleryPhotos.duration,
-        createdAt: galleryPhotos.createdAt,
-        employeeFirstName: employees.firstName,
-        employeeLastName: employees.lastName,
-        serviceName: services.name,
-      })
-      .from(galleryPhotos)
-      .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
-      .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-      .where(and(eq(galleryPhotos.id, id), eq(galleryPhotos.salonId, salonId)));
+    // Fetch with joins for the response (raw(tx) + jawny eq(salonId)).
+    const [fullPhoto] = await repo.raw((tx) =>
+      tx
+        .select({
+          id: galleryPhotos.id,
+          salonId: galleryPhotos.salonId,
+          employeeId: galleryPhotos.employeeId,
+          serviceId: galleryPhotos.serviceId,
+          beforePhotoUrl: galleryPhotos.beforePhotoUrl,
+          afterPhotoUrl: galleryPhotos.afterPhotoUrl,
+          description: galleryPhotos.description,
+          productsUsed: galleryPhotos.productsUsed,
+          techniques: galleryPhotos.techniques,
+          duration: galleryPhotos.duration,
+          createdAt: galleryPhotos.createdAt,
+          employeeFirstName: employees.firstName,
+          employeeLastName: employees.lastName,
+          serviceName: services.name,
+        })
+        .from(galleryPhotos)
+        .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
+        .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
+        .where(and(eq(galleryPhotos.id, id), eq(galleryPhotos.salonId, salonId)))
+    );
 
     logger.info(`[Gallery API] Updated photo: ${id}`);
 
@@ -255,11 +257,10 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
       );
     }
 
+    const repo = forSalon(salonId);
+
     // Get photo scoped to the caller's salon (also yields the file path).
-    const [photo] = await db
-      .select()
-      .from(galleryPhotos)
-      .where(and(eq(galleryPhotos.id, id), eq(galleryPhotos.salonId, salonId)));
+    const photo = await repo.findOne(galleryPhotos, id);
 
     if (!photo) {
       return NextResponse.json(
@@ -275,16 +276,18 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     const isOwner = userRole === "owner" || userRole === "admin";
 
     if (!isOwner) {
-      // Check if user is an employee linked to this photo
-      const [employeeRecord] = await db
-        .select()
-        .from(employees)
-        .where(
-          and(
-            eq(employees.userId, session.user.id),
-            eq(employees.salonId, photo.salonId)
+      // Check if user is an employee linked to this photo (salon-scoped lookup).
+      const [employeeRecord] = await repo.raw((tx) =>
+        tx
+          .select()
+          .from(employees)
+          .where(
+            and(
+              eq(employees.userId, session.user.id),
+              eq(employees.salonId, salonId)
+            )
           )
-        );
+      );
 
       if (!employeeRecord) {
         return NextResponse.json(
@@ -303,9 +306,7 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     }
 
     // Delete from database (scoped to the caller's salon — defense in depth)
-    await db
-      .delete(galleryPhotos)
-      .where(and(eq(galleryPhotos.id, id), eq(galleryPhotos.salonId, salonId)));
+    await repo.deleteOwned(galleryPhotos, id);
 
     // Try to delete files from disk (non-critical)
     const photoUrls = [photo.beforePhotoUrl, photo.afterPhotoUrl].filter(Boolean);

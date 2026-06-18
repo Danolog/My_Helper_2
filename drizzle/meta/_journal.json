@@ -36,6 +36,13 @@
       "when": 1772742009776,
       "tag": "0004_add_composite_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1773000000000,
+      "tag": "0005_rls_tenant_isolation",
+      "breakpoints": true
     }
   ]
 }

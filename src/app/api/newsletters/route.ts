@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { db } from "@/lib/db";
 import { newsletters } from "@/lib/schema";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 const saveSchema = z.object({
@@ -37,14 +37,16 @@ export async function POST(req: Request) {
   const { subject, content } = parsed.data;
 
   try {
-    const result = await db
-      .insert(newsletters)
-      .values({
-        salonId,
-        subject,
-        content,
-      })
-      .returning({ id: newsletters.id });
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .insert(newsletters)
+        .values({
+          salonId,
+          subject,
+          content,
+        })
+        .returning({ id: newsletters.id })
+    );
 
     const saved = result[0];
     if (!saved) {

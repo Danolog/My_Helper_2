@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { forSalon } from "@/lib/server/repository";
 import { appointments, services, employees, clients, reviews } from "@/lib/schema";
 import { eq, and, gte, lte, sql, count } from "drizzle-orm";
 import { isProPlan } from "@/lib/subscription";
@@ -157,9 +157,9 @@ export async function GET(_request: Request) {
       ratingsCurrentMonth,
       // Ratings: previous month average
       ratingsPreviousMonth,
-    ] = await Promise.all([
+    ] = await forSalon(salonId).raw((tx) => Promise.all([
       // Revenue: current month (completed appointments)
-      db
+      tx
         .select({
           total: sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric) - COALESCE(CAST(${appointments.discountAmount} AS numeric), 0)), 0)`,
         })
@@ -176,7 +176,7 @@ export async function GET(_request: Request) {
         .then((r) => parseFloat(r[0]?.total ?? "0")),
 
       // Revenue: previous month
-      db
+      tx
         .select({
           total: sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric) - COALESCE(CAST(${appointments.discountAmount} AS numeric), 0)), 0)`,
         })
@@ -193,7 +193,7 @@ export async function GET(_request: Request) {
         .then((r) => parseFloat(r[0]?.total ?? "0")),
 
       // Revenue: current week
-      db
+      tx
         .select({
           total: sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric) - COALESCE(CAST(${appointments.discountAmount} AS numeric), 0)), 0)`,
         })
@@ -210,7 +210,7 @@ export async function GET(_request: Request) {
         .then((r) => parseFloat(r[0]?.total ?? "0")),
 
       // Revenue: previous week
-      db
+      tx
         .select({
           total: sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric) - COALESCE(CAST(${appointments.discountAmount} AS numeric), 0)), 0)`,
         })
@@ -227,7 +227,7 @@ export async function GET(_request: Request) {
         .then((r) => parseFloat(r[0]?.total ?? "0")),
 
       // Revenue: monthly breakdown for last 3 months
-      db
+      tx
         .select({
           month: sql<string>`TO_CHAR(${appointments.startTime}, 'YYYY-MM')`,
           revenue: sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric) - COALESCE(CAST(${appointments.discountAmount} AS numeric), 0)), 0)`,
@@ -246,7 +246,7 @@ export async function GET(_request: Request) {
         .orderBy(sql`TO_CHAR(${appointments.startTime}, 'YYYY-MM')`),
 
       // Appointments: current month
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -259,7 +259,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Appointments: previous month
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -272,7 +272,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Appointments: current week
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -285,7 +285,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Appointments: previous week
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -298,7 +298,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Clients: new this month
-      db
+      tx
         .select({ count: count() })
         .from(clients)
         .where(
@@ -310,7 +310,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Clients: new previous month
-      db
+      tx
         .select({ count: count() })
         .from(clients)
         .where(
@@ -323,7 +323,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Clients: total
-      db
+      tx
         .select({ count: count() })
         .from(clients)
         .where(eq(clients.salonId, salonId))
@@ -331,7 +331,7 @@ export async function GET(_request: Request) {
 
       // Returning clients this month: clients who booked this month AND had
       // at least one completed appointment before this month
-      db
+      tx
         .select({
           count:
             sql<number>`COUNT(DISTINCT ${appointments.clientId})`,
@@ -355,7 +355,7 @@ export async function GET(_request: Request) {
         .then((r) => Number(r[0]?.count ?? 0)),
 
       // Returning clients previous month
-      db
+      tx
         .select({
           count:
             sql<number>`COUNT(DISTINCT ${appointments.clientId})`,
@@ -379,7 +379,7 @@ export async function GET(_request: Request) {
         .then((r) => Number(r[0]?.count ?? 0)),
 
       // Service popularity: current month (count per service)
-      db
+      tx
         .select({
           serviceId: services.id,
           serviceName: services.name,
@@ -397,7 +397,7 @@ export async function GET(_request: Request) {
         .groupBy(services.id, services.name),
 
       // Service popularity: previous month
-      db
+      tx
         .select({
           serviceId: services.id,
           serviceName: services.name,
@@ -415,7 +415,7 @@ export async function GET(_request: Request) {
         .groupBy(services.id, services.name),
 
       // Employee revenue: current month
-      db
+      tx
         .select({
           employeeId: employees.id,
           firstName: employees.firstName,
@@ -436,7 +436,7 @@ export async function GET(_request: Request) {
         .groupBy(employees.id, employees.firstName, employees.lastName),
 
       // Employee revenue: previous month
-      db
+      tx
         .select({
           employeeId: employees.id,
           firstName: employees.firstName,
@@ -457,7 +457,7 @@ export async function GET(_request: Request) {
         .groupBy(employees.id, employees.firstName, employees.lastName),
 
       // Cancellations: current month (cancelled + no_show)
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -471,7 +471,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Cancellations: previous month
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -485,7 +485,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Total appointments current month (for cancellation rate denominator)
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -498,7 +498,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Total appointments previous month (for cancellation rate denominator)
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -511,7 +511,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Ratings: current month average
-      db
+      tx
         .select({
           avg: sql<string>`COALESCE(AVG(${reviews.rating}), 0)`,
           count: count(),
@@ -530,7 +530,7 @@ export async function GET(_request: Request) {
         })),
 
       // Ratings: previous month average
-      db
+      tx
         .select({
           avg: sql<string>`COALESCE(AVG(${reviews.rating}), 0)`,
           count: count(),
@@ -548,7 +548,7 @@ export async function GET(_request: Request) {
           average: parseFloat(r[0]?.avg ?? "0"),
           count: r[0]?.count ?? 0,
         })),
-    ]);
+    ]));
 
     // --- Compute derived metrics ---
 

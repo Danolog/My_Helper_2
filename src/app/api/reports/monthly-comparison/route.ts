@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { appointments, services, employees } from "@/lib/schema";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 const MONTH_NAMES_PL = [
@@ -90,7 +91,8 @@ async function computeMonthMetrics(
   ];
 
   // Fetch all completed appointments with joined details
-  const completedAppts = await db
+  const completedAppts = await forSalon(salonId).raw((tx) =>
+    tx
     .select({
       appointmentId: appointments.id,
       clientId: appointments.clientId,
@@ -105,7 +107,8 @@ async function computeMonthMetrics(
     .from(appointments)
     .leftJoin(services, eq(appointments.serviceId, services.id))
     .leftJoin(employees, eq(appointments.employeeId, employees.id))
-    .where(and(...completedConditions));
+    .where(and(...completedConditions))
+  );
 
   // Fetch cancelled + no_show appointments in this month
   const cancelledConditions: ReturnType<typeof eq>[] = [
@@ -115,12 +118,14 @@ async function computeMonthMetrics(
     sql`${appointments.status} IN ('cancelled', 'no_show')`,
   ];
 
-  const cancelledAppts = await db
+  const cancelledAppts = await forSalon(salonId).raw((tx) =>
+    tx
     .select({
       appointmentId: appointments.id,
     })
     .from(appointments)
-    .where(and(...cancelledConditions));
+    .where(and(...cancelledConditions))
+  );
 
   // Calculate revenue
   let totalRevenue = 0;
@@ -248,14 +253,14 @@ export async function GET(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const salonId = await getUserSalonId();
     const month1Str = searchParams.get("month1");
     const month2Str = searchParams.get("month2");
 
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
+        { success: false, error: "Salon not found" },
+        { status: 404 }
       );
     }
 
@@ -289,7 +294,8 @@ export async function GET(request: Request) {
 
     // Pre-compute each client's first ever appointment date for the salon.
     // This is needed for the "newClients" metric in both months.
-    const firstAppointmentRows = await db
+    const firstAppointmentRows = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         clientId: appointments.clientId,
         firstDate: sql<Date>`MIN(${appointments.startTime})`.as("first_date"),
@@ -302,7 +308,8 @@ export async function GET(request: Request) {
           sql`${appointments.clientId} IS NOT NULL`
         )
       )
-      .groupBy(appointments.clientId);
+      .groupBy(appointments.clientId)
+    );
 
     const clientFirstAppointmentMap = new Map<string, Date>();
     for (const row of firstAppointmentRows) {

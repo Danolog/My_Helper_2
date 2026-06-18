@@ -27,11 +27,22 @@ const mockDbSelect = vi.fn();
 const mockDbUpdate = vi.fn();
 const mockDbDelete = vi.fn();
 
+// `tx` deleguje do tych samych mocków co `db` — warstwa repo (forSalon) otwiera
+// db.transaction() i woła tx.select/update/delete (ADR-001 R1). Asercje na
+// mockDbSelect/Update/Delete działają po migracji trasy na repozytorium.
+const mockTx = {
+  select: (...args: unknown[]) => mockDbSelect(...args),
+  update: (...args: unknown[]) => mockDbUpdate(...args),
+  delete: (...args: unknown[]) => mockDbDelete(...args),
+  execute: vi.fn().mockResolvedValue(undefined), // SET LOCAL app.current_salon_id
+};
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
     update: (...args: unknown[]) => mockDbUpdate(...args),
     delete: (...args: unknown[]) => mockDbDelete(...args),
+    transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
 }));
 
@@ -87,6 +98,14 @@ vi.mock("@/lib/schema", () => {
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  // `sql` używa warstwa repo (forSalon) do SET LOCAL app.current_salon_id ORAZ
+  // `sql.raw('set local role …')` (naprawa W1). Mock musi dostarczyć `.raw`,
+  // inaczej transakcja rzuca TypeError → handler 500. Kształt spójny z
+  // __tests__/api/clients.test.ts.
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((...args: unknown[]) => ({ type: "sql_raw", args })) }
+  ),
 }));
 
 // fs unlink must never be reached on a foreign-salon DELETE.

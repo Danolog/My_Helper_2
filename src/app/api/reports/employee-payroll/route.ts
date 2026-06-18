@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import {
   appointments,
   services,
@@ -9,6 +8,8 @@ import {
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/reports/employee-payroll - Employee payroll report with hours, commissions, and service breakdown
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const salonId = await getUserSalonId();
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
     const employeeIdsParam = searchParams.get("employeeIds");
@@ -26,8 +27,8 @@ export async function GET(request: Request) {
 
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
+        { success: false, error: "Salon not found" },
+        { status: 404 }
       );
     }
 
@@ -55,7 +56,8 @@ export async function GET(request: Request) {
     }
 
     // Get all completed appointments with service, employee, and commission details
-    const completedAppointments = await db
+    const completedAppointments = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         appointmentId: appointments.id,
         startTime: appointments.startTime,
@@ -79,7 +81,8 @@ export async function GET(request: Request) {
         employeeCommissions,
         eq(appointments.id, employeeCommissions.appointmentId)
       )
-      .where(and(...conditions));
+      .where(and(...conditions))
+    );
 
     // Build per-employee payroll data
     const employeePayroll: Record<

@@ -4,9 +4,9 @@ import {
   requireProAI,
   isProAIError,
 } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { aiGeneratedMedia } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 // ────────────────────────────────────────────────────────────
 // GET /api/ai/video/status/[taskId]
@@ -24,16 +24,18 @@ export async function GET(
   const { taskId } = await params;
 
   // Fetch the task from DB, scoped to the current salon
-  const [task] = await db
-    .select()
-    .from(aiGeneratedMedia)
-    .where(
-      and(
-        eq(aiGeneratedMedia.id, taskId),
-        eq(aiGeneratedMedia.salonId, salonId),
-      ),
-    )
-    .limit(1);
+  const [task] = await forSalon(salonId).raw((tx) =>
+    tx
+      .select()
+      .from(aiGeneratedMedia)
+      .where(
+        and(
+          eq(aiGeneratedMedia.id, taskId),
+          eq(aiGeneratedMedia.salonId, salonId),
+        ),
+      )
+      .limit(1)
+  );
 
   if (!task) {
     return Response.json(
@@ -74,14 +76,21 @@ export async function GET(
 
     if (result.done) {
       if (result.videoUrl) {
-        // Mark as completed in DB
-        await db
-          .update(aiGeneratedMedia)
-          .set({
-            status: "completed",
-            resultUrl: result.videoUrl,
-          })
-          .where(eq(aiGeneratedMedia.id, taskId));
+        // Mark as completed in DB (jawne eq(salonId) — obowiazek warstwy raw())
+        await forSalon(salonId).raw((tx) =>
+          tx
+            .update(aiGeneratedMedia)
+            .set({
+              status: "completed",
+              resultUrl: result.videoUrl,
+            })
+            .where(
+              and(
+                eq(aiGeneratedMedia.id, taskId),
+                eq(aiGeneratedMedia.salonId, salonId),
+              ),
+            )
+        );
 
         return Response.json({
           success: true,
@@ -89,15 +98,22 @@ export async function GET(
           videoUrl: result.videoUrl,
         });
       } else {
-        // Mark as failed in DB
+        // Mark as failed in DB (jawne eq(salonId) — obowiazek warstwy raw())
         const errorMessage = result.error ?? "Nieznany blad generowania wideo";
-        await db
-          .update(aiGeneratedMedia)
-          .set({
-            status: "failed",
-            errorMessage,
-          })
-          .where(eq(aiGeneratedMedia.id, taskId));
+        await forSalon(salonId).raw((tx) =>
+          tx
+            .update(aiGeneratedMedia)
+            .set({
+              status: "failed",
+              errorMessage,
+            })
+            .where(
+              and(
+                eq(aiGeneratedMedia.id, taskId),
+                eq(aiGeneratedMedia.salonId, salonId),
+              ),
+            )
+        );
 
         return Response.json({
           success: true,

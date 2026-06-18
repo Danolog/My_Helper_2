@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { services, employeeServicePrices, serviceVariants, employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/services/[id]/price?employeeId=xxx&variantId=yyy
@@ -30,10 +30,7 @@ export async function GET(
     const variantId = searchParams.get("variantId");
 
     // Get the base service (scoped to the caller's salon)
-    const [service] = await db
-      .select()
-      .from(services)
-      .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)));
+    const service = await forSalon(salonId).findOne(services, serviceId);
 
     if (!service) {
       return NextResponse.json(
@@ -45,61 +42,67 @@ export async function GET(
     let basePrice = parseFloat(service.basePrice);
     let variantModifier = 0;
 
-    // If variant specified, get its price modifier
-    if (variantId) {
-      const [variant] = await db
-        .select()
-        .from(serviceVariants)
-        .where(eq(serviceVariants.id, variantId));
+    // Rozwiazanie ceny (warianty/pracownik/ceny indywidualne) w kontekscie RLS.
+    const { standardPrice, effectivePrice, hasCustomPrice, employeeName } =
+      await forSalon(salonId).raw(async (tx) => {
+        // If variant specified, get its price modifier
+        if (variantId) {
+          const [variant] = await tx
+            .select()
+            .from(serviceVariants)
+            .where(eq(serviceVariants.id, variantId));
 
-      if (variant) {
-        variantModifier = parseFloat(variant.priceModifier || "0");
+          if (variant) {
+            variantModifier = parseFloat(variant.priceModifier || "0");
+          }
+        }
+
+        const standardPrice = basePrice + variantModifier;
+        let effectivePrice = standardPrice;
+        let hasCustomPrice = false;
+        let employeeName: string | null = null;
+
+        // If employee specified, check for custom pricing
+        if (employeeId) {
+          // Get employee name
+          const [employee] = await tx
+            .select()
+            .from(employees)
+            .where(eq(employees.id, employeeId));
+
+          if (employee) {
+            employeeName = `${employee.firstName} ${employee.lastName}`;
+          }
+
+          // Check for employee-specific price
+          const conditions = [
+            eq(employeeServicePrices.employeeId, employeeId),
+            eq(employeeServicePrices.serviceId, serviceId),
+          ];
+
+          const prices = await tx
+            .select()
+            .from(employeeServicePrices)
+            .where(and(...conditions));
+
+          // Look for exact variant match first, then base service price
+          const variantMatch = variantId
+            ? prices.find((p) => p.variantId === variantId)
+            : null;
+          const baseMatch = prices.find((p) => !p.variantId);
+
+          if (variantMatch) {
+            effectivePrice = parseFloat(variantMatch.customPrice);
+            hasCustomPrice = true;
+          } else if (baseMatch) {
+          // Use employee base price + variant modifier
+          effectivePrice = parseFloat(baseMatch.customPrice) + variantModifier;
+          hasCustomPrice = true;
+        }
       }
-    }
 
-    const standardPrice = basePrice + variantModifier;
-    let effectivePrice = standardPrice;
-    let hasCustomPrice = false;
-    let employeeName: string | null = null;
-
-    // If employee specified, check for custom pricing
-    if (employeeId) {
-      // Get employee name
-      const [employee] = await db
-        .select()
-        .from(employees)
-        .where(eq(employees.id, employeeId));
-
-      if (employee) {
-        employeeName = `${employee.firstName} ${employee.lastName}`;
-      }
-
-      // Check for employee-specific price
-      const conditions = [
-        eq(employeeServicePrices.employeeId, employeeId),
-        eq(employeeServicePrices.serviceId, serviceId),
-      ];
-
-      const prices = await db
-        .select()
-        .from(employeeServicePrices)
-        .where(and(...conditions));
-
-      // Look for exact variant match first, then base service price
-      const variantMatch = variantId
-        ? prices.find((p) => p.variantId === variantId)
-        : null;
-      const baseMatch = prices.find((p) => !p.variantId);
-
-      if (variantMatch) {
-        effectivePrice = parseFloat(variantMatch.customPrice);
-        hasCustomPrice = true;
-      } else if (baseMatch) {
-        // Use employee base price + variant modifier
-        effectivePrice = parseFloat(baseMatch.customPrice) + variantModifier;
-        hasCustomPrice = true;
-      }
-    }
+      return { standardPrice, effectivePrice, hasCustomPrice, employeeName };
+    });
 
     return NextResponse.json({
       success: true,

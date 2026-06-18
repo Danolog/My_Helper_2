@@ -1,10 +1,9 @@
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
 import { isProPlan } from "@/lib/subscription";
-import { db } from "@/lib/db";
 import { scheduledPosts } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // POST - Manually publish a scheduled post (simulates publishing)
@@ -38,12 +37,7 @@ export async function POST(
   }
 
   try {
-    const [post] = await db
-      .select()
-      .from(scheduledPosts)
-      .where(
-        and(eq(scheduledPosts.id, id), eq(scheduledPosts.salonId, salonId))
-      );
+    const post = await forSalon(salonId).findOne(scheduledPosts, id);
 
     if (!post) {
       return Response.json({ error: "Post not found" }, { status: 404 });
@@ -59,14 +53,10 @@ export async function POST(
     // In a real implementation, this would call the platform API
     // (Instagram Graph API, Facebook API, etc.) to publish the post.
     // For now, we simulate publishing by updating the status.
-    const [updated] = await db
-      .update(scheduledPosts)
-      .set({
-        status: "published",
-        publishedAt: new Date(),
-      })
-      .where(eq(scheduledPosts.id, id))
-      .returning();
+    const updated = await forSalon(salonId).updateOwned(scheduledPosts, id, {
+      status: "published",
+      publishedAt: new Date(),
+    });
 
     logger.info(`[Scheduled Posts] Post ${id} published on ${post.platform} at ${new Date().toISOString()}`);
 

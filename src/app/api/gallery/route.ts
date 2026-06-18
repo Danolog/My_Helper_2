@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, createGalleryPhotoSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
@@ -11,17 +12,18 @@ export async function GET(request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
-    const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
-    const employeeId = searchParams.get("employeeId");
-    const serviceId = searchParams.get("serviceId");
 
+    const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
+        { success: false, error: "Salon not found" },
+        { status: 404 }
       );
     }
+
+    const { searchParams } = new URL(request.url);
+    const employeeId = searchParams.get("employeeId");
+    const serviceId = searchParams.get("serviceId");
 
     // Build filter conditions
     const conditions = [eq(galleryPhotos.salonId, salonId)];
@@ -76,13 +78,21 @@ export async function POST(request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const body = await request.json();
     const validationError = validateBody(createGalleryPhotoSchema, body);
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
     }
     const {
-      salonId,
       employeeId,
       serviceId,
       beforePhotoUrl,

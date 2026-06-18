@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import {
   appointmentMaterials,
   products,
@@ -9,6 +8,8 @@ import {
 } from "@/lib/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/reports/materials-profitloss - Material profit/loss report
@@ -19,15 +20,15 @@ export async function GET(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const salonId = await getUserSalonId();
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
     const format = searchParams.get("format"); // 'json' or 'csv'
 
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
+        { success: false, error: "Salon not found" },
+        { status: 404 }
       );
     }
 
@@ -48,7 +49,8 @@ export async function GET(request: Request) {
     }
 
     // 1. Get all material usage records with product, appointment, and service details
-    const usageRecords = await db
+    const usageRecords = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         usageId: appointmentMaterials.id,
         productId: products.id,
@@ -77,7 +79,8 @@ export async function GET(request: Request) {
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .where(and(...conditions))
-      .orderBy(desc(appointmentMaterials.createdAt));
+      .orderBy(desc(appointmentMaterials.createdAt))
+    );
 
     // 2. For each appointment, count how many different products were used
     //    (to split revenue proportionally among products)

@@ -4,7 +4,9 @@ import { employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { validateBody, createEmployeeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // Predefined palette of distinct colors for employees
@@ -54,8 +56,15 @@ export async function GET(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
     const activeOnly = searchParams.get("activeOnly") === "true";
 
     logger.info("[Employees API] GET with params", { salonId, activeOnly });
@@ -75,23 +84,16 @@ export async function GET(request: Request) {
     };
 
     let allEmployees;
-    if (salonId && activeOnly) {
+    if (activeOnly) {
       allEmployees = await db
         .select(employeeColumns)
         .from(employees)
         .where(and(eq(employees.salonId, salonId), eq(employees.isActive, true)));
-    } else if (salonId) {
+    } else {
       allEmployees = await db
         .select(employeeColumns)
         .from(employees)
         .where(eq(employees.salonId, salonId));
-    } else if (activeOnly) {
-      allEmployees = await db
-        .select(employeeColumns)
-        .from(employees)
-        .where(eq(employees.isActive, true));
-    } else {
-      allEmployees = await db.select(employeeColumns).from(employees);
     }
 
     logger.info(`[Employees API] Query returned ${allEmployees.length} rows`);
@@ -125,6 +127,14 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const body = await request.json();
 
     // Server-side validation with Zod schema
@@ -133,13 +143,14 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    const { salonId, userId, firstName, lastName, phone, email, photoUrl, role, color } = body;
+    const { userId, firstName, lastName, phone, email, photoUrl, role, color } = body;
 
     // Get next available color if not provided
     const employeeColor = color || await getNextAvailableColor(salonId);
 
     logger.info(`[Employees API] Creating employee: ${firstName} ${lastName} with color ${employeeColor}`);
-    const [newEmployee] = await db
+    const [newEmployee] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(employees)
       .values({
         salonId,
@@ -153,7 +164,8 @@ export async function POST(request: Request) {
         color: employeeColor,
         isActive: true,
       })
-      .returning();
+      .returning()
+    );
 
     logger.info(`[Employees API] Created employee with id: ${newEmployee?.id}`);
 

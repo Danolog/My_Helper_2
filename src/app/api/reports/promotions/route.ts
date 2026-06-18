@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { promotions, promoCodes, appointments, services, clients } from "@/lib/schema";
 import { eq, and, gte, lte, desc, sql, isNotNull } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/reports/promotions - Promotion effectiveness report (ROI on promotions)
@@ -12,30 +13,34 @@ export async function GET(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const salonId = await getUserSalonId();
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
     const format = searchParams.get("format"); // 'json' or 'csv'
 
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
+        { success: false, error: "Salon not found" },
+        { status: 404 }
       );
     }
 
     // 1. Get all promotions for this salon
-    const allPromotions = await db
+    const allPromotions = await forSalon(salonId).raw((tx) =>
+      tx
       .select()
       .from(promotions)
       .where(eq(promotions.salonId, salonId))
-      .orderBy(desc(promotions.createdAt));
+      .orderBy(desc(promotions.createdAt))
+    );
 
     // 2. Get all promo codes for this salon (linked to promotions)
-    const allPromoCodes = await db
+    const allPromoCodes = await forSalon(salonId).raw((tx) =>
+      tx
       .select()
       .from(promoCodes)
-      .where(eq(promoCodes.salonId, salonId));
+      .where(eq(promoCodes.salonId, salonId))
+    );
 
     // Build a map: promoCodeId -> promotionId
     const promoCodeToPromotion: Record<string, string> = {};
@@ -66,7 +71,8 @@ export async function GET(request: Request) {
       conditions.push(lte(appointments.startTime, endDate));
     }
 
-    const promoAppointments = await db
+    const promoAppointments = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         appointmentId: appointments.id,
         promoCodeId: appointments.promoCodeId,
@@ -84,7 +90,8 @@ export async function GET(request: Request) {
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .leftJoin(clients, eq(appointments.clientId, clients.id))
       .where(and(...conditions))
-      .orderBy(desc(appointments.startTime));
+      .orderBy(desc(appointments.startTime))
+    );
 
     // 4. Also get appointments WITHOUT promo codes for comparison (completed only)
     const noPromoConditions: ReturnType<typeof eq>[] = [
@@ -101,13 +108,15 @@ export async function GET(request: Request) {
       noPromoConditions.push(lte(appointments.startTime, endDate));
     }
 
-    const noPromoAppointments = await db
+    const noPromoAppointments = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         basePrice: services.basePrice,
       })
       .from(appointments)
       .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(and(...noPromoConditions));
+      .where(and(...noPromoConditions))
+    );
 
     // 5. Aggregate data per promotion
     const promotionStats: Record<

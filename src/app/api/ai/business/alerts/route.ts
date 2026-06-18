@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import {
   appointments,
   clients,
@@ -12,6 +11,7 @@ import { eq, and, gte, lte, sql, count, desc } from "drizzle-orm";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -109,9 +109,9 @@ export async function GET(_request: Request) {
       servicesPrevious,
       // Employee workload
       employeeWorkload,
-    ] = await Promise.all([
+    ] = await forSalon(salonId).raw((tx) => Promise.all([
       // Recent appointments count (last 30 days)
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -124,7 +124,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Previous 30-day period appointments
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -137,7 +137,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Revenue current 30 days
-      db
+      tx
         .select({
           total: sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric)), 0)`,
         })
@@ -154,7 +154,7 @@ export async function GET(_request: Request) {
         .then((r) => parseFloat(r[0]?.total ?? "0")),
 
       // Revenue previous 30 days
-      db
+      tx
         .select({
           total: sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric)), 0)`,
         })
@@ -171,7 +171,7 @@ export async function GET(_request: Request) {
         .then((r) => parseFloat(r[0]?.total ?? "0")),
 
       // This week appointments
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -184,7 +184,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Last week appointments
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -197,7 +197,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Current period appointment statuses
-      db
+      tx
         .select({
           status: appointments.status,
           count: count(),
@@ -213,7 +213,7 @@ export async function GET(_request: Request) {
         .groupBy(appointments.status),
 
       // Previous period appointment statuses
-      db
+      tx
         .select({
           status: appointments.status,
           count: count(),
@@ -229,7 +229,7 @@ export async function GET(_request: Request) {
         .groupBy(appointments.status),
 
       // Recent low reviews (1-3 stars, last 30 days)
-      db
+      tx
         .select({
           rating: reviews.rating,
           comment: reviews.comment,
@@ -247,7 +247,7 @@ export async function GET(_request: Request) {
         .limit(10),
 
       // Average rating last 30 days
-      db
+      tx
         .select({
           avg: sql<string>`COALESCE(AVG(${reviews.rating}), 0)`,
           count: count(),
@@ -266,7 +266,7 @@ export async function GET(_request: Request) {
         })),
 
       // Average rating previous 30 days
-      db
+      tx
         .select({
           avg: sql<string>`COALESCE(AVG(${reviews.rating}), 0)`,
           count: count(),
@@ -286,7 +286,7 @@ export async function GET(_request: Request) {
         })),
 
       // Low stock products
-      db
+      tx
         .select({
           name: products.name,
           quantity: products.quantity,
@@ -303,7 +303,7 @@ export async function GET(_request: Request) {
         .limit(10),
 
       // Upcoming appointments (next 7 days)
-      db
+      tx
         .select({ count: count() })
         .from(appointments)
         .where(
@@ -317,7 +317,7 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Inactive clients (no appointment in 60 days)
-      db
+      tx
         .select({ count: count() })
         .from(clients)
         .where(
@@ -335,14 +335,14 @@ export async function GET(_request: Request) {
         .then((r) => r[0]?.count ?? 0),
 
       // Total clients
-      db
+      tx
         .select({ count: count() })
         .from(clients)
         .where(eq(clients.salonId, salonId))
         .then((r) => r[0]?.count ?? 0),
 
       // Service popularity current period
-      db
+      tx
         .select({
           serviceName: services.name,
           serviceId: services.id,
@@ -360,7 +360,7 @@ export async function GET(_request: Request) {
         .groupBy(services.name, services.id),
 
       // Service popularity previous period
-      db
+      tx
         .select({
           serviceName: services.name,
           serviceId: services.id,
@@ -379,7 +379,7 @@ export async function GET(_request: Request) {
         .groupBy(services.name, services.id),
 
       // Employee workload (appointments per employee)
-      db
+      tx
         .select({
           firstName: employees.firstName,
           lastName: employees.lastName,
@@ -396,7 +396,7 @@ export async function GET(_request: Request) {
         )
         .groupBy(employees.firstName, employees.lastName)
         .orderBy(count()),
-    ]);
+    ]));
 
     // ── Generate alerts based on detected problems ──
 

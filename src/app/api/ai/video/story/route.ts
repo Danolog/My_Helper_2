@@ -9,9 +9,9 @@ import {
   isProAIError,
   getSalonContext,
 } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { aiGeneratedMedia, galleryPhotos, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 // ────────────────────────────────────────────────────────────
 // Request validation
@@ -90,21 +90,23 @@ export async function POST(req: Request) {
   // Optionally fetch gallery photo context to inform the AI prompt
   let photoContext = "";
   if (photoId) {
-    const [photo] = await db
-      .select({
-        description: galleryPhotos.description,
-        techniques: galleryPhotos.techniques,
-        serviceName: services.name,
-      })
-      .from(galleryPhotos)
-      .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-      .where(
-        and(
-          eq(galleryPhotos.id, photoId),
-          eq(galleryPhotos.salonId, salonId),
-        ),
-      )
-      .limit(1);
+    const [photo] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          description: galleryPhotos.description,
+          techniques: galleryPhotos.techniques,
+          serviceName: services.name,
+        })
+        .from(galleryPhotos)
+        .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
+        .where(
+          and(
+            eq(galleryPhotos.id, photoId),
+            eq(galleryPhotos.salonId, salonId),
+          ),
+        )
+        .limit(1)
+    );
 
     if (photo) {
       const parts = [
@@ -155,25 +157,27 @@ export async function POST(req: Request) {
     });
 
     // Persist the task to the DB for status tracking via the shared status endpoint
-    const rows = await db
-      .insert(aiGeneratedMedia)
-      .values({
-        salonId,
-        type: "video",
-        sourceUrl: photoId ?? null,
-        provider: "google_veo",
-        prompt: videoPrompt,
-        status: "processing",
-        taskId: operationName,
-        metadata: {
-          template,
-          duration: durationSeconds,
-          originalPrompt: prompt,
-          photoId: photoId ?? null,
-          format: "story_9x16",
-        },
-      })
-      .returning();
+    const rows = await forSalon(salonId).raw((tx) =>
+      tx
+        .insert(aiGeneratedMedia)
+        .values({
+          salonId,
+          type: "video",
+          sourceUrl: photoId ?? null,
+          provider: "google_veo",
+          prompt: videoPrompt,
+          status: "processing",
+          taskId: operationName,
+          metadata: {
+            template,
+            duration: durationSeconds,
+            originalPrompt: prompt,
+            photoId: photoId ?? null,
+            format: "story_9x16",
+          },
+        })
+        .returning()
+    );
 
     const media = rows[0];
     if (!media) {

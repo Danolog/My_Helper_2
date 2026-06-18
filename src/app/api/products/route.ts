@@ -4,7 +4,9 @@ import { products, notifications } from "@/lib/schema";
 import { eq, and, like, sql } from "drizzle-orm";
 import { validateBody, createProductSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -64,13 +66,18 @@ async function checkAndNotifyLowStock(product: {
 }
 
 // GET /api/products - List products with optional salonId filter
-export async function GET(request: Request) {
+export async function GET(_request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     // Select only the columns needed by the inventory UI
     const productColumns = {
@@ -88,9 +95,7 @@ export async function GET(request: Request) {
 
     let query = db.select(productColumns).from(products);
 
-    if (salonId) {
-      query = query.where(eq(products.salonId, salonId)) as typeof query;
-    }
+    query = query.where(eq(products.salonId, salonId)) as typeof query;
 
     const result = await query;
 
@@ -123,6 +128,14 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const body = await request.json();
 
     // Server-side validation with Zod schema
@@ -131,9 +144,10 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    const { salonId, name, category, quantity, minQuantity, unit, pricePerUnit } = body;
+    const { name, category, quantity, minQuantity, unit, pricePerUnit } = body;
 
-    const [newProduct] = await db
+    const [newProduct] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(products)
       .values({
         salonId,
@@ -144,7 +158,8 @@ export async function POST(request: Request) {
         unit: unit || null,
         pricePerUnit: pricePerUnit?.toString() || null,
       })
-      .returning();
+      .returning()
+    );
 
     if (!newProduct) {
       return NextResponse.json(
