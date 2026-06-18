@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { notifications, clients } from "@/lib/schema";
 import { desc, eq, and, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 /**
@@ -23,19 +24,20 @@ export async function GET(request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
     const type = searchParams.get("type");
     const status = searchParams.get("status");
     const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100);
     const offset = parseInt(searchParams.get("offset") || "0");
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
-      );
-    }
 
     // Build conditions
     const conditions = [eq(notifications.salonId, salonId)];

@@ -4,6 +4,7 @@ import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { validateBody, createPromoCodeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 
 import { logger } from "@/lib/logger";
@@ -19,17 +20,16 @@ function generatePromoCode(): string {
 }
 
 // GET /api/promo-codes - List promo codes with optional salonId filter
-export async function GET(request: Request) {
+export async function GET(_request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
-    const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
 
+    const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "salonId query parameter is required" },
-        { status: 400 }
+        { success: false, error: "Salon not found" },
+        { status: 404 }
       );
     }
 
@@ -77,6 +77,15 @@ export async function POST(request: Request) {
 
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const body = await request.json();
 
     // Server-side validation with Zod schema
@@ -85,7 +94,7 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    const { salonId, code, promotionId, usageLimit, expiresAt } = body;
+    const { code, promotionId, usageLimit, expiresAt } = body;
 
     // Generate code if not provided
     const promoCode = code

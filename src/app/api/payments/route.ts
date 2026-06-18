@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { depositPayments, subscriptionPayments, appointments, clients, services, salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 import { logger } from "@/lib/logger";
 /**
@@ -22,21 +23,22 @@ export async function GET(request: NextRequest) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { searchParams } = request.nextUrl;
-    const salonId = searchParams.get("salonId");
     const type = searchParams.get("type") || "all";
     const status = searchParams.get("status");
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = parseInt(searchParams.get("limit") || "20", 10);
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
-      );
-    }
 
     const offset = (page - 1) * limit;
     const transactions: Array<{

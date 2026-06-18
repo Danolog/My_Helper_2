@@ -98,8 +98,14 @@ vi.mock("@/lib/schema", () => {
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
-  // `sql` używa warstwa repo (forSalon) do SET LOCAL app.current_salon_id.
-  sql: vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+  // `sql` używa warstwa repo (forSalon) do SET LOCAL app.current_salon_id ORAZ
+  // `sql.raw('set local role …')` (naprawa W1). Mock musi dostarczyć `.raw`,
+  // inaczej transakcja rzuca TypeError → handler 500. Kształt spójny z
+  // __tests__/api/clients.test.ts.
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((...args: unknown[]) => ({ type: "sql_raw", args })) }
+  ),
 }));
 
 // fs unlink must never be reached on a foreign-salon DELETE.

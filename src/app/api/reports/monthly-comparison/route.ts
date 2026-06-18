@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { appointments, services, employees } from "@/lib/schema";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
@@ -252,14 +253,14 @@ export async function GET(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const salonId = await getUserSalonId();
     const month1Str = searchParams.get("month1");
     const month2Str = searchParams.get("month2");
 
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
+        { success: false, error: "Salon not found" },
+        { status: 404 }
       );
     }
 

@@ -4,17 +4,24 @@ import { promotions } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { validateBody, createPromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/promotions - List promotions with optional salonId filter
-export async function GET(request: Request) {
+export async function GET(_request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
-    const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     // Select only the columns needed by the promotions UI
     const promotionColumns = {
@@ -32,9 +39,7 @@ export async function GET(request: Request) {
 
     let query = db.select(promotionColumns).from(promotions).orderBy(desc(promotions.createdAt));
 
-    if (salonId) {
-      query = query.where(eq(promotions.salonId, salonId)) as typeof query;
-    }
+    query = query.where(eq(promotions.salonId, salonId)) as typeof query;
 
     const result = await query;
 
@@ -66,8 +71,17 @@ export async function POST(request: Request) {
 
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const body = await request.json();
-    const { salonId, name, type, value, startDate, endDate, conditionsJson, isActive } = body;
+    const { name, type, value, startDate, endDate, conditionsJson, isActive } = body;
 
     // Server-side validation with Zod schema
     const validationError = validateBody(createPromotionSchema, body);

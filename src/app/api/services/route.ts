@@ -4,6 +4,7 @@ import { services, serviceCategories } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { validateBody, createServiceSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { forSalon } from "@/lib/server/repository";
 
@@ -14,8 +15,15 @@ export async function GET(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
     const activeOnly = searchParams.get("activeOnly") === "true";
 
     logger.info("[Services API] GET with params", { salonId, activeOnly });
@@ -27,9 +35,7 @@ export async function GET(request: Request) {
     .from(services)
     .leftJoin(serviceCategories, eq(services.categoryId, serviceCategories.id));
 
-    if (salonId) {
-      query = query.where(eq(services.salonId, salonId)) as typeof query;
-    }
+    query = query.where(eq(services.salonId, salonId)) as typeof query;
     if (activeOnly) {
       query = query.where(eq(services.isActive, true)) as typeof query;
     }
@@ -73,6 +79,14 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const body = await request.json();
 
     // Server-side validation with Zod schema
@@ -81,7 +95,7 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    const { salonId, categoryId, name, description, basePrice, baseDuration } = body;
+    const { categoryId, name, description, basePrice, baseDuration } = body;
     const parsedPrice = parseFloat(basePrice);
     const parsedDuration = parseInt(baseDuration, 10);
 

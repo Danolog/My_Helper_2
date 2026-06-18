@@ -165,7 +165,15 @@ vi.mock("drizzle-orm", () => ({
   lt: vi.fn((...args: unknown[]) => ({ type: "lt", args })),
   gt: vi.fn((...args: unknown[]) => ({ type: "gt", args })),
   isNotNull: vi.fn((...args: unknown[]) => ({ type: "isNotNull", args })),
-  sql: vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+  // `sql` jest tagged template + ma metodę `.raw(...)`. Warstwa repo (forSalon)
+  // woła OBA warianty w `withSalonContext`: `sql.raw('set local role …')` oraz
+  // `sql\`select set_config(…)\``. Mock musi dostarczyć `.raw`, inaczej
+  // transakcja rzuca TypeError → handler zwraca 500 (regresja po naprawie W1
+  // SET LOCAL ROLE). Kształt spójny z __tests__/api/clients.test.ts.
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((...args: unknown[]) => ({ type: "sql_raw", args })) }
+  ),
 }));
 
 // Mock validations (used in GET/PUT for UUID/date validation)

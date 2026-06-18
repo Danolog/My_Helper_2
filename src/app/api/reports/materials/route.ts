@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { appointmentMaterials, products, appointments, employees, services } from "@/lib/schema";
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const salonId = await getUserSalonId();
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
     const employeeIdsParam = searchParams.get("employeeIds"); // comma-separated employee IDs
@@ -20,8 +21,8 @@ export async function GET(request: Request) {
 
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
+        { success: false, error: "Salon not found" },
+        { status: 404 }
       );
     }
 
