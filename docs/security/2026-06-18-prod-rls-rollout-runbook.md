@@ -3,6 +3,7 @@
 **Status:** Przygotowany — **NIE wykonany.** Czeka na sign-off Darka (Plan Mode) + przegląd domenowy Ryana (CRCO, domena 8 standardu).
 **Data:** 2026-06-18
 **Autor:** Ethan (CTO)
+**Wersja:** v1.2 · 2026-06-18 — **status `ai_generated_media` ROZSTRZYGNIĘTY (ADR-002, Wariant 3 backfill)** — sekcja 3.1 odsyła do decyzji zamiast „Wariant 1 vs 2 do sign-offu"; migracja `0006` przygotowana (idempotentna, nie zaaplikowana na prod); D-RLS-3 i sekcja 9 zaktualizowane. Decyzja Ethana (CTO, mandat techniczny CLAUDE.md sekcja 8). Changelog sekcja 11.
 **Wersja:** v1.1 · 2026-06-18 — domknięcie bramek przeglądu Ryana (CRCO, werdykt NEEDS-WORK): F1 twarda asercja zakresu RLS + status `ai_generated_media`; F2 odstępstwo od modelu 2 ról z ADR; F3 wykonalny dowód cross-tenant na staging; F4 granica ochrony RODO + status lintu; F5/F6 dług i poprawka nazwy gałęzi. Changelog na końcu (sekcja 11).
 **Dotyczy:** `Danolog/My_Helper_2` @ `main` (warstwa repo + RLS lokalny + migracja `0005` są na `main`; gałąź `feat/repo-layer-rls` była wmergowana — historyczna nazwa robocza). Baza produkcyjna: Neon (managed PostgreSQL).
 **Podstawa:** ADR-001 (`docs/adr/ADR-001-repo-layer-rls.md`), migracja `drizzle/0005_rls_tenant_isolation.sql`, wrapper `src/lib/server/repository.ts`, test `__tests__/integration/rls-tenant.test.ts`.
@@ -278,14 +279,14 @@ COMMIT;
 
 **Fakt stwierdzony:** tabela `ai_generated_media` jest zdefiniowana w `src/lib/schema.ts:816-841` (`salon_id NOT NULL`, ma indeks `ai_generated_media_salon_id_idx`) i figuruje na liście `direct_tables` migracji `0005` oraz w tym runbooku (krok 4, 26 tabel). **ALE żadna migracja `0000`–`0004` jej nie tworzy** — zweryfikowane: `grep -rn ai_generated_media drizzle/*.sql` zwraca tylko `0005` (lista RLS), zero `CREATE TABLE ai_generated_media`. To **ten sam typ dryfu** co niezaaplikowana `0005`: `schema.ts` (model docelowy) jest szerszy niż zastosowane migracje.
 
-**Konsekwencja dla prod:** na prod-bazie tabela `ai_generated_media` **najprawdopodobniej NIE ISTNIEJE** (skoro nie ma migracji ją tworzącej). Zachowanie SQL runbooka jest wtedy poprawne i bezpieczne: pętla kroku 4 trafia na `IF NOT EXISTS ... CONTINUE` → tabela pominięta, `RAISE WARNING` ją zgłasza. Asercja F1 (krok 7) **też jej nie wymaga** — sprawdza tylko tabele **istniejące** w `information_schema.columns`, więc nieistniejąca `ai_generated_media` nie wywoła `EXCEPTION`.
+**DECYZJA PODJĘTA — ADR-002 (Ethan, CTO, mandat decyzji technicznej; nie „opcje do sign-offu", lecz rozstrzygnięcie).** Pełne dowody i uzasadnienie: `docs/adr/ADR-002-dryf-schematu-ai-generated-media.md`. W skrócie:
 
-**Decyzja do sign-offu Darka (NIE wykonuję — to czerwona linia):**
-- **Wariant 1 (rekomendowany):** `ai_generated_media` jest **celowo nieobecna na prod do czasu wdrożenia funkcji AI media**. Tabela zostaje na liście `0005`/runbooka — polityka założy się **automatycznie** na pierwszym wdrożeniu, które utworzy tabelę (osobna migracja `CREATE TABLE` + ten runbook puszczony ponownie idempotentnie, albo dołożenie RLS w tej samej migracji per ryzyko R7). Bez akcji teraz.
-- **Wariant 2 (jeśli funkcja AI media wchodzi przed RLS):** najpierw migracja prod tworząca `ai_generated_media` (z `salon_id`), **POTEM** RLS — inaczej pierwsze zapytanie ścieżki żądania do tej tabeli przez `forSalon` trafi na tabelę bez polityki = cross-tenant otwarty na niej (asercja F1 by to wychwyciła PO utworzeniu tabeli i zatrzymała RLS, ale lepiej nie tworzyć dziury).
-- **Czego NIE robię:** nie tworzę migracji prod dla `ai_generated_media` — `CREATE TABLE` na schemacie prod to czerwona linia (CLAUDE.md sekcja 4: migracja schemy produkcyjnej). Dokumentuję decyzję; tworzenie tabeli (jeśli Wariant 2) idzie osobnym sign-offem Darka.
+- **Stan faktyczny (dowody, nie założenie):** tabela jest **UŻYWANA przez żywą funkcję AI media** (4 trasy API: `ai/video/{generate,status,story}`, `ai/usage` + UI `video-generator`/`story-generator`) — więc **Wariant 1 (martwy kod) odpada**. Dryf powstał przez `db:push` z pominięciem migracji: `schema.ts` ma tabelę, `drizzle-kit generate` jej nie zna (0 w snapshotach), a CI quality-gate buduje bazę przez `db:push` (`.github/workflows/quality-gate.yml:92,:160`). Prod build (`build:ci` = `next build`) nie odpala migrate/push.
+- **Decyzja: Wariant 3 (backfill / pojednanie historii), idempotentny.** Skoro funkcja jest zbudowana i wpięta, a jedyny mechanizm tworzący tę tabelę to `db:push`, na prod **najpewniej ISTNIEJE** (powstała push-em) — wtedy ślepy `CREATE TABLE` z Wariantu 2 wywróciłby się na „relation already exists". Migracja **`drizzle/0006_ai_generated_media_catchup.sql`** (`CREATE TABLE IF NOT EXISTS` + FK/indeksy idempotentnie + warunkowa polityka RLS, jeśli rola `myhelper_app` istnieje) jest **poprawna w OBU stanach prod**: jest = czysty backfill (no-op), nie ma = tworzy. Status pliku: **PRZYGOTOWANA, NIE ZAAPLIKOWANA NA PROD** — zastosowanie = czerwona linia, sign-off Darka.
+- **Jedna niewiadoma (nie mam dostępu do prod) → jedno read-only pytanie, nie przerzucanie decyzji:** `SELECT to_regclass('public.ai_generated_media');` — nazwa = istnieje (czysty Wariant 3), `NULL` = `0006` ją utworzy. Wynik = artefakt do bramki/przeglądu Ryana.
+- **Zachowanie SQL runbooka bez zmian i nadal bezpieczne:** jeśli tabeli nie ma w chwili kroku 4 — pętla `IF NOT EXISTS ... CONTINUE` ją pomija (`RAISE WARNING`); asercja F1 (krok 7) sprawdza tylko tabele **istniejące**, więc nie rzuci fałszywego `EXCEPTION`. Kolejność: `0006` **przed** RLS, jeśli tabeli na prod nie ma.
 
-**Domknięcie śladu:** rozjazd `schema.ts` ↔ migracje (dla `ai_generated_media` i ogólnie) to dług schematu do uporządkowania osobno (Ryan: porównanie pełnego `schema.ts` z `_journal.json` przy przeglądzie zakresu — bramka sekcja 6). Asercja F1 chroni przed jego skutkiem na izolacji niezależnie od tego, kiedy dług zostanie spłacony.
+**Domknięcie śladu (dług D-RLS-3):** szerszy rozjazd `schema.ts` ↔ migracje (ten sam typ dryfu dotyczy też FK `appointment_materials`/`fiscal_receipts` i indeksu `clients_birthday` — `0006` pojednuje je idempotentnie) oraz reforma workflow „migracje vs `db:push`" (żeby CI i prod nie rozjeżdżały się znowu) — patrz ADR-002 sekcja 5.4. Asercja F1 chroni izolację niezależnie od tego, kiedy dług workflow zostanie spłacony.
 
 **Świadoma decyzja o rolach łączeniowych:** rola łączeniowa aplikacji **pozostaje rolą owner** (z `DATABASE_URL`). `myhelper_app` jest rolą docelową `SET ROLE`, nie loginem (sekcja 1). `GRANT myhelper_app TO current_user` (krok 3) jest tym, co pozwala `SET LOCAL ROLE myhelper_app` w `repository.ts:76` zadziałać. Gdyby kiedyś przejść na osobny login aplikacji — owner-bypass ścieżek systemowych trzeba by rozwiązać inaczej (poza zakresem tego wdrożenia).
 
@@ -491,7 +492,7 @@ Zapisane wprost jako dług do spłaty, nie ukryte założenie (ADR-001 sekcja 3.
 |---|---|---|---|
 | **D-RLS-1** | `temporary_access`, `push_subscriptions` — **bez kolumny `salon_id`**, FK do `user.id`, świadomie **poza tenant-RLS** | Jeśli kiedyś trafią na ścieżkę żądania przez `forSalon` — `SalonScoped` (TypeScript) je odrzuci (brak `.salonId`), ale przez surowy `db` nie ma ochrony bazy; izolacja zależy od logiki auth po `user_id` | Świadomie poza RLS w tym wdrożeniu. Jeśli wymagają izolacji — RLS po `user_id` (inny model niż tenant) w osobnym ADR. |
 | **D-RLS-2** | **Założenie „1 user = 1 salon" NIE jest zapisane** w schemacie ani egzekwowane | `temporary_access`/`push_subscriptions` izolowane po `user_id` są tożsame z izolacją po salonie **tylko jeśli** user należy do jednego salonu. Gdyby model się zmienił (user w wielu salonach) — założenie pęka cicho | Dług do formalizacji: albo constraint w schemacie, albo jawny ADR przyjmujący „1 user = 1 salon" jako kontrakt. Ryan: wskazać przy przeglądzie zakresu. |
-| **D-RLS-3** | Dryf `schema.ts` ↔ migracje (`ai_generated_media` w `schema.ts`, brak `CREATE TABLE` w `0000`–`0004`) | Model docelowy szerszy niż zastosowany schemat prod — sekcja 3.1 | Asercja F1 chroni izolację niezależnie; pełne porównanie `schema.ts`↔`_journal.json` to osobne sprzątanie schematu. |
+| **D-RLS-3** | Dryf `schema.ts` ↔ migracje (`ai_generated_media` + FK `appointment_materials`/`fiscal_receipts` + indeks `clients_birthday` w `schema.ts`, brak `CREATE`/`ADD` w `0000`–`0004`; powstały przez `db:push`) | Model docelowy szerszy niż zastosowany schemat — sekcja 3.1 | **ROZSTRZYGNIĘTE — ADR-002 (Wariant 3, backfill).** Migracja `0006` (idempotentna) pojednuje historię; status `ai_generated_media` rozstrzygnięty (sekcja 3.1). Asercja F1 chroni izolację niezależnie. Reforma workflow `db:push`↔migracje (CI quality-gate) = dług resztkowy, ADR-002 sekcja 5.4. |
 
 Te długi **nie blokują** wdrożenia RLS (dotyczą tabel świadomie poza modelem tenant), ale są **policzalne i przypisane** — nie „odkryjemy je po incydencie".
 
@@ -501,7 +502,7 @@ Te długi **nie blokują** wdrożenia RLS (dotyczą tabel świadomie poza modele
 
 Domknięcie bramek F1–F6 **nie zdejmuje żadnej czerwonej linii** — runbook nadal jest „wykonalny-po-sign-offie", nie wykonany:
 - **Utworzenie roli `myhelper_app` na prod** + **migracja schemy prod** (ENABLE RLS + policies) — dwie czerwone linie (CLAUDE.md sekcja 4), sign-off Darka w Plan Mode (sekcja 6).
-- **Ewentualna migracja tworząca `ai_generated_media` na prod** (Wariant 2, sekcja 3.1) — osobna migracja schemy prod = osobny sign-off.
+- **Migracja `0006` (`ai_generated_media` catch-up) na prod** — decyzja podjęta (Wariant 3, ADR-002, sekcja 3.1); plik przygotowany i idempotentny, ale **zastosowanie na prod = osobna migracja schemy prod = osobny sign-off Darka**. Poprzedzone jednym read-only `to_regclass` na prod.
 - **Aktualizacja ADR-001** o model jednej roli (sekcja 1.1) — osobny commit dokumentacyjny (nie czerwona linia, ale poza tym PR).
 
 ---
@@ -534,6 +535,12 @@ Pięć słabości i co z nimi:
 - **F5** (niskie): sekcja 8.2 — jawny dług `temporary_access`/`push_subscriptions` poza RLS, niezapisane założenie „1 user=1 salon", dryf schematu.
 - **F6** (info): nazwa gałęzi `feat/repo-layer-rls` → `main` (gałąź wmergowana).
 - Nowa sekcja 9 (co wciąż wymaga sign-offu Darka), sekcja 10 self-critique +punkt 6.
+
+**v1.2 · 2026-06-18 — status `ai_generated_media` rozstrzygnięty (ADR-002):**
+- Sekcja 3.1 przepisana: z „Wariant 1 vs 2 do sign-offu Darka" na **decyzję podjętą — Wariant 3 (backfill)**, z dowodami (tabela żywa: 4 trasy + UI; dryf z `db:push`; CI buduje push-em; prod build bez migrate) i jednym read-only pytaniem `to_regclass`.
+- Nowy plik **`drizzle/0006_ai_generated_media_catchup.sql`** — migracja catch-up idempotentna (`CREATE TABLE IF NOT EXISTS` + FK/indeksy + warunkowa polityka RLS). **PRZYGOTOWANA, NIE ZAAPLIKOWANA NA PROD** (czerwona linia, sign-off Darka).
+- Nowy **ADR-002** (`docs/adr/ADR-002-dryf-schematu-ai-generated-media.md`) — pełna decyzja, dowody, alternatywy, self-critique.
+- D-RLS-3 (sekcja 8.2) i sekcja 9 zaktualizowane do statusu „rozstrzygnięte / przygotowane". Snapshot+journal drizzle pojednane (`0006`).
 
 **v1.0 · 2026-06-18** — pierwsza wersja: sekwencja zero-downtime, SQL prod, weryfikacja, rollback, bramki, 10 ryzyk.
 
