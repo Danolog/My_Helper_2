@@ -82,14 +82,25 @@ describe("SignInButton", () => {
     ).toBeDisabled();
   });
 
-  it("renders nothing when session exists", () => {
+  it("redirects and shows redirect state when session exists", () => {
+    // Intencja: po fix ebc0cdd (fix: show login form after session timeout)
+    // komponent przy aktywnej sesji nie renderuje pustki (dawne return null),
+    // tylko jawnie przekierowuje i pokazuje widoczny, wylaczony przycisk
+    // "Przekierowanie..." - zeby uzytkownik nigdy nie zobaczyl pustego ekranu.
     mockSessionData = {
       data: { user: { name: "Jan", email: "jan@example.com" } },
       isPending: false,
     };
-    const { container } = render(<SignInButton />);
+    render(<SignInButton />);
 
-    expect(container.innerHTML).toBe("");
+    // Przekierowanie zostalo wyzwolone na domyslny cel.
+    expect(mockReplace).toHaveBeenCalledWith("/dashboard");
+    // Widoczny stan przejsciowy: wylaczony przycisk "Przekierowanie...".
+    expect(
+      screen.getByRole("button", { name: "Przekierowanie..." })
+    ).toBeDisabled();
+    // Formularz logowania NIE jest pokazywany przy aktywnej sesji.
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
   });
 
   it("shows validation errors when submitting empty form", async () => {
