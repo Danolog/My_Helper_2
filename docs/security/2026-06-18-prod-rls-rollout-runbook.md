@@ -3,8 +3,8 @@
 **Status:** Przygotowany — **NIE wykonany.** Czeka na sign-off Darka (Plan Mode) + przegląd domenowy Ryana (CRCO, domena 8 standardu).
 **Data:** 2026-06-18
 **Autor:** Ethan (CTO)
-**Wersja:** v1.0
-**Dotyczy:** `Danolog/My_Helper_2` @ `feat/repo-layer-rls`. Baza produkcyjna: Neon (managed PostgreSQL).
+**Wersja:** v1.1 · 2026-06-18 — domknięcie bramek przeglądu Ryana (CRCO, werdykt NEEDS-WORK): F1 twarda asercja zakresu RLS + status `ai_generated_media`; F2 odstępstwo od modelu 2 ról z ADR; F3 wykonalny dowód cross-tenant na staging; F4 granica ochrony RODO + status lintu; F5/F6 dług i poprawka nazwy gałęzi. Changelog na końcu (sekcja 11).
+**Dotyczy:** `Danolog/My_Helper_2` @ `main` (warstwa repo + RLS lokalny + migracja `0005` są na `main`; gałąź `feat/repo-layer-rls` była wmergowana — historyczna nazwa robocza). Baza produkcyjna: Neon (managed PostgreSQL).
 **Podstawa:** ADR-001 (`docs/adr/ADR-001-repo-layer-rls.md`), migracja `drizzle/0005_rls_tenant_isolation.sql`, wrapper `src/lib/server/repository.ts`, test `__tests__/integration/rls-tenant.test.ts`.
 
 > **Słowniczek** (żargon tłumaczony, CLAUDE.md sekcja 3):
@@ -26,7 +26,7 @@
 
 ## 0. Po co ten runbook — i dlaczego to czerwona linia
 
-Gałąź `feat/repo-layer-rls` wprowadza dwie tamy izolacji salonów: warstwę repozytorium (`forSalon`) i RLS w bazie. **Problem deploymentowy:** kod produkcyjny w `withSalonContext` (`src/lib/server/repository.ts:76`) wykonuje przy **każdej** operacji ścieżki żądania:
+Kod na `main` (historycznie gałąź robocza `feat/repo-layer-rls`, już wmergowana) wprowadza dwie tamy izolacji salonów: warstwę repozytorium (`forSalon`) i RLS w bazie. **Problem deploymentowy:** kod produkcyjny w `withSalonContext` (`src/lib/server/repository.ts:76`) wykonuje przy **każdej** operacji ścieżki żądania:
 
 ```
 SET LOCAL ROLE myhelper_app
@@ -40,6 +40,8 @@ Migracja `0005` tworzy rolę + zakłada RLS **wyłącznie na bazie lokalnej/test
 
 Oba wymagają **sign-offu Darka w Plan Mode** przed wykonaniem. Ten dokument doprowadza pakiet do stanu **wykonalnego-po-sign-offie** — nie wykonuje niczego na prod-bazie.
 
+> **GRANICA OCHRONY RLS — czytaj zanim uznasz izolację za „domkniętą bazą" (F4, RODO).** RLS odcina cross-tenant na poziomie bazy **TYLKO na trasach idących przez `forSalon`** — czyli tam, gdzie `withSalonContext` robi `SET LOCAL ROLE myhelper_app` i ustawia kontekst salonu (rola app egzekwuje politykę). Refaktor R2 jest **częściowy**: na 2026-06-18 **68 tras** używa `forSalon`, a **99 tras** wciąż importuje surowy `db` i jedzie **rolą owner** — owner **omija RLS** przez `ENABLE`-not-`FORCE`. **Na tych ~99 trasach izolacja najemcy opiera się WYŁĄCZNIE na filtrze aplikacyjnym** (`eq(salonId)` wpisanym ręcznie w kodzie trasy) — czyli na tej samej „pamięci programisty", którą RLS miał zastąpić. Konsekwencja RODO: dopóki R2/R3 nie domkną migracji wszystkich tras na `forSalon`, RLS jest **drugą tamą tylko dla zmigrowanej części**; reszta ma jedną tamę (aplikacyjną). Wdrożenie RLS na prod **nie zamyka** ryzyka IDOR/cross-tenant na trasach na surowym `db` — to robi dopiero ukończenie R2 + flip lintu na `error` w R3 (sekcja 9). Ten runbook wdraża **bazę**; nie udaje, że pokrywa wszystkie trasy.
+
 ---
 
 ## 1. Model ról — kto się łączy, kto egzekwuje (KLUCZOWE do zrozumienia przed SQL)
@@ -51,7 +53,18 @@ To jest najczęstsze nieporozumienie przy RLS, więc wprost:
 - Żeby owner mógł zrobić `SET ROLE myhelper_app`, owner musi być **członkiem** roli `myhelper_app` — to robi `GRANT myhelper_app TO <owner>` (migracja `0005`, linia 38: `GRANT myhelper_app TO current_user`).
 - Dlaczego nie osobny login dla `myhelper_app`? Bo `ENABLE`-not-`FORCE` wymaga, by ścieżki systemowe (migracje, seed, webhooki Stripe/Twilio, 5 cronów) działały pod ownerem i **omijały** RLS. Gdyby aplikacja logowała się bezpośrednio jako `myhelper_app`, ścieżki systemowe straciłyby owner-bypass. Jedna rola łączeniowa (owner) + przełączanie per transakcja = jedna konfiguracja połączenia, dwa zachowania.
 
-**Konsekwencja dla DSN:** `DATABASE_URL`/`POSTGRES_URL` na prod **zostaje bez zmian** (rola owner). Nie tworzymy nowego loginu, nie rotujemy connection stringa. Jedyna zmiana w aplikacji to obecność wrappera (już w kodzie gałęzi). To upraszcza wdrożenie i rollback.
+**Konsekwencja dla DSN:** `DATABASE_URL`/`POSTGRES_URL` na prod **zostaje bez zmian** (rola owner). Nie tworzymy nowego loginu, nie rotujemy connection stringa. Jedyna zmiana w aplikacji to obecność wrappera (już w kodzie na `main`). To upraszcza wdrożenie i rollback.
+
+### 1.1 Odstępstwo od ADR-001 — model JEDNEJ roli łączeniowej (świadome, F2)
+
+**Ślad audytowy — rozjazd ADR↔runbook nazwany wprost.** ADR-001 (sekcja 3.2 „Wzorzec połączenia — dwie role" i sekcja 5.1 / O2) projektuje **dwie role DB**: `myhelper_app` (runtime, bez BYPASSRLS) **i** `myhelper_migrator` (owner — migracje/seed/ścieżki systemowe), jako dwa osobne loginy z dwoma DSN (`db` vs `dbMigrator`). **Ten runbook świadomie wdraża MODEL JEDNEJ ROLI ŁĄCZENIOWEJ** (owner) + przełączanie na `myhelper_app` przez `SET LOCAL ROLE` per transakcja. To **odstępstwo od litery ADR** — zapisane tu, by ślad był spójny.
+
+**Dlaczego jedna rola łączeniowa, a nie dwie z ADR:**
+- Implementacja w kodzie (`repository.ts:71-81`, `withSalonContext`) poszła ścieżką **`SET LOCAL ROLE` z połączenia ownera** — nie ścieżką dwóch osobnych puli/DSN. To była naprawa W1 z review Ryana ADR (`repository.ts:16-22`): pula loguje się ownerem, a izolację na ścieżce żądania daje przełączenie roli w transakcji. `myhelper_migrator` jako **osobny login** nie powstał — jego funkcję (owner omijający RLS dla migracji/seed/webhooków/cronów) pełni ta sama rola łączeniowa owner.
+- `myhelper_app` istnieje (rola `NOLOGIN`, cel `SET ROLE`), ale **nie jako login** — różnica wobec ADR 3.2, gdzie `db` miało łączyć się bezpośrednio jako `myhelper_app`.
+- Korzyść: jedna konfiguracja połączenia, jeden DSN, brak rotacji connection stringa na prod, prostszy rollback (sekcja 5). Koszt: izolacja na ścieżce żądania zależy od tego, że `withSalonContext` **zawsze** robi `SET LOCAL ROLE` — gdyby ktoś dodał zapytanie ścieżki żądania poza wrapperem na surowym `db`, jechałoby ownerem (RLS przezroczysty). To pilnuje lint `no-restricted-imports` (sekcja 9) + filtr aplikacyjny jako trzecia tama.
+
+**Decyzja do domknięcia śladu (do sign-offu Darka łącznie z wdrożeniem):** model jednej roli jest stanem faktycznym kodu i ZOSTAJE. **Akcja:** zaktualizować ADR-001 sekcję 3.2/5.1, by opisywała model jednej roli + `SET LOCAL ROLE` (a nie dwóch loginów), albo zostawić ADR jako zapis pierwotnego projektu z adnotacją „zrealizowano wariantem jednej roli — patrz runbook 1.1". Rekomendacja Ethana: **adnotacja w ADR** (ADR to zapis decyzji w czasie; runbook 1.1 jest źródłem prawdy o wdrożeniu). Edycja ADR poza tym PR — `agents/*.md`/governance bez zmian; ADR to nie czerwona linia, ale wymaga osobnego, czystego commitu dokumentacyjnego.
 
 > **Uwaga Neon — pooler:** Neon ma dwa endpointy: bezpośredni i pooled (PgBouncer, `-pooler` w hoście). `SET LOCAL ROLE` i `set_config(..., true)` są **transaction-scoped**, więc działają na PgBouncer w trybie `transaction pooling` (cała transakcja na jednym połączeniu — patrz komentarz `repository.ts:24-28`). **Migracje `0005` (DDL) puszczać przez endpoint BEZPOŚREDNI**, nie pooled — DDL i `ALTER DEFAULT PRIVILEGES` na poolerze bywa zawodne. Runtime aplikacji może zostać na poolerze.
 
@@ -203,8 +216,76 @@ CREATE POLICY tenant_self ON salons
 -- (Better Auth), subscription_plans (cennik globalny), temporary_access,
 -- push_subscriptions (FK do user, nie salon). NIE włączamy na nich RLS.
 
+-- =========================================================================
+-- 7. TWARDA BRAMKA ZAKRESU (F1) — ZATRZYMUJE WDROŻENIE, nie ostrzega.
+--    Asercja: każda istniejąca tabela z kolumną salon_id MUSI mieć politykę
+--    tenant_isolation, a salons MUSI mieć tenant_self. Inaczej RAISE EXCEPTION
+--    => cała transakcja ROLLBACK => prod nietknięty. To zamienia „cichą dziurę
+--    cross-tenant na nowej tabeli" (R4) z ostrzeżenia w twardy STOP wdrożenia.
+--    Wykonuje się PO założeniu wszystkich polityk, PRZED COMMIT.
+-- =========================================================================
+DO $$
+DECLARE
+  -- Tabele z bezpośrednim salon_id, które ŚWIADOMIE są poza tenant-RLS (ADR 3.3).
+  -- salon_id mają, ale izolacja idzie inną drogą albo nie dotyczy najemcy.
+  -- (Na dziś: PUSTA — wszystkie tabele z salon_id dostają politykę. Jeśli
+  --  kiedyś świadomie wyłączysz którąś, DOPISZ ją tu z uzasadnieniem, inaczej
+  --  asercja ją wychwyci jako brakującą i zatrzyma wdrożenie.)
+  intentionally_excluded text[] := ARRAY[]::text[];
+  missing text[];
+BEGIN
+  -- (a) Tabele z kolumną salon_id BEZ polityki tenant_isolation, pomijając
+  --     świadomie wyłączone i samą tabelę salons (ma tenant_self, nie tenant_isolation).
+  SELECT array_agg(c.table_name ORDER BY c.table_name) INTO missing
+  FROM information_schema.columns c
+  WHERE c.table_schema = 'public'
+    AND c.column_name = 'salon_id'
+    AND c.table_name <> 'salons'
+    AND c.table_name <> ALL (intentionally_excluded)
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_policies p
+      WHERE p.schemaname = 'public'
+        AND p.tablename = c.table_name
+        AND p.policyname = 'tenant_isolation'
+    );
+
+  IF missing IS NOT NULL AND array_length(missing, 1) > 0 THEN
+    RAISE EXCEPTION
+      'PROD RLS STOP (F1): tabele z salon_id BEZ polityki tenant_isolation: %. '
+      'Cross-tenant byłby otwarty. Dopisz je do list w krokach 4/5 ALBO do '
+      'intentionally_excluded z uzasadnieniem. Wdrożenie przerwane (ROLLBACK).',
+      array_to_string(missing, ', ');
+  END IF;
+
+  -- (b) salons MUSI mieć tenant_self (korzeń najemcy).
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname='public' AND tablename='salons' AND policyname='tenant_self'
+  ) THEN
+    RAISE EXCEPTION 'PROD RLS STOP (F1): salons bez polityki tenant_self. ROLLBACK.';
+  END IF;
+
+  RAISE NOTICE 'PROD RLS OK (F1): wszystkie tabele z salon_id mają tenant_isolation, salons ma tenant_self.';
+END
+$$;
+
 COMMIT;
 ```
+
+> **Bramka F1 — co dokładnie egzekwuje asercja:** liczba tabel z polityką `tenant_isolation` **musi pokrywać** zbiór wszystkich istniejących tabel z kolumną `salon_id` (minus `salons`, która ma `tenant_self`, minus świadomie wyłączone — dziś lista pusta). Jeśli prod-schemat ma tabelę z `salon_id`, której nie zna `0005` (dryf schematu, ryzyko R4), asercja **rzuca `RAISE EXCEPTION`** i cała transakcja robi `ROLLBACK` — prod zostaje nietknięty. To **twarda bramka**, nie `RAISE WARNING` z wcześniejszej wersji. `RAISE WARNING` w pętlach kroków 4/5 (tabela na liście, ale nie istnieje na prod) **zostaje** jako sygnał diagnostyczny — to inny przypadek (lista szersza niż schemat, nie odwrotnie), nieszkodliwy dla izolacji.
+
+### 3.1 Status `ai_generated_media` — dryf schematu, decyzja do sign-offu (F1)
+
+**Fakt stwierdzony:** tabela `ai_generated_media` jest zdefiniowana w `src/lib/schema.ts:816-841` (`salon_id NOT NULL`, ma indeks `ai_generated_media_salon_id_idx`) i figuruje na liście `direct_tables` migracji `0005` oraz w tym runbooku (krok 4, 26 tabel). **ALE żadna migracja `0000`–`0004` jej nie tworzy** — zweryfikowane: `grep -rn ai_generated_media drizzle/*.sql` zwraca tylko `0005` (lista RLS), zero `CREATE TABLE ai_generated_media`. To **ten sam typ dryfu** co niezaaplikowana `0005`: `schema.ts` (model docelowy) jest szerszy niż zastosowane migracje.
+
+**Konsekwencja dla prod:** na prod-bazie tabela `ai_generated_media` **najprawdopodobniej NIE ISTNIEJE** (skoro nie ma migracji ją tworzącej). Zachowanie SQL runbooka jest wtedy poprawne i bezpieczne: pętla kroku 4 trafia na `IF NOT EXISTS ... CONTINUE` → tabela pominięta, `RAISE WARNING` ją zgłasza. Asercja F1 (krok 7) **też jej nie wymaga** — sprawdza tylko tabele **istniejące** w `information_schema.columns`, więc nieistniejąca `ai_generated_media` nie wywoła `EXCEPTION`.
+
+**Decyzja do sign-offu Darka (NIE wykonuję — to czerwona linia):**
+- **Wariant 1 (rekomendowany):** `ai_generated_media` jest **celowo nieobecna na prod do czasu wdrożenia funkcji AI media**. Tabela zostaje na liście `0005`/runbooka — polityka założy się **automatycznie** na pierwszym wdrożeniu, które utworzy tabelę (osobna migracja `CREATE TABLE` + ten runbook puszczony ponownie idempotentnie, albo dołożenie RLS w tej samej migracji per ryzyko R7). Bez akcji teraz.
+- **Wariant 2 (jeśli funkcja AI media wchodzi przed RLS):** najpierw migracja prod tworząca `ai_generated_media` (z `salon_id`), **POTEM** RLS — inaczej pierwsze zapytanie ścieżki żądania do tej tabeli przez `forSalon` trafi na tabelę bez polityki = cross-tenant otwarty na niej (asercja F1 by to wychwyciła PO utworzeniu tabeli i zatrzymała RLS, ale lepiej nie tworzyć dziury).
+- **Czego NIE robię:** nie tworzę migracji prod dla `ai_generated_media` — `CREATE TABLE` na schemacie prod to czerwona linia (CLAUDE.md sekcja 4: migracja schemy produkcyjnej). Dokumentuję decyzję; tworzenie tabeli (jeśli Wariant 2) idzie osobnym sign-offem Darka.
+
+**Domknięcie śladu:** rozjazd `schema.ts` ↔ migracje (dla `ai_generated_media` i ogólnie) to dług schematu do uporządkowania osobno (Ryan: porównanie pełnego `schema.ts` z `_journal.json` przy przeglądzie zakresu — bramka sekcja 6). Asercja F1 chroni przed jego skutkiem na izolacji niezależnie od tego, kiedy dług zostanie spłacony.
 
 **Świadoma decyzja o rolach łączeniowych:** rola łączeniowa aplikacji **pozostaje rolą owner** (z `DATABASE_URL`). `myhelper_app` jest rolą docelową `SET ROLE`, nie loginem (sekcja 1). `GRANT myhelper_app TO current_user` (krok 3) jest tym, co pozwala `SET LOCAL ROLE myhelper_app` w `repository.ts:76` zadziałać. Gdyby kiedyś przejść na osobny login aplikacji — owner-bypass ścieżek systemowych trzeba by rozwiązać inaczej (poza zakresem tego wdrożenia).
 
@@ -222,6 +303,25 @@ SELECT tableowner, count(*) FROM pg_tables WHERE schemaname='public' GROUP BY 1;
 -- Wszystkie tabele z kolumną salon_id — porównaj z listą 26 z sekcji 3 (czy nic nie brakuje).
 SELECT table_name FROM information_schema.columns
 WHERE table_schema='public' AND column_name='salon_id' ORDER BY 1;
+
+-- F1 (read-only podgląd asercji): ile tabel z salon_id istnieje na prod i czy
+-- któraś jest spoza listy 26 z kroku 4. Jeśli ten zbiór jest większy niż lista
+-- runbooka — STOP zanim ruszysz krok 4: twarda asercja (krok 7) i tak przerwie
+-- transakcję, ale lepiej wiedzieć z góry. Porównaj wynik z listą direct_tables.
+SELECT table_name FROM information_schema.columns
+WHERE table_schema='public' AND column_name='salon_id'
+  AND table_name NOT IN (
+    'salons','clients','employees','service_categories','services','appointments',
+    'gallery_photos','albums','reviews','notifications','waiting_list',
+    'product_categories','products','promotions','promo_codes','loyalty_points',
+    'invoices','newsletters','marketing_consents','favorite_salons',
+    'salon_subscriptions','subscription_payments','deposit_payments',
+    'fiscal_receipts','scheduled_posts','ai_conversations','ai_generated_media'
+  )
+ORDER BY 1;
+-- ^ Pusty wynik = zakres runbooka pokrywa prod. Niepusty = DRYF SCHEMATU (R4):
+--   nowa tabela z salon_id, której 0005 nie zna. NIE uruchamiaj kroku 4 — najpierw
+--   dopisz tabelę do list kroków 4/5 (albo do intentionally_excluded z uzasadnieniem).
 ```
 
 ### PO migracji DB (krok 5 — przed deployem kodu)
@@ -237,18 +337,43 @@ SELECT tablename, policyname FROM pg_policies WHERE schemaname='public' ORDER BY
 -- (c) Owner widzi wszystko (ENABLE-not-FORCE) — kontrola różnicująca.
 SELECT count(*) FROM clients;   -- > 0, owner omija RLS
 
--- (d) Rola app Z kontextem widzi tylko jeden salon; BEZ kontekstu — 0 wierszy.
+-- (d) DOWÓD ODCIĘCIA CROSS-TENANT — dwa salony, oba kierunki (F3).
+--     Wymaga DWÓCH istniejących salonów A i B z danymi (na staging: zaseeduj
+--     dwa albo użyj dwóch realnych). Dowodzi nie tylko „widzę swoje", ale że
+--     baza ODCINA cudze ORAZ ODRZUCA zapis do cudzego (WITH CHECK).
 BEGIN;
   SET LOCAL ROLE myhelper_app;
-  -- bez set_config: kontekst pusty -> RLS odcina wszystko
-  SELECT count(*) AS bez_kontekstu FROM clients;        -- = 0
-  SELECT set_config('app.current_salon_id', '<UUID-ISTNIEJĄCEGO-SALONU>', true);
-  SELECT count(*) AS z_kontekstem  FROM clients;        -- = liczba klientów TEGO salonu
-  -- próba sięgnięcia cudzego salonu = 0
-  SELECT set_config('app.current_salon_id', '<UUID-INNEGO-SALONU>', true);
-  SELECT count(*) AS cudzy_salon   FROM clients;        -- powinno odzwierciedlać TYLKO tamten salon
-ROLLBACK;  -- nic nie zmieniamy, to tylko odczyt
+
+  -- (d.1) Bez kontekstu: RLS odcina wszystko.
+  SELECT count(*) AS bez_kontekstu FROM clients;                 -- MUSI = 0
+
+  -- (d.2) Kontekst = salon A: widać TYLKO klientów A, ZERO klientów B.
+  SELECT set_config('app.current_salon_id', '<UUID-SALONU-A>', true);
+  SELECT count(*) AS a_widzi_swoich FROM clients;                -- = liczba klientów A (>0)
+  SELECT count(*) AS a_widzi_obcych_B FROM clients                -- MUSI = 0
+    WHERE salon_id = '<UUID-SALONU-B>'::uuid;
+  -- Krzyżowo: jawny SELECT po id klienta B z kontekstem A -> 0 wierszy.
+  SELECT count(*) AS a_siega_klienta_B FROM clients               -- MUSI = 0
+    WHERE id = '<UUID-KLIENTA-SALONU-B>'::uuid;
+
+  -- (d.3) Kontekst = salon B: lustrzane sprawdzenie w drugą stronę.
+  SELECT set_config('app.current_salon_id', '<UUID-SALONU-B>', true);
+  SELECT count(*) AS b_widzi_swoich FROM clients;                -- = liczba klientów B (>0)
+  SELECT count(*) AS b_widzi_obcych_A FROM clients                -- MUSI = 0
+    WHERE salon_id = '<UUID-SALONU-A>'::uuid;
+
+  -- (d.4) WITH CHECK: próba wstawienia wiersza do CUDZEGO salonu (A) z kontekstem B
+  --       MUSI zostać odrzucona ("new row violates row-level security policy").
+  --       Owijamy w savepoint, by błąd nie zerwał całej transakcji odczytowej.
+  SAVEPOINT cross_insert;
+  INSERT INTO clients (salon_id, first_name, last_name)
+    VALUES ('<UUID-SALONU-A>'::uuid, 'CROSS', 'TENANT');          -- MUSI rzucić błąd RLS
+  -- Jeśli dotarło tu bez błędu = DZIURA. Cofnij i potraktuj jako STOP.
+  ROLLBACK TO SAVEPOINT cross_insert;
+ROLLBACK;  -- nic nie zmieniamy, to tylko dowód odczytu/odrzucenia zapisu
 ```
+
+> **Kryterium zaliczenia dowodu (zrzut do bramki):** `bez_kontekstu=0`, `a_widzi_obcych_B=0`, `a_siega_klienta_B=0`, `b_widzi_obcych_A=0`, oraz INSERT z (d.4) **rzucił** `new row violates row-level security policy`. Każda inna wartość = STOP, eskalacja do Ryana + Darka. Zapisz pełny output (z wartościami count) jako artefakt staging-first.
 
 ### SMOKE (krok 7 — po deployu kodu, na żywym prod, minimalny ruch)
 
@@ -258,7 +383,26 @@ ROLLBACK;  -- nic nie zmieniamy, to tylko odczyt
 - Jeden cron (`publish-scheduled-posts` na staging) → przetwarza wszystkie salony (cross-tenant pod ownerem działa).
 - Logi: zero `role "myhelper_app" does not exist`, zero `permission denied`.
 
-Idealnie: odtworzyć `__tests__/integration/rls-tenant.test.ts` wskazując `POSTGRES_URL` na **staging** (nie prod — guard `setup-real-db.ts` blokuje nie-localhost, więc na staging trzeba świadomie obejść guard w osobnym, jawnym przebiegu lub uruchomić równoważne zapytania ręcznie z bloku „PO (d)").
+### DOWÓD CROSS-TENANT NA STAGING (F1/F3 — bramka wykonalna, nie „na papierze")
+
+Staging-first (sekcja 6) jest obowiązkowy. Dowód odcięcia cross-tenant na staging idzie **jedną z dwóch dróg** — obie wykonalne:
+
+**Droga A (preferowana) — automatyczny test `rls-tenant.test.ts` na staging.** Wcześniej guard `setup-real-db.ts` twardo blokował każdy host nie-localhost (i jawnie Neon), więc testu nie dało się puścić na staging bez hakowania. **Naprawione (F3):** guard ma teraz **kontrolowany, wąski opt-in** `RLS_STAGING_HOST`. Uruchomienie na staging:
+
+```bash
+# DSN wskazuje staging Neon (osobna baza, NIE prod). Host musi być DOKŁADNIE
+# równy wartości RLS_STAGING_HOST — podwójny opt-in. Inny host => guard STOP.
+export POSTGRES_URL='postgres://...@ep-staging-xxx.eu-central-1.aws.neon.tech/...'
+export RLS_STAGING_HOST='ep-staging-xxx.eu-central-1.aws.neon.tech'
+export MYHELPER_APP_DB_ROLE='myhelper_app'
+npx vitest run --config vitest.integration.config.ts __tests__/integration/rls-tenant.test.ts
+```
+
+Test napędza **produkcyjny wrapper `forSalon`** (`SET LOCAL ROLE myhelper_app` + kontekst), pyta bazę BEZ filtra aplikacyjnego i dowodzi: kontekst A widzi tylko A, sięgnięcie po wiersz B → 0 wierszy, owner widzi oba (kontrola różnicująca), rola `myhelper_app` bez BYPASSRLS, webhook pod ownerem zapisuje a rola app bez kontekstu jest odrzucana przez `WITH CHECK`. **Zielony wynik na staging = dowód odcięcia cross-tenant.** Zachowaj log przebiegu jako artefakt bramki.
+
+> **Granica bezpieczeństwa furtki:** `RLS_STAGING_HOST` przepuszcza **dokładnie jeden** nazwany host i tylko gdy zmienna jest ustawiona; domyślnie guard nadal jest localhost-only i blokuje Neon. **NIGDY nie wskazuj tu hosta produkcyjnego** — to okno na staging (bliźniacza, odrębna baza). Prod RLS = ręczny SQL po sign-offie Darka (sekcja 3), nigdy przez test.
+
+**Droga B (fallback, gdy A niewykonalna) — ręczne zapytania z udokumentowanym zrzutem.** Jeśli staging nie da się podpiąć pod test (np. brak runnera), bramką są zapytania PO(d) + SMOKE wykonane ręcznie na staging, z **zapisanym zrzutem wyniku** dołączonym do bramki. Zapytania PO(d) poniżej są rozbudowane tak, by **realnie dowodziły odcięcia** (dwa salony, krzyżowe sprawdzenie w obu kierunkach), nie tylko „widzę swoje".
 
 ---
 
@@ -300,8 +444,9 @@ COMMIT;
 | Bramka | Kto | Czego dotyczy |
 |---|---|---|
 | **Sign-off Darka (Plan Mode)** | Darek (CEO) | Utworzenie roli `myhelper_app` na prod (nowy element infry) + migracja schemy prod (ENABLE RLS + policies). **Dwie czerwone linie, CLAUDE.md sekcja 4.** Bez tego krok 4 nie rusza. |
-| **Przegląd domenowy bezpieczeństwa** | Ryan (CRCO, domena 8) | Zakres tabel RLS (czy lista 26+12+salons kompletna wobec prod-schematu), obsługa ścieżek systemowych (webhooki/crony omijają poprawnie), RODO (czy cross-tenant realnie odcięty). Ryan może **zablokować** wdrożenie. |
-| **Staging-first** | Ethan + Ryan | **Obowiązkowy.** Kroki 3–7 przechodzą na staging Neon z zielonym wynikiem PRZED tknięciem prod. Brak zielonego stagingu = prod nie rusza. |
+| **Przegląd domenowy bezpieczeństwa** | Ryan (CRCO, domena 8) | Zakres tabel RLS (czy lista 26+12+salons kompletna wobec prod-schematu), obsługa ścieżek systemowych (webhooki/crony omijają poprawnie), RODO (czy cross-tenant realnie odcięty + granica F4: ~99 tras na surowym `db` poza RLS). Ryan może **zablokować** wdrożenie. |
+| **Twarda asercja zakresu (F1)** | automat SQL (krok 7) | `RAISE EXCEPTION` + `ROLLBACK`, gdy jakakolwiek istniejąca tabela z `salon_id` nie ma `tenant_isolation` (albo `salons` bez `tenant_self`). Nie da się wdrożyć RLS z luką w zakresie — bramka maszynowa, nie ludzka. |
+| **Staging-first + dowód cross-tenant (F3)** | Ethan + Ryan | **Obowiązkowy.** Kroki 3–7 na staging Neon z zielonym wynikiem PRZED tknięciem prod. Dowód odcięcia: test `rls-tenant.test.ts` przez `RLS_STAGING_HOST` (droga A) albo ręczne zapytania PO(d) dwukierunkowe + WITH CHECK z zapisanym zrzutem (droga B) — sekcja 4. Brak zielonego dowodu = prod nie rusza. |
 | **PoC `SET LOCAL` na poolerze Neon** | Leo | Potwierdzenie, że `SET LOCAL ROLE` + `set_config(...,true)` trzymają się transakcji na pooled endpoincie Neon (PgBouncer transaction mode). ADR sekcja 8 decyzja 4. |
 | **Okno obserwacji** | Ethan | 24–48 h monitoringu po deployu; dopiero czyste okno domyka krok. P0 na prod → natychmiastowa eskalacja do Darka (Slack DM). |
 
@@ -314,30 +459,84 @@ COMMIT;
 | R1 | **Deploy kodu przed założeniem roli** (zła kolejność) | `SET LOCAL ROLE myhelper_app` → `role does not exist` → 500 na całym API. **Outage.** | Sekwencja sekcji 2: DB (krok 4) ZAWSZE przed kodem (krok 6). Krok 5 (weryfikacja) bramkuje deploy. |
 | R2 | **Rola już istnieje** na prod (z wcześniejszej próby) z innymi uprawnieniami | GRANT-y mogą być niespójne; RLS może odcinać nie to, co trzeba | SQL idempotentny (`IF NOT EXISTS`); blok „PRZED" sekcji 4 wykrywa istniejącą rolę i jej `rolbypassrls` przed wykonaniem. |
 | R3 | **Połączenia w puli z błędną/zalegającą rolą** | `SET LOCAL` znika po COMMIT/ROLLBACK, więc rola nie wycieka — ale gdyby transakcja nie domknęła się (długo żyjące połączenie), kolejne żądanie mogłoby dziedziczyć stan | `SET LOCAL` jest transaction-scoped (komentarz `repository.ts:24-28`); `db.transaction` gwarantuje COMMIT/ROLLBACK. Pooler Neon w trybie transaction pooling — PoC Leo (bramka). `idle_timeout: 20`, `max_lifetime` w `db.ts` ograniczają zaleganie. |
-| R4 | **Tabela z `salon_id` poza listą 26** (np. nowa migracja od czasu ADR) | RLS jej nie obejmie → cicha dziura cross-tenant na tej tabeli | Blok „PRZED" sekcji 4: `information_schema.columns` listuje WSZYSTKIE tabele z `salon_id` — porównać z listą 26. `RAISE WARNING` w SQL na brakującą tabelę. Ryan weryfikuje zakres (bramka). |
+| R4 | **Tabela z `salon_id` poza listą 26** (np. nowa migracja od czasu ADR / dryf `schema.ts`↔migracje, jak `ai_generated_media` — sekcja 3.1) | RLS jej nie obejmie → cicha dziura cross-tenant na tej tabeli | **TWARDA BRAMKA F1 (sekcja 3, krok 7):** asercja `RAISE EXCEPTION` + `ROLLBACK`, gdy istnieje tabela z `salon_id` bez `tenant_isolation`. Cicha dziura zamieniona w STOP wdrożenia — nie da się wdrożyć RLS z luką w zakresie. Dodatkowo: read-only podgląd w bloku „PRZED" (różnica list przed krokiem 4) + przegląd zakresu Ryana (bramka sekcja 6). |
 | R5 | **RLS na tabeli bez `salon_id`** (błąd w liście) | Polityka `salon_id = ...` nie skompiluje się lub odetnie wszystko | SQL używa `format` z nazwami z jawnych list (ADR 3.3); tabele pośrednie mają politykę EXISTS (nie odwołują się do nieistniejącego `salon_id`). Tabele Better Auth świadomie pominięte. |
 | R6 | **Migrator/`db:migrate` celuje w prod** | Może zastosować niezamierzone różnice schematu poza RLS | **Zakaz** `db:migrate`/`db:push` na prod (sekcja 3). RLS na prod = ręczny SQL w jawnej transakcji, nic więcej. |
 | R7 | **`ALTER DEFAULT PRIVILEGES` per-rola-twórca** | Nowa tabela utworzona przez INNĄ rolę niż ta z kroku 3 nie nada DML roli app → przyszła trasa rzuci `permission denied` | Migracje prod muszą jechać pod TĄ SAMĄ rolą owner co krok 3. Po każdej przyszłej migracji dodającej tabelę z `salon_id`: dołożyć `ENABLE RLS` + policy + `GRANT` (checklist w sekcji 3, komentarz). |
 | R8 | **Transakcje long-running / wsadowe pod rolą app** | Polityka EXISTS na tabelach pośrednich dokłada subquery do każdego zapytania → koszt w planie | ADR 7: jeśli EXISTS kosztowny — zdenormalizowany `salon_id` (osobny ADR schematu). Monitorować plany zapytań na cronach/raportach w oknie obserwacji. |
-| R9 | **Webhook/cron przypadkiem przez `forSalon`** | Pod rolą app bez kontekstu → 0 wierszy / WITH CHECK odrzuca → cicha awaria płatności/przypomnień | ADR sekcja 4: ścieżki systemowe używają surowego `db` (owner), nie `forSalon`. Lint `no-restricted-imports` (warn→error w R3) pilnuje. Smoke krok 7 testuje webhook + cron. |
+| R9 | **Webhook/cron przypadkiem przez `forSalon`** | Pod rolą app bez kontekstu → 0 wierszy / WITH CHECK odrzuca → cicha awaria płatności/przypomnień | ADR sekcja 4: ścieżki systemowe używają surowego `db` (owner), nie `forSalon`. Lint `no-restricted-imports` (dziś `warn`, docelowo `error` w R3 — patrz sekcja 8) sygnalizuje. Smoke krok 7 testuje webhook + cron. |
 | R10 | **`salons` (korzeń) — publiczny katalog** | Publiczny odczyt `salons/[id]` przez `unstable_cache` pod ownerem — RLS by go nie dotknął, ale gdyby trafił przez app bez kontekstu → 0 wierszy | Publiczny katalog czyta pod ownerem (omija RLS, ADR 3.3 / komentarz migracji linie 135-145). Smoke: sprawdzić publiczny profil salonu po deployu. |
 
 ---
 
-## 8. Self-critique (rola: principal engineer po incydencie cross-tenant na produkcji)
+## 8. Status lintu `no-restricted-imports` i dług strukturalny (F4/F5)
+
+### 8.1 Lint `error` ŚWIADOMIE odłożony do R3 (F4)
+
+Ryan (CRCO) chce regułę `no-restricted-imports` na imporcie `db` na poziomie **`error`** (łamie CI), nie `warn`. **Stan faktyczny blokuje flip TERAZ:** 99 tras w `src/app/api/**` wciąż importuje surowy `db` (refaktor R2 częściowy — 68 tras zmigrowanych na `forSalon`). Podniesienie na `error` natychmiast wywaliłoby `pnpm lint` → quality-gate CI na 99 plikach. To **nie domknięcie długu — to zablokowanie repo** (żaden PR nie przejdzie CI).
+
+**Decyzja (Ethan, świadoma):** lint zostaje `warn` **do PR domykającego R3**. Rozważyłem ograniczenie `error` tylko do tras już zmigrowanych — **odrzucone**: wymagałoby utrzymywania w `eslint.config.mjs` jawnej listy 68 ścieżek (albo wzorca `ignores` na 99 pozostałych), która rozjeżdża się przy każdej migracji paczki R2 i daje fałszywe poczucie pokrycia; ESLint flat config nie ma czystego sposobu „error dla zbioru plików już niełamiących reguły" bez ręcznej, kruchej enumeracji. `warn` na całym `src/app/api/**` jest uczciwszym sygnałem: pokazuje **wszystkie** 99 naruszeń w review, nie psując CI.
+
+**Plan przejścia na `error` (zapisany, mierzalny):**
+1. **R2** — migracja pozostałych 99 tras na `forSalon` paczkami ~10, każda paczka z rozszerzeniem testu izolacji. Po każdej paczce liczba importów `db` w `src/app/api/**` spada (mierzalne: `grep -rln 'from "@/lib/db"' src/app/api --include='*.ts' | grep -v .test.ts | wc -l`).
+2. **R3 (PR domykający)** — gdy licznik = 0 (poza zadeklarowanymi wyjątkami systemowymi: webhooki/cron/seed z jawnym `eslint-disable` + komentarzem), flip reguły z `warn` na `error` w `eslint.config.mjs`. Od tego momentu nowa trasa z `import { db }` nie wejdzie na `main`.
+
+Komentarz w `eslint.config.mjs` (blok `files: ["src/app/api/**/*.ts"]`) zapisuje to samo przy kodzie — żeby ktoś czytający config widział, że `warn` jest świadome, nie zapomniane.
+
+### 8.2 Jawny dług strukturalny — tabele poza modelem tenant-RLS (F5)
+
+Zapisane wprost jako dług do spłaty, nie ukryte założenie (ADR-001 sekcja 3.3 sygnalizował; tu domknięte jako lista):
+
+| Dług | Co | Ryzyko | Status / plan |
+|---|---|---|---|
+| **D-RLS-1** | `temporary_access`, `push_subscriptions` — **bez kolumny `salon_id`**, FK do `user.id`, świadomie **poza tenant-RLS** | Jeśli kiedyś trafią na ścieżkę żądania przez `forSalon` — `SalonScoped` (TypeScript) je odrzuci (brak `.salonId`), ale przez surowy `db` nie ma ochrony bazy; izolacja zależy od logiki auth po `user_id` | Świadomie poza RLS w tym wdrożeniu. Jeśli wymagają izolacji — RLS po `user_id` (inny model niż tenant) w osobnym ADR. |
+| **D-RLS-2** | **Założenie „1 user = 1 salon" NIE jest zapisane** w schemacie ani egzekwowane | `temporary_access`/`push_subscriptions` izolowane po `user_id` są tożsame z izolacją po salonie **tylko jeśli** user należy do jednego salonu. Gdyby model się zmienił (user w wielu salonach) — założenie pęka cicho | Dług do formalizacji: albo constraint w schemacie, albo jawny ADR przyjmujący „1 user = 1 salon" jako kontrakt. Ryan: wskazać przy przeglądzie zakresu. |
+| **D-RLS-3** | Dryf `schema.ts` ↔ migracje (`ai_generated_media` w `schema.ts`, brak `CREATE TABLE` w `0000`–`0004`) | Model docelowy szerszy niż zastosowany schemat prod — sekcja 3.1 | Asercja F1 chroni izolację niezależnie; pełne porównanie `schema.ts`↔`_journal.json` to osobne sprzątanie schematu. |
+
+Te długi **nie blokują** wdrożenia RLS (dotyczą tabel świadomie poza modelem tenant), ale są **policzalne i przypisane** — nie „odkryjemy je po incydencie".
+
+---
+
+## 9. Co WCIĄŻ wymaga sign-offu Darka (niezmienione po v1.1)
+
+Domknięcie bramek F1–F6 **nie zdejmuje żadnej czerwonej linii** — runbook nadal jest „wykonalny-po-sign-offie", nie wykonany:
+- **Utworzenie roli `myhelper_app` na prod** + **migracja schemy prod** (ENABLE RLS + policies) — dwie czerwone linie (CLAUDE.md sekcja 4), sign-off Darka w Plan Mode (sekcja 6).
+- **Ewentualna migracja tworząca `ai_generated_media` na prod** (Wariant 2, sekcja 3.1) — osobna migracja schemy prod = osobny sign-off.
+- **Aktualizacja ADR-001** o model jednej roli (sekcja 1.1) — osobny commit dokumentacyjny (nie czerwona linia, ale poza tym PR).
+
+---
+
+## 10. Self-critique (rola: principal engineer po incydencie cross-tenant na produkcji)
 
 Pięć słabości i co z nimi:
 
 1. **Czy sekwencja naprawdę jest zero-downtime?** Tak, pod jednym warunkiem, który teraz nazwałem wprost: krok 4 (DB) jest wstecznie kompatybilny ze starym kodem **tylko dlatego, że stary kod nie woła `SET LOCAL ROLE`** i jedzie ownerem omijającym RLS (`ENABLE`-not-`FORCE`). Gdyby jakakolwiek istniejąca ścieżka prod już dziś robiła `SET LOCAL ROLE myhelper_app` zanim rola istnieje — założenie pada. Zweryfikowałem: w gałęzi `SET LOCAL ROLE` jest **wyłącznie** w `withSalonContext` (`repository.ts:76`), którego nie ma w kodzie obecnie na prod. Słabość rezydualna: jeśli między napisaniem runbooka a wdrożeniem ktoś doda drugie miejsce z `SET ROLE`, założenie trzeba przeliczyć. Dodałem to do bramki przeglądu.
 
-2. **Czy nie pominąłem tabeli/roli?** Największe realne ryzyko (R4). Lista 26+12+`salons` pochodzi z migracji `0005`, która powstała wobec lokalnego modelu — **prod-schemat może mieć tabele z `salon_id`, których migracja nie zna** (komentarz w `0005` wprost mówi „model lokalny bywa węższy niż schema.ts"). Dlatego blok „PRZED" sekcji 4 listuje WSZYSTKIE kolumny `salon_id` z `information_schema` do porównania, a SQL `RAISE WARNING` na brakującą tabelę zamiast cichego pominięcia. To przesuwa ryzyko z „cicha dziura" na „jawne ostrzeżenie + bramka Ryana". Nie eliminuje całkowicie — wymaga, by ktoś faktycznie porównał listy. Nazwałem to jako działanie człowieka, nie automat.
+2. **Czy nie pominąłem tabeli/roli?** Największe realne ryzyko (R4). Lista 26+12+`salons` pochodzi z migracji `0005`, która powstała wobec lokalnego modelu — **prod-schemat może mieć tabele z `salon_id`, których migracja nie zna**. W v1.0 polegałem na `RAISE WARNING` + ręcznym porównaniu list — to było za słabe (warning nie zatrzymuje wdrożenia, a porównanie zależało od czujności człowieka). **v1.1 (F1):** dołożyłem **twardą asercję** (krok 7) — `RAISE EXCEPTION` + `ROLLBACK`, gdy jakakolwiek istniejąca tabela z `salon_id` nie ma `tenant_isolation`. Ryzyko przesunięte z „cicha dziura / zależne od człowieka" na „maszynowy STOP wdrożenia". Asercja sprawdza tabele **istniejące** w `information_schema`, więc dryf w drugą stronę (`ai_generated_media` na liście, ale nieobecna na prod — sekcja 3.1) nie wywoła fałszywego `EXCEPTION`. Rezydualnie: asercja chroni izolację, ale nie zastępuje przeglądu Ryana co do *celowości* zakresu (czy któraś tabela powinna być świadomie wyłączona).
 
 3. **Czy rollback jest realny?** Tak, i jest bezpieczniejszy niż wdrożenie, bo nie dotyka danych. Dwie rzeczy, które mogłem przeoczyć i poprawiłem: (a) **kolejność rollbacku jest odwrotna** — najpierw rewert kodu, potem zdjęcie roli/RLS, inaczej usunięcie roli pod żywym nowym kodem samo robi outage (scenariusz C). (b) `DROP ROLE` nie zadziała wprost — wymaga `REVOKE` + `DROP OWNED BY`; dlatego rekomenduję **zostawić rolę** (nieszkodliwa) i tylko zdjąć policies. Filtr aplikacyjny `eq(salonId)` zostaje jako siatka w każdym scenariuszu.
 
 4. **Słabość: weryfikacja „PO" na prod modyfikuje rolę bieżącej sesji.** Blok 4(d) robi `SET LOCAL ROLE` w transakcji zakończonej `ROLLBACK` — bezpieczne (nic nie zmienia, `SET LOCAL` znika). Ale wykonujący musi pamiętać o `ROLLBACK`; gdyby zrobił `COMMIT`, nadal nic się nie zmienia (to były same `SELECT`). Ryzyko nieistotne, ale oznaczyłem `ROLLBACK` jawnie. Nie da się tu uszkodzić danych odczytami.
 
-5. **Słabość: nie wykonałem tego na żywym Neon — to projekt, nie dowód.** Runbook opiera się na zachowaniu zweryfikowanym **lokalnie** (test `rls-tenant.test.ts` zielony lokalnie) + wzorcu referencyjnym Neon z pamięci repo (ADR O5). Trzy rzeczy są nadal niepotwierdzone na Neon i dlatego są **bramkami, nie założeniami**: (a) `SET LOCAL` na pooled endpoincie (PoC Leo); (b) czy owner prod ma prawo `CREATE ROLE` i `GRANT ... TO current_user` na Neon (zależy od planu Neon — sprawdzić na staging); (c) czy `ALTER DEFAULT PRIVILEGES` zachowa się jak lokalnie. Staging-first (sekcja 6) istnieje właśnie po to, by te trzy zamienić z niepewności w dowód, zanim ruszy prod. Uczciwa niepewność: dopóki staging nie przejdzie, runbook jest wykonalny-na-papierze, nie dowiedziony.
+5. **Słabość: nie wykonałem tego na żywym Neon — to projekt, nie dowód.** Runbook opiera się na zachowaniu zweryfikowanym **lokalnie** (test `rls-tenant.test.ts` zielony lokalnie) + wzorcu referencyjnym Neon z pamięci repo (ADR O5). Trzy rzeczy są nadal niepotwierdzone na Neon i dlatego są **bramkami, nie założeniami**: (a) `SET LOCAL` na pooled endpoincie (PoC Leo); (b) czy owner prod ma prawo `CREATE ROLE` i `GRANT ... TO current_user` na Neon (zależy od planu Neon — sprawdzić na staging); (c) czy `ALTER DEFAULT PRIVILEGES` zachowa się jak lokalnie. **v1.1 (F3):** dowód cross-tenant na staging jest teraz **wykonalny** (opt-in `RLS_STAGING_HOST` w guardzie zamiast hakowania) — to zamyka „dowód na papierze". Staging-first (sekcja 6) istnieje po to, by zamienić niepewność w dowód, zanim ruszy prod. Uczciwa niepewność: dopóki staging nie przejdzie zielono, runbook jest wykonalny, ale niedowiedziony na Neon.
+
+6. **Słabość v1.1: poszerzenie furtki guarda to nowa powierzchnia ataku.** Dodanie `RLS_STAGING_HOST` osłabia tamę „test nigdy nie dotknie zdalnej bazy". Zminimalizowałem to: podwójny opt-in (zmienna MUSI nazwać host I host DSN MUSI być mu równy), przepuszczany **dokładnie jeden** host (równość pełna, nie wzorzec), domyślnie wyłączone (localhost-only bez zmian), jawny log gdy aktywne, i wprost zakaz wskazywania prod w nagłówku pliku + runbooku. Rezydualnie: ktoś może wpisać tu host prod świadomie — ale to już jawna, widoczna w env decyzja, nie cicha furtka. Granica RODO (F4) jest osobno nazwana: RLS chroni tylko trasy `forSalon`; ~99 tras na surowym `db` ma jedną tamę (aplikacyjną) do czasu R2/R3 — runbook tego nie ukrywa.
 
 ---
 
-**Następny krok:** przegląd Ryana (zakres + ścieżki systemowe) → staging-first (kroki 3–7 na staging Neon, zielony wynik) → dopiero wtedy sign-off Darka w Plan Mode na prod (rola DB + migracja schemy) → wykonanie kroków 4–8 na prod w oknie niskiego ruchu. RLS na prod pozostaje w statusie „czeka na sign-off Darka" do tego momentu.
+## 11. Changelog
+
+**v1.1 · 2026-06-18 — domknięcie bramek przeglądu Ryana (NEEDS-WORK → adres):**
+- **F1** (wysokie): twarda bramka zakresu — sekcja 3 krok 7 `RAISE EXCEPTION`+`ROLLBACK` zamiast `RAISE WARNING`; asercja „każda istniejąca tabela z `salon_id` MUSI mieć `tenant_isolation`, `salons` MUSI mieć `tenant_self`". Read-only podgląd w bloku „PRZED" (różnica list). Status `ai_generated_media` rozstrzygnięty (sekcja 3.1): dryf `schema.ts`↔migracje, najpewniej nieobecna na prod, decyzja Wariant 1/2 do sign-offu Darka — migracji prod NIE tworzę (czerwona linia).
+- **F2** (średnie): sekcja 1.1 — świadome odstępstwo od modelu 2 ról z ADR-001 (jedna rola łączeniowa owner + `SET LOCAL ROLE`, `myhelper_migrator` jako osobny login nie powstał). Rekomendacja: adnotacja w ADR (osobny commit).
+- **F3** (średnie): kontrolowany opt-in `RLS_STAGING_HOST` w `setup-real-db.ts` (wąski, jednohostowy wyjątek guarda) — droga A; rozbudowane dwukierunkowe zapytania PO(d) + WITH CHECK z kryterium zaliczenia — droga B (sekcja 4).
+- **F4** (RODO): granica ochrony w sekcji 0 (RLS tylko na trasach `forSalon`; ~99 tras na surowym `db` poza RLS) + sekcja 8.1 — lint `warn` świadomie do R3 (flip na `error` złamałby CI na 99 plikach), plan przejścia. `eslint.config.mjs` komentarz wzmocniony; reguła pozostaje `warn` (CI niezepsute).
+- **F5** (niskie): sekcja 8.2 — jawny dług `temporary_access`/`push_subscriptions` poza RLS, niezapisane założenie „1 user=1 salon", dryf schematu.
+- **F6** (info): nazwa gałęzi `feat/repo-layer-rls` → `main` (gałąź wmergowana).
+- Nowa sekcja 9 (co wciąż wymaga sign-offu Darka), sekcja 10 self-critique +punkt 6.
+
+**v1.0 · 2026-06-18** — pierwsza wersja: sekwencja zero-downtime, SQL prod, weryfikacja, rollback, bramki, 10 ryzyk.
+
+---
+
+**Następny krok:** ponowny przegląd Ryana (czy bramki F1–F6 domknięte) → staging-first (kroki 3–7 na staging Neon; dowód cross-tenant drogą A lub B z zapisanym zrzutem — sekcja 4) → dopiero wtedy sign-off Darka w Plan Mode na prod (rola DB + migracja schemy; + ewentualna migracja `ai_generated_media` jeśli Wariant 2) → wykonanie kroków 4–8 na prod w oknie niskiego ruchu. RLS na prod pozostaje w statusie „czeka na sign-off Darka" do tego momentu. Aktualizacja ADR-001 (sekcja 1.1) — osobny commit dokumentacyjny.

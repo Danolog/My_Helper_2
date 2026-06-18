@@ -73,9 +73,17 @@ const config = [
   {
     // ADR-001 sekcja 2.3 — zakaz surowego `db` w trasach API poza warstwą repo.
     // Trasa importuje forSalon(salonId) z @/lib/server/repository (wymusza
-    // izolację salonu), nie surowy `db`. Faza R1: poziom `warn` — 53 trasy
-    // jeszcze go łamią (migracja w R2). R3 podniesie do `error` (łamie build CI),
-    // gdy 0 tras importuje `db` poza zadeklarowanymi wyjątkami systemowymi.
+    // izolację salonu), nie surowy `db`.
+    //
+    // POZIOM `warn` JEST ŚWIADOMY DO CZASU R3 (bramka F4 review Ryana, runbook
+    // RLS sekcja 9). Stan faktyczny 2026-06-18: 99 tras w src/app/api/** wciąż
+    // importuje surowy `db` (refaktor R2 częściowy, 68 tras zmigrowanych na
+    // forSalon). Podniesienie na `error` TERAZ złamałoby `pnpm lint` → quality-gate
+    // CI na 99 plikach — to nie zamknięcie długu, to zablokowanie repo. Flip na
+    // `error` należy do PR domykającego R3, gdy 0 tras (poza zadeklarowanymi
+    // wyjątkami systemowymi: webhooki/cron/seed) importuje `db`. Do tego czasu
+    // `warn` utrzymuje sygnał w review bez psucia CI. Plan przejścia: ADR-001
+    // sekcja 5/7 (R2 paczkami ~10 tras → R3 flip na `error`).
     files: ["src/app/api/**/*.ts"],
     ignores: ["src/app/api/**/*.test.ts"],
     rules: {
