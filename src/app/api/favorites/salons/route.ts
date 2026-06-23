@@ -6,6 +6,14 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, favoriteSalonSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
+
+/**
+ * Kontekst KLIENTA — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * Ulubione salony użytkownika: filtr po `eq(favoriteSalons.clientUserId, userId)`
+ * z SESJI (nie query/body) — klient widzi/dodaje/usuwa wyłącznie SWOJE ulubione.
+ * Lista obejmuje wiele salonów, więc kontekst pojedynczego salonu właściciela
+ * (forSalon) nie pasuje.
+ */
 // GET /api/favorites/salons - List favorite salons for authenticated user
 export async function GET() {
   try {

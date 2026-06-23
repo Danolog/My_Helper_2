@@ -5,6 +5,13 @@ import { eq } from "drizzle-orm";
 import { PLANS } from "@/lib/constants";
 
 import { logger } from "@/lib/logger";
+
+/**
+ * Trasa PUBLICZNA / katalog GLOBALNY — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * `subscriptionPlans` to globalny cennik (Basic/Pro), nie dane najemcy — brak kolumny
+ * salonId, więc `forSalon` (wymaga salon-scoped tabeli) jest nieaplikowalny. Auto-seed
+ * planów to operacja systemowa. Brak danych wrażliwych cross-tenant.
+ */
 // Subscription plans rarely change — revalidate every hour to reduce DB queries
 export const revalidate = 3600;
 

@@ -4,6 +4,14 @@ import { appointments, workSchedules, timeBlocks } from "@/lib/schema";
 import { eq, and, gte, lt, not } from "drizzle-orm";
 
 import { logger } from "@/lib/logger";
+
+/**
+ * Trasa PUBLICZNA (portal rezerwacji) — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * Klient (potencjalnie niezalogowany) sprawdza wolne terminy pracownika z `employeeId`
+ * z query — brak właściciela w sesji, więc `forSalon` nie pasuje. Odpowiedź zwraca
+ * wyłącznie godziny zajęte/wolne i etykiety bloków (godzina + typ/powód) — NIE wycieka
+ * tożsamości innych klientów ani danych cross-tenant prywatnych.
+ */
 // GET /api/available-slots?employeeId=xxx&date=2026-02-10&duration=60
 // Returns available time slots for booking
 export async function GET(request: Request) {

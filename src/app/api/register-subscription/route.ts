@@ -14,6 +14,12 @@ import { logger } from "@/lib/logger";
  * Creates a salon subscription in 'trialing' status with a trial period.
  *
  * Body: { planSlug: "basic" | "pro", email: string }
+ *
+ * Kontekst REJESTRACJI WŁAŚCICIELA — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * Salon dopiero powstaje (może być auto-tworzony tutaj), więc salonId WŁAŚCICIELA nie
+ * istnieje jeszcze w sesji do podania do `forSalon`. Email z body jest walidowany
+ * względem tożsamości z SESJI (guard IDOR poniżej), a salon wyznaczany z `ownerId`
+ * tego użytkownika — kontekst wyznaczany z danych rejestracji, nie z forSalon.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -25,6 +31,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(validationError, { status: 400 });
     }
     const { planSlug, email } = rawBody as { planSlug: string; email: string };
+
+    // IDOR guard (R2): trasa działa na salonie WŁAŚCICIELA wyznaczanym z `email`
+    // z body — bez tego sprawdzenia zalogowany użytkownik A mógłby podać email B
+    // i utworzyć/podmienić subskrypcję cudzego salonu (np. downgrade Pro->Basic).
+    // Email z body musi zgadzać się z tożsamością z SESJI (case-insensitive).
+    if (email.toLowerCase() !== (authResult.user.email ?? "").toLowerCase()) {
+      return NextResponse.json(
+        { success: false, error: "Email nie zgadza sie z zalogowanym uzytkownikiem" },
+        { status: 403 }
+      );
+    }
 
     // Find the subscription plan
     const [plan] = await db

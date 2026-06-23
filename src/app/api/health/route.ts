@@ -3,6 +3,12 @@ import { db } from '@/lib/db';
 import { sql } from 'drizzle-orm';
 
 import { logger } from "@/lib/logger";
+
+/**
+ * Trasa SYSTEMOWA (health-check) — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * Tylko `SELECT 1` do testu połączenia — brak danych najemcy, brak sesji właściciela,
+ * więc `forSalon` jest nieaplikowalny. Brak danych wrażliwych w odpowiedzi.
+ */
 // Health checks must always reflect real-time system state — never cache
 export const dynamic = 'force-dynamic';
 

@@ -5,6 +5,13 @@ import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
+
+/**
+ * Kontekst KLIENTA — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * Sprawdzenie czy salon jest w ulubionych użytkownika: filtr po
+ * `eq(favoriteSalons.clientUserId, userId)` z SESJI. Zakres wielo-salonowy —
+ * kontekst właściciela (forSalon) nie pasuje.
+ */
 // GET /api/favorites/salons/check?salonId=<uuid> - Check if salon is in favorites
 export async function GET(request: Request) {
   try {
