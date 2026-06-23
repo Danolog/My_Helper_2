@@ -21,7 +21,12 @@ export async function POST(request: Request) {
 
     const normalizedCode = code.toUpperCase().trim();
 
-    // Look up the promo code by code + salonId, with joined promotion data
+    // ŚCIEŻKA QUASI-PUBLICZNA (rezerwacja klienta): salonId pochodzi z BODY, nie z
+    // sesji właściciela — klient sprawdza kod dla salonu, który rezerwuje (cudzego).
+    // To NIE jest trasa owner-scoped, więc NIE przepuszczamy przez forSalon (który
+    // wymaga salonId z sesji). Zapytanie jest jawnie zawężone do salonId+code z body,
+    // a odpowiedź zwraca tylko status ważności kodu — brak wycieku cudzych danych
+    // poza zamierzonym faktem istnienia/ważności podanego kodu. Zostaje na surowym db.
     const [result] = await db
       .select({
         promoCode: promoCodes,

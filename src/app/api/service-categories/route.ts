@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { serviceCategories } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, createServiceCategorySchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/service-categories - List all service categories
@@ -23,11 +23,13 @@ export async function GET(_request: Request) {
 
     logger.info("[ServiceCategories API] GET with params", { salonId });
 
-    const result = await db
-      .select()
-      .from(serviceCategories)
-      .where(eq(serviceCategories.salonId, salonId))
-      .orderBy(serviceCategories.sortOrder);
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(serviceCategories)
+        .where(eq(serviceCategories.salonId, salonId))
+        .orderBy(serviceCategories.sortOrder)
+    );
 
     logger.info(`[ServiceCategories API] Query returned ${result.length} rows`);
 
@@ -69,14 +71,16 @@ export async function POST(request: Request) {
     const { name, sortOrder } = body;
 
     logger.info(`[ServiceCategories API] Creating category: ${name}`);
-    const [newCategory] = await db
-      .insert(serviceCategories)
-      .values({
-        salonId,
-        name,
-        sortOrder: sortOrder ?? 0,
-      })
-      .returning();
+    const [newCategory] = await forSalon(salonId).raw((tx) =>
+      tx
+        .insert(serviceCategories)
+        .values({
+          salonId,
+          name,
+          sortOrder: sortOrder ?? 0,
+        })
+        .returning()
+    );
 
     logger.info(`[ServiceCategories API] Created category with id: ${newCategory?.id}`);
 

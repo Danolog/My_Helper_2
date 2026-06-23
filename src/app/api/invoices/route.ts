@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { invoices, clients, appointments, employees, services, salons } from "@/lib/schema";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -21,7 +22,9 @@ export async function GET(request: NextRequest) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    // Resolve salon from authenticated user
+    // Resolve salon from authenticated user. Krok rozwiązania właściciel→salon
+    // (jeszcze nie znamy salonId, więc poza forSalon) — pozostaje na surowym db,
+    // analogicznie do getUserSalon(). Dalsze zapytania salonowe idą przez forSalon.
     const [salon] = await db
       .select({ id: salons.id })
       .from(salons)
@@ -71,8 +74,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Query invoices with related data
-    const rows = await db
+    // Query invoices with related data — przez forSalon (kontekst RLS).
+    // Jawny eq(invoices.salonId, salonId) zachowany w conditions (defense in depth).
+    const rows = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: invoices.id,
         invoiceNumber: invoices.invoiceNumber,
@@ -106,7 +111,8 @@ export async function GET(request: NextRequest) {
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .where(and(...conditions))
-      .orderBy(desc(invoices.issuedAt));
+      .orderBy(desc(invoices.issuedAt))
+    );
 
     // Calculate summary
     const totalAmount = rows.reduce(

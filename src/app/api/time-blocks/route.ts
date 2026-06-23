@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { timeBlocks, employees } from "@/lib/schema";
-import { eq, and, gte, lte } from "drizzle-orm";
+import { eq, and, gte, lte, type SQL } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, createTimeBlockSchema } from "@/lib/api-validation";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/time-blocks?employeeId=xxx&startDate=xxx&endDate=xxx
@@ -12,6 +13,15 @@ export async function GET(request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
     const startDate = searchParams.get("startDate");
@@ -20,7 +30,7 @@ export async function GET(request: Request) {
 
     logger.info("[TimeBlocks API] GET with params", { employeeId, startDate, endDate, blockType });
 
-    const conditions = [];
+    const conditions: SQL[] = [];
 
     if (employeeId) {
       conditions.push(eq(timeBlocks.employeeId, employeeId));
@@ -35,19 +45,23 @@ export async function GET(request: Request) {
       conditions.push(lte(timeBlocks.startTime, new Date(endDate)));
     }
 
-    let query = db
-      .select({
-        timeBlock: timeBlocks,
-        employee: employees,
-      })
-      .from(timeBlocks)
-      .leftJoin(employees, eq(timeBlocks.employeeId, employees.id));
+    // time_blocks bez kolumny salon_id — izolacja przez RLS pośrednią (EXISTS na
+    // employees.salon_id). leftJoin employees pod tym samym kontekstem RLS.
+    const result = await forSalon(salonId).raw((tx) => {
+      let query = tx
+        .select({
+          timeBlock: timeBlocks,
+          employee: employees,
+        })
+        .from(timeBlocks)
+        .leftJoin(employees, eq(timeBlocks.employeeId, employees.id));
 
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions)) as typeof query;
-    }
+      if (conditions.length > 0) {
+        query = query.where(and(...conditions)) as typeof query;
+      }
 
-    const result = await query;
+      return query;
+    });
     logger.info(`[TimeBlocks API] Query returned ${result.length} rows`);
 
     const formattedBlocks = result.map((row) => ({
@@ -83,6 +97,15 @@ export async function POST(request: Request) {
 
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const body = await request.json();
     const validationError = validateBody(createTimeBlockSchema, body);
     if (validationError) {
@@ -99,20 +122,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // Verify employee exists
-    const [employee] = await db
-      .select()
-      .from(employees)
-      .where(eq(employees.id, employeeId))
-      .limit(1);
-
-    if (!employee) {
-      return NextResponse.json(
-        { success: false, error: "Employee not found" },
-        { status: 404 }
-      );
-    }
-
     // Validate date range
     const start = new Date(startTime);
     const end = new Date(endTime);
@@ -125,17 +134,42 @@ export async function POST(request: Request) {
 
     logger.info(`[TimeBlocks API] Creating ${blockType} block for employee: ${employeeId}`);
 
-    const [newBlock] = await db
-      .insert(timeBlocks)
-      .values({
-        employeeId,
-        startTime: start,
-        endTime: end,
-        blockType,
-        reason: reason || null,
-      })
-      .returning();
+    // Weryfikacja pracownika + insert w jednej transakcji forSalon (atomowość).
+    // employees pod RLS (bezpośredni salon_id, jawny eq jako defense in depth),
+    // time_blocks pod RLS pośrednią (EXISTS na employees.salon_id).
+    const txResult = await forSalon(salonId).raw(async (tx) => {
+      const [employee] = await tx
+        .select()
+        .from(employees)
+        .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
+        .limit(1);
 
+      if (!employee) {
+        return { notFound: true as const, block: undefined as typeof timeBlocks.$inferSelect | undefined };
+      }
+
+      const [created] = await tx
+        .insert(timeBlocks)
+        .values({
+          employeeId,
+          startTime: start,
+          endTime: end,
+          blockType,
+          reason: reason || null,
+        })
+        .returning();
+
+      return { notFound: false as const, block: created };
+    });
+
+    if (txResult.notFound) {
+      return NextResponse.json(
+        { success: false, error: "Employee not found" },
+        { status: 404 }
+      );
+    }
+
+    const newBlock = txResult.block;
     logger.info(`[TimeBlocks API] Created time block with id: ${newBlock?.id}`);
 
     return NextResponse.json(
@@ -159,6 +193,15 @@ export async function DELETE(request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
 
@@ -171,10 +214,14 @@ export async function DELETE(request: Request) {
 
     logger.info(`[TimeBlocks API] Deleting time block: ${id}`);
 
-    const deleted = await db
-      .delete(timeBlocks)
-      .where(eq(timeBlocks.id, id))
-      .returning();
+    // time_blocks bez salon_id — RLS pośrednia (EXISTS na employees.salon_id) odcina
+    // usunięcie bloku cudzego salonu; zwróci 0 wierszy => 404 (zachowane zachowanie).
+    const deleted = await forSalon(salonId).raw((tx) =>
+      tx
+        .delete(timeBlocks)
+        .where(eq(timeBlocks.id, id))
+        .returning()
+    );
 
     if (deleted.length === 0) {
       return NextResponse.json(

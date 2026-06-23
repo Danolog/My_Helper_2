@@ -27,7 +27,22 @@ vi.mock("@/lib/db", () => ({
     select: (...args: unknown[]) => mockDbSelect(...args),
     insert: (...args: unknown[]) => mockDbInsert(...args),
     delete: (...args: unknown[]) => mockDbDelete(...args),
+    // forSalon(...).raw/findOne/... biegną przez db.transaction; tx udostępnia te
+    // same gałęzie co db + execute (SET LOCAL ROLE / set_config w withSalonContext).
+    transaction: (cb: (tx: unknown) => unknown) =>
+      cb({
+        select: (...args: unknown[]) => mockDbSelect(...args),
+        insert: (...args: unknown[]) => mockDbInsert(...args),
+        delete: (...args: unknown[]) => mockDbDelete(...args),
+        update: (...args: unknown[]) => mockDbSelect(...args),
+        execute: () => Promise.resolve(undefined),
+      }),
   },
+}));
+
+vi.mock("@/lib/get-user-salon", () => ({
+  getUserSalonId: vi.fn().mockResolvedValue("test-salon-id"),
+  getUserSalon: vi.fn().mockResolvedValue({ id: "test-salon-id" }),
 }));
 
 vi.mock("@/lib/schema", () => {
@@ -46,6 +61,11 @@ vi.mock("@/lib/schema", () => {
 
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
+  and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  // sql jako tag template + sql.raw(...) (withSalonContext używa sql`...` i sql.raw)
+  sql: Object.assign((...args: unknown[]) => ({ type: "sql", args }), {
+    raw: (...args: unknown[]) => ({ type: "sql.raw", args }),
+  }),
 }));
 
 vi.mock("@/lib/auth-middleware", () => ({

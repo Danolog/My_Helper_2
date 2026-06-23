@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import {
   employeeCommissions,
   employees,
@@ -7,8 +6,10 @@ import {
   services,
   clients,
 } from "@/lib/schema";
-import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, type SQL } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/finance/commissions - List commissions with employee totals
@@ -16,13 +17,22 @@ export async function GET(request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
     const employeeId = searchParams.get("employeeId");
 
     // Build conditions
-    const conditions = [];
+    const conditions: SQL[] = [];
     if (dateFrom) {
       conditions.push(gte(employeeCommissions.createdAt, new Date(dateFrom)));
     }
@@ -35,8 +45,12 @@ export async function GET(request: Request) {
       conditions.push(eq(employeeCommissions.employeeId, employeeId));
     }
 
+    // employee_commissions bez kolumny salon_id — izolacja przez RLS pośrednią
+    // (EXISTS na employees.salon_id). Oba zapytania (rekordy + sumy) w jednym
+    // kontekście forSalon, więc baza odcina prowizje pracowników cudzych salonów.
+    const { commissions, employeeTotals } = await forSalon(salonId).raw(async (tx) => {
     // Get individual commission records with details
-    const commissionsQuery = db
+    const commissionsQuery = tx
       .select({
         id: employeeCommissions.id,
         employeeId: employeeCommissions.employeeId,
@@ -64,13 +78,13 @@ export async function GET(request: Request) {
       .leftJoin(clients, eq(appointments.clientId, clients.id))
       .orderBy(desc(employeeCommissions.createdAt));
 
-    const commissions =
+    const commissionsResult =
       conditions.length > 0
         ? await commissionsQuery.where(and(...conditions))
         : await commissionsQuery;
 
     // Calculate employee totals
-    const employeeTotalsQuery = db
+    const employeeTotalsQuery = tx
       .select({
         employeeId: employeeCommissions.employeeId,
         firstName: employees.firstName,
@@ -95,10 +109,13 @@ export async function GET(request: Request) {
         sql`COALESCE(SUM(${employeeCommissions.amount}), 0) DESC`
       );
 
-    const employeeTotals =
+    const employeeTotalsResult =
       conditions.length > 0
         ? await employeeTotalsQuery.where(and(...conditions))
         : await employeeTotalsQuery;
+
+      return { commissions: commissionsResult, employeeTotals: employeeTotalsResult };
+    });
 
     // Calculate grand totals
     const grandTotal = commissions.reduce(
