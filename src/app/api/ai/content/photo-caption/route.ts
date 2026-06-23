@@ -1,5 +1,5 @@
 import { generateText } from "ai";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import {
   createAIClient,
@@ -9,7 +9,7 @@ import {
   getSalonContext,
   trackAIUsage,
 } from "@/lib/ai/openrouter";
-import { db } from "@/lib/db";
+import { forSalon } from "@/lib/server/repository";
 import { logger } from "@/lib/logger";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 
@@ -97,24 +97,34 @@ export async function POST(req: Request) {
   } | null = null;
 
   try {
-    const result = await db
-      .select({
-        id: galleryPhotos.id,
-        description: galleryPhotos.description,
-        productsUsed: galleryPhotos.productsUsed,
-        techniques: galleryPhotos.techniques,
-        duration: galleryPhotos.duration,
-        beforePhotoUrl: galleryPhotos.beforePhotoUrl,
-        afterPhotoUrl: galleryPhotos.afterPhotoUrl,
-        employeeFirstName: employees.firstName,
-        employeeLastName: employees.lastName,
-        serviceName: services.name,
-      })
-      .from(galleryPhotos)
-      .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
-      .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-      .where(eq(galleryPhotos.id, photoId))
-      .then((r) => r[0] ?? null);
+    // leftJoin — przez raw(tx) z jawnym eq(galleryPhotos.salonId, salonId).
+    // Domkniecie IDOR: wczesniej filtr byl tylko po photoId (cudze zdjecie
+    // bylo dostepne); teraz tama aplikacyjna + kontekst RLS forSalon.
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          id: galleryPhotos.id,
+          description: galleryPhotos.description,
+          productsUsed: galleryPhotos.productsUsed,
+          techniques: galleryPhotos.techniques,
+          duration: galleryPhotos.duration,
+          beforePhotoUrl: galleryPhotos.beforePhotoUrl,
+          afterPhotoUrl: galleryPhotos.afterPhotoUrl,
+          employeeFirstName: employees.firstName,
+          employeeLastName: employees.lastName,
+          serviceName: services.name,
+        })
+        .from(galleryPhotos)
+        .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
+        .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
+        .where(
+          and(
+            eq(galleryPhotos.id, photoId),
+            eq(galleryPhotos.salonId, salonId)
+          )
+        )
+        .then((r) => r[0] ?? null)
+    );
 
     photo = result;
   } catch (error) {

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { forSalon } from "@/lib/server/repository";
 import {
   appointments,
   clients,
@@ -208,17 +208,11 @@ async function gatherSalonData(salonId: string): Promise<{
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
   try {
-    // Fetch salon info first
-    const salonInfo = await db
-      .select({
-        name: salons.name,
-        industryType: salons.industryType,
-      })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .then((r) => r[0] ?? { name: "Salon", industryType: null });
-
-    const [
+    // Wszystkie odczyty kontekstu salonu w jednej transakcji z kontekstem RLS
+    // (forSalon). Jawne eq(<tabela>.salonId) zachowane jako tama aplikacyjna
+    // (defense in depth). salons filtrujemy po PK (salons.id = salonId).
+    const {
+      salonInfo,
       totalClients,
       totalEmployees,
       activeServices,
@@ -229,145 +223,182 @@ async function gatherSalonData(salonId: string): Promise<{
       avgRatingResult,
       lowStockItems,
       revenueResult,
-    ] = await Promise.all([
-      db
-        .select({ count: count() })
-        .from(clients)
-        .where(eq(clients.salonId, salonId))
-        .then((r) => r[0]?.count ?? 0),
-
-      db
-        .select({ count: count() })
-        .from(employees)
-        .where(
-          and(
-            eq(employees.salonId, salonId),
-            eq(employees.isActive, true),
-          ),
-        )
-        .then((r) => r[0]?.count ?? 0),
-
-      db
-        .select({ count: count() })
-        .from(services)
-        .where(
-          and(
-            eq(services.salonId, salonId),
-            eq(services.isActive, true),
-          ),
-        )
-        .then((r) => r[0]?.count ?? 0),
-
-      db
-        .select({ count: count() })
-        .from(appointments)
-        .where(
-          and(
-            eq(appointments.salonId, salonId),
-            gte(appointments.startTime, thirtyDaysAgo),
-          ),
-        )
-        .then((r) => r[0]?.count ?? 0),
-
-      db
+    } = await forSalon(salonId).raw(async (tx) => {
+      // Fetch salon info first
+      const salonInfo = await tx
         .select({
-          status: appointments.status,
-          count: count(),
+          name: salons.name,
+          industryType: salons.industryType,
         })
-        .from(appointments)
-        .where(
-          and(
-            eq(appointments.salonId, salonId),
-            gte(appointments.startTime, thirtyDaysAgo),
-          ),
-        )
-        .groupBy(appointments.status),
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .then((r) => r[0] ?? { name: "Salon", industryType: null });
 
-      db
-        .select({
-          serviceName: services.name,
-          servicePrice: services.basePrice,
-          count: count(),
-        })
-        .from(appointments)
-        .innerJoin(services, eq(appointments.serviceId, services.id))
-        .where(
-          and(
-            eq(appointments.salonId, salonId),
-            gte(appointments.startTime, thirtyDaysAgo),
-          ),
-        )
-        .groupBy(services.name, services.basePrice)
-        .orderBy(desc(count()))
-        .limit(5),
+      const [
+        totalClients,
+        totalEmployees,
+        activeServices,
+        recentAppointmentsCount,
+        appointmentsByStatus,
+        topServicesList,
+        topEmployeesList,
+        avgRatingResult,
+        lowStockItems,
+        revenueResult,
+      ] = await Promise.all([
+        tx
+          .select({ count: count() })
+          .from(clients)
+          .where(eq(clients.salonId, salonId))
+          .then((r) => r[0]?.count ?? 0),
 
-      db
-        .select({
-          firstName: employees.firstName,
-          lastName: employees.lastName,
-          count: count(),
-        })
-        .from(appointments)
-        .innerJoin(employees, eq(appointments.employeeId, employees.id))
-        .where(
-          and(
-            eq(appointments.salonId, salonId),
-            gte(appointments.startTime, thirtyDaysAgo),
-          ),
-        )
-        .groupBy(employees.firstName, employees.lastName)
-        .orderBy(desc(count()))
-        .limit(5),
+        tx
+          .select({ count: count() })
+          .from(employees)
+          .where(
+            and(
+              eq(employees.salonId, salonId),
+              eq(employees.isActive, true),
+            ),
+          )
+          .then((r) => r[0]?.count ?? 0),
 
-      db
-        .select({
-          avg: sql<string>`COALESCE(AVG(${reviews.rating}), 0)`,
-          count: count(),
-        })
-        .from(reviews)
-        .where(
-          and(
-            eq(reviews.salonId, salonId),
-            sql`${reviews.rating} IS NOT NULL`,
-          ),
-        )
-        .then((r) => ({
-          average: parseFloat(r[0]?.avg ?? "0").toFixed(1),
-          total: r[0]?.count ?? 0,
-        })),
+        tx
+          .select({ count: count() })
+          .from(services)
+          .where(
+            and(
+              eq(services.salonId, salonId),
+              eq(services.isActive, true),
+            ),
+          )
+          .then((r) => r[0]?.count ?? 0),
 
-      db
-        .select({
-          name: products.name,
-          quantity: products.quantity,
-          minQuantity: products.minQuantity,
-          unit: products.unit,
-        })
-        .from(products)
-        .where(
-          and(
-            eq(products.salonId, salonId),
-            sql`CAST(${products.quantity} AS numeric) <= COALESCE(CAST(${products.minQuantity} AS numeric), 5)`,
-          ),
-        )
-        .limit(10),
+        tx
+          .select({ count: count() })
+          .from(appointments)
+          .where(
+            and(
+              eq(appointments.salonId, salonId),
+              gte(appointments.startTime, thirtyDaysAgo),
+            ),
+          )
+          .then((r) => r[0]?.count ?? 0),
 
-      db
-        .select({
-          total:
-            sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric)), 0)`,
-        })
-        .from(appointments)
-        .innerJoin(services, eq(appointments.serviceId, services.id))
-        .where(
-          and(
-            eq(appointments.salonId, salonId),
-            eq(appointments.status, "completed"),
-            gte(appointments.startTime, thirtyDaysAgo),
-          ),
-        )
-        .then((r) => parseFloat(r[0]?.total ?? "0")),
-    ]);
+        tx
+          .select({
+            status: appointments.status,
+            count: count(),
+          })
+          .from(appointments)
+          .where(
+            and(
+              eq(appointments.salonId, salonId),
+              gte(appointments.startTime, thirtyDaysAgo),
+            ),
+          )
+          .groupBy(appointments.status),
+
+        tx
+          .select({
+            serviceName: services.name,
+            servicePrice: services.basePrice,
+            count: count(),
+          })
+          .from(appointments)
+          .innerJoin(services, eq(appointments.serviceId, services.id))
+          .where(
+            and(
+              eq(appointments.salonId, salonId),
+              gte(appointments.startTime, thirtyDaysAgo),
+            ),
+          )
+          .groupBy(services.name, services.basePrice)
+          .orderBy(desc(count()))
+          .limit(5),
+
+        tx
+          .select({
+            firstName: employees.firstName,
+            lastName: employees.lastName,
+            count: count(),
+          })
+          .from(appointments)
+          .innerJoin(employees, eq(appointments.employeeId, employees.id))
+          .where(
+            and(
+              eq(appointments.salonId, salonId),
+              gte(appointments.startTime, thirtyDaysAgo),
+            ),
+          )
+          .groupBy(employees.firstName, employees.lastName)
+          .orderBy(desc(count()))
+          .limit(5),
+
+        tx
+          .select({
+            avg: sql<string>`COALESCE(AVG(${reviews.rating}), 0)`,
+            count: count(),
+          })
+          .from(reviews)
+          .where(
+            and(
+              eq(reviews.salonId, salonId),
+              sql`${reviews.rating} IS NOT NULL`,
+            ),
+          )
+          .then((r) => ({
+            average: parseFloat(r[0]?.avg ?? "0").toFixed(1),
+            total: r[0]?.count ?? 0,
+          })),
+
+        tx
+          .select({
+            name: products.name,
+            quantity: products.quantity,
+            minQuantity: products.minQuantity,
+            unit: products.unit,
+          })
+          .from(products)
+          .where(
+            and(
+              eq(products.salonId, salonId),
+              sql`CAST(${products.quantity} AS numeric) <= COALESCE(CAST(${products.minQuantity} AS numeric), 5)`,
+            ),
+          )
+          .limit(10),
+
+        tx
+          .select({
+            total:
+              sql<string>`COALESCE(SUM(CAST(${services.basePrice} AS numeric)), 0)`,
+          })
+          .from(appointments)
+          .innerJoin(services, eq(appointments.serviceId, services.id))
+          .where(
+            and(
+              eq(appointments.salonId, salonId),
+              eq(appointments.status, "completed"),
+              gte(appointments.startTime, thirtyDaysAgo),
+            ),
+          )
+          .then((r) => parseFloat(r[0]?.total ?? "0")),
+      ]);
+
+      return {
+        salonInfo,
+        totalClients,
+        totalEmployees,
+        activeServices,
+        recentAppointmentsCount,
+        appointmentsByStatus,
+        topServicesList,
+        topEmployeesList,
+        avgRatingResult,
+        lowStockItems,
+        revenueResult,
+      };
+    });
 
     // Build status breakdown string
     const statusMap: Record<string, number> = {};

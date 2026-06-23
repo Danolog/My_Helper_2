@@ -4,7 +4,7 @@ import { z } from "zod";
 import { isProPlan } from "@/lib/subscription";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { forSalon } from "@/lib/server/repository";
 import {
   salons,
   services,
@@ -129,64 +129,68 @@ export async function POST(req: Request) {
   let activePromotions: string[] = [];
 
   try {
-    const salonInfo = await db
-      .select({
-        name: salons.name,
-        industryType: salons.industryType,
-        address: salons.address,
-        phone: salons.phone,
-      })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .then((r) => r[0]);
-
-    if (salonInfo) {
-      salonName = salonInfo.name;
-      salonAddress = salonInfo.address || "";
-      salonPhone = salonInfo.phone || "";
-      const iType = salonInfo.industryType;
-      if (iType && INDUSTRY_LABELS[iType]) {
-        industryLabel = INDUSTRY_LABELS[iType];
-      }
-    }
-
-    // Fetch top services
-    const serviceList = await db
-      .select({ name: services.name, basePrice: services.basePrice })
-      .from(services)
-      .where(
-        and(eq(services.salonId, salonId), eq(services.isActive, true))
-      )
-      .limit(10);
-
-    salonServices = serviceList.map(
-      (s) => `${s.name} (${s.basePrice} PLN)`
-    );
-
-    // Fetch active promotions
-    try {
-      const promoList = await db
+    // Odczyty kontekstu salonu w jednej transakcji z kontekstem RLS (forSalon).
+    // salons filtrujemy po PK (salons.id = salonId); services/promotions po salonId.
+    await forSalon(salonId).raw(async (tx) => {
+      const salonInfo = await tx
         .select({
-          name: promotions.name,
-          type: promotions.type,
-          value: promotions.value,
+          name: salons.name,
+          industryType: salons.industryType,
+          address: salons.address,
+          phone: salons.phone,
         })
-        .from(promotions)
-        .where(
-          and(
-            eq(promotions.salonId, salonId),
-            eq(promotions.isActive, true)
-          )
-        )
-        .limit(5);
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .then((r) => r[0]);
 
-      activePromotions = promoList.map(
-        (p) =>
-          `${p.name} (${p.type === "percentage" ? `-${p.value}%` : `-${p.value} PLN`})`
+      if (salonInfo) {
+        salonName = salonInfo.name;
+        salonAddress = salonInfo.address || "";
+        salonPhone = salonInfo.phone || "";
+        const iType = salonInfo.industryType;
+        if (iType && INDUSTRY_LABELS[iType]) {
+          industryLabel = INDUSTRY_LABELS[iType];
+        }
+      }
+
+      // Fetch top services
+      const serviceList = await tx
+        .select({ name: services.name, basePrice: services.basePrice })
+        .from(services)
+        .where(
+          and(eq(services.salonId, salonId), eq(services.isActive, true))
+        )
+        .limit(10);
+
+      salonServices = serviceList.map(
+        (s) => `${s.name} (${s.basePrice} PLN)`
       );
-    } catch {
-      // promotions table might not exist yet
-    }
+
+      // Fetch active promotions
+      try {
+        const promoList = await tx
+          .select({
+            name: promotions.name,
+            type: promotions.type,
+            value: promotions.value,
+          })
+          .from(promotions)
+          .where(
+            and(
+              eq(promotions.salonId, salonId),
+              eq(promotions.isActive, true)
+            )
+          )
+          .limit(5);
+
+        activePromotions = promoList.map(
+          (p) =>
+            `${p.name} (${p.type === "percentage" ? `-${p.value}%` : `-${p.value} PLN`})`
+        );
+      } catch {
+        // promotions table might not exist yet
+      }
+    });
   } catch (error) {
     logger.error("[AI Newsletter] Error fetching salon context", { error: error });
   }
@@ -278,14 +282,16 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
     let savedId: string | null = null;
     if (save) {
       try {
-        const [saved] = await db
-          .insert(newsletters)
-          .values({
-            salonId: salonId,
-            subject,
-            content,
-          })
-          .returning({ id: newsletters.id });
+        const [saved] = await forSalon(salonId).raw((tx) =>
+          tx
+            .insert(newsletters)
+            .values({
+              salonId: salonId,
+              subject,
+              content,
+            })
+            .returning({ id: newsletters.id })
+        );
 
         savedId = saved!.id;
       } catch (error) {
@@ -327,12 +333,15 @@ export async function GET() {
   }
 
   try {
-    const result = await db
-      .select()
-      .from(newsletters)
-      .where(eq(newsletters.salonId, salonId))
-      .orderBy(desc(newsletters.createdAt))
-      .limit(20);
+    // orderBy + limit — przez raw(tx) z jawnym eq(salonId) (defense in depth).
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(newsletters)
+        .where(eq(newsletters.salonId, salonId))
+        .orderBy(desc(newsletters.createdAt))
+        .limit(20)
+    );
 
     return Response.json({ newsletters: result });
   } catch (error) {

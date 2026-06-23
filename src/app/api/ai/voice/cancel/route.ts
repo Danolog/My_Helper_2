@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isProPlan } from "@/lib/subscription";
-import { db } from "@/lib/db";
+import { forSalon } from "@/lib/server/repository";
 import {
   appointments,
   clients,
@@ -89,27 +89,29 @@ export async function POST(req: Request) {
     let serviceRecord: { id: string; name: string; basePrice: string; baseDuration: number } | undefined;
 
     if (body.appointmentId) {
-      // Direct lookup by appointment ID
-      const rows = await db
-        .select({
-          appointment: appointments,
-          client: clients,
-          employee: employees,
-          service: services,
-        })
-        .from(appointments)
-        .leftJoin(clients, eq(appointments.clientId, clients.id))
-        .leftJoin(employees, eq(appointments.employeeId, employees.id))
-        .leftJoin(services, eq(appointments.serviceId, services.id))
-        .where(
-          and(
-            eq(appointments.id, body.appointmentId),
-            eq(appointments.salonId, salonId),
-            not(eq(appointments.status, "cancelled")),
-            not(eq(appointments.status, "completed"))
+      // Direct lookup by appointment ID (leftJoin -> raw z jawnym eq(salonId)).
+      const rows = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({
+            appointment: appointments,
+            client: clients,
+            employee: employees,
+            service: services,
+          })
+          .from(appointments)
+          .leftJoin(clients, eq(appointments.clientId, clients.id))
+          .leftJoin(employees, eq(appointments.employeeId, employees.id))
+          .leftJoin(services, eq(appointments.serviceId, services.id))
+          .where(
+            and(
+              eq(appointments.id, body.appointmentId!),
+              eq(appointments.salonId, salonId),
+              not(eq(appointments.status, "cancelled")),
+              not(eq(appointments.status, "completed"))
+            )
           )
-        )
-        .limit(1);
+          .limit(1)
+      );
 
       if (rows.length > 0) {
         const row = rows[0]!;
@@ -120,21 +122,23 @@ export async function POST(req: Request) {
       }
     } else {
       // Look up client by phone first
-      const clientRows = await db
-        .select({
-          id: clients.id,
-          firstName: clients.firstName,
-          lastName: clients.lastName,
-          phone: clients.phone,
-        })
-        .from(clients)
-        .where(
-          and(
-            eq(clients.salonId, salonId),
-            eq(clients.phone, body.callerPhone)
+      const clientRows = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({
+            id: clients.id,
+            firstName: clients.firstName,
+            lastName: clients.lastName,
+            phone: clients.phone,
+          })
+          .from(clients)
+          .where(
+            and(
+              eq(clients.salonId, salonId),
+              eq(clients.phone, body.callerPhone)
+            )
           )
-        )
-        .limit(1);
+          .limit(1)
+      );
 
       if (clientRows.length === 0) {
         return NextResponse.json(
@@ -150,26 +154,29 @@ export async function POST(req: Request) {
 
       // Find their next upcoming appointment
       const now = new Date();
-      const apptRows = await db
-        .select({
-          appointment: appointments,
-          employee: employees,
-          service: services,
-        })
-        .from(appointments)
-        .leftJoin(employees, eq(appointments.employeeId, employees.id))
-        .leftJoin(services, eq(appointments.serviceId, services.id))
-        .where(
-          and(
-            eq(appointments.clientId, clientRecord.id),
-            eq(appointments.salonId, salonId),
-            not(eq(appointments.status, "cancelled")),
-            not(eq(appointments.status, "completed")),
-            gte(appointments.startTime, now)
+      const clientId = clientRecord.id;
+      const apptRows = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({
+            appointment: appointments,
+            employee: employees,
+            service: services,
+          })
+          .from(appointments)
+          .leftJoin(employees, eq(appointments.employeeId, employees.id))
+          .leftJoin(services, eq(appointments.serviceId, services.id))
+          .where(
+            and(
+              eq(appointments.clientId, clientId),
+              eq(appointments.salonId, salonId),
+              not(eq(appointments.status, "cancelled")),
+              not(eq(appointments.status, "completed")),
+              gte(appointments.startTime, now)
+            )
           )
-        )
-        .orderBy(appointments.startTime)
-        .limit(1);
+          .orderBy(appointments.startTime)
+          .limit(1)
+      );
 
       if (apptRows.length === 0) {
         return NextResponse.json(
@@ -223,11 +230,20 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step C: Cancel the appointment
     // ------------------------------------------------------------------
-    const [cancelledAppointment] = await db
-      .update(appointments)
-      .set({ status: "cancelled" })
-      .where(eq(appointments.id, appointmentRow.id))
-      .returning();
+    // Update zawezony do salonu (jawny eq(salonId) + kontekst RLS forSalon).
+    const cancelTargetId = appointmentRow.id;
+    const [cancelledAppointment] = await forSalon(salonId).raw((tx) =>
+      tx
+        .update(appointments)
+        .set({ status: "cancelled" })
+        .where(
+          and(
+            eq(appointments.id, cancelTargetId),
+            eq(appointments.salonId, salonId)
+          )
+        )
+        .returning()
+    );
 
     logger.info(`[Voice AI Cancel] Cancelled appointment ${appointmentRow.id}`, {
       hoursUntilAppointment: hoursUntilAppointment.toFixed(1),
@@ -267,13 +283,20 @@ export async function POST(req: Request) {
     // Mark deposit as forfeited if late cancellation (<24h)
     if (depositForfeited) {
       try {
-        await db
-          .update(depositPayments)
-          .set({
-            status: "forfeited",
-            refundReason: "Anulacja wizyty przez AI mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
-          })
-          .where(eq(depositPayments.appointmentId, appointmentRow.id));
+        await forSalon(salonId).raw((tx) =>
+          tx
+            .update(depositPayments)
+            .set({
+              status: "forfeited",
+              refundReason: "Anulacja wizyty przez AI mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
+            })
+            .where(
+              and(
+                eq(depositPayments.appointmentId, appointmentRow!.id),
+                eq(depositPayments.salonId, salonId)
+              )
+            )
+        );
         logger.info(`[Voice AI Cancel] Deposit marked as forfeited for appointment ${appointmentRow.id}`);
       } catch (forfeitError) {
         logger.error("[Voice AI Cancel] Failed to mark deposit as forfeited", { error: forfeitError });
@@ -304,13 +327,15 @@ export async function POST(req: Request) {
       }
 
       try {
-        await db.insert(notifications).values({
-          salonId: appointmentRow.salonId,
-          clientId: clientRecord.id,
-          type: "sms",
-          message: notificationMessage,
-          status: "pending",
-        });
+        await forSalon(salonId).raw((tx) =>
+          tx.insert(notifications).values({
+            salonId: appointmentRow!.salonId,
+            clientId: clientRecord!.id,
+            type: "sms",
+            message: notificationMessage,
+            status: "pending",
+          })
+        );
       } catch (notifError) {
         logger.error("[Voice AI Cancel] Failed to create notification", { error: notifError });
       }
@@ -320,11 +345,13 @@ export async function POST(req: Request) {
     // Step F: Notify waiting list about the freed slot
     // ------------------------------------------------------------------
     try {
-      const [salon] = await db
-        .select()
-        .from(salons)
-        .where(eq(salons.id, appointmentRow.salonId))
-        .limit(1);
+      const [salon] = await forSalon(salonId).raw((tx) =>
+        tx
+          .select()
+          .from(salons)
+          .where(eq(salons.id, appointmentRow!.salonId))
+          .limit(1)
+      );
 
       const salonName = salon?.name || "Salon";
       const serviceName = serviceRecord?.name || "Wizyta";
@@ -349,11 +376,13 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step G: Send SMS confirmation
     // ------------------------------------------------------------------
-    const salonRows = await db
-      .select({ name: salons.name })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
+    const salonRows = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ name: salons.name })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .limit(1)
+    );
 
     const salonName = salonRows[0]?.name || "Nasz salon";
     const employeeName = employeeRecord
@@ -392,14 +421,15 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step H: Log the conversation
     // ------------------------------------------------------------------
-    const [conversation] = await db
-      .insert(aiConversations)
-      .values({
-        salonId: salonId,
-        clientId: clientRecord?.id || null,
-        channel: "voice",
-        transcript: JSON.stringify({
-          type: "cancellation_completed",
+    const [conversation] = await forSalon(salonId).raw((tx) =>
+      tx
+        .insert(aiConversations)
+        .values({
+          salonId: salonId,
+          clientId: clientRecord?.id || null,
+          channel: "voice",
+          transcript: JSON.stringify({
+            type: "cancellation_completed",
           callerPhone: body.callerPhone,
           callerName: body.callerName || null,
           appointmentId: appointmentRow.id,
@@ -415,8 +445,9 @@ export async function POST(req: Request) {
           smsSent,
           timestamp: new Date().toISOString(),
         }),
-      })
-      .returning();
+        })
+        .returning()
+    );
 
     // ------------------------------------------------------------------
     // Return the cancellation result
