@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { products, notifications } from "@/lib/schema";
 import { eq, and, like, sql } from "drizzle-orm";
 import { validateBody, createProductSchema } from "@/lib/api-validation";
@@ -26,18 +25,22 @@ async function checkAndNotifyLowStock(product: {
   if (minQty === null) return null;
 
   if (qty <= minQty) {
-    const existingRecent = await db
-      .select({ id: notifications.id })
-      .from(notifications)
-      .where(
-        and(
-          eq(notifications.salonId, product.salonId),
-          like(notifications.message, `%${product.id}%`),
-          sql`${notifications.createdAt} > NOW() - INTERVAL '24 hours'`,
-          sql`${notifications.type} = 'system'`
+    // Notyfikacja niskiego stanu jest salon-scoped — kontekst RLS dla salonu
+    // produktu; jawny eq(salonId) zachowany jako filtr aplikacyjny.
+    const existingRecent = await forSalon(product.salonId).raw((tx) =>
+      tx
+        .select({ id: notifications.id })
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.salonId, product.salonId),
+            like(notifications.message, `%${product.id}%`),
+            sql`${notifications.createdAt} > NOW() - INTERVAL '24 hours'`,
+            sql`${notifications.type} = 'system'`
+          )
         )
-      )
-      .limit(1);
+        .limit(1)
+    );
 
     if (existingRecent.length > 0) {
       return { notificationSent: false, reason: "duplicate" };
@@ -46,16 +49,18 @@ async function checkAndNotifyLowStock(product: {
     const unitLabel = product.unit || "szt.";
     const message = `Niski stan magazynowy: "${product.name}" - pozostalo ${qty} ${unitLabel} (minimum: ${minQty} ${unitLabel}). Uzupelnij zapasy! [product:${product.id}]`;
 
-    const [notification] = await db
-      .insert(notifications)
-      .values({
-        salonId: product.salonId,
-        type: "system",
-        message,
-        status: "sent",
-        sentAt: new Date(),
-      })
-      .returning();
+    const [notification] = await forSalon(product.salonId).raw((tx) =>
+      tx
+        .insert(notifications)
+        .values({
+          salonId: product.salonId,
+          type: "system",
+          message,
+          status: "sent",
+          sentAt: new Date(),
+        })
+        .returning()
+    );
 
     logger.info(`[Low Stock Alert] Notification sent for "${product.name}" (${product.id}) - qty: ${qty}, min: ${minQty}`);
 
@@ -93,11 +98,15 @@ export async function GET(_request: Request) {
       updatedAt: products.updatedAt,
     };
 
-    let query = db.select(productColumns).from(products);
+    // Lista — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
+    // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
+    const result = await forSalon(salonId).raw(async (tx) => {
+      let query = tx.select(productColumns).from(products);
 
-    query = query.where(eq(products.salonId, salonId)) as typeof query;
+      query = query.where(eq(products.salonId, salonId)) as typeof query;
 
-    const result = await query;
+      return query;
+    });
 
     return NextResponse.json({
       success: true,

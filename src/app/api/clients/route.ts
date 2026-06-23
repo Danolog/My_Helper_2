@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { clients, appointments } from "@/lib/schema";
 import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { validateBody, createClientSchema } from "@/lib/api-validation";
@@ -46,53 +45,57 @@ export async function GET(request: Request) {
       hasAllergies,
     });
 
-    // Subquery: compute the most recent appointment start_time per client
-    const lastVisitSubquery = db
-      .select({
-        clientId: appointments.clientId,
-        lastVisit: sql<string>`MAX(${appointments.startTime})`.as("last_visit"),
-      })
-      .from(appointments)
-      .groupBy(appointments.clientId)
-      .as("last_visit_sq");
+    // Subquery + leftJoin — przez raw(tx) z jawnym eq(salonId) (defense in
+    // depth: filtr aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
+    const result = await forSalon(salonId).raw(async (tx) => {
+      // Subquery: compute the most recent appointment start_time per client
+      const lastVisitSubquery = tx
+        .select({
+          clientId: appointments.clientId,
+          lastVisit: sql<string>`MAX(${appointments.startTime})`.as("last_visit"),
+        })
+        .from(appointments)
+        .groupBy(appointments.clientId)
+        .as("last_visit_sq");
 
-    // Build the base query: select all client fields plus the computed lastVisit
-    let query = db
-      .select({
-        client: clients,
-        lastVisit: lastVisitSubquery.lastVisit,
-      })
-      .from(clients)
-      .leftJoin(lastVisitSubquery, eq(clients.id, lastVisitSubquery.clientId));
+      // Build the base query: select all client fields plus the computed lastVisit
+      let query = tx
+        .select({
+          client: clients,
+          lastVisit: lastVisitSubquery.lastVisit,
+        })
+        .from(clients)
+        .leftJoin(lastVisitSubquery, eq(clients.id, lastVisitSubquery.clientId));
 
-    // Accumulate WHERE conditions dynamically
-    const conditions = [eq(clients.salonId, salonId)];
+      // Accumulate WHERE conditions dynamically
+      const conditions = [eq(clients.salonId, salonId)];
 
-    if (dateAddedFrom) {
-      conditions.push(gte(clients.createdAt, new Date(dateAddedFrom)));
-    }
+      if (dateAddedFrom) {
+        conditions.push(gte(clients.createdAt, new Date(dateAddedFrom)));
+      }
 
-    if (dateAddedTo) {
-      conditions.push(lte(clients.createdAt, new Date(dateAddedTo)));
-    }
+      if (dateAddedTo) {
+        conditions.push(lte(clients.createdAt, new Date(dateAddedTo)));
+      }
 
-    if (lastVisitFrom) {
-      conditions.push(gte(lastVisitSubquery.lastVisit, lastVisitFrom));
-    }
+      if (lastVisitFrom) {
+        conditions.push(gte(lastVisitSubquery.lastVisit, lastVisitFrom));
+      }
 
-    if (lastVisitTo) {
-      conditions.push(lte(lastVisitSubquery.lastVisit, lastVisitTo));
-    }
+      if (lastVisitTo) {
+        conditions.push(lte(lastVisitSubquery.lastVisit, lastVisitTo));
+      }
 
-    if (hasAllergies === "true") {
-      conditions.push(isNotNull(clients.allergies));
-    }
+      if (hasAllergies === "true") {
+        conditions.push(isNotNull(clients.allergies));
+      }
 
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions)) as typeof query;
-    }
+      if (conditions.length > 0) {
+        query = query.where(and(...conditions)) as typeof query;
+      }
 
-    const result = await query;
+      return query;
+    });
     logger.info(`[Clients API] Query returned ${result.length} rows`);
 
     // Flatten: spread client fields and attach lastVisit at the top level

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { services, serviceCategories } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { validateBody, createServiceSchema } from "@/lib/api-validation";
@@ -28,19 +27,23 @@ export async function GET(request: Request) {
 
     logger.info("[Services API] GET with params", { salonId, activeOnly });
 
-    let query = db.select({
-      service: services,
-      category: serviceCategories,
-    })
-    .from(services)
-    .leftJoin(serviceCategories, eq(services.categoryId, serviceCategories.id));
+    // Join — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
+    // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
+    const result = await forSalon(salonId).raw(async (tx) => {
+      let query = tx.select({
+        service: services,
+        category: serviceCategories,
+      })
+      .from(services)
+      .leftJoin(serviceCategories, eq(services.categoryId, serviceCategories.id));
 
-    query = query.where(eq(services.salonId, salonId)) as typeof query;
-    if (activeOnly) {
-      query = query.where(eq(services.isActive, true)) as typeof query;
-    }
+      query = query.where(eq(services.salonId, salonId)) as typeof query;
+      if (activeOnly) {
+        query = query.where(eq(services.isActive, true)) as typeof query;
+      }
 
-    const result = await query;
+      return query;
+    });
     logger.info(`[Services API] Query returned ${result.length} rows`);
 
     const formattedServices = result.map((row) => ({

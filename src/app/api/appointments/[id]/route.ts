@@ -2,13 +2,6 @@ import { NextResponse } from "next/server";
 import { eq, and, not, or, lte, gte } from "drizzle-orm";
 import { validateBody, updateAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// `db` pozostaje dla efektow ubocznych anulacji (forfeit zadatku, notyfikacja,
-// nazwa salonu do waiting-list) — to NIE jest brama zasobu [id], ktora pilnuje
-// test izolacji. Pelna migracja na repo + kontekst RLS tych zapisow = R2.
-// Pod RLS (rola myhelper_app) te zapytania wymagaja wlasnego kontekstu salonu;
-// sciezka pozytywna DELETE z zadatkiem nie jest pokryta testem R1 (zob. raport).
-// eslint-disable-next-line no-restricted-imports
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
@@ -341,13 +334,18 @@ export async function DELETE(
     // Mark deposit as forfeited if late cancellation (<24h)
     if (depositForfeited) {
       try {
-        await db
-          .update(depositPayments)
-          .set({
-            status: "forfeited",
-            refundReason: "Anulacja wizyty mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
-          })
-          .where(eq(depositPayments.appointmentId, id));
+        // Forfeit zadatku w kontekscie RLS salonu (wizyta nalezy do tego salonu).
+        // depositPayments nie ma kolumny salonId — wiazemy przez appointmentId
+        // tej (juz zweryfikowanej jako wlasna) wizyty; kontekst RLS ustawiony.
+        await forSalon(salonId).raw((tx) =>
+          tx
+            .update(depositPayments)
+            .set({
+              status: "forfeited",
+              refundReason: "Anulacja wizyty mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
+            })
+            .where(eq(depositPayments.appointmentId, id))
+        );
         logger.info(`[Appointments API] Deposit marked as forfeited for appointment ${id}`);
       } catch (forfeitError) {
         logger.error("[Appointments API] Failed to mark deposit as forfeited", { error: forfeitError });
@@ -377,13 +375,17 @@ export async function DELETE(
       }
 
       try {
-        await db.insert(notifications).values({
-          salonId: appointment.salonId,
-          clientId: row.client.id,
-          type: "sms",
-          message: notificationMessage,
-          status: "pending",
-        });
+        // Notyfikacja salon-scoped (salonId tej, juz zweryfikowanej, wizyty) —
+        // kontekst RLS ustawiony; jawny salonId zachowany w values.
+        await forSalon(salonId).raw((tx) =>
+          tx.insert(notifications).values({
+            salonId: appointment.salonId,
+            clientId: row.client!.id,
+            type: "sms",
+            message: notificationMessage,
+            status: "pending",
+          })
+        );
         logger.info(`[Appointments API] Created cancellation notification for client ${row.client.id}`);
       } catch (notifError) {
         logger.error("[Appointments API] Failed to create notification", { error: notifError });
@@ -393,12 +395,16 @@ export async function DELETE(
 
     // Notify waiting list entries about the freed slot
     try {
-      // Get salon name for notification (only need name)
-      const [salon] = await db
-        .select({ name: salons.name })
-        .from(salons)
-        .where(eq(salons.id, appointment.salonId))
-        .limit(1);
+      // Get salon name for notification (only need name) — przez raw(tx) w
+      // kontekscie RLS; salons to korzen najemcy (polityka: id = app.current_salon_id),
+      // wiec wlasciciel czyta swoj salon po jego id.
+      const [salon] = await forSalon(salonId).raw((tx) =>
+        tx
+          .select({ name: salons.name })
+          .from(salons)
+          .where(eq(salons.id, appointment.salonId))
+          .limit(1)
+      );
 
       const salonName = salon?.name || "Salon";
       const serviceName = row.service?.name || "Wizyta";
