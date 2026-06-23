@@ -3,7 +3,6 @@ import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import {
   subscriptionPayments,
@@ -11,6 +10,7 @@ import {
   subscriptionPlans,
   salons,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -44,8 +44,12 @@ export async function GET(
       );
     }
 
-    // Fetch payment with plan and salon data
-    const rows = await db
+    // Fetch payment with plan and salon data.
+    // subscriptionPayments jest salon-scoped (jawny eq(id) AND eq(salonId) + RLS);
+    // leftJoiny do salonSubscriptions/salons (salon-scoped) i subscriptionPlans
+    // (globalny katalog) pod kontekstem forSalon.
+    const rows = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: subscriptionPayments.id,
         amount: subscriptionPayments.amount,
@@ -84,7 +88,8 @@ export async function GET(
           eq(subscriptionPayments.salonId, salonId),
         ),
       )
-      .limit(1);
+      .limit(1),
+    );
 
     if (rows.length === 0 || !rows[0]) {
       return NextResponse.json(

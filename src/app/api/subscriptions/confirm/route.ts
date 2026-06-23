@@ -5,6 +5,7 @@ import { validateBody, subscriptionConfirmSchema } from "@/lib/api-validation";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { salonSubscriptions, subscriptionPayments, subscriptionPlans } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { logger } from "@/lib/logger";
 import { getStripe } from "@/lib/stripe";
 
@@ -38,7 +39,9 @@ export async function POST(request: Request) {
 
     const { sessionId } = body as { sessionId: string };
 
-    // Check if we already recorded this session (idempotency guard)
+    // Check if we already recorded this session (idempotency guard).
+    // Ścieżka potwierdzenia po redirect Stripe — wyszukanie po globalnym
+    // stripePaymentIntentId (bez kontekstu salonu); zostaje na surowym db.
     const existingPayments = await db
       .select()
       .from(subscriptionPayments)
@@ -54,6 +57,8 @@ export async function POST(request: Request) {
         );
       }
 
+      // Odczyt po id subskrypcji powiązanej z już zarejestrowaną płatnością
+      // (idempotencja po redirect Stripe) — zostaje na surowym db.
       const subscriptionRows = await db
         .select()
         .from(salonSubscriptions)
@@ -112,7 +117,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Verify plan exists
+    // Verify plan exists.
+    // subscriptionPlans = globalny katalog (BEZ salonId, poza RLS) — odczyt po id
+    // zostaje na surowym db (brak kolumny salonId do zawężenia).
     const planRows = await db
       .select()
       .from(subscriptionPlans)
@@ -144,7 +151,11 @@ export async function POST(request: Request) {
     const periodEnd = new Date(now);
     periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-    const subscriptionRecord = await db.transaction(async (tx) => {
+    // salonSubscriptions + subscriptionPayments są salon-scoped — upsert + zapis
+    // płatności w jednym raw(forSalon) (jedna transakcja, atomowo) z jawnym
+    // eq(salonId) + RLS. salonId pochodzi z metadanych sesji Stripe (patrz IDOR
+    // niżej) — forSalon ustawia kontekst RLS na ten sam salon, na który piszemy.
+    const subscriptionRecord = await forSalon(salonId).raw(async (tx) => {
       // Check if subscription already exists for this salon (update vs insert)
       const existingSubs = await tx
         .select()
@@ -170,7 +181,12 @@ export async function POST(request: Request) {
             currentPeriodStart: now,
             currentPeriodEnd: periodEnd,
           })
-          .where(eq(salonSubscriptions.id, existingSubs[0].id))
+          .where(
+            and(
+              eq(salonSubscriptions.id, existingSubs[0].id),
+              eq(salonSubscriptions.salonId, salonId),
+            ),
+          )
           .returning();
 
         record = updated;
