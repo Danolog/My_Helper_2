@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { depositPayments, appointments } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { forSalon } from "@/lib/server/repository";
@@ -40,7 +40,12 @@ export async function GET(
       tx
         .select()
         .from(depositPayments)
-        .where(eq(depositPayments.appointmentId, id))
+        .where(
+          and(
+            eq(depositPayments.appointmentId, id),
+            eq(depositPayments.salonId, salonId)
+          )
+        )
     );
 
     if (!payment) {
