@@ -65,7 +65,8 @@ export async function GET(request: Request) {
       const packageServices = await db
         .select()
         .from(services)
-        .where(inArray(services.id, packageServiceIds));
+        // Zwiazanie z salonem z requestu — cudze uslugi (innego salonu) nie wejda.
+        .where(and(inArray(services.id, packageServiceIds), eq(services.salonId, salonId)));
 
       // Keep the original order
       const orderedServices = packageServiceIds
