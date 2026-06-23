@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
 import { eq, and, not, lte, gte, or, lt, gt, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, bookPackageSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -22,6 +23,19 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    // Tenant isolation: derive the salon from the session. Wcześniej salonId
+    // brano z `promotion.salonId` (z body-podanego promotionId) — to pozwalało
+    // właścicielowi salonu A zarezerwować pakiet salonu B (IDOR). Teraz pakiet
+    // musi należeć do salonu z sesji, a wszystkie operacje biegną pod kontekstem
+    // RLS tego salonu.
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const body = await request.json();
     const validationError = validateBody(bookPackageSchema, body);
     if (validationError) {
@@ -32,12 +46,15 @@ export async function POST(request: Request) {
     // Use the authenticated user's ID for tracking who booked
     const bookedByUserId: string | null = authResult.user.id || null;
 
-    // 1. Get the package promotion
-    const [promotion] = await db
-      .select()
-      .from(promotions)
-      .where(eq(promotions.id, promotionId))
-      .limit(1);
+    // 1. Get the package promotion — scoped do salonu z sesji (jawny eq(salonId)
+    // + kontekst RLS); cudza/nieistniejąca promocja = 404.
+    const [promotion] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(promotions)
+        .where(and(eq(promotions.id, promotionId), eq(promotions.salonId, salonId)))
+        .limit(1)
+    );
 
     if (!promotion) {
       return NextResponse.json(
@@ -86,11 +103,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Fetch all services in the package
-    const packageServices = await db
-      .select()
-      .from(services)
-      .where(inArray(services.id, packageServiceIds));
+    // 3. Fetch all services in the package (services mają salonId; kontekst RLS
+    // ustawiony — usługi spoza salonu są odcinane. Brak którejś = walidacja niżej).
+    const packageServices = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(services)
+        .where(and(inArray(services.id, packageServiceIds), eq(services.salonId, salonId)))
+    );
 
     if (packageServices.length !== packageServiceIds.length) {
       return NextResponse.json(
@@ -127,11 +147,14 @@ export async function POST(request: Request) {
     const firstStart = appointmentSlots[0]!.start;
     const lastEnd = appointmentSlots[appointmentSlots.length - 1]!.end;
 
-    const overlapping = await db
+    // appointments mają salonId — jawny eq(salonId) + kontekst RLS.
+    const overlapping = await forSalon(salonId).raw((tx) =>
+      tx
       .select()
       .from(appointments)
       .where(
         and(
+          eq(appointments.salonId, salonId),
           eq(appointments.employeeId, employeeId),
           not(eq(appointments.status, "cancelled")),
           or(
@@ -149,7 +172,8 @@ export async function POST(request: Request) {
             )
           )
         )
-      );
+      )
+    );
 
     if (overlapping.length > 0) {
       return NextResponse.json(
@@ -158,17 +182,20 @@ export async function POST(request: Request) {
       );
     }
 
-    // 6. Check for vacation/time blocks
-    const conflictingBlocks = await db
-      .select()
-      .from(timeBlocks)
-      .where(
-        and(
-          eq(timeBlocks.employeeId, employeeId),
-          lt(timeBlocks.startTime, lastEnd),
-          gt(timeBlocks.endTime, firstStart)
+    // 6. Check for vacation/time blocks (timeBlocks nie ma salonId — wiązane
+    // przez employeeId; kontekst RLS ustawiony przez forSalon).
+    const conflictingBlocks = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(timeBlocks)
+        .where(
+          and(
+            eq(timeBlocks.employeeId, employeeId),
+            lt(timeBlocks.startTime, lastEnd),
+            gt(timeBlocks.endTime, firstStart)
+          )
         )
-      );
+    );
 
     if (conflictingBlocks.length > 0) {
       return NextResponse.json(
@@ -177,34 +204,42 @@ export async function POST(request: Request) {
       );
     }
 
-    // 7. Create all appointments
-    const createdAppointments = [];
-    const salonId = promotion.salonId;
+    // 7. Create all appointments — wszystkie INSERT-y w JEDNEJ transakcji z
+    // kontekstem RLS (forSalon(salonId).raw): atomowość pakietu zachowana (gdy
+    // którykolwiek insert padnie, cofa się cały pakiet). salonId z sesji (=
+    // promotion.salonId, zweryfikowany), jawnie ustawiony w values.
+    const createdAppointments = await forSalon(salonId).raw(async (tx) => {
+      const created: Array<
+        typeof appointments.$inferSelect & { serviceName: string; servicePrice: string }
+      > = [];
 
-    for (const slot of appointmentSlots) {
-      const [newAppointment] = await db
-        .insert(appointments)
-        .values({
-          salonId,
-          clientId: clientId || null,
-          employeeId,
-          serviceId: slot.service.id,
-          bookedByUserId,
-          startTime: slot.start,
-          endTime: slot.end,
-          notes: `Pakiet: ${promotion.name} (${packagePrice.toFixed(2)} PLN)`,
-          status: "scheduled",
-        })
-        .returning();
+      for (const slot of appointmentSlots) {
+        const [newAppointment] = await tx
+          .insert(appointments)
+          .values({
+            salonId,
+            clientId: clientId || null,
+            employeeId,
+            serviceId: slot.service.id,
+            bookedByUserId,
+            startTime: slot.start,
+            endTime: slot.end,
+            notes: `Pakiet: ${promotion.name} (${packagePrice.toFixed(2)} PLN)`,
+            status: "scheduled",
+          })
+          .returning();
 
-      if (newAppointment) {
-        createdAppointments.push({
-          ...newAppointment,
-          serviceName: slot.service.name,
-          servicePrice: slot.service.basePrice,
-        });
+        if (newAppointment) {
+          created.push({
+            ...newAppointment,
+            serviceName: slot.service.name,
+            servicePrice: slot.service.basePrice,
+          });
+        }
       }
-    }
+
+      return created;
+    });
 
     logger.info(`[Package Booking API] Booked package "${promotion.name}" with ${createdAppointments.length} services. ` +
       `Package price: ${packagePrice.toFixed(2)} PLN (individual total: ${totalIndividualPrice.toFixed(2)} PLN). ` +

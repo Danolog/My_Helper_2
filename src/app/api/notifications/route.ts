@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { notifications, clients } from "@/lib/schema";
 import { desc, eq, and, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -48,33 +48,37 @@ export async function GET(request: Request) {
       conditions.push(eq(notifications.status, status));
     }
 
-    // Query notifications with client info
-    const results = await db
-      .select({
-        id: notifications.id,
-        salonId: notifications.salonId,
-        clientId: notifications.clientId,
-        type: notifications.type,
-        message: notifications.message,
-        sentAt: notifications.sentAt,
-        status: notifications.status,
-        createdAt: notifications.createdAt,
-        clientFirstName: clients.firstName,
-        clientLastName: clients.lastName,
-        clientPhone: clients.phone,
-      })
-      .from(notifications)
-      .leftJoin(clients, eq(notifications.clientId, clients.id))
-      .where(and(...conditions))
-      .orderBy(desc(notifications.createdAt))
-      .limit(limit)
-      .offset(offset);
+    // Join + count — przez raw(tx) z jawnym eq(salonId) w `conditions`
+    // (defense in depth: filtr aplikacyjny widoczny, kontekst RLS ustawiony).
+    const { results, countResult } = await forSalon(salonId).raw(async (tx) => {
+      const rows = await tx
+        .select({
+          id: notifications.id,
+          salonId: notifications.salonId,
+          clientId: notifications.clientId,
+          type: notifications.type,
+          message: notifications.message,
+          sentAt: notifications.sentAt,
+          status: notifications.status,
+          createdAt: notifications.createdAt,
+          clientFirstName: clients.firstName,
+          clientLastName: clients.lastName,
+          clientPhone: clients.phone,
+        })
+        .from(notifications)
+        .leftJoin(clients, eq(notifications.clientId, clients.id))
+        .where(and(...conditions))
+        .orderBy(desc(notifications.createdAt))
+        .limit(limit)
+        .offset(offset);
 
-    // Get total count for pagination
-    const [countResult] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(notifications)
-      .where(and(...conditions));
+      const [count] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(notifications)
+        .where(and(...conditions));
+
+      return { results: rows, countResult: count };
+    });
 
     const total = countResult?.count || 0;
 

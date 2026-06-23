@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import {
   appointments,
   clients,
@@ -15,6 +14,7 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, fiscalReceiptSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -40,11 +40,14 @@ export async function GET(
 
     const { id } = await params;
 
-    const receipts = await db
-      .select()
-      .from(fiscalReceipts)
-      .where(and(eq(fiscalReceipts.appointmentId, id), eq(fiscalReceipts.salonId, userSalonId)))
-      .limit(1);
+    // fiscalReceipts ma salonId — scoped przez raw(tx) z jawnym eq(salonId).
+    const receipts = await forSalon(userSalonId).raw((tx) =>
+      tx
+        .select()
+        .from(fiscalReceipts)
+        .where(and(eq(fiscalReceipts.appointmentId, id), eq(fiscalReceipts.salonId, userSalonId)))
+        .limit(1)
+    );
 
     if (receipts.length === 0) {
       return NextResponse.json({
@@ -103,22 +106,25 @@ export async function POST(
     }
     const paymentMethod = body.paymentMethod || "cash";
 
-    // 1. Fetch appointment with all related data
-    const [appointment] = await db
-      .select({
-        id: appointments.id,
-        salonId: appointments.salonId,
-        status: appointments.status,
-        startTime: appointments.startTime,
-        endTime: appointments.endTime,
-        notes: appointments.notes,
-        clientId: appointments.clientId,
-        employeeId: appointments.employeeId,
-        serviceId: appointments.serviceId,
-      })
-      .from(appointments)
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, userSalonId)))
-      .limit(1);
+    // 1. Fetch appointment with all related data (scoped do salonu właściciela —
+    // jawny eq(salonId) + kontekst RLS; cudza/nieistniejąca wizyta = 404).
+    const [appointment] = await forSalon(userSalonId).raw((tx) =>
+      tx
+        .select({
+          id: appointments.id,
+          salonId: appointments.salonId,
+          status: appointments.status,
+          startTime: appointments.startTime,
+          endTime: appointments.endTime,
+          notes: appointments.notes,
+          clientId: appointments.clientId,
+          employeeId: appointments.employeeId,
+          serviceId: appointments.serviceId,
+        })
+        .from(appointments)
+        .where(and(eq(appointments.id, id), eq(appointments.salonId, userSalonId)))
+        .limit(1)
+    );
 
     if (!appointment) {
       return NextResponse.json(
@@ -137,12 +143,15 @@ export async function POST(
       );
     }
 
-    // 2. Check if receipt already exists (scoped to caller's salon)
-    const existingReceipts = await db
-      .select()
-      .from(fiscalReceipts)
-      .where(and(eq(fiscalReceipts.appointmentId, id), eq(fiscalReceipts.salonId, userSalonId)))
-      .limit(1);
+    // 2. Check if receipt already exists (scoped to caller's salon — jawny
+    // eq(salonId) + kontekst RLS).
+    const existingReceipts = await forSalon(userSalonId).raw((tx) =>
+      tx
+        .select()
+        .from(fiscalReceipts)
+        .where(and(eq(fiscalReceipts.appointmentId, id), eq(fiscalReceipts.salonId, userSalonId)))
+        .limit(1)
+    );
 
     if (existingReceipts.length > 0) {
       return NextResponse.json({
@@ -153,14 +162,17 @@ export async function POST(
       });
     }
 
-    // 3. Fetch related data
+    // 3. Fetch related data (clients/employees/services mają salonId; kontekst
+    // RLS ustawiony — wiersze spoza salonu są odcinane).
     let clientName: string | null = null;
     if (appointment.clientId) {
-      const [client] = await db
-        .select({ firstName: clients.firstName, lastName: clients.lastName })
-        .from(clients)
-        .where(eq(clients.id, appointment.clientId))
-        .limit(1);
+      const [client] = await forSalon(userSalonId).raw((tx) =>
+        tx
+          .select({ firstName: clients.firstName, lastName: clients.lastName })
+          .from(clients)
+          .where(eq(clients.id, appointment.clientId!))
+          .limit(1)
+      );
       if (client) {
         clientName = `${client.firstName} ${client.lastName}`;
       }
@@ -168,14 +180,16 @@ export async function POST(
 
     let employeeName: string | null = null;
     if (appointment.employeeId) {
-      const [employee] = await db
-        .select({
-          firstName: employees.firstName,
-          lastName: employees.lastName,
-        })
-        .from(employees)
-        .where(eq(employees.id, appointment.employeeId))
-        .limit(1);
+      const [employee] = await forSalon(userSalonId).raw((tx) =>
+        tx
+          .select({
+            firstName: employees.firstName,
+            lastName: employees.lastName,
+          })
+          .from(employees)
+          .where(eq(employees.id, appointment.employeeId!))
+          .limit(1)
+      );
       if (employee) {
         employeeName = `${employee.firstName} ${employee.lastName}`;
       }
@@ -184,26 +198,32 @@ export async function POST(
     let serviceName: string | null = null;
     let servicePrice = "0";
     if (appointment.serviceId) {
-      const [service] = await db
-        .select({ name: services.name, basePrice: services.basePrice })
-        .from(services)
-        .where(eq(services.id, appointment.serviceId))
-        .limit(1);
+      const [service] = await forSalon(userSalonId).raw((tx) =>
+        tx
+          .select({ name: services.name, basePrice: services.basePrice })
+          .from(services)
+          .where(eq(services.id, appointment.serviceId!))
+          .limit(1)
+      );
       if (service) {
         serviceName = service.name;
         servicePrice = service.basePrice;
       }
     }
 
-    // 4. Calculate materials cost
-    const materialsRows = await db
-      .select({
-        quantityUsed: appointmentMaterials.quantityUsed,
-        pricePerUnit: products.pricePerUnit,
-      })
-      .from(appointmentMaterials)
-      .leftJoin(products, eq(appointmentMaterials.productId, products.id))
-      .where(eq(appointmentMaterials.appointmentId, id));
+    // 4. Calculate materials cost (appointmentMaterials nie ma salonId — wiązane
+    // przez appointmentId tej, już zweryfikowanej jako własna, wizyty; products
+    // ma salonId, kontekst RLS ustawiony).
+    const materialsRows = await forSalon(userSalonId).raw((tx) =>
+      tx
+        .select({
+          quantityUsed: appointmentMaterials.quantityUsed,
+          pricePerUnit: products.pricePerUnit,
+        })
+        .from(appointmentMaterials)
+        .leftJoin(products, eq(appointmentMaterials.productId, products.id))
+        .where(eq(appointmentMaterials.appointmentId, id))
+    );
 
     const materialsCost = materialsRows.reduce((sum, m) => {
       if (m.pricePerUnit) {
@@ -212,17 +232,20 @@ export async function POST(
       return sum;
     }, 0);
 
-    // 5. Get salon fiscal settings
+    // 5. Get salon fiscal settings (salons to korzeń najemcy — polityka RLS:
+    // id = app.current_salon_id; właściciel czyta swój salon po id).
     const salonId = appointment.salonId || userSalonId;
-    const [salon] = await db
-      .select({
-        name: salons.name,
-        address: salons.address,
-        settingsJson: salons.settingsJson,
-      })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
+    const [salon] = await forSalon(userSalonId).raw((tx) =>
+      tx
+        .select({
+          name: salons.name,
+          address: salons.address,
+          settingsJson: salons.settingsJson,
+        })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .limit(1)
+    );
 
     const salonSettings = (salon?.settingsJson as Record<string, unknown>) || {};
     const fiscalSettings = (salonSettings.fiscal || {}) as Record<string, unknown>;
@@ -244,15 +267,18 @@ export async function POST(
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0");
 
-    // Count existing receipts for this salon this month
-    const [receiptCount] = await db
-      .select({ count: count() })
-      .from(fiscalReceipts)
-      .where(
-        and(
-          eq(fiscalReceipts.salonId, salonId),
+    // Count existing receipts for this salon this month (jawny eq(salonId) +
+    // kontekst RLS).
+    const [receiptCount] = await forSalon(userSalonId).raw((tx) =>
+      tx
+        .select({ count: count() })
+        .from(fiscalReceipts)
+        .where(
+          and(
+            eq(fiscalReceipts.salonId, salonId),
+          )
         )
-      );
+    );
 
     const seqNum = ((receiptCount?.count as number) || 0) + 1;
     const receiptNumber = `FV/${year}/${month}/${String(seqNum).padStart(5, "0")}`;
@@ -327,8 +353,10 @@ export async function POST(
       footer: "Dziekujemy za wizyte!",
     };
 
-    // 9. Save receipt to database
-    const [newReceipt] = await db
+    // 9. Save receipt to database (fiscalReceipts ma salonId — jawnie ustawiony
+    // w values; kontekst RLS gwarantuje zapis do własnego salonu).
+    const [newReceipt] = await forSalon(userSalonId).raw((tx) =>
+      tx
       .insert(fiscalReceipts)
       .values({
         appointmentId: id,
@@ -349,7 +377,8 @@ export async function POST(
         printStatus: "sent",
         receiptDataJson: receiptData,
       })
-      .returning();
+      .returning()
+    );
 
     // 10. Log print command (in production this would be sent to the fiscal printer)
     logger.info(`[Fiscal Receipt] Printing receipt ${receiptNumber} for appointment ${id}`,
