@@ -50,7 +50,12 @@ export async function GET(
           const [variant] = await tx
             .select()
             .from(serviceVariants)
-            .where(eq(serviceVariants.id, variantId));
+            .where(
+              and(
+                eq(serviceVariants.id, variantId),
+                eq(serviceVariants.serviceId, serviceId)
+              )
+            );
 
           if (variant) {
             variantModifier = parseFloat(variant.priceModifier || "0");
@@ -68,7 +73,12 @@ export async function GET(
           const [employee] = await tx
             .select()
             .from(employees)
-            .where(eq(employees.id, employeeId));
+            .where(
+              and(
+                eq(employees.id, employeeId),
+                eq(employees.salonId, salonId)
+              )
+            );
 
           if (employee) {
             employeeName = `${employee.firstName} ${employee.lastName}`;

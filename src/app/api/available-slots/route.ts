@@ -10,8 +10,8 @@ import { logger } from "@/lib/logger";
  * Trasa PUBLICZNA (portal rezerwacji) — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
  * Klient (potencjalnie niezalogowany) sprawdza wolne terminy pracownika z `employeeId`
  * z query — brak właściciela w sesji, więc `forSalon` nie pasuje. Odpowiedź zwraca
- * wyłącznie godziny zajęte/wolne i etykiety bloków (godzina + typ/powód) — NIE wycieka
- * tożsamości innych klientów ani danych cross-tenant prywatnych.
+ * wyłącznie godziny zajęte/wolne i etykiety bloków (godzina + typ bloku, BEZ prywatnego
+ * `reason`) — NIE wycieka tożsamości innych klientów ani danych cross-tenant prywatnych.
  */
 // GET /api/available-slots?employeeId=xxx&date=2026-02-10&duration=60
 // Returns available time slots for booking
@@ -150,11 +150,13 @@ export async function GET(request: Request) {
         ? blockEnd.getHours() * 60 + blockEnd.getMinutes()
         : 24 * 60;
 
+      // NIE ujawniamy `block.reason` (prywatny powód blokady, np. „wizyta lekarska")
+      // w publicznej odpowiedzi rezerwacji — etykieta to wyłącznie typ bloku (#14 LOW).
       blockedRanges.push({
         start: startMinutes,
         end: endMinutes,
         type: block.blockType,
-        label: block.reason || block.blockType,
+        label: block.blockType,
       });
     }
 

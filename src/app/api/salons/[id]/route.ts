@@ -28,6 +28,9 @@ export const revalidate = 30;
  */
 const getCachedSalonDetail = unstable_cache(
   async (id: string) => {
+    // Trasa PUBLICZNA (katalog) — selektujemy WYŁĄCZNIE pola publiczne. NIE zwracamy
+    // `settingsJson` (konfig fiskalny/drukarka/loyalty) ani `ownerId` — to dane wrażliwe,
+    // które w nieautoryzowanej odpowiedzi katalogu byłyby wyciekiem (#14 LOW, review Ryana).
     const salonColumns = {
       id: salons.id,
       name: salons.name,
@@ -35,8 +38,6 @@ const getCachedSalonDetail = unstable_cache(
       email: salons.email,
       address: salons.address,
       industryType: salons.industryType,
-      settingsJson: salons.settingsJson,
-      ownerId: salons.ownerId,
       createdAt: salons.createdAt,
       updatedAt: salons.updatedAt,
     };

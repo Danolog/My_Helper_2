@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
+import { timingSafeEqual } from "node:crypto";
 import { auth } from "./auth";
 
 type UserRole = "owner" | "employee" | "receptionist" | "client";
@@ -61,8 +62,15 @@ export async function requireCronSecret(request: Request): Promise<NextResponse 
     );
   }
 
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${cronSecret}`) {
+  // Porównanie czasowo-stałe (timingSafeEqual) zamiast `===`, by nie wyciekać sekretu
+  // przez czas porównania (#14 LOW, review Ryana). Guard na równą długość: timingSafeEqual
+  // rzuca na różnych długościach, więc najpierw sprawdzamy długość (sam fakt różnicy długości
+  // i tak nie zdradza zawartości sekretu).
+  const authHeader = request.headers.get("authorization") ?? "";
+  const expected = `Bearer ${cronSecret}`;
+  const a = Buffer.from(authHeader);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401 }
