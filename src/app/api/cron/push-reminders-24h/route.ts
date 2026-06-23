@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- cron (requireCronSecret) — owner-bypass RLS, brak sesji
 import { db } from "@/lib/db";
 import {
   appointments,

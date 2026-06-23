@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+// eslint-disable-next-line no-restricted-imports -- health-check systemowy (SELECT 1) — brak danych najemcy, brak sesji właściciela
 import { db } from '@/lib/db';
 import { sql } from 'drizzle-orm';
 

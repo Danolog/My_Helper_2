@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 // `db` zostaje WYŁĄCZNIE do zaufanego rozwiązania sesja→salon
 // (salons.ownerId = userId) — bez salonId nie da się tego puścić pod RLS.
 // Operacje na opinii idą przez forSalon(salon.id).
+// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (sesja→salon); operacje przez forSalon
 import { db } from "@/lib/db";
 import { reviews, salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";

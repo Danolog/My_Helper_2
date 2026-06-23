@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 // (brak auth, GET czyta galerię dowolnego salonu po `id` z URL) — nie ma sesji właściciela
 // ani kontekstu `app.current_salon_id` do ustawienia. Zgodne z RLS 0005 (publiczny katalog
 // czyta pod rolą owner). Dane są publiczne z założenia (oferta salonu), więc to nie IDOR.
+// eslint-disable-next-line no-restricted-imports -- publiczny katalog klienta (GET galeria), rola owner — RLS 0005
 import { db } from "@/lib/db";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, desc, and, isNotNull } from "drizzle-orm";

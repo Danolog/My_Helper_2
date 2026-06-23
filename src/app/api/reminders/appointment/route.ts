@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- cron — owner-bypass RLS, skan wielu salonów
 import { db } from "@/lib/db";
 import { appointments, clients, salons, services, employees } from "@/lib/schema";
 import { and, eq, gte, lte, isNull, inArray } from "drizzle-orm";

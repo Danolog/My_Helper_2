@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- globalny katalog planów (bez salonId), poza RLS
 import { db } from "@/lib/db";
 import { subscriptionPlans } from "@/lib/schema";
 import { eq } from "drizzle-orm";

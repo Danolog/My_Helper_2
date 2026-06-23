@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 // online (getOptionalSession — bez zalogowanego właściciela salonu). salonId
 // pochodzi z body rezerwacji, nie z sesji właściciela, więc forSalon nie ma
 // kontekstu właściciela do ustawienia. Pozostaje na surowym db. (R2)
+// eslint-disable-next-line no-restricted-imports -- ścieżka publiczna (gość) — salonId z body, brak sesji właściciela
 import { db } from "@/lib/db";
 import { services, appointments, depositPayments } from "@/lib/schema";
 import { eq, and, not, or, lte, gte, lt, gt } from "drizzle-orm";

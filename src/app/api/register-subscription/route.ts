@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- rejestracja właściciela — salon z ownerId, brak salonId w sesji
 import { db } from "@/lib/db";
 import { subscriptionPlans, salonSubscriptions, salons, user as userTable } from "@/lib/schema";
 import { eq } from "drizzle-orm";

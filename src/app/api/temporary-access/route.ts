@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 // samej tabeli temporaryAccess, a cleanupExpiredAccess to globalna konserwacja
 // (kasuje wygasłe wpisy wszystkich salonów). Dlatego trasa pozostaje na surowym db
 // z zachowanymi istniejącymi filtrami. (R2)
+// eslint-disable-next-line no-restricted-imports -- globalna konserwacja (cleanupExpiredAccess), brak salon_id na tabeli
 import { db } from "@/lib/db";
 import { temporaryAccess, employees, salons } from "@/lib/schema";
 import { eq, and, gt, lt, inArray } from "drizzle-orm";

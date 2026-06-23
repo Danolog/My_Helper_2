@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 // depositPayments wyszukanego po id (nie z sesji), analogicznie do
 // subscriptions/confirm i webhooka Stripe. Dlatego NIE migruje na forSalon —
 // pozostaje na surowym db (rola owner, świadomy bypass RLS). (R2)
+// eslint-disable-next-line no-restricted-imports -- salonId z rekordu depositPayments, nie z sesji — owner-bypass
 import { db } from "@/lib/db";
 import { appointments, depositPayments, clients, services, employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";

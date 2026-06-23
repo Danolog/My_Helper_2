@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, subscriptionConfirmSchema } from "@/lib/api-validation";
+// eslint-disable-next-line no-restricted-imports -- lookup po stripePaymentIntentId + globalny katalog planów, poza RLS
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { salonSubscriptions, subscriptionPayments, subscriptionPlans } from "@/lib/schema";

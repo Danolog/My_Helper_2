@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- kontekst klienta (scope po userId z sesji)
 import { db } from "@/lib/db";
 import { waitingList, clients } from "@/lib/schema";
 import { eq } from "drizzle-orm";

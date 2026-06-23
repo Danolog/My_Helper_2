@@ -6,6 +6,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // salonId z góry, którego tu jeszcze nie znamy; gdyby ustawić kontekst na cokolwiek,
 // RLS `id = current_salon_id` odciąłby wyszukiwanie po ownerId. Brak IDOR: filtr to
 // `ownerId == zalogowany user`, więc zwraca wyłącznie salon właściciela.
+// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId z sesji (problem jajka i kury)
 import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 // `db` zostaje WYŁĄCZNIE jako źródło typu DbExecutor (Parameters<db.transaction>);
 // żadna operacja danych nie używa już surowego `db` — wszystko biegnie przez
 // forSalon(salonId).raw, który daje transakcję z kontekstem RLS.
+// eslint-disable-next-line no-restricted-imports -- db tylko jako źródło typu DbExecutor; dane przez forSalon
 import { db } from "@/lib/db";
 import {
   appointments,

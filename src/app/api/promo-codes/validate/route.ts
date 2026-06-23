@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- quasi-public (rezerwacja klienta) — salonId z body, brak sesji właściciela
 import { db } from "@/lib/db";
 import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";

@@ -7,6 +7,7 @@ import { validateBody, employeePriceSchema } from "@/lib/api-validation";
 import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
+// eslint-disable-next-line no-restricted-imports -- import type db (DbExecutor); dane przez forSalon
 import type { db } from "@/lib/db";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];

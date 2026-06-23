@@ -7,6 +7,7 @@ import { NextResponse } from "next/server";
 //     ownerId WYŁĄCZNIE z sesji (nie z body) — inaczej salon na cudzego usera (IDOR).
 //   - DELETE: usuwa WYŁĄCZNIE salon zalogowanego właściciela (eq(ownerId, sesja)) —
 //     wcześniej kasował dowolny salon po id (krytyczny IDOR).
+// eslint-disable-next-line no-restricted-imports -- korzeń najemcy — salon jeszcze nie istnieje, ownerId z sesji
 import { db } from "@/lib/db";
 import { salons, services, reviews } from "@/lib/schema";
 import { eq, and, isNotNull, ne, inArray, count, avg } from "drizzle-orm";

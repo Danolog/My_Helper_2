@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
+// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (sesja→salon); operacje przez forSalon
 import { db } from "@/lib/db";
 import {
   waitingList,

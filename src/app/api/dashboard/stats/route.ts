@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (weryfikacja własności przed kontekstem RLS)
 import { db } from "@/lib/db";
 import {
   appointments,

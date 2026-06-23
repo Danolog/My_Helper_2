@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- ścieżka systemowa (seed) — owner-bypass RLS, brak salonId scope
 import { db } from "@/lib/db";
 import { salons, employees, services, clients, appointments } from "@/lib/schema";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";

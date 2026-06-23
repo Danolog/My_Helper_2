@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// eslint-disable-next-line no-restricted-imports -- globalny katalog planów (subscriptionPlans) poza RLS; reszta przez forSalon
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import {

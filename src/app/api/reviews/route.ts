@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 // (salons.ownerId = userId) — ten lookup nie ma jeszcze salonId, więc nie może
 // biec pod RLS (analogicznie do getUserSalon). Zapytania o opinie idą przez
 // forSalon(salon.id).
+// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (sesja→salon); operacje przez forSalon
 import { db } from "@/lib/db";
 import { reviews, salons, clients, employees, services, appointments } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";

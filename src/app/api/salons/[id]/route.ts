@@ -3,6 +3,7 @@ import { unstable_cache } from "next/cache";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // `db` używane WYŁĄCZNIE w publicznym katalogu (GET przez unstable_cache) — patrz
 // komentarz przy getCachedSalonDetail. Operacje właściciela (PUT) idą przez forSalon.
+// eslint-disable-next-line no-restricted-imports -- publiczny katalog (GET przez unstable_cache); PUT przez forSalon
 import { db } from "@/lib/db";
 import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
 import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";

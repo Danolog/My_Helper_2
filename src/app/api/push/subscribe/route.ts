@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 // nie per-salon. Trasa NIE migruje na forSalon: brak kolumny salon_id do
 // zawężenia, a subskrypcja push należy do urządzenia użytkownika niezależnie od
 // salonu. Pozostaje na surowym db, scope przez eq(userId) z sesji. (R2)
+// eslint-disable-next-line no-restricted-imports -- pushSubscriptions per-USER (klucz userId), brak salon_id
 import { db } from "@/lib/db";
 import { pushSubscriptions } from "@/lib/schema";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";

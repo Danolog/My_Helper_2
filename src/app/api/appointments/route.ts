@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 // POST (public booking) używa surowego `db` — patrz komentarz przy POST poniżej.
+// eslint-disable-next-line no-restricted-imports -- POST public booking — brak sesji właściciela
 import { db } from "@/lib/db";
 import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
 import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- publiczny portal rezerwacji — brak sesji właściciela
 import { db } from "@/lib/db";
 import { appointments, workSchedules, timeBlocks } from "@/lib/schema";
 import { eq, and, gte, lt, not } from "drizzle-orm";
