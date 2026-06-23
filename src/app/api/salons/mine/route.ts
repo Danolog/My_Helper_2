@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// CELOWO na surowym `db` (rola owner, omija RLS). Ta trasa DOPIERO USTALA salonId —
+// szuka salonu po `ownerId` z sesji (problem jajka i kury). forSalon(salonId) wymaga
+// salonId z góry, którego tu jeszcze nie znamy; gdyby ustawić kontekst na cokolwiek,
+// RLS `id = current_salon_id` odciąłby wyszukiwanie po ownerId. Brak IDOR: filtr to
+// `ownerId == zalogowany user`, więc zwraca wyłącznie salon właściciela.
 import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
 

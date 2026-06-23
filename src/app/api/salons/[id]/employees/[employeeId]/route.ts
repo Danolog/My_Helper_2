@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+// CELOWO na surowym `db` (rola owner, omija RLS). To PUBLICZNY endpoint portalu klienta
+// (brak auth, GET czyta profil pracownika dowolnego salonu po `id` z URL) — nie ma sesji
+// właściciela ani kontekstu `app.current_salon_id`. Zgodne z RLS 0005 (publiczny katalog
+// czyta pod rolą owner). Dane są publiczne z założenia (profil specjalisty), więc to nie IDOR.
 import { db } from "@/lib/db";
 import {
   employees,

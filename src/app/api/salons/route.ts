@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+// CELOWO na surowym `db` (rola owner, omija RLS). Trasa działa MIĘDZY najemcami i
+// poza kontekstem pojedynczego salonu:
+//   - GET: publiczny katalog wszystkich salonów (agregaty services/reviews po wielu
+//     salonId naraz) — forSalon zawęziłby do jednego salonu i zwrócił 0 wierszy.
+//   - POST: tworzy KORZEŃ najemcy (salon jeszcze nie istnieje, nie ma salonId).
+//   - DELETE: usuwa salon po dowolnym id (operacja administracyjna ponad najemcą).
 import { db } from "@/lib/db";
 import { salons, services, reviews } from "@/lib/schema";
 import { eq, and, isNotNull, ne, inArray, count, avg } from "drizzle-orm";
