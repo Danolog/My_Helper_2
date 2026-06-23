@@ -5,6 +5,16 @@ import { eq, and, inArray } from "drizzle-orm";
 
 import { logger } from "@/lib/logger";
 /**
+ * KLASYFIKACJA (R2): PUBLIC / quasi-public — NIE migrowane na forSalon.
+ *
+ * Wołane przy rezerwacji KLIENTA (brak sesji/requireAuth). `salonId` z query
+ * requestu (salon, o który pyta klient). Zapytanie do `promotions` zawężone jawnym
+ * `eq(promotions.salonId, salonId)` — brak wycieku promocji innych salonów.
+ * Pozostaje na surowym `db` (poza RLS) celowo — brak kontekstu właściciela
+ * (ADR-001, ścieżki publiczne). Lookup `services` po ID z conditionsJson promocji
+ * tego salonu służy tylko wyliczeniu ceny pakietu w booking.
+ */
+/**
  * GET /api/promotions/check-package
  * Get active package promotions for a salon with service details
  *

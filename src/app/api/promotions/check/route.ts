@@ -4,6 +4,17 @@ import { promotions, appointments, services } from "@/lib/schema";
 import { eq, and, not, sql } from "drizzle-orm";
 
 import { logger } from "@/lib/logger";
+/**
+ * KLASYFIKACJA (R2): PUBLIC / quasi-public — NIE migrowane na forSalon.
+ *
+ * Trasa walidacyjna wołana przy rezerwacji KLIENTA (brak sesji właściciela,
+ * brak requireAuth). `salonId` pochodzi z query requestu, nie z sesji — to salon,
+ * o który PYTA klient. Każde zapytanie do `promotions` jest zawężone jawnym
+ * `eq(promotions.salonId, salonId)`, więc nie wycieka promocji innych salonów niż
+ * ten z requestu. Pozostaje na surowym `db` (poza wrapperem RLS) celowo, bo nie ma
+ * kontekstu zalogowanego właściciela (ADR-001, ścieżki publiczne). Lookup `services`
+ * po `serviceId` z requestu służy tylko wyliczeniu ceny wyświetlanej w booking.
+ */
 // GET /api/promotions/check - Check if a client qualifies for any buy2get1 promotion
 // Query params: salonId, clientId, serviceId
 export async function GET(request: Request) {

@@ -4,6 +4,16 @@ import { salons, employees, services, clients, appointments } from "@/lib/schema
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
+/**
+ * KLASYFIKACJA (R2): ŚCIEŻKA SYSTEMOWA — NIE migrowane na forSalon, zostaje na `db`.
+ *
+ * Seed danych deweloperskich (zablokowany w produkcji). Trasa TWORZY demo-salon od
+ * zera i wstawia rekordy pod nowo wygenerowane salonId — nie operuje w kontekście
+ * jednego, istniejącego salonu właściciela, więc `forSalon(salonId)` nie ma się od
+ * czego odbić (brak salonId z sesji jako scope). Zgodnie z ADR-001 sekcja 4 ścieżki
+ * systemowe (seed, migracje, crony, webhooki) świadomie omijają wrapper RLS i jadą
+ * surowym `db` (rola owner). Pozostaje na `db` celowo.
+ */
 // POST /api/seed - Seed test data for development
 export async function POST() {
   if (process.env.NODE_ENV === "production") {

@@ -5,6 +5,17 @@ import { eq, and, sql } from "drizzle-orm";
 
 import { logger } from "@/lib/logger";
 /**
+ * KLASYFIKACJA (R2): PUBLIC / quasi-public — NIE migrowane na forSalon.
+ *
+ * Wołane przy rezerwacji KLIENTA (brak sesji/requireAuth). `salonId` z query
+ * requestu (salon, o który pyta klient). Zapytania do `promotions`, `clients`,
+ * `appointments` zawężone jawnym `eq(salonId, ...)` — brak wycieku danych innych
+ * salonów. Pozostaje na surowym `db` (poza RLS) celowo — brak kontekstu
+ * właściciela (ADR-001, ścieżki publiczne). UWAGA: parametryzacja podzapytania
+ * `email` pokryta testem regresyjnym promotions-check-first-visit-sqli.test.ts —
+ * NIE zmieniać kształtu zapytania portal-count.
+ */
+/**
  * GET /api/promotions/check-first-visit
  * Check if a client qualifies for a first-visit discount at a salon.
  *

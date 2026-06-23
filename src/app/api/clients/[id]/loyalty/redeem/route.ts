@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { loyaltyPoints, loyaltyTransactions, salons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import type { LoyaltySettings, RewardTier } from "@/app/api/salons/[id]/loyalty-settings/route";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, loyaltyRedeemSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -46,109 +46,136 @@ export async function POST(
       );
     }
 
-    // 1. Fetch salon loyalty settings and find the reward tier
-    const [salon] = await db
-      .select({ id: salons.id, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
+    // Cała transakcja (odczyt salonu + ustawień, odczyt punktów, update salda,
+    // insert transakcji) atomowo w jednym kontekście RLS. loyaltyPoints ma salonId
+    // (jawny eq zachowany); loyaltyTransactions bez salonId — scope przez FK loyaltyId.
+    // Wieloetapowość w jednym raw() = atomowość (brak częściowego odjęcia punktów).
+    const outcome = await forSalon(salonId).raw(async (tx) => {
+      // 1. Fetch salon loyalty settings and find the reward tier
+      const [salon] = await tx
+        .select({ id: salons.id, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .limit(1);
 
-    if (!salon) {
+      if (!salon) {
+        return { kind: "no-salon" as const };
+      }
+
+      const settings = salon.settingsJson as Record<string, unknown> | null;
+      const loyaltySettings = settings?.loyalty as LoyaltySettings | undefined;
+
+      if (!loyaltySettings?.enabled) {
+        return { kind: "not-active" as const };
+      }
+
+      // Find the reward tier
+      const rewardTier: RewardTier | undefined = loyaltySettings.rewardTiers?.find(
+        (tier) => tier.id === rewardTierId
+      );
+
+      if (!rewardTier) {
+        return { kind: "no-tier" as const };
+      }
+
+      // 2. Check client has enough points
+      const [loyaltyRecord] = await tx
+        .select()
+        .from(loyaltyPoints)
+        .where(
+          and(
+            eq(loyaltyPoints.clientId, clientId),
+            eq(loyaltyPoints.salonId, salonId)
+          )
+        )
+        .limit(1);
+
+      if (!loyaltyRecord) {
+        return { kind: "insufficient" as const, required: rewardTier.pointsRequired, available: 0 };
+      }
+
+      if (loyaltyRecord.points < rewardTier.pointsRequired) {
+        return {
+          kind: "insufficient" as const,
+          required: rewardTier.pointsRequired,
+          available: loyaltyRecord.points,
+        };
+      }
+
+      // 3. Deduct points from balance
+      const newBalance = loyaltyRecord.points - rewardTier.pointsRequired;
+
+      await tx
+        .update(loyaltyPoints)
+        .set({
+          points: newBalance,
+          lastUpdated: new Date(),
+        })
+        .where(eq(loyaltyPoints.id, loyaltyRecord.id));
+
+      // 4. Create transaction record
+      const rewardTypeLabel =
+        rewardTier.rewardType === "discount"
+          ? `Rabat ${rewardTier.rewardValue}%`
+          : rewardTier.rewardType === "free_service"
+            ? `Darmowa usluga do ${rewardTier.rewardValue} PLN`
+            : `Produkt gratis do ${rewardTier.rewardValue} PLN`;
+
+      const transactionResult = await tx
+        .insert(loyaltyTransactions)
+        .values({
+          loyaltyId: loyaltyRecord.id,
+          pointsChange: -rewardTier.pointsRequired,
+          reason: `Wymiana punktow: ${rewardTier.name} (${rewardTypeLabel})`,
+          appointmentId: null,
+        })
+        .returning();
+
+      const transaction = transactionResult[0];
+      if (!transaction) {
+        throw new Error("Failed to create redemption transaction");
+      }
+
+      return {
+        kind: "ok" as const,
+        rewardTier,
+        transaction,
+        previousPoints: loyaltyRecord.points,
+        newBalance,
+      };
+    });
+
+    if (outcome.kind === "no-salon") {
       return NextResponse.json(
         { success: false, error: "Salon nie znaleziony" },
         { status: 404 }
       );
     }
-
-    const settings = salon.settingsJson as Record<string, unknown> | null;
-    const loyaltySettings = settings?.loyalty as LoyaltySettings | undefined;
-
-    if (!loyaltySettings?.enabled) {
+    if (outcome.kind === "not-active") {
       return NextResponse.json(
         { success: false, error: "Program lojalnosciowy nie jest aktywny" },
         { status: 400 }
       );
     }
-
-    // Find the reward tier
-    const rewardTier: RewardTier | undefined = loyaltySettings.rewardTiers?.find(
-      (tier) => tier.id === rewardTierId
-    );
-
-    if (!rewardTier) {
+    if (outcome.kind === "no-tier") {
       return NextResponse.json(
         { success: false, error: "Nie znaleziono nagrody o podanym ID" },
         { status: 404 }
       );
     }
-
-    // 2. Check client has enough points
-    const [loyaltyRecord] = await db
-      .select()
-      .from(loyaltyPoints)
-      .where(
-        and(
-          eq(loyaltyPoints.clientId, clientId),
-          eq(loyaltyPoints.salonId, salonId)
-        )
-      )
-      .limit(1);
-
-    if (!loyaltyRecord) {
+    if (outcome.kind === "insufficient") {
       return NextResponse.json(
         {
           success: false,
-          error: `Niewystarczajaca liczba punktow. Wymagane: ${rewardTier.pointsRequired}, dostepne: 0`,
+          error: `Niewystarczajaca liczba punktow. Wymagane: ${outcome.required}, dostepne: ${outcome.available}`,
         },
         { status: 400 }
       );
     }
 
-    if (loyaltyRecord.points < rewardTier.pointsRequired) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Niewystarczajaca liczba punktow. Wymagane: ${rewardTier.pointsRequired}, dostepne: ${loyaltyRecord.points}`,
-        },
-        { status: 400 }
-      );
-    }
+    const { rewardTier, transaction, previousPoints, newBalance } = outcome;
 
-    // 3. Deduct points from balance
-    const newBalance = loyaltyRecord.points - rewardTier.pointsRequired;
-
-    await db
-      .update(loyaltyPoints)
-      .set({
-        points: newBalance,
-        lastUpdated: new Date(),
-      })
-      .where(eq(loyaltyPoints.id, loyaltyRecord.id));
-
-    // 4. Create transaction record
-    const rewardTypeLabel =
-      rewardTier.rewardType === "discount"
-        ? `Rabat ${rewardTier.rewardValue}%`
-        : rewardTier.rewardType === "free_service"
-          ? `Darmowa usluga do ${rewardTier.rewardValue} PLN`
-          : `Produkt gratis do ${rewardTier.rewardValue} PLN`;
-
-    const transactionResult = await db
-      .insert(loyaltyTransactions)
-      .values({
-        loyaltyId: loyaltyRecord.id,
-        pointsChange: -rewardTier.pointsRequired,
-        reason: `Wymiana punktow: ${rewardTier.name} (${rewardTypeLabel})`,
-        appointmentId: null,
-      })
-      .returning();
-
-    const transaction = transactionResult[0];
-    if (!transaction) {
-      throw new Error("Failed to create redemption transaction");
-    }
-
-    logger.info(`[Loyalty Redeem] Client ${clientId} redeemed "${rewardTier.name}" for ${rewardTier.pointsRequired} points. Balance: ${loyaltyRecord.points} -> ${newBalance}`);
+    logger.info(`[Loyalty Redeem] Client ${clientId} redeemed "${rewardTier.name}" for ${rewardTier.pointsRequired} points. Balance: ${previousPoints} -> ${newBalance}`);
 
     // 5. Return success with details
     return NextResponse.json({
@@ -163,7 +190,7 @@ export async function POST(
           transactionId: transaction.id,
         },
         balance: {
-          previousPoints: loyaltyRecord.points,
+          previousPoints,
           currentPoints: newBalance,
         },
       },
@@ -202,12 +229,27 @@ export async function GET(
       );
     }
 
-    // 1. Fetch salon loyalty settings
-    const [salon] = await db
-      .select({ id: salons.id, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
+    // Odczyt salonu + punktów klienta w jednym kontekście RLS. loyaltyPoints ma
+    // salonId (jawny eq zachowany); salons scope = eq(salons.id, salonId).
+    const { salon, loyaltyRecord } = await forSalon(salonId).raw(async (tx) => {
+      const [s] = await tx
+        .select({ id: salons.id, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .limit(1);
+      if (!s) return { salon: null, loyaltyRecord: null };
+      const [lr] = await tx
+        .select()
+        .from(loyaltyPoints)
+        .where(
+          and(
+            eq(loyaltyPoints.clientId, clientId),
+            eq(loyaltyPoints.salonId, salonId)
+          )
+        )
+        .limit(1);
+      return { salon: s, loyaltyRecord: lr ?? null };
+    });
 
     if (!salon) {
       return NextResponse.json(
@@ -230,18 +272,6 @@ export async function GET(
         },
       });
     }
-
-    // 2. Get client's current points
-    const [loyaltyRecord] = await db
-      .select()
-      .from(loyaltyPoints)
-      .where(
-        and(
-          eq(loyaltyPoints.clientId, clientId),
-          eq(loyaltyPoints.salonId, salonId)
-        )
-      )
-      .limit(1);
 
     const currentPoints = loyaltyRecord?.points ?? 0;
 
