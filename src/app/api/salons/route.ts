@@ -4,7 +4,9 @@ import { NextResponse } from "next/server";
 //   - GET: publiczny katalog wszystkich salonów (agregaty services/reviews po wielu
 //     salonId naraz) — forSalon zawęziłby do jednego salonu i zwrócił 0 wierszy.
 //   - POST: tworzy KORZEŃ najemcy (salon jeszcze nie istnieje, nie ma salonId).
-//   - DELETE: usuwa salon po dowolnym id (operacja administracyjna ponad najemcą).
+//     ownerId WYŁĄCZNIE z sesji (nie z body) — inaczej salon na cudzego usera (IDOR).
+//   - DELETE: usuwa WYŁĄCZNIE salon zalogowanego właściciela (eq(ownerId, sesja)) —
+//     wcześniej kasował dowolny salon po id (krytyczny IDOR).
 import { db } from "@/lib/db";
 import { salons, services, reviews } from "@/lib/schema";
 import { eq, and, isNotNull, ne, inArray, count, avg } from "drizzle-orm";
@@ -144,7 +146,7 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    const { name, phone, email, address, industryType, ownerId } = body;
+    const { name, phone, email, address, industryType } = body;
 
     logger.info(`[Salons API] Executing: INSERT INTO salons (name, phone, email, address, industry_type, owner_id)`);
     const [newSalon] = await db
@@ -155,7 +157,8 @@ export async function POST(request: Request) {
         email: email || null,
         address: address || null,
         industryType: industryType || null,
-        ownerId: ownerId || null,
+        // ownerId z SESJI, nigdy z body — zapobiega utworzeniu salonu na cudzego usera (IDOR).
+        ownerId: authResult.user.id,
       })
       .returning();
 
@@ -191,9 +194,11 @@ export async function DELETE(request: Request) {
     }
 
     logger.info(`[Salons API] Executing: DELETE FROM salons WHERE id = '${id}'`);
+    // Tylko WŁASNY salon (eq(ownerId, sesja)) — cudzy/nieistniejący => brak wiersza => 404
+    // (nie ujawnia istnienia). Wcześniej kasowało dowolny salon po id (krytyczny IDOR).
     const [deleted] = await db
       .delete(salons)
-      .where(eq(salons.id, id))
+      .where(and(eq(salons.id, id), eq(salons.ownerId, authResult.user.id)))
       .returning();
 
     if (!deleted) {

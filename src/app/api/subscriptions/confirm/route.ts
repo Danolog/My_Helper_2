@@ -106,8 +106,18 @@ export async function POST(request: Request) {
       );
     }
 
-    // Extract metadata written during checkout creation
-    const salonId = checkoutSession.metadata?.salonId || currentSalonId;
+    // Extract metadata written during checkout creation.
+    // BEZPIECZEŃSTWO (anty-IDOR): jeśli sesja Stripe niesie salonId w metadanych,
+    // MUSI być salonem zalogowanego właściciela. Inaczej ktoś mógłby podać cudze
+    // (opłacone) sessionId i potwierdzić/podmienić subskrypcję obcego salonu.
+    const metadataSalonId = checkoutSession.metadata?.salonId;
+    if (metadataSalonId && metadataSalonId !== currentSalonId) {
+      return NextResponse.json(
+        { success: false, error: "Sesja platnosci nie nalezy do tego salonu" },
+        { status: 403 },
+      );
+    }
+    const salonId = metadataSalonId || currentSalonId;
     const planId = checkoutSession.metadata?.planId;
 
     if (!planId) {
