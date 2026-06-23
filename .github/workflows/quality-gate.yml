@@ -99,7 +99,11 @@ jobs:
           PGPASSWORD=dev_password psql -h localhost -U dev_user -d pos_dev -c "SELECT id, email, email_verified, role FROM \"user\" WHERE email IN ('owner@test.com','client@test.com');"
           PGPASSWORD=dev_password psql -h localhost -U dev_user -d pos_dev -c "SELECT id, provider_id, user_id, CASE WHEN password IS NOT NULL THEN 'SET' ELSE 'NULL' END as pwd FROM account WHERE user_id IN ('test-owner-user-id-00001','test-client-user-id-00001');"
 
-      - run: pnpm exec playwright install --with-deps chromium
+      # Bez `--with-deps`: runner ubuntu-latest ma biblioteki systemowe chromium,
+      # a `--with-deps` odpalalo apt-get z mirrora azure, ktory dlawil pobieranie
+      # (wielominutowe zawieszki) -> job padal na timeout zanim testy ruszyly.
+      # Przegladarki ida z CDN Playwright (szybko), apt znika z krytycznej sciezki.
+      - run: pnpm exec playwright install chromium
 
       - run: pnpm build:ci
 
@@ -162,7 +166,11 @@ jobs:
       - name: Seed test data
         run: pnpm db:seed:test
 
-      - run: pnpm exec playwright install --with-deps chromium
+      # Bez `--with-deps`: runner ubuntu-latest ma biblioteki systemowe chromium,
+      # a `--with-deps` odpalalo apt-get z mirrora azure, ktory dlawil pobieranie
+      # (wielominutowe zawieszki) -> job padal na timeout zanim testy ruszyly.
+      # Przegladarki ida z CDN Playwright (szybko), apt znika z krytycznej sciezki.
+      - run: pnpm exec playwright install chromium
 
       - run: pnpm build:ci
 

@@ -24,7 +24,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm exec playwright install --with-deps chromium
+      # Bez `--with-deps`: apt-get z mirrora azure dlawil pobieranie zaleznosci
+      # systemowych chromium -> job padal na timeout 5 min. Runner ubuntu-latest
+      # ma te biblioteki; przegladarka idzie z CDN Playwright.
+      - run: pnpm exec playwright install chromium
 
       - name: Run production health checks
         run: pnpm exec playwright test --grep @production --workers=2 --retries=1 --timeout=15000
