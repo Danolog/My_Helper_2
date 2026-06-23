@@ -79,6 +79,30 @@ pnpm db:studio            # Drizzle Studio
 pnpm db:seed:test         # seed danych testowych
 ```
 
+## Governance — decyzje techniczne
+
+> **WSZYSTKIE decyzje techniczne — teraz i w przyszłości — podejmuje zespół Ethana.**
+> Dotyczy wyboru architektury, bibliotek, podejść, kompromisów jakościowych,
+> progów i bramek CI, zakresu testów oraz każdego rozwidlenia „A/B/C".
+> Agent **nie rozstrzyga** takich decyzji samodzielnie: przygotowuje zwięzły
+> brief (fakty, opcje, rekomendacja) i **czeka na werdykt zespołu Ethana**.
+> Sign-offy domenowe pozostają bez zmian (np. Ryan — bezpieczeństwo/CRCO,
+> Darek — czerwone linie wdrożeń prod); rola zespołu Ethana jest **nadrzędna dla
+> decyzji technicznych** i nie zwalnia z tych sign-offów.
+>
+> **Właściciel (Darek) NIE jest angażowany w sprawy techniczne.** Nie pytaj go o
+> rozstrzygnięcia techniczne ani procesowe — kieruj je do zespołu Ethana.
+>
+> **Standard wykonania — sztuka tworzenia produktów SaaS.** Każda zmiana ma być
+> zgodna z dobrymi praktykami budowania SaaS (bezpieczeństwo i izolacja najemcy,
+> testowalność, obserwowalność, atomowe commity, czyste migracje, CI jako bramka,
+> ślad decyzji w ADR/runbookach — „Built-to-Sell").
+>
+> **Baza wiedzy przez MCP (obowiązek).** Gdy zespołowi Ethana brakuje wiedzy, jak
+> coś zrobić zgodnie ze sztuką SaaS, **NAJPIERW** sięga do bazy wiedzy przez
+> serwer MCP, czerpie z niej wzorce i uczy się — zamiast zgadywać lub angażować
+> właściciela. Decyzję podejmuje dopiero po skonsultowaniu bazy.
+
 ## Guidelines
 
 1. Be concise and helpful
