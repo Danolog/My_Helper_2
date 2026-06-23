@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+// pushSubscriptions jest kluczowane userId (NIE salonId) — zasób per-USER, nie
+// per-salon. Trasa NIE migruje na forSalon: brak kolumny salon_id do zawężenia.
+// Pozostaje na surowym db, scope przez eq(userId) z sesji. (R2)
 import { db } from "@/lib/db";
 import { pushSubscriptions } from "@/lib/schema";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";

@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+// Ścieżka PUBLICZNA: KLIENT/gość inicjuje płatność zadatku w ramach rezerwacji
+// online (getOptionalSession — bez zalogowanego właściciela salonu). salonId
+// pochodzi z body rezerwacji, nie z sesji właściciela, więc forSalon nie ma
+// kontekstu właściciela do ustawienia. Pozostaje na surowym db. (R2)
 import { db } from "@/lib/db";
 import { services, appointments, depositPayments } from "@/lib/schema";
 import { eq, and, not, or, lte, gte, lt, gt } from "drizzle-orm";

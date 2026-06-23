@@ -10,6 +10,7 @@ import {
 } from "@/lib/schema";
 import { eq, and, gte, lte, not, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -65,7 +66,11 @@ export async function GET(request: Request) {
       );
     }
 
-    // Verify the authenticated user owns the requested salon
+    // Weryfikacja własności (salonId z query) — odczyt z tabeli salons po
+    // (id, ownerId). salons jest korzeniem własności (filtr ownerId = userId),
+    // nie danymi salon-scoped pod RLS; sprawdzenie biegnie PRZED ustawieniem
+    // kontekstu salonu, więc zostaje na surowym db. To zarazem brama IDOR:
+    // dalsze zapytania jadą przez forSalon(salonId) dopiero po potwierdzeniu.
     const [salon] = await db
       .select({ id: salons.id })
       .from(salons)
@@ -83,11 +88,29 @@ export async function GET(request: Request) {
     const { todayStart, todayEnd, thirtyDaysAgo, monthStart, monthEnd, todayDow } =
       getWarsawDateBoundaries();
 
-    // ─── Run independent queries in parallel ──────────────────
-    const [todayAppointments, salonEmployees, monthAppointments, last30Appointments, newClients30d] =
-      await Promise.all([
+    // ─── Run independent queries w jednym kontekście salonu ───
+    // Wszystkie odczyty są salon-scoped — biegną w jednym raw(forSalon) (jedna
+    // transakcja z RLS), z jawnym eq(salonId)/eq(employees.salonId) zachowanym
+    // (defense in depth). workSchedules NIE ma kolumny salon_id — izolacja przez
+    // RLS pośrednią (polityka EXISTS na employees.salon_id) + filtr po employeeIds
+    // tego salonu, w tym samym kontekście.
+    const {
+      todayAppointments,
+      salonEmployees,
+      monthAppointments,
+      last30Appointments,
+      newClients30d,
+      todaySchedules,
+    } = await forSalon(salonId).raw(async (tx) => {
+      const [
+        _todayAppointments,
+        _salonEmployees,
+        _monthAppointments,
+        _last30Appointments,
+        _newClients30d,
+      ] = await Promise.all([
         // Today's appointments
-        db
+        tx
           .select({
             id: appointments.id,
             startTime: appointments.startTime,
@@ -120,7 +143,7 @@ export async function GET(request: Request) {
           .orderBy(appointments.startTime),
 
         // Active employees for this salon
-        db
+        tx
           .select({
             id: employees.id,
             firstName: employees.firstName,
@@ -134,7 +157,7 @@ export async function GET(request: Request) {
           ),
 
         // Cancellation statistics (this month)
-        db
+        tx
           .select({
             status: appointments.status,
           })
@@ -148,7 +171,7 @@ export async function GET(request: Request) {
           ),
 
         // Last 30 days statistics
-        db
+        tx
           .select({
             status: appointments.status,
             servicePrice: services.basePrice,
@@ -165,7 +188,7 @@ export async function GET(request: Request) {
           ),
 
         // New clients last 30 days
-        db
+        tx
           .select({ id: clients.id })
           .from(clients)
           .where(
@@ -176,24 +199,34 @@ export async function GET(request: Request) {
           ),
       ]);
 
-    // ─── Employees working today (depends on salonEmployees) ──
-    const employeeIds = salonEmployees.map((e) => e.id);
-    let todaySchedules: { employeeId: string; startTime: string; endTime: string }[] = [];
-    if (employeeIds.length > 0) {
-      todaySchedules = await db
-        .select({
-          employeeId: workSchedules.employeeId,
-          startTime: workSchedules.startTime,
-          endTime: workSchedules.endTime,
-        })
-        .from(workSchedules)
-        .where(
-          and(
-            inArray(workSchedules.employeeId, employeeIds),
-            eq(workSchedules.dayOfWeek, todayDow)
-          )
-        );
-    }
+      // ─── Employees working today (depends on salonEmployees) ──
+      const employeeIds = _salonEmployees.map((e) => e.id);
+      let _todaySchedules: { employeeId: string; startTime: string; endTime: string }[] = [];
+      if (employeeIds.length > 0) {
+        _todaySchedules = await tx
+          .select({
+            employeeId: workSchedules.employeeId,
+            startTime: workSchedules.startTime,
+            endTime: workSchedules.endTime,
+          })
+          .from(workSchedules)
+          .where(
+            and(
+              inArray(workSchedules.employeeId, employeeIds),
+              eq(workSchedules.dayOfWeek, todayDow)
+            )
+          );
+      }
+
+      return {
+        todayAppointments: _todayAppointments,
+        salonEmployees: _salonEmployees,
+        monthAppointments: _monthAppointments,
+        last30Appointments: _last30Appointments,
+        newClients30d: _newClients30d,
+        todaySchedules: _todaySchedules,
+      };
+    });
 
     // Map schedules to employees
     const scheduleMap = new Map(

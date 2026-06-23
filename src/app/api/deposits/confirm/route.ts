@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server";
+// Ścieżka systemowa/symulator (DEV-only; w prod potwierdza SIGNED webhook Stripe,
+// nie ta trasa). Brak zalogowanego WŁAŚCICIELA salonu — salonId wynika z rekordu
+// depositPayments wyszukanego po id (nie z sesji), analogicznie do
+// subscriptions/confirm i webhooka Stripe. Dlatego NIE migruje na forSalon —
+// pozostaje na surowym db (rola owner, świadomy bypass RLS). (R2)
 import { db } from "@/lib/db";
 import { appointments, depositPayments, clients, services, employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";

@@ -1,4 +1,12 @@
 import { NextResponse } from "next/server";
+// temporaryAccess NIE ma kolumny salon_id — to tabela kluczowana userId
+// (FK do user), nie salon-scoped. Izolacja najemcy jest tu POŚREDNIA i
+// realizowana w warstwie aplikacji: trasa ustala salon właściciela (salons.ownerId),
+// pobiera userId pracowników tego salonu (employees.salonId) i filtruje grants po
+// tych userId (inArray). Brak kolumny salon_id => brak kontekstu dla forSalon na
+// samej tabeli temporaryAccess, a cleanupExpiredAccess to globalna konserwacja
+// (kasuje wygasłe wpisy wszystkich salonów). Dlatego trasa pozostaje na surowym db
+// z zachowanymi istniejącymi filtrami. (R2)
 import { db } from "@/lib/db";
 import { temporaryAccess, employees, salons } from "@/lib/schema";
 import { eq, and, gt, lt, inArray } from "drizzle-orm";
