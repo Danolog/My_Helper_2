@@ -8,7 +8,7 @@ jobs:
     name: Production Health Checks
     if: github.event.deployment_status.state == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       BASE_URL: ${{ secrets.BETTER_AUTH_BASE_URL_PROD }}
       CI: true
@@ -25,9 +25,19 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # Bez `--with-deps`: apt-get z mirrora azure dlawil pobieranie zaleznosci
-      # systemowych chromium -> job padal na timeout 5 min. Runner ubuntu-latest
-      # ma te biblioteki; przegladarka idzie z CDN Playwright.
-      - run: pnpm exec playwright install chromium
+      # systemowych chromium. Dodatkowo timeout+retry: pobranie przegladarki
+      # potrafi zawisnac bez wewnetrznego timeoutu i zjada caly limit joba.
+      - name: Install Playwright chromium (timeout+retry)
+        run: |
+          set +e
+          for i in 1 2 3; do
+            timeout 180 pnpm exec playwright install chromium
+            [ $? -eq 0 ] && exit 0
+            echo "::warning::playwright install proba $i nieudana/timeout (stall pobierania), ponawiam"
+            sleep 5
+          done
+          echo "::error::playwright install nieudane po 3 probach"
+          exit 1
 
       - name: Run production health checks
         run: pnpm exec playwright test --grep @production --workers=2 --retries=1 --timeout=15000

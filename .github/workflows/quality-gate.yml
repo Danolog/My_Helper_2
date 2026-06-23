@@ -55,7 +55,7 @@ jobs:
   e2e-smoke:
     name: E2E Smoke Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     services:
       postgres:
         image: pgvector/pgvector:pg18
@@ -103,7 +103,17 @@ jobs:
       # a `--with-deps` odpalalo apt-get z mirrora azure, ktory dlawil pobieranie
       # (wielominutowe zawieszki) -> job padal na timeout zanim testy ruszyly.
       # Przegladarki ida z CDN Playwright (szybko), apt znika z krytycznej sciezki.
-      - run: pnpm exec playwright install chromium
+      - name: Install Playwright chromium (timeout+retry)
+        run: |
+          set +e
+          for i in 1 2 3; do
+            timeout 180 pnpm exec playwright install chromium
+            [ $? -eq 0 ] && exit 0
+            echo "::warning::playwright install proba $i nieudana/timeout (stall pobierania), ponawiam"
+            sleep 5
+          done
+          echo "::error::playwright install nieudane po 3 probach"
+          exit 1
 
       - run: pnpm build:ci
 
@@ -170,7 +180,17 @@ jobs:
       # a `--with-deps` odpalalo apt-get z mirrora azure, ktory dlawil pobieranie
       # (wielominutowe zawieszki) -> job padal na timeout zanim testy ruszyly.
       # Przegladarki ida z CDN Playwright (szybko), apt znika z krytycznej sciezki.
-      - run: pnpm exec playwright install chromium
+      - name: Install Playwright chromium (timeout+retry)
+        run: |
+          set +e
+          for i in 1 2 3; do
+            timeout 180 pnpm exec playwright install chromium
+            [ $? -eq 0 ] && exit 0
+            echo "::warning::playwright install proba $i nieudana/timeout (stall pobierania), ponawiam"
+            sleep 5
+          done
+          echo "::error::playwright install nieudane po 3 probach"
+          exit 1
 
       - run: pnpm build:ci
 
