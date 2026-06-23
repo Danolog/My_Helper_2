@@ -17,12 +17,12 @@ overrides:
   express-rate-limit: '>=8.2.2'
   flatted: '>=3.4.2'
   undici: '>=6.24.0'
-  '@vercel/blob>undici': '>=7.28.0'
+  '@vercel/blob>undici': '>=7.28.0 <8'
   kysely: '>=0.28.12 <0.29'
   vite: '>=7.3.5 <8'
-  tmp: '>=0.2.6'
-  ws: '>=8.21.0'
-  form-data: '>=4.0.6'
+  tmp: '>=0.2.6 <0.3'
+  ws: '>=8.21.0 <9'
+  form-data: '>=4.0.6 <5'
   protobufjs: '>=7.6.3 <8'
   axios: '>=1.16.0'
   fast-uri: '>=3.1.2 <4'
@@ -5753,9 +5753,9 @@ packages:
   undici-types@6.21.0:
     resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
 
-  undici@8.5.0:
-    resolution: {integrity: sha512-xamtWoB1EshgjpmlXd7GGm2VfdDtw1+rD8uhry8pSNW3If6S8E0m2T2+orSKeZXEn/aPJMviCpDBA65WJt8zhg==}
-    engines: {node: '>=22.19.0'}
+  undici@7.28.0:
+    resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
+    engines: {node: '>=20.18.1'}
 
   unicorn-magic@0.3.0:
     resolution: {integrity: sha512-+QBBXBCvifc56fsbuxZQ6Sic3wqqc3WWaqxs58gvJrcOuN83HGTCwz3oS5phzU9LthRNE9VrJCFCLUgHeeFnfA==}
@@ -8150,7 +8150,7 @@ snapshots:
       is-buffer: 2.0.5
       is-node-process: 1.2.0
       throttleit: 2.1.0
-      undici: 8.5.0
+      undici: 7.28.0
 
   '@vercel/oidc@3.1.0': {}
 
@@ -11860,7 +11860,7 @@ snapshots:
 
   undici-types@6.21.0: {}
 
-  undici@8.5.0: {}
+  undici@7.28.0: {}
 
   unicorn-magic@0.3.0: {}
 
