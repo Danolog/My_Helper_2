@@ -1,10 +1,19 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- kontekst klienta (scope po bookedByUserId z sesji)
 import { db } from "@/lib/db";
 import { appointments, employees, services, salons } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
+
+/**
+ * Kontekst KLIENTA — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * `forSalon(salonId)` jest dla WŁAŚCICIELA (RLS zawęża do JEGO salonu). Tu klient
+ * widzi SWOJE wizyty rozsiane po WIELU salonach — filtr to `bookedByUserId` z SESJI
+ * (nie query/body), więc izolacja działa po tożsamości klienta, nie po pojedynczym
+ * salonie. Pojedynczy salonId właściciela nie pasuje do tego kontekstu.
+ */
 // GET /api/client/appointments - List appointments for the authenticated client user
 export async function GET() {
   try {

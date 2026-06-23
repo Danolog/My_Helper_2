@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { promotions } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { validateBody, createPromotionSchema } from "@/lib/api-validation";
@@ -37,11 +36,15 @@ export async function GET(_request: Request) {
       createdAt: promotions.createdAt,
     };
 
-    let query = db.select(promotionColumns).from(promotions).orderBy(desc(promotions.createdAt));
+    // Lista — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
+    // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
+    const result = await forSalon(salonId).raw(async (tx) => {
+      let query = tx.select(promotionColumns).from(promotions).orderBy(desc(promotions.createdAt));
 
-    query = query.where(eq(promotions.salonId, salonId)) as typeof query;
+      query = query.where(eq(promotions.salonId, salonId)) as typeof query;
 
-    const result = await query;
+      return query;
+    });
 
     return NextResponse.json({
       success: true,

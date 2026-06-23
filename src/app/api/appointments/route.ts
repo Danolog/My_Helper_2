@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+// POST (public booking) używa surowego `db` — patrz komentarz przy POST poniżej.
+// eslint-disable-next-line no-restricted-imports -- POST public booking — brak sesji właściciela
 import { db } from "@/lib/db";
 import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
 import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
@@ -8,6 +10,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { getOptionalSession } from "@/lib/session";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/appointments - List appointments with optional date range filter
@@ -55,38 +58,42 @@ export async function GET(request: Request) {
       );
     }
 
-    let query = db.select({
-      appointment: appointments,
-      client: clients,
-      employee: employees,
-      service: services,
-    })
-    .from(appointments)
-    .leftJoin(clients, eq(appointments.clientId, clients.id))
-    .leftJoin(employees, eq(appointments.employeeId, employees.id))
-    .leftJoin(services, eq(appointments.serviceId, services.id));
+    // Join — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
+    // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
+    const result = await forSalon(salonId).raw(async (tx) => {
+      let query = tx.select({
+        appointment: appointments,
+        client: clients,
+        employee: employees,
+        service: services,
+      })
+      .from(appointments)
+      .leftJoin(clients, eq(appointments.clientId, clients.id))
+      .leftJoin(employees, eq(appointments.employeeId, employees.id))
+      .leftJoin(services, eq(appointments.serviceId, services.id));
 
-    const conditions = [eq(appointments.salonId, salonId)];
+      const conditions = [eq(appointments.salonId, salonId)];
 
-    if (employeeId) {
-      conditions.push(eq(appointments.employeeId, employeeId));
-    }
-    if (startDate && endDate) {
-      // Overlap query: appointment overlaps with [startDate, endDate] range
-      // when appointment.startTime < endDate AND appointment.endTime > startDate
-      conditions.push(lt(appointments.startTime, new Date(endDate)));
-      conditions.push(gt(appointments.endTime, new Date(startDate)));
-    } else if (startDate) {
-      conditions.push(gte(appointments.startTime, new Date(startDate)));
-    } else if (endDate) {
-      conditions.push(lte(appointments.endTime, new Date(endDate)));
-    }
+      if (employeeId) {
+        conditions.push(eq(appointments.employeeId, employeeId));
+      }
+      if (startDate && endDate) {
+        // Overlap query: appointment overlaps with [startDate, endDate] range
+        // when appointment.startTime < endDate AND appointment.endTime > startDate
+        conditions.push(lt(appointments.startTime, new Date(endDate)));
+        conditions.push(gt(appointments.endTime, new Date(startDate)));
+      } else if (startDate) {
+        conditions.push(gte(appointments.startTime, new Date(startDate)));
+      } else if (endDate) {
+        conditions.push(lte(appointments.endTime, new Date(endDate)));
+      }
 
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions)) as typeof query;
-    }
+      if (conditions.length > 0) {
+        query = query.where(and(...conditions)) as typeof query;
+      }
 
-    const result = await query;
+      return query;
+    });
     logger.info(`[Appointments API] Query returned ${result.length} rows`);
 
     // Transform result to a cleaner format
@@ -113,6 +120,13 @@ export async function GET(request: Request) {
 
 // POST /api/appointments - Create a new appointment
 // Auth is optional: logged-in users book with their session, guests provide contact info.
+//
+// ŚCIEŻKA PUBLICZNA (nie owner-scoped): goście bez sesji rezerwują online, więc
+// NIE ma zalogowanego właściciela ani salonId z sesji. salonId pochodzi z body
+// (cel rezerwacji). Z tego powodu trasa zostaje na surowym `db` — `forSalon(...)`
+// wymaga zaufanego salonId z sesji, którego tu nie ma. Insert jawnie ustawia
+// salonId z body (rezerwacja trafia tylko do wskazanego salonu); sprawdzenia
+// kolizji/blokad/promo celowo przeszukują dane pracownika/kodu bez RLS.
 export async function POST(request: Request) {
   try {
     // Rate limit to prevent abuse (especially from unauthenticated guests)

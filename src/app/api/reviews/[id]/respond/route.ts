@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
+// `db` zostaje WYŁĄCZNIE do zaufanego rozwiązania sesja→salon
+// (salons.ownerId = userId) — bez salonId nie da się tego puścić pod RLS.
+// Operacje na opinii idą przez forSalon(salon.id).
+// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (sesja→salon); operacje przez forSalon
 import { db } from "@/lib/db";
 import { reviews, salons } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { validateBody, reviewRespondSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // PATCH /api/reviews/[id]/respond - Save owner response to a review
@@ -52,17 +57,9 @@ export async function PATCH(
       );
     }
 
-    // Find the review and verify it belongs to the owner's salon
-    const [review] = await db
-      .select()
-      .from(reviews)
-      .where(
-        and(
-          eq(reviews.id, reviewId),
-          eq(reviews.salonId, salon.id)
-        )
-      )
-      .limit(1);
+    // Find the review and verify it belongs to the owner's salon (scoped
+    // findOne — cudza/nieistniejąca opinia = null = 404; kontekst RLS ustawiony).
+    const review = await forSalon(salon.id).findOne(reviews, reviewId);
 
     if (!review) {
       return NextResponse.json(
@@ -71,15 +68,11 @@ export async function PATCH(
       );
     }
 
-    // Save the owner response
-    const [updatedReview] = await db
-      .update(reviews)
-      .set({
-        ownerResponse: response.trim(),
-        ownerResponseAt: new Date(),
-      })
-      .where(eq(reviews.id, reviewId))
-      .returning();
+    // Save the owner response (updateOwned domyka eq(salonId) — defense in depth).
+    const updatedReview = await forSalon(salon.id).updateOwned(reviews, reviewId, {
+      ownerResponse: response.trim(),
+      ownerResponseAt: new Date(),
+    });
 
     logger.info(`[Reviews API] Owner response saved for review ${reviewId} by user ${userId} (salon ${salon.id})`);
 
@@ -131,17 +124,9 @@ export async function DELETE(
       );
     }
 
-    // Find the review and verify it belongs to the owner's salon
-    const [review] = await db
-      .select()
-      .from(reviews)
-      .where(
-        and(
-          eq(reviews.id, reviewId),
-          eq(reviews.salonId, salon.id)
-        )
-      )
-      .limit(1);
+    // Find the review and verify it belongs to the owner's salon (scoped
+    // findOne — cudza/nieistniejąca opinia = null = 404; kontekst RLS ustawiony).
+    const review = await forSalon(salon.id).findOne(reviews, reviewId);
 
     if (!review) {
       return NextResponse.json(
@@ -150,15 +135,11 @@ export async function DELETE(
       );
     }
 
-    // Remove the owner response
-    const [updatedReview] = await db
-      .update(reviews)
-      .set({
-        ownerResponse: null,
-        ownerResponseAt: null,
-      })
-      .where(eq(reviews.id, reviewId))
-      .returning();
+    // Remove the owner response (updateOwned domyka eq(salonId) — defense in depth).
+    const updatedReview = await forSalon(salon.id).updateOwned(reviews, reviewId, {
+      ownerResponse: null,
+      ownerResponseAt: null,
+    });
 
     logger.info(`[Reviews API] Owner response removed for review ${reviewId} by user ${userId} (salon ${salon.id})`);
 

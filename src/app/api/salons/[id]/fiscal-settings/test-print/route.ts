@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import type { FiscalPrinterSettings } from "../route";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -34,17 +34,21 @@ export async function POST(
       );
     }
 
-    // Fetch current salon settings
-    const [salon] = await db
-      .select({
-        id: salons.id,
-        name: salons.name,
-        ownerId: salons.ownerId,
-        settingsJson: salons.settingsJson,
-      })
-      .from(salons)
-      .where(eq(salons.id, id))
-      .limit(1);
+    // Fetch current salon settings. salons = korzeń najemcy: RLS izoluje po `id`,
+    // forSalon(id) ustawia kontekst; ownerId-check (403) odcina cudzy salon — bez IDOR.
+    const salon = await forSalon(id).raw(async (tx) => {
+      const [row] = await tx
+        .select({
+          id: salons.id,
+          name: salons.name,
+          ownerId: salons.ownerId,
+          settingsJson: salons.settingsJson,
+        })
+        .from(salons)
+        .where(eq(salons.id, id))
+        .limit(1);
+      return row ?? null;
+    });
 
     if (!salon) {
       return NextResponse.json(

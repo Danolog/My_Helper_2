@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { validateBody, createEmployeeSchema } from "@/lib/api-validation";
@@ -28,10 +27,12 @@ const EMPLOYEE_COLORS = [
 // Get next available color for a salon
 async function getNextAvailableColor(salonId: string): Promise<string> {
   try {
-    const existingEmployees = await db
-      .select({ color: employees.color })
-      .from(employees)
-      .where(eq(employees.salonId, salonId));
+    const existingEmployees = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ color: employees.color })
+        .from(employees)
+        .where(eq(employees.salonId, salonId))
+    );
 
     const usedColors = new Set(existingEmployees.map((e) => e.color).filter(Boolean));
 
@@ -83,18 +84,20 @@ export async function GET(request: Request) {
       color: employees.color,
     };
 
-    let allEmployees;
-    if (activeOnly) {
-      allEmployees = await db
-        .select(employeeColumns)
-        .from(employees)
-        .where(and(eq(employees.salonId, salonId), eq(employees.isActive, true)));
-    } else {
-      allEmployees = await db
+    // Lista — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
+    // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
+    const allEmployees = await forSalon(salonId).raw((tx) => {
+      if (activeOnly) {
+        return tx
+          .select(employeeColumns)
+          .from(employees)
+          .where(and(eq(employees.salonId, salonId), eq(employees.isActive, true)));
+      }
+      return tx
         .select(employeeColumns)
         .from(employees)
         .where(eq(employees.salonId, salonId));
-    }
+    });
 
     logger.info(`[Employees API] Query returned ${allEmployees.length} rows`);
 

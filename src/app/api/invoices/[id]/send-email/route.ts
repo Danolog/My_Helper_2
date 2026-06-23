@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { invoices, clients } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { sendInvoiceEmailSchema, validateBody } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -68,8 +68,10 @@ export async function POST(
       // No body or invalid JSON - that's OK
     }
 
-    // Fetch invoice with client data
-    const rows = await db
+    // Fetch invoice with client data — przez forSalon (kontekst RLS); jawny
+    // eq(invoices.salonId, salonId) zachowany w where (defense in depth).
+    const rows = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: invoices.id,
         invoiceNumber: invoices.invoiceNumber,
@@ -96,7 +98,8 @@ export async function POST(
       .from(invoices)
       .leftJoin(clients, eq(invoices.clientId, clients.id))
       .where(and(eq(invoices.id, id), eq(invoices.salonId, salonId)))
-      .limit(1);
+      .limit(1)
+    );
 
     if (rows.length === 0) {
       return NextResponse.json(
@@ -159,15 +162,19 @@ Attachment: ${invoice.invoiceNumber.replace(/\//g, "_")}.pdf (would be attached 
 ${"=".repeat(70)}
 `);
 
-    // Update invoice with email sent timestamp
+    // Update invoice with email sent timestamp — przez forSalon (kontekst RLS).
+    // Dopisany jawny eq(invoices.salonId, salonId) (defense in depth — oryginał
+    // filtrował tylko po id; własność weryfikował wcześniejszy select).
     const now = new Date();
-    await db
-      .update(invoices)
-      .set({
-        emailSentAt: now,
-        emailSentTo: recipientEmail,
-      })
-      .where(eq(invoices.id, id));
+    await forSalon(salonId).raw((tx) =>
+      tx
+        .update(invoices)
+        .set({
+          emailSentAt: now,
+          emailSentTo: recipientEmail,
+        })
+        .where(and(eq(invoices.id, id), eq(invoices.salonId, salonId)))
+    );
 
     return NextResponse.json({
       success: true,

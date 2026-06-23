@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
+// `db` zostaje WYŁĄCZNIE do zaufanego rozwiązania sesja→salon
+// (salons.ownerId = userId) — bez salonId nie da się tego puścić pod RLS.
+// Operacje na opinii idą przez forSalon(salon.id).
+// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (sesja→salon); operacje przez forSalon
 import { db } from "@/lib/db";
 import { reviews, salons } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { validateBody, reviewModerateSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // PATCH /api/reviews/[id]/moderate - Approve or reject a review
@@ -52,17 +57,9 @@ export async function PATCH(
       );
     }
 
-    // Find the review and verify it belongs to the owner's salon
-    const [review] = await db
-      .select()
-      .from(reviews)
-      .where(
-        and(
-          eq(reviews.id, reviewId),
-          eq(reviews.salonId, salon.id)
-        )
-      )
-      .limit(1);
+    // Find the review and verify it belongs to the owner's salon (scoped
+    // findOne — cudza/nieistniejąca opinia = null = 404; kontekst RLS ustawiony).
+    const review = await forSalon(salon.id).findOne(reviews, reviewId);
 
     if (!review) {
       return NextResponse.json(
@@ -71,13 +68,11 @@ export async function PATCH(
       );
     }
 
-    // Update the review status
+    // Update the review status (updateOwned domyka eq(salonId) — defense in depth).
     const newStatus = action === "approve" ? "approved" : "rejected";
-    const [updatedReview] = await db
-      .update(reviews)
-      .set({ status: newStatus })
-      .where(eq(reviews.id, reviewId))
-      .returning();
+    const updatedReview = await forSalon(salon.id).updateOwned(reviews, reviewId, {
+      status: newStatus,
+    });
 
     logger.info(`[Reviews Moderation API] Review ${reviewId} ${newStatus} by user ${userId} (salon ${salon.id})`);
 

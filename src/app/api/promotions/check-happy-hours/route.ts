@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- publiczny/quasi-public — salonId z requestu, brak sesji właściciela
 import { db } from "@/lib/db";
 import { promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 
 import { logger } from "@/lib/logger";
+/**
+ * KLASYFIKACJA (R2): PUBLIC / quasi-public — NIE migrowane na forSalon.
+ *
+ * Wołane przy rezerwacji KLIENTA (brak sesji/requireAuth). `salonId` z query
+ * requestu (salon, o który pyta klient). Jedyne zapytanie (`promotions`) zawężone
+ * jawnym `eq(promotions.salonId, salonId)` — brak wycieku promocji innych salonów.
+ * Pozostaje na surowym `db` (poza RLS) celowo — brak kontekstu właściciela
+ * (ADR-001, ścieżki publiczne).
+ */
 /**
  * GET /api/promotions/check-happy-hours
  * Check if a booking time slot qualifies for a happy hours promotion

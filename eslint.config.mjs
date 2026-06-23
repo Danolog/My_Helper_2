@@ -75,19 +75,19 @@ const config = [
     // Trasa importuje forSalon(salonId) z @/lib/server/repository (wymusza
     // izolację salonu), nie surowy `db`.
     //
-    // POZIOM `warn` JEST ŚWIADOMY DO CZASU R3 (bramka F4 review Ryana, runbook
-    // RLS sekcja 9). Stan faktyczny 2026-06-18: 99 tras w src/app/api/** wciąż
-    // importuje surowy `db` (refaktor R2 częściowy, 68 tras zmigrowanych na
-    // forSalon). Podniesienie na `error` TERAZ złamałoby `pnpm lint` → quality-gate
-    // CI na 99 plikach — to nie zamknięcie długu, to zablokowanie repo. Flip na
-    // `error` należy do PR domykającego R3, gdy 0 tras (poza zadeklarowanymi
-    // wyjątkami systemowymi: webhooki/cron/seed) importuje `db`. Do tego czasu
-    // `warn` utrzymuje sygnał w review bez psucia CI. Plan przejścia: ADR-001
-    // sekcja 5/7 (R2 paczkami ~10 tras → R3 flip na `error`).
+    // POZIOM `error` (R3, domknięcie strukturalne). Refaktor R2 jest KOMPLETNY:
+    // wszystkie trasy owner-scoped migrowane na forSalon. Pozostałe importy `db`
+    // w src/app/api/** to ZADEKLAROWANE WYJĄTKI — każdy opatrzony
+    // `// eslint-disable-next-line no-restricted-imports` z powodem (kontekst
+    // klienta / publiczny katalog / webhook / cron / seed / per-user / globalny
+    // katalog planów / lookup salons.ownerId). Nowy nieoznaczony import `db`
+    // łamie `pnpm lint` → quality-gate CI, co jest celem bramki: każdy nowy
+    // surowy `db` wymaga świadomej decyzji + adnotacji. Plan przejścia: ADR-001
+    // sekcja 5/7 (R2 paczkami → R3 flip na `error`).
     files: ["src/app/api/**/*.ts"],
     ignores: ["src/app/api/**/*.test.ts"],
     rules: {
-      "no-restricted-imports": ["warn", {
+      "no-restricted-imports": ["error", {
         paths: [{
           name: "@/lib/db",
           importNames: ["db"],

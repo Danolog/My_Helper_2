@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+// `db` zostaje WYŁĄCZNIE jako źródło typu DbExecutor (Parameters<db.transaction>);
+// żadna operacja danych nie używa już surowego `db` — wszystko biegnie przez
+// forSalon(salonId).raw, który daje transakcję z kontekstem RLS.
+// eslint-disable-next-line no-restricted-imports -- db tylko jako źródło typu DbExecutor; dane przez forSalon
 import { db } from "@/lib/db";
 import {
   appointments,
@@ -21,6 +25,7 @@ import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 import { validateBody, completeAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 import { logger } from "@/lib/logger";
 
 /**
@@ -126,15 +131,18 @@ export async function POST(
     const { recipe, techniques, notes, commissionPercentage } = body;
 
     // Fetch the appointment with service info, scoped to the caller's salon
-    const result = await db
-      .select({
-        appointment: appointments,
-        service: services,
-      })
-      .from(appointments)
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .limit(1);
+    // (join przez raw(tx) z jawnym eq(salonId) — cudza/nieistniejąca wizyta = 404).
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          appointment: appointments,
+          service: services,
+        })
+        .from(appointments)
+        .leftJoin(services, eq(appointments.serviceId, services.id))
+        .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+        .limit(1)
+    );
 
     const row = result[0];
     if (!row) {
@@ -164,7 +172,13 @@ export async function POST(
     // All mutating operations are wrapped in a single transaction so that
     // a failure at any step (e.g. stock deduction, commission insert) rolls
     // back every preceding write, keeping the database consistent.
-    const txResult = await db.transaction(async (tx) => {
+    // forSalon(salonId).raw daje JEDNĄ transakcję z kontekstem RLS — atomowość
+    // wszystkich operacji zachowana, a każdy zapis biegnie pod rolą app (RLS
+    // odcina cudze wiersze). Tabele bez salonId (treatmentHistory,
+    // employeeCommissions, employeeServicePrices, productUsage, loyaltyTransactions)
+    // są wiązane przez appointmentId/employeeId/loyaltyId tej, już zweryfikowanej
+    // jako własna, wizyty.
+    const txResult = await forSalon(salonId).raw(async (tx) => {
       // 1. Save or update treatment record
       const [existingTreatment] = await tx
         .select()

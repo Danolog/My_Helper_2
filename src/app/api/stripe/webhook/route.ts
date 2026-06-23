@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+// eslint-disable-next-line no-restricted-imports -- webhook Stripe — owner-bypass RLS, brak sesji
 import { db } from "@/lib/db";
 import {
   salonSubscriptions,

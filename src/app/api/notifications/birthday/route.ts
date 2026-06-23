@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+// ŚCIEŻKA SYSTEMOWA (cron): uwierzytelniana przez requireCronSecret, BEZ
+// zalogowanego właściciela. salonId pochodzi z query/body (kontekst wyznaczony
+// z danych, nie z sesji). Zgodnie z ADR-001 (repository.ts:30-34) crony NIE
+// przechodzą przez forSalon — używają surowego `db` (rola owner, świadomy bypass
+// RLS). Trasa celowo POZOSTAJE na `db`.
+// eslint-disable-next-line no-restricted-imports -- cron — owner-bypass RLS, salonId z query/body
 import { db } from "@/lib/db";
 import { clients, notifications, salons } from "@/lib/schema";
 import { eq, sql, and, isNotNull, inArray, like } from "drizzle-orm";

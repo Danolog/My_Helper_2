@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { validateBody, notificationTypeSettingsSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 export interface NotificationTypeSettings {
@@ -38,11 +38,16 @@ export async function GET(
 
     const { id } = await params;
 
-    const [salon] = await db
-      .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, id))
-      .limit(1);
+    // salons = korzeń najemcy: RLS izoluje po `id`, forSalon(id) ustawia kontekst.
+    // Dostęp do cudzego salonu odcina ownerId-check (403) — bez IDOR.
+    const salon = await forSalon(id).raw(async (tx) => {
+      const [row] = await tx
+        .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, id))
+        .limit(1);
+      return row ?? null;
+    });
 
     if (!salon) {
       return NextResponse.json(
@@ -103,12 +108,15 @@ export async function PUT(
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    // Fetch current salon
-    const [salon] = await db
-      .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, id))
-      .limit(1);
+    // Fetch current salon (forSalon: kontekst RLS na id; ownerId-check gwarantuje brak IDOR)
+    const salon = await forSalon(id).raw(async (tx) => {
+      const [row] = await tx
+        .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, id))
+        .limit(1);
+      return row ?? null;
+    });
 
     if (!salon) {
       return NextResponse.json(
@@ -164,10 +172,12 @@ export async function PUT(
     };
 
     // Save to database
-    await db
-      .update(salons)
-      .set({ settingsJson: updatedSettings })
-      .where(eq(salons.id, id));
+    await forSalon(id).raw((tx) =>
+      tx
+        .update(salons)
+        .set({ settingsJson: updatedSettings })
+        .where(eq(salons.id, id))
+    );
 
     logger.info(`[Notification Type Settings API] Updated notification type settings for salon ${id}`,
       { settings: newSettings as unknown as Record<string, unknown> });

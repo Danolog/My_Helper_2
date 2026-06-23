@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isProPlan } from "@/lib/subscription";
-import { db } from "@/lib/db";
+import { forSalon } from "@/lib/server/repository";
 import {
   appointments,
   clients,
@@ -67,6 +67,11 @@ export async function POST(req: Request) {
   const body = rawBody as { appointmentId?: string; callerPhone: string; callerName?: string; preferredDate?: string; preferredTime?: string; notes?: string };
 
   try {
+    // Caly transakcyjny przeplyw (odczyty + update wizyty, log aiConversation)
+    // w jednej transakcji z kontekstem RLS (forSalon). Wczesne wyjscia zwracaja
+    // NextResponse bezposrednio z callbacku. Jawne eq(<tabela>.salonId, salonId)
+    // zachowane jako tama aplikacyjna (defense in depth).
+    return await forSalon(salonId).raw(async (tx) => {
     // ------------------------------------------------------------------
     // Step A: Find the client's upcoming appointment
     // ------------------------------------------------------------------
@@ -88,7 +93,7 @@ export async function POST(req: Request) {
 
     if (body.appointmentId) {
       // Direct lookup by appointment ID
-      const rows = await db
+      const rows = await tx
         .select({
           appointment: appointments,
           client: clients,
@@ -117,7 +122,7 @@ export async function POST(req: Request) {
       }
     } else {
       // Look up client by phone first
-      const clientRows = await db
+      const clientRows = await tx
         .select({
           id: clients.id,
           firstName: clients.firstName,
@@ -147,7 +152,7 @@ export async function POST(req: Request) {
 
       // Find their next upcoming appointment
       const now = new Date();
-      const apptRows = await db
+      const apptRows = await tx
         .select({
           appointment: appointments,
           employee: employees,
@@ -229,7 +234,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step C: Check employee works on the target day
     // ------------------------------------------------------------------
-    const scheduleRows = await db
+    const scheduleRows = await tx
       .select({
         startTime: workSchedules.startTime,
         endTime: workSchedules.endTime,
@@ -265,7 +270,7 @@ export async function POST(req: Request) {
     const dayEnd = new Date(targetDateStr + "T23:59:59");
 
     const [existingAppointments, existingBlocks] = await Promise.all([
-      db
+      tx
         .select({
           id: appointments.id,
           startTime: appointments.startTime,
@@ -274,6 +279,7 @@ export async function POST(req: Request) {
         .from(appointments)
         .where(
           and(
+            eq(appointments.salonId, salonId),
             eq(appointments.employeeId, employeeId),
             not(eq(appointments.status, "cancelled")),
             not(eq(appointments.id, appointmentRow.id)), // Exclude the appointment being rescheduled
@@ -281,7 +287,7 @@ export async function POST(req: Request) {
             lt(appointments.startTime, dayEnd)
           )
         ),
-      db
+      tx
         .select({
           startTime: timeBlocks.startTime,
           endTime: timeBlocks.endTime,
@@ -395,7 +401,7 @@ export async function POST(req: Request) {
     const newStartDate = new Date(targetDateStr + `T${bestSlot.time}:00`);
     const newEndDate = new Date(newStartDate.getTime() + duration * 60 * 1000);
 
-    const [updatedAppointment] = await db
+    const [updatedAppointment] = await tx
       .update(appointments)
       .set({
         startTime: newStartDate,
@@ -412,7 +418,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step G: Send SMS confirmation
     // ------------------------------------------------------------------
-    const salonRows = await db
+    const salonRows = await tx
       .select({ name: salons.name })
       .from(salons)
       .where(eq(salons.id, salonId))
@@ -450,7 +456,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step H: Log the conversation
     // ------------------------------------------------------------------
-    const [conversation] = await db
+    const [conversation] = await tx
       .insert(aiConversations)
       .values({
         salonId: salonId,
@@ -496,6 +502,7 @@ export async function POST(req: Request) {
         phone: body.callerPhone,
       },
       conversationId: conversation?.id || null,
+    });
     });
   } catch (error) {
     logger.error("[Voice AI Reschedule] Error", { error: error });

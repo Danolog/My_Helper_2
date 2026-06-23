@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { serviceVariants, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, createServiceVariantSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/services/[id]/variants - List all variants for a service
@@ -26,11 +26,21 @@ export async function GET(
 
     const { id } = await params;
 
-    // Verify service exists in the caller's salon
-    const [service] = await db
-      .select()
-      .from(services)
-      .where(and(eq(services.id, id), eq(services.salonId, salonId)));
+    // Weryfikacja własności usługi (jawny eq(salonId)) i odczyt wariantów w jednym
+    // kontekście RLS. serviceVariants nie ma salonId — scope idzie przez ownership
+    // usługi-rodzica (FK serviceId -> services.salonId) wewnątrz forSalon.
+    const { service, variants } = await forSalon(salonId).raw(async (tx) => {
+      const [svc] = await tx
+        .select()
+        .from(services)
+        .where(and(eq(services.id, id), eq(services.salonId, salonId)));
+      if (!svc) return { service: null, variants: [] };
+      const rows = await tx
+        .select()
+        .from(serviceVariants)
+        .where(eq(serviceVariants.serviceId, id));
+      return { service: svc, variants: rows };
+    });
 
     if (!service) {
       return NextResponse.json(
@@ -38,11 +48,6 @@ export async function GET(
         { status: 404 }
       );
     }
-
-    const variants = await db
-      .select()
-      .from(serviceVariants)
-      .where(eq(serviceVariants.serviceId, id));
 
     return NextResponse.json({
       success: true,
@@ -83,11 +88,25 @@ export async function POST(
     }
     const { name, priceModifier, durationModifier } = body;
 
-    // Verify service exists in the caller's salon
-    const [service] = await db
-      .select()
-      .from(services)
-      .where(and(eq(services.id, id), eq(services.salonId, salonId)));
+    // Weryfikacja własności usługi + insert wariantu w jednym kontekście RLS.
+    // serviceVariants bez salonId — scope przez ownership usługi (eq salonId) i FK.
+    const { service, newVariant } = await forSalon(salonId).raw(async (tx) => {
+      const [svc] = await tx
+        .select()
+        .from(services)
+        .where(and(eq(services.id, id), eq(services.salonId, salonId)));
+      if (!svc) return { service: null, newVariant: undefined };
+      const [variant] = await tx
+        .insert(serviceVariants)
+        .values({
+          serviceId: id,
+          name: name.trim(),
+          priceModifier: (priceModifier ?? 0).toString(),
+          durationModifier: parseInt(durationModifier ?? "0", 10),
+        })
+        .returning();
+      return { service: svc, newVariant: variant };
+    });
 
     if (!service) {
       return NextResponse.json(
@@ -95,16 +114,6 @@ export async function POST(
         { status: 404 }
       );
     }
-
-    const [newVariant] = await db
-      .insert(serviceVariants)
-      .values({
-        serviceId: id,
-        name: name.trim(),
-        priceModifier: (priceModifier ?? 0).toString(),
-        durationModifier: parseInt(durationModifier ?? "0", 10),
-      })
-      .returning();
 
     logger.info(`[Variants API] Created variant "${name}" for service ${id}`);
 

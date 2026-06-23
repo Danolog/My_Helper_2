@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- kontekst klienta (scope po bookedByUserId z sesji)
 import { db } from "@/lib/db";
 import { appointments, employees, services, salons, depositPayments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
@@ -8,6 +9,15 @@ import { processAutomaticRefund } from "@/lib/refund";
 import { notifyWaitingList } from "@/lib/waiting-list";
 
 import { logger } from "@/lib/logger";
+
+/**
+ * Kontekst KLIENTA — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * Anulacja własnej wizyty: własność wymuszana `eq(appointments.bookedByUserId,
+ * userId)` z SESJI (klient B nie anuluje wizyty klienta A — brak wiersza => 404).
+ * Refund/forfeit/notyfikacje waiting-list to operacje systemowe na zweryfikowanej
+ * już wizycie. Dane klienta rozciągają się na wiele salonów — kontekst właściciela
+ * (forSalon) nie pasuje.
+ */
 // GET /api/client/appointments/[id]/cancel - Get cancellation policy info for client
 export async function GET(
   _request: Request,

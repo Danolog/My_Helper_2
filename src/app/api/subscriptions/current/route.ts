@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// eslint-disable-next-line no-restricted-imports -- globalny katalog planów (subscriptionPlans) poza RLS; reszta przez forSalon
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -34,25 +36,29 @@ export async function GET() {
       );
     }
 
-    // Find the most recent subscription for the salon (active, trialing, or canceled)
-    const results = await db
-      .select({
-        subscription: salonSubscriptions,
-        plan: subscriptionPlans,
-      })
-      .from(salonSubscriptions)
-      .innerJoin(
-        subscriptionPlans,
-        eq(salonSubscriptions.planId, subscriptionPlans.id),
-      )
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          inArray(salonSubscriptions.status, ["active", "trialing", "canceled"]),
-        ),
-      )
-      .orderBy(desc(salonSubscriptions.createdAt))
-      .limit(1);
+    // Find the most recent subscription for the salon (active, trialing, or canceled).
+    // salonSubscriptions jest salon-scoped (jawny eq(salonId) + RLS); innerJoin do
+    // subscriptionPlans (globalny katalog) pod kontekstem forSalon.
+    const results = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          subscription: salonSubscriptions,
+          plan: subscriptionPlans,
+        })
+        .from(salonSubscriptions)
+        .innerJoin(
+          subscriptionPlans,
+          eq(salonSubscriptions.planId, subscriptionPlans.id),
+        )
+        .where(
+          and(
+            eq(salonSubscriptions.salonId, salonId),
+            inArray(salonSubscriptions.status, ["active", "trialing", "canceled"]),
+          ),
+        )
+        .orderBy(desc(salonSubscriptions.createdAt))
+        .limit(1),
+    );
 
     const row = results[0];
 
@@ -67,6 +73,8 @@ export async function GET() {
     // If there's a scheduled plan change (downgrade), fetch the target plan details
     let scheduledPlan: { id: string; name: string; slug: string; priceMonthly: string; features: string[] } | null = null;
     if (row.subscription.scheduledPlanId) {
+      // subscriptionPlans = globalny katalog (BEZ salonId, poza RLS) — odczyt planu
+      // po id zostaje na surowym db (brak kolumny salonId do zawężenia).
       const scheduledPlanAlias = alias(subscriptionPlans, "scheduled_plan");
       const [targetPlan] = await db
         .select()

@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, subscriptionCheckoutSchema } from "@/lib/api-validation";
+// eslint-disable-next-line no-restricted-imports -- globalny katalog planów (subscriptionPlans) poza RLS; reszta przez forSalon
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { subscriptionPlans, salonSubscriptions, subscriptionPayments } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { getStripe, isStripePricesConfigured } from "@/lib/stripe";
 
 /**
@@ -35,19 +37,22 @@ async function createSimulatedSubscription(
   const periodEnd = new Date(now);
   periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-  // Check if there is an existing trialing or canceled subscription to reactivate
+  // Check if there is an existing trialing or canceled subscription to reactivate.
+  // salonSubscriptions + subscriptionPayments są salon-scoped — odczyt i transakcja
+  // przez jeden raw(forSalon) z jawnym eq(salonId) + RLS (atomowo).
   const { inArray } = await import("drizzle-orm");
-  const existingReusable = await db
-    .select()
-    .from(salonSubscriptions)
-    .where(
-      and(
-        eq(salonSubscriptions.salonId, _salonId),
-        inArray(salonSubscriptions.status, ["trialing", "canceled"]),
-      ),
-    );
 
-  return await db.transaction(async (tx) => {
+  return await forSalon(_salonId).raw(async (tx) => {
+    const existingReusable = await tx
+      .select()
+      .from(salonSubscriptions)
+      .where(
+        and(
+          eq(salonSubscriptions.salonId, _salonId),
+          inArray(salonSubscriptions.status, ["trialing", "canceled"]),
+        ),
+      );
+
     let subscription;
 
     if (existingReusable.length > 0 && existingReusable[0]) {
@@ -64,7 +69,12 @@ async function createSimulatedSubscription(
           trialEndsAt: null,
           canceledAt: null,
         })
-        .where(eq(salonSubscriptions.id, existingReusable[0].id))
+        .where(
+          and(
+            eq(salonSubscriptions.id, existingReusable[0].id),
+            eq(salonSubscriptions.salonId, _salonId),
+          ),
+        )
         .returning();
 
       subscription = updated;
@@ -158,7 +168,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Look up the plan in the database
+    // Look up the plan in the database.
+    // subscriptionPlans = globalny katalog (BEZ salonId, poza RLS) — odczyt po slug
+    // zostaje na surowym db (brak kolumny salonId do zawężenia).
     const [plan] = await db
       .select()
       .from(subscriptionPlans)
@@ -176,16 +188,19 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check if salon already has an active subscription for the same plan
-    const existingSubscriptions = await db
-      .select()
-      .from(salonSubscriptions)
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          eq(salonSubscriptions.status, "active"),
+    // Check if salon already has an active subscription for the same plan.
+    // salonSubscriptions jest salon-scoped (jawny eq(salonId) + RLS).
+    const existingSubscriptions = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(salonSubscriptions)
+        .where(
+          and(
+            eq(salonSubscriptions.salonId, salonId),
+            eq(salonSubscriptions.status, "active"),
+          ),
         ),
-      );
+    );
 
     if (existingSubscriptions.length > 0 && existingSubscriptions[0]) {
       const existingSub = existingSubscriptions[0];
@@ -204,7 +219,9 @@ export async function POST(request: Request) {
       const periodEnd = new Date(now);
       periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-      await db.transaction(async (tx) => {
+      // Obie tabele salon-scoped — jeden raw(forSalon) (jedna transakcja, atomowo)
+      // z jawnym eq(salonId) + RLS.
+      await forSalon(salonId).raw(async (tx) => {
         await tx
           .update(salonSubscriptions)
           .set({
@@ -212,7 +229,12 @@ export async function POST(request: Request) {
             currentPeriodStart: now,
             currentPeriodEnd: periodEnd,
           })
-          .where(eq(salonSubscriptions.id, existingSub.id));
+          .where(
+            and(
+              eq(salonSubscriptions.id, existingSub.id),
+              eq(salonSubscriptions.salonId, salonId),
+            ),
+          );
 
         await tx.insert(subscriptionPayments).values({
           subscriptionId: existingSub.id,

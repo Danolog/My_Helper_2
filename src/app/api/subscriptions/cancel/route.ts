@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { getStripe } from "@/lib/stripe";
 
 /**
@@ -34,16 +34,18 @@ export async function POST() {
       );
     }
 
-    // Find the current active subscription
-    const [activeSub] = await db
-      .select()
-      .from(salonSubscriptions)
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          eq(salonSubscriptions.status, "active"),
+    // Find the current active subscription (salon-scoped: jawny eq(salonId) + RLS)
+    const [activeSub] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(salonSubscriptions)
+        .where(
+          and(
+            eq(salonSubscriptions.salonId, salonId),
+            eq(salonSubscriptions.status, "active"),
+          ),
         ),
-      );
+    );
 
     if (!activeSub) {
       return NextResponse.json(
@@ -88,14 +90,15 @@ export async function POST() {
     }
 
     // Update the subscription status to canceled in our database
-    const [updated] = await db
-      .update(salonSubscriptions)
-      .set({
+    // (salon-scoped: updateOwned domyka eq(id) AND eq(salonId) + RLS).
+    const updated = await forSalon(salonId).updateOwned(
+      salonSubscriptions,
+      activeSub.id,
+      {
         status: "canceled",
         canceledAt: now,
-      })
-      .where(eq(salonSubscriptions.id, activeSub.id))
-      .returning();
+      },
+    );
 
     if (!updated) {
       return NextResponse.json(

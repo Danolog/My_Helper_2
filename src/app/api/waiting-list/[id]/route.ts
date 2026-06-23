@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
+// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (sesja→salon); operacje przez forSalon
 import { db } from "@/lib/db";
 import {
   waitingList,
@@ -12,6 +13,7 @@ import { eq, and } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { validateBody, updateWaitingListSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/waiting-list/[id] - Get a single waiting list entry
@@ -48,24 +50,28 @@ export async function GET(
       );
     }
 
-    const result = await db
-      .select({
-        entry: waitingList,
-        client: clients,
-        service: services,
-        employee: employees,
-      })
-      .from(waitingList)
-      .innerJoin(clients, eq(waitingList.clientId, clients.id))
-      .leftJoin(services, eq(waitingList.serviceId, services.id))
-      .leftJoin(
-        employees,
-        eq(waitingList.preferredEmployeeId, employees.id)
-      )
-      .where(
-        and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
-      )
-      .limit(1);
+    // Join (clients/services/employees) — przez raw(tx) z jawnym
+    // eq(waitingList.salonId) (defense in depth) plus kontekst RLS.
+    const result = await forSalon(salon.id).raw((tx) =>
+      tx
+        .select({
+          entry: waitingList,
+          client: clients,
+          service: services,
+          employee: employees,
+        })
+        .from(waitingList)
+        .innerJoin(clients, eq(waitingList.clientId, clients.id))
+        .leftJoin(services, eq(waitingList.serviceId, services.id))
+        .leftJoin(
+          employees,
+          eq(waitingList.preferredEmployeeId, employees.id)
+        )
+        .where(
+          and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
+        )
+        .limit(1)
+    );
 
     const row = result[0];
     if (!row) {
@@ -142,13 +148,15 @@ export async function PUT(
     }
 
     // Verify the entry belongs to this salon
-    const [existing] = await db
-      .select()
-      .from(waitingList)
-      .where(
-        and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
-      )
-      .limit(1);
+    const [existing] = await forSalon(salon.id).raw((tx) =>
+      tx
+        .select()
+        .from(waitingList)
+        .where(
+          and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
+        )
+        .limit(1)
+    );
 
     if (!existing) {
       return NextResponse.json(
@@ -195,11 +203,18 @@ export async function PUT(
       );
     }
 
-    const [updatedEntry] = await db
-      .update(waitingList)
-      .set(updateData)
-      .where(eq(waitingList.id, id))
-      .returning();
+    // FIX IDOR: poprzedni update zawężał TYLKO po eq(waitingList.id) (bez
+    // salonId) — polegał wyłącznie na wcześniejszej weryfikacji `existing`.
+    // Teraz jawne eq(waitingList.salonId) + kontekst RLS (defense in depth).
+    const [updatedEntry] = await forSalon(salon.id).raw((tx) =>
+      tx
+        .update(waitingList)
+        .set(updateData)
+        .where(
+          and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
+        )
+        .returning()
+    );
 
     logger.info(`[WaitingList API] PUT: Updated entry ${id} in salon ${salon.id}`,
       updateData);
@@ -252,13 +267,16 @@ export async function DELETE(
       );
     }
 
-    // Verify and delete the entry (must belong to this salon)
-    const [deletedEntry] = await db
-      .delete(waitingList)
-      .where(
-        and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
-      )
-      .returning();
+    // Verify and delete the entry (must belong to this salon) — jawne
+    // eq(waitingList.salonId) (defense in depth) plus kontekst RLS.
+    const [deletedEntry] = await forSalon(salon.id).raw((tx) =>
+      tx
+        .delete(waitingList)
+        .where(
+          and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
+        )
+        .returning()
+    );
 
     if (!deletedEntry) {
       return NextResponse.json(

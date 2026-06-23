@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
+// `db` zostaje WYŁĄCZNIE do zaufanego rozwiązania sesja→salon
+// (salons.ownerId = userId) — ten lookup nie ma jeszcze salonId, więc nie może
+// biec pod RLS (analogicznie do getUserSalon). Zapytania o opinie idą przez
+// forSalon(salon.id).
+// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (sesja→salon); operacje przez forSalon
 import { db } from "@/lib/db";
 import { reviews, salons, clients, employees, services, appointments } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/reviews - List reviews for the owner's salon with optional status filter
@@ -36,21 +42,25 @@ export async function GET(request: Request) {
       conditions.push(eq(reviews.status, status));
     }
 
-    const result = await db
-      .select({
-        review: reviews,
-        client: clients,
-        employee: employees,
-        service: services,
-        appointment: appointments,
-      })
-      .from(reviews)
-      .leftJoin(clients, eq(reviews.clientId, clients.id))
-      .leftJoin(employees, eq(reviews.employeeId, employees.id))
-      .leftJoin(appointments, eq(reviews.appointmentId, appointments.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(and(...conditions))
-      .orderBy(desc(reviews.createdAt));
+    // Join — przez raw(tx) z jawnym eq(reviews.salonId) w `conditions` (defense
+    // in depth: filtr aplikacyjny widoczny, kontekst RLS ustawiony przez forSalon).
+    const result = await forSalon(salon.id).raw((tx) =>
+      tx
+        .select({
+          review: reviews,
+          client: clients,
+          employee: employees,
+          service: services,
+          appointment: appointments,
+        })
+        .from(reviews)
+        .leftJoin(clients, eq(reviews.clientId, clients.id))
+        .leftJoin(employees, eq(reviews.employeeId, employees.id))
+        .leftJoin(appointments, eq(reviews.appointmentId, appointments.id))
+        .leftJoin(services, eq(appointments.serviceId, services.id))
+        .where(and(...conditions))
+        .orderBy(desc(reviews.createdAt))
+    );
 
     const formattedReviews = result.map((row) => ({
       id: row.review.id,

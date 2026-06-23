@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- kontekst klienta (scope po bookedByUserId z sesji)
 import { db } from "@/lib/db";
 import { appointments, employees, services, salons, treatmentHistory, depositPayments, serviceVariants } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
@@ -6,6 +7,13 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/validations";
 
 import { logger } from "@/lib/logger";
+
+/**
+ * Kontekst KLIENTA — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * Własność wymuszana warunkiem `eq(appointments.bookedByUserId, userId)` z SESJI
+ * (klient A nie odczyta wizyty klienta B — brak wiersza => 404). Dane rozciągają
+ * się na wiele salonów, więc kontekst pojedynczego salonu właściciela nie pasuje.
+ */
 // GET /api/client/appointments/[id] - Get appointment detail for the authenticated client user
 export async function GET(
   _request: Request,

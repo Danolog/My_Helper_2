@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
+// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (sesja→salon); operacje przez forSalon
 import { db } from "@/lib/db";
 import {
   waitingList,
@@ -12,6 +13,7 @@ import { eq, and, desc, isNull, isNotNull } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { validateBody, createWaitingListSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/waiting-list - List waiting list entries for the salon owner's salon
@@ -72,22 +74,26 @@ export async function GET(request: Request) {
       conditions.push(eq(waitingList.accepted, false));
     }
 
-    const result = await db
-      .select({
-        entry: waitingList,
-        client: clients,
-        service: services,
-        employee: employees,
-      })
-      .from(waitingList)
-      .innerJoin(clients, eq(waitingList.clientId, clients.id))
-      .leftJoin(services, eq(waitingList.serviceId, services.id))
-      .leftJoin(
-        employees,
-        eq(waitingList.preferredEmployeeId, employees.id)
-      )
-      .where(and(...conditions))
-      .orderBy(desc(waitingList.createdAt));
+    // Join (clients/services/employees) — przez raw(tx) z jawnym
+    // eq(waitingList.salonId) w conditions (defense in depth) plus kontekst RLS.
+    const result = await forSalon(salon.id).raw((tx) =>
+      tx
+        .select({
+          entry: waitingList,
+          client: clients,
+          service: services,
+          employee: employees,
+        })
+        .from(waitingList)
+        .innerJoin(clients, eq(waitingList.clientId, clients.id))
+        .leftJoin(services, eq(waitingList.serviceId, services.id))
+        .leftJoin(
+          employees,
+          eq(waitingList.preferredEmployeeId, employees.id)
+        )
+        .where(and(...conditions))
+        .orderBy(desc(waitingList.createdAt))
+    );
 
     const formattedEntries = result.map((row) => ({
       id: row.entry.id,
@@ -165,11 +171,13 @@ export async function POST(request: Request) {
     const { clientId, serviceId, preferredEmployeeId, preferredDate } = body;
 
     // Verify the client belongs to this salon
-    const [client] = await db
-      .select()
-      .from(clients)
-      .where(and(eq(clients.id, clientId), eq(clients.salonId, salon.id)))
-      .limit(1);
+    const [client] = await forSalon(salon.id).raw((tx) =>
+      tx
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.salonId, salon.id)))
+        .limit(1)
+    );
 
     if (!client) {
       return NextResponse.json(
@@ -180,13 +188,15 @@ export async function POST(request: Request) {
 
     // Validate serviceId if provided
     if (serviceId) {
-      const [service] = await db
-        .select()
-        .from(services)
-        .where(
-          and(eq(services.id, serviceId), eq(services.salonId, salon.id))
-        )
-        .limit(1);
+      const [service] = await forSalon(salon.id).raw((tx) =>
+        tx
+          .select()
+          .from(services)
+          .where(
+            and(eq(services.id, serviceId), eq(services.salonId, salon.id))
+          )
+          .limit(1)
+      );
 
       if (!service) {
         return NextResponse.json(
@@ -201,16 +211,18 @@ export async function POST(request: Request) {
 
     // Validate preferredEmployeeId if provided
     if (preferredEmployeeId) {
-      const [employee] = await db
-        .select()
-        .from(employees)
-        .where(
-          and(
-            eq(employees.id, preferredEmployeeId),
-            eq(employees.salonId, salon.id)
+      const [employee] = await forSalon(salon.id).raw((tx) =>
+        tx
+          .select()
+          .from(employees)
+          .where(
+            and(
+              eq(employees.id, preferredEmployeeId),
+              eq(employees.salonId, salon.id)
+            )
           )
-        )
-        .limit(1);
+          .limit(1)
+      );
 
       if (!employee) {
         return NextResponse.json(
@@ -223,16 +235,18 @@ export async function POST(request: Request) {
       }
     }
 
-    const [newEntry] = await db
-      .insert(waitingList)
-      .values({
-        salonId: salon.id,
-        clientId,
-        serviceId: serviceId || null,
-        preferredEmployeeId: preferredEmployeeId || null,
-        preferredDate: preferredDate ? new Date(preferredDate) : null,
-      })
-      .returning();
+    const [newEntry] = await forSalon(salon.id).raw((tx) =>
+      tx
+        .insert(waitingList)
+        .values({
+          salonId: salon.id,
+          clientId,
+          serviceId: serviceId || null,
+          preferredEmployeeId: preferredEmployeeId || null,
+          preferredDate: preferredDate ? new Date(preferredDate) : null,
+        })
+        .returning()
+    );
 
     logger.info(`[WaitingList API] POST: Created entry ${newEntry?.id} for client ${clientId} in salon ${salon.id}`);
 

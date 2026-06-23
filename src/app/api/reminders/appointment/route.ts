@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- cron — owner-bypass RLS, skan wielu salonów
 import { db } from "@/lib/db";
 import { appointments, clients, salons, services, employees } from "@/lib/schema";
 import { and, eq, gte, lte, isNull, inArray } from "drizzle-orm";
@@ -7,6 +8,15 @@ import { requireCronSecret } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
+
+/**
+ * Trasa SYSTEMOWA (cron) — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * Chroniona `requireCronSecret` — brak zalogowanego właściciela w sesji, więc
+ * `forSalon` (wymaga salonId WŁAŚCICIELA z sesji) jest nieaplikowalny. Cron skanuje
+ * wizyty wielu salonów (opcjonalny filtr ?salonId), wysyła SMS i robi batch-update
+ * `reminderSentAt` — operacja owner-bypass RLS z założenia (analogicznie do
+ * webhooków/cronów w komentarzie repository.ts).
+ */
 /**
  * POST /api/reminders/appointment
  *

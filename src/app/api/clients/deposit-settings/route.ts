@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { clients } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -35,19 +35,21 @@ export async function GET(request: Request) {
       );
     }
 
-    // Look up the client in the salon by email
-    const [client] = await db
-      .select({
-        id: clients.id,
-        firstName: clients.firstName,
-        lastName: clients.lastName,
-        requireDeposit: clients.requireDeposit,
-        depositType: clients.depositType,
-        depositValue: clients.depositValue,
-      })
-      .from(clients)
-      .where(and(eq(clients.salonId, salonId), eq(clients.email, email)))
-      .limit(1);
+    // Look up the client in the salon by email (jawny eq(salonId) + RLS przez forSalon)
+    const [client] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          id: clients.id,
+          firstName: clients.firstName,
+          lastName: clients.lastName,
+          requireDeposit: clients.requireDeposit,
+          depositType: clients.depositType,
+          depositValue: clients.depositValue,
+        })
+        .from(clients)
+        .where(and(eq(clients.salonId, salonId), eq(clients.email, email)))
+        .limit(1)
+    );
 
     if (!client) {
       return NextResponse.json({

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- kontekst klienta (scope po userId z sesji)
 import { db } from "@/lib/db";
 import {
   waitingList,
@@ -12,6 +13,15 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, clientWaitingListSchema } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
+
+/**
+ * Kontekst KLIENTA — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * Wpisy klienta na listach oczekujących w RÓŻNYCH salonach: wiązanie po
+ * `clients.email === session.user.email` (tożsamość z SESJI), nie po query/body.
+ * POST waliduje salon/usługę/pracownika względem podanego salonId i tworzy wpis
+ * tylko dla rekordu klienta tego użytkownika. Wielo-salonowy zakres => forSalon
+ * (kontekst jednego salonu właściciela) nie pasuje.
+ */
 // GET /api/client/waiting-list - List waiting list entries for the authenticated client
 export async function GET() {
   try {

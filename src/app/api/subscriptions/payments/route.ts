@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import {
   subscriptionPayments,
   salonSubscriptions,
   subscriptionPlans,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 /**
@@ -59,8 +59,12 @@ export async function GET(request: NextRequest) {
       conditions.push(lte(subscriptionPayments.createdAt, endDate));
     }
 
-    // Query subscription payments with plan info
-    const rows = await db
+    // Query subscription payments with plan info.
+    // subscriptionPayments jest salon-scoped (jawny eq(salonId) w conditions + RLS);
+    // leftJoin do salonSubscriptions (salon-scoped) i subscriptionPlans (globalny
+    // katalog) pod kontekstem forSalon.
+    const rows = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: subscriptionPayments.id,
         subscriptionId: subscriptionPayments.subscriptionId,
@@ -89,7 +93,8 @@ export async function GET(request: NextRequest) {
         eq(salonSubscriptions.planId, subscriptionPlans.id),
       )
       .where(and(...conditions))
-      .orderBy(desc(subscriptionPayments.createdAt));
+      .orderBy(desc(subscriptionPayments.createdAt)),
+    );
 
     // Pagination
     const total = rows.length;

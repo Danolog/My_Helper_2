@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
 import {
   clients,
   marketingConsents,
@@ -10,6 +9,7 @@ import {
 import { eq, and, isNull, isNotNull } from "drizzle-orm";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { forSalon } from "@/lib/server/repository";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
@@ -74,17 +74,19 @@ export async function POST(
   const { recipientIds } = parsed.data;
 
   try {
-    // Fetch newsletter
-    const [newsletter] = await db
-      .select()
-      .from(newsletters)
-      .where(
-        and(
-          eq(newsletters.id, newsletterId),
-          eq(newsletters.salonId, salonId)
+    // Fetch newsletter — jawne eq(newsletters.salonId) (defense in depth) + RLS.
+    const [newsletter] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(newsletters)
+        .where(
+          and(
+            eq(newsletters.id, newsletterId),
+            eq(newsletters.salonId, salonId)
+          )
         )
-      )
-      .limit(1);
+        .limit(1)
+    );
 
     if (!newsletter) {
       return Response.json(
@@ -93,26 +95,27 @@ export async function POST(
       );
     }
 
-    // Get consented clients with email
-    let consentedClientsQuery = db
-      .select({
-        clientId: clients.id,
-        firstName: clients.firstName,
-        lastName: clients.lastName,
-        email: clients.email,
-      })
-      .from(marketingConsents)
-      .innerJoin(clients, eq(marketingConsents.clientId, clients.id))
-      .where(
-        and(
-          eq(marketingConsents.salonId, salonId),
-          eq(marketingConsents.consentType, "email"),
-          isNull(marketingConsents.revokedAt),
-          isNotNull(clients.email)
+    // Get consented clients with email — innerJoin przez raw(tx) z jawnym
+    // eq(marketingConsents.salonId) (defense in depth) plus kontekst RLS.
+    const allConsented = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          clientId: clients.id,
+          firstName: clients.firstName,
+          lastName: clients.lastName,
+          email: clients.email,
+        })
+        .from(marketingConsents)
+        .innerJoin(clients, eq(marketingConsents.clientId, clients.id))
+        .where(
+          and(
+            eq(marketingConsents.salonId, salonId),
+            eq(marketingConsents.consentType, "email"),
+            isNull(marketingConsents.revokedAt),
+            isNotNull(clients.email)
+          )
         )
-      );
-
-    const allConsented = await consentedClientsQuery;
+    );
 
     // Filter to valid emails
     let recipients = allConsented.filter(
@@ -183,7 +186,10 @@ export async function POST(
     // Wrap all database writes in a transaction for atomicity:
     // - batch insert notification records for each recipient
     // - update the newsletter with sent timestamp and recipient count
-    await db.transaction(async (tx) => {
+    // notifications + newsletters są salon-scoped — batch insert + update w jednym
+    // raw(forSalon) (jedna transakcja z RLS). Update newslettera z jawnym
+    // eq(newsletters.salonId) (defense in depth; wcześniej tylko eq(id)).
+    await forSalon(salonId).raw(async (tx) => {
       const notificationRows = sentDetails.map((detail) => ({
         salonId: salonId,
         clientId: detail.clientId,
@@ -206,7 +212,12 @@ export async function POST(
           sentAt: new Date(),
           recipientsCount: sentCount,
         })
-        .where(eq(newsletters.id, newsletterId));
+        .where(
+          and(
+            eq(newsletters.id, newsletterId),
+            eq(newsletters.salonId, salonId)
+          )
+        );
     });
 
     return Response.json({

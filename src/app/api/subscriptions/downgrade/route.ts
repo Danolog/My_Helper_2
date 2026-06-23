@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// eslint-disable-next-line no-restricted-imports -- globalny katalog planów (subscriptionPlans) poza RLS; reszta przez forSalon
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { downgradeSubscriptionSchema, validateBody } from "@/lib/api-validation";
 
 import { logger } from "@/lib/logger";
@@ -37,23 +39,27 @@ export async function POST(request: Request) {
 
     const { targetPlanSlug } = rawBody as { targetPlanSlug: string };
 
-    // Find the current active subscription
-    const [activeSub] = await db
-      .select({
-        subscription: salonSubscriptions,
-        plan: subscriptionPlans,
-      })
-      .from(salonSubscriptions)
-      .innerJoin(
-        subscriptionPlans,
-        eq(salonSubscriptions.planId, subscriptionPlans.id),
-      )
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          eq(salonSubscriptions.status, "active"),
+    // Find the current active subscription.
+    // salonSubscriptions jest salon-scoped (jawny eq(salonId) + RLS); innerJoin do
+    // subscriptionPlans (globalny katalog) pod kontekstem forSalon.
+    const [activeSub] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          subscription: salonSubscriptions,
+          plan: subscriptionPlans,
+        })
+        .from(salonSubscriptions)
+        .innerJoin(
+          subscriptionPlans,
+          eq(salonSubscriptions.planId, subscriptionPlans.id),
+        )
+        .where(
+          and(
+            eq(salonSubscriptions.salonId, salonId),
+            eq(salonSubscriptions.status, "active"),
+          ),
         ),
-      );
+    );
 
     if (!activeSub) {
       return NextResponse.json(
@@ -70,7 +76,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Find the target plan
+    // Find the target plan.
+    // subscriptionPlans = globalny katalog (BEZ salonId, poza RLS) — odczyt po slug
+    // zostaje na surowym db (brak kolumny salonId do zawężenia).
     const [targetPlan] = await db
       .select()
       .from(subscriptionPlans)
@@ -102,14 +110,15 @@ export async function POST(request: Request) {
     // Schedule the downgrade to take effect at the end of the current billing period
     const scheduledChangeAt = activeSub.subscription.currentPeriodEnd || new Date();
 
-    const [updated] = await db
-      .update(salonSubscriptions)
-      .set({
+    // salon-scoped: updateOwned domyka eq(id) AND eq(salonId) + RLS.
+    const updated = await forSalon(salonId).updateOwned(
+      salonSubscriptions,
+      activeSub.subscription.id,
+      {
         scheduledPlanId: targetPlan.id,
         scheduledChangeAt,
-      })
-      .where(eq(salonSubscriptions.id, activeSub.subscription.id))
-      .returning();
+      },
+    );
 
     if (!updated) {
       return NextResponse.json(
@@ -155,16 +164,19 @@ export async function DELETE() {
       );
     }
 
-    // Find the current active subscription with a scheduled downgrade
-    const [activeSub] = await db
-      .select()
-      .from(salonSubscriptions)
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          eq(salonSubscriptions.status, "active"),
+    // Find the current active subscription with a scheduled downgrade.
+    // salonSubscriptions jest salon-scoped (jawny eq(salonId) + RLS).
+    const [activeSub] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(salonSubscriptions)
+        .where(
+          and(
+            eq(salonSubscriptions.salonId, salonId),
+            eq(salonSubscriptions.status, "active"),
+          ),
         ),
-      );
+    );
 
     if (!activeSub) {
       return NextResponse.json(
@@ -181,13 +193,11 @@ export async function DELETE() {
     }
 
     // Clear the scheduled downgrade
-    await db
-      .update(salonSubscriptions)
-      .set({
-        scheduledPlanId: null,
-        scheduledChangeAt: null,
-      })
-      .where(eq(salonSubscriptions.id, activeSub.id));
+    // (salon-scoped: updateOwned domyka eq(id) AND eq(salonId) + RLS).
+    await forSalon(salonId).updateOwned(salonSubscriptions, activeSub.id, {
+      scheduledPlanId: null,
+      scheduledChangeAt: null,
+    });
 
     // eslint-disable-next-line no-console
     logger.info(`[Subscriptions API] Scheduled downgrade cancelled for subscription ${activeSub.id}`,);

@@ -27,6 +27,8 @@ interface MockTx {
   select: (...args: unknown[]) => ReturnType<typeof mockDbSelect>;
   insert: (...args: unknown[]) => ReturnType<typeof mockDbInsert>;
   update: (...args: unknown[]) => ReturnType<typeof mockDbUpdate>;
+  // forSalon().raw() owija db.transaction i wola tx.execute (SET LOCAL ROLE + set_config)
+  execute: (...args: unknown[]) => Promise<undefined>;
 }
 
 vi.mock("@/lib/db", () => {
@@ -36,6 +38,7 @@ vi.mock("@/lib/db", () => {
     select: (...args: unknown[]) => mockDbSelect(...args),
     insert: (...args: unknown[]) => mockDbInsert(...args),
     update: (...args: unknown[]) => mockDbUpdate(...args),
+    execute: () => Promise.resolve(undefined),
   };
   return {
     db: {
@@ -76,7 +79,11 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
   like: vi.fn((...args: unknown[]) => ({ type: "like", args })),
-  sql: vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+  // sql uzywane jako tag + sql.raw (repository.ts withSalonContext: SET LOCAL ROLE)
+  sql: Object.assign(
+    (...args: unknown[]) => ({ type: "sql", args }),
+    { raw: (s: string) => ({ type: "sql.raw", s }) }
+  ),
 }));
 
 vi.mock("@/lib/constants", () => ({

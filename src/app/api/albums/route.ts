@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { albums, photoAlbums } from "@/lib/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, createAlbumSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/albums - List albums for a salon
@@ -21,21 +21,23 @@ export async function GET(_request: Request) {
       );
     }
 
-    // Get albums with photo count
-    const albumsList = await db
-      .select({
-        id: albums.id,
-        salonId: albums.salonId,
-        name: albums.name,
-        category: albums.category,
-        createdAt: albums.createdAt,
-        photoCount: sql<number>`COALESCE(COUNT(${photoAlbums.id}), 0)::int`,
-      })
-      .from(albums)
-      .leftJoin(photoAlbums, eq(albums.id, photoAlbums.albumId))
-      .where(eq(albums.salonId, salonId))
-      .groupBy(albums.id)
-      .orderBy(desc(albums.createdAt));
+    // Get albums with photo count — przez forSalon (RLS); jawny eq(albums.salonId) zachowany.
+    const albumsList = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          id: albums.id,
+          salonId: albums.salonId,
+          name: albums.name,
+          category: albums.category,
+          createdAt: albums.createdAt,
+          photoCount: sql<number>`COALESCE(COUNT(${photoAlbums.id}), 0)::int`,
+        })
+        .from(albums)
+        .leftJoin(photoAlbums, eq(albums.id, photoAlbums.albumId))
+        .where(eq(albums.salonId, salonId))
+        .groupBy(albums.id)
+        .orderBy(desc(albums.createdAt))
+    );
 
     logger.info(`[Albums API] GET: ${albumsList.length} albums found for salon ${salonId}`);
 
@@ -74,14 +76,16 @@ export async function POST(request: Request) {
     }
     const { name, category } = body;
 
-    const [newAlbum] = await db
-      .insert(albums)
-      .values({
-        salonId,
-        name: name.trim(),
-        category: category?.trim() || null,
-      })
-      .returning();
+    const [newAlbum] = await forSalon(salonId).raw((tx) =>
+      tx
+        .insert(albums)
+        .values({
+          salonId,
+          name: name.trim(),
+          category: category?.trim() || null,
+        })
+        .returning()
+    );
 
     logger.info(`[Albums API] Created album: ${newAlbum?.id} - "${newAlbum?.name}"`);
 

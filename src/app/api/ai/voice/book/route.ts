@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isProPlan } from "@/lib/subscription";
-import { db } from "@/lib/db";
+import { forSalon } from "@/lib/server/repository";
 import {
   appointments,
   clients,
@@ -68,10 +68,15 @@ export async function POST(req: Request) {
   const body = rawBody as { serviceId: string; employeeId?: string; preferredDate?: string; preferredTime?: string; callerPhone: string; callerName?: string; notes?: string };
 
   try {
+    // Caly transakcyjny przeplyw (odczyty + zapisy: appointment, klient,
+    // aiConversation) w jednej transakcji z kontekstem RLS (forSalon).
+    // Wczesne wyjscia zwracaja NextResponse bezposrednio z callbacku.
+    // Jawne eq(<tabela>.salonId, salonId) zachowane jako tama aplikacyjna.
+    return await forSalon(salonId).raw(async (tx) => {
     // ------------------------------------------------------------------
     // Step A: Look up the requested service
     // ------------------------------------------------------------------
-    const serviceRows = await db
+    const serviceRows = await tx
       .select({
         id: services.id,
         name: services.name,
@@ -127,7 +132,7 @@ export async function POST(req: Request) {
     if (!employeeId) {
       // Try to find an active employee assigned to this service via the
       // employeeServices junction table who also works on the target day.
-      const assignedRows = await db
+      const assignedRows = await tx
         .select({ employeeId: employeeServices.employeeId })
         .from(employeeServices)
         .innerJoin(employees, eq(employees.id, employeeServices.employeeId))
@@ -152,7 +157,7 @@ export async function POST(req: Request) {
       } else {
         // Fallback: pick any active employee in the salon who works on
         // the target day (join with workSchedules to guarantee schedule).
-        const fallbackRows = await db
+        const fallbackRows = await tx
           .select({ id: employees.id })
           .from(employees)
           .innerJoin(
@@ -182,7 +187,7 @@ export async function POST(req: Request) {
     }
 
     // Fetch employee details (name) for the confirmation message
-    const employeeRows = await db
+    const employeeRows = await tx
       .select({
         id: employees.id,
         firstName: employees.firstName,
@@ -209,7 +214,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step D: Query the employee's work schedule for that day
     // ------------------------------------------------------------------
-    const scheduleRows = await db
+    const scheduleRows = await tx
       .select({
         startTime: workSchedules.startTime,
         endTime: workSchedules.endTime,
@@ -242,7 +247,7 @@ export async function POST(req: Request) {
     const dayEnd = new Date(targetDateStr + "T23:59:59");
 
     const [existingAppointments, existingBlocks] = await Promise.all([
-      db
+      tx
         .select({
           startTime: appointments.startTime,
           endTime: appointments.endTime,
@@ -250,13 +255,14 @@ export async function POST(req: Request) {
         .from(appointments)
         .where(
           and(
+            eq(appointments.salonId, salonId),
             eq(appointments.employeeId, employeeId),
             not(eq(appointments.status, "cancelled")),
             gte(appointments.startTime, dayStart),
             lt(appointments.startTime, dayEnd)
           )
         ),
-      db
+      tx
         .select({
           startTime: timeBlocks.startTime,
           endTime: timeBlocks.endTime,
@@ -362,7 +368,7 @@ export async function POST(req: Request) {
     const slotStartDate = new Date(targetDateStr + `T${bestSlot.time}:00`);
     const slotEndDate = new Date(slotStartDate.getTime() + duration * 60 * 1000);
 
-    const [newAppointment] = await db
+    const [newAppointment] = await tx
       .insert(appointments)
       .values({
         salonId: salonId,
@@ -380,7 +386,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     let clientRecord: { id: string; firstName: string; lastName: string } | undefined;
 
-    const existingClients = await db
+    const existingClients = await tx
       .select({
         id: clients.id,
         firstName: clients.firstName,
@@ -403,7 +409,7 @@ export async function POST(req: Request) {
       const firstName = callerNameParts[0] || "Klient";
       const lastName = callerNameParts.slice(1).join(" ") || "telefoniczny";
 
-      const [newClient] = await db
+      const [newClient] = await tx
         .insert(clients)
         .values({
           salonId: salonId,
@@ -424,7 +430,7 @@ export async function POST(req: Request) {
 
     // Link the client to the appointment if we have a record
     if (clientRecord && newAppointment) {
-      await db
+      await tx
         .update(appointments)
         .set({ clientId: clientRecord.id })
         .where(eq(appointments.id, newAppointment.id));
@@ -433,7 +439,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step I: Send SMS confirmation
     // ------------------------------------------------------------------
-    const salonRows = await db
+    const salonRows = await tx
       .select({ name: salons.name })
       .from(salons)
       .where(eq(salons.id, salonId))
@@ -462,7 +468,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step J: Log the conversation in aiConversations
     // ------------------------------------------------------------------
-    const [conversation] = await db
+    const [conversation] = await tx
       .insert(aiConversations)
       .values({
         salonId: salonId,
@@ -505,6 +511,7 @@ export async function POST(req: Request) {
         phone: body.callerPhone,
       },
       conversationId: conversation?.id || null,
+    });
     });
   } catch (error) {
     logger.error("[Voice AI Book] Error", { error: error });

@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
+// eslint-disable-next-line no-restricted-imports -- kontekst klienta (scope po userId z sesji)
 import { db } from "@/lib/db";
 import { reviews, appointments, employees, services, salons } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 
 import { logger } from "@/lib/logger";
+
+/**
+ * Kontekst KLIENTA — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
+ * Lista MOICH opinii: join opinii->wizyty z filtrem `eq(appointments.bookedByUserId,
+ * userId)` z SESJI. Opinie klienta rozciągają się na wiele salonów — kontekst
+ * pojedynczego salonu właściciela (forSalon) nie pasuje.
+ */
 // GET /api/client/reviews - List all reviews by the authenticated user
 export async function GET() {
   try {

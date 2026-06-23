@@ -20,10 +20,19 @@ import { createMockRequest, createRouteParams, parseResponse, TEST_IDS } from ".
 const mockDbSelect = vi.fn();
 const mockDbUpdate = vi.fn();
 
+// forSalon().raw() otwiera db.transaction() i wola tx.execute (SET LOCAL ROLE +
+// set_config) oraz tx.select/update — tx (inline, by uniknac TDZ w hoistowanej
+// fabryce) deleguje do tych samych mockow co db; execute jest no-opem.
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
     update: (...args: unknown[]) => mockDbUpdate(...args),
+    transaction: (cb: (tx: unknown) => unknown) =>
+      cb({
+        select: (...args: unknown[]) => mockDbSelect(...args),
+        update: (...args: unknown[]) => mockDbUpdate(...args),
+        execute: () => Promise.resolve(undefined),
+      }),
   },
 }));
 
@@ -38,9 +47,16 @@ vi.mock("@/lib/schema", () => {
   return { salons: createTable("salons") };
 });
 
+// `sql` / `sql.raw` uzywane przez repository.ts (withSalonContext: SET LOCAL ROLE
+// + set_config). tx.execute jest no-opem, wiec wartosci nieistotne — maja tylko
+// nie rzucac. Inline (TDZ w hoistowanej fabryce); mock nadpisuje realne `sql`.
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  sql: Object.assign(
+    (...args: unknown[]) => ({ type: "sql", args }),
+    { raw: (s: string) => ({ type: "sql.raw", s }) }
+  ),
 }));
 
 // requireAuth returns the CALLER. Tests flip the caller's user id to simulate

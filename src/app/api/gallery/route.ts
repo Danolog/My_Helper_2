@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, createGalleryPhotoSchema } from "@/lib/api-validation";
+import { forSalon } from "@/lib/server/repository";
 
 import { logger } from "@/lib/logger";
 // GET /api/gallery - List gallery photos
@@ -34,28 +34,32 @@ export async function GET(request: Request) {
       conditions.push(eq(galleryPhotos.serviceId, serviceId));
     }
 
-    const photos = await db
-      .select({
-        id: galleryPhotos.id,
-        salonId: galleryPhotos.salonId,
-        employeeId: galleryPhotos.employeeId,
-        serviceId: galleryPhotos.serviceId,
-        beforePhotoUrl: galleryPhotos.beforePhotoUrl,
-        afterPhotoUrl: galleryPhotos.afterPhotoUrl,
-        description: galleryPhotos.description,
-        productsUsed: galleryPhotos.productsUsed,
-        techniques: galleryPhotos.techniques,
-        duration: galleryPhotos.duration,
-        createdAt: galleryPhotos.createdAt,
-        employeeFirstName: employees.firstName,
-        employeeLastName: employees.lastName,
-        serviceName: services.name,
-      })
-      .from(galleryPhotos)
-      .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
-      .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-      .where(and(...conditions))
-      .orderBy(desc(galleryPhotos.createdAt));
+    // leftJoin (employees/services) — przez raw(tx) z jawnym eq(salonId) w
+    // conditions (defense in depth) plus kontekst RLS ustawiony przez forSalon.
+    const photos = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          id: galleryPhotos.id,
+          salonId: galleryPhotos.salonId,
+          employeeId: galleryPhotos.employeeId,
+          serviceId: galleryPhotos.serviceId,
+          beforePhotoUrl: galleryPhotos.beforePhotoUrl,
+          afterPhotoUrl: galleryPhotos.afterPhotoUrl,
+          description: galleryPhotos.description,
+          productsUsed: galleryPhotos.productsUsed,
+          techniques: galleryPhotos.techniques,
+          duration: galleryPhotos.duration,
+          createdAt: galleryPhotos.createdAt,
+          employeeFirstName: employees.firstName,
+          employeeLastName: employees.lastName,
+          serviceName: services.name,
+        })
+        .from(galleryPhotos)
+        .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
+        .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
+        .where(and(...conditions))
+        .orderBy(desc(galleryPhotos.createdAt))
+    );
 
     logger.info(`[Gallery API] GET: ${photos.length} photos found (filters: employeeId=${employeeId || 'none'}, serviceId=${serviceId || 'none'})`);
 
@@ -103,7 +107,8 @@ export async function POST(request: Request) {
       duration,
     } = body;
 
-    const [newPhoto] = await db
+    const [newPhoto] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(galleryPhotos)
       .values({
         salonId,
@@ -116,7 +121,8 @@ export async function POST(request: Request) {
         techniques: techniques || null,
         duration: duration ? parseInt(duration, 10) : null,
       })
-      .returning();
+      .returning()
+    );
 
     logger.info(`[Gallery API] Created photo: ${newPhoto?.id}`);
 
