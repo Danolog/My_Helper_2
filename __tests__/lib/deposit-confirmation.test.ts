@@ -18,7 +18,6 @@ const {
   txReturningQueue,
   mockTxUpdate,
   mockTxSet,
-  mockTxReturning,
   mockTransaction,
   mockSendSms,
 } = vi.hoisted(() => {
@@ -28,7 +27,7 @@ const {
     Promise.resolve(selectQueue.length > 0 ? selectQueue.shift()! : [])
   );
   const mockDbSelectFrom = vi.fn(() => ({ where: mockDbSelectWhere }));
-  const mockDbSelect = vi.fn(() => ({ from: mockDbSelectFrom }));
+  const mockDbSelect = vi.fn((..._args: unknown[]) => ({ from: mockDbSelectFrom }));
 
   // tx.update().set().where().returning() — kolejne wyniki z kolejki
   const txReturningQueue: unknown[][] = [];
@@ -36,7 +35,7 @@ const {
     Promise.resolve(txReturningQueue.length > 0 ? txReturningQueue.shift()! : [])
   );
   const mockTxWhere = vi.fn(() => ({ returning: mockTxReturning }));
-  const mockTxSet = vi.fn(() => ({ where: mockTxWhere }));
+  const mockTxSet = vi.fn((..._args: unknown[]) => ({ where: mockTxWhere }));
   const mockTxUpdate = vi.fn(() => ({ set: mockTxSet }));
 
   const mockTransaction = vi.fn(

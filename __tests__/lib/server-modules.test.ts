@@ -16,7 +16,7 @@ const { mockForSalon, mockRaw, mockTxLimit, mockLoggerError } = vi.hoisted(() =>
   const mockTx = { select: mockTxSelect };
   // raw(fn) wykonuje callback na zamockowanym kliencie transakcyjnym
   const mockRaw = vi.fn((fn: (tx: typeof mockTx) => unknown) => fn(mockTx));
-  const mockForSalon = vi.fn(() => ({ raw: mockRaw }));
+  const mockForSalon = vi.fn((..._args: unknown[]) => ({ raw: mockRaw }));
   const mockLoggerError = vi.fn();
   return { mockForSalon, mockRaw, mockTxLimit, mockLoggerError };
 });

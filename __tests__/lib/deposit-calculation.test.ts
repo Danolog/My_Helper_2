@@ -13,7 +13,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { selectQueue, mockDbSelect, mockDbSelectFrom, mockDbSelectWhere } = vi.hoisted(() => {
+const { selectQueue, mockDbSelect } = vi.hoisted(() => {
   const selectQueue: unknown[][] = [];
   const mockDbSelectWhere = vi.fn(() => {
     const result = selectQueue.length > 0 ? selectQueue.shift()! : [];
@@ -24,7 +24,7 @@ const { selectQueue, mockDbSelect, mockDbSelectFrom, mockDbSelectWhere } = vi.ho
     return thenable;
   });
   const mockDbSelectFrom = vi.fn(() => ({ where: mockDbSelectWhere }));
-  const mockDbSelect = vi.fn(() => ({ from: mockDbSelectFrom }));
+  const mockDbSelect = vi.fn((..._args: unknown[]) => ({ from: mockDbSelectFrom }));
   return { selectQueue, mockDbSelect, mockDbSelectFrom, mockDbSelectWhere };
 });
 
