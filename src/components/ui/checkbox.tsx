@@ -17,9 +17,13 @@ const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
 
     return (
       <div className="relative inline-flex items-center">
+        {/* Realny input NAKRYWA stylizowane pole (przezroczysty, klikalny)
+            zamiast sr-only: klik/label/testy E2E trafiaja bezposrednio w
+            kontrolke — ukryty input nigdy nie jest "visible" dla Playwrighta
+            (setChecked na [id^="service-"] wisialo w E2E od 2026-06). */}
         <input
           type="checkbox"
-          className="sr-only peer"
+          className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
           ref={ref}
           checked={checked}
           onChange={handleChange}
@@ -27,15 +31,9 @@ const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
         />
         <div
           className={cn(
-            "h-4 w-4 shrink-0 rounded-sm border border-primary shadow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-checked:bg-primary peer-checked:text-primary-foreground flex items-center justify-center cursor-pointer",
+            "h-4 w-4 shrink-0 rounded-sm border border-primary shadow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-checked:bg-primary peer-checked:text-primary-foreground flex items-center justify-center",
             className
           )}
-          onClick={() => {
-            const input = ref && "current" in ref ? ref.current : null;
-            if (input) {
-              input.click();
-            }
-          }}
         >
           {checked && <Check className="h-3 w-3" />}
         </div>
