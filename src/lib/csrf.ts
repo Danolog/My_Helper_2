@@ -17,22 +17,24 @@ export const CSRF_SECRET_COOKIE = "csrf-secret";
 export const CSRF_TOKEN_COOKIE = "csrf-token";
 export const CSRF_HEADER = "x-csrf-token";
 
-// Fail-closed: w produkcji brak BETTER_AUTH_SECRET zatrzymuje aplikację przy
-// starcie zamiast po cichu podpisywać tokeny znanym, publicznym sekretem.
-const APP_SECRET: string = (() => {
+// Fail-closed: w produkcji brak BETTER_AUTH_SECRET odrzuca każdą operację
+// CSRF zamiast po cichu podpisywać tokeny znanym, publicznym dev-sekretem.
+// Leniwie (przy pierwszym użyciu, nie przy imporcie) — `next build` ewaluuje
+// moduły tras bez env i import-time throw wywalałby build.
+function getAppSecret(): string {
   const secret = process.env.BETTER_AUTH_SECRET;
   if (secret) return secret;
   if (process.env.NODE_ENV === "production") {
     throw new Error("CSRF: BETTER_AUTH_SECRET jest wymagany w produkcji");
   }
   return "dev-csrf-secret-must-be-32-chars-long";
-})();
+}
 
 export async function hmacSign(data: string): Promise<string> {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
-    enc.encode(APP_SECRET),
+    enc.encode(getAppSecret()),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
