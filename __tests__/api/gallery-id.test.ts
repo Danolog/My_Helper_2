@@ -98,8 +98,12 @@ vi.mock("@/lib/schema", () => {
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
-  // `sql` używa warstwa repo (forSalon) do SET LOCAL app.current_salon_id.
-  sql: vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+  // `sql` używa warstwa repo (forSalon): sql`...` do set_config oraz
+  // sql.raw(...) do SET LOCAL ROLE (naprawa W2) — mock musi mieć oba.
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((query: string) => ({ type: "sql.raw", query })) }
+  ),
 }));
 
 // fs unlink must never be reached on a foreign-salon DELETE.
@@ -145,7 +149,6 @@ import {
   PATCH as patchPhoto,
   DELETE as deletePhoto,
 } from "@/app/api/gallery/[id]/route";
-
 import { getUserSalonId } from "@/lib/get-user-salon";
 const mockGetUserSalonId = vi.mocked(getUserSalonId);
 

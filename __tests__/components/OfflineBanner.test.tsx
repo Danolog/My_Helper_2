@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { OfflineBanner } from "@/components/offline-banner";
 
 // Mock the network status hook
@@ -73,7 +73,7 @@ describe("OfflineBanner", () => {
     expect(screen.getByText("Odswierz")).toBeInTheDocument();
   });
 
-  it("renders reconnected message when back online after being offline", () => {
+  it("renders reconnected message when back online after being offline", async () => {
     mockNetworkStatus = {
       isOnline: true,
       wasOffline: true,
@@ -82,13 +82,14 @@ describe("OfflineBanner", () => {
 
     render(<OfflineBanner />);
 
+    // Baner pojawia sie po odroczonym setState (timer 0 ms) — findBy czeka.
     expect(
-      screen.getByText(/Polaczenie przywrocone/)
+      await screen.findByText(/Polaczenie przywrocone/)
     ).toBeInTheDocument();
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
-  it("renders wifi icon when reconnected", () => {
+  it("renders wifi icon when reconnected", async () => {
     mockNetworkStatus = {
       isOnline: true,
       wasOffline: true,
@@ -97,6 +98,7 @@ describe("OfflineBanner", () => {
 
     render(<OfflineBanner />);
 
-    expect(screen.getByTestId("wifi-icon")).toBeInTheDocument();
+    // Baner pojawia sie po odroczonym setState (timer 0 ms) — findBy czeka.
+    expect(await screen.findByTestId("wifi-icon")).toBeInTheDocument();
   });
 });

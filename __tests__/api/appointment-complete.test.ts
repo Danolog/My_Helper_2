@@ -27,15 +27,18 @@ interface MockTx {
   select: (...args: unknown[]) => ReturnType<typeof mockDbSelect>;
   insert: (...args: unknown[]) => ReturnType<typeof mockDbInsert>;
   update: (...args: unknown[]) => ReturnType<typeof mockDbUpdate>;
+  execute: (...args: unknown[]) => Promise<undefined>;
 }
 
 vi.mock("@/lib/db", () => {
   // The tx object passed into db.transaction() reuses the same mock fns
   // so that existing mockReturnValueOnce chains work identically.
+  // execute: SET LOCAL ROLE + set_config wykonywane przez forSalon (ADR-001).
   const tx: MockTx = {
     select: (...args: unknown[]) => mockDbSelect(...args),
     insert: (...args: unknown[]) => mockDbInsert(...args),
     update: (...args: unknown[]) => mockDbUpdate(...args),
+    execute: () => Promise.resolve(undefined),
   };
   return {
     db: {
@@ -76,7 +79,11 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
   like: vi.fn((...args: unknown[]) => ({ type: "like", args })),
-  sql: vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+  // sql`...` (set_config) + sql.raw (SET LOCAL ROLE) — oba używa forSalon.
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((query: string) => ({ type: "sql.raw", query })) }
+  ),
 }));
 
 vi.mock("@/lib/constants", () => ({

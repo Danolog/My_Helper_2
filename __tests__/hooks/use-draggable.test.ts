@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useDraggable } from "@/hooks/use-draggable";
 
 /**
@@ -65,7 +65,7 @@ describe("useDraggable", () => {
     const { result } = renderHook(() => useDraggable());
 
     expect(result.current.isDragging).toBe(false);
-    expect(result.current.dragStartPos).toBeNull();
+    expect(result.current.dragStartPosRef.current).toBeNull();
   });
 
   it("should return dragProps with draggable=true and event handlers", () => {
@@ -240,7 +240,7 @@ describe("useDraggable", () => {
     act(() => {
       result.current.dragProps.onDragEnd(makeDragEvent());
     });
-    expect(result.current.dragStartPos).toBeNull();
+    expect(result.current.dragStartPosRef.current).toBeNull();
   });
 
   it("should stop propagation on both start and end events", () => {

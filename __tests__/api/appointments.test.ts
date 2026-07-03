@@ -165,7 +165,11 @@ vi.mock("drizzle-orm", () => ({
   lt: vi.fn((...args: unknown[]) => ({ type: "lt", args })),
   gt: vi.fn((...args: unknown[]) => ({ type: "gt", args })),
   isNotNull: vi.fn((...args: unknown[]) => ({ type: "isNotNull", args })),
-  sql: vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+  // sql`...` (set_config) + sql.raw (SET LOCAL ROLE) — oba używa forSalon.
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((query: string) => ({ type: "sql.raw", query })) }
+  ),
 }));
 
 // Mock validations (used in GET/PUT for UUID/date validation)
@@ -213,13 +217,13 @@ function chainMock(result: unknown[] = []) {
 // -------------------------------------------------------
 
 // Import list/create handlers
-import { GET as listAppointments, POST as createAppointment } from "@/app/api/appointments/route";
 // Import single appointment handlers
 import {
   GET as getAppointment,
   PUT as updateAppointment,
   DELETE as deleteAppointment,
 } from "@/app/api/appointments/[id]/route";
+import { GET as listAppointments, POST as createAppointment } from "@/app/api/appointments/route";
 
 // Mocked tenant resolver — referenced directly so cross-tenant tests can
 // flip the resolved salon (simulate "the caller has no salon" / wrong tenant).
