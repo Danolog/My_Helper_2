@@ -128,11 +128,14 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should submit forgot password form', { tag: '@full' }, async ({ page }) => {
       await page.goto('/forgot-password');
-      // Wait for form to render with React event handlers
-      await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
-      await page.waitForTimeout(500);
+      // Przycisk jest disabled do konca hydratacji (fix natywnego submitu).
+      // Czekamy na enabled i DOPIERO wtedy wypelniamy pole — kontrolowany
+      // input Reacta wymazuje wartosc wpisana przed hydratacja (pierwszy
+      // render ze stanem ""), co bylo zrodlem flaka tego testu.
+      const submit = page.locator('form button[type="submit"]');
+      await expect(submit).toBeEnabled({ timeout: 15000 });
       await page.fill('#email', TEST_USER.email);
-      await page.locator('form button[type="submit"]').click();
+      await submit.click();
       // Should show success message, error, or "Wysylanie..." — confirms form submitted
       await expect(
         page.getByText(/jesli konto z tym adresem|jeśli konto z tym adresem|nie udalo|blad|wyslano|user not found|powrot do logowania|wysylanie/i)
