@@ -1,6 +1,7 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { ProfitabilityChart } from "./_components/ProfitabilityChart";
 import { ProfitabilityFilters } from "./_components/ProfitabilityFilters";
@@ -9,6 +10,14 @@ import { ProfitabilityTable } from "./_components/ProfitabilityTable";
 import { useProfitabilityData } from "./_hooks/use-profitability-data";
 
 export default function ServiceProfitabilityPage() {
+  return (
+    <ModuleGate module="reportsAdvanced">
+      <ServiceProfitabilityPageInner />
+    </ModuleGate>
+  );
+}
+
+function ServiceProfitabilityPageInner() {
   const {
     reportData,
     loading,

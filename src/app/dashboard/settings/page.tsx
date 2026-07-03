@@ -10,10 +10,18 @@ import {
   Gift,
   Printer,
   Crown,
+  Blocks,
 } from "lucide-react";
+import { useModules } from "@/components/dashboard/modules-provider";
 import { Button } from "@/components/ui/button";
 
 const SETTINGS_ITEMS = [
+  {
+    label: "Moduly",
+    description: "Wlacz tylko te funkcje, ktorych uzywasz w salonie",
+    href: "/dashboard/settings/modules",
+    icon: Blocks,
+  },
   {
     label: "Dane salonu",
     description: "Nazwa, adres, telefon i typ dzialalnosci salonu",
@@ -37,12 +45,14 @@ const SETTINGS_ITEMS = [
     description: "Konfiguracja systemu punktow i nagrod dla klientow",
     href: "/dashboard/settings/loyalty",
     icon: Gift,
+    moduleKey: "loyalty" as const,
   },
   {
     label: "Drukarka fiskalna",
     description: "Konfiguracja integracji z drukarka fiskalna i kasa",
     href: "/dashboard/settings/fiscal",
     icon: Printer,
+    moduleKey: "fiscal" as const,
   },
   {
     label: "Subskrypcja",
@@ -53,6 +63,11 @@ const SETTINGS_ITEMS = [
 ];
 
 export default function SettingsHubPage() {
+  const modules = useModules();
+  const items = SETTINGS_ITEMS.filter(
+    (item) => !("moduleKey" in item) || modules[item.moduleKey],
+  );
+
   return (
     <div className="container mx-auto p-6">
       <div className="flex items-center gap-4 mb-6">
@@ -73,7 +88,7 @@ export default function SettingsHubPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {SETTINGS_ITEMS.map((item) => {
+        {items.map((item) => {
           const Icon = item.icon;
           return (
             <Link

@@ -1,6 +1,7 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { DetailsTab } from "./_components/details-tab";
 import { ProductSummaryTab } from "./_components/product-summary-tab";
@@ -11,6 +12,14 @@ import { TabNavigation } from "./_components/tab-navigation";
 import { useMaterialsData } from "./_hooks/use-materials-data";
 
 export default function MaterialsProfitLossPage() {
+  return (
+    <ModuleGate module="reportsAdvanced">
+      <MaterialsProfitLossPageInner />
+    </ModuleGate>
+  );
+}
+
+function MaterialsProfitLossPageInner() {
   const {
     reportData,
     loading,

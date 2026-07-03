@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { FileText } from "lucide-react";
 import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,14 @@ interface ReportData {
 }
 
 export default function MaterialsReportPage() {
+  return (
+    <ModuleGate module="reportsAdvanced">
+      <MaterialsReportPageInner />
+    </ModuleGate>
+  );
+}
+
+function MaterialsReportPageInner() {
   useSession();
   const { salonId, loading: salonLoading } = useSalonId();
   const [reportData, setReportData] = useState<ReportData | null>(null);

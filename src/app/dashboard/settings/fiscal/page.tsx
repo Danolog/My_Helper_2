@@ -7,6 +7,7 @@ import {
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FiscalConnectionForm } from "./_components/fiscal-connection-form";
@@ -16,6 +17,14 @@ import { FiscalTestSection } from "./_components/fiscal-test-section";
 import { useFiscalSettings } from "./_hooks/use-fiscal-settings";
 
 export default function FiscalSettingsPage() {
+  return (
+    <ModuleGate module="fiscal">
+      <FiscalSettingsPageInner />
+    </ModuleGate>
+  );
+}
+
+function FiscalSettingsPageInner() {
   const {
     loading,
     saving,

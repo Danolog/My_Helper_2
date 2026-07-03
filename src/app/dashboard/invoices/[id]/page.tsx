@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, FileText, Printer, Mail, Send, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -87,6 +88,14 @@ interface Invoice {
 }
 
 export default function InvoicePreviewPage() {
+  return (
+    <ModuleGate module="invoices">
+      <InvoicePreviewPageInner />
+    </ModuleGate>
+  );
+}
+
+function InvoicePreviewPageInner() {
   const params = useParams();
   const router = useRouter();
   const invoiceId = params.id as string;

@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { Lock } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { PromoCodesFilters } from "./_components/PromoCodesFilters";
 import { PromoCodesHeader } from "./_components/PromoCodesHeader";
 import { PromoCodesTable } from "./_components/PromoCodesTable";
@@ -15,6 +16,14 @@ const DeletePromoCodeDialog = dynamic(
 );
 
 export default function PromoCodesPage() {
+  return (
+    <ModuleGate module="promotions">
+      <PromoCodesPageInner />
+    </ModuleGate>
+  );
+}
+
+function PromoCodesPageInner() {
   const {
     session,
     isPending,

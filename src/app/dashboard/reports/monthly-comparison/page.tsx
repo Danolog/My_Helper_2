@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { FileText } from "lucide-react";
 import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -196,6 +197,14 @@ function getMetricValue(metrics: MetricData, key: string): number | string {
 }
 
 export default function MonthlyComparisonPage() {
+  return (
+    <ModuleGate module="reportsAdvanced">
+      <MonthlyComparisonPageInner />
+    </ModuleGate>
+  );
+}
+
+function MonthlyComparisonPageInner() {
   // Session is consumed to ensure auth context; prefixed to satisfy noUnusedLocals
   const { data: _session } = useSession();
   const { salonId, loading: salonLoading } = useSalonId();

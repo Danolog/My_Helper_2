@@ -3,6 +3,7 @@
 import { useState, Suspense } from "react";
 import dynamic from "next/dynamic";
 import { Loader2 } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { NewsletterConfigCard } from "./_components/newsletter-config-card";
 import { NewsletterHeader } from "./_components/newsletter-header";
@@ -87,6 +88,14 @@ function NewslettersContent() {
 }
 
 export default function NewslettersPage() {
+  return (
+    <ModuleGate module="newsletters">
+      <NewslettersPageInner />
+    </ModuleGate>
+  );
+}
+
+function NewslettersPageInner() {
   return (
     <ProPlanGate
       featureName="Newslettery AI"

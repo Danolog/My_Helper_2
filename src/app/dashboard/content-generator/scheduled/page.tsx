@@ -16,6 +16,7 @@ import {
   Send,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import {
   AlertDialog,
@@ -518,6 +519,14 @@ function PostCard({
 }
 
 export default function ScheduledPostsPage() {
+  return (
+    <ModuleGate module="socialPosts">
+      <ScheduledPostsPageInner />
+    </ModuleGate>
+  );
+}
+
+function ScheduledPostsPageInner() {
   return (
     <ProPlanGate
       featureName="Zaplanowane posty"

@@ -1,6 +1,7 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { YearlyComparisonChart } from "./_components/YearlyComparisonChart";
 import { YearlyComparisonFilters } from "./_components/YearlyComparisonFilters";
 import { YearlyComparisonHeader } from "./_components/YearlyComparisonHeader";
@@ -8,6 +9,14 @@ import { YearlyComparisonTable } from "./_components/YearlyComparisonTable";
 import { useYearlyComparisonData } from "./_hooks/use-yearly-comparison-data";
 
 export default function YearlyComparisonPage() {
+  return (
+    <ModuleGate module="reportsAdvanced">
+      <YearlyComparisonPageInner />
+    </ModuleGate>
+  );
+}
+
+function YearlyComparisonPageInner() {
   const {
     comparisonData,
     loading,

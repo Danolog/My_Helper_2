@@ -18,6 +18,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -96,6 +97,14 @@ function getStatusBadge(entry: WaitingListEntry) {
 }
 
 export default function WaitingListPage() {
+  return (
+    <ModuleGate module="waitingList">
+      <WaitingListPageInner />
+    </ModuleGate>
+  );
+}
+
+function WaitingListPageInner() {
   const [entries, setEntries] = useState<WaitingListEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");

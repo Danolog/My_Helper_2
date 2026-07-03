@@ -15,6 +15,7 @@ import {
   TrendingDown,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -86,6 +87,14 @@ function getStatusVariant(
 }
 
 export default function ProductDetailPage() {
+  return (
+    <ModuleGate module="products">
+      <ProductDetailPageInner />
+    </ModuleGate>
+  );
+}
+
+function ProductDetailPageInner() {
   const params = useParams();
   const router = useRouter();
   const productId = params.id as string;

@@ -42,6 +42,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useModules } from "@/components/dashboard/modules-provider";
 import {
   CommandDialog,
   CommandEmpty,
@@ -53,6 +54,7 @@ import {
 } from "@/components/ui/command";
 import { useAISearch } from "@/hooks/use-ai-search";
 import { useVoiceInput } from "@/hooks/use-voice-input";
+import { BASIC_REPORT_SLUGS, moduleForRoute } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
 interface CommandPage {
@@ -127,6 +129,21 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const router = useRouter();
+  const modules = useModules();
+
+  const isPageVisible = (page: CommandPage) => {
+    const moduleKey = moduleForRoute(page.href);
+    return moduleKey === null || modules[moduleKey];
+  };
+  const visibleNavPages = NAV_PAGES.filter(isPageVisible);
+  const visibleReportPages = REPORT_PAGES.filter((page) => {
+    if (!isPageVisible(page)) return false;
+    const slug = page.href.slice("/dashboard/reports/".length);
+    if (!page.href.startsWith("/dashboard/reports/") || !slug) return true;
+    return BASIC_REPORT_SLUGS.includes(slug) || modules.reportsAdvanced;
+  });
+  const visibleSettingsPages = SETTINGS_PAGES.filter(isPageVisible);
+  const visibleAiPages = AI_PAGES.filter(isPageVisible);
 
   // Voice input integration: transcribed text populates the search field
   const handleVoiceTranscript = useCallback((text: string) => {
@@ -266,7 +283,7 @@ export function CommandPalette() {
         <CommandSeparator />
 
         <CommandGroup heading="Nawigacja">
-          {NAV_PAGES.map((page) => {
+          {visibleNavPages.map((page) => {
             const Icon = page.icon;
             return (
               <CommandItem
@@ -284,7 +301,7 @@ export function CommandPalette() {
         <CommandSeparator />
 
         <CommandGroup heading="Raporty">
-          {REPORT_PAGES.map((page) => {
+          {visibleReportPages.map((page) => {
             const Icon = page.icon;
             return (
               <CommandItem
@@ -302,7 +319,7 @@ export function CommandPalette() {
         <CommandSeparator />
 
         <CommandGroup heading="Ustawienia">
-          {SETTINGS_PAGES.map((page) => {
+          {visibleSettingsPages.map((page) => {
             const Icon = page.icon;
             return (
               <CommandItem
@@ -320,7 +337,7 @@ export function CommandPalette() {
         <CommandSeparator />
 
         <CommandGroup heading="AI">
-          {AI_PAGES.map((page) => {
+          {visibleAiPages.map((page) => {
             const Icon = page.icon;
             return (
               <CommandItem

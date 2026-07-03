@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { FileText } from "lucide-react";
 import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -88,6 +89,14 @@ function formatROI(roi: string) {
 }
 
 export default function PromotionsReportPage() {
+  return (
+    <ModuleGate module="reportsAdvanced">
+      <PromotionsReportPageInner />
+    </ModuleGate>
+  );
+}
+
+function PromotionsReportPageInner() {
   const { data: _session } = useSession();
   const { salonId, loading: salonLoading } = useSalonId();
   const [reportData, setReportData] = useState<ReportData | null>(null);

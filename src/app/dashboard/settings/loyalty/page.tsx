@@ -17,6 +17,7 @@ import {
   Coins,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +42,14 @@ interface LoyaltySettings {
 }
 
 export default function LoyaltySettingsPage() {
+  return (
+    <ModuleGate module="loyalty">
+      <LoyaltySettingsPageInner />
+    </ModuleGate>
+  );
+}
+
+function LoyaltySettingsPageInner() {
   const { data: session } = useSession();
   const [salonId, setSalonId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

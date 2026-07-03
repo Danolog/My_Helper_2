@@ -512,6 +512,12 @@ export const notificationTypeSettingsSchema = z.object({
   paymentConfirmations: z.boolean().optional(),
 });
 
+// Feature flags per salon (Ustawienia -> Moduły): mapa klucz modułu -> bool.
+// Nieznane/hardOff klucze odfiltrowuje trasa (jedno źródło prawdy: features.ts).
+export const salonModulesSchema = z.object({
+  modules: z.record(z.string(), z.boolean()),
+});
+
 export const weMissYouSettingsSchema = z.object({
   enabled: z.boolean().optional(),
   inactiveDays: z.number().int().min(1).max(365).optional(),

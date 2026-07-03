@@ -1,6 +1,7 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { PayrollFilters } from "./_components/PayrollFilters";
 import { PayrollHeader } from "./_components/PayrollHeader";
@@ -9,6 +10,14 @@ import { PayrollTable } from "./_components/PayrollTable";
 import { usePayrollData } from "./_hooks/use-payroll-data";
 
 export default function EmployeePayrollReportPage() {
+  return (
+    <ModuleGate module="reportsAdvanced">
+      <EmployeePayrollReportPageInner />
+    </ModuleGate>
+  );
+}
+
+function EmployeePayrollReportPageInner() {
   const {
     reportData,
     loading,

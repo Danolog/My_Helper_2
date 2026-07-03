@@ -3,6 +3,7 @@
 import { useState } from "react";
 import dynamic from "next/dynamic";
 import { Lock, Plus, Package, Tag } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { NetworkErrorHandler } from "@/components/network-error-handler";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -23,6 +24,14 @@ const CategoryDialog = dynamic(() => import("./_components/category-dialog").the
 const DeleteCategoryDialog = dynamic(() => import("./_components/delete-category-dialog").then((m) => m.DeleteCategoryDialog));
 
 export default function ProductsPage() {
+  return (
+    <ModuleGate module="products">
+      <ProductsPageInner />
+    </ModuleGate>
+  );
+}
+
+function ProductsPageInner() {
   const { data: session, isPending } = useSession();
   const { salonId, loading: salonLoading } = useSalonId();
   const [activeTab, setActiveTab] = useState("products");

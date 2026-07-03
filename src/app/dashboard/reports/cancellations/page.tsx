@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { RefreshCw } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import { ComparisonPeriodFilter } from "./_components/comparison-period-filter";
 import { EmployeeFilterCard } from "./_components/employee-filter-card";
@@ -19,6 +20,14 @@ const DayOfWeekTab = dynamic(() => import("./_components/day-of-week-tab").then(
 const TrendTab = dynamic(() => import("./_components/trend-tab").then((m) => m.TrendTab));
 
 export default function CancellationReportPage() {
+  return (
+    <ModuleGate module="reportsAdvanced">
+      <CancellationReportPageInner />
+    </ModuleGate>
+  );
+}
+
+function CancellationReportPageInner() {
   const {
     reportData,
     loading,
