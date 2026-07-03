@@ -17,7 +17,16 @@ export const CSRF_SECRET_COOKIE = "csrf-secret";
 export const CSRF_TOKEN_COOKIE = "csrf-token";
 export const CSRF_HEADER = "x-csrf-token";
 
-const APP_SECRET = process.env.BETTER_AUTH_SECRET || "dev-csrf-secret-must-be-32-chars-long";
+// Fail-closed: w produkcji brak BETTER_AUTH_SECRET zatrzymuje aplikację przy
+// starcie zamiast po cichu podpisywać tokeny znanym, publicznym sekretem.
+const APP_SECRET: string = (() => {
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("CSRF: BETTER_AUTH_SECRET jest wymagany w produkcji");
+  }
+  return "dev-csrf-secret-must-be-32-chars-long";
+})();
 
 export async function hmacSign(data: string): Promise<string> {
   const enc = new TextEncoder();
