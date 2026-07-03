@@ -1,13 +1,13 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { RefreshCw } from "lucide-react";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
-import { useRevenueData } from "./_hooks/use-revenue-data";
-import { ReportHeader } from "./_components/report-header";
 import { EmployeeFilterCard } from "./_components/employee-filter-card";
+import { ReportHeader } from "./_components/report-header";
 import { SummaryCards } from "./_components/summary-cards";
 import { TabNavigation } from "./_components/tab-navigation";
-import dynamic from "next/dynamic";
+import { useRevenueData } from "./_hooks/use-revenue-data";
 
 const ServiceBreakdownTab = dynamic(
   () => import("./_components/service-breakdown-tab").then((m) => m.ServiceBreakdownTab),

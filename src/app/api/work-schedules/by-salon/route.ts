@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { workSchedules, employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { workSchedules, employees } from "@/lib/schema";
 // GET /api/work-schedules/by-salon?salonId=xxx&dayOfWeek=1
 // Returns all work schedules for active employees in a salon, optionally filtered by day
 export async function GET(request: Request) {
@@ -41,7 +40,7 @@ export async function GET(request: Request) {
     }
 
     // Fetch schedules for all active employees
-    let allSchedules: (typeof workSchedules.$inferSelect)[] = [];
+    const allSchedules: (typeof workSchedules.$inferSelect)[] = [];
     for (const empId of employeeIds) {
       let conditions;
       if (dayOfWeekStr !== null && dayOfWeekStr !== undefined) {

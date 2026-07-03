@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { reviews, appointments, employees, services, salons } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { reviews, appointments, employees, services, salons } from "@/lib/schema";
 // GET /api/client/reviews - List all reviews by the authenticated user
 export async function GET() {
   try {

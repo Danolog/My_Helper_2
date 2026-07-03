@@ -1,10 +1,11 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { streamText, UIMessage, convertToModelMessages } from "ai";
+import { eq, and, gte, sql, count, desc } from "drizzle-orm";
 import { z } from "zod";
-import { isProPlan } from "@/lib/subscription";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
@@ -14,9 +15,7 @@ import {
   products,
   salons,
 } from "@/lib/schema";
-import { eq, and, gte, sql, count, desc } from "drizzle-orm";
-
-import { logger } from "@/lib/logger";
+import { isProPlan } from "@/lib/subscription";
 // Zod schema for message validation
 const messagePartSchema = z.object({
   type: z.string(),

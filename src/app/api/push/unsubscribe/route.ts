@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { pushSubscriptions } from "@/lib/schema";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { validateBody, pushUnsubscribeSchema } from "@/lib/api-validation";
 import { eq, and } from "drizzle-orm";
-
+import { validateBody, pushUnsubscribeSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { pushSubscriptions } from "@/lib/schema";
 /**
  * POST /api/push/unsubscribe
  *

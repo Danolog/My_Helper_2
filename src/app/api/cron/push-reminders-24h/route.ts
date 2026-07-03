@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
+import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
+import { requireCronSecret } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { sendAppointmentReminder24hPush } from "@/lib/push";
 import {
   appointments,
   clients,
@@ -8,10 +12,6 @@ import {
   salons,
   pushSubscriptions,
 } from "@/lib/schema";
-import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
-import { requireCronSecret } from "@/lib/auth-middleware";
-import { logger } from "@/lib/logger";
-import { sendAppointmentReminder24hPush } from "@/lib/push";
 
 /**
  * POST /api/cron/push-reminders-24h

@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { appointments, services, employees } from "@/lib/schema";
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { appointments, services, employees } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 const DAY_LABELS_PL = [
   "Niedziela",
   "Poniedzialek",

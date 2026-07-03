@@ -1,21 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { useSession } from "@/lib/auth-client";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import dynamic from "next/dynamic";
 import { Lock, Plus, Package, Tag } from "lucide-react";
 import { NetworkErrorHandler } from "@/components/network-error-handler";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
-
-import { useProductsData } from "./_hooks/use-products-data";
-import { useCategoriesData } from "./_hooks/use-categories-data";
-import { ProductFilters } from "./_components/product-filters";
-import { ProductStats } from "./_components/product-stats";
-import { LowStockWarning } from "./_components/low-stock-warning";
+import { useSession } from "@/lib/auth-client";
 import { LowStockNotifications } from "./_components/low-stock-notifications";
+import { LowStockWarning } from "./_components/low-stock-warning";
+import { ProductFilters } from "./_components/product-filters";
 import { ProductList } from "./_components/product-list";
-import dynamic from "next/dynamic";
+import { ProductStats } from "./_components/product-stats";
+import { useCategoriesData } from "./_hooks/use-categories-data";
+import { useProductsData } from "./_hooks/use-products-data";
 
 const ProductDialog = dynamic(() => import("./_components/product-dialog").then((m) => m.ProductDialog));
 const DeleteProductDialog = dynamic(() => import("./_components/delete-product-dialog").then((m) => m.DeleteProductDialog));

@@ -1,6 +1,6 @@
-import { type FullConfig, request } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
+import { type FullConfig, request } from '@playwright/test';
 
 const OWNER = { email: 'owner@test.com', password: 'TestPassword123!' };
 

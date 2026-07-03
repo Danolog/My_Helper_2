@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { CalendarPlus, ArrowLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { BookingProgressBar } from "@/components/booking/booking-progress-bar";
+import { Button } from "@/components/ui/button";
 
 interface BookingHeaderProps {
   salonId: string;

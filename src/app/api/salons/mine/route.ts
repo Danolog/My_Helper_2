@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
 import { salons } from "@/lib/schema";
 
-import { logger } from "@/lib/logger";
 /**
  * GET /api/salons/mine
  *

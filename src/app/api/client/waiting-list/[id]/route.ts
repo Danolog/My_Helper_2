@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { waitingList, clients } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { clientWaitingListResponseSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { waitingList, clients } from "@/lib/schema";
 import {
   acceptEarlierSlot,
   declineEarlierSlot,
 } from "@/lib/waiting-list";
-import { clientWaitingListResponseSchema, validateBody } from "@/lib/api-validation";
-
-import { logger } from "@/lib/logger";
 // POST /api/client/waiting-list/[id] - Client accepts or declines a notified slot
 export async function POST(
   request: Request,

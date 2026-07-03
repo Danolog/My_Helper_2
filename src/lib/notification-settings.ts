@@ -1,8 +1,7 @@
 import { eq } from "drizzle-orm";
-
 import { db } from "@/lib/db";
-import { salons } from "@/lib/schema";
 import { logger } from "@/lib/logger";
+import { salons } from "@/lib/schema";
 
 export interface NotificationTypeSettings {
   smsReminders: boolean;

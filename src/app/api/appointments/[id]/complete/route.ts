@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
+import { eq, and, like, sql } from "drizzle-orm";
+import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/route";
+import { validateBody, completeAppointmentSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   treatmentHistory,
@@ -15,13 +22,6 @@ import {
   loyaltyTransactions,
   salons,
 } from "@/lib/schema";
-import { eq, and, like, sql } from "drizzle-orm";
-import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/route";
-import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
-import { validateBody, completeAppointmentSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { logger } from "@/lib/logger";
 
 /**
  * Database query executor — works for both the top-level `db` instance

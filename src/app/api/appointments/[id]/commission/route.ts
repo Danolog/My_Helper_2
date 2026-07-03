@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { employeeCommissions, employees, appointments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { employeeCommissions, employees, appointments } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/appointments/[id]/commission - Get commission info for an appointment
 export async function GET(
   _request: Request,

@@ -1,8 +1,8 @@
 "use client";
 
 import { XCircle, RefreshCw } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 
 interface ErrorStateProps {
   error: string;

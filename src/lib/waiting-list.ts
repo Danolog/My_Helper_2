@@ -1,4 +1,8 @@
+import crypto from "crypto";
+import { eq, and, isNull, or, not } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { sendPushNotification } from "@/lib/push";
 import {
   waitingList,
   clients,
@@ -6,11 +10,7 @@ import {
   appointments,
   notifications,
 } from "@/lib/schema";
-import { eq, and, isNull, or, not } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
-import { sendPushNotification } from "@/lib/push";
-import { logger } from "@/lib/logger";
-import crypto from "crypto";
 
 interface NotifyWaitingListParams {
   salonId: string;

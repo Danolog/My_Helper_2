@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { products, notifications } from "@/lib/schema";
 import { eq, and, like, sql } from "drizzle-orm";
 import { validateBody, updateProductSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { products, notifications } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * Check if a product has low stock and create a notification if needed.
  * Prevents duplicate notifications within 24 hours.

@@ -4,9 +4,9 @@ import { alias } from "drizzle-orm/pg-core";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 
-import { logger } from "@/lib/logger";
 /**
  * GET /api/subscriptions/current
  *

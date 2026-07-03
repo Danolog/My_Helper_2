@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { appointments, employees, services, salons, treatmentHistory, depositPayments, serviceVariants } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { isValidUuid } from "@/lib/validations";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { appointments, employees, services, salons, treatmentHistory, depositPayments, serviceVariants } from "@/lib/schema";
+import { isValidUuid } from "@/lib/validations";
 // GET /api/client/appointments/[id] - Get appointment detail for the authenticated client user
 export async function GET(
   _request: Request,

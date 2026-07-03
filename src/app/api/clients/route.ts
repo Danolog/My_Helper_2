@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { clients, appointments } from "@/lib/schema";
 import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { validateBody, createClientSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { clients, appointments } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/clients - List all clients with optional filtering
 // Supported query params:
 //   salonId        - filter by salon

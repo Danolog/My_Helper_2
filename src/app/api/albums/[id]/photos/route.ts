@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { albums, photoAlbums, galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { validateBody, albumPhotosSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, albumPhotosSchema } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { albums, photoAlbums, galleryPhotos, employees, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/albums/[id]/photos - Get all photos in an album
 export async function GET(
   _request: Request,

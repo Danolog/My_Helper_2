@@ -1,6 +1,11 @@
-import { NextResponse } from "next/server";
 import { headers } from "next/headers";
+import { NextResponse } from "next/server";
+import { eq, and } from "drizzle-orm";
+import { validateBody, updateWaitingListSchema } from "@/lib/api-validation";
+import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
 import {
   waitingList,
   clients,
@@ -8,12 +13,6 @@ import {
   employees,
   salons,
 } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
-import { auth } from "@/lib/auth";
-import { validateBody, updateWaitingListSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
-import { logger } from "@/lib/logger";
 // GET /api/waiting-list/[id] - Get a single waiting list entry
 export async function GET(
   _request: Request,

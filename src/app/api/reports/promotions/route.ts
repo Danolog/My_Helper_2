@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { promotions, promoCodes, appointments, services, clients } from "@/lib/schema";
 import { eq, and, gte, lte, desc, sql, isNotNull } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { promotions, promoCodes, appointments, services, clients } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/reports/promotions - Promotion effectiveness report (ROI on promotions)
 export async function GET(request: Request) {
   try {

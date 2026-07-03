@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { appointmentMaterials, products, appointments, clients, employees, services } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
-import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { appointmentMaterials, products, appointments, clients, employees, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isValidUuid } from "@/lib/validations";
 // GET /api/products/[id]/usage-history - Get usage history for a product
 export async function GET(
   _request: Request,

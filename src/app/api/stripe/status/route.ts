@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { testStripeConnection } from "@/lib/stripe";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
 import { logger } from "@/lib/logger";
+import { testStripeConnection } from "@/lib/stripe";
 /**
  * GET /api/stripe/status
  *

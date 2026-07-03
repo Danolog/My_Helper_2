@@ -7,9 +7,9 @@ import { Copy, Check, Loader2, ArrowLeft } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { UserProfile } from "@/components/auth/user-profile";
+import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/auth-client";
-import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { getUserFriendlyMessage } from "@/lib/error-messages";
 import type { Components } from "react-markdown";
 

@@ -1,13 +1,12 @@
 "use client";
 
 import { useParams } from "next/navigation";
-
 import { BookingConfirmation } from "@/components/booking/booking-confirmation";
-import { useBookingData } from "./_hooks/use-booking-data";
+import { BookingHeader } from "./_components/booking-header";
 import { BookingLoading } from "./_components/booking-loading";
 import { BookingNotFound } from "./_components/booking-not-found";
-import { BookingHeader } from "./_components/booking-header";
 import { BookingSteps } from "./_components/booking-steps";
+import { useBookingData } from "./_hooks/use-booking-data";
 
 // ---------------------------------------------------------------------------
 // Page — Client Booking Flow

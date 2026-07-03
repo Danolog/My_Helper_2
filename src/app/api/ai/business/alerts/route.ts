@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import { eq, and, gte, lte, sql, count, desc } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
@@ -7,13 +11,8 @@ import {
   reviews,
   products,
 } from "@/lib/schema";
-import { eq, and, gte, lte, sql, count, desc } from "drizzle-orm";
-import { isProPlan } from "@/lib/subscription";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
+import { isProPlan } from "@/lib/subscription";
 /**
  * Severity levels for business alerts.
  * - critical: Requires immediate attention (severe drops, major issues)

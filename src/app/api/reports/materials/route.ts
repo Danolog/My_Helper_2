@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { appointmentMaterials, products, appointments, employees, services } from "@/lib/schema";
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { appointmentMaterials, products, appointments, employees, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/reports/materials - Materials consumption report
 export async function GET(request: Request) {
   try {

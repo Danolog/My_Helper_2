@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import { employeeServicePrices, employees, serviceVariants, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { validateBody, employeePriceSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 
 /** Verify the service belongs to the caller's salon. */
 async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {

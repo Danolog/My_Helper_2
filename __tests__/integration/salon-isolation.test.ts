@@ -29,8 +29,14 @@ vi.mock("next/headers", () => ({
 
 // Importy modułów dotykających DB/auth — PO załadowaniu env w setupie.
 // (setupFiles odpala się przed plikiem testu, więc statyczny import jest OK.)
-import { db } from "@/lib/db";
+import { eq } from "drizzle-orm";
+
+// Realne handlery tras [id].
+import { GET as apptGET, PUT as apptPUT, DELETE as apptDELETE } from "@/app/api/appointments/[id]/route";
+import { GET as clientGET, PUT as clientPUT, DELETE as clientDELETE } from "@/app/api/clients/[id]/route";
+import { GET as galleryGET, PATCH as galleryPATCH, DELETE as galleryDELETE } from "@/app/api/gallery/[id]/route";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
 import {
   user,
   account,
@@ -41,12 +47,6 @@ import {
   appointments,
   galleryPhotos,
 } from "@/lib/schema";
-import { eq } from "drizzle-orm";
-
-// Realne handlery tras [id].
-import { GET as clientGET, PUT as clientPUT, DELETE as clientDELETE } from "@/app/api/clients/[id]/route";
-import { GET as apptGET, PUT as apptPUT, DELETE as apptDELETE } from "@/app/api/appointments/[id]/route";
-import { GET as galleryGET, PATCH as galleryPATCH, DELETE as galleryDELETE } from "@/app/api/gallery/[id]/route";
 
 const PW = process.env.TEST_PW ?? "Pa" + "ssw0rd!Integration";
 

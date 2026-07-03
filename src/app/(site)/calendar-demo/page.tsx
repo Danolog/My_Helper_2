@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { TimeGrid } from "@/components/calendar/time-grid";
-import { CalendarLegend } from "@/components/calendar/calendar-legend";
 import { ChevronLeft, ChevronRight, Calendar, Palette } from "lucide-react";
+import { CalendarLegend } from "@/components/calendar/calendar-legend";
+import { TimeGrid } from "@/components/calendar/time-grid";
+import { Button } from "@/components/ui/button";
 import type { Appointment, CalendarEvent, Employee } from "@/types/calendar";
 
 // Demo data - sample employees

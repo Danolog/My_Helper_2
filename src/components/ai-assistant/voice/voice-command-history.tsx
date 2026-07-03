@@ -11,8 +11,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { CallLogEntry } from "./types";
 import { CallLogList, CallLogEmpty } from "./call-log-list";
+import type { CallLogEntry } from "./types";
 
 // ---------------------------------------------------------------------------
 // Props

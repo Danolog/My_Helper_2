@@ -13,18 +13,18 @@ import {
   UserPlus,
   Wallet,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import type { AssignedEmployee, ServiceItem, ServiceVariant } from "./types";
 import { formatDuration, formatDateDisplay, calcEndTime } from "./types";
+import type { AssignedEmployee, ServiceItem, ServiceVariant } from "./types";
 
 // ---------------------------------------------------------------------------
 // Props

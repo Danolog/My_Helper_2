@@ -13,7 +13,6 @@ import {
   History,
 } from "lucide-react";
 import { toast } from "sonner";
-
 import type { VoiceAiConfig, CallLogEntry, ServiceOption } from "@/components/ai-assistant/voice/types";
 import { DEFAULT_CONFIG } from "@/components/ai-assistant/voice/types";
 import { VoiceCallPanel } from "@/components/ai-assistant/voice/voice-call-panel";

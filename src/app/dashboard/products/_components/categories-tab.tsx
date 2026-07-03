@@ -1,8 +1,8 @@
 "use client";
 
+import { Plus, Edit, Trash2, Tag, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Edit, Trash2, Tag, FolderOpen } from "lucide-react";
 import type { ProductCategory } from "../_types";
 
 interface CategoriesTabProps {

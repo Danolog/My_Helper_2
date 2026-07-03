@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { clients, notifications, salons } from "@/lib/schema";
 import { eq, sql, and, isNotNull, inArray, like } from "drizzle-orm";
-import { requireCronSecret } from "@/lib/auth-middleware";
 import { isValidUuid, validateBody, birthdayNotificationSchema } from "@/lib/api-validation";
-
+import { requireCronSecret } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { clients, notifications, salons } from "@/lib/schema";
 interface BirthdaySettings {
   enabled: boolean;
   giftType: "discount" | "product";

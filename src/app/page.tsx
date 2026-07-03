@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Scissors, Search } from "lucide-react";
 import { motion, MotionConfig } from "framer-motion";
+import { Scissors, Search } from "lucide-react";
 
 export default function RoleSelector() {
   return (

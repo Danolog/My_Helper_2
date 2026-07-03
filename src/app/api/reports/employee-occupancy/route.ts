@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { eq, and, gte, lte, ne, inArray } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   employees,
@@ -6,11 +9,7 @@ import {
   services,
   timeBlocks,
 } from "@/lib/schema";
-import { eq, and, gte, lte, ne, inArray } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
 /**
  * Parses a time string like "09:00" into total minutes since midnight.
  */

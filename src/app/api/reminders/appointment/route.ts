@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { appointments, clients, salons, services, employees } from "@/lib/schema";
 import { and, eq, gte, lte, isNull, inArray } from "drizzle-orm";
-import { sendSms } from "@/lib/sms";
-import { requireCronSecret } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
-
+import { requireCronSecret } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { appointments, clients, salons, services, employees } from "@/lib/schema";
+import { sendSms } from "@/lib/sms";
 /**
  * POST /api/reminders/appointment
  *

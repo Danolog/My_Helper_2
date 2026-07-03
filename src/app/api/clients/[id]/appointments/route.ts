@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { appointments, clients, employees, services, treatmentHistory, appointmentMaterials, products } from "@/lib/schema";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { appointments, clients, employees, services, treatmentHistory, appointmentMaterials, products } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/clients/[id]/appointments - Get all appointments for a specific client
 export async function GET(
   _request: Request,

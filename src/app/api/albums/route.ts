@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { albums, photoAlbums } from "@/lib/schema";
 import { eq, desc, sql } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, createAlbumSchema } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { albums, photoAlbums } from "@/lib/schema";
 // GET /api/albums - List albums for a salon
 export async function GET(request: Request) {
   try {

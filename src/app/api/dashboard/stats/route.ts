@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { eq, and, gte, lte, not, inArray } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
@@ -8,10 +11,6 @@ import {
   salons,
   workSchedules,
 } from "@/lib/schema";
-import { eq, and, gte, lte, not, inArray } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
-import { logger } from "@/lib/logger";
 /**
  * Compute date boundaries in the Europe/Warsaw timezone.
  * This ensures correct "today" boundaries regardless of the server's local timezone.

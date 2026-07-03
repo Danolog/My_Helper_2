@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { services, serviceCategories } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { validateBody, createServiceSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { services, serviceCategories } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/services - List all services
 export async function GET(request: Request) {
   try {

@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { validateBody, createPromoCodeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { promoCodes, promotions } from "@/lib/schema";
 /**
  * Generate a random 8-character alphanumeric uppercase code.
  * Uses crypto.getRandomValues for better randomness than Math.random.

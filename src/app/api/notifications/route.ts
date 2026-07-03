@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { notifications, clients } from "@/lib/schema";
 import { desc, eq, and, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { notifications, clients } from "@/lib/schema";
 /**
  * GET /api/notifications
  *

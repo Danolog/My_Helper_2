@@ -3,13 +3,13 @@ import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   subscriptionPayments,
   salonSubscriptions,
   subscriptionPlans,
 } from "@/lib/schema";
 
-import { logger } from "@/lib/logger";
 /**
  * GET /api/subscriptions/payments
  *

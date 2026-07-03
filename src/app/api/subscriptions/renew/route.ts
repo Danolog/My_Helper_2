@@ -3,13 +3,13 @@ import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   salonSubscriptions,
   subscriptionPayments,
   subscriptionPlans,
 } from "@/lib/schema";
 
-import { logger } from "@/lib/logger";
 /**
  * POST /api/subscriptions/renew
  *
@@ -90,7 +90,7 @@ export async function POST() {
         renewPlan = targetPlan;
         planChanged = true;
 
-        // eslint-disable-next-line no-console
+         
         logger.info(`[Subscription Renewal] Applying scheduled plan change: ${plan.slug} → ${targetPlan.slug}`);
       }
     }
@@ -127,7 +127,7 @@ export async function POST() {
       return { payment: _payment, updatedSub: _updatedSub };
     });
 
-    // eslint-disable-next-line no-console
+     
     logger.info(`[Subscription Renewal] Subscription ${sub.id} renewed. ` +
         `Plan: ${renewPlan.slug} (${renewPlan.priceMonthly} PLN). ` +
         `New period: ${newPeriodStart.toISOString()} - ${newPeriodEnd.toISOString()}` +

@@ -1,15 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSalonId } from "@/hooks/use-salon-id";
 import { Users, X, Check, ChevronsUpDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { useSalonId } from "@/hooks/use-salon-id";
 
 interface Employee {
   id: string;

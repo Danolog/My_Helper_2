@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { appointments, services, employees, clients, reviews, serviceCategories } from "@/lib/schema";
 import { eq, and, gte, lte, desc, ne, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { appointments, services, employees, clients, reviews, serviceCategories } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/reports/services-popularity - Service popularity report: most booked services
 export async function GET(request: Request) {
   try {

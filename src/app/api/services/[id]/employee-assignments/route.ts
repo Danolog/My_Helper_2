@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { employeeServices, employees, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { validateBody, employeeAssignmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, employeeAssignmentSchema } from "@/lib/api-validation";
 import { forSalon } from "@/lib/server/repository";
 
 /** Verify the service belongs to the caller's salon. */

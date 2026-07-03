@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
 import {
   employeeCommissions,
   employees,
@@ -7,10 +10,6 @@ import {
   services,
   clients,
 } from "@/lib/schema";
-import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
-import { logger } from "@/lib/logger";
 // GET /api/finance/commissions - List commissions with employee totals
 export async function GET(request: Request) {
   try {

@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { Bell, BellOff, BellRing, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { mutationFetch } from "@/lib/api-client";
-import { Bell, BellOff, BellRing, Loader2 } from "lucide-react";
 
 interface PushManagerState {
   isSupported: boolean;

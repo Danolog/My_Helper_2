@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
 import { sql } from 'drizzle-orm';
-
+import { db } from '@/lib/db';
 import { logger } from "@/lib/logger";
 // Health checks must always reflect real-time system state — never cache
 export const dynamic = 'force-dynamic';

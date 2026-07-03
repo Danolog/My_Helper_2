@@ -1,12 +1,12 @@
-import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
-import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
+import { NextResponse } from "next/server";
 import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";
 import { validateBody, updateSalonSchema } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
+
 
 // Revalidate salon detail every 30 seconds
 export const revalidate = 30;
@@ -104,7 +104,7 @@ const getCachedSalonDetail = unstable_cache(
     const employeeIds = salonEmployees.map((e) => e.id);
 
     // Get specialties
-    let employeeServiceMap: Record<string, string[]> = {};
+    const employeeServiceMap: Record<string, string[]> = {};
     if (employeeIds.length > 0) {
       const empServices = await db
         .select({
@@ -124,7 +124,7 @@ const getCachedSalonDetail = unstable_cache(
     }
 
     // Get employee ratings
-    let employeeRatingMap: Record<string, { avgRating: number; reviewCount: number }> = {};
+    const employeeRatingMap: Record<string, { avgRating: number; reviewCount: number }> = {};
     if (employeeIds.length > 0) {
       const empRatings = await db
         .select({
@@ -152,7 +152,7 @@ const getCachedSalonDetail = unstable_cache(
     }
 
     // Get gallery photo counts per employee
-    let employeeGalleryCountMap: Record<string, number> = {};
+    const employeeGalleryCountMap: Record<string, number> = {};
     if (employeeIds.length > 0) {
       const galleryCounts = await db
         .select({

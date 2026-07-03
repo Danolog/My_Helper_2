@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   subscriptionPayments,
   salonSubscriptions,
@@ -12,7 +13,6 @@ import {
   salons,
 } from "@/lib/schema";
 
-import { logger } from "@/lib/logger";
 /**
  * GET /api/subscriptions/payments/[id]/receipt
  *

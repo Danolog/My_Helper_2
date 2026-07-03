@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { ArrowLeft, Bot, Mic, Brain, MessageSquare, TrendingUp } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
+import { Button } from "@/components/ui/button";
 
 function AiAssistantContent() {
   return (

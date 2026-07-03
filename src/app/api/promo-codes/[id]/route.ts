@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { validateBody, updatePromoCodeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, updatePromoCodeSchema } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { promoCodes, promotions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/promo-codes/:id - Get a single promo code with joined promotion data
 export async function GET(
   _request: Request,

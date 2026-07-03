@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq, and, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import {
   clients,
   marketingConsents,
   newsletters,
   notifications,
 } from "@/lib/schema";
-import { eq, and, isNull, isNotNull } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { logger } from "@/lib/logger";
-import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
 const sendSchema = z.object({
   // Optional: send only to specific client IDs. If not provided, send to all consented.
@@ -94,7 +94,7 @@ export async function POST(
     }
 
     // Get consented clients with email
-    let consentedClientsQuery = db
+    const consentedClientsQuery = db
       .select({
         clientId: clients.id,
         firstName: clients.firstName,

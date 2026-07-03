@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { reviews, salons, clients, employees, services, appointments } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { reviews, salons, clients, employees, services, appointments } from "@/lib/schema";
 // GET /api/reviews - List reviews for the owner's salon with optional status filter
 export async function GET(request: Request) {
   const authResult = await requireAuth();

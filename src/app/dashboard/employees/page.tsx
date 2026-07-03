@@ -1,14 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSession } from "@/lib/auth-client";
 import Link from "next/link";
+import { Lock, Users, Clock, UserPlus, Pencil } from "lucide-react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -18,10 +16,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Lock, Users, Clock, UserPlus, Pencil } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useTabSync } from "@/hooks/use-tab-sync";
-import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
+import { useSession } from "@/lib/auth-client";
 
 interface Employee {
   id: string;

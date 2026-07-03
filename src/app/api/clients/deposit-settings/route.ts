@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { clients } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { clients } from "@/lib/schema";
 /**
  * GET /api/clients/deposit-settings?salonId=...&email=...
  *

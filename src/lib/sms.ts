@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
-import { notifications } from "@/lib/schema";
 import { logger } from "@/lib/logger";
+import { notifications } from "@/lib/schema";
 
 export interface SmsMessage {
   to: string; // Phone number

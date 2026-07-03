@@ -1,10 +1,10 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Lock, Scissors, FolderOpen } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
-import dynamic from "next/dynamic";
 
 const AddServiceDialog = dynamic(() => import("./_components/add-service-dialog").then((m) => m.AddServiceDialog));
 const CategoriesTab = dynamic(() => import("./_components/categories-tab").then((m) => m.CategoriesTab));

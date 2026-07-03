@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock fetch
 const mockFetch = vi.fn();
@@ -148,7 +148,7 @@ describe("useSubscription", () => {
         if (args.length === 0) {
           super(mockNow);
         } else {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           
           super(...(args as [any]));
         }
       }
@@ -196,7 +196,7 @@ describe("useSubscription", () => {
         if (args.length === 0) {
           super(mockNow);
         } else {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           
           super(...(args as [any]));
         }
       }

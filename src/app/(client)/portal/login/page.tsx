@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation"
 import Link from "next/link"
+import { redirect } from "next/navigation"
 import { SignInButton } from "@/components/auth/sign-in-button"
 import {
   Card,

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Crown, Sparkles, ArrowRight, Lock } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,10 +11,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useSubscription } from "@/hooks/use-subscription";
 import { PLANS } from "@/lib/constants";
-import { Skeleton } from "@/components/ui/skeleton";
 
 type ProPlanGateProps = {
   /** The name of the blocked feature (e.g., "Asystent AI") */

@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
-import { useTabSync } from "@/hooks/use-tab-sync";
 import { useSalonId } from "@/hooks/use-salon-id";
+import { useTabSync } from "@/hooks/use-tab-sync";
 import { mutationFetch } from "@/lib/api-client";
+import { useSession } from "@/lib/auth-client";
 import type { Promotion, Service } from "../_types";
 
 interface UsePromotionsDataReturn {

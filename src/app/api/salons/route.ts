@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { salons, services, reviews } from "@/lib/schema";
 import { eq, and, isNotNull, ne, inArray, count, avg } from "drizzle-orm";
 import { validateBody, createSalonSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { salons, services, reviews } from "@/lib/schema";
 
 // Revalidate salon list every 60 seconds (ISR)
 export const revalidate = 60;

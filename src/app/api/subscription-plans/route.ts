@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { subscriptionPlans } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { PLANS } from "@/lib/constants";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { subscriptionPlans } from "@/lib/schema";
 // Subscription plans rarely change — revalidate every hour to reduce DB queries
 export const revalidate = 3600;
 

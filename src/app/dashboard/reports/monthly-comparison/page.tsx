@@ -20,19 +20,19 @@ import {
   ArrowDownRight,
   BarChart3,
 } from "lucide-react";
+import { FileText } from "lucide-react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { useSession } from "@/lib/auth-client";
+import { Input } from "@/components/ui/input";
 import { useSalonId } from "@/hooks/use-salon-id";
-import { toast } from "sonner";
-import { FileText } from "lucide-react";
+import { useSession } from "@/lib/auth-client";
 import { generateReportPDF } from "@/lib/pdf-export";
 
 interface MetricData {

@@ -158,12 +158,12 @@ function chainMock(result: unknown[] = []) {
 // Import route handlers
 // -------------------------------------------------------
 
-import { GET as listClients, POST as createClient } from "@/app/api/clients/route";
 import {
   GET as getClient,
   PUT as updateClient,
   DELETE as deleteClient,
 } from "@/app/api/clients/[id]/route";
+import { GET as listClients, POST as createClient } from "@/app/api/clients/route";
 
 // Mocked tenant resolver — flip it to simulate "no salon" / wrong tenant.
 import { getUserSalonId } from "@/lib/get-user-salon";

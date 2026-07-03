@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
+import { downgradeSubscriptionSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
-import { downgradeSubscriptionSchema, validateBody } from "@/lib/api-validation";
-
 import { logger } from "@/lib/logger";
+import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
+
 /**
  * POST /api/subscriptions/downgrade
  *
@@ -118,7 +118,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // eslint-disable-next-line no-console
+     
     logger.info(`[Subscriptions API] Downgrade scheduled: ${activeSub.plan.slug} → ${targetPlanSlug} at ${scheduledChangeAt}`,);
 
     return NextResponse.json({
@@ -189,7 +189,7 @@ export async function DELETE() {
       })
       .where(eq(salonSubscriptions.id, activeSub.id));
 
-    // eslint-disable-next-line no-console
+     
     logger.info(`[Subscriptions API] Scheduled downgrade cancelled for subscription ${activeSub.id}`,);
 
     return NextResponse.json({

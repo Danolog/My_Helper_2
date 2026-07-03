@@ -143,7 +143,7 @@ describe("stripe module", () => {
       process.env.STRIPE_SECRET_KEY = "sk_test_123";
       const { testStripeConnection, getStripe } = await import("@/lib/stripe");
       const stripe = getStripe();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (stripe as any).accounts.retrieve.mockResolvedValue({
         id: "acct_123",
         charges_enabled: true,
@@ -164,7 +164,7 @@ describe("stripe module", () => {
       process.env.STRIPE_SECRET_KEY = "sk_test_123";
       const { testStripeConnection, getStripe } = await import("@/lib/stripe");
       const stripe = getStripe();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (stripe as any).accounts.retrieve.mockResolvedValue({
         id: "acct_456",
         charges_enabled: false,
@@ -184,7 +184,7 @@ describe("stripe module", () => {
       process.env.STRIPE_SECRET_KEY = "sk_test_123";
       const { testStripeConnection, getStripe } = await import("@/lib/stripe");
       const stripe = getStripe();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (stripe as any).accounts.retrieve.mockResolvedValue({
         id: "acct_789",
         charges_enabled: true,
@@ -204,7 +204,7 @@ describe("stripe module", () => {
       const Stripe = (await import("stripe")).default;
       const { testStripeConnection, getStripe } = await import("@/lib/stripe");
       const stripe = getStripe();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (stripe as any).accounts.retrieve.mockRejectedValue(
         new Stripe.errors.StripeAuthenticationError({ message: "bad key", type: "authentication_error" })
       );
@@ -220,7 +220,7 @@ describe("stripe module", () => {
       const Stripe = (await import("stripe")).default;
       const { testStripeConnection, getStripe } = await import("@/lib/stripe");
       const stripe = getStripe();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (stripe as any).accounts.retrieve.mockRejectedValue(
         new Stripe.errors.StripeConnectionError({ message: "network down", type: "api_error" })
       );
@@ -236,7 +236,7 @@ describe("stripe module", () => {
       const Stripe = (await import("stripe")).default;
       const { testStripeConnection, getStripe } = await import("@/lib/stripe");
       const stripe = getStripe();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (stripe as any).accounts.retrieve.mockRejectedValue(
         new Stripe.errors.StripePermissionError({ message: "restricted key", type: "api_error" })
       );
@@ -251,7 +251,7 @@ describe("stripe module", () => {
       process.env.STRIPE_SECRET_KEY = "sk_test_123";
       const { testStripeConnection, getStripe } = await import("@/lib/stripe");
       const stripe = getStripe();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (stripe as any).accounts.retrieve.mockRejectedValue(
         new Error("Something went wrong")
       );
@@ -266,7 +266,7 @@ describe("stripe module", () => {
       process.env.STRIPE_SECRET_KEY = "sk_test_123";
       const { testStripeConnection, getStripe } = await import("@/lib/stripe");
       const stripe = getStripe();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       (stripe as any).accounts.retrieve.mockRejectedValue("unexpected string");
 
       const status = await testStripeConnection();

@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { productCategories, products } from "@/lib/schema";
 import { eq, asc, sql } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, createProductCategorySchema } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { productCategories, products } from "@/lib/schema";
 // GET /api/product-categories - List product categories with product counts
 export async function GET(request: Request) {
   try {

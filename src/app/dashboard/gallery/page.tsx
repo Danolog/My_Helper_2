@@ -23,8 +23,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useSalonId } from "@/hooks/use-salon-id";
-import { useSession } from "@/lib/auth-client";
 import { mutationFetch } from "@/lib/api-client";
+import { useSession } from "@/lib/auth-client";
 
 export default function GalleryPage() {
   const { data: session, isPending } = useSession();

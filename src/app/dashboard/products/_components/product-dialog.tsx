@@ -1,9 +1,8 @@
 "use client";
 
 import type { Dispatch, KeyboardEvent, SetStateAction } from "react";
+import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -11,6 +10,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -18,9 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FormRecoveryBanner } from "@/components/form-recovery-banner";
-import type { Product } from "../_types";
 import { NO_CATEGORY, UNITS } from "../_types";
+import type { Product } from "../_types";
 
 interface ProductDialogProps {
   open: boolean;

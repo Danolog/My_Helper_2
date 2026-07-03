@@ -7,9 +7,9 @@ import {
   DollarSign,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { ReportData } from "../_types";
 import { getRateColor } from "../_types";
 import { DeltaIndicator } from "./delta-indicator";
+import type { ReportData } from "../_types";
 
 interface SummaryCardsProps {
   reportData: ReportData;

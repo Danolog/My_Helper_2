@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   services,
@@ -7,11 +10,7 @@ import {
   products,
   employeeCommissions,
 } from "@/lib/schema";
-import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
 // GET /api/reports/service-profitability - Service profit margins report
 export async function GET(request: Request) {
   try {

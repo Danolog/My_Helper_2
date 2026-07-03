@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { z } from "zod";
 import {
   validateBody,
   createServiceSchema,
@@ -8,7 +9,6 @@ import {
   createAppointmentSchema,
   createPromotionSchema,
 } from "@/lib/api-validation";
-import { z } from "zod";
 
 describe("validateBody", () => {
   const simpleSchema = z.object({

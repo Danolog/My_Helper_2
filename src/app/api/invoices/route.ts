@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { invoices, clients, appointments, employees, services, salons } from "@/lib/schema";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { invoices, clients, appointments, employees, services, salons } from "@/lib/schema";
 /**
  * GET /api/invoices
  *

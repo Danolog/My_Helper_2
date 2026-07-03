@@ -1,10 +1,9 @@
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { isProPlan } from "@/lib/subscription";
-import { scheduledPosts } from "@/lib/schema";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { scheduledPosts } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isProPlan } from "@/lib/subscription";
 // GET - Get a single scheduled post by ID
 export async function GET(
   _req: Request,

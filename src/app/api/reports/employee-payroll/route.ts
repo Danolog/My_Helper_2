@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
+import { eq, and, gte, lte, inArray } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   services,
   employees,
   employeeCommissions,
 } from "@/lib/schema";
-import { eq, and, gte, lte, inArray } from "drizzle-orm";
-import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
 // GET /api/reports/employee-payroll - Employee payroll report with hours, commissions, and service breakdown
 export async function GET(request: Request) {
   try {

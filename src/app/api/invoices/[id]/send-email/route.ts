@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { invoices, clients } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { sendInvoiceEmailSchema, validateBody } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { invoices, clients } from "@/lib/schema";
 /**
  * POST /api/invoices/[id]/send-email
  *
@@ -145,7 +144,7 @@ export async function POST(
     const emailBody = buildEmailBody(invoice, invoiceType, clientDisplayName);
 
     // In development mode, log to console instead of sending
-    // eslint-disable-next-line no-console
+     
     logger.info(`
 ${"=".repeat(70)}
 INVOICE EMAIL SENT
@@ -199,7 +198,7 @@ function buildEmailBody(
     netAmount: string | null;
     issuedAt: Date;
     paymentMethod: string | null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     invoiceDataJson: any;
   },
   invoiceType: string,

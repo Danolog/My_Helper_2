@@ -1,10 +1,10 @@
 "use client";
 
 import { Scissors } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { ReportData } from "../_types";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getRateColor, getRateBadge } from "../_types";
+import type { ReportData } from "../_types";
 
 interface ServiceTabProps {
   reportData: ReportData;

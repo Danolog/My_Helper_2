@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { promotions, appointments, services } from "@/lib/schema";
 import { eq, and, not, sql } from "drizzle-orm";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { promotions, appointments, services } from "@/lib/schema";
+
 // GET /api/promotions/check - Check if a client qualifies for any buy2get1 promotion
 // Query params: salonId, clientId, serviceId
 export async function GET(request: Request) {

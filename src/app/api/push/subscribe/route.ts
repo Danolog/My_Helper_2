@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { pushSubscriptions } from "@/lib/schema";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { validateBody, pushSubscribeSchema } from "@/lib/api-validation";
 import { eq, and } from "drizzle-orm";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-
+import { validateBody, pushSubscribeSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { pushSubscriptions } from "@/lib/schema";
 /**
  * POST /api/push/subscribe
  *

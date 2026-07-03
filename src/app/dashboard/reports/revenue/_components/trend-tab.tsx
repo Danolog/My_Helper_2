@@ -1,8 +1,8 @@
 "use client";
 
 import { TrendingUp } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ReportData } from "../_types";
 
 interface TrendTabProps {

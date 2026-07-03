@@ -1,8 +1,8 @@
+import { eq } from "drizzle-orm";
 import webpush from "web-push";
 import { db } from "@/lib/db";
-import { notifications, pushSubscriptions } from "@/lib/schema";
-import { eq } from "drizzle-orm";
 import { logger } from "@/lib/logger";
+import { notifications, pushSubscriptions } from "@/lib/schema";
 
 // Configure web-push with VAPID details
 const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "";

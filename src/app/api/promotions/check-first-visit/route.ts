@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { promotions, appointments, clients, services } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { promotions, appointments, clients, services } from "@/lib/schema";
+
 /**
  * GET /api/promotions/check-first-visit
  * Check if a client qualifies for a first-visit discount at a salon.

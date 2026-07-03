@@ -3,19 +3,19 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Search, MapPin, Phone, Star, Heart, Scissors, ArrowRight, Clock } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { NetworkErrorHandler } from "@/components/network-error-handler";
-import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { useSession } from "@/lib/auth-client";
+import { Input } from "@/components/ui/input";
 import { mutationFetch } from "@/lib/api-client";
+import { useSession } from "@/lib/auth-client";
+import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 
 interface Salon {
   id: string;

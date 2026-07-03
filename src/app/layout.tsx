@@ -1,6 +1,6 @@
-import { Analytics } from "@vercel/analytics/react";
 import { Playfair_Display, DM_Sans } from "next/font/google";
 import { headers } from "next/headers";
+import { Analytics } from "@vercel/analytics/react";
 import "./globals.css";
 import { OfflineBanner } from "@/components/offline-banner";
 import { InstallPrompt } from "@/components/pwa/install-prompt";

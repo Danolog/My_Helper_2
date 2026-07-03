@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { promotions } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { validateBody, createPromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { promotions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/promotions - List promotions with optional salonId filter
 export async function GET(request: Request) {
   try {

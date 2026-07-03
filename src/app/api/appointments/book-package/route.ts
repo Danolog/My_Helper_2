@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
 import { eq, and, not, lte, gte, or, lt, gt, inArray } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, bookPackageSchema } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
 /**
  * POST /api/appointments/book-package
  * Book all services in a package promotion as sequential appointments

@@ -1,19 +1,18 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
+import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
-import { isProPlan } from "@/lib/subscription";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   salons,
   services,
   promotions,
   newsletters,
 } from "@/lib/schema";
-import { eq, and, desc } from "drizzle-orm";
-
-import { logger } from "@/lib/logger";
+import { isProPlan } from "@/lib/subscription";
 const requestSchema = z.object({
   topic: z.string().min(1).max(500),
   goals: z

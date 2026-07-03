@@ -3,13 +3,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { toast } from "sonner";
-import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { mutationFetch } from "@/lib/api-client";
+import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 import { validatePhone } from "@/lib/validations";
-import type { Client, ClientFiltersState } from "../_types";
 import { EMPTY_FILTERS } from "../_types";
+import type { Client, ClientFiltersState } from "../_types";
 
 type ClientFormState = {
   firstName: string;

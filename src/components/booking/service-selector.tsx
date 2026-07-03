@@ -8,16 +8,16 @@ import {
   CreditCard,
   Scissors,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
-import type { ServiceItem, ServiceCategory, ServiceVariant } from "./types";
 import { formatDuration } from "./types";
+import type { ServiceItem, ServiceCategory, ServiceVariant } from "./types";
 
 // ---------------------------------------------------------------------------
 // Props

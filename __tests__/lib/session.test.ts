@@ -44,6 +44,7 @@ vi.mock("@/lib/schema", () => ({
   salons: { id: "salons.id", ownerId: "salons.ownerId" },
 }));
 
+import { auth } from "@/lib/auth";
 import {
   isProtectedRoute,
   isAdminRoute,
@@ -56,7 +57,6 @@ import {
 } from "@/lib/session";
 
 // Import mock references so we can control their behavior per test
-import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 

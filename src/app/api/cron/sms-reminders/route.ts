@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { appointments, clients, employees, services, salons } from "@/lib/schema";
 import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { appointments, clients, employees, services, salons } from "@/lib/schema";
 import { sendAppointmentReminderSms } from "@/lib/sms";
 
 /**

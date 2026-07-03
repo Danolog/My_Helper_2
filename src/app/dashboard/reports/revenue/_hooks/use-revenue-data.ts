@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, usePathname } from "next/navigation";
 import { toast } from "sonner";
-import { useSession } from "@/lib/auth-client";
 import { useSalonId } from "@/hooks/use-salon-id";
+import { useSession } from "@/lib/auth-client";
 import { generateReportPDF } from "@/lib/pdf-export";
 import type { ReportData, RevenueActiveTab } from "../_types";
 

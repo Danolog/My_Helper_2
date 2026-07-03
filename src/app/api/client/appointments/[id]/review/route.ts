@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { appointments, reviews } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, clientReviewSchema } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { appointments, reviews } from "@/lib/schema";
 // GET /api/client/appointments/[id]/review - Check if a review exists for this appointment
 export async function GET(
   _request: Request,

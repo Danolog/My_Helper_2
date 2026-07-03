@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { appointments, services, employees, clients } from "@/lib/schema";
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
-import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { forSalon } from "@/lib/server/repository";
-
+import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 import { logger } from "@/lib/logger";
+import { appointments, services, employees, clients } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/reports/revenue - Revenue report with breakdowns by service/employee and trends
 export async function GET(request: Request) {
   try {

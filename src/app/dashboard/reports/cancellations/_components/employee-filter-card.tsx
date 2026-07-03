@@ -1,7 +1,7 @@
 "use client";
 
-import { Card, CardContent } from "@/components/ui/card";
 import { EmployeeFilter } from "@/components/reports/employee-filter";
+import { Card, CardContent } from "@/components/ui/card";
 
 interface EmployeeFilterCardProps {
   selectedEmployeeIds: string[];

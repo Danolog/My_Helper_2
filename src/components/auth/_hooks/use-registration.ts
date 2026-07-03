@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { signUp } from "@/lib/auth-client";
-import { sanitizeAuthError } from "@/lib/error-messages";
 import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { mutationFetch } from "@/lib/api-client";
+import { signUp } from "@/lib/auth-client";
+import { sanitizeAuthError } from "@/lib/error-messages";
 
 export type Plan = {
   id: string;

@@ -1,13 +1,12 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { temporaryAccess, employees, salons } from "@/lib/schema";
-import { eq, and, gt, lt, inArray } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { NextResponse } from "next/server";
+import { eq, and, gt, lt, inArray } from "drizzle-orm";
 import { validateBody, temporaryAccessSchema } from "@/lib/api-validation";
-
+import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { temporaryAccess, employees, salons } from "@/lib/schema";
 /**
  * Available feature names that can be granted temporarily.
  * These correspond to dashboard sections that employees/receptionists

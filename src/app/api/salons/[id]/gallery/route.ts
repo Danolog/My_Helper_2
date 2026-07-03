@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, desc, and, isNotNull } from "drizzle-orm";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { galleryPhotos, employees, services } from "@/lib/schema";
+
 // GET /api/salons/[id]/gallery - Public gallery for clients (no auth required)
 export async function GET(
   request: Request,

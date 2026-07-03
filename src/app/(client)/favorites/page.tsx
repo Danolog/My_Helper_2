@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Heart, MapPin, Phone, ArrowLeft } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -11,9 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { useSession } from "@/lib/auth-client";
 import { mutationFetch } from "@/lib/api-client";
+import { useSession } from "@/lib/auth-client";
 
 interface FavoriteSalon {
   id: string;

@@ -18,8 +18,8 @@
  *   k6 run --env BASE_URL=https://myhelper.app tests/performance/load-test.js
  */
 
-import http from "k6/http";
 import { check, group, sleep } from "k6";
+import http from "k6/http";
 import { Rate, Trend } from "k6/metrics";
 
 // ─── Custom metrics ──────────────────────────────────────────────────────────

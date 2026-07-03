@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { forSalon } from "@/lib/server/repository";
-import { appointments, services, employees, clients, reviews } from "@/lib/schema";
 import { eq, and, gte, lte, sql, count } from "drizzle-orm";
-import { isProPlan } from "@/lib/subscription";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { appointments, services, employees, clients, reviews } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isProPlan } from "@/lib/subscription";
 /** Trend direction based on percentage change relative to a threshold. */
 function classifyTrend(
   current: number,

@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { forSalon } from "@/lib/server/repository";
+import { eq, and, gte, lte, sql, count, desc } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
@@ -8,12 +11,8 @@ import {
   reviews,
   products,
 } from "@/lib/schema";
-import { eq, and, gte, lte, sql, count, desc } from "drizzle-orm";
+import { forSalon } from "@/lib/server/repository";
 import { isProPlan } from "@/lib/subscription";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
-import { logger } from "@/lib/logger";
 interface Suggestion {
   id: string;
   type: "warning" | "opportunity" | "action" | "insight";

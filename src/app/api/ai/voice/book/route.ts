@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
-import { isProPlan } from "@/lib/subscription";
+import { eq, and, gte, lt, not } from "drizzle-orm";
+import { voiceBookSchema, validateBody } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
@@ -12,13 +16,8 @@ import {
   employeeServices,
   salons,
 } from "@/lib/schema";
-import { eq, and, gte, lt, not } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { voiceBookSchema, validateBody } from "@/lib/api-validation";
-
-import { logger } from "@/lib/logger";
+import { isProPlan } from "@/lib/subscription";
 /** Slot interval in minutes used when generating available time slots. */
 const SLOT_INTERVAL = 15;
 

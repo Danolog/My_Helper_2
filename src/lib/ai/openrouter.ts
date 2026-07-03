@@ -1,8 +1,9 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { isProPlan } from "@/lib/subscription";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { eq, and, gte, sql, count, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   aiGeneratedMedia,
   appointments,
@@ -13,8 +14,7 @@ import {
   products,
   salons,
 } from "@/lib/schema";
-import { eq, and, gte, sql, count, desc } from "drizzle-orm";
-import { logger } from "@/lib/logger";
+import { isProPlan } from "@/lib/subscription";
 
 // ────────────────────────────────────────────────────────────
 // Shared AI client factory

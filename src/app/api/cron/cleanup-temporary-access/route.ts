@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { cleanupExpiredTemporaryAccess } from "@/lib/temporary-access";
 import { requireCronSecret } from "@/lib/auth-middleware";
-
 import { logger } from "@/lib/logger";
+import { cleanupExpiredTemporaryAccess } from "@/lib/temporary-access";
 /**
  * POST /api/cron/cleanup-temporary-access
  *

@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { depositPayments, subscriptionPayments, appointments, clients, services, salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { depositPayments, subscriptionPayments, appointments, clients, services, salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 /**
  * GET /api/payments
  *

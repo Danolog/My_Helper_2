@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { favoriteSalons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { favoriteSalons } from "@/lib/schema";
 // GET /api/favorites/salons/check?salonId=<uuid> - Check if salon is in favorites
 export async function GET(request: Request) {
   try {

@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSession } from "@/lib/auth-client";
-import { useSalonId } from "@/hooks/use-salon-id";
 import { toast } from "sonner";
+import { useSalonId } from "@/hooks/use-salon-id";
+import { useSession } from "@/lib/auth-client";
 import { generateReportPDF } from "@/lib/pdf-export";
 import type { ReportData, ActiveTab } from "../_types";
 

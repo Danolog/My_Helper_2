@@ -24,13 +24,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { VoiceControls } from "./VoiceControls";
+import { VoiceMessageForm } from "./VoiceMessageForm";
 import type {
   CallSimulationResult,
   MessageResult,
   VoiceAiConfig,
 } from "../types";
-import { VoiceControls } from "./VoiceControls";
-import { VoiceMessageForm } from "./VoiceMessageForm";
 
 // ---------------------------------------------------------------------------
 // Props

@@ -4,7 +4,6 @@ import { useEffect, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle2, Loader2, XCircle, ArrowRight } from "lucide-react";
-import { mutationFetch } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -13,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { mutationFetch } from "@/lib/api-client";
 
 type ConfirmResult = {
   planName: string;

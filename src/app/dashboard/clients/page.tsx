@@ -1,12 +1,12 @@
 "use client";
 
-import { useSession } from "@/lib/auth-client";
 import { Lock, Users } from "lucide-react";
 import { useSalonId } from "@/hooks/use-salon-id";
-import { useClientsData } from "./_hooks/use-clients-data";
-import { ClientForm } from "./_components/ClientForm";
+import { useSession } from "@/lib/auth-client";
 import { ClientFilters } from "./_components/ClientFilters";
+import { ClientForm } from "./_components/ClientForm";
 import { ClientList } from "./_components/ClientList";
+import { useClientsData } from "./_hooks/use-clients-data";
 
 export default function ClientsPage() {
   const { data: session, isPending } = useSession();

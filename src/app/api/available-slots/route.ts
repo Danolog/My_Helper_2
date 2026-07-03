@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { appointments, workSchedules, timeBlocks } from "@/lib/schema";
 import { eq, and, gte, lt, not } from "drizzle-orm";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { appointments, workSchedules, timeBlocks } from "@/lib/schema";
+
 // GET /api/available-slots?employeeId=xxx&date=2026-02-10&duration=60
 // Returns available time slots for booking
 export async function GET(request: Request) {

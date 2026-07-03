@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
 import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
 import { validateBody, createAppointmentSchema } from "@/lib/api-validation";
-import { isValidUuid, isValidDateString } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { getOptionalSession } from "@/lib/session";
-import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
-
 import { logger } from "@/lib/logger";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
+import { getOptionalSession } from "@/lib/session";
+import { isValidUuid, isValidDateString } from "@/lib/validations";
 // GET /api/appointments - List appointments with optional date range filter
 export async function GET(request: Request) {
   try {

@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { CalendarEventComponent } from "./calendar-event";
-import { getBlockStyle } from "./calendar-constants";
 import type { CalendarEvent, Employee, TimeBlock, TimeSlot, WorkSchedule } from "@/types/calendar";
+import { getBlockStyle } from "./calendar-constants";
+import { CalendarEventComponent } from "./calendar-event";
 
 interface TimeGridProps {
   date: Date;

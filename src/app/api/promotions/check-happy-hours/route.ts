@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { promotions } from "@/lib/schema";
+
 /**
  * GET /api/promotions/check-happy-hours
  * Check if a booking time slot qualifies for a happy hours promotion

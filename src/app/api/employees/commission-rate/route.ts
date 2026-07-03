@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, commissionRateSchema } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { employees } from "@/lib/schema";
 // PUT /api/employees/commission-rate - Update employee's default commission rate
 export async function PUT(request: Request) {
   try {

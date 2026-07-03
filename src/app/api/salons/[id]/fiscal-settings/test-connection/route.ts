@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import type { FiscalPrinterSettings } from "../route";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { salons } from "@/lib/schema";
+import type { FiscalPrinterSettings } from "../route";
 /**
  * POST /api/salons/[id]/fiscal-settings/test-connection
  *

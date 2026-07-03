@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { eq, and, avg, count, desc } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
 import {
   employees,
   services,
@@ -9,9 +11,7 @@ import {
   salons,
   clients,
 } from "@/lib/schema";
-import { eq, and, avg, count, desc } from "drizzle-orm";
 
-import { logger } from "@/lib/logger";
 // GET /api/salons/[id]/employees/[employeeId] - Get employee profile details
 export async function GET(
   _request: Request,

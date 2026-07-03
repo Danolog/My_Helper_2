@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { clients, appointments, notifications, salons } from "@/lib/schema";
 import { eq, sql, and, lt, isNull, or, inArray } from "drizzle-orm";
-import { requireCronSecret } from "@/lib/auth-middleware";
 import { isValidUuid, validateBody, weMissYouNotificationSchema } from "@/lib/api-validation";
-
+import { requireCronSecret } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { clients, appointments, notifications, salons } from "@/lib/schema";
 interface WeMissYouSettings {
   enabled: boolean;
   inactiveDays: number;

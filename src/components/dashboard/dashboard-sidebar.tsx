@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard,
   Calendar,
@@ -33,6 +32,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
+import type { LucideIcon } from "lucide-react";
 
 interface NavItem {
   label: string;

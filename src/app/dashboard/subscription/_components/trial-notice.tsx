@@ -3,8 +3,8 @@
 import { AlertTriangle, Timer, CreditCard, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TRIAL_DAYS } from "@/lib/constants";
-import type { SubscriptionData, PlanData } from "../_types";
 import { formatDate } from "../_types";
+import type { SubscriptionData, PlanData } from "../_types";
 
 interface TrialNoticeProps {
   subscription: SubscriptionData;

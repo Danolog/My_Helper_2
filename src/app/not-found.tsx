@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { FileQuestion, Home, LayoutDashboard } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { SiteHeader } from "@/components/site-header";
+import { Button } from "@/components/ui/button";
 
 export default function NotFound() {
   return (

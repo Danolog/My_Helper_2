@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { appointments, employees, services, salons } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { appointments, employees, services, salons } from "@/lib/schema";
 // GET /api/client/appointments - List appointments for the authenticated client user
 export async function GET() {
   try {

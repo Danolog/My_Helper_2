@@ -1,24 +1,22 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
-import { useSession } from "@/lib/auth-client";
 import { Lock } from "lucide-react";
 import { useSalonId } from "@/hooks/use-salon-id";
-
-import { useServiceData } from "./_hooks/use-service-data";
-import { useVariantForm } from "./_hooks/use-variant-form";
+import { useSession } from "@/lib/auth-client";
+import { EmployeeAssignmentCard } from "./_components/employee-assignment-card";
+import { EmployeePricingCard } from "./_components/employee-pricing-card";
+import { GalleryPhotosCard } from "./_components/gallery-photos-card";
+import { LinkedProductsCard } from "./_components/linked-products-card";
+import { ServiceDetailsCard } from "./_components/service-details-card";
+import { ServiceHeader } from "./_components/service-header";
+import { VariantsCard } from "./_components/variants-card";
 import { useEditService } from "./_hooks/use-edit-service";
 import { useEmployeePricing } from "./_hooks/use-employee-pricing";
 import { useProductLinks } from "./_hooks/use-product-links";
-
-import { ServiceHeader } from "./_components/service-header";
-import { ServiceDetailsCard } from "./_components/service-details-card";
-import { VariantsCard } from "./_components/variants-card";
-import { EmployeeAssignmentCard } from "./_components/employee-assignment-card";
-import { EmployeePricingCard } from "./_components/employee-pricing-card";
-import { LinkedProductsCard } from "./_components/linked-products-card";
-import { GalleryPhotosCard } from "./_components/gallery-photos-card";
-import dynamic from "next/dynamic";
+import { useServiceData } from "./_hooks/use-service-data";
+import { useVariantForm } from "./_hooks/use-variant-form";
 
 const EditServiceDialog = dynamic(() => import("./_components/edit-service-dialog").then((m) => m.EditServiceDialog));
 

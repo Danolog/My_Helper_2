@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
-
-import { useSession } from "@/lib/auth-client";
 import { mutationFetch } from "@/lib/api-client";
+import { useSession } from "@/lib/auth-client";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
 import type {
   SalonDetail,

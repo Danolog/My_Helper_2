@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { treatmentHistory, appointments } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { validateBody, treatmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, treatmentSchema } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { treatmentHistory, appointments } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/appointments/[id]/treatment - Get treatment record for an appointment
 export async function GET(
   _request: Request,

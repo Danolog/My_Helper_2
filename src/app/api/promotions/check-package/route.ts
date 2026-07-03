@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { promotions, services } from "@/lib/schema";
 import { eq, and, inArray } from "drizzle-orm";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { promotions, services } from "@/lib/schema";
+
 /**
  * GET /api/promotions/check-package
  * Get active package promotions for a salon with service details

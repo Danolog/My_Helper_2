@@ -1,13 +1,12 @@
-import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { db } from "@/lib/db";
-import { reviews, salons } from "@/lib/schema";
+import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { validateBody, reviewModerateSchema } from "@/lib/api-validation";
+import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { reviews, salons } from "@/lib/schema";
 // PATCH /api/reviews/[id]/moderate - Approve or reject a review
 export async function PATCH(
   request: Request,

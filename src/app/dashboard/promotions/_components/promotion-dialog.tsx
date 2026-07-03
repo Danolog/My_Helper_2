@@ -1,9 +1,8 @@
 "use client";
 
+import { Package, Clock } from "lucide-react";
+import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -12,6 +11,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -19,10 +20,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Package, Clock } from "lucide-react";
-import { FormRecoveryBanner } from "@/components/form-recovery-banner";
-import type { Promotion, Service } from "../_types";
+import { Switch } from "@/components/ui/switch";
 import { DAY_NAMES_PL, DAY_FULL_NAMES_PL } from "../_types";
+import type { Promotion, Service } from "../_types";
 
 interface PromotionDialogProps {
   open: boolean;

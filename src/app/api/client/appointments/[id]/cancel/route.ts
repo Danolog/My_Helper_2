@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { appointments, employees, services, salons, depositPayments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
-import { processAutomaticRefund } from "@/lib/refund";
-import { notifyWaitingList } from "@/lib/waiting-list";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { processAutomaticRefund } from "@/lib/refund";
+import { appointments, employees, services, salons, depositPayments } from "@/lib/schema";
+import { notifyWaitingList } from "@/lib/waiting-list";
 // GET /api/client/appointments/[id]/cancel - Get cancellation policy info for client
 export async function GET(
   _request: Request,

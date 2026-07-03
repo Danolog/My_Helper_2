@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useSalonData } from "./_hooks/use-salon-data";
-import { SalonHeader } from "./_components/SalonHeader";
-import { SalonServices } from "./_components/SalonServices";
-import { SalonEmployees } from "./_components/SalonEmployees";
-import { SalonReviews } from "./_components/SalonReviews";
 import { SalonBookingCta } from "./_components/SalonBookingCta";
+import { SalonEmployees } from "./_components/SalonEmployees";
+import { SalonHeader } from "./_components/SalonHeader";
+import { SalonReviews } from "./_components/SalonReviews";
+import { SalonServices } from "./_components/SalonServices";
+import { useSalonData } from "./_hooks/use-salon-data";
 
 export default function SalonProfilePage() {
   const {

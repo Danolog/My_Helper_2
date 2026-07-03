@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { employees, employeeServices } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { validateBody, updateEmployeeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { employees, employeeServices } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/employees/[id] - Get single employee with assigned services
 export async function GET(
   _request: Request,

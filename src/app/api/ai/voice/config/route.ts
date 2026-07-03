@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { isProPlan } from "@/lib/subscription";
-import { db } from "@/lib/db";
-import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { voiceConfigSchema, validateBody } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { salons } from "@/lib/schema";
+import { isProPlan } from "@/lib/subscription";
 export type VoiceAiConfig = {
   enabled: boolean;
   greeting: string;

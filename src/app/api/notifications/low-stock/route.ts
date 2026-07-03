@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { products, notifications } from "@/lib/schema";
 import { eq, and, isNotNull, like, sql } from "drizzle-orm";
-import { requireCronSecret } from "@/lib/auth-middleware";
 import { isValidUuid, validateBody, lowStockNotificationSchema } from "@/lib/api-validation";
-
+import { requireCronSecret } from "@/lib/auth-middleware";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { products, notifications } from "@/lib/schema";
 /**
  * GET /api/notifications/low-stock
  *

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { logger } from "@/lib/logger";
 import {
   hasTemporaryAccess,
   getActiveTemporaryAccess,
 } from "@/lib/temporary-access";
 
-import { logger } from "@/lib/logger";
 /**
  * GET /api/temporary-access/check
  *

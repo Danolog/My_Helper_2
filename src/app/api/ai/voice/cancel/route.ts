@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
-import { isProPlan } from "@/lib/subscription";
+import { eq, and, gte, not } from "drizzle-orm";
+import { voiceCancelSchema, validateBody } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
+import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
 import {
   appointments,
   clients,
@@ -11,15 +16,9 @@ import {
   notifications,
   depositPayments,
 } from "@/lib/schema";
-import { eq, and, gte, not } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
-import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
+import { isProPlan } from "@/lib/subscription";
 import { notifyWaitingList } from "@/lib/waiting-list";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { voiceCancelSchema, validateBody } from "@/lib/api-validation";
-
-import { logger } from "@/lib/logger";
 
 /**
  * POST /api/ai/voice/cancel

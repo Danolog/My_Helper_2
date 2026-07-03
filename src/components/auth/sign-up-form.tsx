@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { signUp } from "@/lib/auth-client"
-import { validatePhone } from "@/lib/validations"
 import { sanitizeAuthError } from "@/lib/error-messages"
+import { validatePhone } from "@/lib/validations"
 
 interface SignUpFormProps {
   /** Where to redirect after successful signup */

@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { products, notifications } from "@/lib/schema";
 import { eq, and, like, sql } from "drizzle-orm";
 import { validateBody, createProductSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { products, notifications } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * Check if a product has low stock and create a notification if needed.
  */

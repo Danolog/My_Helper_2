@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { salons, employees, services, clients, appointments } from "@/lib/schema";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { salons, employees, services, clients, appointments } from "@/lib/schema";
+
 // POST /api/seed - Seed test data for development
 export async function POST() {
   if (process.env.NODE_ENV === "production") {

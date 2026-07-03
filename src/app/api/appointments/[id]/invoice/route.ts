@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq, and, count } from "drizzle-orm";
+import { validateBody, invoiceSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { DEFAULT_VAT_RATE } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
@@ -10,13 +16,6 @@ import {
   products,
   invoices,
 } from "@/lib/schema";
-import { eq, and, count } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { DEFAULT_VAT_RATE } from "@/lib/constants";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { validateBody, invoiceSchema } from "@/lib/api-validation";
-
-import { logger } from "@/lib/logger";
 /**
  * GET /api/appointments/[id]/invoice
  *

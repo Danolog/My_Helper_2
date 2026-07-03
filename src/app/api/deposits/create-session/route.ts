@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { services, appointments, depositPayments } from "@/lib/schema";
 import { eq, and, not, or, lte, gte, lt, gt } from "drizzle-orm";
-import { timeBlocks } from "@/lib/schema";
 import { validateBody, depositCreateSessionSchema } from "@/lib/api-validation";
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { timeBlocks } from "@/lib/schema";
+import { services, appointments, depositPayments } from "@/lib/schema";
 import { getOptionalSession } from "@/lib/session";
 
 /**

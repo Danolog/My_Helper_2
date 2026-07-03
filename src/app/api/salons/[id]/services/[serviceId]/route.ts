@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
 import {
   services,
   serviceVariants,
@@ -8,9 +10,7 @@ import {
   employeeServicePrices,
   serviceCategories,
 } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
 
-import { logger } from "@/lib/logger";
 // GET /api/salons/[id]/services/[serviceId] - Get service details with variants and assigned employees
 export async function GET(
   _request: Request,

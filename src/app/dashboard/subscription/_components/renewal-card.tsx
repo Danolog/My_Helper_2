@@ -10,8 +10,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { SubscriptionData, PlanData, ScheduledPlanData } from "../_types";
 import { formatDate } from "../_types";
+import type { SubscriptionData, PlanData, ScheduledPlanData } from "../_types";
 
 interface RenewalCardProps {
   subscription: SubscriptionData;

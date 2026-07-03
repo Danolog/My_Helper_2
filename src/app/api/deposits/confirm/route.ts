@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { appointments, depositPayments, clients, services, employees } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { sendPaymentConfirmationSms } from "@/lib/sms";
 import { depositConfirmSchema } from "@/lib/api-validation";
-import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
-
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { appointments, depositPayments, clients, services, employees } from "@/lib/schema";
+import { sendPaymentConfirmationSms } from "@/lib/sms";
 /**
  * POST /api/deposits/confirm
  *

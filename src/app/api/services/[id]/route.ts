@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { services, serviceCategories, serviceVariants } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { validateBody, updateServiceSchema } from "@/lib/api-validation";
-import { isValidUuid } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { services, serviceCategories, serviceVariants } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isValidUuid } from "@/lib/validations";
 // GET /api/services/[id] - Get a single service with its variants
 export async function GET(
   _request: Request,
