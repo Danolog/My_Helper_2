@@ -141,6 +141,20 @@ async function seed() {
   console.log("[seed-test] Created client user: client@test.com (emailVerified=true + verification record)");
 
   // 3. Create test salon linked to owner
+  // E2E testuje pelny produkt, wiec salon testowy ma WLACZONE wszystkie moduly
+  // opcjonalne (Faza 2: domyslnie OFF — "chudy UI"); hardOff (voiceAi/videoGen/
+  // fiscal/socialPosts) pozostaja wylaczone globalnie niezaleznie od zapisu.
+  const seedModules = {
+    modules: {
+      products: true,
+      promotions: true,
+      loyalty: true,
+      waitingList: true,
+      newsletters: true,
+      invoices: true,
+      reportsAdvanced: true,
+    },
+  };
   await db
     .insert(salons)
     .values({
@@ -151,10 +165,11 @@ async function seed() {
       address: "ul. Przykladowa 123, Warszawa",
       industryType: "beauty_salon",
       ownerId: OWNER_USER_ID,
+      settingsJson: seedModules,
     })
     .onConflictDoUpdate({
       target: salons.id,
-      set: { name: "Beauty Studio Demo", ownerId: OWNER_USER_ID },
+      set: { name: "Beauty Studio Demo", ownerId: OWNER_USER_ID, settingsJson: seedModules },
     });
 
   console.log("[seed-test] Created salon: Beauty Studio Demo");

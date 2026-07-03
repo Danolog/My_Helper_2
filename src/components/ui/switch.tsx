@@ -9,7 +9,7 @@ export interface SwitchProps extends Omit<React.InputHTMLAttributes<HTMLInputEle
 }
 
 const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
-  ({ className, onCheckedChange, checked = false, disabled, ...props }, ref) => {
+  ({ className, onCheckedChange, checked = false, disabled, id, ...props }, ref) => {
     const handleChange = () => {
       if (!disabled) {
         onCheckedChange?.(!checked);
@@ -22,6 +22,10 @@ const Switch = React.forwardRef<HTMLInputElement, SwitchProps>(
         role="switch"
         aria-checked={checked}
         disabled={disabled}
+        // `id` MUSI byc na widocznym przycisku (nie na ukrytym sr-only input):
+        // <Label htmlFor> i testy E2E (np. locator('#edit-active').click())
+        // celuja w id — ukryty input nigdy nie jest "visible" dla Playwrighta.
+        id={id}
         className={cn(
           "peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50",
           checked ? "bg-primary" : "bg-input",
