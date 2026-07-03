@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { sendInvoiceEmailSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { invoices, clients } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * POST /api/invoices/[id]/send-email
  *
@@ -68,7 +68,8 @@ export async function POST(
     }
 
     // Fetch invoice with client data
-    const rows = await db
+    const rows = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: invoices.id,
         invoiceNumber: invoices.invoiceNumber,
@@ -95,7 +96,8 @@ export async function POST(
       .from(invoices)
       .leftJoin(clients, eq(invoices.clientId, clients.id))
       .where(and(eq(invoices.id, id), eq(invoices.salonId, salonId)))
-      .limit(1);
+      .limit(1)
+    );
 
     if (rows.length === 0) {
       return NextResponse.json(
@@ -160,13 +162,10 @@ ${"=".repeat(70)}
 
     // Update invoice with email sent timestamp
     const now = new Date();
-    await db
-      .update(invoices)
-      .set({
-        emailSentAt: now,
-        emailSentTo: recipientEmail,
-      })
-      .where(eq(invoices.id, id));
+    await forSalon(salonId).updateOwned(invoices, id, {
+      emailSentAt: now,
+      emailSentTo: recipientEmail,
+    });
 
     return NextResponse.json({
       success: true,

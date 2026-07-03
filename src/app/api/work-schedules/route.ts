@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { validateBody, createWorkScheduleSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { workSchedules, employees } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/work-schedules?employeeId=xxx
 export async function GET(request: Request) {
   try {
@@ -21,13 +22,38 @@ export async function GET(request: Request) {
       );
     }
 
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     logger.info("[WorkSchedules API] GET for employee", { employeeId });
 
-    const schedules = await db
-      .select()
-      .from(workSchedules)
-      .where(eq(workSchedules.employeeId, employeeId))
-      .orderBy(workSchedules.dayOfWeek);
+    // workSchedules nie ma kolumny salonId — scope przez join z employees
+    // (tabela nadrzędna) i jawny eq(employees.salonId, salonId).
+    const schedules = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          id: workSchedules.id,
+          employeeId: workSchedules.employeeId,
+          dayOfWeek: workSchedules.dayOfWeek,
+          startTime: workSchedules.startTime,
+          endTime: workSchedules.endTime,
+          createdAt: workSchedules.createdAt,
+        })
+        .from(workSchedules)
+        .innerJoin(employees, eq(workSchedules.employeeId, employees.id))
+        .where(
+          and(
+            eq(workSchedules.employeeId, employeeId),
+            eq(employees.salonId, salonId)
+          )
+        )
+        .orderBy(workSchedules.dayOfWeek)
+    );
 
     logger.info(`[WorkSchedules API] Found ${schedules.length} schedule entries`);
 
@@ -67,26 +93,13 @@ export async function POST(request: Request) {
     }
     const { employeeId, schedules } = body;
 
-    // Verify employee exists
-    const [employee] = await db
-      .select()
-      .from(employees)
-      .where(eq(employees.id, employeeId))
-      .limit(1);
-
-    if (!employee) {
+    const salonId = await getUserSalonId();
+    if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "Employee not found" },
+        { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
-
-    logger.info(`[WorkSchedules API] Saving schedule for employee: ${employeeId}`);
-
-    // Delete existing schedules for this employee
-    await db
-      .delete(workSchedules)
-      .where(eq(workSchedules.employeeId, employeeId));
 
     // Insert new schedules (skip days marked as day off)
     const schedulesToInsert = schedules
@@ -98,12 +111,40 @@ export async function POST(request: Request) {
         endTime: s.endTime,
       }));
 
-    let insertedSchedules: typeof workSchedules.$inferSelect[] = [];
-    if (schedulesToInsert.length > 0) {
-      insertedSchedules = await db
-        .insert(workSchedules)
-        .values(schedulesToInsert)
-        .returning();
+    // workSchedules nie ma kolumny salonId — najpierw weryfikacja, że pracownik
+    // należy do salonu (jawny eq(employees.salonId, salonId) na tabeli
+    // nadrzędnej), potem delete+insert w tej samej transakcji RLS.
+    const insertedSchedules = await forSalon(salonId).raw(async (tx) => {
+      const [employee] = await tx
+        .select()
+        .from(employees)
+        .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
+        .limit(1);
+
+      if (!employee) return null;
+
+      logger.info(`[WorkSchedules API] Saving schedule for employee: ${employeeId}`);
+
+      // Delete existing schedules for this employee
+      await tx
+        .delete(workSchedules)
+        .where(eq(workSchedules.employeeId, employeeId));
+
+      let inserted: typeof workSchedules.$inferSelect[] = [];
+      if (schedulesToInsert.length > 0) {
+        inserted = await tx
+          .insert(workSchedules)
+          .values(schedulesToInsert)
+          .returning();
+      }
+      return inserted;
+    });
+
+    if (insertedSchedules === null) {
+      return NextResponse.json(
+        { success: false, error: "Employee not found" },
+        { status: 404 }
+      );
     }
 
     logger.info(`[WorkSchedules API] Saved ${insertedSchedules.length} schedule entries`);

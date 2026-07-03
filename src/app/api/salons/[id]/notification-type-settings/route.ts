@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { validateBody, notificationTypeSettingsSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salons } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 export interface NotificationTypeSettings {
   smsReminders: boolean; // SMS appointment reminders (1h before)
   pushReminders: boolean; // Push appointment reminders (1h and 24h before)
@@ -37,11 +37,13 @@ export async function GET(
 
     const { id } = await params;
 
-    const [salon] = await db
-      .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, id))
-      .limit(1);
+    const [salon] = await forSalon(id).raw((tx) =>
+      tx
+        .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, id))
+        .limit(1)
+    );
 
     if (!salon) {
       return NextResponse.json(
@@ -103,11 +105,13 @@ export async function PUT(
     }
 
     // Fetch current salon
-    const [salon] = await db
-      .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, id))
-      .limit(1);
+    const [salon] = await forSalon(id).raw((tx) =>
+      tx
+        .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, id))
+        .limit(1)
+    );
 
     if (!salon) {
       return NextResponse.json(
@@ -162,11 +166,13 @@ export async function PUT(
       notificationTypes: newSettings,
     };
 
-    // Save to database
-    await db
-      .update(salons)
-      .set({ settingsJson: updatedSettings })
-      .where(eq(salons.id, id));
+    // Save to database (salons: tabela nadrzędna — filtr jawny po id = salonId)
+    await forSalon(id).raw((tx) =>
+      tx
+        .update(salons)
+        .set({ settingsJson: updatedSettings })
+        .where(eq(salons.id, id))
+    );
 
     logger.info(`[Notification Type Settings API] Updated notification type settings for salon ${id}`,
       { settings: newSettings as unknown as Record<string, unknown> });

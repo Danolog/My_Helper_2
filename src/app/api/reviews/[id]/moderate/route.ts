@@ -1,12 +1,12 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
 import { validateBody, reviewModerateSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { reviews, salons } from "@/lib/schema";
+import { reviews } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // PATCH /api/reviews/[id]/moderate - Approve or reject a review
 export async function PATCH(
   request: Request,
@@ -38,30 +38,19 @@ export async function PATCH(
     const { action } = body;
 
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salonId = await getUserSalonId();
 
-    if (!salon) {
+    if (!salonId) {
       return NextResponse.json(
         { success: false, error: "Nie znaleziono salonu dla tego uzytkownika" },
         { status: 403 }
       );
     }
 
+    const repo = forSalon(salonId);
+
     // Find the review and verify it belongs to the owner's salon
-    const [review] = await db
-      .select()
-      .from(reviews)
-      .where(
-        and(
-          eq(reviews.id, reviewId),
-          eq(reviews.salonId, salon.id)
-        )
-      )
-      .limit(1);
+    const review = await repo.findOne(reviews, reviewId);
 
     if (!review) {
       return NextResponse.json(
@@ -72,13 +61,11 @@ export async function PATCH(
 
     // Update the review status
     const newStatus = action === "approve" ? "approved" : "rejected";
-    const [updatedReview] = await db
-      .update(reviews)
-      .set({ status: newStatus })
-      .where(eq(reviews.id, reviewId))
-      .returning();
+    const updatedReview = await repo.updateOwned(reviews, reviewId, {
+      status: newStatus,
+    });
 
-    logger.info(`[Reviews Moderation API] Review ${reviewId} ${newStatus} by user ${userId} (salon ${salon.id})`);
+    logger.info(`[Reviews Moderation API] Review ${reviewId} ${newStatus} by user ${userId} (salon ${salonId})`);
 
     return NextResponse.json({
       success: true,

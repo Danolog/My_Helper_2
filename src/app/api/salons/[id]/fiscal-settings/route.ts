@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { validateBody, fiscalSettingsSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salons } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 export interface FiscalPrinterSettings {
   enabled: boolean;
   connectionType: "network" | "usb" | "serial";
@@ -59,11 +59,13 @@ export async function GET(
 
     const { id } = await params;
 
-    const [salon] = await db
-      .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, id))
-      .limit(1);
+    const [salon] = await forSalon(id).raw((tx) =>
+      tx
+        .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, id))
+        .limit(1)
+    );
 
     if (!salon) {
       return NextResponse.json(
@@ -123,11 +125,13 @@ export async function PUT(
     }
 
     // Fetch current salon
-    const [salon] = await db
-      .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, id))
-      .limit(1);
+    const [salon] = await forSalon(id).raw((tx) =>
+      tx
+        .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, id))
+        .limit(1)
+    );
 
     if (!salon) {
       return NextResponse.json(
@@ -241,12 +245,14 @@ export async function PUT(
       fiscal: newFiscalSettings,
     };
 
-    // Save to database
-    await db
-      .update(salons)
-      .set({ settingsJson: updatedSettings })
-      .where(eq(salons.id, id))
-      .returning();
+    // Save to database (salons: tabela nadrzędna — filtr jawny po id = salonId)
+    await forSalon(id).raw((tx) =>
+      tx
+        .update(salons)
+        .set({ settingsJson: updatedSettings })
+        .where(eq(salons.id, id))
+        .returning()
+    );
 
     logger.info(`[Fiscal Settings API] Updated fiscal settings for salon ${id}`,
       { settings: newFiscalSettings as unknown as Record<string, unknown> });

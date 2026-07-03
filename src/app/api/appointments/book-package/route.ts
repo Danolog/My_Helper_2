@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { eq, and, not, lte, gte, or, lt, gt, inArray } from "drizzle-orm";
 import { validateBody, bookPackageSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * POST /api/appointments/book-package
  * Book all services in a package promotion as sequential appointments
@@ -31,12 +32,19 @@ export async function POST(request: Request) {
     // Use the authenticated user's ID for tracking who booked
     const bookedByUserId: string | null = authResult.user.id || null;
 
-    // 1. Get the package promotion
-    const [promotion] = await db
-      .select()
-      .from(promotions)
-      .where(eq(promotions.id, promotionId))
-      .limit(1);
+    // Tenant isolation (ADR-001): trasa wołana z dashboardu właściciela —
+    // salon z sesji; promocja/usługi/terminy muszą należeć do tego salonu.
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+    const repo = forSalon(salonId);
+
+    // 1. Get the package promotion (scoped to the caller's salon)
+    const promotion = await repo.findOne(promotions, promotionId);
 
     if (!promotion) {
       return NextResponse.json(
@@ -85,11 +93,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Fetch all services in the package
-    const packageServices = await db
-      .select()
-      .from(services)
-      .where(inArray(services.id, packageServiceIds));
+    // 3. Fetch all services in the package (scoped to the salon)
+    const packageServices = await repo.listOwned(
+      services,
+      inArray(services.id, packageServiceIds)
+    );
 
     if (packageServices.length !== packageServiceIds.length) {
       return NextResponse.json(
@@ -126,29 +134,32 @@ export async function POST(request: Request) {
     const firstStart = appointmentSlots[0]!.start;
     const lastEnd = appointmentSlots[appointmentSlots.length - 1]!.end;
 
-    const overlapping = await db
-      .select()
-      .from(appointments)
-      .where(
-        and(
-          eq(appointments.employeeId, employeeId),
-          not(eq(appointments.status, "cancelled")),
-          or(
-            and(
-              lte(appointments.startTime, firstStart),
-              gte(appointments.endTime, firstStart)
-            ),
-            and(
-              lte(appointments.startTime, lastEnd),
-              gte(appointments.endTime, lastEnd)
-            ),
-            and(
-              gte(appointments.startTime, firstStart),
-              lte(appointments.endTime, lastEnd)
+    const overlapping = await repo.raw((tx) =>
+      tx
+        .select()
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.salonId, salonId),
+            eq(appointments.employeeId, employeeId),
+            not(eq(appointments.status, "cancelled")),
+            or(
+              and(
+                lte(appointments.startTime, firstStart),
+                gte(appointments.endTime, firstStart)
+              ),
+              and(
+                lte(appointments.startTime, lastEnd),
+                gte(appointments.endTime, lastEnd)
+              ),
+              and(
+                gte(appointments.startTime, firstStart),
+                lte(appointments.endTime, lastEnd)
+              )
             )
           )
         )
-      );
+    );
 
     if (overlapping.length > 0) {
       return NextResponse.json(
@@ -158,16 +169,20 @@ export async function POST(request: Request) {
     }
 
     // 6. Check for vacation/time blocks
-    const conflictingBlocks = await db
-      .select()
-      .from(timeBlocks)
-      .where(
-        and(
-          eq(timeBlocks.employeeId, employeeId),
-          lt(timeBlocks.startTime, lastEnd),
-          gt(timeBlocks.endTime, firstStart)
+    // timeBlocks nie ma kolumny salonId — zakres pilnuje filtr po employeeId
+    // + kontekst RLS transakcji (repo.raw).
+    const conflictingBlocks = await repo.raw((tx) =>
+      tx
+        .select()
+        .from(timeBlocks)
+        .where(
+          and(
+            eq(timeBlocks.employeeId, employeeId),
+            lt(timeBlocks.startTime, lastEnd),
+            gt(timeBlocks.endTime, firstStart)
+          )
         )
-      );
+    );
 
     if (conflictingBlocks.length > 0) {
       return NextResponse.json(
@@ -176,34 +191,38 @@ export async function POST(request: Request) {
       );
     }
 
-    // 7. Create all appointments
-    const createdAppointments = [];
-    const salonId = promotion.salonId;
+    // 7. Create all appointments — one transaction for the whole package
+    // (promotion is fetched scoped, so promotion.salonId === salonId)
+    const createdAppointments = await repo.raw(async (tx) => {
+      const created = [];
 
-    for (const slot of appointmentSlots) {
-      const [newAppointment] = await db
-        .insert(appointments)
-        .values({
-          salonId,
-          clientId: clientId || null,
-          employeeId,
-          serviceId: slot.service.id,
-          bookedByUserId,
-          startTime: slot.start,
-          endTime: slot.end,
-          notes: `Pakiet: ${promotion.name} (${packagePrice.toFixed(2)} PLN)`,
-          status: "scheduled",
-        })
-        .returning();
+      for (const slot of appointmentSlots) {
+        const [newAppointment] = await tx
+          .insert(appointments)
+          .values({
+            salonId,
+            clientId: clientId || null,
+            employeeId,
+            serviceId: slot.service.id,
+            bookedByUserId,
+            startTime: slot.start,
+            endTime: slot.end,
+            notes: `Pakiet: ${promotion.name} (${packagePrice.toFixed(2)} PLN)`,
+            status: "scheduled",
+          })
+          .returning();
 
-      if (newAppointment) {
-        createdAppointments.push({
-          ...newAppointment,
-          serviceName: slot.service.name,
-          servicePrice: slot.service.basePrice,
-        });
+        if (newAppointment) {
+          created.push({
+            ...newAppointment,
+            serviceName: slot.service.name,
+            servicePrice: slot.service.basePrice,
+          });
+        }
       }
-    }
+
+      return created;
+    });
 
     logger.info(`[Package Booking API] Booked package "${promotion.name}" with ${createdAppointments.length} services. ` +
       `Package price: ${packagePrice.toFixed(2)} PLN (individual total: ${totalIndividualPrice.toFixed(2)} PLN). ` +

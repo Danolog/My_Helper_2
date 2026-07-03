@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, not, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001 R2b: własna weryfikacja własności salonu (ownerId → 403) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import {

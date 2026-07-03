@@ -21,13 +21,13 @@ import { createMockRequest, parseResponse } from "./helpers";
 // -------------------------------------------------------
 
 const mockSelectWhere = vi.fn();
-const mockDbSelect = vi.fn(() => ({
+const mockDbSelect = vi.fn((..._a: unknown[]) => ({
   from: () => ({ innerJoin: () => ({ where: mockSelectWhere }) }),
 }));
 
 const mockTxUpdateWhere = vi.fn().mockResolvedValue(undefined);
-const mockTxUpdateSet = vi.fn(() => ({ where: mockTxUpdateWhere }));
-const mockTxUpdate = vi.fn(() => ({ set: mockTxUpdateSet }));
+const mockTxUpdateSet = vi.fn((..._a: unknown[]) => ({ where: mockTxUpdateWhere }));
+const mockTxUpdate = vi.fn((..._a: unknown[]) => ({ set: mockTxUpdateSet }));
 
 const mockTx = { update: (...a: unknown[]) => mockTxUpdate(...a) };
 

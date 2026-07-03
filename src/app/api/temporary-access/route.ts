@@ -4,6 +4,8 @@ import { eq, and, gt, lt, inArray } from "drizzle-orm";
 import { validateBody, temporaryAccessSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001: ścieżka user-scoped/token-based (nie salon-scoped) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { temporaryAccess, employees, salons } from "@/lib/schema";

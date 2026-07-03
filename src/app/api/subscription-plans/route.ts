@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { PLANS } from "@/lib/constants";
+// ADR-001: ścieżka publiczna (globalny cennik, bez tenant) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { subscriptionPlans } from "@/lib/schema";

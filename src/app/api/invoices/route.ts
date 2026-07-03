@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001 R2b grupa B: odczyt `salons` po ownerId (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { invoices, clients, appointments, employees, services, salons } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * GET /api/invoices
  *
@@ -71,7 +74,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Query invoices with related data
-    const rows = await db
+    const rows = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: invoices.id,
         invoiceNumber: invoices.invoiceNumber,
@@ -105,7 +109,8 @@ export async function GET(request: NextRequest) {
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .where(and(...conditions))
-      .orderBy(desc(invoices.issuedAt));
+      .orderBy(desc(invoices.issuedAt))
+    );
 
     // Calculate summary
     const totalAmount = rows.reduce(

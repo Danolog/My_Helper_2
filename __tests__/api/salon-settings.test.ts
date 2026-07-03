@@ -20,10 +20,20 @@ import { createMockRequest, createRouteParams, parseResponse, TEST_IDS } from ".
 const mockDbSelect = vi.fn();
 const mockDbUpdate = vi.fn();
 
+// `tx` deleguje do tych samych mocków co `db` — warstwa repo (forSalon) otwiera
+// db.transaction() i woła tx.select/update (ADR-001 R1). Asercje na
+// mockDbSelect/Update działają po migracji trasy na repozytorium.
+const mockTx = {
+  select: (...args: unknown[]) => mockDbSelect(...args),
+  update: (...args: unknown[]) => mockDbUpdate(...args),
+  execute: vi.fn().mockResolvedValue(undefined), // SET LOCAL role / app.current_salon_id
+};
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
     update: (...args: unknown[]) => mockDbUpdate(...args),
+    transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
 }));
 
@@ -41,6 +51,12 @@ vi.mock("@/lib/schema", () => {
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  // `sql` używa warstwa repo (forSalon): sql`...` do set_config oraz
+  // sql.raw(...) do SET LOCAL ROLE — mock musi mieć oba.
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((query: string) => ({ type: "sql.raw", query })) }
+  ),
 }));
 
 // requireAuth returns the CALLER. Tests flip the caller's user id to simulate

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { workSchedules, employees } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/work-schedules/by-salon?salonId=xxx&dayOfWeek=1
 // Returns all work schedules for active employees in a salon, optionally filtered by day
 export async function GET(request: Request) {
@@ -23,41 +23,38 @@ export async function GET(request: Request) {
 
     logger.info("[WorkSchedules BySalon API] GET for salon", { salonId });
 
-    // Get all active employees for the salon
-    const activeEmployees = await db
-      .select({ id: employees.id })
-      .from(employees)
-      .where(and(eq(employees.salonId, salonId), eq(employees.isActive, true)));
+    // workSchedules nie ma kolumny salonId — scope przez tabelę nadrzędną
+    // employees (jawny eq(employees.salonId, salonId)) w jednej transakcji RLS.
+    const allSchedules = await forSalon(salonId).raw(async (tx) => {
+      // Get all active employees for the salon
+      const activeEmployees = await tx
+        .select({ id: employees.id })
+        .from(employees)
+        .where(and(eq(employees.salonId, salonId), eq(employees.isActive, true)));
 
-    const employeeIds = activeEmployees.map((e) => e.id);
+      const employeeIds = activeEmployees.map((e) => e.id);
 
-    if (employeeIds.length === 0) {
-      return NextResponse.json({
-        success: true,
-        data: [],
-        count: 0,
-      });
-    }
-
-    // Fetch schedules for all active employees
-    const allSchedules: (typeof workSchedules.$inferSelect)[] = [];
-    for (const empId of employeeIds) {
-      let conditions;
-      if (dayOfWeekStr !== null && dayOfWeekStr !== undefined) {
-        const dayOfWeek = parseInt(dayOfWeekStr, 10);
-        conditions = and(
-          eq(workSchedules.employeeId, empId),
-          eq(workSchedules.dayOfWeek, dayOfWeek)
-        );
-      } else {
-        conditions = eq(workSchedules.employeeId, empId);
+      // Fetch schedules for all active employees
+      const schedulesForSalon: (typeof workSchedules.$inferSelect)[] = [];
+      for (const empId of employeeIds) {
+        let conditions;
+        if (dayOfWeekStr !== null && dayOfWeekStr !== undefined) {
+          const dayOfWeek = parseInt(dayOfWeekStr, 10);
+          conditions = and(
+            eq(workSchedules.employeeId, empId),
+            eq(workSchedules.dayOfWeek, dayOfWeek)
+          );
+        } else {
+          conditions = eq(workSchedules.employeeId, empId);
+        }
+        const schedules = await tx
+          .select()
+          .from(workSchedules)
+          .where(conditions);
+        schedulesForSalon.push(...schedules);
       }
-      const schedules = await db
-        .select()
-        .from(workSchedules)
-        .where(conditions);
-      allSchedules.push(...schedules);
-    }
+      return schedulesForSalon;
+    });
 
     logger.info(`[WorkSchedules BySalon API] Found ${allSchedules.length} schedule entries`);
 

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and, like, sql } from "drizzle-orm";
 import { validateBody, createProductSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { products, notifications } from "@/lib/schema";
@@ -24,40 +24,43 @@ async function checkAndNotifyLowStock(product: {
   if (minQty === null) return null;
 
   if (qty <= minQty) {
-    const existingRecent = await db
-      .select({ id: notifications.id })
-      .from(notifications)
-      .where(
-        and(
-          eq(notifications.salonId, product.salonId),
-          like(notifications.message, `%${product.id}%`),
-          sql`${notifications.createdAt} > NOW() - INTERVAL '24 hours'`,
-          sql`${notifications.type} = 'system'`
+    // Sprawdzenie duplikatu + insert powiadomienia w jednej transakcji RLS.
+    return forSalon(product.salonId).raw(async (tx) => {
+      const existingRecent = await tx
+        .select({ id: notifications.id })
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.salonId, product.salonId),
+            like(notifications.message, `%${product.id}%`),
+            sql`${notifications.createdAt} > NOW() - INTERVAL '24 hours'`,
+            sql`${notifications.type} = 'system'`
+          )
         )
-      )
-      .limit(1);
+        .limit(1);
 
-    if (existingRecent.length > 0) {
-      return { notificationSent: false, reason: "duplicate" };
-    }
+      if (existingRecent.length > 0) {
+        return { notificationSent: false, reason: "duplicate" };
+      }
 
-    const unitLabel = product.unit || "szt.";
-    const message = `Niski stan magazynowy: "${product.name}" - pozostalo ${qty} ${unitLabel} (minimum: ${minQty} ${unitLabel}). Uzupelnij zapasy! [product:${product.id}]`;
+      const unitLabel = product.unit || "szt.";
+      const message = `Niski stan magazynowy: "${product.name}" - pozostalo ${qty} ${unitLabel} (minimum: ${minQty} ${unitLabel}). Uzupelnij zapasy! [product:${product.id}]`;
 
-    const [notification] = await db
-      .insert(notifications)
-      .values({
-        salonId: product.salonId,
-        type: "system",
-        message,
-        status: "sent",
-        sentAt: new Date(),
-      })
-      .returning();
+      const [notification] = await tx
+        .insert(notifications)
+        .values({
+          salonId: product.salonId,
+          type: "system",
+          message,
+          status: "sent",
+          sentAt: new Date(),
+        })
+        .returning();
 
-    logger.info(`[Low Stock Alert] Notification sent for "${product.name}" (${product.id}) - qty: ${qty}, min: ${minQty}`);
+      logger.info(`[Low Stock Alert] Notification sent for "${product.name}" (${product.id}) - qty: ${qty}, min: ${minQty}`);
 
-    return { notificationSent: true, notification };
+      return { notificationSent: true, notification };
+    });
   }
 
   return { notificationSent: false, reason: "stock_ok" };
@@ -70,7 +73,15 @@ export async function GET(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
+    // "lista bez zawężenia" była wyciekiem cross-salon).
+    const salonId = searchParams.get("salonId") || (await getUserSalonId());
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     // Select only the columns needed by the inventory UI
     const productColumns = {
@@ -86,13 +97,9 @@ export async function GET(request: Request) {
       updatedAt: products.updatedAt,
     };
 
-    let query = db.select(productColumns).from(products);
-
-    if (salonId) {
-      query = query.where(eq(products.salonId, salonId)) as typeof query;
-    }
-
-    const result = await query;
+    const result = await forSalon(salonId).raw((tx) =>
+      tx.select(productColumns).from(products).where(eq(products.salonId, salonId))
+    );
 
     return NextResponse.json({
       success: true,

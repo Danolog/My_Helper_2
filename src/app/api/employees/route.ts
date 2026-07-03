@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { validateBody, createEmployeeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { employees } from "@/lib/schema";
@@ -26,10 +26,12 @@ const EMPLOYEE_COLORS = [
 // Get next available color for a salon
 async function getNextAvailableColor(salonId: string): Promise<string> {
   try {
-    const existingEmployees = await db
-      .select({ color: employees.color })
-      .from(employees)
-      .where(eq(employees.salonId, salonId));
+    const existingEmployees = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ color: employees.color })
+        .from(employees)
+        .where(eq(employees.salonId, salonId))
+    );
 
     const usedColors = new Set(existingEmployees.map((e) => e.color).filter(Boolean));
 
@@ -54,8 +56,17 @@ export async function GET(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    // Tenant isolation (ADR-001): derive the salon from the session, never
+    // trust a client-supplied salonId in the query string (IDOR risk).
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
     const activeOnly = searchParams.get("activeOnly") === "true";
 
     logger.info("[Employees API] GET with params", { salonId, activeOnly });
@@ -74,25 +85,16 @@ export async function GET(request: Request) {
       color: employees.color,
     };
 
-    let allEmployees;
-    if (salonId && activeOnly) {
-      allEmployees = await db
+    const allEmployees = await forSalon(salonId).raw((tx) =>
+      tx
         .select(employeeColumns)
         .from(employees)
-        .where(and(eq(employees.salonId, salonId), eq(employees.isActive, true)));
-    } else if (salonId) {
-      allEmployees = await db
-        .select(employeeColumns)
-        .from(employees)
-        .where(eq(employees.salonId, salonId));
-    } else if (activeOnly) {
-      allEmployees = await db
-        .select(employeeColumns)
-        .from(employees)
-        .where(eq(employees.isActive, true));
-    } else {
-      allEmployees = await db.select(employeeColumns).from(employees);
-    }
+        .where(
+          activeOnly
+            ? and(eq(employees.salonId, salonId), eq(employees.isActive, true))
+            : eq(employees.salonId, salonId)
+        )
+    );
 
     logger.info(`[Employees API] Query returned ${allEmployees.length} rows`);
 

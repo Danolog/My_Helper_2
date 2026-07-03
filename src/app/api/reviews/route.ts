@@ -1,23 +1,18 @@
 import { NextResponse } from "next/server";
 import { eq, and, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { getUserSalon } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { reviews, salons, clients, employees, services, appointments } from "@/lib/schema";
+import { reviews, clients, employees, services, appointments } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/reviews - List reviews for the owner's salon with optional status filter
 export async function GET(request: Request) {
   const authResult = await requireAuth();
   if (isAuthError(authResult)) return authResult;
 
   try {
-    const userId = authResult.user.id;
-
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -35,21 +30,23 @@ export async function GET(request: Request) {
       conditions.push(eq(reviews.status, status));
     }
 
-    const result = await db
-      .select({
-        review: reviews,
-        client: clients,
-        employee: employees,
-        service: services,
-        appointment: appointments,
-      })
-      .from(reviews)
-      .leftJoin(clients, eq(reviews.clientId, clients.id))
-      .leftJoin(employees, eq(reviews.employeeId, employees.id))
-      .leftJoin(appointments, eq(reviews.appointmentId, appointments.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(and(...conditions))
-      .orderBy(desc(reviews.createdAt));
+    const result = await forSalon(salon.id).raw((tx) =>
+      tx
+        .select({
+          review: reviews,
+          client: clients,
+          employee: employees,
+          service: services,
+          appointment: appointments,
+        })
+        .from(reviews)
+        .leftJoin(clients, eq(reviews.clientId, clients.id))
+        .leftJoin(employees, eq(reviews.employeeId, employees.id))
+        .leftJoin(appointments, eq(reviews.appointmentId, appointments.id))
+        .leftJoin(services, eq(appointments.serviceId, services.id))
+        .where(and(...conditions))
+        .orderBy(desc(reviews.createdAt))
+    );
 
     const formattedReviews = result.map((row) => ({
       id: row.review.id,

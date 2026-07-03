@@ -3,9 +3,14 @@ import { NextResponse } from "next/server";
 import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";
 import { validateBody, updateSalonSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001: GET to ścieżka publiczna (katalog salonu przez unstable_cache, bez sesji
+// salonu — ryzyko 4.4 ADR), a lookup własności w PUT musi widzieć także cudzy salon
+// (404 vs 403) — te fragmenty świadomie na surowym db. UPDATE w PUT idzie przez forSalon.
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 
 // Revalidate salon detail every 30 seconds
@@ -294,11 +299,16 @@ export async function PUT(
         ? body.industryType
         : null;
 
-    const [updated] = await db
-      .update(salons)
-      .set({ name, phone, email, address, industryType })
-      .where(eq(salons.id, id))
-      .returning();
+    // Własność zweryfikowana wyżej — update przez forSalon (tabela salons nie ma
+    // kolumny salonId, więc raw() z jawnym eq(salons.id, salonId); RLS tenant_self
+    // przepuszcza wiersz o id = app.current_salon_id).
+    const [updated] = await forSalon(id).raw((tx) =>
+      tx
+        .update(salons)
+        .set({ name, phone, email, address, industryType })
+        .where(eq(salons.id, id))
+        .returning()
+    );
 
     return NextResponse.json({
       success: true,

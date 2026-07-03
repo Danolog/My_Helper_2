@@ -3,6 +3,10 @@ import { eq, and, count } from "drizzle-orm";
 import { validateBody, fiscalReceiptSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
+// ADR-001 R2b grupa B: odczyt `salons` (ustawienia fiskalne; polityka RLS po owner_id)
+// czeka na akcesor forOwner — pozostałe odczyty poboczne świadomie surowe db;
+// brama zasobu [id] i zapisy paragonów idą przez forSalon.
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
@@ -16,6 +20,7 @@ import {
   products,
   fiscalReceipts,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * GET /api/appointments/[id]/fiscal-receipt
  *
@@ -39,11 +44,13 @@ export async function GET(
 
     const { id } = await params;
 
-    const receipts = await db
+    const receipts = await forSalon(userSalonId).raw((tx) =>
+      tx
       .select()
       .from(fiscalReceipts)
       .where(and(eq(fiscalReceipts.appointmentId, id), eq(fiscalReceipts.salonId, userSalonId)))
-      .limit(1);
+      .limit(1)
+    );
 
     if (receipts.length === 0) {
       return NextResponse.json({
@@ -103,7 +110,8 @@ export async function POST(
     const paymentMethod = body.paymentMethod || "cash";
 
     // 1. Fetch appointment with all related data
-    const [appointment] = await db
+    const [appointment] = await forSalon(userSalonId).raw((tx) =>
+      tx
       .select({
         id: appointments.id,
         salonId: appointments.salonId,
@@ -117,7 +125,8 @@ export async function POST(
       })
       .from(appointments)
       .where(and(eq(appointments.id, id), eq(appointments.salonId, userSalonId)))
-      .limit(1);
+      .limit(1)
+    );
 
     if (!appointment) {
       return NextResponse.json(
@@ -137,11 +146,13 @@ export async function POST(
     }
 
     // 2. Check if receipt already exists (scoped to caller's salon)
-    const existingReceipts = await db
+    const existingReceipts = await forSalon(userSalonId).raw((tx) =>
+      tx
       .select()
       .from(fiscalReceipts)
       .where(and(eq(fiscalReceipts.appointmentId, id), eq(fiscalReceipts.salonId, userSalonId)))
-      .limit(1);
+      .limit(1)
+    );
 
     if (existingReceipts.length > 0) {
       return NextResponse.json({
@@ -244,14 +255,16 @@ export async function POST(
     const month = String(now.getMonth() + 1).padStart(2, "0");
 
     // Count existing receipts for this salon this month
-    const [receiptCount] = await db
+    const [receiptCount] = await forSalon(salonId).raw((tx) =>
+      tx
       .select({ count: count() })
       .from(fiscalReceipts)
       .where(
         and(
           eq(fiscalReceipts.salonId, salonId),
         )
-      );
+      )
+    );
 
     const seqNum = ((receiptCount?.count as number) || 0) + 1;
     const receiptNumber = `FV/${year}/${month}/${String(seqNum).padStart(5, "0")}`;
@@ -327,7 +340,8 @@ export async function POST(
     };
 
     // 9. Save receipt to database
-    const [newReceipt] = await db
+    const [newReceipt] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(fiscalReceipts)
       .values({
         appointmentId: id,
@@ -348,7 +362,8 @@ export async function POST(
         printStatus: "sent",
         receiptDataJson: receiptData,
       })
-      .returning();
+      .returning()
+    );
 
     // 10. Log print command (in production this would be sent to the fiscal printer)
     logger.info(`[Fiscal Receipt] Printing receipt ${receiptNumber} for appointment ${id}`,

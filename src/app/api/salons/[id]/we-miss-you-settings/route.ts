@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { validateBody, weMissYouSettingsSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salons } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 export interface WeMissYouSettings {
   enabled: boolean;
   inactiveDays: number; // Number of days since last visit to consider inactive (default 30)
@@ -38,11 +38,13 @@ export async function GET(
 
     const { id } = await params;
 
-    const [salon] = await db
-      .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, id))
-      .limit(1);
+    const [salon] = await forSalon(id).raw((tx) =>
+      tx
+        .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, id))
+        .limit(1)
+    );
 
     if (!salon) {
       return NextResponse.json(
@@ -104,11 +106,13 @@ export async function PUT(
     }
 
     // Fetch current salon
-    const [salon] = await db
-      .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, id))
-      .limit(1);
+    const [salon] = await forSalon(id).raw((tx) =>
+      tx
+        .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, id))
+        .limit(1)
+    );
 
     if (!salon) {
       return NextResponse.json(
@@ -167,12 +171,14 @@ export async function PUT(
       weMissYou: newWeMissYouSettings,
     };
 
-    // Save to database
-    const [_updated] = await db
-      .update(salons)
-      .set({ settingsJson: updatedSettings })
-      .where(eq(salons.id, id))
-      .returning();
+    // Save to database (salons: tabela nadrzędna — filtr jawny po id = salonId)
+    const [_updated] = await forSalon(id).raw((tx) =>
+      tx
+        .update(salons)
+        .set({ settingsJson: updatedSettings })
+        .where(eq(salons.id, id))
+        .returning()
+    );
 
     logger.info(`[We Miss You Settings API] Updated we-miss-you settings for salon ${id}`,
       { settings: newWeMissYouSettings as unknown as Record<string, unknown> });

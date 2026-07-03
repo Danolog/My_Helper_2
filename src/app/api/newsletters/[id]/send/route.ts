@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, and, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
@@ -12,6 +11,7 @@ import {
   newsletters,
   notifications,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 const sendSchema = z.object({
   // Optional: send only to specific client IDs. If not provided, send to all consented.
@@ -75,7 +75,8 @@ export async function POST(
 
   try {
     // Fetch newsletter
-    const [newsletter] = await db
+    const [newsletter] = await forSalon(salonId).raw((tx) =>
+      tx
       .select()
       .from(newsletters)
       .where(
@@ -84,7 +85,8 @@ export async function POST(
           eq(newsletters.salonId, salonId)
         )
       )
-      .limit(1);
+      .limit(1)
+    );
 
     if (!newsletter) {
       return Response.json(
@@ -94,7 +96,8 @@ export async function POST(
     }
 
     // Get consented clients with email
-    const consentedClientsQuery = db
+    const allConsented = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         clientId: clients.id,
         firstName: clients.firstName,
@@ -110,9 +113,8 @@ export async function POST(
           isNull(marketingConsents.revokedAt),
           isNotNull(clients.email)
         )
-      );
-
-    const allConsented = await consentedClientsQuery;
+      )
+    );
 
     // Filter to valid emails
     let recipients = allConsented.filter(
@@ -183,7 +185,7 @@ export async function POST(
     // Wrap all database writes in a transaction for atomicity:
     // - batch insert notification records for each recipient
     // - update the newsletter with sent timestamp and recipient count
-    await db.transaction(async (tx) => {
+    await forSalon(salonId).raw(async (tx) => {
       const notificationRows = sentDetails.map((detail) => ({
         salonId: salonId,
         clientId: detail.clientId,
@@ -206,7 +208,7 @@ export async function POST(
           sentAt: new Date(),
           recipientsCount: sentCount,
         })
-        .where(eq(newsletters.id, newsletterId));
+        .where(and(eq(newsletters.id, newsletterId), eq(newsletters.salonId, salonId)));
     });
 
     return Response.json({

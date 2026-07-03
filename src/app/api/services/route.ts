@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { validateBody, createServiceSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { services, serviceCategories } from "@/lib/schema";
@@ -14,26 +14,35 @@ export async function GET(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
+    // "lista bez zawężenia" była wyciekiem cross-salon).
+    const salonId = searchParams.get("salonId") || (await getUserSalonId());
     const activeOnly = searchParams.get("activeOnly") === "true";
+
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     logger.info("[Services API] GET with params", { salonId, activeOnly });
 
-    let query = db.select({
-      service: services,
-      category: serviceCategories,
-    })
-    .from(services)
-    .leftJoin(serviceCategories, eq(services.categoryId, serviceCategories.id));
-
-    if (salonId) {
-      query = query.where(eq(services.salonId, salonId)) as typeof query;
-    }
-    if (activeOnly) {
-      query = query.where(eq(services.isActive, true)) as typeof query;
-    }
-
-    const result = await query;
+    // Zapytanie z joinem — przez forSalon().raw() z jawnym eq(services.salonId).
+    // Warunki złożone przez and() — drugie .where() nadpisywałoby filtr salonu.
+    const result = await forSalon(salonId).raw((tx) =>
+      tx.select({
+        service: services,
+        category: serviceCategories,
+      })
+      .from(services)
+      .leftJoin(serviceCategories, eq(services.categoryId, serviceCategories.id))
+      .where(
+        activeOnly
+          ? and(eq(services.salonId, salonId), eq(services.isActive, true))
+          : eq(services.salonId, salonId)
+      )
+    );
     logger.info(`[Services API] Query returned ${result.length} rows`);
 
     const formattedServices = result.map((row) => ({

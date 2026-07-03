@@ -22,12 +22,29 @@ const mockDbSelect = vi.fn();
 const mockDbInsert = vi.fn();
 const mockDbDelete = vi.fn();
 
+// `tx` deleguje do tych samych mocków co `db` — warstwa repo (forSalon) otwiera
+// db.transaction() i woła tx.select/insert/delete (ADR-001 R1). Asercje na
+// mockDbSelect/Insert/Delete działają po migracji trasy na repozytorium.
+const mockTx = {
+  select: (...args: unknown[]) => mockDbSelect(...args),
+  insert: (...args: unknown[]) => mockDbInsert(...args),
+  delete: (...args: unknown[]) => mockDbDelete(...args),
+  execute: vi.fn().mockResolvedValue(undefined), // SET LOCAL ROLE / app.current_salon_id
+};
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
     insert: (...args: unknown[]) => mockDbInsert(...args),
     delete: (...args: unknown[]) => mockDbDelete(...args),
+    transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
+}));
+
+// Tenant resolver — trasa pobiera salonId z sesji właściciela.
+vi.mock("@/lib/get-user-salon", () => ({
+  getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
+  getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
 }));
 
 vi.mock("@/lib/schema", () => {
@@ -46,6 +63,13 @@ vi.mock("@/lib/schema", () => {
 
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
+  and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  // `sql` używa warstwa repo (forSalon): sql`...` do set_config oraz
+  // sql.raw(...) do SET LOCAL ROLE — mock musi mieć oba.
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((query: string) => ({ type: "sql.raw", query })) }
+  ),
 }));
 
 vi.mock("@/lib/auth-middleware", () => ({
@@ -63,10 +87,10 @@ vi.mock("@/lib/auth-middleware", () => ({
 function chainMock(result: unknown[] = []) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   const methods = [
-    "select", "from", "where", "leftJoin",
+    "select", "from", "where", "leftJoin", "innerJoin",
     "limit", "orderBy",
     "insert", "values", "delete",
-    "returning",
+    "returning", "execute",
   ];
   for (const method of methods) {
     chain[method] = vi.fn().mockReturnValue(chain);
@@ -133,7 +157,7 @@ describe("GET /api/work-schedules", () => {
 
   it("should return 500 when database throws", async () => {
     const errorChain: Record<string, unknown> = {};
-    const methods = ["select", "from", "where", "orderBy"];
+    const methods = ["select", "from", "where", "innerJoin", "orderBy"];
     for (const m of methods) {
       (errorChain as Record<string, ReturnType<typeof vi.fn>>)[m] = vi.fn().mockReturnValue(errorChain);
     }

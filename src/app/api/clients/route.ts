@@ -2,14 +2,14 @@ import { NextResponse } from "next/server";
 import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { validateBody, createClientSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { clients, appointments } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-// GET /api/clients - List all clients with optional filtering
+// GET /api/clients - List clients of the caller's salon with optional filtering
+// (salon is derived from the session — ADR-001 tenant isolation)
 // Supported query params:
-//   salonId        - filter by salon
 //   dateAddedFrom  - clients added on or after this ISO date
 //   dateAddedTo    - clients added on or before this ISO date
 //   lastVisitFrom  - clients whose last visit is on or after this ISO date
@@ -20,8 +20,17 @@ export async function GET(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
+    // Tenant isolation (ADR-001): derive the salon from the session, never
+    // trust a client-supplied salonId in the query string (IDOR risk).
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
     const dateAddedFrom = searchParams.get("dateAddedFrom");
     const dateAddedTo = searchParams.get("dateAddedTo");
     const lastVisitFrom = searchParams.get("lastVisitFrom");
@@ -37,57 +46,51 @@ export async function GET(request: Request) {
       hasAllergies,
     });
 
-    // Subquery: compute the most recent appointment start_time per client
-    const lastVisitSubquery = db
-      .select({
-        clientId: appointments.clientId,
-        lastVisit: sql<string>`MAX(${appointments.startTime})`.as("last_visit"),
-      })
-      .from(appointments)
-      .groupBy(appointments.clientId)
-      .as("last_visit_sq");
+    const result = await forSalon(salonId).raw((tx) => {
+      // Subquery: compute the most recent appointment start_time per client
+      const lastVisitSubquery = tx
+        .select({
+          clientId: appointments.clientId,
+          lastVisit: sql<string>`MAX(${appointments.startTime})`.as("last_visit"),
+        })
+        .from(appointments)
+        .where(eq(appointments.salonId, salonId))
+        .groupBy(appointments.clientId)
+        .as("last_visit_sq");
 
-    // Build the base query: select all client fields plus the computed lastVisit
-    let query = db
-      .select({
-        client: clients,
-        lastVisit: lastVisitSubquery.lastVisit,
-      })
-      .from(clients)
-      .leftJoin(lastVisitSubquery, eq(clients.id, lastVisitSubquery.clientId));
+      // Accumulate WHERE conditions dynamically (salon scope always applied)
+      const conditions = [eq(clients.salonId, salonId)];
 
-    // Accumulate WHERE conditions dynamically
-    const conditions = [];
+      if (dateAddedFrom) {
+        conditions.push(gte(clients.createdAt, new Date(dateAddedFrom)));
+      }
 
-    if (salonId) {
-      conditions.push(eq(clients.salonId, salonId));
-    }
+      if (dateAddedTo) {
+        conditions.push(lte(clients.createdAt, new Date(dateAddedTo)));
+      }
 
-    if (dateAddedFrom) {
-      conditions.push(gte(clients.createdAt, new Date(dateAddedFrom)));
-    }
+      if (lastVisitFrom) {
+        conditions.push(gte(lastVisitSubquery.lastVisit, lastVisitFrom));
+      }
 
-    if (dateAddedTo) {
-      conditions.push(lte(clients.createdAt, new Date(dateAddedTo)));
-    }
+      if (lastVisitTo) {
+        conditions.push(lte(lastVisitSubquery.lastVisit, lastVisitTo));
+      }
 
-    if (lastVisitFrom) {
-      conditions.push(gte(lastVisitSubquery.lastVisit, lastVisitFrom));
-    }
+      if (hasAllergies === "true") {
+        conditions.push(isNotNull(clients.allergies));
+      }
 
-    if (lastVisitTo) {
-      conditions.push(lte(lastVisitSubquery.lastVisit, lastVisitTo));
-    }
-
-    if (hasAllergies === "true") {
-      conditions.push(isNotNull(clients.allergies));
-    }
-
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions)) as typeof query;
-    }
-
-    const result = await query;
+      // Base query: select all client fields plus the computed lastVisit
+      return tx
+        .select({
+          client: clients,
+          lastVisit: lastVisitSubquery.lastVisit,
+        })
+        .from(clients)
+        .leftJoin(lastVisitSubquery, eq(clients.id, lastVisitSubquery.clientId))
+        .where(and(...conditions));
+    });
     logger.info(`[Clients API] Query returned ${result.length} rows`);
 
     // Flatten: spread client fields and attach lastVisit at the top level

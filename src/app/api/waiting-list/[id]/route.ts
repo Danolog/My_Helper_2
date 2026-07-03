@@ -4,15 +4,15 @@ import { eq, and } from "drizzle-orm";
 import { validateBody, updateWaitingListSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { getUserSalon } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import {
   waitingList,
   clients,
   services,
   employees,
-  salons,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/waiting-list/[id] - Get a single waiting list entry
 export async function GET(
   _request: Request,
@@ -30,15 +30,10 @@ export async function GET(
       );
     }
 
-    const userId = session.user.id;
     const { id } = await params;
 
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -47,24 +42,26 @@ export async function GET(
       );
     }
 
-    const result = await db
-      .select({
-        entry: waitingList,
-        client: clients,
-        service: services,
-        employee: employees,
-      })
-      .from(waitingList)
-      .innerJoin(clients, eq(waitingList.clientId, clients.id))
-      .leftJoin(services, eq(waitingList.serviceId, services.id))
-      .leftJoin(
-        employees,
-        eq(waitingList.preferredEmployeeId, employees.id)
-      )
-      .where(
-        and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
-      )
-      .limit(1);
+    const result = await forSalon(salon.id).raw((tx) =>
+      tx
+        .select({
+          entry: waitingList,
+          client: clients,
+          service: services,
+          employee: employees,
+        })
+        .from(waitingList)
+        .innerJoin(clients, eq(waitingList.clientId, clients.id))
+        .leftJoin(services, eq(waitingList.serviceId, services.id))
+        .leftJoin(
+          employees,
+          eq(waitingList.preferredEmployeeId, employees.id)
+        )
+        .where(
+          and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
+        )
+        .limit(1)
+    );
 
     const row = result[0];
     if (!row) {
@@ -123,15 +120,10 @@ export async function PUT(
       );
     }
 
-    const userId = session.user.id;
     const { id } = await params;
 
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -141,13 +133,7 @@ export async function PUT(
     }
 
     // Verify the entry belongs to this salon
-    const [existing] = await db
-      .select()
-      .from(waitingList)
-      .where(
-        and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
-      )
-      .limit(1);
+    const existing = await forSalon(salon.id).findOne(waitingList, id);
 
     if (!existing) {
       return NextResponse.json(
@@ -194,11 +180,11 @@ export async function PUT(
       );
     }
 
-    const [updatedEntry] = await db
-      .update(waitingList)
-      .set(updateData)
-      .where(eq(waitingList.id, id))
-      .returning();
+    const updatedEntry = await forSalon(salon.id).updateOwned(
+      waitingList,
+      id,
+      updateData as Partial<typeof waitingList.$inferInsert>
+    );
 
     logger.info(`[WaitingList API] PUT: Updated entry ${id} in salon ${salon.id}`,
       updateData);
@@ -234,15 +220,10 @@ export async function DELETE(
       );
     }
 
-    const userId = session.user.id;
     const { id } = await params;
 
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -252,12 +233,7 @@ export async function DELETE(
     }
 
     // Verify and delete the entry (must belong to this salon)
-    const [deletedEntry] = await db
-      .delete(waitingList)
-      .where(
-        and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
-      )
-      .returning();
+    const deletedEntry = await forSalon(salon.id).deleteOwned(waitingList, id);
 
     if (!deletedEntry) {
       return NextResponse.json(

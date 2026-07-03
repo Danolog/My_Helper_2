@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, inArray } from "drizzle-orm";
+// ADR-001: ścieżka publiczna (bez sesji salonu) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { promotions, services } from "@/lib/schema";

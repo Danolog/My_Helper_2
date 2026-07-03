@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { eq, desc, and } from "drizzle-orm";
 import { validateBody, createGalleryPhotoSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { galleryPhotos, employees, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/gallery - List gallery photos
 export async function GET(request: Request) {
   try {
@@ -31,7 +31,8 @@ export async function GET(request: Request) {
       conditions.push(eq(galleryPhotos.serviceId, serviceId));
     }
 
-    const photos = await db
+    const photos = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: galleryPhotos.id,
         salonId: galleryPhotos.salonId,
@@ -52,7 +53,8 @@ export async function GET(request: Request) {
       .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
       .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
       .where(and(...conditions))
-      .orderBy(desc(galleryPhotos.createdAt));
+      .orderBy(desc(galleryPhotos.createdAt))
+    );
 
     logger.info(`[Gallery API] GET: ${photos.length} photos found (filters: employeeId=${employeeId || 'none'}, serviceId=${serviceId || 'none'})`);
 
@@ -92,7 +94,8 @@ export async function POST(request: Request) {
       duration,
     } = body;
 
-    const [newPhoto] = await db
+    const [newPhoto] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(galleryPhotos)
       .values({
         salonId,
@@ -105,7 +108,8 @@ export async function POST(request: Request) {
         techniques: techniques || null,
         duration: duration ? parseInt(duration, 10) : null,
       })
-      .returning();
+      .returning()
+    );
 
     logger.info(`[Gallery API] Created photo: ${newPhoto?.id}`);
 

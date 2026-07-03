@@ -3,6 +3,10 @@ import { eq, and, count } from "drizzle-orm";
 import { validateBody, invoiceSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
+// ADR-001 R2b grupa B: odczyt `salons` (dane sprzedawcy; polityka RLS po owner_id)
+// czeka na akcesor forOwner — odczyty poboczne świadomie surowe db;
+// brama zasobu [id] i zapisy faktur idą przez forSalon.
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
@@ -16,6 +20,7 @@ import {
   products,
   invoices,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * GET /api/appointments/[id]/invoice
  *
@@ -39,11 +44,13 @@ export async function GET(
 
     const { id } = await params;
 
-    const existingInvoices = await db
+    const existingInvoices = await forSalon(userSalonId).raw((tx) =>
+      tx
       .select()
       .from(invoices)
       .where(and(eq(invoices.appointmentId, id), eq(invoices.salonId, userSalonId)))
-      .limit(1);
+      .limit(1)
+    );
 
     if (existingInvoices.length === 0) {
       return NextResponse.json({
@@ -145,7 +152,8 @@ export async function POST(
     }
 
     // 1. Fetch appointment
-    const [appointment] = await db
+    const [appointment] = await forSalon(userSalonId).raw((tx) =>
+      tx
       .select({
         id: appointments.id,
         salonId: appointments.salonId,
@@ -158,7 +166,8 @@ export async function POST(
       })
       .from(appointments)
       .where(and(eq(appointments.id, id), eq(appointments.salonId, userSalonId)))
-      .limit(1);
+      .limit(1)
+    );
 
     if (!appointment) {
       return NextResponse.json(
@@ -178,11 +187,13 @@ export async function POST(
     }
 
     // 2. Check if invoice already exists (scoped to caller's salon)
-    const existingInvoices = await db
+    const existingInvoices = await forSalon(userSalonId).raw((tx) =>
+      tx
       .select()
       .from(invoices)
       .where(and(eq(invoices.appointmentId, id), eq(invoices.salonId, userSalonId)))
-      .limit(1);
+      .limit(1)
+    );
 
     if (existingInvoices.length > 0) {
       return NextResponse.json({
@@ -281,14 +292,16 @@ export async function POST(
     const month = String(now.getMonth() + 1).padStart(2, "0");
 
     // Count existing invoices for this salon
-    const [invoiceCount] = await db
+    const [invoiceCount] = await forSalon(salonId).raw((tx) =>
+      tx
       .select({ count: count() })
       .from(invoices)
       .where(
         and(
           eq(invoices.salonId, salonId),
         )
-      );
+      )
+    );
 
     const seqNum = ((invoiceCount?.count as number) || 0) + 1;
     const invoiceNumber =
@@ -375,7 +388,8 @@ export async function POST(
     };
 
     // 9. Save invoice to database
-    const [newInvoice] = await db
+    const [newInvoice] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(invoices)
       .values({
         salonId,
@@ -397,7 +411,8 @@ export async function POST(
         netAmount: netAmount.toFixed(2),
         invoiceDataJson: invoiceData,
       })
-      .returning();
+      .returning()
+    );
 
     logger.info(`[Invoice] Generated invoice ${invoiceNumber} for appointment ${id}`);
 

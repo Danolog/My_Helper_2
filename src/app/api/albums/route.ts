@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { eq, desc, sql } from "drizzle-orm";
 import { validateBody, createAlbumSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { albums, photoAlbums } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/albums - List albums for a salon
 export async function GET(request: Request) {
   try {
@@ -21,7 +21,8 @@ export async function GET(request: Request) {
     }
 
     // Get albums with photo count
-    const albumsList = await db
+    const albumsList = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: albums.id,
         salonId: albums.salonId,
@@ -34,7 +35,8 @@ export async function GET(request: Request) {
       .leftJoin(photoAlbums, eq(albums.id, photoAlbums.albumId))
       .where(eq(albums.salonId, salonId))
       .groupBy(albums.id)
-      .orderBy(desc(albums.createdAt));
+      .orderBy(desc(albums.createdAt))
+    );
 
     logger.info(`[Albums API] GET: ${albumsList.length} albums found for salon ${salonId}`);
 
@@ -64,14 +66,16 @@ export async function POST(request: Request) {
     }
     const { salonId, name, category } = body;
 
-    const [newAlbum] = await db
+    const [newAlbum] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(albums)
       .values({
         salonId,
         name: name.trim(),
         category: category?.trim() || null,
       })
-      .returning();
+      .returning()
+    );
 
     logger.info(`[Albums API] Created album: ${newAlbum?.id} - "${newAlbum?.name}"`);
 

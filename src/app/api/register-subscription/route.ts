@@ -3,6 +3,8 @@ import { eq } from "drizzle-orm";
 import { registerSubscriptionSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { TRIAL_DAYS } from "@/lib/constants";
+// ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { subscriptionPlans, salonSubscriptions, salons, user as userTable } from "@/lib/schema";

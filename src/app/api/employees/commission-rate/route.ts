@@ -1,15 +1,26 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { validateBody, commissionRateSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { employees } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // PUT /api/employees/commission-rate - Update employee's default commission rate
 export async function PUT(request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    // Tenant isolation (ADR-001): derive the salon from the session — a
+    // foreign-salon employee is invisible (scoped lookup -> 404).
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     const body = await request.json();
     const validationError = validateBody(commissionRateSchema, body);
@@ -20,12 +31,10 @@ export async function PUT(request: Request) {
 
     const rate = parseFloat(commissionRate);
 
-    // Check if employee exists
-    const [employee] = await db
-      .select()
-      .from(employees)
-      .where(eq(employees.id, employeeId))
-      .limit(1);
+    const repo = forSalon(salonId);
+
+    // Check if employee exists (in the caller's salon)
+    const employee = await repo.findOne(employees, employeeId);
 
     if (!employee) {
       return NextResponse.json(
@@ -34,14 +43,11 @@ export async function PUT(request: Request) {
       );
     }
 
-    // Update the commission rate
-    const result = await db
-      .update(employees)
-      .set({ commissionRate: rate.toFixed(2) })
-      .where(eq(employees.id, employeeId))
-      .returning();
+    // Update the commission rate (scoped to the salon)
+    const updated = await repo.updateOwned(employees, employeeId, {
+      commissionRate: rate.toFixed(2),
+    });
 
-    const updated = result[0];
     if (!updated) {
       return NextResponse.json(
         { success: false, error: "Failed to update employee" },
@@ -74,19 +80,30 @@ export async function GET() {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const result = await db
-      .select({
-        id: employees.id,
-        firstName: employees.firstName,
-        lastName: employees.lastName,
-        role: employees.role,
-        color: employees.color,
-        commissionRate: employees.commissionRate,
-        isActive: employees.isActive,
-      })
-      .from(employees)
-      .where(eq(employees.isActive, true))
-      .orderBy(employees.firstName);
+    // Tenant isolation (ADR-001): list only the caller's salon employees.
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          id: employees.id,
+          firstName: employees.firstName,
+          lastName: employees.lastName,
+          role: employees.role,
+          color: employees.color,
+          commissionRate: employees.commissionRate,
+          isActive: employees.isActive,
+        })
+        .from(employees)
+        .where(and(eq(employees.salonId, salonId), eq(employees.isActive, true)))
+        .orderBy(employees.firstName)
+    );
 
     return NextResponse.json({
       success: true,

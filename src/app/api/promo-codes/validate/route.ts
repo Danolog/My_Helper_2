@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { validateBody, validatePromoCodeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { promoCodes, promotions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // POST /api/promo-codes/validate - Validate a promo code and return discount info
 export async function POST(request: Request) {
   const authResult = await requireAuth();
@@ -21,7 +21,8 @@ export async function POST(request: Request) {
     const normalizedCode = code.toUpperCase().trim();
 
     // Look up the promo code by code + salonId, with joined promotion data
-    const [result] = await db
+    const [result] = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         promoCode: promoCodes,
         promotion: promotions,
@@ -34,7 +35,8 @@ export async function POST(request: Request) {
           eq(promoCodes.salonId, salonId)
         )
       )
-      .limit(1);
+      .limit(1)
+    );
 
     if (!result) {
       return NextResponse.json({

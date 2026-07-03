@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { depositPayments, subscriptionPayments, appointments, clients, services, salonSubscriptions, subscriptionPlans } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * GET /api/payments
  *
@@ -70,7 +70,8 @@ export async function GET(request: NextRequest) {
         depositConditions.push(lte(depositPayments.createdAt, endDate));
       }
 
-      const depositRows = await db
+      const depositRows = await forSalon(salonId).raw((tx) =>
+        tx
         .select({
           id: depositPayments.id,
           amount: depositPayments.amount,
@@ -91,7 +92,8 @@ export async function GET(request: NextRequest) {
         .leftJoin(clients, eq(appointments.clientId, clients.id))
         .leftJoin(services, eq(appointments.serviceId, services.id))
         .where(and(...depositConditions))
-        .orderBy(desc(depositPayments.createdAt));
+        .orderBy(desc(depositPayments.createdAt))
+      );
 
       for (const row of depositRows) {
         const clientName = row.clientFirstName && row.clientLastName
@@ -135,7 +137,8 @@ export async function GET(request: NextRequest) {
         subConditions.push(lte(subscriptionPayments.createdAt, endDate));
       }
 
-      const subRows = await db
+      const subRows = await forSalon(salonId).raw((tx) =>
+        tx
         .select({
           id: subscriptionPayments.id,
           amount: subscriptionPayments.amount,
@@ -150,7 +153,8 @@ export async function GET(request: NextRequest) {
         .leftJoin(salonSubscriptions, eq(subscriptionPayments.subscriptionId, salonSubscriptions.id))
         .leftJoin(subscriptionPlans, eq(salonSubscriptions.planId, subscriptionPlans.id))
         .where(and(...subConditions))
-        .orderBy(desc(subscriptionPayments.createdAt));
+        .orderBy(desc(subscriptionPayments.createdAt))
+      );
 
       for (const row of subRows) {
         transactions.push({

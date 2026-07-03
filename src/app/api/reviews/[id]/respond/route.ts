@@ -1,12 +1,12 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
 import { validateBody, reviewRespondSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
+import { getUserSalon } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { reviews, salons } from "@/lib/schema";
+import { reviews } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // PATCH /api/reviews/[id]/respond - Save owner response to a review
 export async function PATCH(
   request: Request,
@@ -38,11 +38,7 @@ export async function PATCH(
     const { response } = body;
 
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -52,16 +48,7 @@ export async function PATCH(
     }
 
     // Find the review and verify it belongs to the owner's salon
-    const [review] = await db
-      .select()
-      .from(reviews)
-      .where(
-        and(
-          eq(reviews.id, reviewId),
-          eq(reviews.salonId, salon.id)
-        )
-      )
-      .limit(1);
+    const review = await forSalon(salon.id).findOne(reviews, reviewId);
 
     if (!review) {
       return NextResponse.json(
@@ -71,14 +58,10 @@ export async function PATCH(
     }
 
     // Save the owner response
-    const [updatedReview] = await db
-      .update(reviews)
-      .set({
-        ownerResponse: response.trim(),
-        ownerResponseAt: new Date(),
-      })
-      .where(eq(reviews.id, reviewId))
-      .returning();
+    const updatedReview = await forSalon(salon.id).updateOwned(reviews, reviewId, {
+      ownerResponse: response.trim(),
+      ownerResponseAt: new Date(),
+    });
 
     logger.info(`[Reviews API] Owner response saved for review ${reviewId} by user ${userId} (salon ${salon.id})`);
 
@@ -117,11 +100,7 @@ export async function DELETE(
     const { id: reviewId } = await params;
 
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -131,16 +110,7 @@ export async function DELETE(
     }
 
     // Find the review and verify it belongs to the owner's salon
-    const [review] = await db
-      .select()
-      .from(reviews)
-      .where(
-        and(
-          eq(reviews.id, reviewId),
-          eq(reviews.salonId, salon.id)
-        )
-      )
-      .limit(1);
+    const review = await forSalon(salon.id).findOne(reviews, reviewId);
 
     if (!review) {
       return NextResponse.json(
@@ -150,14 +120,10 @@ export async function DELETE(
     }
 
     // Remove the owner response
-    const [updatedReview] = await db
-      .update(reviews)
-      .set({
-        ownerResponse: null,
-        ownerResponseAt: null,
-      })
-      .where(eq(reviews.id, reviewId))
-      .returning();
+    const updatedReview = await forSalon(salon.id).updateOwned(reviews, reviewId, {
+      ownerResponse: null,
+      ownerResponseAt: null,
+    });
 
     logger.info(`[Reviews API] Owner response removed for review ${reviewId} by user ${userId} (salon ${salon.id})`);
 

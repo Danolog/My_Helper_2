@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { desc, eq, and, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { notifications, clients } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * GET /api/notifications
  *
@@ -46,7 +46,8 @@ export async function GET(request: Request) {
     }
 
     // Query notifications with client info
-    const results = await db
+    const results = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: notifications.id,
         salonId: notifications.salonId,
@@ -65,13 +66,16 @@ export async function GET(request: Request) {
       .where(and(...conditions))
       .orderBy(desc(notifications.createdAt))
       .limit(limit)
-      .offset(offset);
+      .offset(offset)
+    );
 
     // Get total count for pagination
-    const [countResult] = await db
+    const [countResult] = await forSalon(salonId).raw((tx) =>
+      tx
       .select({ count: sql<number>`count(*)::int` })
       .from(notifications)
-      .where(and(...conditions));
+      .where(and(...conditions))
+    );
 
     const total = countResult?.count || 0;
 

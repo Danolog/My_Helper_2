@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
 import { validateBody, createAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001 R2b: POST to świadomie publiczny booking (gość bez sesji salonu) — świadomie surowe db; GET idzie przez forSalon
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { getOptionalSession } from "@/lib/session";
 import { isValidUuid, isValidDateString } from "@/lib/validations";
 // GET /api/appointments - List appointments with optional date range filter
@@ -54,17 +57,6 @@ export async function GET(request: Request) {
       );
     }
 
-    let query = db.select({
-      appointment: appointments,
-      client: clients,
-      employee: employees,
-      service: services,
-    })
-    .from(appointments)
-    .leftJoin(clients, eq(appointments.clientId, clients.id))
-    .leftJoin(employees, eq(appointments.employeeId, employees.id))
-    .leftJoin(services, eq(appointments.serviceId, services.id));
-
     const conditions = [eq(appointments.salonId, salonId)];
 
     if (employeeId) {
@@ -81,11 +73,19 @@ export async function GET(request: Request) {
       conditions.push(lte(appointments.endTime, new Date(endDate)));
     }
 
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions)) as typeof query;
-    }
-
-    const result = await query;
+    const result = await forSalon(salonId).raw((tx) =>
+      tx.select({
+        appointment: appointments,
+        client: clients,
+        employee: employees,
+        service: services,
+      })
+      .from(appointments)
+      .leftJoin(clients, eq(appointments.clientId, clients.id))
+      .leftJoin(employees, eq(appointments.employeeId, employees.id))
+      .leftJoin(services, eq(appointments.serviceId, services.id))
+      .where(and(...conditions))
+    );
     logger.info(`[Appointments API] Query returned ${result.length} rows`);
 
     // Transform result to a cleaner format

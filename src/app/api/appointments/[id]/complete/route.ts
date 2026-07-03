@@ -4,6 +4,9 @@ import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/rou
 import { validateBody, completeAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
+// ADR-001 R2b grupa B: transakcja domykająca wizytę czyta `salons` (polityka RLS po
+// owner_id) — czeka na akcesor forOwner; brama zasobu [id] idzie przez forSalon.
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
@@ -22,6 +25,7 @@ import {
   loyaltyTransactions,
   salons,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 /**
  * Database query executor — works for both the top-level `db` instance
@@ -126,7 +130,8 @@ export async function POST(
     const { recipe, techniques, notes, commissionPercentage } = body;
 
     // Fetch the appointment with service info, scoped to the caller's salon
-    const result = await db
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         appointment: appointments,
         service: services,
@@ -134,7 +139,8 @@ export async function POST(
       .from(appointments)
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .limit(1);
+      .limit(1)
+    );
 
     const row = result[0];
     if (!row) {

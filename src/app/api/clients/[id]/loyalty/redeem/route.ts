@@ -3,10 +3,13 @@ import { eq, and } from "drizzle-orm";
 import type { LoyaltySettings, RewardTier } from "@/app/api/salons/[id]/loyalty-settings/route";
 import { validateBody, loyaltyRedeemSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001 R2b grupa B: odczyty `salons` (polityka RLS po owner_id) — czekają na akcesor forOwner; świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { loyaltyPoints, loyaltyTransactions, salons } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * POST /api/clients/[id]/loyalty/redeem
  *
@@ -82,7 +85,8 @@ export async function POST(
     }
 
     // 2. Check client has enough points
-    const [loyaltyRecord] = await db
+    const [loyaltyRecord] = await forSalon(salonId).raw((tx) =>
+      tx
       .select()
       .from(loyaltyPoints)
       .where(
@@ -91,7 +95,8 @@ export async function POST(
           eq(loyaltyPoints.salonId, salonId)
         )
       )
-      .limit(1);
+      .limit(1)
+    );
 
     if (!loyaltyRecord) {
       return NextResponse.json(
@@ -116,13 +121,10 @@ export async function POST(
     // 3. Deduct points from balance
     const newBalance = loyaltyRecord.points - rewardTier.pointsRequired;
 
-    await db
-      .update(loyaltyPoints)
-      .set({
-        points: newBalance,
-        lastUpdated: new Date(),
-      })
-      .where(eq(loyaltyPoints.id, loyaltyRecord.id));
+    await forSalon(salonId).updateOwned(loyaltyPoints, loyaltyRecord.id, {
+      points: newBalance,
+      lastUpdated: new Date(),
+    });
 
     // 4. Create transaction record
     const rewardTypeLabel =
@@ -132,7 +134,8 @@ export async function POST(
           ? `Darmowa usluga do ${rewardTier.rewardValue} PLN`
           : `Produkt gratis do ${rewardTier.rewardValue} PLN`;
 
-    const transactionResult = await db
+    const transactionResult = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(loyaltyTransactions)
       .values({
         loyaltyId: loyaltyRecord.id,
@@ -140,7 +143,8 @@ export async function POST(
         reason: `Wymiana punktow: ${rewardTier.name} (${rewardTypeLabel})`,
         appointmentId: null,
       })
-      .returning();
+      .returning()
+    );
 
     const transaction = transactionResult[0];
     if (!transaction) {
@@ -231,7 +235,8 @@ export async function GET(
     }
 
     // 2. Get client's current points
-    const [loyaltyRecord] = await db
+    const [loyaltyRecord] = await forSalon(salonId).raw((tx) =>
+      tx
       .select()
       .from(loyaltyPoints)
       .where(
@@ -240,7 +245,8 @@ export async function GET(
           eq(loyaltyPoints.salonId, salonId)
         )
       )
-      .limit(1);
+      .limit(1)
+    );
 
     const currentPoints = loyaltyRecord?.points ?? 0;
 

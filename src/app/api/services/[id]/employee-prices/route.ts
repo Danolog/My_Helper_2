@@ -3,16 +3,12 @@ import { employeeServicePrices, employees, serviceVariants, services } from "@/l
 import { eq, and } from "drizzle-orm";
 import { validateBody, employeePriceSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { forSalon } from "@/lib/server/repository";
 
 /** Verify the service belongs to the caller's salon. */
 async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {
-  const [service] = await db
-    .select({ id: services.id })
-    .from(services)
-    .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
-    .limit(1);
+  const service = await forSalon(salonId).findOne(services, serviceId);
   return !!service;
 }
 
@@ -43,16 +39,19 @@ export async function GET(
       );
     }
 
-    const prices = await db
-      .select({
-        price: employeeServicePrices,
-        employee: employees,
-        variant: serviceVariants,
-      })
-      .from(employeeServicePrices)
-      .leftJoin(employees, eq(employeeServicePrices.employeeId, employees.id))
-      .leftJoin(serviceVariants, eq(employeeServicePrices.variantId, serviceVariants.id))
-      .where(eq(employeeServicePrices.serviceId, serviceId));
+    // employeeServicePrices nie ma salonId — scope przez zweryfikowany wyżej serwis.
+    const prices = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          price: employeeServicePrices,
+          employee: employees,
+          variant: serviceVariants,
+        })
+        .from(employeeServicePrices)
+        .leftJoin(employees, eq(employeeServicePrices.employeeId, employees.id))
+        .leftJoin(serviceVariants, eq(employeeServicePrices.variantId, serviceVariants.id))
+        .where(eq(employeeServicePrices.serviceId, serviceId))
+    );
 
     const formatted = prices.map((row) => ({
       ...row.price,
@@ -107,11 +106,7 @@ export async function POST(
     }
 
     // Verify the employee belongs to the caller's salon
-    const [ownedEmployee] = await db
-      .select({ id: employees.id })
-      .from(employees)
-      .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
-      .limit(1);
+    const ownedEmployee = await forSalon(salonId).findOne(employees, employeeId);
     if (!ownedEmployee) {
       return NextResponse.json(
         { success: false, error: "Employee not found" },
@@ -129,46 +124,55 @@ export async function POST(
       conditions.push(eq(employeeServicePrices.variantId, variantId));
     }
 
-    const existing = await db
-      .select()
-      .from(employeeServicePrices)
-      .where(and(...conditions));
+    // Sprawdzenie istniejącej ceny + update/insert atomowo w transakcji RLS.
+    // employeeServicePrices nie ma salonId — scope przez zweryfikowany wyżej
+    // serwis i pracownika salonu.
+    const { row, wasUpdated } = await forSalon(salonId).raw(async (tx) => {
+      const existing = await tx
+        .select()
+        .from(employeeServicePrices)
+        .where(and(...conditions));
 
-    // Filter for exact variantId match (including null)
-    const exactMatch = existing.find(
-      (e) => (e.variantId || null) === (variantId || null)
-    );
+      // Filter for exact variantId match (including null)
+      const exactMatch = existing.find(
+        (e) => (e.variantId || null) === (variantId || null)
+      );
 
-    if (exactMatch) {
-      // Update existing price
-      const [updated] = await db
-        .update(employeeServicePrices)
-        .set({ customPrice: customPrice.toString() })
-        .where(eq(employeeServicePrices.id, exactMatch.id))
+      if (exactMatch) {
+        // Update existing price
+        const [updated] = await tx
+          .update(employeeServicePrices)
+          .set({ customPrice: customPrice.toString() })
+          .where(eq(employeeServicePrices.id, exactMatch.id))
+          .returning();
+        return { row: updated, wasUpdated: true };
+      }
+
+      // Create new employee price
+      const [newPrice] = await tx
+        .insert(employeeServicePrices)
+        .values({
+          employeeId,
+          serviceId,
+          variantId: variantId || null,
+          customPrice: customPrice.toString(),
+        })
         .returning();
+      return { row: newPrice, wasUpdated: false };
+    });
 
+    if (wasUpdated) {
       return NextResponse.json({
         success: true,
-        data: updated,
+        data: row,
         updated: true,
       });
     }
 
-    // Create new employee price
-    const [newPrice] = await db
-      .insert(employeeServicePrices)
-      .values({
-        employeeId,
-        serviceId,
-        variantId: variantId || null,
-        customPrice: customPrice.toString(),
-      })
-      .returning();
-
     return NextResponse.json(
       {
         success: true,
-        data: newPrice,
+        data: row,
         updated: false,
       },
       { status: 201 }
@@ -218,15 +222,17 @@ export async function DELETE(
     }
 
     // Only delete a price that belongs to this (salon-owned) service
-    const [deleted] = await db
-      .delete(employeeServicePrices)
-      .where(
-        and(
-          eq(employeeServicePrices.id, priceId),
-          eq(employeeServicePrices.serviceId, serviceId)
+    const [deleted] = await forSalon(salonId).raw((tx) =>
+      tx
+        .delete(employeeServicePrices)
+        .where(
+          and(
+            eq(employeeServicePrices.id, priceId),
+            eq(employeeServicePrices.serviceId, serviceId)
+          )
         )
-      )
-      .returning();
+        .returning()
+    );
 
     if (!deleted) {
       return NextResponse.json(

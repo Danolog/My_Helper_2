@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { eq, and, desc } from "drizzle-orm";
 import { validateBody, createPromoCodeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { promoCodes, promotions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * Generate a random 8-character alphanumeric uppercase code.
  * Uses crypto.getRandomValues for better randomness than Math.random.
@@ -32,7 +32,8 @@ export async function GET(request: Request) {
       );
     }
 
-    const result = await db
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         promoCode: promoCodes,
         promotion: promotions,
@@ -40,7 +41,8 @@ export async function GET(request: Request) {
       .from(promoCodes)
       .leftJoin(promotions, eq(promoCodes.promotionId, promotions.id))
       .where(eq(promoCodes.salonId, salonId))
-      .orderBy(desc(promoCodes.createdAt));
+      .orderBy(desc(promoCodes.createdAt))
+    );
 
     // Flatten the join result to embed promotion data directly
     const formattedCodes = result.map((row) => ({
@@ -99,7 +101,8 @@ export async function POST(request: Request) {
     }
 
     // Validate that the code is unique within this salon
-    const [existingCode] = await db
+    const [existingCode] = await forSalon(salonId).raw((tx) =>
+      tx
       .select()
       .from(promoCodes)
       .where(
@@ -108,7 +111,8 @@ export async function POST(request: Request) {
           eq(promoCodes.code, promoCode)
         )
       )
-      .limit(1);
+      .limit(1)
+    );
 
     if (existingCode) {
       return NextResponse.json(
@@ -119,7 +123,8 @@ export async function POST(request: Request) {
 
     // Validate that promotionId exists and belongs to the same salon (if provided)
     if (promotionId) {
-      const [promotion] = await db
+      const [promotion] = await forSalon(salonId).raw((tx) =>
+        tx
         .select()
         .from(promotions)
         .where(
@@ -128,7 +133,8 @@ export async function POST(request: Request) {
             eq(promotions.salonId, salonId)
           )
         )
-        .limit(1);
+        .limit(1)
+      );
 
       if (!promotion) {
         return NextResponse.json(
@@ -138,7 +144,8 @@ export async function POST(request: Request) {
       }
     }
 
-    const [newPromoCode] = await db
+    const [newPromoCode] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(promoCodes)
       .values({
         salonId,
@@ -147,7 +154,8 @@ export async function POST(request: Request) {
         usageLimit: usageLimit != null ? usageLimit : null,
         expiresAt: expiresAt ? new Date(expiresAt) : null,
       })
-      .returning();
+      .returning()
+    );
 
     if (!newPromoCode) {
       return NextResponse.json(

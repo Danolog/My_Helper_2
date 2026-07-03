@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { reviews, appointments, employees, services, salons } from "@/lib/schema";

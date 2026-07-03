@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { eq, asc, sql } from "drizzle-orm";
 import { validateBody, createProductCategorySchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { productCategories, products } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/product-categories - List product categories with product counts
 export async function GET(request: Request) {
   try {
@@ -22,7 +22,8 @@ export async function GET(request: Request) {
     }
 
     // Get categories with product counts using a left join
-    const categories = await db
+    const categories = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         id: productCategories.id,
         salonId: productCategories.salonId,
@@ -35,7 +36,8 @@ export async function GET(request: Request) {
       .leftJoin(products, eq(products.category, productCategories.name))
       .where(eq(productCategories.salonId, salonId))
       .groupBy(productCategories.id)
-      .orderBy(asc(productCategories.sortOrder), asc(productCategories.name));
+      .orderBy(asc(productCategories.sortOrder), asc(productCategories.name))
+    );
 
     return NextResponse.json({
       success: true,
@@ -65,13 +67,15 @@ export async function POST(request: Request) {
     const { salonId, name } = body;
 
     // Check for duplicate name within salon
-    const existing = await db
+    const existing = await forSalon(salonId).raw((tx) =>
+      tx
       .select({ id: productCategories.id })
       .from(productCategories)
       .where(
         sql`${productCategories.salonId} = ${salonId} AND LOWER(${productCategories.name}) = LOWER(${name.trim()})`
       )
-      .limit(1);
+      .limit(1)
+    );
 
     if (existing.length > 0) {
       return NextResponse.json(
@@ -81,21 +85,25 @@ export async function POST(request: Request) {
     }
 
     // Get max sort order for this salon
-    const maxOrder = await db
+    const maxOrder = await forSalon(salonId).raw((tx) =>
+      tx
       .select({ max: sql<number>`COALESCE(MAX(${productCategories.sortOrder}), 0)` })
       .from(productCategories)
-      .where(eq(productCategories.salonId, salonId));
+      .where(eq(productCategories.salonId, salonId))
+    );
 
     const nextOrder = (maxOrder[0]?.max || 0) + 1;
 
-    const [newCategory] = await db
+    const [newCategory] = await forSalon(salonId).raw((tx) =>
+      tx
       .insert(productCategories)
       .values({
         salonId,
         name: name.trim(),
         sortOrder: nextOrder,
       })
-      .returning();
+      .returning()
+    );
 
     logger.info(`[Product Categories API] Created category: ${newCategory!.name} (${newCategory!.id})`);
 

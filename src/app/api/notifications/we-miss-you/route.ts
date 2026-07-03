@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { eq, sql, and, lt, isNull, or, inArray } from "drizzle-orm";
 import { isValidUuid, validateBody, weMissYouNotificationSchema } from "@/lib/api-validation";
 import { requireCronSecret } from "@/lib/auth-middleware";
+// ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { clients, appointments, notifications, salons } from "@/lib/schema";

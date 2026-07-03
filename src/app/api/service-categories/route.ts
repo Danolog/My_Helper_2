@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { validateBody, createServiceCategorySchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// Gałąź GET bez salonId listuje kategorie cross-salon (zachowanie zastane) —
+// świadomie surowe db; gałąź z salonId idzie przez forSalon (ADR-001).
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { serviceCategories } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/service-categories - List all service categories
 export async function GET(request: Request) {
   try {
@@ -18,11 +22,13 @@ export async function GET(request: Request) {
 
     let result;
     if (salonId) {
-      result = await db
-        .select()
-        .from(serviceCategories)
-        .where(eq(serviceCategories.salonId, salonId))
-        .orderBy(serviceCategories.sortOrder);
+      result = await forSalon(salonId).raw((tx) =>
+        tx
+          .select()
+          .from(serviceCategories)
+          .where(eq(serviceCategories.salonId, salonId))
+          .orderBy(serviceCategories.sortOrder)
+      );
     } else {
       result = await db
         .select()
@@ -62,14 +68,16 @@ export async function POST(request: Request) {
     const { salonId, name, sortOrder } = body;
 
     logger.info(`[ServiceCategories API] Creating category: ${name}`);
-    const [newCategory] = await db
-      .insert(serviceCategories)
-      .values({
-        salonId,
-        name,
-        sortOrder: sortOrder ?? 0,
-      })
-      .returning();
+    const [newCategory] = await forSalon(salonId).raw((tx) =>
+      tx
+        .insert(serviceCategories)
+        .values({
+          salonId,
+          name,
+          sortOrder: sortOrder ?? 0,
+        })
+        .returning()
+    );
 
     logger.info(`[ServiceCategories API] Created category with id: ${newCategory?.id}`);
 

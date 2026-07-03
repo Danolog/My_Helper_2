@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { eq, and, isNotNull, ne, inArray, count, avg } from "drizzle-orm";
 import { validateBody, createSalonSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001: operacje na korzeniu najemcy (salons) — GET to publiczny katalog (bez
+// sesji salonu), POST tworzy salon zanim istnieje salonId — poza modelem forSalon,
+// świadomie surowe db.
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";

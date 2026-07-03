@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { validateBody, createServiceVariantSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { serviceVariants, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+
+/** Verify the service belongs to the caller's salon. */
+async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {
+  const service = await forSalon(salonId).findOne(services, serviceId);
+  return !!service;
+}
+
 // GET /api/services/[id]/variants - List all variants for a service
 export async function GET(
   _request: Request,
@@ -26,22 +33,20 @@ export async function GET(
     const { id } = await params;
 
     // Verify service exists in the caller's salon
-    const [service] = await db
-      .select()
-      .from(services)
-      .where(and(eq(services.id, id), eq(services.salonId, salonId)));
-
-    if (!service) {
+    if (!(await serviceBelongsToSalon(id, salonId))) {
       return NextResponse.json(
         { success: false, error: "Service not found" },
         { status: 404 }
       );
     }
 
-    const variants = await db
-      .select()
-      .from(serviceVariants)
-      .where(eq(serviceVariants.serviceId, id));
+    // serviceVariants nie ma salonId — scope przez zweryfikowany wyżej serwis.
+    const variants = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(serviceVariants)
+        .where(eq(serviceVariants.serviceId, id))
+    );
 
     return NextResponse.json({
       success: true,
@@ -83,27 +88,25 @@ export async function POST(
     const { name, priceModifier, durationModifier } = body;
 
     // Verify service exists in the caller's salon
-    const [service] = await db
-      .select()
-      .from(services)
-      .where(and(eq(services.id, id), eq(services.salonId, salonId)));
-
-    if (!service) {
+    if (!(await serviceBelongsToSalon(id, salonId))) {
       return NextResponse.json(
         { success: false, error: "Service not found" },
         { status: 404 }
       );
     }
 
-    const [newVariant] = await db
-      .insert(serviceVariants)
-      .values({
-        serviceId: id,
-        name: name.trim(),
-        priceModifier: (priceModifier ?? 0).toString(),
-        durationModifier: parseInt(durationModifier ?? "0", 10),
-      })
-      .returning();
+    // serviceVariants nie ma salonId — scope przez zweryfikowany wyżej serwis.
+    const [newVariant] = await forSalon(salonId).raw((tx) =>
+      tx
+        .insert(serviceVariants)
+        .values({
+          serviceId: id,
+          name: name.trim(),
+          priceModifier: (priceModifier ?? 0).toString(),
+          durationModifier: parseInt(durationModifier ?? "0", 10),
+        })
+        .returning()
+    );
 
     logger.info(`[Variants API] Created variant "${name}" for service ${id}`);
 

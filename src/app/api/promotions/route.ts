@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { eq, desc } from "drizzle-orm";
 import { validateBody, createPromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// GET bez salonId listuje promocje bez filtra najemcy (zachowanie historyczne)
+// — ta gałąź świadomie zostaje na surowym db (gałąź z salonId idzie przez forSalon):
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
@@ -29,13 +32,16 @@ export async function GET(request: Request) {
       createdAt: promotions.createdAt,
     };
 
-    let query = db.select(promotionColumns).from(promotions).orderBy(desc(promotions.createdAt));
-
-    if (salonId) {
-      query = query.where(eq(promotions.salonId, salonId)) as typeof query;
-    }
-
-    const result = await query;
+    // Gałąź z salonId — przez forSalon (RLS + jawny eq(salonId), obowiązek raw()).
+    const result = salonId
+      ? await forSalon(salonId).raw((tx) =>
+          tx
+            .select(promotionColumns)
+            .from(promotions)
+            .where(eq(promotions.salonId, salonId))
+            .orderBy(desc(promotions.createdAt))
+        )
+      : await db.select(promotionColumns).from(promotions).orderBy(desc(promotions.createdAt));
 
     return NextResponse.json({
       success: true,
