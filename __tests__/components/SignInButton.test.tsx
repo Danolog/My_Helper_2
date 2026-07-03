@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SignInButton } from "@/components/auth/sign-in-button";
 
 // Mock Next.js navigation
@@ -82,24 +82,19 @@ describe("SignInButton", () => {
     ).toBeDisabled();
   });
 
-  it("redirects and shows redirect state when session exists", () => {
-    // Intencja: po fix ebc0cdd (fix: show login form after session timeout)
-    // komponent przy aktywnej sesji nie renderuje pustki (dawne return null),
-    // tylko jawnie przekierowuje i pokazuje widoczny, wylaczony przycisk
-    // "Przekierowanie..." - zeby uzytkownik nigdy nie zobaczyl pustego ekranu.
+  it("redirects and shows placeholder when session exists", () => {
     mockSessionData = {
       data: { user: { name: "Jan", email: "jan@example.com" } },
       isPending: false,
     };
     render(<SignInButton />);
 
-    // Przekierowanie zostalo wyzwolone na domyslny cel.
-    expect(mockReplace).toHaveBeenCalledWith("/dashboard");
-    // Widoczny stan przejsciowy: wylaczony przycisk "Przekierowanie...".
+    // Zalogowany uzytkownik: komponent woła router.replace i renderuje
+    // przycisk-placeholder zamiast formularza (patrz sign-in-button.tsx).
     expect(
       screen.getByRole("button", { name: "Przekierowanie..." })
     ).toBeDisabled();
-    // Formularz logowania NIE jest pokazywany przy aktywnej sesji.
+    expect(mockReplace).toHaveBeenCalledWith("/dashboard");
     expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
   });
 

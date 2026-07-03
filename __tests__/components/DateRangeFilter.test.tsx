@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
 
 // Mock lucide-react icons to avoid complex SVG rendering

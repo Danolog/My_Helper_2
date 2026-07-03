@@ -1,26 +1,42 @@
 import { NextResponse } from "next/server";
-import { promotions } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 import { validateBody, createPromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
+// GET bez salonId listuje promocje bez filtra najemcy (zachowanie historyczne)
+// — ta gałąź świadomie zostaje na surowym db (gałąź z salonId idzie przez forSalon):
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
+import { promotions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/promotions - List promotions with optional salonId filter
-export async function GET(_request: Request) {
+export async function GET(request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): promocje tylko owner, chyba że czasowy grant "promotions";
+    // nie-owner zawsze w zakresie WŁASNEGO salonu (query salonId ignorowane,
+    // gałąź historyczna "bez filtra" zostaje owner-only).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role !== "owner" && !(await hasFeatureAccess(ctx, "promotions"))) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+
+    const { searchParams } = new URL(request.url);
+    const salonId =
+      ctx.role === "owner" ? searchParams.get("salonId") : ctx.salonId;
 
     // Select only the columns needed by the promotions UI
     const promotionColumns = {
@@ -36,15 +52,16 @@ export async function GET(_request: Request) {
       createdAt: promotions.createdAt,
     };
 
-    // Lista — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
-    // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
-    const result = await forSalon(salonId).raw(async (tx) => {
-      let query = tx.select(promotionColumns).from(promotions).orderBy(desc(promotions.createdAt));
-
-      query = query.where(eq(promotions.salonId, salonId)) as typeof query;
-
-      return query;
-    });
+    // Gałąź z salonId — przez forSalon (RLS + jawny eq(salonId), obowiązek raw()).
+    const result = salonId
+      ? await forSalon(salonId).raw((tx) =>
+          tx
+            .select(promotionColumns)
+            .from(promotions)
+            .where(eq(promotions.salonId, salonId))
+            .orderBy(desc(promotions.createdAt))
+        )
+      : await db.select(promotionColumns).from(promotions).orderBy(desc(promotions.createdAt));
 
     return NextResponse.json({
       success: true,
@@ -75,8 +92,10 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): tworzenie promocji tylko owner, chyba że czasowy grant
+    // "promotions"; nie-owner wyłącznie we WŁASNYM salonie.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
@@ -84,7 +103,17 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { name, type, value, startDate, endDate, conditionsJson, isActive } = body;
+    const { salonId, name, type, value, startDate, endDate, conditionsJson, isActive } = body;
+
+    if (
+      ctx.role !== "owner" &&
+      (!(await hasFeatureAccess(ctx, "promotions")) || salonId !== ctx.salonId)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
 
     // Server-side validation with Zod schema
     const validationError = validateBody(createPromotionSchema, body);

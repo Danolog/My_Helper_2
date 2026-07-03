@@ -20,19 +20,20 @@ import { createMockRequest, createRouteParams, parseResponse, TEST_IDS } from ".
 const mockDbSelect = vi.fn();
 const mockDbUpdate = vi.fn();
 
-// forSalon().raw() otwiera db.transaction() i wola tx.execute (SET LOCAL ROLE +
-// set_config) oraz tx.select/update — tx (inline, by uniknac TDZ w hoistowanej
-// fabryce) deleguje do tych samych mockow co db; execute jest no-opem.
+// `tx` deleguje do tych samych mocków co `db` — warstwa repo (forSalon) otwiera
+// db.transaction() i woła tx.select/update (ADR-001 R1). Asercje na
+// mockDbSelect/Update działają po migracji trasy na repozytorium.
+const mockTx = {
+  select: (...args: unknown[]) => mockDbSelect(...args),
+  update: (...args: unknown[]) => mockDbUpdate(...args),
+  execute: vi.fn().mockResolvedValue(undefined), // SET LOCAL role / app.current_salon_id
+};
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
     update: (...args: unknown[]) => mockDbUpdate(...args),
-    transaction: (cb: (tx: unknown) => unknown) =>
-      cb({
-        select: (...args: unknown[]) => mockDbSelect(...args),
-        update: (...args: unknown[]) => mockDbUpdate(...args),
-        execute: () => Promise.resolve(undefined),
-      }),
+    transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
 }));
 
@@ -47,15 +48,14 @@ vi.mock("@/lib/schema", () => {
   return { salons: createTable("salons") };
 });
 
-// `sql` / `sql.raw` uzywane przez repository.ts (withSalonContext: SET LOCAL ROLE
-// + set_config). tx.execute jest no-opem, wiec wartosci nieistotne — maja tylko
-// nie rzucac. Inline (TDZ w hoistowanej fabryce); mock nadpisuje realne `sql`.
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  // `sql` używa warstwa repo (forSalon): sql`...` do set_config oraz
+  // sql.raw(...) do SET LOCAL ROLE — mock musi mieć oba.
   sql: Object.assign(
-    (...args: unknown[]) => ({ type: "sql", args }),
-    { raw: (s: string) => ({ type: "sql.raw", s }) }
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((query: string) => ({ type: "sql.raw", query })) }
   ),
 }));
 

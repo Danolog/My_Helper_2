@@ -1,10 +1,9 @@
 import { z } from "zod";
-import { newsletters } from "@/lib/schema";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { forSalon } from "@/lib/server/repository";
-
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { newsletters } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 const saveSchema = z.object({
   subject: z.string().min(1, "Subject is required").max(500),
   content: z.string().min(1, "Content is required").max(10000),

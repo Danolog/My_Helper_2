@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { isProPlan } from "@/lib/subscription";
-import { forSalon } from "@/lib/server/repository";
+import { eq, and, gte, lt, not } from "drizzle-orm";
+import { voiceIncomingSchema, validateBody } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   salons,
   services,
@@ -10,12 +16,7 @@ import {
   workSchedules,
   timeBlocks,
 } from "@/lib/schema";
-import { eq, and, gte, lt, not } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { voiceIncomingSchema, validateBody } from "@/lib/api-validation";
-
-import { logger } from "@/lib/logger";
+import { isProPlan } from "@/lib/subscription";
 type VoiceAiConfig = {
   enabled: boolean;
   greeting: string;
@@ -75,54 +76,18 @@ export async function POST(req: Request) {
   const body = rawBody as { callerMessage: string; callerPhone?: string };
 
   try {
-    // Odczyt konfiguracji + kontekstu salonu w jednej transakcji z kontekstem
-    // RLS (forSalon). salons po PK (salons.id = salonId); services/employees po salonId.
-    const { salon, salonServices, salonEmployees } = await forSalon(
-      salonId
-    ).raw(async (tx) => {
-      const salonRows = await tx
-        .select({
-          settingsJson: salons.settingsJson,
-          name: salons.name,
-          phone: salons.phone,
-        })
-        .from(salons)
-        .where(eq(salons.id, salonId))
-        .limit(1);
+    // Load voice AI config
+    const salonRows = await db
+      .select({
+        settingsJson: salons.settingsJson,
+        name: salons.name,
+        phone: salons.phone,
+      })
+      .from(salons)
+      .where(eq(salons.id, salonId))
+      .limit(1);
 
-      const [salonServices, salonEmployees] = await Promise.all([
-        tx
-          .select({
-            id: services.id,
-            name: services.name,
-            price: services.basePrice,
-            duration: services.baseDuration,
-          })
-          .from(services)
-          .where(
-            and(
-              eq(services.salonId, salonId),
-              eq(services.isActive, true)
-            )
-          ),
-        tx
-          .select({
-            id: employees.id,
-            firstName: employees.firstName,
-            lastName: employees.lastName,
-          })
-          .from(employees)
-          .where(
-            and(
-              eq(employees.salonId, salonId),
-              eq(employees.isActive, true)
-            )
-          ),
-      ]);
-
-      return { salon: salonRows[0], salonServices, salonEmployees };
-    });
-
+    const salon = salonRows[0];
     if (!salon) {
       return NextResponse.json(
         { error: "Salon nie znaleziony" },
@@ -143,11 +108,39 @@ export async function POST(req: Request) {
       );
     }
 
-    // Build AI response based on caller message and salon context.
-    // salonId przekazany do generateVoiceResponse -> queryAvailability dla
-    // kontekstu RLS przy odczytach kalendarza.
+    // Get salon context: services and employees
+    const [salonServices, salonEmployees] = await Promise.all([
+      db
+        .select({
+          id: services.id,
+          name: services.name,
+          price: services.basePrice,
+          duration: services.baseDuration,
+        })
+        .from(services)
+        .where(
+          and(
+            eq(services.salonId, salonId),
+            eq(services.isActive, true)
+          )
+        ),
+      db
+        .select({
+          id: employees.id,
+          firstName: employees.firstName,
+          lastName: employees.lastName,
+        })
+        .from(employees)
+        .where(
+          and(
+            eq(employees.salonId, salonId),
+            eq(employees.isActive, true)
+          )
+        ),
+    ]);
+
+    // Build AI response based on caller message and salon context
     const aiResponse = await generateVoiceResponse(
-      salonId,
       body.callerMessage,
       config,
       salon.name || "Nasz salon",
@@ -155,24 +148,22 @@ export async function POST(req: Request) {
       salonEmployees
     );
 
-    // Log the conversation in database (insert w kontekscie RLS forSalon).
-    const conversationRows = await forSalon(salonId).raw((tx) =>
-      tx
-        .insert(aiConversations)
-        .values({
-          salonId: salonId,
-          channel: "voice",
-          transcript: JSON.stringify({
-            callerPhone: body.callerPhone || "symulacja",
-            callerMessage: body.callerMessage,
-            aiResponse: aiResponse.message,
-            intent: aiResponse.intent,
-            availabilityData: aiResponse.availabilityData ?? null,
-            timestamp: new Date().toISOString(),
-          }),
-        })
-        .returning()
-    );
+    // Log the conversation in database
+    const conversationRows = await db
+      .insert(aiConversations)
+      .values({
+        salonId: salonId,
+        channel: "voice",
+        transcript: JSON.stringify({
+          callerPhone: body.callerPhone || "symulacja",
+          callerMessage: body.callerMessage,
+          aiResponse: aiResponse.message,
+          intent: aiResponse.intent,
+          availabilityData: aiResponse.availabilityData ?? null,
+          timestamp: new Date().toISOString(),
+        }),
+      })
+      .returning();
 
     const conversation = conversationRows[0];
 
@@ -516,7 +507,6 @@ function matchEmployeeFromMessage(
  * Query real availability for a given employee on a given date.
  */
 async function queryAvailability(
-  salonId: string,
   employeeId: string,
   date: string,
   duration: number
@@ -529,55 +519,16 @@ async function queryAvailability(
   const requestedDate = new Date(date + "T00:00:00");
   const dayOfWeek = requestedDate.getDay();
 
-  const dayStart = new Date(date + "T00:00:00");
-  const dayEnd = new Date(date + "T23:59:59");
-
-  // Odczyty kalendarza w jednej transakcji z kontekstem RLS (forSalon).
-  // workSchedules/timeBlocks sa scope'owane przez employeeId (brak salonId;
-  // RLS odcina cudzy salon przez FK do employees). appointments ma salonId,
-  // wiec dopisujemy jawny eq(appointments.salonId, salonId) (defense in depth).
-  const { schedules, existingAppointments, existingBlocks } = await forSalon(
-    salonId
-  ).raw(async (tx) => {
-    // 1. Get employee work schedule for this day
-    const schedules = await tx
-      .select()
-      .from(workSchedules)
-      .where(
-        and(
-          eq(workSchedules.employeeId, employeeId),
-          eq(workSchedules.dayOfWeek, dayOfWeek)
-        )
-      );
-
-    // 2. Get existing appointments
-    const existingAppointments = await tx
-      .select()
-      .from(appointments)
-      .where(
-        and(
-          eq(appointments.salonId, salonId),
-          eq(appointments.employeeId, employeeId),
-          not(eq(appointments.status, "cancelled")),
-          gte(appointments.startTime, dayStart),
-          lt(appointments.startTime, dayEnd)
-        )
-      );
-
-    // 3. Get time blocks (vacations, breaks)
-    const existingBlocks = await tx
-      .select()
-      .from(timeBlocks)
-      .where(
-        and(
-          eq(timeBlocks.employeeId, employeeId),
-          lt(timeBlocks.startTime, dayEnd),
-          gte(timeBlocks.endTime, dayStart)
-        )
-      );
-
-    return { schedules, existingAppointments, existingBlocks };
-  });
+  // 1. Get employee work schedule for this day
+  const schedules = await db
+    .select()
+    .from(workSchedules)
+    .where(
+      and(
+        eq(workSchedules.employeeId, employeeId),
+        eq(workSchedules.dayOfWeek, dayOfWeek)
+      )
+    );
 
   if (schedules.length === 0) {
     return {
@@ -591,6 +542,34 @@ async function queryAvailability(
   const schedule = schedules[0]!;
   const workStart = schedule.startTime;
   const workEnd = schedule.endTime;
+
+  // 2. Get existing appointments
+  const dayStart = new Date(date + "T00:00:00");
+  const dayEnd = new Date(date + "T23:59:59");
+
+  const existingAppointments = await db
+    .select()
+    .from(appointments)
+    .where(
+      and(
+        eq(appointments.employeeId, employeeId),
+        not(eq(appointments.status, "cancelled")),
+        gte(appointments.startTime, dayStart),
+        lt(appointments.startTime, dayEnd)
+      )
+    );
+
+  // 3. Get time blocks (vacations, breaks)
+  const existingBlocks = await db
+    .select()
+    .from(timeBlocks)
+    .where(
+      and(
+        eq(timeBlocks.employeeId, employeeId),
+        lt(timeBlocks.startTime, dayEnd),
+        gte(timeBlocks.endTime, dayStart)
+      )
+    );
 
   // 4. Build blocked ranges
   interface TimeRange {
@@ -658,7 +637,6 @@ async function queryAvailability(
 }
 
 async function generateVoiceResponse(
-  salonId: string,
   callerMessage: string,
   config: VoiceAiConfig,
   salonName: string,
@@ -816,7 +794,6 @@ async function generateVoiceResponse(
       const duration = 60; // Default duration, will be overridden in actual reschedule
 
       const availability = await queryAvailability(
-        salonId,
         matchedEmployee.id,
         dateStr,
         duration
@@ -962,7 +939,7 @@ async function generateVoiceResponse(
     if (parsedDate && employeesList.length > 0) {
       const dateStr = parsedDate.date.toISOString().split("T")[0]!;
       const defaultEmp = employeesList[0]!;
-      const availability = await queryAvailability(salonId, defaultEmp.id, dateStr, 60);
+      const availability = await queryAvailability(defaultEmp.id, dateStr, 60);
       const empName = `${defaultEmp.firstName} ${defaultEmp.lastName}`;
       const availableOnly = availability.availableSlots.filter(
         (s) => s.available
@@ -1058,7 +1035,6 @@ async function generateVoiceResponse(
       const duration = matchedService ? matchedService.duration : 60;
 
       const availability = await queryAvailability(
-        salonId,
         matchedEmployee.id,
         dateStr,
         duration
@@ -1211,7 +1187,6 @@ async function generateVoiceResponse(
       // Check availability for first employee as default
       const defaultEmployee = employeesList[0]!;
       const availability = await queryAvailability(
-        salonId,
         defaultEmployee.id,
         dateStr,
         duration
@@ -1363,7 +1338,6 @@ async function generateVoiceResponse(
       const duration = matchedService ? matchedService.duration : 60;
 
       const availability = await queryAvailability(
-        salonId,
         matchedEmployee.id,
         dateStr,
         duration
@@ -1518,7 +1492,6 @@ async function generateVoiceResponse(
       const defaultEmp = employeesList[0]!;
 
       const availability = await queryAvailability(
-        salonId,
         defaultEmp.id,
         dateStr,
         duration

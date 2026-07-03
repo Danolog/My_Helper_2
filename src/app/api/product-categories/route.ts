@@ -1,43 +1,45 @@
 import { NextResponse } from "next/server";
-import { productCategories, products } from "@/lib/schema";
 import { eq, asc, sql } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, createProductCategorySchema } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
+import { withApiHandler } from "@/lib/api-handler";
+import { createProductCategorySchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
+import { productCategories, products } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // GET /api/product-categories - List product categories with product counts
-export async function GET(_request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Product Categories API] GET",
+    errorMessage: "Failed to fetch product categories",
+  },
+  async ({ request }) => {
+    const { searchParams } = new URL(request.url);
+    const salonId = searchParams.get("salonId");
 
-    const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
+        { success: false, error: "salonId is required" },
+        { status: 400 }
       );
     }
 
-    // Get categories with product counts using a left join — przez forSalon (RLS).
-    // Jawny eq(productCategories.salonId) zachowany (defense in depth).
+    // Get categories with product counts using a left join
     const categories = await forSalon(salonId).raw((tx) =>
       tx
-        .select({
-          id: productCategories.id,
-          salonId: productCategories.salonId,
-          name: productCategories.name,
-          sortOrder: productCategories.sortOrder,
-          createdAt: productCategories.createdAt,
-          productCount: sql<number>`count(${products.id})::int`,
-        })
-        .from(productCategories)
-        .leftJoin(products, eq(products.category, productCategories.name))
-        .where(eq(productCategories.salonId, salonId))
-        .groupBy(productCategories.id)
-        .orderBy(asc(productCategories.sortOrder), asc(productCategories.name))
+      .select({
+        id: productCategories.id,
+        salonId: productCategories.salonId,
+        name: productCategories.name,
+        sortOrder: productCategories.sortOrder,
+        createdAt: productCategories.createdAt,
+        productCount: sql<number>`count(${products.id})::int`,
+      })
+      .from(productCategories)
+      .leftJoin(products, eq(products.category, productCategories.name))
+      .where(eq(productCategories.salonId, salonId))
+      .groupBy(productCategories.id)
+      .orderBy(asc(productCategories.sortOrder), asc(productCategories.name))
     );
 
     return NextResponse.json({
@@ -45,45 +47,32 @@ export async function GET(_request: Request) {
       data: categories,
       count: categories.length,
     });
-  } catch (error) {
-    logger.error("[Product Categories API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch product categories" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/product-categories - Create a new product category
-export async function POST(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    schema: createProductCategorySchema as z.ZodType<{
+      salonId: string;
+      name: string;
+    }>,
+    logLabel: "[Product Categories API] POST",
+    errorMessage: "Failed to create product category",
+  },
+  async ({ body }) => {
+    const { salonId, name } = body;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
-    const body = await request.json();
-    const validationError = validateBody(createProductCategorySchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
-    const { name } = body;
-
-    // Check for duplicate name within salon (przez forSalon — kontekst RLS)
+    // Check for duplicate name within salon
     const existing = await forSalon(salonId).raw((tx) =>
       tx
-        .select({ id: productCategories.id })
-        .from(productCategories)
-        .where(
-          sql`${productCategories.salonId} = ${salonId} AND LOWER(${productCategories.name}) = LOWER(${name.trim()})`
-        )
-        .limit(1)
+      .select({ id: productCategories.id })
+      .from(productCategories)
+      .where(
+        sql`${productCategories.salonId} = ${salonId} AND LOWER(${productCategories.name}) = LOWER(${name.trim()})`
+      )
+      .limit(1)
     );
 
     if (existing.length > 0) {
@@ -96,22 +85,22 @@ export async function POST(request: Request) {
     // Get max sort order for this salon
     const maxOrder = await forSalon(salonId).raw((tx) =>
       tx
-        .select({ max: sql<number>`COALESCE(MAX(${productCategories.sortOrder}), 0)` })
-        .from(productCategories)
-        .where(eq(productCategories.salonId, salonId))
+      .select({ max: sql<number>`COALESCE(MAX(${productCategories.sortOrder}), 0)` })
+      .from(productCategories)
+      .where(eq(productCategories.salonId, salonId))
     );
 
     const nextOrder = (maxOrder[0]?.max || 0) + 1;
 
     const [newCategory] = await forSalon(salonId).raw((tx) =>
       tx
-        .insert(productCategories)
-        .values({
-          salonId,
-          name: name.trim(),
-          sortOrder: nextOrder,
-        })
-        .returning()
+      .insert(productCategories)
+      .values({
+        salonId,
+        name: name.trim(),
+        sortOrder: nextOrder,
+      })
+      .returning()
     );
 
     logger.info(`[Product Categories API] Created category: ${newCategory!.name} (${newCategory!.id})`);
@@ -120,11 +109,5 @@ export async function POST(request: Request) {
       success: true,
       data: newCategory,
     }, { status: 201 });
-  } catch (error) {
-    logger.error("[Product Categories API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create product category" },
-      { status: 500 }
-    );
   }
-}
+);

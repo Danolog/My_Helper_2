@@ -19,8 +19,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { SubscriptionData, ExpirationData } from "../_types";
 import { formatDate } from "../_types";
+import type { SubscriptionData, ExpirationData } from "../_types";
 
 interface ExpirationWarningCardProps {
   subscription: SubscriptionData;

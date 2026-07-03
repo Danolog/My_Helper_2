@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { products, notifications } from "@/lib/schema";
 import { eq, and, like, sql } from "drizzle-orm";
-import { validateBody, createProductSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
+import { withApiHandler } from "@/lib/api-handler";
+import { createProductSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
+import { apiRateLimit } from "@/lib/rate-limit";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
+import { products, notifications } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 /**
  * Check if a product has low stock and create a notification if needed.
  */
@@ -25,10 +25,9 @@ async function checkAndNotifyLowStock(product: {
   if (minQty === null) return null;
 
   if (qty <= minQty) {
-    // Notyfikacja niskiego stanu jest salon-scoped — kontekst RLS dla salonu
-    // produktu; jawny eq(salonId) zachowany jako filtr aplikacyjny.
-    const existingRecent = await forSalon(product.salonId).raw((tx) =>
-      tx
+    // Sprawdzenie duplikatu + insert powiadomienia w jednej transakcji RLS.
+    return forSalon(product.salonId).raw(async (tx) => {
+      const existingRecent = await tx
         .select({ id: notifications.id })
         .from(notifications)
         .where(
@@ -39,18 +38,16 @@ async function checkAndNotifyLowStock(product: {
             sql`${notifications.type} = 'system'`
           )
         )
-        .limit(1)
-    );
+        .limit(1);
 
-    if (existingRecent.length > 0) {
-      return { notificationSent: false, reason: "duplicate" };
-    }
+      if (existingRecent.length > 0) {
+        return { notificationSent: false, reason: "duplicate" };
+      }
 
-    const unitLabel = product.unit || "szt.";
-    const message = `Niski stan magazynowy: "${product.name}" - pozostalo ${qty} ${unitLabel} (minimum: ${minQty} ${unitLabel}). Uzupelnij zapasy! [product:${product.id}]`;
+      const unitLabel = product.unit || "szt.";
+      const message = `Niski stan magazynowy: "${product.name}" - pozostalo ${qty} ${unitLabel} (minimum: ${minQty} ${unitLabel}). Uzupelnij zapasy! [product:${product.id}]`;
 
-    const [notification] = await forSalon(product.salonId).raw((tx) =>
-      tx
+      const [notification] = await tx
         .insert(notifications)
         .values({
           salonId: product.salonId,
@@ -59,30 +56,47 @@ async function checkAndNotifyLowStock(product: {
           status: "sent",
           sentAt: new Date(),
         })
-        .returning()
-    );
+        .returning();
 
-    logger.info(`[Low Stock Alert] Notification sent for "${product.name}" (${product.id}) - qty: ${qty}, min: ${minQty}`);
+      logger.info(`[Low Stock Alert] Notification sent for "${product.name}" (${product.id}) - qty: ${qty}, min: ${minQty}`);
 
-    return { notificationSent: true, notification };
+      return { notificationSent: true, notification };
+    });
   }
 
   return { notificationSent: false, reason: "stock_ok" };
 }
 
 // GET /api/products - List products with optional salonId filter
-export async function GET(_request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Products API] GET",
+    errorMessage: "Failed to fetch products",
+  },
+  async ({ request }) => {
+    const { searchParams } = new URL(request.url);
+    // Faza 3 (role): magazyn tylko owner, chyba że czasowy grant "products";
+    // nie-owner zawsze w zakresie WŁASNEGO salonu (query salonId ignorowane).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role !== "owner" && !(await hasFeatureAccess(ctx, "products"))) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
+    // "lista bez zawężenia" była wyciekiem cross-salon).
+    const salonId =
+      ctx.role === "owner"
+        ? searchParams.get("salonId") || ctx.salonId
+        : ctx.salonId;
 
     // Select only the columns needed by the inventory UI
     const productColumns = {
@@ -98,62 +112,56 @@ export async function GET(_request: Request) {
       updatedAt: products.updatedAt,
     };
 
-    // Lista — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
-    // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
-    const result = await forSalon(salonId).raw(async (tx) => {
-      let query = tx.select(productColumns).from(products);
-
-      query = query.where(eq(products.salonId, salonId)) as typeof query;
-
-      return query;
-    });
+    const result = await forSalon(salonId).raw((tx) =>
+      tx.select(productColumns).from(products).where(eq(products.salonId, salonId))
+    );
 
     return NextResponse.json({
       success: true,
       data: result,
       count: result.length,
     });
-  } catch (error) {
-    logger.error("[Products API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch products" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/products - Create a new product
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    schema: createProductSchema as z.ZodType<{
+      salonId: string;
+      name: string;
+      category?: string | null;
+      quantity?: string | number | null;
+      minQuantity?: string | number | null;
+      unit?: string | null;
+      pricePerUnit?: string | number | null;
+    }>,
+    logLabel: "[Products API] POST",
+    errorMessage: "Failed to create product",
+  },
+  async ({ body }) => {
+    const { salonId, name, category, quantity, minQuantity, unit, pricePerUnit } = body;
 
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): dodawanie produktów tylko owner, chyba że czasowy grant
+    // "products"; nie-owner wyłącznie do WŁASNEGO salonu.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
-
-    const body = await request.json();
-
-    // Server-side validation with Zod schema
-    const validationError = validateBody(createProductSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
+    if (
+      ctx.role !== "owner" &&
+      (!(await hasFeatureAccess(ctx, "products")) || salonId !== ctx.salonId)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
     }
-
-    const { name, category, quantity, minQuantity, unit, pricePerUnit } = body;
 
     const [newProduct] = await forSalon(salonId).raw((tx) =>
       tx
@@ -192,11 +200,5 @@ export async function POST(request: Request) {
       data: newProduct,
       lowStockAlert,
     }, { status: 201 });
-  } catch (error) {
-    logger.error("[Products API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create product" },
-      { status: 500 }
-    );
   }
-}
+);

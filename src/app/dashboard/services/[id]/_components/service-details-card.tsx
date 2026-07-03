@@ -1,9 +1,9 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DollarSign, Clock } from "lucide-react";
-import type { ServiceDetail } from "../_types";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatPrice, formatDuration } from "../_types";
+import type { ServiceDetail } from "../_types";
 
 interface ServiceDetailsCardProps {
   service: ServiceDetail;

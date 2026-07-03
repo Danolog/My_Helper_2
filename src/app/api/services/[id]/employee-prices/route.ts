@@ -1,38 +1,25 @@
 import { NextResponse } from "next/server";
-import { employeeServicePrices, employees, serviceVariants, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, employeePriceSchema } from "@/lib/api-validation";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { employeeServicePrices, employees, serviceVariants, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
-import { logger } from "@/lib/logger";
-// eslint-disable-next-line no-restricted-imports -- import type db (DbExecutor); dane przez forSalon
-import type { db } from "@/lib/db";
-
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-/**
- * Verify the service belongs to the caller's salon — wykonywane WEWNĄTRZ kontekstu
- * RLS (tx z forSalon). Jawny eq(salonId) zachowany jako filtr aplikacyjny.
- */
-async function serviceBelongsToSalon(tx: Tx, serviceId: string, salonId: string): Promise<boolean> {
-  const [service] = await tx
-    .select({ id: services.id })
-    .from(services)
-    .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
-    .limit(1);
+/** Verify the service belongs to the caller's salon. */
+async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {
+  const service = await forSalon(salonId).findOne(services, serviceId);
   return !!service;
 }
-// GET /api/services/[id]/employee-prices - List all employee-specific prices for a service
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
 
+// GET /api/services/[id]/employee-prices - List all employee-specific prices for a service
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Employee Prices API] GET",
+    errorMessage: "Failed to fetch employee prices",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -41,15 +28,18 @@ export async function GET(
       );
     }
 
-    const { id: serviceId } = await params;
+    const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
-    // Ownership usługi + odczyt cen (leftJoin) w jednym kontekście RLS.
-    // employeeServicePrices bez salonId — scope przez ownership usługi i FK.
-    const { ownsService, prices } = await forSalon(salonId).raw(async (tx) => {
-      if (!(await serviceBelongsToSalon(tx, serviceId, salonId))) {
-        return { ownsService: false, prices: [] };
-      }
-      const rows = await tx
+    if (!(await serviceBelongsToSalon(serviceId, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Service not found" },
+        { status: 404 }
+      );
+    }
+
+    // employeeServicePrices nie ma salonId — scope przez zweryfikowany wyżej serwis.
+    const prices = await forSalon(salonId).raw((tx) =>
+      tx
         .select({
           price: employeeServicePrices,
           employee: employees,
@@ -58,16 +48,8 @@ export async function GET(
         .from(employeeServicePrices)
         .leftJoin(employees, eq(employeeServicePrices.employeeId, employees.id))
         .leftJoin(serviceVariants, eq(employeeServicePrices.variantId, serviceVariants.id))
-        .where(eq(employeeServicePrices.serviceId, serviceId));
-      return { ownsService: true, prices: rows };
-    });
-
-    if (!ownsService) {
-      return NextResponse.json(
-        { success: false, error: "Service not found" },
-        { status: 404 }
-      );
-    }
+        .where(eq(employeeServicePrices.serviceId, serviceId))
+    );
 
     const formatted = prices.map((row) => ({
       ...row.price,
@@ -80,24 +62,17 @@ export async function GET(
       data: formatted,
       count: formatted.length,
     });
-  } catch (error) {
-    logger.error("[Employee Prices API] Error fetching prices", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch employee prices" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/services/[id]/employee-prices - Create or update employee-specific price
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Employee Prices API] POST",
+    errorMessage: "Failed to save employee price",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -106,7 +81,8 @@ export async function POST(
       );
     }
 
-    const { id: serviceId } = await params;
+    const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
+    // Walidacja celowo w handlerze (po sprawdzeniu salonu) — jak dotąd.
     const body = await request.json();
     const validationError = validateBody(employeePriceSchema, body);
     if (validationError) {
@@ -114,34 +90,36 @@ export async function POST(
     }
     const { employeeId, variantId, customPrice } = body;
 
-    // Cała operacja (ownership usługi + ownership pracownika + upsert ceny) w jednym
-    // kontekście RLS, atomowo. employeeServicePrices bez salonId — scope przez
-    // ownership usługi/pracownika (jawne eq salonId) i FK.
-    const outcome = await forSalon(salonId).raw(async (tx) => {
-      if (!(await serviceBelongsToSalon(tx, serviceId, salonId))) {
-        return { kind: "no-service" as const };
-      }
+    if (!(await serviceBelongsToSalon(serviceId, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Service not found" },
+        { status: 404 }
+      );
+    }
 
-      // Verify the employee belongs to the caller's salon
-      const [ownedEmployee] = await tx
-        .select({ id: employees.id })
-        .from(employees)
-        .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
-        .limit(1);
-      if (!ownedEmployee) {
-        return { kind: "no-employee" as const };
-      }
+    // Verify the employee belongs to the caller's salon
+    const ownedEmployee = await forSalon(salonId).findOne(employees, employeeId);
+    if (!ownedEmployee) {
+      return NextResponse.json(
+        { success: false, error: "Employee not found" },
+        { status: 404 }
+      );
+    }
 
-      // Check if an employee price already exists for this employee + service + variant combo
-      const conditions = [
-        eq(employeeServicePrices.employeeId, employeeId),
-        eq(employeeServicePrices.serviceId, serviceId),
-      ];
+    // Check if an employee price already exists for this employee + service + variant combo
+    const conditions = [
+      eq(employeeServicePrices.employeeId, employeeId),
+      eq(employeeServicePrices.serviceId, serviceId),
+    ];
 
-      if (variantId) {
-        conditions.push(eq(employeeServicePrices.variantId, variantId));
-      }
+    if (variantId) {
+      conditions.push(eq(employeeServicePrices.variantId, variantId));
+    }
 
+    // Sprawdzenie istniejącej ceny + update/insert atomowo w transakcji RLS.
+    // employeeServicePrices nie ma salonId — scope przez zweryfikowany wyżej
+    // serwis i pracownika salonu.
+    const { row, wasUpdated } = await forSalon(salonId).raw(async (tx) => {
       const existing = await tx
         .select()
         .from(employeeServicePrices)
@@ -153,14 +131,16 @@ export async function POST(
       );
 
       if (exactMatch) {
+        // Update existing price
         const [updated] = await tx
           .update(employeeServicePrices)
           .set({ customPrice: customPrice.toString() })
           .where(eq(employeeServicePrices.id, exactMatch.id))
           .returning();
-        return { kind: "updated" as const, data: updated };
+        return { row: updated, wasUpdated: true };
       }
 
+      // Create new employee price
       const [newPrice] = await tx
         .insert(employeeServicePrices)
         .values({
@@ -170,25 +150,13 @@ export async function POST(
           customPrice: customPrice.toString(),
         })
         .returning();
-      return { kind: "created" as const, data: newPrice };
+      return { row: newPrice, wasUpdated: false };
     });
 
-    if (outcome.kind === "no-service") {
-      return NextResponse.json(
-        { success: false, error: "Service not found" },
-        { status: 404 }
-      );
-    }
-    if (outcome.kind === "no-employee") {
-      return NextResponse.json(
-        { success: false, error: "Employee not found" },
-        { status: 404 }
-      );
-    }
-    if (outcome.kind === "updated") {
+    if (wasUpdated) {
       return NextResponse.json({
         success: true,
-        data: outcome.data,
+        data: row,
         updated: true,
       });
     }
@@ -196,29 +164,22 @@ export async function POST(
     return NextResponse.json(
       {
         success: true,
-        data: outcome.data,
+        data: row,
         updated: false,
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[Employee Prices API] Error saving price", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to save employee price" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/services/[id]/employee-prices - Delete an employee-specific price
-export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Employee Prices API] DELETE",
+    errorMessage: "Failed to delete employee price",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -227,7 +188,7 @@ export async function DELETE(
       );
     }
 
-    const { id: serviceId } = await params;
+    const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
     const { searchParams } = new URL(request.url);
     const priceId = searchParams.get("priceId");
 
@@ -238,13 +199,16 @@ export async function DELETE(
       );
     }
 
-    // Ownership usługi + delete ceny w jednym kontekście RLS, atomowo.
-    const { ownsService, deleted } = await forSalon(salonId).raw(async (tx) => {
-      if (!(await serviceBelongsToSalon(tx, serviceId, salonId))) {
-        return { ownsService: false, deleted: undefined };
-      }
-      // Only delete a price that belongs to this (salon-owned) service
-      const [row] = await tx
+    if (!(await serviceBelongsToSalon(serviceId, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Service not found" },
+        { status: 404 }
+      );
+    }
+
+    // Only delete a price that belongs to this (salon-owned) service
+    const [deleted] = await forSalon(salonId).raw((tx) =>
+      tx
         .delete(employeeServicePrices)
         .where(
           and(
@@ -252,16 +216,8 @@ export async function DELETE(
             eq(employeeServicePrices.serviceId, serviceId)
           )
         )
-        .returning();
-      return { ownsService: true, deleted: row };
-    });
-
-    if (!ownsService) {
-      return NextResponse.json(
-        { success: false, error: "Service not found" },
-        { status: 404 }
-      );
-    }
+        .returning()
+    );
 
     if (!deleted) {
       return NextResponse.json(
@@ -274,11 +230,5 @@ export async function DELETE(
       success: true,
       data: deleted,
     });
-  } catch (error) {
-    logger.error("[Employee Prices API] Error deleting price", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to delete employee price" },
-      { status: 500 }
-    );
   }
-}
+);

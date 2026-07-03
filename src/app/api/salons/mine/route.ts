@@ -1,21 +1,20 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// CELOWO na surowym `db` (rola owner, omija RLS). Ta trasa DOPIERO USTALA salonId —
-// szuka salonu po `ownerId` z sesji (problem jajka i kury). forSalon(salonId) wymaga
-// salonId z góry, którego tu jeszcze nie znamy; gdyby ustawić kontekst na cokolwiek,
-// RLS `id = current_salon_id` odciąłby wyszukiwanie po ownerId. Brak IDOR: filtr to
-// `ownerId == zalogowany user`, więc zwraca wyłącznie salon właściciela.
-// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId z sesji (problem jajka i kury)
+// ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { getSalonContext } from "@/lib/salon-context";
 import { salons } from "@/lib/schema";
 
-import { logger } from "@/lib/logger";
 /**
  * GET /api/salons/mine
  *
- * Returns the salon owned by the currently authenticated user.
- * Looks up salons where ownerId matches the session user's ID.
+ * Returns the salon of the currently authenticated user: the salon they
+ * OWN, or (Faza 3 — role) the salon they WORK IN as an active linked
+ * employee/receptionist (getSalonContext). UI (useSalonId) relies on this
+ * for every dashboard page, so staff must resolve their salon here too.
  *
  * Response shape:
  *   { success: true, salon: { id, name, ... } }    -- salon found
@@ -27,18 +26,21 @@ export async function GET() {
   if (isAuthError(authResult)) return authResult;
 
   try {
-    const [salon] = await db
-      .select({
-        id: salons.id,
-        name: salons.name,
-        phone: salons.phone,
-        email: salons.email,
-        address: salons.address,
-        industryType: salons.industryType,
-      })
-      .from(salons)
-      .where(eq(salons.ownerId, authResult.user.id))
-      .limit(1);
+    const ctx = await getSalonContext();
+    const [salon] = ctx
+      ? await db
+          .select({
+            id: salons.id,
+            name: salons.name,
+            phone: salons.phone,
+            email: salons.email,
+            address: salons.address,
+            industryType: salons.industryType,
+          })
+          .from(salons)
+          .where(eq(salons.id, ctx.salonId))
+          .limit(1)
+      : [];
 
     return NextResponse.json({
       success: true,

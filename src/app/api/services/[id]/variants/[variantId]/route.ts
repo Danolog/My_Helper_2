@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { serviceVariants, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateServiceVariantSchema } from "@/lib/api-validation";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { serviceVariants, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
 /** Verify the service belongs to the caller's salon. */
@@ -12,16 +12,14 @@ async function serviceBelongsToSalon(serviceId: string, salonId: string): Promis
   return !!service;
 }
 
-import { logger } from "@/lib/logger";
 // PUT /api/services/[id]/variants/[variantId] - Update a variant
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string; variantId: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const PUT = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Variants API] PUT",
+    errorMessage: "Failed to update variant",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -30,7 +28,8 @@ export async function PUT(
       );
     }
 
-    const { id, variantId } = await params;
+    const id = params.id!, variantId = params.variantId!; // segmenty trasy zawsze obecne (noUncheckedIndexedAccess)
+    // Walidacja celowo w handlerze (po sprawdzeniu salonu) — jak dotąd.
     const body = await request.json();
     const validationError = validateBody(updateServiceVariantSchema, body);
     if (validationError) {
@@ -74,24 +73,17 @@ export async function PUT(
       success: true,
       data: updated,
     });
-  } catch (error) {
-    logger.error("[Variants API] Error updating variant", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to update variant" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/services/[id]/variants/[variantId] - Delete a variant
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string; variantId: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Variants API] DELETE",
+    errorMessage: "Failed to delete variant",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -100,7 +92,7 @@ export async function DELETE(
       );
     }
 
-    const { id, variantId } = await params;
+    const id = params.id!, variantId = params.variantId!; // segmenty trasy zawsze obecne (noUncheckedIndexedAccess)
 
     if (!(await serviceBelongsToSalon(id, salonId))) {
       return NextResponse.json(
@@ -132,11 +124,5 @@ export async function DELETE(
       success: true,
       data: deleted,
     });
-  } catch (error) {
-    logger.error("[Variants API] Error deleting variant", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to delete variant" },
-      { status: 500 }
-    );
   }
-}
+);

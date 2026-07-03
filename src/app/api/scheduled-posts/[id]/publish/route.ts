@@ -1,11 +1,10 @@
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
-import { isProPlan } from "@/lib/subscription";
-import { scheduledPosts } from "@/lib/schema";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { scheduledPosts } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isProPlan } from "@/lib/subscription";
 // POST - Manually publish a scheduled post (simulates publishing)
 export async function POST(
   _req: Request,

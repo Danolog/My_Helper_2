@@ -32,8 +32,8 @@ const requestSchema = z.object({
 // ────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
-  // Auth + Pro plan check
-  const proResult = await requireProAI();
+  // Auth + Pro plan check (+ monthly image unit limit)
+  const proResult = await requireProAI({ op: "image" });
   if (isProAIError(proResult)) return proResult;
   const { salonId } = proResult;
 

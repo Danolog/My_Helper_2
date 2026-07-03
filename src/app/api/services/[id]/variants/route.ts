@@ -1,21 +1,26 @@
 import { NextResponse } from "next/server";
-import { serviceVariants, services } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { eq } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, createServiceVariantSchema } from "@/lib/api-validation";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
+import { serviceVariants, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
-import { logger } from "@/lib/logger";
-// GET /api/services/[id]/variants - List all variants for a service
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+/** Verify the service belongs to the caller's salon. */
+async function serviceBelongsToSalon(serviceId: string, salonId: string): Promise<boolean> {
+  const service = await forSalon(salonId).findOne(services, serviceId);
+  return !!service;
+}
 
+// GET /api/services/[id]/variants - List all variants for a service
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Variants API] GET",
+    errorMessage: "Failed to fetch variants",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -24,54 +29,41 @@ export async function GET(
       );
     }
 
-    const { id } = await params;
+    // Segment [id] zawsze obecny w tej trasie (noUncheckedIndexedAccess)
+    const id = params.id!;
 
-    // Weryfikacja własności usługi (jawny eq(salonId)) i odczyt wariantów w jednym
-    // kontekście RLS. serviceVariants nie ma salonId — scope idzie przez ownership
-    // usługi-rodzica (FK serviceId -> services.salonId) wewnątrz forSalon.
-    const { service, variants } = await forSalon(salonId).raw(async (tx) => {
-      const [svc] = await tx
-        .select()
-        .from(services)
-        .where(and(eq(services.id, id), eq(services.salonId, salonId)));
-      if (!svc) return { service: null, variants: [] };
-      const rows = await tx
-        .select()
-        .from(serviceVariants)
-        .where(eq(serviceVariants.serviceId, id));
-      return { service: svc, variants: rows };
-    });
-
-    if (!service) {
+    // Verify service exists in the caller's salon
+    if (!(await serviceBelongsToSalon(id, salonId))) {
       return NextResponse.json(
         { success: false, error: "Service not found" },
         { status: 404 }
       );
     }
 
+    // serviceVariants nie ma salonId — scope przez zweryfikowany wyżej serwis.
+    const variants = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(serviceVariants)
+        .where(eq(serviceVariants.serviceId, id))
+    );
+
     return NextResponse.json({
       success: true,
       data: variants,
       count: variants.length,
     });
-  } catch (error) {
-    logger.error("[Variants API] Error fetching variants", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch variants" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/services/[id]/variants - Create a new variant
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Variants API] POST",
+    errorMessage: "Failed to create variant",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -80,7 +72,9 @@ export async function POST(
       );
     }
 
-    const { id } = await params;
+    // Segment [id] zawsze obecny w tej trasie (noUncheckedIndexedAccess)
+    const id = params.id!;
+    // Walidacja celowo w handlerze (po sprawdzeniu salonu) — jak dotąd.
     const body = await request.json();
     const validationError = validateBody(createServiceVariantSchema, body);
     if (validationError) {
@@ -88,15 +82,17 @@ export async function POST(
     }
     const { name, priceModifier, durationModifier } = body;
 
-    // Weryfikacja własności usługi + insert wariantu w jednym kontekście RLS.
-    // serviceVariants bez salonId — scope przez ownership usługi (eq salonId) i FK.
-    const { service, newVariant } = await forSalon(salonId).raw(async (tx) => {
-      const [svc] = await tx
-        .select()
-        .from(services)
-        .where(and(eq(services.id, id), eq(services.salonId, salonId)));
-      if (!svc) return { service: null, newVariant: undefined };
-      const [variant] = await tx
+    // Verify service exists in the caller's salon
+    if (!(await serviceBelongsToSalon(id, salonId))) {
+      return NextResponse.json(
+        { success: false, error: "Service not found" },
+        { status: 404 }
+      );
+    }
+
+    // serviceVariants nie ma salonId — scope przez zweryfikowany wyżej serwis.
+    const [newVariant] = await forSalon(salonId).raw((tx) =>
+      tx
         .insert(serviceVariants)
         .values({
           serviceId: id,
@@ -104,16 +100,8 @@ export async function POST(
           priceModifier: (priceModifier ?? 0).toString(),
           durationModifier: parseInt(durationModifier ?? "0", 10),
         })
-        .returning();
-      return { service: svc, newVariant: variant };
-    });
-
-    if (!service) {
-      return NextResponse.json(
-        { success: false, error: "Service not found" },
-        { status: 404 }
-      );
-    }
+        .returning()
+    );
 
     logger.info(`[Variants API] Created variant "${name}" for service ${id}`);
 
@@ -124,11 +112,5 @@ export async function POST(
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[Variants API] Error creating variant", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create variant" },
-      { status: 500 }
-    );
   }
-}
+);

@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSalonId } from "@/hooks/use-salon-id";
 import Link from "next/link";
 import { ArrowLeft, CreditCard, Clock, CheckCircle, XCircle, RefreshCw, Filter, DollarSign, TrendingUp, AlertCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -15,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useSalonId } from "@/hooks/use-salon-id";
 
 interface Transaction {
   id: string;

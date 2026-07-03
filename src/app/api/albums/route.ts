@@ -1,42 +1,45 @@
 import { NextResponse } from "next/server";
-import { albums, photoAlbums } from "@/lib/schema";
 import { eq, desc, sql } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, createAlbumSchema } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
+import { withApiHandler } from "@/lib/api-handler";
+import { createAlbumSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
+import { albums, photoAlbums } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // GET /api/albums - List albums for a salon
-export async function GET(_request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Albums API] GET",
+    errorMessage: "Failed to fetch albums",
+  },
+  async ({ request }) => {
+    const { searchParams } = new URL(request.url);
+    const salonId = searchParams.get("salonId");
 
-    const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
+        { success: false, error: "salonId is required" },
+        { status: 400 }
       );
     }
 
-    // Get albums with photo count — przez forSalon (RLS); jawny eq(albums.salonId) zachowany.
+    // Get albums with photo count
     const albumsList = await forSalon(salonId).raw((tx) =>
       tx
-        .select({
-          id: albums.id,
-          salonId: albums.salonId,
-          name: albums.name,
-          category: albums.category,
-          createdAt: albums.createdAt,
-          photoCount: sql<number>`COALESCE(COUNT(${photoAlbums.id}), 0)::int`,
-        })
-        .from(albums)
-        .leftJoin(photoAlbums, eq(albums.id, photoAlbums.albumId))
-        .where(eq(albums.salonId, salonId))
-        .groupBy(albums.id)
-        .orderBy(desc(albums.createdAt))
+      .select({
+        id: albums.id,
+        salonId: albums.salonId,
+        name: albums.name,
+        category: albums.category,
+        createdAt: albums.createdAt,
+        photoCount: sql<number>`COALESCE(COUNT(${photoAlbums.id}), 0)::int`,
+      })
+      .from(albums)
+      .leftJoin(photoAlbums, eq(albums.id, photoAlbums.albumId))
+      .where(eq(albums.salonId, salonId))
+      .groupBy(albums.id)
+      .orderBy(desc(albums.createdAt))
     );
 
     logger.info(`[Albums API] GET: ${albumsList.length} albums found for salon ${salonId}`);
@@ -46,45 +49,34 @@ export async function GET(_request: Request) {
       data: albumsList,
       count: albumsList.length,
     });
-  } catch (error) {
-    logger.error("[Albums API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch albums" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/albums - Create a new album
-export async function POST(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
-    const body = await request.json();
-    const validationError = validateBody(createAlbumSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
-    const { name, category } = body;
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    schema: createAlbumSchema as z.ZodType<{
+      salonId: string;
+      name: string;
+      description?: string | null;
+      category?: string | null;
+    }>,
+    logLabel: "[Albums API] POST",
+    errorMessage: "Failed to create album",
+  },
+  async ({ body }) => {
+    const { salonId, name, category } = body;
 
     const [newAlbum] = await forSalon(salonId).raw((tx) =>
       tx
-        .insert(albums)
-        .values({
-          salonId,
-          name: name.trim(),
-          category: category?.trim() || null,
-        })
-        .returning()
+      .insert(albums)
+      .values({
+        salonId,
+        name: name.trim(),
+        category: category?.trim() || null,
+      })
+      .returning()
     );
 
     logger.info(`[Albums API] Created album: ${newAlbum?.id} - "${newAlbum?.name}"`);
@@ -96,11 +88,5 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[Albums API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create album" },
-      { status: 500 }
-    );
   }
-}
+);

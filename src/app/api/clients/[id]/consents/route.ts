@@ -1,12 +1,11 @@
 import { NextRequest } from "next/server";
-import { marketingConsents, clients } from "@/lib/schema";
 import { eq, and, isNull } from "drizzle-orm";
+import { validateBody, clientConsentsSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, clientConsentsSchema } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { marketingConsents, clients } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 const VALID_CONSENT_TYPES = ["email", "sms", "phone"] as const;
 type ConsentType = (typeof VALID_CONSENT_TYPES)[number];
 

@@ -1,21 +1,18 @@
 import { NextResponse } from "next/server";
-import { employees, employeeServices } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateEmployeeSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { employees, employeeServices } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
 // GET /api/employees/[id] - Get single employee with assigned services
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Employees API] GET by id",
+    errorMessage: "Nie udalo sie pobrac pracownika",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -24,7 +21,7 @@ export async function GET(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny w trasie dynamicznej
 
     const employee = await forSalon(salonId).findOne(employees, id);
 
@@ -51,24 +48,17 @@ export async function GET(
         serviceIds: assignedServices.map((s) => s.serviceId),
       },
     });
-  } catch (error) {
-    logger.error("[Employees API] GET by id error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac pracownika" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // PUT /api/employees/[id] - Update employee and their service assignments
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const PUT = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Employees API] PUT",
+    errorMessage: "Nie udalo sie zaktualizowac pracownika",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -77,7 +67,9 @@ export async function PUT(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny w trasie dynamicznej
+    // Walidacja pozostaje w handlerze (nie w opcji schema): oryginalna
+    // kolejnosc krokow to salon -> walidacja, a wrapper walidowalby wczesniej.
     const body = await request.json();
 
     // Server-side validation with Zod schema
@@ -153,11 +145,5 @@ export async function PUT(
     });
 
     return NextResponse.json({ success: true, data: updated });
-  } catch (error) {
-    logger.error("[Employees API] PUT error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie zaktualizowac pracownika" },
-      { status: 500 }
-    );
   }
-}
+);

@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   Loader2,
 } from "lucide-react";
+import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,7 +19,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FormRecoveryBanner } from "@/components/form-recovery-banner";
 import type { Plan } from "../_hooks/use-registration";
 
 interface StepAccountDetailsProps {

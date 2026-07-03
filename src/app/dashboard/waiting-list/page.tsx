@@ -17,6 +17,9 @@ import {
   Loader2,
   RefreshCw,
 } from "lucide-react";
+import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,7 +27,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +36,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -41,9 +45,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
 
 interface WaitingListEntry {
@@ -96,6 +97,14 @@ function getStatusBadge(entry: WaitingListEntry) {
 }
 
 export default function WaitingListPage() {
+  return (
+    <ModuleGate module="waitingList">
+      <WaitingListPageInner />
+    </ModuleGate>
+  );
+}
+
+function WaitingListPageInner() {
   const [entries, setEntries] = useState<WaitingListEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");

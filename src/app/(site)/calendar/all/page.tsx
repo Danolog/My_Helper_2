@@ -1,16 +1,16 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSession } from "@/lib/auth-client";
-import { Button } from "@/components/ui/button";
-import { TimeGrid } from "@/components/calendar/time-grid";
-import { RescheduleDialog } from "@/components/calendar/reschedule-dialog";
-import { CalendarLegend } from "@/components/calendar/calendar-legend";
+import Link from "next/link";
 import { ChevronLeft, ChevronRight, Calendar, Lock, Palette, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { CalendarLegend } from "@/components/calendar/calendar-legend";
+import { RescheduleDialog } from "@/components/calendar/reschedule-dialog";
+import { TimeGrid } from "@/components/calendar/time-grid";
+import { Button } from "@/components/ui/button";
 import { mutationFetch } from "@/lib/api-client";
+import { useSession } from "@/lib/auth-client";
 import type { Appointment, CalendarEvent, Employee } from "@/types/calendar";
-import Link from "next/link";
 
 export default function CalendarAllPage() {
   const { data: session, isPending } = useSession();

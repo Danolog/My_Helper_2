@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { cleanupExpiredTemporaryAccess } from "@/lib/temporary-access";
 import { requireCronSecret } from "@/lib/auth-middleware";
-
 import { logger } from "@/lib/logger";
+import { cleanupExpiredTemporaryAccess } from "@/lib/temporary-access";
 /**
  * POST /api/cron/cleanup-temporary-access
  *
@@ -13,7 +12,7 @@ import { logger } from "@/lib/logger";
  * The hasTemporaryAccess() utility also checks expiration in real-time,
  * so this cron is a cleanup mechanism rather than the primary enforcement.
  */
-export async function POST(request: Request) {
+async function handleCleanup(request: Request) {
   try {
     const cronError = await requireCronSecret(request);
     if (cronError) return cronError;
@@ -32,4 +31,14 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+// Vercel Cron invokes the path with GET (Authorization: Bearer CRON_SECRET);
+// POST stays for external schedulers. Both go through requireCronSecret.
+export async function GET(request: Request) {
+  return handleCleanup(request);
+}
+
+export async function POST(request: Request) {
+  return handleCleanup(request);
 }

@@ -341,3 +341,165 @@ Pozostała szczera niepewność: nie uruchamiałem migracji ani RLS (ADR = proje
 ---
 
 **Następny krok:** po przeglądzie Ryana (zakres RLS + ścieżki systemowe) i PoC Leo (`SET LOCAL` na `postgres-js`) — implementacja Fazy R1 zgodnie z DoD sekcji 2/5. RLS na produkcji pozostaje w statusie „czeka na sign-off Darka" (czerwone linie, sekcja 8).
+
+---
+
+## DECYZJA 2026-06-17 (Ethan, CTO) — co robimy TERAZ z dorobkiem R1
+
+**Wybór: Opcja C — najpierw R2 (wszystkie trasy na warstwę repo), RLS na produkcję dopiero potem. R1 zostaje na branchu jako gotowy PR; NIE wdrażamy RLS na prod teraz.**
+
+### Decyzja w skrócie
+
+Praca R1 (`feat/repo-layer-rls`) jest domknięta i dowiedziona na czystej bazie (38 polityk RLS, 17/17 testów, review Ryana wbudowany W1–W3, dowód Leo). **Ale produkcja jest już bezpieczna bez RLS** — naprawy P0 zmergowane i wdrożone, izolacja salonów dowiedziona na żywej bazie testem (12/12), filtr aplikacyjny działa na wszystkich trasach. RLS to druga, głębsza tama (defense in depth — obrona warstwowa, kilka niezależnych zabezpieczeń), a nie jedyne zabezpieczenie. Wdrażanie jej teraz nie zdejmuje żadnego realnego ryzyka, a wprowadza nowe.
+
+### Dlaczego nie Opcja B (rollout RLS na prod teraz) — trzy twarde powody
+
+1. **Częściowy RLS na prod ma znikomą wartość, a niesie realne ryzyko.** Na branchu R1 tylko **3 z ~161 tras** ustawiają rolę aplikacyjną `myhelper_app` (rola DB o ograniczonych prawach, którą blokuje RLS). Pozostałe ~158 tras jadą rolą `owner` (właściciel bazy — z definicji omija RLS) i polegają na filtrze aplikacyjnym. Czyli RLS na prod chroniłby dziś realnie tylko 3 trasy, których filtr aplikacyjny już chroni. Zero przyrostu bezpieczeństwa, za to pełne ryzyko operacyjne wdrożenia.
+
+2. **Ścieżki systemowe to ryzyko cichej awarii (sekcja 4).** 2 webhooki (Stripe, Twilio) + 5 zadań cyklicznych (cron) + seed nie mają kontekstu salonu. Źle założony RLS na żywym ruchu = webhook „przetworzony", ale nic nie zapisał; cron „wykonany", ale nikogo nie powiadomił — awaria bez błędu, najgorszy rodzaj. To trzeba przejść na produkcji w oknie obserwacji, nie przy 3 trasach.
+
+3. **Migracja `0005` w obecnej formie PADNIE na produkcji.** Zweryfikowane dziś: tabela `ai_generated_media` istnieje tylko w `schema.ts` i w polityce RLS `0005` — **nie ma żadnej migracji `CREATE TABLE` (`0000`–`0004`), która by ją tworzyła**. Na prod tej tabeli fizycznie nie ma, więc `CREATE POLICY ... ON ai_generated_media` w `0005` przerwie migrację błędem. Prod nie jest gotowy na `0005` as-is — to dług do zamknięcia przed jakimkolwiek RLS na prod.
+
+### Dlaczego Opcja C (R2 najpierw), a nie Opcja A (zostawić i nie ruszać)
+
+Opcja A (domknięte na dziś, oba branche jako PR-y) jest poprawna na ten wieczór, ale nie wyznacza kierunku. **RLS daje wartość bezpieczeństwa dopiero, gdy chroni wszystkie trasy** — a chroni je dopiero po R2 (wszystkie ~158 tras przeniesione na `forSalon`, czyli ustawiają rolę app). Wdrożenie RLS na prod sensownie następuje **po** R2, nie przed. Dlatego sekwencja: R1 czeka jako gotowy fundament → R2 domyka warstwę aplikacyjną na wszystkich trasach → dopiero wtedy RLS na prod ma pełne pokrycie i jest wart ryzyka. To też zgodne z fazowaniem z sekcji 5/7 (R1 → R2 → R3 → prod).
+
+Built-to-Sell: kupujący widzi świadomą sekwencję (najpierw pełne pokrycie warstwy aplikacyjnej, potem twarda tama w bazie z oknem obserwacji), nie „włączyliśmy RLS na 3 trasach, żeby odhaczyć".
+
+### Rekomendowana sekwencja kolejnych kroków
+
+1. **TERAZ:** R1 (`feat/repo-layer-rls`) zostaje na branchu jako gotowy, dowiedziony PR. Nie merge, nie push do prod. Kod zamrożony — dowód leży w repo.
+2. **R2 (kolejne PR-y, paczki ~10 tras):** migracja pozostałych ~158 tras na `forSalon`, każda paczka rozszerza test izolacji o nowe encje. PoC Leo (`SET LOCAL` na sterowniku `postgres-js` z poolem połączeń) **przed pierwszą paczką R2** — decyzja 4 z sekcji 8, warunek niezamknięty.
+3. **Dług `ai_generated_media`:** migracja `CREATE TABLE` (wygenerowana przez `drizzle-kit`, wpisana do `_journal.json` w kolejności) — **przed** jakimkolwiek RLS na prod, inaczej `0005` padnie.
+4. **R3 (PR domykający):** lint `no-restricted-imports` z `warn` na `error`, gdy 0 tras importuje surowy `db` poza wyjątkami.
+5. **DOPIERO POTEM — RLS na produkcji** jako osobny PR + sign-off Darka + okno obserwacji (patrz czerwone linie niżej).
+
+### Czerwone linie — sign-off Darka (CLAUDE.md sekcja 4); ja ich NIE wykonuję sam
+
+Żadna z poniższych NIE jest uruchamiana tą decyzją — wszystkie czekają na jawne „tak" Darka, dopiero po R2:
+
+- **Dedykowana rola DB na produkcji Neon** (`myhelper_app` bez `BYPASSRLS` + `myhelper_migrator`) — nowy element infrastruktury bazy.
+- **Migracja schemy produkcyjnej RLS** (`0005` + migracja tworząca `ai_generated_media`) na żywą bazę Neon — migracja schemy produkcyjnej.
+
+Obie pozostają w statusie z sekcji 8: spakowane, gotowe do uruchomienia, ale tylko z sign-offem Darka. R2 i dług `ai_generated_media` to praca lokalna/odwracalna (warstwa kodu + migracja lokalna) — ich nie blokuje czerwona linia, blokuje je tylko krok prod.
+
+### Co z branchami TERAZ
+
+- `feat/repo-layer-rls` (R1) — **trzymać jako gotowy PR.** Nie merge do main, nie push. (Uwaga: merge R1 do main bez wcześniejszego utworzenia roli + migracji RLS na prod = 3 trasy padną na prod — pułapka `build:ci` z sekcji O2; dlatego nie mergujemy nawet R1 dopóki prod nie ma roli i migracji.)
+- `test/izolacja-realna-baza` — baza dowodowa P0, **trzymać** jako ślad audytowy. Nic nie robić.
+- **Nic nie idzie na produkcję tym ruchem.**
+
+---
+
+## R2b — KLASYFIKACJA GRUP DO DECYZJI (Ethan, 2026-06-18)
+
+**Kontekst.** Część mechaniczna R2 zrobiona — 65 tras salon-scoped (z scope salonu) zmigrowanych na `forSalon`, lint `no-restricted-imports` (zakaz surowego `db`) = 98 ostrzeżeń (czyli tyle tras zostało). Z tej reszty Leo wyłonił grupy „DO DECYZJI": to **nie** mechaniczny refaktor, bo albo zmieniają kontrakt/zachowanie (zamykają lukę), albo czytają tabelę `salons` poza wzorcem `forSalon`. Sklasyfikowałem każdą po odczycie kodu na branchu (nie z samego raportu).
+
+> **Słowniczek tej sekcji** (żargon tłumaczony, CLAUDE.md sekcja 3):
+> **cross-tenant** (między najemcami — tu: między salonami; wyciek = jeden salon widzi dane drugiego);
+> **query string** (część adresu URL po `?`, np. `?salonId=...` — w pełni kontrolowana przez klienta, można wpisać dowolną wartość);
+> **sesja** (zalogowany użytkownik wyznaczony przez ciasteczko — wartości z sesji klient sfałszować nie może);
+> **fix-izolacja** (naprawa luki — wyprowadzić `salonId` z sesji zamiast z query/fallbacku; **zmienia zachowanie** → sign-off);
+> **migrowalna** (da się przenieść na `forSalon` mechanicznie, **bez** zmiany kontraktu — bo trasa i tak miała czytać własny zasób);
+> **system** (świadomy bypass — trasa z definicji jest publiczna albo systemowa; zostaje, udokumentowana);
+> **IDOR** (odwołanie do cudzego obiektu po samym identyfikatorze, bez sprawdzenia właściciela — patrz słowniczek główny).
+
+### Ustalenie kluczowe, które porządkuje całość
+
+Autoryzacja w tym kodzie ma **dwa poziomy** i to one rozstrzygają klasyfikację:
+- `requireAuth()` — sprawdza **tylko**, że ktoś jest zalogowany. **Nie wiąże go z żadnym salonem.**
+- `getUserSalonId()` / `requireProAI()` — czyta `salons` po `ownerId = sesja` i zwraca `salonId` **właściciela** (`src/lib/get-user-salon.ts`). To jest jedyne wiarygodne źródło „mój salon".
+
+**Wzorzec luki grupy A:** trasa ma tylko `requireAuth()` + bierze `salonId` z **query stringa** (albo z opcjonalnego fallbacku). Zalogowany owner salonu A wpisuje w adres `salonId` salonu B i dostaje cudze dane — bo nic nie sprawdza, że ten salon jest jego. To realny IDOR cross-tenant na danych RODO (klienci, telefony, alergie).
+
+**Wzorzec poprawny (wzór do naśladowania, już w kodzie):** `dashboard/stats` bierze `salonId` z query, ale **weryfikuje własność** (`where salons.id = salonId AND salons.ownerId = user.id` → 403 bez dostępu). To nie jest luka — i pokazuje, jak wygląda domknięcie.
+
+### Tabela klasyfikacji
+
+| Trasa | Źródło `salonId` dziś | Klasyfikacja | Severity | Uzasadnienie |
+|---|---|---|---|---|
+| `ai/content/photo-caption` | sesja (`requireProAI`) — ALE zapytanie o zdjęcie bez `eq(salonId)` | **MIGROWALNA** | **P1** | Ma poprawny `salonId` z sesji w ręku; brakuje tylko `eq(salonId)` w `where` (czyta cudze zdjęcie po samym `photoId`). Kontrakt się nie zmienia — trasa i tak miała czytać własne zdjęcie. Mechaniczny dopisek scope → `forSalon(...).raw()`. |
+| `clients` GET | query string, opcjonalny | **FIX-IZOLACJA** | **P0** | Bez `salonId` listuje WSZYSTKICH klientów wszystkich salonów (dane RODO). Fix: `salonId` z sesji (`getUserSalonId`), nie z query. Zmiana zachowania. |
+| `employees` GET | query string, opcjonalny | **FIX-IZOLACJA** | **P1** | Bez `salonId` listuje pracowników cross-salon. Mniej wrażliwe niż klienci, ale ujawnia obsadę konkurencji. |
+| `products` GET | query string, opcjonalny | **FIX-IZOLACJA** | **P2** | Cross-salon lista magazynu/cen — dane biznesowe, nie osobowe. |
+| `services` GET | query string, opcjonalny | **FIX-IZOLACJA** | **P2** | Usługi i cennik często i tak publiczne; wyciek niski. |
+| `promotions` GET | query string, **brak nawet** `if(!salonId)` | **FIX-IZOLACJA** | **P2** | Listuje promocje cross-salon; dane marketingowe, niska wrażliwość. |
+| `gallery` GET | query string (wymagany) | **FIX-IZOLACJA** | **P1** | Klient podaje cudzy `salonId` → cudza galeria. Zdjęcia przed/po klientów = dane wrażliwe. |
+| `notifications` GET | query string (wymagany) | **FIX-IZOLACJA** | **P0** | Cudzy `salonId` → log powiadomień z **imionami, telefonami klientów** (join do `clients`). Wyciek RODO przez sam parametr URL. |
+| `promo-codes` GET | query string (wymagany) | **FIX-IZOLACJA** | **P2** | Kody rabatowe cudzego salonu — nadużycie ekonomiczne, nie RODO. |
+| `product-categories` GET | query string (wymagany) | **FIX-IZOLACJA** | **P2** | Słownik kategorii cudzego salonu; niska wrażliwość. |
+| `time-blocks` GET | tylko `employeeId` z query, brak scope salonu | **FIX-IZOLACJA** | **P1** | Cudzy `employeeId` → bloki czasu cudzego pracownika (urlopy, przerwy). Trzeba związać przez salon ownera. |
+| `work-schedules` GET | tylko `employeeId` z query | **FIX-IZOLACJA** | **P1** | jw. — grafik cudzego pracownika. |
+| `available-slots` GET | tylko `employeeId`, **brak `requireAuth`** | **ZOSTAJE system** | — | Publiczny endpoint bookingu (klient salonu rezerwuje bez logowania). Wolne terminy są z definicji publiczne. Udokumentować jako świadomie publiczny; **nie** dawać mu `forSalon`. |
+| `dashboard/stats` GET | query string, ALE **weryfikuje własność** (403) | **ZOSTAJE bez zmian** | — | **Błąd w raporcie Leo** — ta trasa już sprawdza `ownerId = user.id`. Nie jest luką. Można później przepiąć kosmetycznie na `forSalon`, ale to nie pilne i nie zmienia bezpieczeństwa. |
+| **Grupa B** (`ai/content/newsletter`, `ai/business/chat`, `ai/voice/{config,incoming,book,cancel,reschedule}`) | sesja (`getUserSalonId`/`requireProAI`) | **MIGROWALNA, ale wymaga akcesora `salons`** | — | **NIE są lukami** — `salonId` pochodzi z sesji ownera, każda filtruje swoje encje po `eq(salonId)`. Problem jest wyłącznie architektoniczny pod RLS (niżej). |
+
+### Korekty do raportów Leo (zweryfikowane w kodzie)
+
+1. **`dashboard/stats` NIE jest luką** — ma już weryfikację własności salonu (403). Wypada z grupy A.
+2. **`available-slots` to świadomie publiczny booking** (brak `requireAuth` w ogóle) — nie luka do naprawy, lecz pozycja „system" do udokumentowania.
+3. **Grupa B w całości to nie luki cross-tenant** — wszystkie trasy biorą `salonId` z sesji (`getUserSalonId`), nie z query. Wyglądają groźnie („czytają `salons`"), ale owner czyta wyłącznie swój salon. Realnym tematem jest tylko ich zachowanie po włączeniu RLS.
+4. **`photo-caption` to płytka luka** — w przeciwieństwie do reszty grupy A ma już poprawny `salonId` z sesji; brak tylko `eq(salonId)` w jednym zapytaniu. Dlatego MIGROWALNA, nie FIX-IZOLACJA (kontrakt bez zmian).
+
+### Decyzja 2 — wzorzec dla grupy B (akcesor kontekstu salonu)
+
+**Decyzja: rozszerzyć warstwę repo o akcesor `salons` czytany po `ownerId` z sesji — NIE zostawiać tych tras jako systemowych.**
+
+Powód: tabela `salons` ma politykę RLS po `owner_id`, nie po `salon_id` (ADR sekcja 3.3 — `salons` to *korzeń* najemcy). `forSalon(salonId)` ustawia kontekst `app.current_salon_id` i rolę `myhelper_app` — pod tą rolą zapytanie do `salons` po `salons.id` **nie zadziała tak jak dziś** (polityka jest po `owner_id`). Gdyby grupa B czytała `salons` przez zwykły `forSalon`, dostalibyśmy ciche puste wyniki po wdrożeniu RLS na prod (najgorszy rodzaj awarii — sekcja 4).
+
+**Wzorzec (sygnatura referencyjna, implementuje Leo — to projekt, nie kod):**
+```ts
+// rozszerzenie src/lib/server/repository.ts
+// Brama kontekstu salonu — czyta/zapisuje WŁASNY salon ownera.
+// Kontekst RLS ustawiony tak, by polityka po owner_id przepuściła właściciela.
+export function forOwner(ownerUserId: string) {
+  if (!ownerUserId) throw new Error("repository.forOwner: ownerUserId wymagany");
+  return {
+    salonRow(): Promise<Salon | null> { /* select salons where ownerId = ownerUserId, w transakcji z kontekstem */ },
+    updateSalonSettings(data): Promise<Salon | null> { /* update salons where ownerId = ownerUserId */ },
+  };
+}
+```
+- Grupa B przestaje importować surowy `db`; `getUserSalonId()` i odczyt `salons.settingsJson` idą przez `forOwner(session.user.id)`.
+- To domyka lint (`no-restricted-imports`) także dla tych tras — bez tego nigdy nie dojdziemy do `error` w R3.
+- Alternatywa „zostają systemowe (eslint-disable na stałe)" **odrzucona**: `salons` zawiera dane wszystkich salonów; trzymanie tych tras na surowym `db` (rola owner) to trwała dziura w „defense in depth" i wieczny wyjątek w lincie. Akcesor jest niedrogi (jeden moduł), a domyka warstwę aplikacyjną w 100%.
+
+**Warunek wstępny (jak w sekcji 8 pkt 4):** PoC Leo, że polityka RLS `salons` po `owner_id` współgra z `SET LOCAL ROLE myhelper_app` — bo `forOwner` musi ustawić kontekst tak, by właściciel widział swój wiersz. To jest do potwierdzenia przed pierwszą migracją grupy B.
+
+### Decyzja 3 — severity (propozycja Ethana → potwierdza Ryan, domena 8)
+
+**Do sign-offu Ryana (CRCO) — przegląd domenowy bezpieczeństwa/RODO:**
+- **P0 (wyciek danych osobowych przez sam parametr URL):** `clients` GET, `notifications` GET. Zalogowany owder dowolnego salonu czyta imiona/telefony/alergie klientów cudzego salonu. To realny IDOR na danych RODO — najwyższy priorytet.
+- **P1 (cross-tenant, dane wrażliwe nie-RODO lub trudniejsze do wykorzystania):** `photo-caption`, `gallery`, `employees`, `time-blocks`, `work-schedules`.
+- **P2 (cross-tenant, dane biznesowe/marketingowe, niska wrażliwość):** `products`, `services`, `promotions`, `promo-codes`, `product-categories`.
+
+Ja proponuję skalę; Ryan potwierdza lub przesuwa (np. czy `gallery` to P0 — zdjęcia przed/po mogą być wrażliwe). **Recenzent może zablokować** (CLAUDE.md sekcja 8).
+
+### Decyzja 4 — plan R2b (kolejność i bramki)
+
+**Realnych luk wymagających sign-offu Darka: 11 tras** (12 pozycji FIX-IZOLACJA minus `available-slots`/`dashboard` które wypadają, plus `photo-caption` która jest migrowalna ale i tak zmienia wynik dla cudzego zdjęcia → traktuję jej fix razem z P1). Każdy fix-izolacji **zmienia zachowanie** (trasa zacznie zwracać 403/404/własne dane zamiast cudzych) — to czerwona linia „zmiana izolacji" w duchu sekcji 4, więc pakiet idzie do sign-offu Darka, nie do Auto Mode.
+
+**Kolejność:**
+1. **Najpierw P0 (`clients`, `notifications`)** — to czynne wycieki RODO. Pakiet do sign-offu Darka jako pierwszy, osobno, mały diff, każdy z testem cross-tenant (owner A dostaje 404/403 na salon B). Po sign-offie implementuje Leo, ja review (kod auth/izolacji = mój review, sekcja „kod krytyczny").
+2. **`photo-caption` (P1, migrowalna)** — mechaniczny dopisek `eq(salonId)` przez `forSalon().raw()`. Najmniejszy diff w grupie; może iść razem z paczką P1.
+3. **P1 (`gallery`, `employees`, `time-blocks`, `work-schedules`)** — paczka po sign-offie P0. `time-blocks`/`work-schedules` wymagają związania `employeeId → salon ownera` (join przez `employees.salonId`) — to nie sam `forSalon`, lecz jawny warunek własności; PoC kształtu zapytania u Leo.
+4. **P2 (`products`, `services`, `promotions`, `promo-codes`, `product-categories`)** — paczka domykająca, niski priorytet bezpieczeństwa.
+5. **Grupa B (akcesor `forOwner`)** — po PoC Leo (RLS `salons` po `owner_id` + `SET LOCAL ROLE`). Mechaniczna po zatwierdzeniu wzorca; nie zmienia kontraktu (owner czyta swój salon jak dziś), więc **nie wymaga sign-offu Darka jako zmiana izolacji** — to refaktor pod warstwę. Wymaga tylko mojego review wzorca + potwierdzenia Ryana, że nie odsłania `salons` cross-owner.
+6. **`available-slots`, `dashboard/stats`** — dopisać `// eslint-disable-next-line no-restricted-imports` z komentarzem „świadomie publiczny booking" / „własna weryfikacja ownera" + ewentualne kosmetyczne przepięcie `dashboard` na `forSalon` później. To domyka lint do `error` (R3) bez fałszywego alarmu.
+
+**Co wymaga mojego sign-offu Darka (zmiana zachowania/izolacji):** pakiety 1, 3, 4 (wszystkie fix-izolacja — łącznie 11 tras zmieniających zachowanie) — bo trasa przestaje zwracać cudze dane. Pakiet P0 idzie pierwszy i osobno.
+**Co Leo robi mechanicznie (bez sign-offu izolacji, po zatwierdzeniu wzorca):** `photo-caption` (dopisek scope), grupa B (`forOwner`), wyjątki lintu dla `available-slots`/`dashboard`.
+
+**Do Ryana (CRCO, domena 8):** potwierdzenie skali severity (P0/P1/P2 powyżej) + potwierdzenie, że wzorzec `forOwner` na `salons` (po `owner_id`) nie tworzy nowej ścieżki cross-owner. To przegląd domenowy bezpieczeństwa przed implementacją (jak decyzja 3 w sekcji 8).
+
+**Granica czerwonych linii bez zmian:** żaden fix nie idzie na produkcję tym ruchem; RLS na prod nadal czeka na sign-off Darka (sekcja powyżej). R2b to praca lokalna/odwracalna (warstwa kodu + testy), blokuje ją tylko bramka sign-offu Darka na *zmianę zachowania izolacji*, nie krok prod.
+
+### Self-critique (rola: principal engineer po incydencie IDOR cross-tenant)
+
+1. **Ryzyko, że klasyfikacja brzmi jak opinia, nie pomiar.** → Każda pozycja ma sprawdzone w kodzie źródło `salonId` (query vs sesja) i numer linii w odczycie; `dashboard/stats` i grupa B przeklasyfikowane PRZECIW raportowi Leo na podstawie kodu, nie domysłu.
+2. **Severity mogło być życzeniowe.** → Skala oparta na konkretnym typie danych wyciekających (RODO osobowe = P0, wrażliwe nie-osobowe = P1, biznesowe = P2), jawnie oddana Ryanowi do potwierdzenia z prawem weta — nie zaklepana sama.
+3. **Mogłem zatrzeć granicę czerwonej linii** („naprawimy izolację po cichu"). → Każdy fix-izolacja zmienia zachowanie → sign-off Darka; rozdzieliłem twardo, co idzie do Darka (11 tras), co Leo robi mechanicznie (photo-caption, grupa B, wyjątki lintu).
+4. **Grupa B mogła zostać „systemowa” na skróty.** → Odrzuciłem wieczny eslint-disable; akcesor `forOwner` domyka warstwę aplikacyjną do 100% (warunek dojścia do lintu `error` w R3), z PoC RLS `salons` jako warunkiem wstępnym.
+5. **Mogłem pominąć, że to projekt, nie implementacja.** → Granice zadania trzymane: tylko odczyt kodu + zapis decyzji; `forOwner` to sygnatura referencyjna dla Leo, nie wdrożony kod; PoC `SET LOCAL ROLE` + polityka `salons` to warunek przed pierwszą migracją grupy B.
+
+Pozostała szczera niepewność: nie uruchamiałem tych tras — klasyfikacja oparta na statycznym odczycie. Czy `forOwner` na RLS `salons` po `owner_id` realnie przepuści właściciela pod rolą `myhelper_app`, wymaga PoC Leo (warunek wstępny grupy B). `gallery` na granicy P1/P2 — zostawiam Ryanowi.

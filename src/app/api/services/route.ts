@@ -1,20 +1,31 @@
 import { NextResponse } from "next/server";
-import { services, serviceCategories } from "@/lib/schema";
-import { eq } from "drizzle-orm";
-import { validateBody, createServiceSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
+import { and, eq } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
+import { createServiceSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
-// GET /api/services - List all services
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+import { apiRateLimit } from "@/lib/rate-limit";
+import { getSalonContext } from "@/lib/salon-context";
+import { services, serviceCategories } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 
-    const salonId = await getUserSalonId();
+// GET /api/services - List all services
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Services API] GET",
+    errorMessage: "Failed to fetch services",
+  },
+  async ({ request }) => {
+    const { searchParams } = new URL(request.url);
+    // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
+    // "lista bez zawężenia" była wyciekiem cross-salon).
+    // Faza 3 (role): getSalonContext obejmuje też recepcję/pracownika (podgląd
+    // kalendarza); mutacje zostają owner-only.
+    const salonId =
+      searchParams.get("salonId") || (await getSalonContext())?.salonId;
+    const activeOnly = searchParams.get("activeOnly") === "true";
+
     if (!salonId) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
@@ -22,28 +33,23 @@ export async function GET(request: Request) {
       );
     }
 
-    const { searchParams } = new URL(request.url);
-    const activeOnly = searchParams.get("activeOnly") === "true";
-
     logger.info("[Services API] GET with params", { salonId, activeOnly });
 
-    // Join — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
-    // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
-    const result = await forSalon(salonId).raw(async (tx) => {
-      let query = tx.select({
+    // Zapytanie z joinem — przez forSalon().raw() z jawnym eq(services.salonId).
+    // Warunki złożone przez and() — drugie .where() nadpisywałoby filtr salonu.
+    const result = await forSalon(salonId).raw((tx) =>
+      tx.select({
         service: services,
         category: serviceCategories,
       })
       .from(services)
-      .leftJoin(serviceCategories, eq(services.categoryId, serviceCategories.id));
-
-      query = query.where(eq(services.salonId, salonId)) as typeof query;
-      if (activeOnly) {
-        query = query.where(eq(services.isActive, true)) as typeof query;
-      }
-
-      return query;
-    });
+      .leftJoin(serviceCategories, eq(services.categoryId, serviceCategories.id))
+      .where(
+        activeOnly
+          ? and(eq(services.salonId, salonId), eq(services.isActive, true))
+          : eq(services.salonId, salonId)
+      )
+    );
     logger.info(`[Services API] Query returned ${result.length} rows`);
 
     const formattedServices = result.map((row) => ({
@@ -58,49 +64,29 @@ export async function GET(request: Request) {
     });
     response.headers.set("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
     return response;
-  } catch (error) {
-    logger.error("[Services API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch services" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/services - Create a new service
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
-    const body = await request.json();
-
-    // Server-side validation with Zod schema
-    const validationError = validateBody(createServiceSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
-
-    const { categoryId, name, description, basePrice, baseDuration } = body;
-    const parsedPrice = parseFloat(basePrice);
-    const parsedDuration = parseInt(baseDuration, 10);
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    schema: createServiceSchema as z.ZodType<{
+      salonId: string;
+      categoryId?: string | null;
+      name: string;
+      description?: string | null;
+      basePrice: string | number;
+      baseDuration: string | number;
+    }>,
+    logLabel: "[Services API] POST",
+    errorMessage: "Failed to create service",
+  },
+  async ({ body }) => {
+    const { salonId, categoryId, name, description, basePrice, baseDuration } = body;
+    const parsedPrice = parseFloat(basePrice as string);
+    const parsedDuration = parseInt(baseDuration as string, 10);
 
     logger.info(`[Services API] Creating service: ${name}`);
     const [newService] = await forSalon(salonId).raw((tx) =>
@@ -124,11 +110,5 @@ export async function POST(request: Request) {
       success: true,
       data: newService,
     }, { status: 201 });
-  } catch (error) {
-    logger.error("[Services API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create service" },
-      { status: 500 }
-    );
   }
-}
+);

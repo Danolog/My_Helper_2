@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
-import { reviews, clients, employees, services, appointments } from "@/lib/schema";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
-import { isProPlan } from "@/lib/subscription";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
-
+import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { reviews, clients, employees, services, appointments } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isProPlan } from "@/lib/subscription";
 /**
  * Severity classification for negative reviews.
  * - critical: 1-2 star reviews that require immediate attention

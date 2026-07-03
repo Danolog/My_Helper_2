@@ -1,7 +1,7 @@
-import type { Metadata } from "next";
 import Link from "next/link";
 import { WifiOff } from "lucide-react";
 import { ReloadButton } from "@/components/reload-button";
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Offline",

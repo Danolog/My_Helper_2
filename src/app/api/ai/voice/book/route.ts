@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { isProPlan } from "@/lib/subscription";
-import { forSalon } from "@/lib/server/repository";
+import { eq, and, gte, lt, not } from "drizzle-orm";
+import { voiceBookSchema, validateBody } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
@@ -12,13 +18,8 @@ import {
   employeeServices,
   salons,
 } from "@/lib/schema";
-import { eq, and, gte, lt, not } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { voiceBookSchema, validateBody } from "@/lib/api-validation";
-
-import { logger } from "@/lib/logger";
+import { isProPlan } from "@/lib/subscription";
 /** Slot interval in minutes used when generating available time slots. */
 const SLOT_INTERVAL = 15;
 
@@ -68,15 +69,10 @@ export async function POST(req: Request) {
   const body = rawBody as { serviceId: string; employeeId?: string; preferredDate?: string; preferredTime?: string; callerPhone: string; callerName?: string; notes?: string };
 
   try {
-    // Caly transakcyjny przeplyw (odczyty + zapisy: appointment, klient,
-    // aiConversation) w jednej transakcji z kontekstem RLS (forSalon).
-    // Wczesne wyjscia zwracaja NextResponse bezposrednio z callbacku.
-    // Jawne eq(<tabela>.salonId, salonId) zachowane jako tama aplikacyjna.
-    return await forSalon(salonId).raw(async (tx) => {
     // ------------------------------------------------------------------
     // Step A: Look up the requested service
     // ------------------------------------------------------------------
-    const serviceRows = await tx
+    const serviceRows = await db
       .select({
         id: services.id,
         name: services.name,
@@ -132,7 +128,7 @@ export async function POST(req: Request) {
     if (!employeeId) {
       // Try to find an active employee assigned to this service via the
       // employeeServices junction table who also works on the target day.
-      const assignedRows = await tx
+      const assignedRows = await db
         .select({ employeeId: employeeServices.employeeId })
         .from(employeeServices)
         .innerJoin(employees, eq(employees.id, employeeServices.employeeId))
@@ -157,7 +153,7 @@ export async function POST(req: Request) {
       } else {
         // Fallback: pick any active employee in the salon who works on
         // the target day (join with workSchedules to guarantee schedule).
-        const fallbackRows = await tx
+        const fallbackRows = await db
           .select({ id: employees.id })
           .from(employees)
           .innerJoin(
@@ -187,7 +183,7 @@ export async function POST(req: Request) {
     }
 
     // Fetch employee details (name) for the confirmation message
-    const employeeRows = await tx
+    const employeeRows = await db
       .select({
         id: employees.id,
         firstName: employees.firstName,
@@ -214,7 +210,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step D: Query the employee's work schedule for that day
     // ------------------------------------------------------------------
-    const scheduleRows = await tx
+    const scheduleRows = await db
       .select({
         startTime: workSchedules.startTime,
         endTime: workSchedules.endTime,
@@ -247,7 +243,7 @@ export async function POST(req: Request) {
     const dayEnd = new Date(targetDateStr + "T23:59:59");
 
     const [existingAppointments, existingBlocks] = await Promise.all([
-      tx
+      db
         .select({
           startTime: appointments.startTime,
           endTime: appointments.endTime,
@@ -255,14 +251,13 @@ export async function POST(req: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, salonId),
             eq(appointments.employeeId, employeeId),
             not(eq(appointments.status, "cancelled")),
             gte(appointments.startTime, dayStart),
             lt(appointments.startTime, dayEnd)
           )
         ),
-      tx
+      db
         .select({
           startTime: timeBlocks.startTime,
           endTime: timeBlocks.endTime,
@@ -368,7 +363,7 @@ export async function POST(req: Request) {
     const slotStartDate = new Date(targetDateStr + `T${bestSlot.time}:00`);
     const slotEndDate = new Date(slotStartDate.getTime() + duration * 60 * 1000);
 
-    const [newAppointment] = await tx
+    const [newAppointment] = await db
       .insert(appointments)
       .values({
         salonId: salonId,
@@ -386,7 +381,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     let clientRecord: { id: string; firstName: string; lastName: string } | undefined;
 
-    const existingClients = await tx
+    const existingClients = await db
       .select({
         id: clients.id,
         firstName: clients.firstName,
@@ -409,7 +404,7 @@ export async function POST(req: Request) {
       const firstName = callerNameParts[0] || "Klient";
       const lastName = callerNameParts.slice(1).join(" ") || "telefoniczny";
 
-      const [newClient] = await tx
+      const [newClient] = await db
         .insert(clients)
         .values({
           salonId: salonId,
@@ -430,7 +425,7 @@ export async function POST(req: Request) {
 
     // Link the client to the appointment if we have a record
     if (clientRecord && newAppointment) {
-      await tx
+      await db
         .update(appointments)
         .set({ clientId: clientRecord.id })
         .where(eq(appointments.id, newAppointment.id));
@@ -439,7 +434,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step I: Send SMS confirmation
     // ------------------------------------------------------------------
-    const salonRows = await tx
+    const salonRows = await db
       .select({ name: salons.name })
       .from(salons)
       .where(eq(salons.id, salonId))
@@ -468,7 +463,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step J: Log the conversation in aiConversations
     // ------------------------------------------------------------------
-    const [conversation] = await tx
+    const [conversation] = await db
       .insert(aiConversations)
       .values({
         salonId: salonId,
@@ -511,7 +506,6 @@ export async function POST(req: Request) {
         phone: body.callerPhone,
       },
       conversationId: conversation?.id || null,
-    });
     });
   } catch (error) {
     logger.error("[Voice AI Book] Error", { error: error });

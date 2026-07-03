@@ -1,18 +1,17 @@
 import { NextResponse } from "next/server";
-// POST (public booking) używa surowego `db` — patrz komentarz przy POST poniżej.
-// eslint-disable-next-line no-restricted-imports -- POST public booking — brak sesji właściciela
-import { db } from "@/lib/db";
-import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
 import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
 import { validateBody, createAppointmentSchema } from "@/lib/api-validation";
-import { isValidUuid, isValidDateString } from "@/lib/validations";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { getOptionalSession } from "@/lib/session";
-import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
+// ADR-001 R2b: POST to świadomie publiczny booking (gość bez sesji salonu) — świadomie surowe db; GET idzie przez forSalon
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { getSalonContext } from "@/lib/salon-context";
+import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { getOptionalSession } from "@/lib/session";
+import { isValidUuid, isValidDateString } from "@/lib/validations";
 // GET /api/appointments - List appointments with optional date range filter
 export async function GET(request: Request) {
   try {
@@ -21,13 +20,16 @@ export async function GET(request: Request) {
 
     // Tenant isolation: derive the salon from the session, never trust a
     // client-supplied salonId in the query string (IDOR risk).
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): owner/receptionist widzą pełną listę salonu,
+    // employee tylko własne wizyty (filtr niżej).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("startDate");
@@ -58,10 +60,34 @@ export async function GET(request: Request) {
       );
     }
 
-    // Join — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
-    // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
-    const result = await forSalon(salonId).raw(async (tx) => {
-      let query = tx.select({
+    // Rola employee: wynik ograniczony do WŁASNYCH wizyt (spec Fazy 3).
+    // Konto pracownicze bez rekordu employees => pusta lista (fail-closed).
+    if (ctx.role === "employee" && !ctx.employeeId) {
+      return NextResponse.json({ success: true, data: [], count: 0 });
+    }
+
+    const conditions = [eq(appointments.salonId, salonId)];
+
+    if (ctx.role === "employee" && ctx.employeeId) {
+      conditions.push(eq(appointments.employeeId, ctx.employeeId));
+    }
+
+    if (employeeId) {
+      conditions.push(eq(appointments.employeeId, employeeId));
+    }
+    if (startDate && endDate) {
+      // Overlap query: appointment overlaps with [startDate, endDate] range
+      // when appointment.startTime < endDate AND appointment.endTime > startDate
+      conditions.push(lt(appointments.startTime, new Date(endDate)));
+      conditions.push(gt(appointments.endTime, new Date(startDate)));
+    } else if (startDate) {
+      conditions.push(gte(appointments.startTime, new Date(startDate)));
+    } else if (endDate) {
+      conditions.push(lte(appointments.endTime, new Date(endDate)));
+    }
+
+    const result = await forSalon(salonId).raw((tx) =>
+      tx.select({
         appointment: appointments,
         client: clients,
         employee: employees,
@@ -70,30 +96,9 @@ export async function GET(request: Request) {
       .from(appointments)
       .leftJoin(clients, eq(appointments.clientId, clients.id))
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id));
-
-      const conditions = [eq(appointments.salonId, salonId)];
-
-      if (employeeId) {
-        conditions.push(eq(appointments.employeeId, employeeId));
-      }
-      if (startDate && endDate) {
-        // Overlap query: appointment overlaps with [startDate, endDate] range
-        // when appointment.startTime < endDate AND appointment.endTime > startDate
-        conditions.push(lt(appointments.startTime, new Date(endDate)));
-        conditions.push(gt(appointments.endTime, new Date(startDate)));
-      } else if (startDate) {
-        conditions.push(gte(appointments.startTime, new Date(startDate)));
-      } else if (endDate) {
-        conditions.push(lte(appointments.endTime, new Date(endDate)));
-      }
-
-      if (conditions.length > 0) {
-        query = query.where(and(...conditions)) as typeof query;
-      }
-
-      return query;
-    });
+      .leftJoin(services, eq(appointments.serviceId, services.id))
+      .where(and(...conditions))
+    );
     logger.info(`[Appointments API] Query returned ${result.length} rows`);
 
     // Transform result to a cleaner format
@@ -120,13 +125,6 @@ export async function GET(request: Request) {
 
 // POST /api/appointments - Create a new appointment
 // Auth is optional: logged-in users book with their session, guests provide contact info.
-//
-// ŚCIEŻKA PUBLICZNA (nie owner-scoped): goście bez sesji rezerwują online, więc
-// NIE ma zalogowanego właściciela ani salonId z sesji. salonId pochodzi z body
-// (cel rezerwacji). Z tego powodu trasa zostaje na surowym `db` — `forSalon(...)`
-// wymaga zaufanego salonId z sesji, którego tu nie ma. Insert jawnie ustawia
-// salonId z body (rezerwacja trafia tylko do wskazanego salonu); sprawdzenia
-// kolizji/blokad/promo celowo przeszukują dane pracownika/kodu bez RLS.
 export async function POST(request: Request) {
   try {
     // Rate limit to prevent abuse (especially from unauthenticated guests)

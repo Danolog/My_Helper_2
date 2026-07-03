@@ -1,17 +1,13 @@
 import { NextResponse } from "next/server";
-// pushSubscriptions jest kluczowane userId (NIE salonId) — to zasób per-USER,
-// nie per-salon. Trasa NIE migruje na forSalon: brak kolumny salon_id do
-// zawężenia, a subskrypcja push należy do urządzenia użytkownika niezależnie od
-// salonu. Pozostaje na surowym db, scope przez eq(userId) z sesji. (R2)
-// eslint-disable-next-line no-restricted-imports -- pushSubscriptions per-USER (klucz userId), brak salon_id
-import { db } from "@/lib/db";
-import { pushSubscriptions } from "@/lib/schema";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { validateBody, pushSubscribeSchema } from "@/lib/api-validation";
 import { eq, and } from "drizzle-orm";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-
+import { validateBody, pushSubscribeSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { pushSubscriptions } from "@/lib/schema";
 /**
  * POST /api/push/subscribe
  *

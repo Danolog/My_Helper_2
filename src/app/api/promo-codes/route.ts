@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { validateBody, createPromoCodeSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
+import { withApiHandler } from "@/lib/api-handler";
+import { createPromoCodeSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
+import { apiRateLimit } from "@/lib/rate-limit";
+import { promoCodes, promotions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 /**
  * Generate a random 8-character alphanumeric uppercase code.
  * Uses crypto.getRandomValues for better randomness than Math.random.
@@ -20,30 +19,33 @@ function generatePromoCode(): string {
 }
 
 // GET /api/promo-codes - List promo codes with optional salonId filter
-export async function GET(_request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[PromoCodes API] GET",
+    errorMessage: "Failed to fetch promo codes",
+  },
+  async ({ request }) => {
+    const { searchParams } = new URL(request.url);
+    const salonId = searchParams.get("salonId");
 
-    const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
+        { success: false, error: "salonId query parameter is required" },
+        { status: 400 }
       );
     }
 
-    // leftJoin przez forSalon (kontekst RLS); jawny eq(promoCodes.salonId) zachowany.
     const result = await forSalon(salonId).raw((tx) =>
       tx
-        .select({
-          promoCode: promoCodes,
-          promotion: promotions,
-        })
-        .from(promoCodes)
-        .leftJoin(promotions, eq(promoCodes.promotionId, promotions.id))
-        .where(eq(promoCodes.salonId, salonId))
-        .orderBy(desc(promoCodes.createdAt))
+      .select({
+        promoCode: promoCodes,
+        promotion: promotions,
+      })
+      .from(promoCodes)
+      .leftJoin(promotions, eq(promoCodes.promotionId, promotions.id))
+      .where(eq(promoCodes.salonId, salonId))
+      .orderBy(desc(promoCodes.createdAt))
     );
 
     // Flatten the join result to embed promotion data directly
@@ -57,47 +59,26 @@ export async function GET(_request: Request) {
       data: formattedCodes,
       count: formattedCodes.length,
     });
-  } catch (error) {
-    logger.error("[PromoCodes API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch promo codes" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/promo-codes - Create a new promo code
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
-    const body = await request.json();
-
-    // Server-side validation with Zod schema
-    const validationError = validateBody(createPromoCodeSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
-
-    const { code, promotionId, usageLimit, expiresAt } = body;
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    schema: createPromoCodeSchema as z.ZodType<{
+      salonId: string;
+      code?: string;
+      promotionId?: string | null;
+      usageLimit?: number | null;
+      expiresAt?: string | null;
+    }>,
+    logLabel: "[PromoCodes API] POST",
+    errorMessage: "Failed to create promo code",
+  },
+  async ({ body }) => {
+    const { salonId, code, promotionId, usageLimit, expiresAt } = body;
 
     // Generate code if not provided
     const promoCode = code
@@ -111,18 +92,18 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate that the code is unique within this salon (przez forSalon — kontekst RLS)
+    // Validate that the code is unique within this salon
     const [existingCode] = await forSalon(salonId).raw((tx) =>
       tx
-        .select()
-        .from(promoCodes)
-        .where(
-          and(
-            eq(promoCodes.salonId, salonId),
-            eq(promoCodes.code, promoCode)
-          )
+      .select()
+      .from(promoCodes)
+      .where(
+        and(
+          eq(promoCodes.salonId, salonId),
+          eq(promoCodes.code, promoCode)
         )
-        .limit(1)
+      )
+      .limit(1)
     );
 
     if (existingCode) {
@@ -136,15 +117,15 @@ export async function POST(request: Request) {
     if (promotionId) {
       const [promotion] = await forSalon(salonId).raw((tx) =>
         tx
-          .select()
-          .from(promotions)
-          .where(
-            and(
-              eq(promotions.id, promotionId),
-              eq(promotions.salonId, salonId)
-            )
+        .select()
+        .from(promotions)
+        .where(
+          and(
+            eq(promotions.id, promotionId),
+            eq(promotions.salonId, salonId)
           )
-          .limit(1)
+        )
+        .limit(1)
       );
 
       if (!promotion) {
@@ -157,15 +138,15 @@ export async function POST(request: Request) {
 
     const [newPromoCode] = await forSalon(salonId).raw((tx) =>
       tx
-        .insert(promoCodes)
-        .values({
-          salonId,
-          code: promoCode,
-          promotionId: promotionId || null,
-          usageLimit: usageLimit != null ? usageLimit : null,
-          expiresAt: expiresAt ? new Date(expiresAt) : null,
-        })
-        .returning()
+      .insert(promoCodes)
+      .values({
+        salonId,
+        code: promoCode,
+        promotionId: promotionId || null,
+        usageLimit: usageLimit != null ? usageLimit : null,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+      })
+      .returning()
     );
 
     if (!newPromoCode) {
@@ -184,11 +165,5 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[PromoCodes API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create promo code" },
-      { status: 500 }
-    );
   }
-}
+);

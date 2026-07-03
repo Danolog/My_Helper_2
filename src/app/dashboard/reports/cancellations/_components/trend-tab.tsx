@@ -1,10 +1,10 @@
 "use client";
 
 import { TrendingDown } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { ReportData } from "../_types";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getRateColor, getRateBadge, formatDateShort } from "../_types";
+import type { ReportData } from "../_types";
 
 interface TrendTabProps {
   reportData: ReportData;

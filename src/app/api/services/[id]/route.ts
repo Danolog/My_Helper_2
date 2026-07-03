@@ -1,22 +1,21 @@
 import { NextResponse } from "next/server";
-import { services, serviceCategories, serviceVariants } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateServiceSchema } from "@/lib/api-validation";
-import { isValidUuid } from "@/lib/validations";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
-// GET /api/services/[id] - Get a single service with its variants
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+import { services, serviceCategories, serviceVariants } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { isValidUuid } from "@/lib/validations";
 
+// GET /api/services/[id] - Get a single service with its variants
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Services API] GET",
+    errorMessage: "Failed to fetch service",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -25,7 +24,7 @@ export async function GET(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     if (!isValidUuid(id)) {
       return NextResponse.json(
@@ -68,24 +67,17 @@ export async function GET(
         variants,
       },
     });
-  } catch (error) {
-    logger.error("[Services API] Error fetching service", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch service" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // PUT /api/services/[id] - Update a service
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const PUT = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Services API] PUT",
+    errorMessage: "Failed to update service",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -94,7 +86,7 @@ export async function PUT(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     if (!isValidUuid(id)) {
       return NextResponse.json(
@@ -106,6 +98,7 @@ export async function PUT(
     const body = await request.json();
 
     // Server-side validation with Zod schema
+    // (walidacja celowo w handlerze, po sprawdzeniu salonu i UUID — jak dotąd)
     const validationError = validateBody(updateServiceSchema, body);
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
@@ -136,14 +129,8 @@ export async function PUT(
       success: true,
       data: updated,
     });
-  } catch (error) {
-    logger.error("[Services API] Error updating service", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to update service" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/services/[id] - Delete a service
 // Related records are handled by database cascade rules:
@@ -151,14 +138,13 @@ export async function PUT(
 // - employee_services: CASCADE (deleted)
 // - employee_service_prices: CASCADE (deleted)
 // - appointments.serviceId: SET NULL (appointments preserved, serviceId nullified)
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Services API] DELETE",
+    errorMessage: "Failed to delete service",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -167,7 +153,7 @@ export async function DELETE(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     if (!isValidUuid(id)) {
       return NextResponse.json(
@@ -191,11 +177,5 @@ export async function DELETE(
       success: true,
       data: deleted,
     });
-  } catch (error) {
-    logger.error("[Services API] Error deleting service", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to delete service" },
-      { status: 500 }
-    );
   }
-}
+);

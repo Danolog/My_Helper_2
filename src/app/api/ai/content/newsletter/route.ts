@@ -1,19 +1,20 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
+import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
-import { isProPlan } from "@/lib/subscription";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { forSalon } from "@/lib/server/repository";
+// ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   salons,
   services,
   promotions,
   newsletters,
 } from "@/lib/schema";
-import { eq, and, desc } from "drizzle-orm";
-
-import { logger } from "@/lib/logger";
+import { isProPlan } from "@/lib/subscription";
 const requestSchema = z.object({
   topic: z.string().min(1).max(500),
   goals: z
@@ -129,68 +130,64 @@ export async function POST(req: Request) {
   let activePromotions: string[] = [];
 
   try {
-    // Odczyty kontekstu salonu w jednej transakcji z kontekstem RLS (forSalon).
-    // salons filtrujemy po PK (salons.id = salonId); services/promotions po salonId.
-    await forSalon(salonId).raw(async (tx) => {
-      const salonInfo = await tx
+    const salonInfo = await db
+      .select({
+        name: salons.name,
+        industryType: salons.industryType,
+        address: salons.address,
+        phone: salons.phone,
+      })
+      .from(salons)
+      .where(eq(salons.id, salonId))
+      .then((r) => r[0]);
+
+    if (salonInfo) {
+      salonName = salonInfo.name;
+      salonAddress = salonInfo.address || "";
+      salonPhone = salonInfo.phone || "";
+      const iType = salonInfo.industryType;
+      if (iType && INDUSTRY_LABELS[iType]) {
+        industryLabel = INDUSTRY_LABELS[iType];
+      }
+    }
+
+    // Fetch top services
+    const serviceList = await db
+      .select({ name: services.name, basePrice: services.basePrice })
+      .from(services)
+      .where(
+        and(eq(services.salonId, salonId), eq(services.isActive, true))
+      )
+      .limit(10);
+
+    salonServices = serviceList.map(
+      (s) => `${s.name} (${s.basePrice} PLN)`
+    );
+
+    // Fetch active promotions
+    try {
+      const promoList = await db
         .select({
-          name: salons.name,
-          industryType: salons.industryType,
-          address: salons.address,
-          phone: salons.phone,
+          name: promotions.name,
+          type: promotions.type,
+          value: promotions.value,
         })
-        .from(salons)
-        .where(eq(salons.id, salonId))
-        .then((r) => r[0]);
-
-      if (salonInfo) {
-        salonName = salonInfo.name;
-        salonAddress = salonInfo.address || "";
-        salonPhone = salonInfo.phone || "";
-        const iType = salonInfo.industryType;
-        if (iType && INDUSTRY_LABELS[iType]) {
-          industryLabel = INDUSTRY_LABELS[iType];
-        }
-      }
-
-      // Fetch top services
-      const serviceList = await tx
-        .select({ name: services.name, basePrice: services.basePrice })
-        .from(services)
+        .from(promotions)
         .where(
-          and(eq(services.salonId, salonId), eq(services.isActive, true))
-        )
-        .limit(10);
-
-      salonServices = serviceList.map(
-        (s) => `${s.name} (${s.basePrice} PLN)`
-      );
-
-      // Fetch active promotions
-      try {
-        const promoList = await tx
-          .select({
-            name: promotions.name,
-            type: promotions.type,
-            value: promotions.value,
-          })
-          .from(promotions)
-          .where(
-            and(
-              eq(promotions.salonId, salonId),
-              eq(promotions.isActive, true)
-            )
+          and(
+            eq(promotions.salonId, salonId),
+            eq(promotions.isActive, true)
           )
-          .limit(5);
+        )
+        .limit(5);
 
-        activePromotions = promoList.map(
-          (p) =>
-            `${p.name} (${p.type === "percentage" ? `-${p.value}%` : `-${p.value} PLN`})`
-        );
-      } catch {
-        // promotions table might not exist yet
-      }
-    });
+      activePromotions = promoList.map(
+        (p) =>
+          `${p.name} (${p.type === "percentage" ? `-${p.value}%` : `-${p.value} PLN`})`
+      );
+    } catch {
+      // promotions table might not exist yet
+    }
   } catch (error) {
     logger.error("[AI Newsletter] Error fetching salon context", { error: error });
   }
@@ -282,16 +279,14 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
     let savedId: string | null = null;
     if (save) {
       try {
-        const [saved] = await forSalon(salonId).raw((tx) =>
-          tx
-            .insert(newsletters)
-            .values({
-              salonId: salonId,
-              subject,
-              content,
-            })
-            .returning({ id: newsletters.id })
-        );
+        const [saved] = await db
+          .insert(newsletters)
+          .values({
+            salonId: salonId,
+            subject,
+            content,
+          })
+          .returning({ id: newsletters.id });
 
         savedId = saved!.id;
       } catch (error) {
@@ -333,15 +328,12 @@ export async function GET() {
   }
 
   try {
-    // orderBy + limit — przez raw(tx) z jawnym eq(salonId) (defense in depth).
-    const result = await forSalon(salonId).raw((tx) =>
-      tx
-        .select()
-        .from(newsletters)
-        .where(eq(newsletters.salonId, salonId))
-        .orderBy(desc(newsletters.createdAt))
-        .limit(20)
-    );
+    const result = await db
+      .select()
+      .from(newsletters)
+      .where(eq(newsletters.salonId, salonId))
+      .orderBy(desc(newsletters.createdAt))
+      .limit(20);
 
     return Response.json({ newsletters: result });
   } catch (error) {

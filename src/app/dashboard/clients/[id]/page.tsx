@@ -24,9 +24,9 @@ import {
 } from "@/components/clients/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
+import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
 import { validatePhone } from "@/lib/validations";
-import { mutationFetch } from "@/lib/api-client";
 
 export default function ClientProfilePage() {
   const params = useParams();

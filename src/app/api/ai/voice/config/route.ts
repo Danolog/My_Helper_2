@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { isProPlan } from "@/lib/subscription";
-import { forSalon } from "@/lib/server/repository";
-import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { voiceConfigSchema, validateBody } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { salons } from "@/lib/schema";
+import { isProPlan } from "@/lib/subscription";
 export type VoiceAiConfig = {
   enabled: boolean;
   greeting: string;
@@ -62,14 +63,11 @@ export async function GET() {
   }
 
   try {
-    // salons filtrujemy po PK (salons.id = salonId); kontekst RLS przez forSalon.
-    const rows = await forSalon(salonId).raw((tx) =>
-      tx
-        .select({ settingsJson: salons.settingsJson })
-        .from(salons)
-        .where(eq(salons.id, salonId))
-        .limit(1)
-    );
+    const rows = await db
+      .select({ settingsJson: salons.settingsJson })
+      .from(salons)
+      .where(eq(salons.id, salonId))
+      .limit(1);
 
     const settings = (rows[0]?.settingsJson || {}) as Record<string, unknown>;
     const voiceConfig = (settings.voiceAi as VoiceAiConfig) || DEFAULT_CONFIG;
@@ -127,23 +125,20 @@ export async function PUT(req: Request) {
       },
     };
 
-    // Read-then-update salons w jednej transakcji z kontekstem RLS (forSalon).
-    // salons filtrujemy po PK (salons.id = salonId).
-    await forSalon(salonId).raw(async (tx) => {
-      const rows = await tx
-        .select({ settingsJson: salons.settingsJson })
-        .from(salons)
-        .where(eq(salons.id, salonId))
-        .limit(1);
+    // Get current settings and merge
+    const rows = await db
+      .select({ settingsJson: salons.settingsJson })
+      .from(salons)
+      .where(eq(salons.id, salonId))
+      .limit(1);
 
-      const currentSettings = (rows[0]?.settingsJson || {}) as Record<string, unknown>;
-      const updatedSettings = { ...currentSettings, voiceAi: config };
+    const currentSettings = (rows[0]?.settingsJson || {}) as Record<string, unknown>;
+    const updatedSettings = { ...currentSettings, voiceAi: config };
 
-      await tx
-        .update(salons)
-        .set({ settingsJson: updatedSettings, updatedAt: new Date() })
-        .where(eq(salons.id, salonId));
-    });
+    await db
+      .update(salons)
+      .set({ settingsJson: updatedSettings, updatedAt: new Date() })
+      .where(eq(salons.id, salonId));
 
     return NextResponse.json({ config, message: "Konfiguracja zapisana" });
   } catch (error) {

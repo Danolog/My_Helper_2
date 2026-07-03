@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
-import type { FiscalPrinterSettings } from "../route";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
+import { salons } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import type { FiscalPrinterSettings } from "../route";
 /**
  * POST /api/salons/[id]/fiscal-settings/test-connection
  *
@@ -34,16 +33,14 @@ export async function POST(
       );
     }
 
-    // Fetch current salon settings. salons = korzeń najemcy: RLS izoluje po `id`,
-    // forSalon(id) ustawia kontekst; ownerId-check (403) odcina cudzy salon — bez IDOR.
-    const salon = await forSalon(id).raw(async (tx) => {
-      const [row] = await tx
+    // Fetch current salon settings
+    const [salon] = await forSalon(id).raw((tx) =>
+      tx
         .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
         .from(salons)
         .where(eq(salons.id, id))
-        .limit(1);
-      return row ?? null;
-    });
+        .limit(1)
+    );
 
     if (!salon) {
       return NextResponse.json(
@@ -134,6 +131,7 @@ export async function POST(
       fiscal: updatedFiscal,
     };
 
+    // salons: tabela nadrzędna — filtr jawny po id = salonId
     await forSalon(id).raw((tx) =>
       tx
         .update(salons)

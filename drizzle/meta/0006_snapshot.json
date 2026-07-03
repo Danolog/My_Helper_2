@@ -1,5 +1,5 @@
 {
-  "id": "4d9e571f-6f28-413e-8fd2-9fccdfb1d145",
+  "id": "df0e0f02-9f19-46c1-9fb7-80213722905c",
   "prevId": "8a2cf375-aa86-4355-8197-66fc8dc448d4",
   "version": "7",
   "dialect": "postgresql",
@@ -909,6 +909,36 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "appointments_variant_id_idx": {
+          "name": "appointments_variant_id_idx",
+          "columns": [
+            {
+              "expression": "variant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "appointments_end_time_idx": {
+          "name": "appointments_end_time_idx",
+          "columns": [
+            {
+              "expression": "end_time",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -957,6 +987,19 @@
           "tableTo": "services",
           "columnsFrom": [
             "service_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "appointments_variant_id_service_variants_id_fk": {
+          "name": "appointments_variant_id_service_variants_id_fk",
+          "tableFrom": "appointments",
+          "tableTo": "service_variants",
+          "columnsFrom": [
+            "variant_id"
           ],
           "columnsTo": [
             "id"

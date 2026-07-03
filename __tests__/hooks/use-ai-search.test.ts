@@ -9,8 +9,8 @@
  * - Error handling: clears results on failed fetch
  * - Cleanup: aborts in-flight request on unmount
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock fetch globally before importing the hook
 const mockFetch = vi.fn();

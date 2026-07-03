@@ -7,8 +7,8 @@ import {
   ArrowDownRight,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { ReportTotals } from "../_types";
 import { getMarginColor } from "../_types";
+import type { ReportTotals } from "../_types";
 
 interface SummaryCardsProps {
   totals: ReportTotals;

@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { validateBody, createEmployeeSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
+import { withApiHandler } from "@/lib/api-handler";
+import { createEmployeeSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
+import { apiRateLimit } from "@/lib/rate-limit";
+import { getSalonContext } from "@/lib/salon-context";
+import { employees } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // Predefined palette of distinct colors for employees
 const EMPLOYEE_COLORS = [
   "#3b82f6", // Blue
@@ -52,25 +52,32 @@ async function getNextAvailableColor(salonId: string): Promise<string> {
 }
 
 // GET /api/employees - List all employees
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Employees API] GET",
+    errorMessage: "Failed to fetch employees",
+  },
+  async ({ request }) => {
+    // Tenant isolation (ADR-001): derive the salon from the session, never
+    // trust a client-supplied salonId in the query string (IDOR risk).
+    // Faza 3 (role): odczyt listy pracowników dla wszystkich ról (podgląd
+    // kalendarza wymaga listy pracowników); mutacje zostają owner-only.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const activeOnly = searchParams.get("activeOnly") === "true";
 
     logger.info("[Employees API] GET with params", { salonId, activeOnly });
 
-    // Select only the columns needed by list consumers (excludes userId, commissionRate, timestamps)
+    // Select only the columns needed by list consumers (excludes commissionRate, timestamps)
     const employeeColumns = {
       id: employees.id,
       salonId: employees.salonId,
@@ -82,22 +89,20 @@ export async function GET(request: Request) {
       role: employees.role,
       isActive: employees.isActive,
       color: employees.color,
+      // Faza 3: stan polaczenia konta (sekcja "Konto pracownika" w UI)
+      userId: employees.userId,
     };
 
-    // Lista — przez raw(tx) z jawnym eq(salonId) (defense in depth: filtr
-    // aplikacyjny widoczny, plus kontekst RLS ustawiony przez forSalon).
-    const allEmployees = await forSalon(salonId).raw((tx) => {
-      if (activeOnly) {
-        return tx
-          .select(employeeColumns)
-          .from(employees)
-          .where(and(eq(employees.salonId, salonId), eq(employees.isActive, true)));
-      }
-      return tx
+    const allEmployees = await forSalon(salonId).raw((tx) =>
+      tx
         .select(employeeColumns)
         .from(employees)
-        .where(eq(employees.salonId, salonId));
-    });
+        .where(
+          activeOnly
+            ? and(eq(employees.salonId, salonId), eq(employees.isActive, true))
+            : eq(employees.salonId, salonId)
+        )
+    );
 
     logger.info(`[Employees API] Query returned ${allEmployees.length} rows`);
 
@@ -106,47 +111,31 @@ export async function GET(request: Request) {
       data: allEmployees,
       count: allEmployees.length,
     });
-  } catch (error) {
-    logger.error("[Employees API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch employees" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/employees - Create a new employee
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
-    const body = await request.json();
-
-    // Server-side validation with Zod schema
-    const validationError = validateBody(createEmployeeSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
-
-    const { userId, firstName, lastName, phone, email, photoUrl, role, color } = body;
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    schema: createEmployeeSchema as z.ZodType<{
+      salonId: string;
+      firstName: string;
+      lastName: string;
+      phone?: string | null;
+      email?: string | null;
+      photoUrl?: string | null;
+      role?: string;
+      color?: string;
+    }>,
+    logLabel: "[Employees API] POST",
+    errorMessage: "Failed to create employee",
+  },
+  async ({ body }) => {
+    // userId celowo NIE jest przyjmowany z body — łączenie konta wyłącznie
+    // przez PUT /api/employees/[id]/link-account (walidacje cross-tenant).
+    const { salonId, firstName, lastName, phone, email, photoUrl, role, color } = body;
 
     // Get next available color if not provided
     const employeeColor = color || await getNextAvailableColor(salonId);
@@ -157,7 +146,6 @@ export async function POST(request: Request) {
       .insert(employees)
       .values({
         salonId,
-        userId: userId || null,
         firstName,
         lastName,
         phone: phone || null,
@@ -176,11 +164,5 @@ export async function POST(request: Request) {
       success: true,
       data: newEmployee,
     }, { status: 201 });
-  } catch (error) {
-    logger.error("[Employees API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create employee" },
-      { status: 500 }
-    );
   }
-}
+);

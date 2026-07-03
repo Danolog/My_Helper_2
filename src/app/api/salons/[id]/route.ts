@@ -1,16 +1,17 @@
-import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// `db` używane WYŁĄCZNIE w publicznym katalogu (GET przez unstable_cache) — patrz
-// komentarz przy getCachedSalonDetail. Operacje właściciela (PUT) idą przez forSalon.
-// eslint-disable-next-line no-restricted-imports -- publiczny katalog (GET przez unstable_cache); PUT przez forSalon
-import { db } from "@/lib/db";
-import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
+import { NextResponse } from "next/server";
 import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";
 import { validateBody, updateSalonSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001: GET to ścieżka publiczna (katalog salonu przez unstable_cache, bez sesji
+// salonu — ryzyko 4.4 ADR), a lookup własności w PUT musi widzieć także cudzy salon
+// (404 vs 403) — te fragmenty świadomie na surowym db. UPDATE w PUT idzie przez forSalon.
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
-import { logger } from "@/lib/logger";
 
 // Revalidate salon detail every 30 seconds
 export const revalidate = 30;
@@ -18,13 +19,6 @@ export const revalidate = 30;
 /**
  * Cached salon detail query — avoids re-running 7+ DB queries on every request.
  * Cache is keyed by salonId and revalidated every 30s or on-demand via tag.
- *
- * CELOWO na surowym `db` (rola owner, omija RLS). To PUBLICZNY katalog portalu
- * klienta — czyta dowolny salon po `id` z URL bez sesji właściciela, więc nie ma
- * kontekstu `app.current_salon_id` do ustawienia (forSalon by go wymagał i odciął
- * wszystko poza „własnym" salonem). Zgodne z migracją RLS 0005 sekcja 5
- * („Publiczny katalog (salons/[id]) czyta pod rolą owner — omija RLS"). Dane są
- * publiczne z założenia (oferta salonu), więc to nie IDOR.
  */
 const getCachedSalonDetail = unstable_cache(
   async (id: string) => {
@@ -115,7 +109,7 @@ const getCachedSalonDetail = unstable_cache(
     const employeeIds = salonEmployees.map((e) => e.id);
 
     // Get specialties
-    let employeeServiceMap: Record<string, string[]> = {};
+    const employeeServiceMap: Record<string, string[]> = {};
     if (employeeIds.length > 0) {
       const empServices = await db
         .select({
@@ -135,7 +129,7 @@ const getCachedSalonDetail = unstable_cache(
     }
 
     // Get employee ratings
-    let employeeRatingMap: Record<string, { avgRating: number; reviewCount: number }> = {};
+    const employeeRatingMap: Record<string, { avgRating: number; reviewCount: number }> = {};
     if (employeeIds.length > 0) {
       const empRatings = await db
         .select({
@@ -163,7 +157,7 @@ const getCachedSalonDetail = unstable_cache(
     }
 
     // Get gallery photo counts per employee
-    let employeeGalleryCountMap: Record<string, number> = {};
+    const employeeGalleryCountMap: Record<string, number> = {};
     if (employeeIds.length > 0) {
       const galleryCounts = await db
         .select({
@@ -267,17 +261,11 @@ export async function PUT(
   try {
     const { id } = await params;
 
-    // salonId = id z URL, ale WYŁĄCZNIE po weryfikacji ownerId == user.id poniżej
-    // (brak IDOR). `salons` to korzeń najemcy: RLS izoluje po `id`, więc forSalon(id)
-    // ustawia kontekst na ten salon, a jawne eq(salons.id, id) domyka filtr aplikacyjny.
-    // Weryfikacja własności i UPDATE biegną w jednej transakcji (jeden kontekst RLS).
-    const salon = await forSalon(id).raw(async (tx) => {
-      const [row] = await tx
-        .select({ id: salons.id, ownerId: salons.ownerId })
-        .from(salons)
-        .where(eq(salons.id, id));
-      return row ?? null;
-    });
+    // Verify ownership
+    const [salon] = await db
+      .select({ id: salons.id, ownerId: salons.ownerId })
+      .from(salons)
+      .where(eq(salons.id, id));
 
     if (!salon) {
       return NextResponse.json(
@@ -311,6 +299,9 @@ export async function PUT(
         ? body.industryType
         : null;
 
+    // Własność zweryfikowana wyżej — update przez forSalon (tabela salons nie ma
+    // kolumny salonId, więc raw() z jawnym eq(salons.id, salonId); RLS tenant_self
+    // przepuszcza wiersz o id = app.current_salon_id).
     const [updated] = await forSalon(id).raw((tx) =>
       tx
         .update(salons)

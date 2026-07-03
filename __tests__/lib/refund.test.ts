@@ -145,7 +145,7 @@ describe("processAutomaticRefund", () => {
     });
   });
 
-  it("should mark as refunded even if Stripe refund fails", async () => {
+  it("should NOT mark as refunded when the Stripe refund fails (money still with us)", async () => {
     mockDbSelectWhere.mockResolvedValue([
       {
         id: "pay-1",
@@ -158,8 +158,11 @@ describe("processAutomaticRefund", () => {
     mockStripeRefundsCreate.mockRejectedValue(new Error("Stripe error"));
 
     const result = await processAutomaticRefund("appt-1");
-    expect(result.success).toBe(true);
-    expect(result.refunded).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.refunded).toBe(false);
+    expect(result.error).toBe("Stripe error");
+    // Payment must stay "succeeded" — no DB update to status "refunded"
+    expect(mockDbUpdateSet).not.toHaveBeenCalled();
   });
 
   it("should process manual refund for non-Stripe payments", async () => {

@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import Link from "next/link";
 import {
   ArrowLeft,
   Gift,
@@ -19,9 +17,12 @@ import {
   Coins,
 } from "lucide-react";
 import { toast } from "sonner";
-import Link from "next/link";
-import { useSession } from "@/lib/auth-client";
+import { ModuleGate } from "@/components/dashboard/module-gate";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { mutationFetch } from "@/lib/api-client";
+import { useSession } from "@/lib/auth-client";
 
 interface RewardTier {
   id: string;
@@ -41,6 +42,14 @@ interface LoyaltySettings {
 }
 
 export default function LoyaltySettingsPage() {
+  return (
+    <ModuleGate module="loyalty">
+      <LoyaltySettingsPageInner />
+    </ModuleGate>
+  );
+}
+
+function LoyaltySettingsPageInner() {
   const { data: session } = useSession();
   const [salonId, setSalonId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);

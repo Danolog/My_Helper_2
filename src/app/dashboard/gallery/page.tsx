@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { ArrowLeft, Plus, Loader2, Image as ImageIcon, Folder, FolderPlus } from "lucide-react";
+import { RoleGate } from "@/components/dashboard/role-gate";
 import {
   GalleryToolbar,
   GalleryGrid,
@@ -23,10 +24,18 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useSalonId } from "@/hooks/use-salon-id";
-import { useSession } from "@/lib/auth-client";
 import { mutationFetch } from "@/lib/api-client";
+import { useSession } from "@/lib/auth-client";
 
 export default function GalleryPage() {
+  return (
+    <RoleGate allow={["owner", "employee"]}>
+      <GalleryPageInner />
+    </RoleGate>
+  );
+}
+
+function GalleryPageInner() {
   const { data: session, isPending } = useSession();
   const { salonId, loading: salonLoading } = useSalonId();
 

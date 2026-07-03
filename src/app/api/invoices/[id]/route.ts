@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { invoices, clients, appointments, employees, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { forSalon } from "@/lib/server/repository";
-
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { invoices, clients, appointments, employees, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * GET /api/invoices/[id]
  *

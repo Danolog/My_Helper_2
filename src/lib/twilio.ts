@@ -32,6 +32,37 @@ export function getTwilioPhoneNumber(): string {
 }
 
 /**
+ * Reconstruct the absolute public URL Twilio used to sign the request.
+ * Twilio computes the signature over the exact URL it POSTed to, so we must
+ * rebuild it from the forwarded proto/host headers (Vercel/Cloud Run set these).
+ */
+export function getTwilioRequestUrl(req: Request): string {
+  const url = new URL(req.url);
+  const proto = req.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "");
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? url.host;
+  return `${proto}://${host}${url.pathname}${url.search}`;
+}
+
+/**
+ * Verify the X-Twilio-Signature header against the request (P0-E).
+ * Fail-closed: missing credential or header => reject.
+ */
+export function isValidTwilioSignature(
+  req: Request,
+  params: Record<string, string>
+): boolean {
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!authToken) return false;
+  const signature = req.headers.get("x-twilio-signature");
+  if (!signature) return false;
+  try {
+    return twilio.validateRequest(authToken, signature, getTwilioRequestUrl(req), params);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Check whether all Twilio env vars are present (non-destructive check).
  * Use this to conditionally show Twilio-related UI in the dashboard.
  */

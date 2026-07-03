@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (weryfikacja własności przed kontekstem RLS)
+import { eq, and, gte, lte, not, inArray } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
+// ADR-001 R2b: własna weryfikacja własności salonu (ownerId → 403) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import {
   appointments,
@@ -9,11 +12,6 @@ import {
   salons,
   workSchedules,
 } from "@/lib/schema";
-import { eq, and, gte, lte, not, inArray } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
 /**
  * Compute date boundaries in the Europe/Warsaw timezone.
  * This ensures correct "today" boundaries regardless of the server's local timezone.
@@ -51,12 +49,15 @@ function getWarsawDateBoundaries() {
 
 // GET /api/dashboard/stats - Dashboard overview data
 // Returns: today's appointments, employees working today, cancellation stats, and 30-day stats
-export async function GET(request: Request) {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-  const { user } = authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Dashboard Stats API] GET",
+    errorMessage: "Nie udalo sie pobrac statystyk dashboardu",
+  },
+  async ({ request, auth }) => {
+    const { user } = auth!; // auth: "user" gwarantuje sesje
 
-  try {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -67,11 +68,7 @@ export async function GET(request: Request) {
       );
     }
 
-    // Weryfikacja własności (salonId z query) — odczyt z tabeli salons po
-    // (id, ownerId). salons jest korzeniem własności (filtr ownerId = userId),
-    // nie danymi salon-scoped pod RLS; sprawdzenie biegnie PRZED ustawieniem
-    // kontekstu salonu, więc zostaje na surowym db. To zarazem brama IDOR:
-    // dalsze zapytania jadą przez forSalon(salonId) dopiero po potwierdzeniu.
+    // Verify the authenticated user owns the requested salon
     const [salon] = await db
       .select({ id: salons.id })
       .from(salons)
@@ -89,29 +86,11 @@ export async function GET(request: Request) {
     const { todayStart, todayEnd, thirtyDaysAgo, monthStart, monthEnd, todayDow } =
       getWarsawDateBoundaries();
 
-    // ─── Run independent queries w jednym kontekście salonu ───
-    // Wszystkie odczyty są salon-scoped — biegną w jednym raw(forSalon) (jedna
-    // transakcja z RLS), z jawnym eq(salonId)/eq(employees.salonId) zachowanym
-    // (defense in depth). workSchedules NIE ma kolumny salon_id — izolacja przez
-    // RLS pośrednią (polityka EXISTS na employees.salon_id) + filtr po employeeIds
-    // tego salonu, w tym samym kontekście.
-    const {
-      todayAppointments,
-      salonEmployees,
-      monthAppointments,
-      last30Appointments,
-      newClients30d,
-      todaySchedules,
-    } = await forSalon(salonId).raw(async (tx) => {
-      const [
-        _todayAppointments,
-        _salonEmployees,
-        _monthAppointments,
-        _last30Appointments,
-        _newClients30d,
-      ] = await Promise.all([
+    // ─── Run independent queries in parallel ──────────────────
+    const [todayAppointments, salonEmployees, monthAppointments, last30Appointments, newClients30d] =
+      await Promise.all([
         // Today's appointments
-        tx
+        db
           .select({
             id: appointments.id,
             startTime: appointments.startTime,
@@ -144,7 +123,7 @@ export async function GET(request: Request) {
           .orderBy(appointments.startTime),
 
         // Active employees for this salon
-        tx
+        db
           .select({
             id: employees.id,
             firstName: employees.firstName,
@@ -158,7 +137,7 @@ export async function GET(request: Request) {
           ),
 
         // Cancellation statistics (this month)
-        tx
+        db
           .select({
             status: appointments.status,
           })
@@ -172,7 +151,7 @@ export async function GET(request: Request) {
           ),
 
         // Last 30 days statistics
-        tx
+        db
           .select({
             status: appointments.status,
             servicePrice: services.basePrice,
@@ -189,7 +168,7 @@ export async function GET(request: Request) {
           ),
 
         // New clients last 30 days
-        tx
+        db
           .select({ id: clients.id })
           .from(clients)
           .where(
@@ -200,34 +179,24 @@ export async function GET(request: Request) {
           ),
       ]);
 
-      // ─── Employees working today (depends on salonEmployees) ──
-      const employeeIds = _salonEmployees.map((e) => e.id);
-      let _todaySchedules: { employeeId: string; startTime: string; endTime: string }[] = [];
-      if (employeeIds.length > 0) {
-        _todaySchedules = await tx
-          .select({
-            employeeId: workSchedules.employeeId,
-            startTime: workSchedules.startTime,
-            endTime: workSchedules.endTime,
-          })
-          .from(workSchedules)
-          .where(
-            and(
-              inArray(workSchedules.employeeId, employeeIds),
-              eq(workSchedules.dayOfWeek, todayDow)
-            )
-          );
-      }
-
-      return {
-        todayAppointments: _todayAppointments,
-        salonEmployees: _salonEmployees,
-        monthAppointments: _monthAppointments,
-        last30Appointments: _last30Appointments,
-        newClients30d: _newClients30d,
-        todaySchedules: _todaySchedules,
-      };
-    });
+    // ─── Employees working today (depends on salonEmployees) ──
+    const employeeIds = salonEmployees.map((e) => e.id);
+    let todaySchedules: { employeeId: string; startTime: string; endTime: string }[] = [];
+    if (employeeIds.length > 0) {
+      todaySchedules = await db
+        .select({
+          employeeId: workSchedules.employeeId,
+          startTime: workSchedules.startTime,
+          endTime: workSchedules.endTime,
+        })
+        .from(workSchedules)
+        .where(
+          and(
+            inArray(workSchedules.employeeId, employeeIds),
+            eq(workSchedules.dayOfWeek, todayDow)
+          )
+        );
+    }
 
     // Map schedules to employees
     const scheduleMap = new Map(
@@ -324,11 +293,5 @@ export async function GET(request: Request) {
         },
       },
     });
-  } catch (error) {
-    logger.error("[Dashboard Stats API] Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac statystyk dashboardu" },
-      { status: 500 }
-    );
   }
-}
+);

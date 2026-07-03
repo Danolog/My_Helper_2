@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { services, employeeServicePrices, serviceVariants, employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { services, employeeServicePrices, serviceVariants, employees } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/services/[id]/price?employeeId=xxx&variantId=yyy
 // Returns the effective price for a service based on employee-specific pricing
 export async function GET(
@@ -39,7 +38,7 @@ export async function GET(
       );
     }
 
-    let basePrice = parseFloat(service.basePrice);
+    const basePrice = parseFloat(service.basePrice);
     let variantModifier = 0;
 
     // Rozwiazanie ceny (warianty/pracownik/ceny indywidualne) w kontekscie RLS.

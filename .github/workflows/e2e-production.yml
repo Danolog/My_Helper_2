@@ -8,8 +8,7 @@ jobs:
     name: Production Health Checks
     if: github.event.deployment_status.state == 'success'
     runs-on: ubuntu-latest
-    container: mcr.microsoft.com/playwright:v1.58.2-noble
-    timeout-minutes: 8
+    timeout-minutes: 5
     env:
       BASE_URL: ${{ secrets.BETTER_AUTH_BASE_URL_PROD }}
       CI: true
@@ -25,8 +24,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Przegladarki sa wbudowane w obraz mcr.microsoft.com/playwright -> brak kroku
-      # `playwright install` (pobranie systematycznie wisialo i zjadalo timeout joba).
+      - run: pnpm exec playwright install --with-deps chromium
 
       - name: Run production health checks
         run: pnpm exec playwright test --grep @production --workers=2 --retries=1 --timeout=15000

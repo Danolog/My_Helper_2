@@ -13,12 +13,12 @@ import {
   History,
 } from "lucide-react";
 import { toast } from "sonner";
-
 import type { VoiceAiConfig, CallLogEntry, ServiceOption } from "@/components/ai-assistant/voice/types";
 import { DEFAULT_CONFIG } from "@/components/ai-assistant/voice/types";
 import { VoiceCallPanel } from "@/components/ai-assistant/voice/voice-call-panel";
 import { VoiceCommandHistory } from "@/components/ai-assistant/voice/voice-command-history";
 import { VoiceSettings } from "@/components/ai-assistant/voice/voice-settings";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -254,6 +254,14 @@ function VoiceAiContent() {
 // ---------------------------------------------------------------------------
 
 export default function VoiceAiPage() {
+  return (
+    <ModuleGate module="voiceAi">
+      <VoiceAiPageInner />
+    </ModuleGate>
+  );
+}
+
+function VoiceAiPageInner() {
   return (
     <ProPlanGate
       featureName="Asystent glosowy AI"

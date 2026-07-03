@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import { clients } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { clients } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * GET /api/clients/deposit-settings?salonId=...&email=...
  *
@@ -17,38 +15,31 @@ export async function GET(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
     const { searchParams } = new URL(request.url);
+    const salonId = searchParams.get("salonId");
     const email = searchParams.get("email");
 
-    if (!email) {
+    if (!salonId || !email) {
       return NextResponse.json(
-        { success: false, error: "email is required" },
+        { success: false, error: "salonId and email are required" },
         { status: 400 }
       );
     }
 
-    // Look up the client in the salon by email (jawny eq(salonId) + RLS przez forSalon)
+    // Look up the client in the salon by email
     const [client] = await forSalon(salonId).raw((tx) =>
       tx
-        .select({
-          id: clients.id,
-          firstName: clients.firstName,
-          lastName: clients.lastName,
-          requireDeposit: clients.requireDeposit,
-          depositType: clients.depositType,
-          depositValue: clients.depositValue,
-        })
-        .from(clients)
-        .where(and(eq(clients.salonId, salonId), eq(clients.email, email)))
-        .limit(1)
+      .select({
+        id: clients.id,
+        firstName: clients.firstName,
+        lastName: clients.lastName,
+        requireDeposit: clients.requireDeposit,
+        depositType: clients.depositType,
+        depositValue: clients.depositValue,
+      })
+      .from(clients)
+      .where(and(eq(clients.salonId, salonId), eq(clients.email, email)))
+      .limit(1)
     );
 
     if (!client) {

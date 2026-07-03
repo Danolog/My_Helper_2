@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
+import { eq, and, gte, lte, inArray } from "drizzle-orm";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   employees,
   reviews,
   services,
 } from "@/lib/schema";
-import { eq, and, gte, lte, inArray } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
 // GET /api/reports/employee-popularity - Employee popularity ranking report
 export async function GET(request: Request) {
   try {
@@ -18,15 +16,15 @@ export async function GET(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const salonId = await getUserSalonId();
+    const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
     const format = searchParams.get("format"); // 'json' or 'csv'
 
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
+        { success: false, error: "salonId is required" },
+        { status: 400 }
       );
     }
 

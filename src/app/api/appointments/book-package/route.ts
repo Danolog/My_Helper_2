@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
 import { eq, and, not, lte, gte, or, lt, gt, inArray } from "drizzle-orm";
+import { validateBody, bookPackageSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, bookPackageSchema } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * POST /api/appointments/book-package
  * Book all services in a package promotion as sequential appointments
@@ -23,19 +22,6 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    // Tenant isolation: derive the salon from the session. Wcześniej salonId
-    // brano z `promotion.salonId` (z body-podanego promotionId) — to pozwalało
-    // właścicielowi salonu A zarezerwować pakiet salonu B (IDOR). Teraz pakiet
-    // musi należeć do salonu z sesji, a wszystkie operacje biegną pod kontekstem
-    // RLS tego salonu.
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
     const body = await request.json();
     const validationError = validateBody(bookPackageSchema, body);
     if (validationError) {
@@ -46,15 +32,19 @@ export async function POST(request: Request) {
     // Use the authenticated user's ID for tracking who booked
     const bookedByUserId: string | null = authResult.user.id || null;
 
-    // 1. Get the package promotion — scoped do salonu z sesji (jawny eq(salonId)
-    // + kontekst RLS); cudza/nieistniejąca promocja = 404.
-    const [promotion] = await forSalon(salonId).raw((tx) =>
-      tx
-        .select()
-        .from(promotions)
-        .where(and(eq(promotions.id, promotionId), eq(promotions.salonId, salonId)))
-        .limit(1)
-    );
+    // Tenant isolation (ADR-001): trasa wołana z dashboardu właściciela —
+    // salon z sesji; promocja/usługi/terminy muszą należeć do tego salonu.
+    const salonId = await getUserSalonId();
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+    const repo = forSalon(salonId);
+
+    // 1. Get the package promotion (scoped to the caller's salon)
+    const promotion = await repo.findOne(promotions, promotionId);
 
     if (!promotion) {
       return NextResponse.json(
@@ -103,13 +93,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // 3. Fetch all services in the package (services mają salonId; kontekst RLS
-    // ustawiony — usługi spoza salonu są odcinane. Brak którejś = walidacja niżej).
-    const packageServices = await forSalon(salonId).raw((tx) =>
-      tx
-        .select()
-        .from(services)
-        .where(and(inArray(services.id, packageServiceIds), eq(services.salonId, salonId)))
+    // 3. Fetch all services in the package (scoped to the salon)
+    const packageServices = await repo.listOwned(
+      services,
+      inArray(services.id, packageServiceIds)
     );
 
     if (packageServices.length !== packageServiceIds.length) {
@@ -147,32 +134,31 @@ export async function POST(request: Request) {
     const firstStart = appointmentSlots[0]!.start;
     const lastEnd = appointmentSlots[appointmentSlots.length - 1]!.end;
 
-    // appointments mają salonId — jawny eq(salonId) + kontekst RLS.
-    const overlapping = await forSalon(salonId).raw((tx) =>
+    const overlapping = await repo.raw((tx) =>
       tx
-      .select()
-      .from(appointments)
-      .where(
-        and(
-          eq(appointments.salonId, salonId),
-          eq(appointments.employeeId, employeeId),
-          not(eq(appointments.status, "cancelled")),
-          or(
-            and(
-              lte(appointments.startTime, firstStart),
-              gte(appointments.endTime, firstStart)
-            ),
-            and(
-              lte(appointments.startTime, lastEnd),
-              gte(appointments.endTime, lastEnd)
-            ),
-            and(
-              gte(appointments.startTime, firstStart),
-              lte(appointments.endTime, lastEnd)
+        .select()
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.salonId, salonId),
+            eq(appointments.employeeId, employeeId),
+            not(eq(appointments.status, "cancelled")),
+            or(
+              and(
+                lte(appointments.startTime, firstStart),
+                gte(appointments.endTime, firstStart)
+              ),
+              and(
+                lte(appointments.startTime, lastEnd),
+                gte(appointments.endTime, lastEnd)
+              ),
+              and(
+                gte(appointments.startTime, firstStart),
+                lte(appointments.endTime, lastEnd)
+              )
             )
           )
         )
-      )
     );
 
     if (overlapping.length > 0) {
@@ -182,9 +168,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // 6. Check for vacation/time blocks (timeBlocks nie ma salonId — wiązane
-    // przez employeeId; kontekst RLS ustawiony przez forSalon).
-    const conflictingBlocks = await forSalon(salonId).raw((tx) =>
+    // 6. Check for vacation/time blocks
+    // timeBlocks nie ma kolumny salonId — zakres pilnuje filtr po employeeId
+    // + kontekst RLS transakcji (repo.raw).
+    const conflictingBlocks = await repo.raw((tx) =>
       tx
         .select()
         .from(timeBlocks)
@@ -204,14 +191,10 @@ export async function POST(request: Request) {
       );
     }
 
-    // 7. Create all appointments — wszystkie INSERT-y w JEDNEJ transakcji z
-    // kontekstem RLS (forSalon(salonId).raw): atomowość pakietu zachowana (gdy
-    // którykolwiek insert padnie, cofa się cały pakiet). salonId z sesji (=
-    // promotion.salonId, zweryfikowany), jawnie ustawiony w values.
-    const createdAppointments = await forSalon(salonId).raw(async (tx) => {
-      const created: Array<
-        typeof appointments.$inferSelect & { serviceName: string; servicePrice: string }
-      > = [];
+    // 7. Create all appointments — one transaction for the whole package
+    // (promotion is fetched scoped, so promotion.salonId === salonId)
+    const createdAppointments = await repo.raw(async (tx) => {
+      const created = [];
 
       for (const slot of appointmentSlots) {
         const [newAppointment] = await tx

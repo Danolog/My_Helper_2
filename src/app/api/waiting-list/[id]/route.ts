@@ -1,30 +1,26 @@
-import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (sesja→salon); operacje przez forSalon
-import { db } from "@/lib/db";
+import { NextResponse } from "next/server";
+import { eq, and } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
+import { validateBody, updateWaitingListSchema } from "@/lib/api-validation";
+import { auth } from "@/lib/auth";
+import { getUserSalon } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   waitingList,
   clients,
   services,
   employees,
-  salons,
 } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
-import { auth } from "@/lib/auth";
-import { validateBody, updateWaitingListSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
 // GET /api/waiting-list/[id] - Get a single waiting list entry
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WaitingList API] GET [id]",
+    errorMessage: "Nie udalo sie pobrac wpisu",
+  },
+  async ({ params }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -33,15 +29,11 @@ export async function GET(
       );
     }
 
-    const userId = session.user.id;
-    const { id } = await params;
+    // Segment [id] zawsze obecny w tej trasie (noUncheckedIndexedAccess)
+    const id = params.id!;
 
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -50,8 +42,6 @@ export async function GET(
       );
     }
 
-    // Join (clients/services/employees) — przez raw(tx) z jawnym
-    // eq(waitingList.salonId) (defense in depth) plus kontekst RLS.
     const result = await forSalon(salon.id).raw((tx) =>
       tx
         .select({
@@ -104,24 +94,17 @@ export async function GET(
       success: true,
       data: formattedEntry,
     });
-  } catch (error) {
-    logger.error("[WaitingList API] GET [id] Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac wpisu" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // PUT /api/waiting-list/[id] - Update a waiting list entry (accept/decline or modify)
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const PUT = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WaitingList API] PUT",
+    errorMessage: "Nie udalo sie zaktualizowac wpisu",
+  },
+  async ({ request, params }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -130,15 +113,11 @@ export async function PUT(
       );
     }
 
-    const userId = session.user.id;
-    const { id } = await params;
+    // Segment [id] zawsze obecny w tej trasie (noUncheckedIndexedAccess)
+    const id = params.id!;
 
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -148,15 +127,7 @@ export async function PUT(
     }
 
     // Verify the entry belongs to this salon
-    const [existing] = await forSalon(salon.id).raw((tx) =>
-      tx
-        .select()
-        .from(waitingList)
-        .where(
-          and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
-        )
-        .limit(1)
-    );
+    const existing = await forSalon(salon.id).findOne(waitingList, id);
 
     if (!existing) {
       return NextResponse.json(
@@ -203,17 +174,10 @@ export async function PUT(
       );
     }
 
-    // FIX IDOR: poprzedni update zawężał TYLKO po eq(waitingList.id) (bez
-    // salonId) — polegał wyłącznie na wcześniejszej weryfikacji `existing`.
-    // Teraz jawne eq(waitingList.salonId) + kontekst RLS (defense in depth).
-    const [updatedEntry] = await forSalon(salon.id).raw((tx) =>
-      tx
-        .update(waitingList)
-        .set(updateData)
-        .where(
-          and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
-        )
-        .returning()
+    const updatedEntry = await forSalon(salon.id).updateOwned(
+      waitingList,
+      id,
+      updateData as Partial<typeof waitingList.$inferInsert>
     );
 
     logger.info(`[WaitingList API] PUT: Updated entry ${id} in salon ${salon.id}`,
@@ -224,24 +188,17 @@ export async function PUT(
       data: updatedEntry,
       message: "Wpis zostal zaktualizowany",
     });
-  } catch (error) {
-    logger.error("[WaitingList API] PUT Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie zaktualizowac wpisu" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/waiting-list/[id] - Remove an entry from the waiting list
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WaitingList API] DELETE",
+    errorMessage: "Nie udalo sie usunac wpisu",
+  },
+  async ({ params }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -250,15 +207,11 @@ export async function DELETE(
       );
     }
 
-    const userId = session.user.id;
-    const { id } = await params;
+    // Segment [id] zawsze obecny w tej trasie (noUncheckedIndexedAccess)
+    const id = params.id!;
 
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -267,16 +220,8 @@ export async function DELETE(
       );
     }
 
-    // Verify and delete the entry (must belong to this salon) — jawne
-    // eq(waitingList.salonId) (defense in depth) plus kontekst RLS.
-    const [deletedEntry] = await forSalon(salon.id).raw((tx) =>
-      tx
-        .delete(waitingList)
-        .where(
-          and(eq(waitingList.id, id), eq(waitingList.salonId, salon.id))
-        )
-        .returning()
-    );
+    // Verify and delete the entry (must belong to this salon)
+    const deletedEntry = await forSalon(salon.id).deleteOwned(waitingList, id);
 
     if (!deletedEntry) {
       return NextResponse.json(
@@ -292,11 +237,5 @@ export async function DELETE(
       data: deletedEntry,
       message: "Wpis zostal usuniety z listy oczekujacych",
     });
-  } catch (error) {
-    logger.error("[WaitingList API] DELETE Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie usunac wpisu" },
-      { status: 500 }
-    );
   }
-}
+);

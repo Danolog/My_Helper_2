@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { logger } from "@/lib/logger";
 import { sendPushNotification } from "@/lib/push";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
-import { logger } from "@/lib/logger";
 /**
  * POST /api/push/test
  *

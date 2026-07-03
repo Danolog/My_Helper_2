@@ -1,21 +1,12 @@
 import { NextResponse } from "next/server";
-// eslint-disable-next-line no-restricted-imports -- kontekst klienta (scope po bookedByUserId z sesji)
-import { db } from "@/lib/db";
-import { appointments, reviews } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { validateBody, clientReviewSchema } from "@/lib/api-validation";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-
-/**
- * Kontekst KLIENTA — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
- * Opinia do własnej wizyty: każda operacja najpierw weryfikuje wizytę przez
- * `eq(appointments.bookedByUserId, userId)` z SESJI (klient B nie wystawi/odczyta
- * opinii do wizyty klienta A — brak wiersza => 404). salonId/employeeId opinii
- * pochodzą z tej zweryfikowanej wizyty, nie z wejścia. Dane klienta są wielo-salonowe
- * — kontekst właściciela (forSalon) nie pasuje.
- */
+import { appointments, reviews } from "@/lib/schema";
 // GET /api/client/appointments/[id]/review - Check if a review exists for this appointment
 export async function GET(
   _request: Request,

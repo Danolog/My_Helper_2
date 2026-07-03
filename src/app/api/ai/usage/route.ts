@@ -1,26 +1,10 @@
 import { eq, and, gte, count } from "drizzle-orm";
 import { requireProAI, isProAIError } from "@/lib/ai/openrouter";
+// Cost-per-use map shared with the hard budget limits (single source of truth)
+import { COST_MAP, DEFAULT_COST_PER_USE } from "@/lib/ai/usage-limits";
 import { logger } from "@/lib/logger";
 import { aiGeneratedMedia } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-
-// ────────────────────────────────────────────────────────────
-// Cost-per-use map keyed by "type:provider"
-// ────────────────────────────────────────────────────────────
-
-const COST_MAP: Record<string, number> = {
-  // Media generation costs
-  "image:google_imagen": 0.01, // Social graphics (Imagen)
-  "image:sharp": 0, // Photo enhancement — server-side, no API cost
-  "banner:google_imagen": 0.01, // Banner generation
-  "banner:sharp": 0, // Server-side banner compositing
-  "video:google_veo": 0.15, // Video clips (Veo)
-  // Text AI costs (OpenRouter — Claude Sonnet)
-  "text:openrouter": 0.002,
-};
-
-/** Fallback cost when the type:provider combination is not in the map. */
-const DEFAULT_COST_PER_USE = 0.002;
 
 // ────────────────────────────────────────────────────────────
 // GET /api/ai/usage — AI usage statistics for the current salon

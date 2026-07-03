@@ -2,13 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useSession } from "@/lib/auth-client";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import { Spinner } from "@/components/ui/spinner";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { ArrowLeft, FileText, Printer, Mail, Send, CheckCircle2 } from "lucide-react";
+import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -17,9 +15,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ArrowLeft, FileText, Printer, Mail, Send, CheckCircle2 } from "lucide-react";
-import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import { mutationFetch } from "@/lib/api-client";
+import { useSession } from "@/lib/auth-client";
 
 interface InvoiceItem {
   name: string;
@@ -87,6 +88,14 @@ interface Invoice {
 }
 
 export default function InvoicePreviewPage() {
+  return (
+    <ModuleGate module="invoices">
+      <InvoicePreviewPageInner />
+    </ModuleGate>
+  );
+}
+
+function InvoicePreviewPageInner() {
   const params = useParams();
   const router = useRouter();
   const invoiceId = params.id as string;

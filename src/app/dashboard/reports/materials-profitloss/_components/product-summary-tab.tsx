@@ -1,11 +1,11 @@
 "use client";
 
 import { Package } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { ProductProfitSummary, ReportTotals } from "../_types";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getMarginColor } from "../_types";
 import { MarginBadge } from "./margin-badge";
+import type { ProductProfitSummary, ReportTotals } from "../_types";
 
 interface ProductSummaryTabProps {
   summary: ProductProfitSummary[];

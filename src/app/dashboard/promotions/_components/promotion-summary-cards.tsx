@@ -1,9 +1,9 @@
 "use client";
 
-import { Card, CardContent } from "@/components/ui/card";
 import { Tag, Percent, Calendar } from "lucide-react";
-import type { Promotion } from "../_types";
+import { Card, CardContent } from "@/components/ui/card";
 import { isExpired } from "../_types";
+import type { Promotion } from "../_types";
 
 interface PromotionSummaryCardsProps {
   promotionsList: Promotion[];

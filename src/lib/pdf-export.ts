@@ -190,7 +190,7 @@ export function generateReportPDF(options: PDFReportOptions): void {
       });
 
       // Get the final Y position after the table
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       yPos = (doc as any).lastAutoTable?.finalY + 10 || yPos + 40;
     }
   }

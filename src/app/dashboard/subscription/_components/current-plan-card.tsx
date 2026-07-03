@@ -10,15 +10,6 @@ import {
   Loader2,
   XCircle,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,15 +21,24 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { formatDate, statusColor, statusLabel } from "../_types";
+import { PlanActions } from "./plan-actions";
+import { TrialNotice } from "./trial-notice";
 import type {
   SubscriptionData,
   PlanData,
   ScheduledPlanData,
   AllPlansMap,
 } from "../_types";
-import { formatDate, statusColor, statusLabel } from "../_types";
-import { TrialNotice } from "./trial-notice";
-import { PlanActions } from "./plan-actions";
 
 interface CurrentPlanCardProps {
   subscription: SubscriptionData;

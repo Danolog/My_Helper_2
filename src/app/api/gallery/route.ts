@@ -1,29 +1,31 @@
 import { NextResponse } from "next/server";
-import { galleryPhotos, employees, services } from "@/lib/schema";
 import { eq, desc, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, createGalleryPhotoSchema } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
+import { withApiHandler } from "@/lib/api-handler";
+import { createGalleryPhotoSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
+import { galleryPhotos, employees, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // GET /api/gallery - List gallery photos
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Gallery API] GET",
+    errorMessage: "Failed to fetch gallery photos",
+  },
+  async ({ request }) => {
     const { searchParams } = new URL(request.url);
+    const salonId = searchParams.get("salonId");
     const employeeId = searchParams.get("employeeId");
     const serviceId = searchParams.get("serviceId");
+
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "salonId is required" },
+        { status: 400 }
+      );
+    }
 
     // Build filter conditions
     const conditions = [eq(galleryPhotos.salonId, salonId)];
@@ -34,31 +36,29 @@ export async function GET(request: Request) {
       conditions.push(eq(galleryPhotos.serviceId, serviceId));
     }
 
-    // leftJoin (employees/services) — przez raw(tx) z jawnym eq(salonId) w
-    // conditions (defense in depth) plus kontekst RLS ustawiony przez forSalon.
     const photos = await forSalon(salonId).raw((tx) =>
       tx
-        .select({
-          id: galleryPhotos.id,
-          salonId: galleryPhotos.salonId,
-          employeeId: galleryPhotos.employeeId,
-          serviceId: galleryPhotos.serviceId,
-          beforePhotoUrl: galleryPhotos.beforePhotoUrl,
-          afterPhotoUrl: galleryPhotos.afterPhotoUrl,
-          description: galleryPhotos.description,
-          productsUsed: galleryPhotos.productsUsed,
-          techniques: galleryPhotos.techniques,
-          duration: galleryPhotos.duration,
-          createdAt: galleryPhotos.createdAt,
-          employeeFirstName: employees.firstName,
-          employeeLastName: employees.lastName,
-          serviceName: services.name,
-        })
-        .from(galleryPhotos)
-        .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
-        .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-        .where(and(...conditions))
-        .orderBy(desc(galleryPhotos.createdAt))
+      .select({
+        id: galleryPhotos.id,
+        salonId: galleryPhotos.salonId,
+        employeeId: galleryPhotos.employeeId,
+        serviceId: galleryPhotos.serviceId,
+        beforePhotoUrl: galleryPhotos.beforePhotoUrl,
+        afterPhotoUrl: galleryPhotos.afterPhotoUrl,
+        description: galleryPhotos.description,
+        productsUsed: galleryPhotos.productsUsed,
+        techniques: galleryPhotos.techniques,
+        duration: galleryPhotos.duration,
+        createdAt: galleryPhotos.createdAt,
+        employeeFirstName: employees.firstName,
+        employeeLastName: employees.lastName,
+        serviceName: services.name,
+      })
+      .from(galleryPhotos)
+      .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
+      .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
+      .where(and(...conditions))
+      .orderBy(desc(galleryPhotos.createdAt))
     );
 
     logger.info(`[Gallery API] GET: ${photos.length} photos found (filters: employeeId=${employeeId || 'none'}, serviceId=${serviceId || 'none'})`);
@@ -68,35 +68,51 @@ export async function GET(request: Request) {
       data: photos,
       count: photos.length,
     });
-  } catch (error) {
-    logger.error("[Gallery API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch gallery photos" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/gallery - Create a gallery photo entry
-export async function POST(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    schema: createGalleryPhotoSchema as z.ZodType<{
+      salonId: string;
+      employeeId?: string | null;
+      serviceId?: string | null;
+      beforePhotoUrl?: string | null;
+      afterPhotoUrl?: string | null;
+      description?: string | null;
+      productsUsed?: string | null;
+      techniques?: string | null;
+      duration?: string | null;
+    }>,
+    logLabel: "[Gallery API] POST",
+    errorMessage: "Failed to create gallery photo",
+  },
+  async ({ body }) => {
+    // Faza 3 (role): zdjęcia dodaje owner i employee (spec); receptionist
+    // tylko z czasowym grantem "gallery-manage". Nie-owner wyłącznie do
+    // WŁASNEGO salonu (salonId z body musi zgadzać się z sesją).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
-
-    const body = await request.json();
-    const validationError = validateBody(createGalleryPhotoSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
+    if (
+      (ctx.role === "receptionist" &&
+        !(await hasFeatureAccess(ctx, "gallery-manage"))) ||
+      (ctx.role !== "owner" && body.salonId !== ctx.salonId)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
     }
+
     const {
+      salonId,
       employeeId,
       serviceId,
       beforePhotoUrl,
@@ -133,11 +149,5 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[Gallery API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create gallery photo" },
-      { status: 500 }
-    );
   }
-}
+);

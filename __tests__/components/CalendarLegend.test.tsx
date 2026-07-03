@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
 import { CalendarLegend } from "@/components/calendar/calendar-legend";
 
 // Mock the calendar-event module for STATUS_COLORS and STATUS_LABELS exports

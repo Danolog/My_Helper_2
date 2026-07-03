@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation"
-import { hasActiveSession } from "@/lib/session"
 import { RegistrationFlow } from "@/components/auth/registration-flow"
+import { hasActiveSession } from "@/lib/session"
 
 export default async function RegisterPage({
   searchParams,

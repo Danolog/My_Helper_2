@@ -1,11 +1,22 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
-import { randomUUID } from "crypto";
+import sharp from "sharp";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
-import { logger } from "@/lib/logger";
+
+// Rozszerzenie nadajemy WYŁĄCZNIE z formatu wykrytego przez sharp (magic
+// bytes), nigdy z nazwy pliku ani z deklarowanego przez klienta MIME —
+// inaczej dałoby się zapisać np. .html/.svg do public/uploads (stored XSS).
+const EXT_BY_FORMAT: Record<string, string> = {
+  jpeg: "jpg",
+  png: "png",
+  webp: "webp",
+  gif: "gif",
+};
 // POST /api/gallery/upload - Upload a photo file
 export async function POST(request: Request) {
   try {
@@ -48,8 +59,27 @@ export async function POST(request: Request) {
       );
     }
 
-    // Generate unique filename
-    const ext = file.name.split(".").pop() || "jpg";
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+
+    // Verify magic bytes: the buffer must decode as a real image and its
+    // sniffed format must be on the allowlist. file.type above is only a
+    // client-declared hint; this check is the actual gate.
+    let detectedFormat: string | undefined;
+    try {
+      detectedFormat = (await sharp(buffer).metadata()).format;
+    } catch {
+      detectedFormat = undefined;
+    }
+    const ext = detectedFormat ? EXT_BY_FORMAT[detectedFormat] : undefined;
+    if (!ext) {
+      return NextResponse.json(
+        { success: false, error: "Invalid file content. Allowed: JPEG, PNG, WebP, GIF" },
+        { status: 400 }
+      );
+    }
+
+    // Generate unique filename (extension from sniffed format, not file.name)
     const filename = `${randomUUID()}.${ext}`;
 
     // Ensure upload directory exists
@@ -57,8 +87,6 @@ export async function POST(request: Request) {
     await mkdir(uploadDir, { recursive: true });
 
     // Write file to disk
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
     const filePath = path.join(uploadDir, filename);
     await writeFile(filePath, buffer);
 

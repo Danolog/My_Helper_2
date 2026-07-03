@@ -22,27 +22,41 @@ const mockDbSelect = vi.fn();
 const mockDbInsert = vi.fn();
 const mockDbDelete = vi.fn();
 
+// `tx` deleguje do tych samych mocków co `db` — warstwa repo (forSalon) otwiera
+// db.transaction() i woła tx.select/insert/delete (ADR-001 R1). Asercje na
+// mockDbSelect/Insert/Delete działają po migracji trasy na repozytorium.
+const mockTx = {
+  select: (...args: unknown[]) => mockDbSelect(...args),
+  insert: (...args: unknown[]) => mockDbInsert(...args),
+  delete: (...args: unknown[]) => mockDbDelete(...args),
+  execute: vi.fn().mockResolvedValue(undefined), // SET LOCAL ROLE / app.current_salon_id
+};
+
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...args),
     insert: (...args: unknown[]) => mockDbInsert(...args),
     delete: (...args: unknown[]) => mockDbDelete(...args),
-    // forSalon(...).raw/findOne/... biegną przez db.transaction; tx udostępnia te
-    // same gałęzie co db + execute (SET LOCAL ROLE / set_config w withSalonContext).
-    transaction: (cb: (tx: unknown) => unknown) =>
-      cb({
-        select: (...args: unknown[]) => mockDbSelect(...args),
-        insert: (...args: unknown[]) => mockDbInsert(...args),
-        delete: (...args: unknown[]) => mockDbDelete(...args),
-        update: (...args: unknown[]) => mockDbSelect(...args),
-        execute: () => Promise.resolve(undefined),
-      }),
+    transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
 }));
 
+// Tenant resolver — POST nadal pobiera salonId z sesji właściciela.
 vi.mock("@/lib/get-user-salon", () => ({
-  getUserSalonId: vi.fn().mockResolvedValue("test-salon-id"),
-  getUserSalon: vi.fn().mockResolvedValue({ id: "test-salon-id" }),
+  getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
+  getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
+}));
+
+// Faza 3 (role): GET grafików przeszedł na getSalonContext (odczyt dla
+// wszystkich ról). Domyślnie właściciel — asercje bez zmian.
+vi.mock("@/lib/salon-context", () => ({
+  getSalonContext: vi.fn().mockResolvedValue({
+    salonId: TEST_IDS.SALON_UUID,
+    role: "owner",
+    employeeId: null,
+    userId: "user-1",
+  }),
+  hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
 }));
 
 vi.mock("@/lib/schema", () => {
@@ -62,10 +76,12 @@ vi.mock("@/lib/schema", () => {
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
-  // sql jako tag template + sql.raw(...) (withSalonContext używa sql`...` i sql.raw)
-  sql: Object.assign((...args: unknown[]) => ({ type: "sql", args }), {
-    raw: (...args: unknown[]) => ({ type: "sql.raw", args }),
-  }),
+  // `sql` używa warstwa repo (forSalon): sql`...` do set_config oraz
+  // sql.raw(...) do SET LOCAL ROLE — mock musi mieć oba.
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((query: string) => ({ type: "sql.raw", query })) }
+  ),
 }));
 
 vi.mock("@/lib/auth-middleware", () => ({
@@ -83,10 +99,10 @@ vi.mock("@/lib/auth-middleware", () => ({
 function chainMock(result: unknown[] = []) {
   const chain: Record<string, ReturnType<typeof vi.fn>> = {};
   const methods = [
-    "select", "from", "where", "leftJoin",
+    "select", "from", "where", "leftJoin", "innerJoin",
     "limit", "orderBy",
     "insert", "values", "delete",
-    "returning",
+    "returning", "execute",
   ];
   for (const method of methods) {
     chain[method] = vi.fn().mockReturnValue(chain);
@@ -100,6 +116,8 @@ function chainMock(result: unknown[] = []) {
 // -------------------------------------------------------
 
 import { GET as getWorkSchedules, POST as saveWorkSchedules } from "@/app/api/work-schedules/route";
+import { getSalonContext } from "@/lib/salon-context";
+const mockGetSalonContext = vi.mocked(getSalonContext);
 
 // -------------------------------------------------------
 // Tests
@@ -151,9 +169,29 @@ describe("GET /api/work-schedules", () => {
     expect(body.count).toBe(0);
   });
 
+  it("should return 200 for receptionist reading schedules (Faza 3 role)", async () => {
+    mockGetSalonContext.mockResolvedValueOnce({
+      salonId: TEST_IDS.SALON_UUID,
+      role: "receptionist",
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      userId: "user-rec",
+    });
+    mockDbSelect.mockReturnValue(chainMock([makeWorkSchedule()]));
+
+    const request = createMockRequest(
+      `http://localhost:3000/api/work-schedules?employeeId=${TEST_IDS.EMPLOYEE_UUID}`
+    );
+    const response = await getWorkSchedules(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.count).toBe(1);
+  });
+
   it("should return 500 when database throws", async () => {
     const errorChain: Record<string, unknown> = {};
-    const methods = ["select", "from", "where", "orderBy"];
+    const methods = ["select", "from", "where", "innerJoin", "orderBy"];
     for (const m of methods) {
       (errorChain as Record<string, ReturnType<typeof vi.fn>>)[m] = vi.fn().mockReturnValue(errorChain);
     }

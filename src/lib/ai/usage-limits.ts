@@ -1,0 +1,195 @@
+/**
+ * Hard AI cost limits per salon (monthly budget + per-type unit limits).
+ *
+ * Cost accounting mirrors GET /api/ai/usage: every tracked AI call is a row
+ * in `aiGeneratedMedia`, and the estimated cost is `count * COST_MAP[type:provider]`.
+ * The budget window is the current calendar month (from the 1st, 00:00 local).
+ *
+ * Limits are configured via env vars (with safe defaults):
+ * - AI_MONTHLY_BUDGET_USD   — total monthly budget in USD (default 20)
+ * - AI_MONTHLY_VIDEO_LIMIT  — hard cap on generated videos/month (default 10)
+ * - AI_MONTHLY_IMAGE_LIMIT  — hard cap on generated images+banners/month (default 100)
+ */
+
+import { eq, and, gte, count } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { aiGeneratedMedia } from "@/lib/schema";
+
+// ────────────────────────────────────────────────────────────
+// Cost-per-use map keyed by "type:provider"
+// (single source of truth — also used by GET /api/ai/usage)
+// ────────────────────────────────────────────────────────────
+
+export const COST_MAP: Record<string, number> = {
+  // Media generation costs
+  "image:google_imagen": 0.01, // Social graphics (Imagen)
+  "image:sharp": 0, // Photo enhancement — server-side, no API cost
+  "banner:google_imagen": 0.01, // Banner generation
+  "banner:sharp": 0, // Server-side banner compositing
+  "video:google_veo": 0.15, // Video clips (Veo)
+  // Text AI costs (OpenRouter — Claude Sonnet)
+  "text:openrouter": 0.002,
+};
+
+/** Fallback cost when the type:provider combination is not in the map. */
+export const DEFAULT_COST_PER_USE = 0.002;
+
+// ────────────────────────────────────────────────────────────
+// Types
+// ────────────────────────────────────────────────────────────
+
+/** Operation type for per-type unit limits. */
+export type AIOperation = "text" | "image" | "banner" | "video";
+
+export type AIBudgetUsage = {
+  /** Estimated total cost in USD for the current calendar month */
+  totalCostUSD: number;
+  /** Number of generated videos this month */
+  videoCount: number;
+  /** Number of generated images + banners this month (API-cost-bearing only) */
+  imageCount: number;
+};
+
+export type AIBudgetLimits = {
+  monthlyBudgetUSD: number;
+  monthlyVideoLimit: number;
+  monthlyImageLimit: number;
+};
+
+export type AIBudgetCheck = {
+  allowed: boolean;
+  /** Human-readable (PL) reason when not allowed */
+  reason?: string;
+  usage: AIBudgetUsage;
+  budget: AIBudgetLimits;
+};
+
+// ────────────────────────────────────────────────────────────
+// Env-configured limits (read at call time so tests can override)
+// ────────────────────────────────────────────────────────────
+
+function envNumber(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+/** Current AI budget limits (env-configurable with defaults). */
+export function getAIBudgetLimits(): AIBudgetLimits {
+  return {
+    monthlyBudgetUSD: envNumber("AI_MONTHLY_BUDGET_USD", 20),
+    monthlyVideoLimit: envNumber("AI_MONTHLY_VIDEO_LIMIT", 10),
+    monthlyImageLimit: envNumber("AI_MONTHLY_IMAGE_LIMIT", 100),
+  };
+}
+
+// ────────────────────────────────────────────────────────────
+// Budget check
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Check whether the salon is within its monthly AI budget and unit limits.
+ *
+ * @param salonId - Salon to check
+ * @param op      - Optional operation about to be performed; "video" / "image" /
+ *                  "banner" additionally enforce the per-unit monthly caps.
+ *
+ * Fail-open: on a DB error the check returns `allowed: true` (with a warning
+ * logged) so transient DB issues never take down all AI features.
+ */
+export async function checkAIBudget(
+  salonId: string,
+  op?: AIOperation,
+): Promise<AIBudgetCheck> {
+  const budget = getAIBudgetLimits();
+
+  // Start of the current calendar month
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  let usage: AIBudgetUsage = { totalCostUSD: 0, videoCount: 0, imageCount: 0 };
+
+  try {
+    const stats = await db
+      .select({
+        type: aiGeneratedMedia.type,
+        provider: aiGeneratedMedia.provider,
+        count: count(),
+      })
+      .from(aiGeneratedMedia)
+      .where(
+        and(
+          eq(aiGeneratedMedia.salonId, salonId),
+          gte(aiGeneratedMedia.createdAt, monthStart),
+        ),
+      )
+      .groupBy(aiGeneratedMedia.type, aiGeneratedMedia.provider);
+
+    let totalCostUSD = 0;
+    let videoCount = 0;
+    let imageCount = 0;
+
+    for (const stat of stats) {
+      const costPerUse =
+        COST_MAP[`${stat.type}:${stat.provider}`] ?? DEFAULT_COST_PER_USE;
+      totalCostUSD += stat.count * costPerUse;
+
+      if (stat.type === "video") {
+        videoCount += stat.count;
+      } else if (
+        (stat.type === "image" || stat.type === "banner") &&
+        stat.provider !== "sharp" // sharp is server-side, no API cost
+      ) {
+        imageCount += stat.count;
+      }
+    }
+
+    usage = {
+      totalCostUSD: Math.round(totalCostUSD * 100) / 100,
+      videoCount,
+      imageCount,
+    };
+  } catch (error) {
+    logger.warn("[AI Budget] Failed to compute usage — failing open", {
+      error,
+      salonId,
+    });
+    return { allowed: true, usage, budget };
+  }
+
+  // Total monthly budget (applies to every AI operation)
+  if (usage.totalCostUSD >= budget.monthlyBudgetUSD) {
+    return {
+      allowed: false,
+      reason: `Miesieczny budzet AI zostal wyczerpany (${usage.totalCostUSD.toFixed(2)} / ${budget.monthlyBudgetUSD} USD). Limit odnowi sie na poczatku nastepnego miesiaca.`,
+      usage,
+      budget,
+    };
+  }
+
+  // Per-type unit limits
+  if (op === "video" && usage.videoCount >= budget.monthlyVideoLimit) {
+    return {
+      allowed: false,
+      reason: `Miesieczny limit generowanych wideo zostal osiagniety (${usage.videoCount} / ${budget.monthlyVideoLimit}). Limit odnowi sie na poczatku nastepnego miesiaca.`,
+      usage,
+      budget,
+    };
+  }
+
+  if (
+    (op === "image" || op === "banner") &&
+    usage.imageCount >= budget.monthlyImageLimit
+  ) {
+    return {
+      allowed: false,
+      reason: `Miesieczny limit generowanych obrazow zostal osiagniety (${usage.imageCount} / ${budget.monthlyImageLimit}). Limit odnowi sie na poczatku nastepnego miesiaca.`,
+      usage,
+      budget,
+    };
+  }
+
+  return { allowed: true, usage, budget };
+}

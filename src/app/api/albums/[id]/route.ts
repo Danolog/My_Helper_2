@@ -1,21 +1,19 @@
 import { NextResponse } from "next/server";
-import { albums, photoAlbums } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateAlbumSchema } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { albums, photoAlbums } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/albums/[id] - Get single album with photo count
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Albums API] GET [id]",
+    errorMessage: "Failed to fetch album",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -24,7 +22,7 @@ export async function GET(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     const [album] = await forSalon(salonId).raw((tx) =>
       tx
@@ -53,24 +51,17 @@ export async function GET(
       success: true,
       data: album,
     });
-  } catch (error) {
-    logger.error("[Albums API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch album" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // PATCH /api/albums/[id] - Update album name/category
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const PATCH = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Albums API] PATCH",
+    errorMessage: "Failed to update album",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -79,7 +70,7 @@ export async function PATCH(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
     const body = await request.json();
     const validationError = validateBody(updateAlbumSchema, body);
     if (validationError) {
@@ -116,24 +107,17 @@ export async function PATCH(
       success: true,
       data: updated,
     });
-  } catch (error) {
-    logger.error("[Albums API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to update album" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/albums/[id] - Delete album (does NOT delete photos, only the album grouping)
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Albums API] DELETE",
+    errorMessage: "Failed to delete album",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -142,7 +126,7 @@ export async function DELETE(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     // Check album exists in the caller's salon
     const album = await forSalon(salonId).findOne(albums, id);
@@ -163,11 +147,5 @@ export async function DELETE(
       success: true,
       message: "Album deleted successfully",
     });
-  } catch (error) {
-    logger.error("[Albums API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to delete album" },
-      { status: 500 }
-    );
   }
-}
+);

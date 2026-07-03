@@ -13,8 +13,8 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import type { ServiceItem, ServiceVariant, AssignedEmployee } from "./types";
 import { formatDuration, formatDateDisplay, calcEndTime } from "./types";
+import type { ServiceItem, ServiceVariant, AssignedEmployee } from "./types";
 
 // ---------------------------------------------------------------------------
 // Props

@@ -1,4 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq, and, count } from "drizzle-orm";
+import { validateBody, invoiceSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { DEFAULT_VAT_RATE } from "@/lib/constants";
+// ADR-001 R2b grupa B: odczyt `salons` (dane sprzedawcy; polityka RLS po owner_id)
+// czeka na akcesor forOwner — odczyty poboczne świadomie surowe db;
+// brama zasobu [id] i zapisy faktur idą przez forSalon.
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
@@ -9,14 +20,7 @@ import {
   products,
   invoices,
 } from "@/lib/schema";
-import { eq, and, count } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { DEFAULT_VAT_RATE } from "@/lib/constants";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { validateBody, invoiceSchema } from "@/lib/api-validation";
 import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
 /**
  * GET /api/appointments/[id]/invoice
  *
@@ -40,13 +44,12 @@ export async function GET(
 
     const { id } = await params;
 
-    // invoices ma salonId — scoped przez raw(tx) z jawnym eq(salonId).
     const existingInvoices = await forSalon(userSalonId).raw((tx) =>
       tx
-        .select()
-        .from(invoices)
-        .where(and(eq(invoices.appointmentId, id), eq(invoices.salonId, userSalonId)))
-        .limit(1)
+      .select()
+      .from(invoices)
+      .where(and(eq(invoices.appointmentId, id), eq(invoices.salonId, userSalonId)))
+      .limit(1)
     );
 
     if (existingInvoices.length === 0) {
@@ -148,23 +151,22 @@ export async function POST(
       }
     }
 
-    // 1. Fetch appointment (scoped do salonu właściciela — jawny eq(salonId) +
-    // kontekst RLS; cudza/nieistniejąca wizyta = 404).
+    // 1. Fetch appointment
     const [appointment] = await forSalon(userSalonId).raw((tx) =>
       tx
-        .select({
-          id: appointments.id,
-          salonId: appointments.salonId,
-          status: appointments.status,
-          startTime: appointments.startTime,
-          endTime: appointments.endTime,
-          clientId: appointments.clientId,
-          employeeId: appointments.employeeId,
-          serviceId: appointments.serviceId,
-        })
-        .from(appointments)
-        .where(and(eq(appointments.id, id), eq(appointments.salonId, userSalonId)))
-        .limit(1)
+      .select({
+        id: appointments.id,
+        salonId: appointments.salonId,
+        status: appointments.status,
+        startTime: appointments.startTime,
+        endTime: appointments.endTime,
+        clientId: appointments.clientId,
+        employeeId: appointments.employeeId,
+        serviceId: appointments.serviceId,
+      })
+      .from(appointments)
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, userSalonId)))
+      .limit(1)
     );
 
     if (!appointment) {
@@ -184,14 +186,13 @@ export async function POST(
       );
     }
 
-    // 2. Check if invoice already exists (scoped to caller's salon — jawny
-    // eq(salonId) + kontekst RLS).
+    // 2. Check if invoice already exists (scoped to caller's salon)
     const existingInvoices = await forSalon(userSalonId).raw((tx) =>
       tx
-        .select()
-        .from(invoices)
-        .where(and(eq(invoices.appointmentId, id), eq(invoices.salonId, userSalonId)))
-        .limit(1)
+      .select()
+      .from(invoices)
+      .where(and(eq(invoices.appointmentId, id), eq(invoices.salonId, userSalonId)))
+      .limit(1)
     );
 
     if (existingInvoices.length > 0) {
@@ -203,17 +204,14 @@ export async function POST(
       });
     }
 
-    // 3. Fetch related data (clients/employees/services mają salonId; kontekst
-    // RLS ustawiony — wiersze spoza salonu są odcinane).
+    // 3. Fetch related data
     let clientFullName: string | null = null;
     if (appointment.clientId) {
-      const [client] = await forSalon(userSalonId).raw((tx) =>
-        tx
-          .select({ firstName: clients.firstName, lastName: clients.lastName })
-          .from(clients)
-          .where(eq(clients.id, appointment.clientId!))
-          .limit(1)
-      );
+      const [client] = await db
+        .select({ firstName: clients.firstName, lastName: clients.lastName })
+        .from(clients)
+        .where(eq(clients.id, appointment.clientId))
+        .limit(1);
       if (client) {
         clientFullName = `${client.firstName} ${client.lastName}`;
       }
@@ -221,16 +219,14 @@ export async function POST(
 
     let employeeName: string | null = null;
     if (appointment.employeeId) {
-      const [employee] = await forSalon(userSalonId).raw((tx) =>
-        tx
-          .select({
-            firstName: employees.firstName,
-            lastName: employees.lastName,
-          })
-          .from(employees)
-          .where(eq(employees.id, appointment.employeeId!))
-          .limit(1)
-      );
+      const [employee] = await db
+        .select({
+          firstName: employees.firstName,
+          lastName: employees.lastName,
+        })
+        .from(employees)
+        .where(eq(employees.id, appointment.employeeId))
+        .limit(1);
       if (employee) {
         employeeName = `${employee.firstName} ${employee.lastName}`;
       }
@@ -239,33 +235,27 @@ export async function POST(
     let serviceName: string | null = null;
     let servicePrice = "0";
     if (appointment.serviceId) {
-      const [service] = await forSalon(userSalonId).raw((tx) =>
-        tx
-          .select({ name: services.name, basePrice: services.basePrice })
-          .from(services)
-          .where(eq(services.id, appointment.serviceId!))
-          .limit(1)
-      );
+      const [service] = await db
+        .select({ name: services.name, basePrice: services.basePrice })
+        .from(services)
+        .where(eq(services.id, appointment.serviceId))
+        .limit(1);
       if (service) {
         serviceName = service.name;
         servicePrice = service.basePrice;
       }
     }
 
-    // 4. Calculate materials cost (appointmentMaterials nie ma salonId — wiązane
-    // przez appointmentId tej, już zweryfikowanej jako własna, wizyty; products
-    // ma salonId, kontekst RLS ustawiony).
-    const materialsRows = await forSalon(userSalonId).raw((tx) =>
-      tx
-        .select({
-          quantityUsed: appointmentMaterials.quantityUsed,
-          pricePerUnit: products.pricePerUnit,
-          productName: products.name,
-        })
-        .from(appointmentMaterials)
-        .leftJoin(products, eq(appointmentMaterials.productId, products.id))
-        .where(eq(appointmentMaterials.appointmentId, id))
-    );
+    // 4. Calculate materials cost
+    const materialsRows = await db
+      .select({
+        quantityUsed: appointmentMaterials.quantityUsed,
+        pricePerUnit: products.pricePerUnit,
+        productName: products.name,
+      })
+      .from(appointmentMaterials)
+      .leftJoin(products, eq(appointmentMaterials.productId, products.id))
+      .where(eq(appointmentMaterials.appointmentId, id));
 
     const materialsCost = materialsRows.reduce((sum, m) => {
       if (m.pricePerUnit) {
@@ -274,20 +264,17 @@ export async function POST(
       return sum;
     }, 0);
 
-    // 5. Get salon info (salons to korzeń najemcy — polityka RLS:
-    // id = app.current_salon_id; właściciel czyta swój salon po id).
+    // 5. Get salon info
     const salonId = appointment.salonId || userSalonId;
-    const [salon] = await forSalon(userSalonId).raw((tx) =>
-      tx
-        .select({
-          name: salons.name,
-          address: salons.address,
-          settingsJson: salons.settingsJson,
-        })
-        .from(salons)
-        .where(eq(salons.id, salonId))
-        .limit(1)
-    );
+    const [salon] = await db
+      .select({
+        name: salons.name,
+        address: salons.address,
+        settingsJson: salons.settingsJson,
+      })
+      .from(salons)
+      .where(eq(salons.id, salonId))
+      .limit(1);
 
     const salonSettings = (salon?.settingsJson as Record<string, unknown>) || {};
     const fiscalSettings = (salonSettings.fiscal || {}) as Record<string, unknown>;
@@ -304,16 +291,16 @@ export async function POST(
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, "0");
 
-    // Count existing invoices for this salon (jawny eq(salonId) + kontekst RLS).
-    const [invoiceCount] = await forSalon(userSalonId).raw((tx) =>
+    // Count existing invoices for this salon
+    const [invoiceCount] = await forSalon(salonId).raw((tx) =>
       tx
-        .select({ count: count() })
-        .from(invoices)
-        .where(
-          and(
-            eq(invoices.salonId, salonId),
-          )
+      .select({ count: count() })
+      .from(invoices)
+      .where(
+        and(
+          eq(invoices.salonId, salonId),
         )
+      )
     );
 
     const seqNum = ((invoiceCount?.count as number) || 0) + 1;
@@ -400,9 +387,8 @@ export async function POST(
       })}`,
     };
 
-    // 9. Save invoice to database (invoices ma salonId — jawnie ustawiony w
-    // values; kontekst RLS gwarantuje zapis do własnego salonu).
-    const [newInvoice] = await forSalon(userSalonId).raw((tx) =>
+    // 9. Save invoice to database
+    const [newInvoice] = await forSalon(salonId).raw((tx) =>
       tx
       .insert(invoices)
       .values({

@@ -1,30 +1,20 @@
 import { NextResponse } from "next/server";
-// `db` zostaje WYŁĄCZNIE do zaufanego rozwiązania sesja→salon
-// (salons.ownerId = userId) — ten lookup nie ma jeszcze salonId, więc nie może
-// biec pod RLS (analogicznie do getUserSalon). Zapytania o opinie idą przez
-// forSalon(salon.id).
-// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (sesja→salon); operacje przez forSalon
-import { db } from "@/lib/db";
-import { reviews, salons, clients, employees, services, appointments } from "@/lib/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { forSalon } from "@/lib/server/repository";
-
+import { withApiHandler } from "@/lib/api-handler";
+import { getUserSalon } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { reviews, clients, employees, services, appointments } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/reviews - List reviews for the owner's salon with optional status filter
-export async function GET(request: Request) {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-
-  try {
-    const userId = authResult.user.id;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Reviews Moderation API] GET",
+    errorMessage: "Nie udalo sie pobrac opinii",
+  },
+  async ({ request }) => {
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -42,8 +32,6 @@ export async function GET(request: Request) {
       conditions.push(eq(reviews.status, status));
     }
 
-    // Join — przez raw(tx) z jawnym eq(reviews.salonId) w `conditions` (defense
-    // in depth: filtr aplikacyjny widoczny, kontekst RLS ustawiony przez forSalon).
     const result = await forSalon(salon.id).raw((tx) =>
       tx
         .select({
@@ -89,11 +77,5 @@ export async function GET(request: Request) {
       data: formattedReviews,
       count: formattedReviews.length,
     });
-  } catch (error) {
-    logger.error("[Reviews Moderation API] GET Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac opinii" },
-      { status: 500 }
-    );
   }
-}
+);

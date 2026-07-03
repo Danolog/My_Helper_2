@@ -2,13 +2,33 @@ import { NextResponse } from "next/server";
 import { eq, and, not, or, lte, gte } from "drizzle-orm";
 import { validateBody, updateAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
+// `db` pozostaje dla efektow ubocznych anulacji (forfeit zadatku, notyfikacja,
+// nazwa salonu do waiting-list) — to NIE jest brama zasobu [id], ktora pilnuje
+// test izolacji. Pelna migracja na repo + kontekst RLS tych zapisow = R2.
+// Pod RLS (rola myhelper_app) te zapytania wymagaja wlasnego kontekstu salonu;
+// sciezka pozytywna DELETE z zadatkiem nie jest pokryta testem R1 (zob. raport).
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
+import { getSalonContext, type SalonContext } from "@/lib/salon-context";
 import { appointments, clients, employees, services, notifications, depositPayments, salons } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
 import { notifyWaitingList } from "@/lib/waiting-list";
+
+// Faza 3 (role): employee widzi/modyfikuje wyłącznie WŁASNE wizyty.
+// Cudza wizyta = 404 (nie 403 — nie zdradzamy istnienia zasobu).
+function isForeignForEmployee(
+  ctx: SalonContext,
+  appointmentEmployeeId: string | null
+): boolean {
+  return (
+    ctx.role === "employee" &&
+    (!ctx.employeeId || appointmentEmployeeId !== ctx.employeeId)
+  );
+}
+
 // GET /api/appointments/[id] - Get a single appointment
 export async function GET(
   _request: Request,
@@ -18,13 +38,14 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { id } = await params;
 
@@ -54,7 +75,7 @@ export async function GET(
     );
 
     const row = result[0];
-    if (!row) {
+    if (!row || isForeignForEmployee(ctx, row.appointment.employeeId)) {
       return NextResponse.json(
         { success: false, error: "Appointment not found" },
         { status: 404 }
@@ -90,13 +111,14 @@ export async function PUT(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { id } = await params;
 
@@ -121,7 +143,7 @@ export async function PUT(
     // wizyta = 404 (scoped findOne, kontekst RLS ustawiony).
     const existing = await forSalon(salonId).findOne(appointments, id);
 
-    if (!existing) {
+    if (!existing || isForeignForEmployee(ctx, existing.employeeId)) {
       return NextResponse.json(
         { success: false, error: "Appointment not found" },
         { status: 404 }
@@ -222,13 +244,14 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { id } = await params;
     const url = new URL(request.url);
@@ -253,7 +276,7 @@ export async function DELETE(
     );
 
     const row = result[0];
-    if (!row) {
+    if (!row || isForeignForEmployee(ctx, row.appointment.employeeId)) {
       return NextResponse.json(
         { success: false, error: "Appointment not found" },
         { status: 404 }
@@ -334,18 +357,13 @@ export async function DELETE(
     // Mark deposit as forfeited if late cancellation (<24h)
     if (depositForfeited) {
       try {
-        // Forfeit zadatku w kontekscie RLS salonu (wizyta nalezy do tego salonu).
-        // depositPayments nie ma kolumny salonId — wiazemy przez appointmentId
-        // tej (juz zweryfikowanej jako wlasna) wizyty; kontekst RLS ustawiony.
-        await forSalon(salonId).raw((tx) =>
-          tx
-            .update(depositPayments)
-            .set({
-              status: "forfeited",
-              refundReason: "Anulacja wizyty mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
-            })
-            .where(eq(depositPayments.appointmentId, id))
-        );
+        await db
+          .update(depositPayments)
+          .set({
+            status: "forfeited",
+            refundReason: "Anulacja wizyty mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
+          })
+          .where(eq(depositPayments.appointmentId, id));
         logger.info(`[Appointments API] Deposit marked as forfeited for appointment ${id}`);
       } catch (forfeitError) {
         logger.error("[Appointments API] Failed to mark deposit as forfeited", { error: forfeitError });
@@ -375,17 +393,13 @@ export async function DELETE(
       }
 
       try {
-        // Notyfikacja salon-scoped (salonId tej, juz zweryfikowanej, wizyty) —
-        // kontekst RLS ustawiony; jawny salonId zachowany w values.
-        await forSalon(salonId).raw((tx) =>
-          tx.insert(notifications).values({
-            salonId: appointment.salonId,
-            clientId: row.client!.id,
-            type: "sms",
-            message: notificationMessage,
-            status: "pending",
-          })
-        );
+        await db.insert(notifications).values({
+          salonId: appointment.salonId,
+          clientId: row.client.id,
+          type: "sms",
+          message: notificationMessage,
+          status: "pending",
+        });
         logger.info(`[Appointments API] Created cancellation notification for client ${row.client.id}`);
       } catch (notifError) {
         logger.error("[Appointments API] Failed to create notification", { error: notifError });
@@ -395,16 +409,12 @@ export async function DELETE(
 
     // Notify waiting list entries about the freed slot
     try {
-      // Get salon name for notification (only need name) — przez raw(tx) w
-      // kontekscie RLS; salons to korzen najemcy (polityka: id = app.current_salon_id),
-      // wiec wlasciciel czyta swoj salon po jego id.
-      const [salon] = await forSalon(salonId).raw((tx) =>
-        tx
-          .select({ name: salons.name })
-          .from(salons)
-          .where(eq(salons.id, appointment.salonId))
-          .limit(1)
-      );
+      // Get salon name for notification (only need name)
+      const [salon] = await db
+        .select({ name: salons.name })
+        .from(salons)
+        .where(eq(salons.id, appointment.salonId))
+        .limit(1);
 
       const salonName = salon?.name || "Salon";
       const serviceName = row.service?.name || "Wizyta";

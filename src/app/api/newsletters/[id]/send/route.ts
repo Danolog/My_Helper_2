@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { eq, and, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import {
   clients,
   marketingConsents,
   newsletters,
   notifications,
 } from "@/lib/schema";
-import { eq, and, isNull, isNotNull } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { forSalon } from "@/lib/server/repository";
-import { logger } from "@/lib/logger";
-import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 
 const sendSchema = z.object({
   // Optional: send only to specific client IDs. If not provided, send to all consented.
@@ -74,18 +74,18 @@ export async function POST(
   const { recipientIds } = parsed.data;
 
   try {
-    // Fetch newsletter — jawne eq(newsletters.salonId) (defense in depth) + RLS.
+    // Fetch newsletter
     const [newsletter] = await forSalon(salonId).raw((tx) =>
       tx
-        .select()
-        .from(newsletters)
-        .where(
-          and(
-            eq(newsletters.id, newsletterId),
-            eq(newsletters.salonId, salonId)
-          )
+      .select()
+      .from(newsletters)
+      .where(
+        and(
+          eq(newsletters.id, newsletterId),
+          eq(newsletters.salonId, salonId)
         )
-        .limit(1)
+      )
+      .limit(1)
     );
 
     if (!newsletter) {
@@ -95,26 +95,25 @@ export async function POST(
       );
     }
 
-    // Get consented clients with email — innerJoin przez raw(tx) z jawnym
-    // eq(marketingConsents.salonId) (defense in depth) plus kontekst RLS.
+    // Get consented clients with email
     const allConsented = await forSalon(salonId).raw((tx) =>
       tx
-        .select({
-          clientId: clients.id,
-          firstName: clients.firstName,
-          lastName: clients.lastName,
-          email: clients.email,
-        })
-        .from(marketingConsents)
-        .innerJoin(clients, eq(marketingConsents.clientId, clients.id))
-        .where(
-          and(
-            eq(marketingConsents.salonId, salonId),
-            eq(marketingConsents.consentType, "email"),
-            isNull(marketingConsents.revokedAt),
-            isNotNull(clients.email)
-          )
+      .select({
+        clientId: clients.id,
+        firstName: clients.firstName,
+        lastName: clients.lastName,
+        email: clients.email,
+      })
+      .from(marketingConsents)
+      .innerJoin(clients, eq(marketingConsents.clientId, clients.id))
+      .where(
+        and(
+          eq(marketingConsents.salonId, salonId),
+          eq(marketingConsents.consentType, "email"),
+          isNull(marketingConsents.revokedAt),
+          isNotNull(clients.email)
         )
+      )
     );
 
     // Filter to valid emails
@@ -186,9 +185,6 @@ export async function POST(
     // Wrap all database writes in a transaction for atomicity:
     // - batch insert notification records for each recipient
     // - update the newsletter with sent timestamp and recipient count
-    // notifications + newsletters są salon-scoped — batch insert + update w jednym
-    // raw(forSalon) (jedna transakcja z RLS). Update newslettera z jawnym
-    // eq(newsletters.salonId) (defense in depth; wcześniej tylko eq(id)).
     await forSalon(salonId).raw(async (tx) => {
       const notificationRows = sentDetails.map((detail) => ({
         salonId: salonId,
@@ -212,12 +208,7 @@ export async function POST(
           sentAt: new Date(),
           recipientsCount: sentCount,
         })
-        .where(
-          and(
-            eq(newsletters.id, newsletterId),
-            eq(newsletters.salonId, salonId)
-          )
-        );
+        .where(and(eq(newsletters.id, newsletterId), eq(newsletters.salonId, salonId)));
     });
 
     return Response.json({

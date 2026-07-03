@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { isValidUuid } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
+// ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   subscriptionPayments,
   salonSubscriptions,
   subscriptionPlans,
   salons,
 } from "@/lib/schema";
-import { forSalon } from "@/lib/server/repository";
 
-import { logger } from "@/lib/logger";
 /**
  * GET /api/subscriptions/payments/[id]/receipt
  *
@@ -44,12 +46,8 @@ export async function GET(
       );
     }
 
-    // Fetch payment with plan and salon data.
-    // subscriptionPayments jest salon-scoped (jawny eq(id) AND eq(salonId) + RLS);
-    // leftJoiny do salonSubscriptions/salons (salon-scoped) i subscriptionPlans
-    // (globalny katalog) pod kontekstem forSalon.
-    const rows = await forSalon(salonId).raw((tx) =>
-      tx
+    // Fetch payment with plan and salon data
+    const rows = await db
       .select({
         id: subscriptionPayments.id,
         amount: subscriptionPayments.amount,
@@ -88,8 +86,7 @@ export async function GET(
           eq(subscriptionPayments.salonId, salonId),
         ),
       )
-      .limit(1),
-    );
+      .limit(1);
 
     if (rows.length === 0 || !rows[0]) {
       return NextResponse.json(

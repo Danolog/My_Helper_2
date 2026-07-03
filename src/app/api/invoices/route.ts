@@ -1,12 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
-// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (przed kontekstem RLS); dalej forSalon
-import { db } from "@/lib/db";
-import { invoices, clients, appointments, employees, services, salons } from "@/lib/schema";
+import { NextResponse } from "next/server";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
+import { invoices, clients, appointments, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
 /**
  * GET /api/invoices
  *
@@ -18,28 +15,31 @@ import { logger } from "@/lib/logger";
  *  - type: 'paragon' | 'faktura' (filter by invoice type)
  *  - search: string (search by invoice number, client name, or company name)
  */
-export async function GET(request: NextRequest) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Invoices API] GET",
+    errorMessage: "Nie udalo sie pobrac faktur",
+  },
+  async ({ request }) => {
+    // Resolve salon from authenticated user (auth: "user" gwarantuje sesje).
+    // Faza 3 (role): faktury tylko owner, chyba że czasowy grant "invoices".
+    const ctx = await getSalonContext();
 
-    // Resolve salon from authenticated user. Krok rozwiązania właściciel→salon
-    // (jeszcze nie znamy salonId, więc poza forSalon) — pozostaje na surowym db,
-    // analogicznie do getUserSalon(). Dalsze zapytania salonowe idą przez forSalon.
-    const [salon] = await db
-      .select({ id: salons.id })
-      .from(salons)
-      .where(eq(salons.ownerId, authResult.user.id))
-      .limit(1);
-
-    if (!salon) {
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Nie znaleziono salonu dla tego uzytkownika" },
         { status: 403 }
       );
     }
+    if (ctx.role !== "owner" && !(await hasFeatureAccess(ctx, "invoices"))) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
 
-    const salonId = salon.id;
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const dateFrom = searchParams.get("dateFrom");
@@ -75,8 +75,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Query invoices with related data — przez forSalon (kontekst RLS).
-    // Jawny eq(invoices.salonId, salonId) zachowany w conditions (defense in depth).
+    // Query invoices with related data
     const rows = await forSalon(salonId).raw((tx) =>
       tx
       .select({
@@ -143,11 +142,5 @@ export async function GET(request: NextRequest) {
         fakturaCount,
       },
     });
-  } catch (error) {
-    logger.error("[Invoices API] GET Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac faktur" },
-      { status: 500 }
-    );
   }
-}
+);

@@ -1,0 +1,76 @@
+# Harmonogram cronów aplikacji przez GitHub Actions.
+#
+# DLACZEGO TUTAJ, NIE W vercel.json: plan Vercel Hobby ogranicza crony do
+# 2 zadań raz DZIENNIE — deployment z harmonogramami co 5-30 min jest
+# odrzucany ("Hobby accounts are limited to daily cron jobs"). Ten workflow
+# woła te same endpointy (POST + Authorization: Bearer CRON_SECRET,
+# fail-closed po stronie aplikacji). Po przejściu na Vercel Pro można
+# przenieść harmonogramy z powrotem do vercel.json (sekcja crons, GET).
+#
+# Wymagane sekrety repo:
+#   BETTER_AUTH_BASE_URL_PROD — bazowy URL produkcji (już istnieje)
+#   CRON_SECRET               — ta sama wartość co w env produkcji Vercela
+#
+# Uwaga: GitHub potrafi opóźnić schedule o kilka minut przy dużym ruchu —
+# okna czasowe endpointów (60 min dla przypomnień, 45 min cutoff cleanup)
+# to tolerują.
+name: App Cron Scheduler
+
+on:
+  schedule:
+    # co 5 min: przypomnienia SMS/push, publikacja postów, cleanup zadatków
+    - cron: "*/5 * * * *"
+    # przesunięte o 13 min względem pełnej godziny: przypomnienia 24h (co 30 min)
+    - cron: "13,43 * * * *"
+    # co godzinę: czyszczenie wygasłych uprawnień tymczasowych
+    - cron: "7 * * * *"
+    # codziennie 05:00 UTC (06:00/07:00 PL): urodziny, niski stan, we-miss-you
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      endpoint:
+        description: "Ścieżka pojedynczego crona do ręcznego odpalenia (np. /api/cron/sms-reminders); puste = zestaw 5-minutowy"
+        required: false
+
+jobs:
+  run-crons:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Wywołaj endpointy cron
+        env:
+          BASE_URL: ${{ secrets.BETTER_AUTH_BASE_URL_PROD }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SCHEDULE: ${{ github.event.schedule }}
+          MANUAL_ENDPOINT: ${{ inputs.endpoint }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::Brak sekretu CRON_SECRET w repo — ustaw ten sam, co w env produkcji Vercela (gh secret set CRON_SECRET)."
+            exit 1
+          fi
+          if [ -z "$BASE_URL" ]; then
+            echo "::error::Brak sekretu BETTER_AUTH_BASE_URL_PROD."
+            exit 1
+          fi
+
+          case "$SCHEDULE" in
+            "13,43 * * * *") ENDPOINTS="/api/cron/push-reminders-24h" ;;
+            "7 * * * *")     ENDPOINTS="/api/cron/cleanup-temporary-access" ;;
+            "0 5 * * *")     ENDPOINTS="/api/notifications/birthday /api/notifications/low-stock /api/notifications/we-miss-you" ;;
+            *)               ENDPOINTS="${MANUAL_ENDPOINT:-/api/cron/sms-reminders /api/cron/push-reminders /api/cron/publish-scheduled-posts /api/cron/cleanup-pending-deposits}" ;;
+          esac
+
+          FAILED=0
+          # GET jak Vercel Cron — trasy /api/cron/* mają alias GET (wysyłka bez
+          # ?status=1), a /api/notifications/* wystawiają wyłącznie GET.
+          for ep in $ENDPOINTS; do
+            echo "--- GET $ep"
+            HTTP=$(curl -sS -o /tmp/resp.json -w "%{http_code}" -m 60 \
+              -H "Authorization: Bearer $CRON_SECRET" "$BASE_URL$ep" || echo "000")
+            echo "HTTP $HTTP: $(head -c 500 /tmp/resp.json 2>/dev/null)"
+            if [ "$HTTP" -lt 200 ] || [ "$HTTP" -ge 300 ]; then
+              echo "::error::Cron $ep zwrócił HTTP $HTTP"
+              FAILED=1
+            fi
+          done
+          exit $FAILED

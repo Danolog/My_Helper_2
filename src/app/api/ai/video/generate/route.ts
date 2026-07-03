@@ -28,8 +28,8 @@ const requestSchema = z.object({
 // ────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
-  // Auth + Pro plan check
-  const proResult = await requireProAI();
+  // Auth + Pro plan check (+ monthly video unit limit)
+  const proResult = await requireProAI({ op: "video" });
   if (isProAIError(proResult)) return proResult;
   const { salonId } = proResult;
 

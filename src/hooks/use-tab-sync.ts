@@ -52,10 +52,15 @@ export function useTabSync(
   const channelRef = useRef<BroadcastChannel | null>(null);
   const onRefetchRef = useRef(onRefetch);
   const lastFetchRef = useRef<number>(0);
-  // Lazily initialize lastFetchRef on first render
-  if (lastFetchRef.current === 0) {
-    lastFetchRef.current = Date.now();
-  }
+
+  // Inicjalizacja w efekcie, nie w renderze (Date.now() + zapis refa w ciele
+  // komponentu łamią react-hooks/purity). Zdarzenie visibilitychange i tak
+  // nie wyprzedzi pierwszego efektu po montażu.
+  useEffect(() => {
+    if (lastFetchRef.current === 0) {
+      lastFetchRef.current = Date.now();
+    }
+  }, []);
 
   // Keep onRefetch ref up to date
   useEffect(() => {

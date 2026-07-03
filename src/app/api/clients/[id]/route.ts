@@ -2,36 +2,43 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { verifyPassword } from "better-auth/crypto";
 import { eq, and } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateClientSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // `account` pozostaje surowym `db` (weryfikacja hasła nie jest salon-scoped):
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import { clients, account } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
 
 // GET /api/clients/[id] - Get a single client by ID
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Clients API] GET",
+    errorMessage: "Failed to fetch client",
+  },
+  async ({ params }) => {
+    // Faza 3 (role): kartoteka klientów dla owner/receptionist; employee 403.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role === "employee") {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     if (!isValidUuid(id)) {
       return NextResponse.json(
@@ -55,33 +62,34 @@ export async function GET(
       success: true,
       data: client,
     });
-  } catch (error) {
-    logger.error("[Clients API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch client" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // PUT /api/clients/[id] - Update a client
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+export const PUT = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Clients API] PUT",
+    errorMessage: "Failed to update client",
+  },
+  async ({ request, params }) => {
+    // Faza 3 (role): edycja klientów dla owner/receptionist; employee 403.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role === "employee") {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     if (!isValidUuid(id)) {
       return NextResponse.json(
@@ -93,6 +101,7 @@ export async function PUT(
     const body = await request.json();
 
     // Server-side validation with Zod schema
+    // (walidacja celowo w handlerze, po sprawdzeniu salonu i UUID — jak dotąd)
     const validationError = validateBody(updateClientSchema, body);
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
@@ -131,16 +140,13 @@ export async function PUT(
       success: true,
       data: updated,
     });
-  } catch (error) {
-    logger.error("[Clients API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to update client" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/clients/[id] - Delete a client (requires password confirmation)
+// UWAGA: świadomie NIE zmigrowane na withApiHandler — niestandardowa
+// autoryzacja (bezpośrednio auth.api.getSession + weryfikacja hasła)
+// i warunkowe parsowanie body nie mieszczą się w polityce wrappera.
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -165,13 +171,23 @@ export async function DELETE(
     }
 
     // 1a. Resolve the caller's salon — tenant isolation
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): usuwanie klientów TYLKO owner, chyba że czasowy grant
+    // "clients-delete" (temporary-access). Rola sprawdzana PRZED istniejącą
+    // logiką (weryfikacja hasła zostaje bez zmian dla dopuszczonych ról).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role !== "owner" && !(await hasFeatureAccess(ctx, "clients-delete"))) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
     // 1b. (ADR-001 sekcja 2.4) Cudzy/nieistniejacy zasob = 404 ZANIM dojdzie do
     // weryfikacji hasla — istnienie cudzego klienta nie moze przeciekac przez

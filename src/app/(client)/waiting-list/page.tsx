@@ -17,11 +17,11 @@ import {
   ArrowRight,
   Loader2,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { useSession } from "@/lib/auth-client";
 import { mutationFetch } from "@/lib/api-client";
+import { useSession } from "@/lib/auth-client";
 
 interface WaitingListEntry {
   id: string;

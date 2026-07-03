@@ -9,9 +9,9 @@ import {
   getSalonContext,
   trackAIUsage,
 } from "@/lib/ai/openrouter";
-import { forSalon } from "@/lib/server/repository";
 import { logger } from "@/lib/logger";
 import { galleryPhotos, employees, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 const requestSchema = z.object({
   photoId: z.string().uuid("Nieprawidlowy format ID zdjecia"),
@@ -97,9 +97,6 @@ export async function POST(req: Request) {
   } | null = null;
 
   try {
-    // leftJoin — przez raw(tx) z jawnym eq(galleryPhotos.salonId, salonId).
-    // Domkniecie IDOR: wczesniej filtr byl tylko po photoId (cudze zdjecie
-    // bylo dostepne); teraz tama aplikacyjna + kontekst RLS forSalon.
     const result = await forSalon(salonId).raw((tx) =>
       tx
         .select({
@@ -117,12 +114,7 @@ export async function POST(req: Request) {
         .from(galleryPhotos)
         .leftJoin(employees, eq(galleryPhotos.employeeId, employees.id))
         .leftJoin(services, eq(galleryPhotos.serviceId, services.id))
-        .where(
-          and(
-            eq(galleryPhotos.id, photoId),
-            eq(galleryPhotos.salonId, salonId)
-          )
-        )
+        .where(and(eq(galleryPhotos.id, photoId), eq(galleryPhotos.salonId, salonId)))
         .then((r) => r[0] ?? null)
     );
 

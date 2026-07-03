@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-// CELOWO na surowym `db` (rola owner, omija RLS). To PUBLICZNY endpoint portalu klienta
-// (brak auth, GET czyta profil pracownika dowolnego salonu po `id` z URL) — nie ma sesji
-// właściciela ani kontekstu `app.current_salon_id`. Zgodne z RLS 0005 (publiczny katalog
-// czyta pod rolą owner). Dane są publiczne z założenia (profil specjalisty), więc to nie IDOR.
-// eslint-disable-next-line no-restricted-imports -- publiczny katalog klienta (GET profil), rola owner — RLS 0005
+import { eq, and, avg, count, desc } from "drizzle-orm";
+// ADR-001: ścieżka publiczna (bez sesji salonu) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
 import {
   employees,
   services,
@@ -14,9 +13,7 @@ import {
   salons,
   clients,
 } from "@/lib/schema";
-import { eq, and, avg, count, desc } from "drizzle-orm";
 
-import { logger } from "@/lib/logger";
 // GET /api/salons/[id]/employees/[employeeId] - Get employee profile details
 export async function GET(
   _request: Request,

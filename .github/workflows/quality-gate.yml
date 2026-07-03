@@ -55,8 +55,7 @@ jobs:
   e2e-smoke:
     name: E2E Smoke Tests
     runs-on: ubuntu-latest
-    container: mcr.microsoft.com/playwright:v1.58.2-noble
-    timeout-minutes: 15
+    timeout-minutes: 10
     services:
       postgres:
         image: pgvector/pgvector:pg18
@@ -72,9 +71,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     env:
-      # Kontener joba lezy w tej samej sieci Dockera co usluga `postgres`,
-      # ktora jest osiagalna pod nazwa uslugi (`postgres`), nie pod `localhost`.
-      POSTGRES_URL: postgresql://dev_user:dev_password@postgres:5432/pos_dev
+      POSTGRES_URL: postgresql://dev_user:dev_password@localhost:5432/pos_dev
       BETTER_AUTH_SECRET: ci-test-secret-minimum-32-characters-long
       BETTER_AUTH_URL: http://localhost:3000
       NEXT_PUBLIC_APP_URL: http://localhost:3000
@@ -97,34 +94,12 @@ jobs:
       - name: Seed test data
         run: pnpm db:seed:test
 
-      # Obraz Playwright nie ma `psql` (postgresql-client), a apt na tym runnerze
-      # wisi -> diagnostyke seedow robimy w Node z pakietu `postgres` (jest w deps).
       - name: Verify seed data
-        # Diagnostyka — nie blokuje E2E (testy i tak weryfikuja dane); chroni przed
-        # ewentualnym bledem escapowania w node -e wewnatrz YAML/bash.
-        continue-on-error: true
         run: |
-          node -e "
-          const postgres = require('postgres');
-          const sql = postgres(process.env.POSTGRES_URL);
-          (async () => {
-            try {
-              const users = await sql\`SELECT id, email, email_verified, role FROM \\\"user\\\" WHERE email IN ('owner@test.com','client@test.com')\`;
-              console.log('Seed users:', JSON.stringify(users, null, 2));
-              const accounts = await sql\`SELECT id, provider_id, user_id, CASE WHEN password IS NOT NULL THEN 'SET' ELSE 'NULL' END AS pwd FROM account WHERE user_id IN ('test-owner-user-id-00001','test-client-user-id-00001')\`;
-              console.log('Seed accounts:', JSON.stringify(accounts, null, 2));
-              if (users.length < 2) { console.error('::warning::oczekiwano 2 uzytkownikow seed, znaleziono ' + users.length); }
-            } catch (e) {
-              console.error('::error::Verify seed data nieudane: ' + e.message);
-              process.exit(1);
-            } finally {
-              await sql.end();
-            }
-          })();
-          "
+          PGPASSWORD=dev_password psql -h localhost -U dev_user -d pos_dev -c "SELECT id, email, email_verified, role FROM \"user\" WHERE email IN ('owner@test.com','client@test.com');"
+          PGPASSWORD=dev_password psql -h localhost -U dev_user -d pos_dev -c "SELECT id, provider_id, user_id, CASE WHEN password IS NOT NULL THEN 'SET' ELSE 'NULL' END as pwd FROM account WHERE user_id IN ('test-owner-user-id-00001','test-client-user-id-00001');"
 
-      # Przegladarki sa wbudowane w obraz mcr.microsoft.com/playwright -> brak kroku
-      # `playwright install` (pobranie systematycznie wisialo i zjadalo timeout joba).
+      - run: pnpm exec playwright install --with-deps chromium
 
       - run: pnpm build:ci
 
@@ -148,7 +123,6 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [e2e-smoke]
     runs-on: ubuntu-latest
-    container: mcr.microsoft.com/playwright:v1.58.2-noble
     timeout-minutes: 35
     services:
       postgres:
@@ -165,9 +139,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     env:
-      # Kontener joba lezy w tej samej sieci Dockera co usluga `postgres`,
-      # ktora jest osiagalna pod nazwa uslugi (`postgres`), nie pod `localhost`.
-      POSTGRES_URL: postgresql://dev_user:dev_password@postgres:5432/pos_dev
+      POSTGRES_URL: postgresql://dev_user:dev_password@localhost:5432/pos_dev
       BETTER_AUTH_SECRET: ci-test-secret-minimum-32-characters-long
       BETTER_AUTH_URL: http://localhost:3000
       NEXT_PUBLIC_APP_URL: http://localhost:3000
@@ -190,8 +162,7 @@ jobs:
       - name: Seed test data
         run: pnpm db:seed:test
 
-      # Przegladarki sa wbudowane w obraz mcr.microsoft.com/playwright -> brak kroku
-      # `playwright install` (pobranie systematycznie wisialo i zjadalo timeout joba).
+      - run: pnpm exec playwright install --with-deps chromium
 
       - run: pnpm build:ci
 

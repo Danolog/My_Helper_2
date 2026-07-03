@@ -2,8 +2,8 @@
 
 import { Tag, Plus } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
-import type { Promotion, Service } from "../_types";
 import { PromotionCard } from "./promotion-card";
+import type { Promotion, Service } from "../_types";
 
 interface PromotionListProps {
   promotionsList: Promotion[];

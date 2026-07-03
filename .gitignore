@@ -70,3 +70,4 @@ claude-progress.txt
 test-results/
 playwright-report/
 tests/.auth/
+.env.cron-secret.local

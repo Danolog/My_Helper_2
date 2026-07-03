@@ -11,6 +11,8 @@ import {
   Menu,
 } from "lucide-react";
 import { SidebarNav } from "@/components/dashboard/dashboard-sidebar";
+import { useModules } from "@/components/dashboard/modules-provider";
+import { useSalonRole } from "@/components/dashboard/role-provider";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -18,6 +20,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { moduleForRoute } from "@/lib/features";
+import { isRouteAllowedForRole } from "@/lib/role-access";
 import { cn } from "@/lib/utils";
 
 interface BottomNavItem {
@@ -65,6 +69,13 @@ const BOTTOM_NAV_ITEMS: BottomNavItem[] = [
 export function DashboardBottomNav() {
   const pathname = usePathname();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const modules = useModules();
+  const role = useSalonRole();
+  const visibleItems = BOTTOM_NAV_ITEMS.filter((item) => {
+    if (!isRouteAllowedForRole(item.href, role)) return false;
+    const moduleKey = moduleForRoute(item.href);
+    return moduleKey === null || modules[moduleKey];
+  });
 
   return (
     <>
@@ -79,7 +90,7 @@ export function DashboardBottomNav() {
         role="navigation"
         aria-label="Szybka nawigacja"
       >
-        {BOTTOM_NAV_ITEMS.map((item) => {
+        {visibleItems.map((item) => {
           const active = item.isActive(pathname);
           const Icon = item.icon;
 

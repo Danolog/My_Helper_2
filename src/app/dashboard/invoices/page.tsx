@@ -1,11 +1,20 @@
 "use client";
 
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { InvoicesFilters } from "./_components/invoices-filters";
 import { InvoicesHeader } from "./_components/invoices-header";
 import { InvoicesTable } from "./_components/invoices-table";
 import { useInvoicesData } from "./_hooks/use-invoices-data";
 
 export default function InvoicesPage() {
+  return (
+    <ModuleGate module="invoices">
+      <InvoicesPageInner />
+    </ModuleGate>
+  );
+}
+
+function InvoicesPageInner() {
   const {
     session,
     isPending,

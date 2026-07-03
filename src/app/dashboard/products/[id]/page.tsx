@@ -2,11 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useSession } from "@/lib/auth-client";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   Lock,
   ArrowLeft,
@@ -20,6 +15,12 @@ import {
   TrendingDown,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { useSession } from "@/lib/auth-client";
 
 interface ProductDetail {
   id: string;
@@ -86,6 +87,14 @@ function getStatusVariant(
 }
 
 export default function ProductDetailPage() {
+  return (
+    <ModuleGate module="products">
+      <ProductDetailPageInner />
+    </ModuleGate>
+  );
+}
+
+function ProductDetailPageInner() {
   const params = useParams();
   const router = useRouter();
   const productId = params.id as string;

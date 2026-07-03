@@ -3,11 +3,11 @@
 import { useState } from "react";
 import { FileText, Pencil, Save, X, Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { ReadAloudButton } from "@/components/ui/read-aloud-button";
+import { Textarea } from "@/components/ui/textarea";
 import { mutationFetch } from "@/lib/api-client";
 import type { AppointmentDetail } from "./types";
 

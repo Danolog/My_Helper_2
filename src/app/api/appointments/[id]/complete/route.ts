@@ -1,9 +1,15 @@
 import { NextResponse } from "next/server";
-// `db` zostaje WYŁĄCZNIE jako źródło typu DbExecutor (Parameters<db.transaction>);
-// żadna operacja danych nie używa już surowego `db` — wszystko biegnie przez
-// forSalon(salonId).raw, który daje transakcję z kontekstem RLS.
-// eslint-disable-next-line no-restricted-imports -- db tylko jako źródło typu DbExecutor; dane przez forSalon
+import { eq, and, like, sql } from "drizzle-orm";
+import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/route";
+import { validateBody, completeAppointmentSchema } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
+// ADR-001 R2b grupa B: transakcja domykająca wizytę czyta `salons` (polityka RLS po
+// owner_id) — czeka na akcesor forOwner; brama zasobu [id] idzie przez forSalon.
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { getSalonContext } from "@/lib/salon-context";
 import {
   appointments,
   treatmentHistory,
@@ -19,14 +25,7 @@ import {
   loyaltyTransactions,
   salons,
 } from "@/lib/schema";
-import { eq, and, like, sql } from "drizzle-orm";
-import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/route";
-import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
-import { validateBody, completeAppointmentSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { forSalon } from "@/lib/server/repository";
-import { logger } from "@/lib/logger";
 
 /**
  * Database query executor — works for both the top-level `db` instance
@@ -111,13 +110,16 @@ export async function POST(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): owner/receptionist domykają dowolną wizytę salonu,
+    // employee wyłącznie własną (sprawdzenie po pobraniu wizyty niżej).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { id } = await params;
     const body = await request.json();
@@ -131,21 +133,25 @@ export async function POST(
     const { recipe, techniques, notes, commissionPercentage } = body;
 
     // Fetch the appointment with service info, scoped to the caller's salon
-    // (join przez raw(tx) z jawnym eq(salonId) — cudza/nieistniejąca wizyta = 404).
     const result = await forSalon(salonId).raw((tx) =>
       tx
-        .select({
-          appointment: appointments,
-          service: services,
-        })
-        .from(appointments)
-        .leftJoin(services, eq(appointments.serviceId, services.id))
-        .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-        .limit(1)
+      .select({
+        appointment: appointments,
+        service: services,
+      })
+      .from(appointments)
+      .leftJoin(services, eq(appointments.serviceId, services.id))
+      .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+      .limit(1)
     );
 
     const row = result[0];
-    if (!row) {
+    // Employee: cudza wizyta = 404 (nie 403 — nie zdradzamy istnienia).
+    if (
+      !row ||
+      (ctx.role === "employee" &&
+        (!ctx.employeeId || row.appointment.employeeId !== ctx.employeeId))
+    ) {
       return NextResponse.json(
         { success: false, error: "Appointment not found" },
         { status: 404 }
@@ -172,13 +178,7 @@ export async function POST(
     // All mutating operations are wrapped in a single transaction so that
     // a failure at any step (e.g. stock deduction, commission insert) rolls
     // back every preceding write, keeping the database consistent.
-    // forSalon(salonId).raw daje JEDNĄ transakcję z kontekstem RLS — atomowość
-    // wszystkich operacji zachowana, a każdy zapis biegnie pod rolą app (RLS
-    // odcina cudze wiersze). Tabele bez salonId (treatmentHistory,
-    // employeeCommissions, employeeServicePrices, productUsage, loyaltyTransactions)
-    // są wiązane przez appointmentId/employeeId/loyaltyId tej, już zweryfikowanej
-    // jako własna, wizyty.
-    const txResult = await forSalon(salonId).raw(async (tx) => {
+    const txResult = await db.transaction(async (tx) => {
       // 1. Save or update treatment record
       const [existingTreatment] = await tx
         .select()

@@ -73,21 +73,13 @@ const config = [
   {
     // ADR-001 sekcja 2.3 — zakaz surowego `db` w trasach API poza warstwą repo.
     // Trasa importuje forSalon(salonId) z @/lib/server/repository (wymusza
-    // izolację salonu), nie surowy `db`.
-    //
-    // POZIOM `error` (R3, domknięcie strukturalne). Refaktor R2 jest KOMPLETNY:
-    // wszystkie trasy owner-scoped migrowane na forSalon. Pozostałe importy `db`
-    // w src/app/api/** to ZADEKLAROWANE WYJĄTKI — każdy opatrzony
-    // `// eslint-disable-next-line no-restricted-imports` z powodem (kontekst
-    // klienta / publiczny katalog / webhook / cron / seed / per-user / globalny
-    // katalog planów / lookup salons.ownerId). Nowy nieoznaczony import `db`
-    // łamie `pnpm lint` → quality-gate CI, co jest celem bramki: każdy nowy
-    // surowy `db` wymaga świadomej decyzji + adnotacji. Plan przejścia: ADR-001
-    // sekcja 5/7 (R2 paczkami → R3 flip na `error`).
+    // izolację salonu), nie surowy `db`. Faza R1: poziom `warn` — 53 trasy
+    // jeszcze go łamią (migracja w R2). R3 podniesie do `error` (łamie build CI),
+    // gdy 0 tras importuje `db` poza zadeklarowanymi wyjątkami systemowymi.
     files: ["src/app/api/**/*.ts"],
     ignores: ["src/app/api/**/*.test.ts"],
     rules: {
-      "no-restricted-imports": ["error", {
+      "no-restricted-imports": ["warn", {
         paths: [{
           name: "@/lib/db",
           importNames: ["db"],

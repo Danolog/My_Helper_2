@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { serviceCategories, services } from "@/lib/schema";
 import { eq, and, count } from "drizzle-orm";
+import { validateBody, updateServiceCategorySchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, updateServiceCategorySchema } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { serviceCategories, services } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/service-categories/[id] - Get a single category
 export async function GET(
   _request: Request,

@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard,
   Calendar,
@@ -22,6 +21,8 @@ import {
   Settings,
   Menu,
 } from "lucide-react";
+import { useModules } from "@/components/dashboard/modules-provider";
+import { useSalonRole } from "@/components/dashboard/role-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -32,7 +33,10 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { moduleForRoute } from "@/lib/features";
+import { isRouteAllowedForRole } from "@/lib/role-access";
 import { cn } from "@/lib/utils";
+import type { LucideIcon } from "lucide-react";
 
 interface NavItem {
   label: string;
@@ -208,6 +212,17 @@ export function SidebarNav({
   pathname: string;
   onClick?: () => void;
 }) {
+  const modules = useModules();
+  const role = useSalonRole();
+  const visibleGroups = NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter((item) => {
+      if (!isRouteAllowedForRole(item.href, role)) return false;
+      const moduleKey = moduleForRoute(item.href);
+      return moduleKey === null || modules[moduleKey];
+    }),
+  })).filter((group) => group.items.length > 0);
+
   return (
     <nav
       className="flex flex-col gap-1 h-full"
@@ -215,7 +230,7 @@ export function SidebarNav({
       aria-label="Panel nawigacyjny"
     >
       <div className="flex-1">
-        {NAV_GROUPS.map((group, groupIndex) => (
+        {visibleGroups.map((group, groupIndex) => (
           <div key={group.title} className={cn(groupIndex > 0 && "mt-4")}>
             <h3 className="px-3 mb-1 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/40">
               {group.title}
@@ -234,10 +249,12 @@ export function SidebarNav({
         ))}
       </div>
 
-      {/* Settings pinned at the bottom */}
-      <div className="mt-4 pt-4 border-t border-sidebar-border">
-        <NavLink item={SETTINGS_ITEM} pathname={pathname} onClick={onClick} />
-      </div>
+      {/* Settings pinned at the bottom (tylko owner) */}
+      {isRouteAllowedForRole(SETTINGS_ITEM.href, role) && (
+        <div className="mt-4 pt-4 border-t border-sidebar-border">
+          <NavLink item={SETTINGS_ITEM} pathname={pathname} onClick={onClick} />
+        </div>
+      )}
     </nav>
   );
 }

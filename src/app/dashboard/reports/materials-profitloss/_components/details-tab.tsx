@@ -2,8 +2,8 @@
 
 import { Package } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { DetailRecord, ReportTotals } from "../_types";
 import { formatDate } from "../_types";
+import type { DetailRecord, ReportTotals } from "../_types";
 
 interface DetailsTabProps {
   details: DetailRecord[];

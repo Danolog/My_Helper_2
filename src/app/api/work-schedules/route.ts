@@ -1,27 +1,22 @@
 import { NextResponse } from "next/server";
-import { workSchedules, employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
+import { createWorkScheduleSchema } from "@/lib/api-validation";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { validateBody, createWorkScheduleSchema } from "@/lib/api-validation";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { apiRateLimit } from "@/lib/rate-limit";
+import { getSalonContext } from "@/lib/salon-context";
+import { workSchedules, employees } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // GET /api/work-schedules?employeeId=xxx
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WorkSchedules API] GET",
+    errorMessage: "Failed to fetch work schedules",
+  },
+  async ({ request }) => {
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
 
@@ -32,16 +27,39 @@ export async function GET(request: Request) {
       );
     }
 
+    // Faza 3 (role): odczyt grafików dla wszystkich ról (podgląd kalendarza);
+    // zapis (POST) zostaje na getUserSalonId — owner-only.
+    const ctx = await getSalonContext();
+    if (!ctx) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+    const salonId = ctx.salonId;
+
     logger.info("[WorkSchedules API] GET for employee", { employeeId });
 
-    // work_schedules nie ma kolumny salon_id — izolacja przez RLS pośrednią
-    // (polityka EXISTS na employees.salon_id, migracja 0005). forSalon ustawia
-    // kontekst app.current_salon_id, więc baza odcina harmonogramy cudzych salonów.
+    // workSchedules nie ma kolumny salonId — scope przez join z employees
+    // (tabela nadrzędna) i jawny eq(employees.salonId, salonId).
     const schedules = await forSalon(salonId).raw((tx) =>
       tx
-        .select()
+        .select({
+          id: workSchedules.id,
+          employeeId: workSchedules.employeeId,
+          dayOfWeek: workSchedules.dayOfWeek,
+          startTime: workSchedules.startTime,
+          endTime: workSchedules.endTime,
+          createdAt: workSchedules.createdAt,
+        })
         .from(workSchedules)
-        .where(eq(workSchedules.employeeId, employeeId))
+        .innerJoin(employees, eq(workSchedules.employeeId, employees.id))
+        .where(
+          and(
+            eq(workSchedules.employeeId, employeeId),
+            eq(employees.salonId, salonId)
+          )
+        )
         .orderBy(workSchedules.dayOfWeek)
     );
 
@@ -52,30 +70,29 @@ export async function GET(request: Request) {
       data: schedules,
       count: schedules.length,
     });
-  } catch (error) {
-    logger.error("[WorkSchedules API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch work schedules" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/work-schedules - Create or update work schedule for an employee
 // Accepts a full week schedule: { employeeId, schedules: [{ dayOfWeek, startTime, endTime, isDayOff }] }
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    schema: createWorkScheduleSchema as z.ZodType<{
+      employeeId: string;
+      schedules: {
+        dayOfWeek: number;
+        startTime: string;
+        endTime: string;
+        isDayOff?: boolean;
+      }[];
+    }>,
+    logLabel: "[WorkSchedules API] POST",
+    errorMessage: "Failed to save work schedule",
+  },
+  async ({ body }) => {
+    const { employeeId, schedules } = body;
 
     const salonId = await getUserSalonId();
     if (!salonId) {
@@ -84,13 +101,6 @@ export async function POST(request: Request) {
         { status: 404 }
       );
     }
-
-    const body = await request.json();
-    const validationError = validateBody(createWorkScheduleSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
-    const { employeeId, schedules } = body;
 
     // Insert new schedules (skip days marked as day off)
     const schedulesToInsert = schedules
@@ -102,23 +112,19 @@ export async function POST(request: Request) {
         endTime: s.endTime,
       }));
 
-    logger.info(`[WorkSchedules API] Saving schedule for employee: ${employeeId}`);
-
-    // Multi-step (weryfikacja pracownika + delete + insert) w jednej transakcji
-    // forSalon — atomowość zachowana. employees/work_schedules pod RLS (bezpośredni
-    // i pośredni salon_id) odcinają cudze wiersze nawet bez jawnego eq(salonId)
-    // na work_schedules (ta tabela kolumny salon_id nie ma).
-    const txResult = await forSalon(salonId).raw(async (tx) => {
-      // Verify employee exists (RLS zawęża do pracowników tego salonu)
+    // workSchedules nie ma kolumny salonId — najpierw weryfikacja, że pracownik
+    // należy do salonu (jawny eq(employees.salonId, salonId) na tabeli
+    // nadrzędnej), potem delete+insert w tej samej transakcji RLS.
+    const insertedSchedules = await forSalon(salonId).raw(async (tx) => {
       const [employee] = await tx
         .select()
         .from(employees)
         .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
         .limit(1);
 
-      if (!employee) {
-        return { notFound: true as const, inserted: [] as typeof workSchedules.$inferSelect[] };
-      }
+      if (!employee) return null;
+
+      logger.info(`[WorkSchedules API] Saving schedule for employee: ${employeeId}`);
 
       // Delete existing schedules for this employee
       await tx
@@ -132,17 +138,16 @@ export async function POST(request: Request) {
           .values(schedulesToInsert)
           .returning();
       }
-      return { notFound: false as const, inserted };
+      return inserted;
     });
 
-    if (txResult.notFound) {
+    if (insertedSchedules === null) {
       return NextResponse.json(
         { success: false, error: "Employee not found" },
         { status: 404 }
       );
     }
 
-    const insertedSchedules = txResult.inserted;
     logger.info(`[WorkSchedules API] Saved ${insertedSchedules.length} schedule entries`);
 
     return NextResponse.json({
@@ -151,11 +156,5 @@ export async function POST(request: Request) {
       count: insertedSchedules.length,
       message: `Schedule saved with ${insertedSchedules.length} working days`,
     });
-  } catch (error) {
-    logger.error("[WorkSchedules API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to save work schedule" },
-      { status: 500 }
-    );
   }
-}
+);

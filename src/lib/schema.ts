@@ -229,7 +229,8 @@ export const appointments = pgTable(
       .notNull()
       .references(() => employees.id, { onDelete: "cascade" }),
     serviceId: uuid("service_id").references(() => services.id, { onDelete: "set null" }),
-    variantId: uuid("variant_id"), // References service_variants.id
+    // set null (nie cascade): usunięcie wariantu nie może kasować historii wizyt
+    variantId: uuid("variant_id").references(() => serviceVariants.id, { onDelete: "set null" }),
     bookedByUserId: text("booked_by_user_id").references(() => user.id, { onDelete: "set null" }), // User account who booked (for client portal)
     startTime: timestamp("start_time").notNull(),
     endTime: timestamp("end_time").notNull(),
@@ -264,6 +265,9 @@ export const appointments = pgTable(
     // FK indexes (IDX-01, IDX-02 from PERFORMANCE_REPORT.md)
     index("appointments_booked_by_user_id_idx").on(table.bookedByUserId),
     index("appointments_service_id_idx").on(table.serviceId),
+    index("appointments_variant_id_idx").on(table.variantId),
+    // Overlap detection (kolizje wizyt) filtruje po startTime ORAZ endTime
+    index("appointments_end_time_idx").on(table.endTime),
   ]
 );
 

@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
-import { employees } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, commissionRateSchema } from "@/lib/api-validation";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
 // PUT /api/employees/commission-rate - Update employee's default commission rate
-export async function PUT(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const PUT = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Commission Rate API] PUT",
+    errorMessage: "Failed to update commission rate",
+  },
+  async ({ request }) => {
+    // Tenant isolation (ADR-001): derive the salon from the session — a
+    // foreign-salon employee is invisible (scoped lookup -> 404).
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -21,6 +23,8 @@ export async function PUT(request: Request) {
       );
     }
 
+    // Walidacja pozostaje w handlerze (nie w opcji schema): oryginalna
+    // kolejnosc krokow to salon -> walidacja, a wrapper walidowalby wczesniej.
     const body = await request.json();
     const validationError = validateBody(commissionRateSchema, body);
     if (validationError) {
@@ -30,37 +34,23 @@ export async function PUT(request: Request) {
 
     const rate = parseFloat(commissionRate);
 
-    // Weryfikacja istnienia + update prowizji w jednej transakcji forSalon.
-    // employees pod RLS (bezpośredni salon_id, jawny eq jako defense in depth) —
-    // odcina pracowników cudzych salonów (naprawa istniejącego braku filtra salonu).
-    const txResult = await forSalon(salonId).raw(async (tx) => {
-      const [employee] = await tx
-        .select()
-        .from(employees)
-        .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
-        .limit(1);
+    const repo = forSalon(salonId);
 
-      if (!employee) {
-        return { notFound: true as const, updated: undefined as typeof employees.$inferSelect | undefined };
-      }
+    // Check if employee exists (in the caller's salon)
+    const employee = await repo.findOne(employees, employeeId);
 
-      const rows = await tx
-        .update(employees)
-        .set({ commissionRate: rate.toFixed(2) })
-        .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
-        .returning();
-
-      return { notFound: false as const, updated: rows[0] };
-    });
-
-    if (txResult.notFound) {
+    if (!employee) {
       return NextResponse.json(
         { success: false, error: "Employee not found" },
         { status: 404 }
       );
     }
 
-    const updated = txResult.updated;
+    // Update the commission rate (scoped to the salon)
+    const updated = await repo.updateOwned(employees, employeeId, {
+      commissionRate: rate.toFixed(2),
+    });
+
     if (!updated) {
       return NextResponse.json(
         { success: false, error: "Failed to update employee" },
@@ -78,21 +68,18 @@ export async function PUT(request: Request) {
       },
       message: `Prowizja dla ${updated.firstName} ${updated.lastName} ustawiona na ${rate}%`,
     });
-  } catch (error) {
-    logger.error("[Commission Rate API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to update commission rate" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // GET /api/employees/commission-rate - Get all employees with their commission rates
-export async function GET() {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Commission Rate API] GET",
+    errorMessage: "Failed to fetch commission rates",
+  },
+  async () => {
+    // Tenant isolation (ADR-001): list only the caller's salon employees.
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -101,8 +88,6 @@ export async function GET() {
       );
     }
 
-    // employees pod RLS — dopisany jawny eq(employees.salonId) (defense in depth
-    // + naprawa: oryginał listował WSZYSTKICH aktywnych pracowników bez filtra salonu).
     const result = await forSalon(salonId).raw((tx) =>
       tx
         .select({
@@ -123,11 +108,5 @@ export async function GET() {
       success: true,
       data: result,
     });
-  } catch (error) {
-    logger.error("[Commission Rate API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch commission rates" },
-      { status: 500 }
-    );
   }
-}
+);

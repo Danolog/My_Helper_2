@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { invoices, clients } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { sendInvoiceEmailSchema, validateBody } from "@/lib/api-validation";
-import { forSalon } from "@/lib/server/repository";
-
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { invoices, clients } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * POST /api/invoices/[id]/send-email
  *
@@ -68,8 +67,7 @@ export async function POST(
       // No body or invalid JSON - that's OK
     }
 
-    // Fetch invoice with client data — przez forSalon (kontekst RLS); jawny
-    // eq(invoices.salonId, salonId) zachowany w where (defense in depth).
+    // Fetch invoice with client data
     const rows = await forSalon(salonId).raw((tx) =>
       tx
       .select({
@@ -148,7 +146,7 @@ export async function POST(
     const emailBody = buildEmailBody(invoice, invoiceType, clientDisplayName);
 
     // In development mode, log to console instead of sending
-    // eslint-disable-next-line no-console
+     
     logger.info(`
 ${"=".repeat(70)}
 INVOICE EMAIL SENT
@@ -162,19 +160,12 @@ Attachment: ${invoice.invoiceNumber.replace(/\//g, "_")}.pdf (would be attached 
 ${"=".repeat(70)}
 `);
 
-    // Update invoice with email sent timestamp — przez forSalon (kontekst RLS).
-    // Dopisany jawny eq(invoices.salonId, salonId) (defense in depth — oryginał
-    // filtrował tylko po id; własność weryfikował wcześniejszy select).
+    // Update invoice with email sent timestamp
     const now = new Date();
-    await forSalon(salonId).raw((tx) =>
-      tx
-        .update(invoices)
-        .set({
-          emailSentAt: now,
-          emailSentTo: recipientEmail,
-        })
-        .where(and(eq(invoices.id, id), eq(invoices.salonId, salonId)))
-    );
+    await forSalon(salonId).updateOwned(invoices, id, {
+      emailSentAt: now,
+      emailSentTo: recipientEmail,
+    });
 
     return NextResponse.json({
       success: true,
@@ -206,7 +197,7 @@ function buildEmailBody(
     netAmount: string | null;
     issuedAt: Date;
     paymentMethod: string | null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     invoiceDataJson: any;
   },
   invoiceType: string,

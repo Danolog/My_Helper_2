@@ -8,16 +8,16 @@ import {
   Loader2,
   XCircle,
 } from "lucide-react";
+import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
-import { OverviewTab } from "./_components/overview-tab";
+import { AskTab } from "./_components/ask-tab";
 import { DetailsTab } from "./_components/details-tab";
 import { InsightsTab } from "./_components/insights-tab";
-import { AskTab } from "./_components/ask-tab";
-import { useTrendsData } from "./_hooks/use-trends-data";
+import { OverviewTab } from "./_components/overview-tab";
 import { useTrendsChat } from "./_hooks/use-trends-chat";
+import { useTrendsData } from "./_hooks/use-trends-data";
 
 // ────────────────────────────────────────────────────────────
 // Page header — shared between loading, error, and data states

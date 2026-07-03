@@ -2,8 +2,8 @@
 
 import { Package } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
-import type { Product } from "../_types";
 import { ProductCard } from "./product-card";
+import type { Product } from "../_types";
 
 interface ProductListProps {
   filteredProducts: Product[];

@@ -26,8 +26,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import { getStatusLabel, getStatusVariant, formatDuration } from "./utils";
 import { mutationFetch } from "@/lib/api-client";
+import { getStatusLabel, getStatusVariant, formatDuration } from "./utils";
 import type { AppointmentData } from "./types";
 
 interface ClientHistoryTabProps {

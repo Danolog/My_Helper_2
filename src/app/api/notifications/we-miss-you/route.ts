@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
-// ŚCIEŻKA SYSTEMOWA (cron): uwierzytelniana przez requireCronSecret, BEZ
-// zalogowanego właściciela. salonId pochodzi z query/body. Zgodnie z ADR-001
-// (repository.ts:30-34) crony NIE przechodzą przez forSalon — używają surowego
-// `db`. Trasa celowo POZOSTAJE na `db`.
-// eslint-disable-next-line no-restricted-imports -- cron (requireCronSecret) — owner-bypass RLS, salonId z query/body
-import { db } from "@/lib/db";
-import { clients, appointments, notifications, salons } from "@/lib/schema";
 import { eq, sql, and, lt, isNull, or, inArray } from "drizzle-orm";
-import { requireCronSecret } from "@/lib/auth-middleware";
 import { isValidUuid, validateBody, weMissYouNotificationSchema } from "@/lib/api-validation";
-
+import { requireCronSecret } from "@/lib/auth-middleware";
+// ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { clients, appointments, notifications, salons } from "@/lib/schema";
 interface WeMissYouSettings {
   enabled: boolean;
   inactiveDays: number;

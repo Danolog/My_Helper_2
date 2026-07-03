@@ -8,23 +8,21 @@ import {
   Clock,
   CreditCard,
   Loader2,
-  Phone,
-  Smartphone,
   UserPlus,
   Wallet,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import type { AssignedEmployee, ServiceItem, ServiceVariant } from "./types";
 import { formatDuration, formatDateDisplay, calcEndTime } from "./types";
+import type { AssignedEmployee, ServiceItem, ServiceVariant } from "./types";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -297,10 +295,14 @@ export const BookingSummary = forwardRef<HTMLDivElement, BookingSummaryProps>(
                       Zadatek jest wymagany do potwierdzenia rezerwacji. Pozostala kwota platna w salonie.
                     </p>
 
-                    {/* Payment method selection */}
+                    {/* Payment method info.
+                        The mock "BLIK P2P" option (payment request to a phone
+                        number) was removed — BLIK and Przelewy24 are available
+                        as payment methods inside Stripe Checkout, so a single
+                        online payment entry is enough. */}
                     <div className="space-y-2">
                       <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Metoda platnosci:</p>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 gap-2">
                         <div
                           className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors ${
                             payment.selectedPaymentMethod === "stripe"
@@ -315,65 +317,14 @@ export const BookingSummary = forwardRef<HTMLDivElement, BookingSummaryProps>(
                         >
                           <CreditCard className="w-5 h-5 text-primary" />
                           <div>
-                            <p className="text-sm font-medium">Karta</p>
-                            <p className="text-xs text-muted-foreground">Visa, Mastercard</p>
+                            <p className="text-sm font-medium">Platnosc online</p>
+                            <p className="text-xs text-muted-foreground">Karta, BLIK, Przelewy24</p>
                           </div>
                           {payment.selectedPaymentMethod === "stripe" && (
                             <Check className="w-4 h-4 text-primary ml-auto" />
                           )}
                         </div>
-                        <div
-                          className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors ${
-                            payment.selectedPaymentMethod === "blik"
-                              ? "bg-primary/10 border-primary"
-                              : "bg-white dark:bg-background hover:bg-muted/50"
-                          }`}
-                          onClick={() => payment.onPaymentMethodChange("blik")}
-                          data-testid="payment-method-blik"
-                        >
-                          <Smartphone className="w-5 h-5 text-pink-600" />
-                          <div>
-                            <p className="text-sm font-medium">BLIK P2P</p>
-                            <p className="text-xs text-muted-foreground">Platnosc na telefon</p>
-                          </div>
-                          {payment.selectedPaymentMethod === "blik" && (
-                            <Check className="w-4 h-4 text-primary ml-auto" />
-                          )}
-                        </div>
                       </div>
-
-                      {/* Blik P2P phone number input */}
-                      {payment.selectedPaymentMethod === "blik" && (
-                        <div className="mt-3 p-3 bg-pink-50 dark:bg-pink-900/20 rounded-lg border border-pink-200 dark:border-pink-800" data-testid="blik-phone-section">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Phone className="w-4 h-4 text-pink-600" />
-                            <p className="text-sm font-medium text-pink-800 dark:text-pink-300">Numer telefonu do platnosci BLIK</p>
-                          </div>
-                          <p className="text-xs text-pink-600 dark:text-pink-400 mb-2">
-                            Podaj numer telefonu, na ktory zostanie wyslane zadanie platnosci BLIK P2P.
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-pink-700 dark:text-pink-300 whitespace-nowrap">+48</span>
-                            <Input
-                              type="tel"
-                              placeholder="123 456 789"
-                              value={payment.blikPhoneNumber}
-                              onChange={(e) => {
-                                payment.onBlikPhoneChange(e.target.value);
-                                payment.onBlikPhoneErrorClear();
-                              }}
-                              className={`flex-1 ${payment.blikPhoneError ? "border-red-500" : ""}`}
-                              maxLength={15}
-                              data-testid="blik-phone-input"
-                            />
-                          </div>
-                          {payment.blikPhoneError && (
-                            <p className="text-xs text-red-500 mt-1" data-testid="blik-phone-error">
-                              {payment.blikPhoneError}
-                            </p>
-                          )}
-                        </div>
-                      )}
                     </div>
                   </div>
                 </>

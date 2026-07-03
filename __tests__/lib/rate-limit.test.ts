@@ -4,8 +4,18 @@ import {
   apiRateLimit,
   authRateLimit,
   strictRateLimit,
+  aiRateLimit,
   getClientIp,
 } from "@/lib/rate-limit";
+
+vi.mock("@/lib/logger", () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
 
 describe("createRateLimit", () => {
   beforeEach(() => {
@@ -180,6 +190,179 @@ describe("pre-configured limiters", () => {
       expect(strictRateLimit.check("test-ip").success).toBe(true);
     }
     expect(strictRateLimit.check("test-ip").success).toBe(false);
+  });
+
+  it("aiRateLimit should allow 30 requests per minute", () => {
+    aiRateLimit.reset();
+    for (let i = 0; i < 30; i++) {
+      expect(aiRateLimit.check("salon:abc").success).toBe(true);
+    }
+    expect(aiRateLimit.check("salon:abc").success).toBe(false);
+  });
+});
+
+describe("checkAsync (Upstash adapter)", () => {
+  const UPSTASH_URL = "https://test-redis.upstash.io";
+  const UPSTASH_TOKEN = "test-token";
+
+  /** Build a fetch mock returning an Upstash pipeline response. */
+  function mockUpstashFetch(
+    items: Array<{ result?: unknown; error?: string }>,
+    ok = true,
+    status = 200,
+  ) {
+    return vi.fn().mockResolvedValue({
+      ok,
+      status,
+      json: async () => items,
+    });
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("should fall back to in-memory when Upstash env is not configured", async () => {
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", "");
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", "");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const limiter = createRateLimit({ interval: 60_000, limit: 2 });
+
+    const r1 = await limiter.checkAsync("user-1");
+    expect(r1.success).toBe(true);
+    expect(r1.remaining).toBe(1);
+
+    await limiter.checkAsync("user-1");
+    const r3 = await limiter.checkAsync("user-1");
+    expect(r3.success).toBe(false);
+
+    // Redis must not have been touched
+    expect(fetchMock).not.toHaveBeenCalled();
+    // The in-memory cache tracked the key
+    expect(limiter.size).toBe(1);
+  });
+
+  it("should use the Upstash pipeline when env is configured", async () => {
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", UPSTASH_URL);
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", UPSTASH_TOKEN);
+    const fetchMock = mockUpstashFetch([
+      { result: 1 },
+      { result: 1 },
+      { result: 60_000 },
+    ]);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const limiter = createRateLimit({
+      interval: 60_000,
+      limit: 30,
+      prefix: "ai",
+    });
+
+    const result = await limiter.checkAsync("salon:abc");
+    expect(result.success).toBe(true);
+    expect(result.remaining).toBe(29);
+    expect(result.reset).toBe(60_000);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [
+      string,
+      { method: string; headers: Record<string, string>; body: string },
+    ];
+    expect(url).toBe(`${UPSTASH_URL}/pipeline`);
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe(`Bearer ${UPSTASH_TOKEN}`);
+
+    const body = JSON.parse(init.body);
+    expect(body).toEqual([
+      ["INCR", "rl:ai:salon:abc"],
+      ["PEXPIRE", "rl:ai:salon:abc", "60000", "NX"],
+      ["PTTL", "rl:ai:salon:abc"],
+    ]);
+
+    // The in-memory cache must not be used on the Redis path
+    expect(limiter.size).toBe(0);
+  });
+
+  it("should reject when the Redis counter exceeds the limit", async () => {
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", UPSTASH_URL);
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", UPSTASH_TOKEN);
+    vi.stubGlobal(
+      "fetch",
+      mockUpstashFetch([{ result: 31 }, { result: 0 }, { result: 42_000 }]),
+    );
+
+    const limiter = createRateLimit({ interval: 60_000, limit: 30 });
+
+    const result = await limiter.checkAsync("salon:abc");
+    expect(result.success).toBe(false);
+    expect(result.remaining).toBe(0);
+    expect(result.reset).toBe(42_000);
+  });
+
+  it("should treat missing TTL (-1) as a fresh window", async () => {
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", UPSTASH_URL);
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", UPSTASH_TOKEN);
+    vi.stubGlobal(
+      "fetch",
+      mockUpstashFetch([{ result: 1 }, { result: 1 }, { result: -1 }]),
+    );
+
+    const limiter = createRateLimit({ interval: 60_000, limit: 5 });
+
+    const result = await limiter.checkAsync("user-1");
+    expect(result.success).toBe(true);
+    expect(result.reset).toBe(60_000);
+  });
+
+  it("should fall back to in-memory when the fetch call fails", async () => {
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", UPSTASH_URL);
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", UPSTASH_TOKEN);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("network down")),
+    );
+
+    const limiter = createRateLimit({ interval: 60_000, limit: 1 });
+
+    const r1 = await limiter.checkAsync("user-1");
+    expect(r1.success).toBe(true);
+
+    const r2 = await limiter.checkAsync("user-1");
+    expect(r2.success).toBe(false);
+
+    // Both requests were served by the in-memory fallback
+    expect(limiter.size).toBe(1);
+  });
+
+  it("should fall back to in-memory on a non-OK HTTP response", async () => {
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", UPSTASH_URL);
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", UPSTASH_TOKEN);
+    vi.stubGlobal("fetch", mockUpstashFetch([], false, 500));
+
+    const limiter = createRateLimit({ interval: 60_000, limit: 3 });
+
+    const result = await limiter.checkAsync("user-1");
+    expect(result.success).toBe(true);
+    expect(limiter.size).toBe(1);
+  });
+
+  it("should strip trailing slashes from the Upstash URL", async () => {
+    vi.stubEnv("UPSTASH_REDIS_REST_URL", `${UPSTASH_URL}/`);
+    vi.stubEnv("UPSTASH_REDIS_REST_TOKEN", UPSTASH_TOKEN);
+    const fetchMock = mockUpstashFetch([
+      { result: 1 },
+      { result: 1 },
+      { result: 60_000 },
+    ]);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const limiter = createRateLimit({ interval: 60_000, limit: 3 });
+    await limiter.checkAsync("user-1");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${UPSTASH_URL}/pipeline`);
   });
 });
 

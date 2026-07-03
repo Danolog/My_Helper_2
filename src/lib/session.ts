@@ -1,10 +1,9 @@
-import { eq } from "drizzle-orm";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-
+import { and, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { salons } from "@/lib/schema";
+import { employees, salons } from "@/lib/schema";
 
 /**
  * Protected routes that require authentication.
@@ -69,6 +68,70 @@ export async function requireAdmin(): Promise<{
     .limit(1);
 
   return { session, isAdmin: !!salon };
+}
+
+/**
+ * Checks if the current user may access the dashboard (Faza 3 — role
+ * pracownik/recepcja). Like requireAdmin, but ALSO admits an active employee
+ * whose account is linked (employees.userId === user.id AND isActive).
+ *
+ * requireAdmin stays untouched (used elsewhere for owner-only gates).
+ *
+ * @returns Object with session, allowed flag and the resolved salon role
+ *   ("owner" | "receptionist" | "employee" | null)
+ * @throws Redirects to login page if not authenticated
+ */
+export async function requireDashboardAccess(): Promise<{
+  session: Awaited<ReturnType<typeof auth.api.getSession>>;
+  allowed: boolean;
+  role: "owner" | "receptionist" | "employee" | null;
+}> {
+  const session = await auth.api.getSession({ headers: await headers() });
+
+  if (!session) {
+    redirect("/login");
+  }
+
+  // Check user role (same fast path as requireAdmin)
+  const userRole = (session.user as { role?: string }).role;
+  if (userRole === "admin" || userRole === "owner") {
+    return { session, allowed: true, role: "owner" };
+  }
+
+  // Check salon ownership
+  const [salon] = await db
+    .select({ id: salons.id })
+    .from(salons)
+    .where(eq(salons.ownerId, session.user.id))
+    .limit(1);
+
+  if (salon) {
+    return { session, allowed: true, role: "owner" };
+  }
+
+  // Active employee with a linked account
+  const [employee] = await db
+    .select({ role: employees.role })
+    .from(employees)
+    .where(
+      and(eq(employees.userId, session.user.id), eq(employees.isActive, true))
+    )
+    .limit(1);
+
+  if (employee) {
+    return {
+      session,
+      allowed: true,
+      // Uprawnienia właścicielskie daje wyłącznie salons.ownerId (wyżej) —
+      // employees.role mapujemy tylko na "receptionist" | "employee".
+      role:
+        employee.role === "receptionist" || employee.role === "reception"
+          ? "receptionist"
+          : "employee",
+    };
+  }
+
+  return { session, allowed: false, role: null };
 }
 
 /**

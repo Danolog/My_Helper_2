@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Lock, Plus, Ticket } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -16,6 +17,14 @@ const DeletePromotionDialog = dynamic(() => import("./_components/delete-promoti
 const BannerGenerator = dynamic(() => import("@/components/promotions/banner-generator").then((m) => m.BannerGenerator));
 
 export default function PromotionsPage() {
+  return (
+    <ModuleGate module="promotions">
+      <PromotionsPageInner />
+    </ModuleGate>
+  );
+}
+
+function PromotionsPageInner() {
   const {
     session,
     isPending,

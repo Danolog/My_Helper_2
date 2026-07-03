@@ -1,18 +1,11 @@
 import { NextResponse } from "next/server";
-// eslint-disable-next-line no-restricted-imports -- globalny katalog planów (bez salonId), poza RLS
-import { db } from "@/lib/db";
-import { subscriptionPlans } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { PLANS } from "@/lib/constants";
-
+// ADR-001: ścieżka publiczna (globalny cennik, bez tenant) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-
-/**
- * Trasa PUBLICZNA / katalog GLOBALNY — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
- * `subscriptionPlans` to globalny cennik (Basic/Pro), nie dane najemcy — brak kolumny
- * salonId, więc `forSalon` (wymaga salon-scoped tabeli) jest nieaplikowalny. Auto-seed
- * planów to operacja systemowa. Brak danych wrażliwych cross-tenant.
- */
+import { subscriptionPlans } from "@/lib/schema";
 // Subscription plans rarely change — revalidate every hour to reduce DB queries
 export const revalidate = 3600;
 

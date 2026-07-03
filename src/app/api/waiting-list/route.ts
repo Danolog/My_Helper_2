@@ -1,27 +1,26 @@
-import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-// eslint-disable-next-line no-restricted-imports -- lookup salons.ownerId (sesja→salon); operacje przez forSalon
-import { db } from "@/lib/db";
+import { NextResponse } from "next/server";
+import { eq, and, desc, isNull, isNotNull } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
+import { validateBody, createWaitingListSchema } from "@/lib/api-validation";
+import { auth } from "@/lib/auth";
+import { getUserSalon } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   waitingList,
   clients,
   services,
   employees,
-  salons,
 } from "@/lib/schema";
-import { eq, and, desc, isNull, isNotNull } from "drizzle-orm";
-import { auth } from "@/lib/auth";
-import { validateBody, createWaitingListSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { forSalon } from "@/lib/server/repository";
-
-import { logger } from "@/lib/logger";
 // GET /api/waiting-list - List waiting list entries for the salon owner's salon
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WaitingList API] GET",
+    errorMessage: "Nie udalo sie pobrac listy oczekujacych",
+  },
+  async ({ request }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -30,14 +29,8 @@ export async function GET(request: Request) {
       );
     }
 
-    const userId = session.user.id;
-
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -74,8 +67,6 @@ export async function GET(request: Request) {
       conditions.push(eq(waitingList.accepted, false));
     }
 
-    // Join (clients/services/employees) — przez raw(tx) z jawnym
-    // eq(waitingList.salonId) w conditions (defense in depth) plus kontekst RLS.
     const result = await forSalon(salon.id).raw((tx) =>
       tx
         .select({
@@ -121,21 +112,17 @@ export async function GET(request: Request) {
       data: formattedEntries,
       count: formattedEntries.length,
     });
-  } catch (error) {
-    logger.error("[WaitingList API] GET Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac listy oczekujacych" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/waiting-list - Add a client to the waiting list (staff action)
-export async function POST(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WaitingList API] POST",
+    errorMessage: "Nie udalo sie dodac klienta do listy oczekujacych",
+  },
+  async ({ request }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -144,14 +131,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const userId = session.user.id;
-
     // Find the salon owned by the current user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, userId))
-      .limit(1);
+    const salon = await getUserSalon();
 
     if (!salon) {
       return NextResponse.json(
@@ -171,13 +152,7 @@ export async function POST(request: Request) {
     const { clientId, serviceId, preferredEmployeeId, preferredDate } = body;
 
     // Verify the client belongs to this salon
-    const [client] = await forSalon(salon.id).raw((tx) =>
-      tx
-        .select()
-        .from(clients)
-        .where(and(eq(clients.id, clientId), eq(clients.salonId, salon.id)))
-        .limit(1)
-    );
+    const client = await forSalon(salon.id).findOne(clients, clientId);
 
     if (!client) {
       return NextResponse.json(
@@ -188,15 +163,7 @@ export async function POST(request: Request) {
 
     // Validate serviceId if provided
     if (serviceId) {
-      const [service] = await forSalon(salon.id).raw((tx) =>
-        tx
-          .select()
-          .from(services)
-          .where(
-            and(eq(services.id, serviceId), eq(services.salonId, salon.id))
-          )
-          .limit(1)
-      );
+      const service = await forSalon(salon.id).findOne(services, serviceId);
 
       if (!service) {
         return NextResponse.json(
@@ -211,17 +178,9 @@ export async function POST(request: Request) {
 
     // Validate preferredEmployeeId if provided
     if (preferredEmployeeId) {
-      const [employee] = await forSalon(salon.id).raw((tx) =>
-        tx
-          .select()
-          .from(employees)
-          .where(
-            and(
-              eq(employees.id, preferredEmployeeId),
-              eq(employees.salonId, salon.id)
-            )
-          )
-          .limit(1)
+      const employee = await forSalon(salon.id).findOne(
+        employees,
+        preferredEmployeeId
       );
 
       if (!employee) {
@@ -258,14 +217,5 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[WaitingList API] POST Error", { error: error });
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Nie udalo sie dodac klienta do listy oczekujacych",
-      },
-      { status: 500 }
-    );
   }
-}
+);

@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
-// eslint-disable-next-line no-restricted-imports -- cron (requireCronSecret) — owner-bypass RLS, brak sesji
+import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
+import { requireCronSecret } from "@/lib/auth-middleware";
+// ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { sendAppointmentReminder24hPush } from "@/lib/push";
 import {
   appointments,
   clients,
@@ -9,10 +14,6 @@ import {
   salons,
   pushSubscriptions,
 } from "@/lib/schema";
-import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
-import { requireCronSecret } from "@/lib/auth-middleware";
-import { logger } from "@/lib/logger";
-import { sendAppointmentReminder24hPush } from "@/lib/push";
 
 /**
  * POST /api/cron/push-reminders-24h
@@ -245,9 +246,14 @@ export async function POST(request: Request) {
 /**
  * GET /api/cron/push-reminders-24h
  *
- * Returns status information about the 24h push reminder system.
+ * Vercel Cron invokes the path with GET (Authorization: Bearer CRON_SECRET),
+ * so a plain GET triggers the same send as POST. `?status=1` returns status
+ * information instead (monitoring/debugging).
  */
 export async function GET(request: Request) {
+  if (new URL(request.url).searchParams.get("status") !== "1") {
+    return POST(request);
+  }
   try {
     const cronError = await requireCronSecret(request);
     if (cronError) return cronError;

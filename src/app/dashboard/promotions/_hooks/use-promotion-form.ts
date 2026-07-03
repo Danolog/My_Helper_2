@@ -4,8 +4,8 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { mutationFetch } from "@/lib/api-client";
-import type { Promotion } from "../_types";
 import { validateValueField } from "../_types";
+import type { Promotion } from "../_types";
 
 type PromotionFormState = {
   name: string;

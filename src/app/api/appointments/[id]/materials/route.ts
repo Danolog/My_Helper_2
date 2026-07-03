@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { appointmentMaterials, products, appointments } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { validateBody, addAppointmentMaterialSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { appointmentMaterials, products, appointments } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/appointments/[id]/materials - List materials for an appointment
 export async function GET(
   _request: Request,

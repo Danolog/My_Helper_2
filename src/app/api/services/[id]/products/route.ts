@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { serviceProducts, products, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, serviceProductLinkSchema } from "@/lib/api-validation";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
+import { serviceProducts, products, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
 /** Verify the service belongs to the caller's salon; returns true if owned. */
@@ -12,16 +13,14 @@ async function serviceBelongsToSalon(serviceId: string, salonId: string): Promis
   return !!service;
 }
 
-import { logger } from "@/lib/logger";
 // GET /api/services/[id]/products - List products linked to a service (for auto-deduction)
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Service Products API] GET",
+    errorMessage: "Failed to fetch service products",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -30,7 +29,7 @@ export async function GET(
       );
     }
 
-    const { id: serviceId } = await params;
+    const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     if (!(await serviceBelongsToSalon(serviceId, salonId))) {
       return NextResponse.json(
@@ -63,24 +62,17 @@ export async function GET(
       data: result,
       count: result.length,
     });
-  } catch (error) {
-    logger.error("[Service Products API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch service products" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/services/[id]/products - Link a product to a service for auto-deduction
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Service Products API] POST",
+    errorMessage: "Failed to link product to service",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -89,7 +81,8 @@ export async function POST(
       );
     }
 
-    const { id: serviceId } = await params;
+    const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
+    // Walidacja celowo w handlerze (po sprawdzeniu salonu) — jak dotąd.
     const body = await request.json();
     const validationError = validateBody(serviceProductLinkSchema, body);
     if (validationError) {
@@ -168,24 +161,17 @@ export async function POST(
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[Service Products API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to link product to service" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/services/[id]/products - Remove a product link from a service
-export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Service Products API] DELETE",
+    errorMessage: "Failed to remove product link",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -194,7 +180,7 @@ export async function DELETE(
       );
     }
 
-    const { id: serviceId } = await params;
+    const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
     const { searchParams } = new URL(request.url);
     const linkId = searchParams.get("linkId");
 
@@ -238,11 +224,5 @@ export async function DELETE(
       data: deleted,
       message: "Product link removed",
     });
-  } catch (error) {
-    logger.error("[Service Products API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to remove product link" },
-      { status: 500 }
-    );
   }
-}
+);

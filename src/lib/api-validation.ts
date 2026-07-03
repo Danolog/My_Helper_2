@@ -123,9 +123,10 @@ export const createClientSchema = z.object({
   depositValue: z.string().nullable().optional(),
 });
 
+// userId celowo NIE jest przyjmowany z body — łączenie konta wyłącznie przez
+// PUT /api/employees/[id]/link-account (Faza 3, walidacje cross-tenant).
 export const createEmployeeSchema = z.object({
   salonId: requiredString("Salon ID"),
-  userId: z.string().nullable().optional(),
   firstName: requiredString("Imie"),
   lastName: requiredString("Nazwisko"),
   phone: phoneField,
@@ -133,6 +134,15 @@ export const createEmployeeSchema = z.object({
   photoUrl: z.string().url("Nieprawidlowy URL zdjecia").nullable().optional().or(z.literal("")),
   role: z.string().optional(),
   color: z.string().optional(),
+});
+
+// PUT /api/employees/[id]/link-account — email konta do podpięcia,
+// null = odłączenie konta od pracownika.
+export const linkEmployeeAccountSchema = z.object({
+  email: z
+    .string({ message: "Adres e-mail jest wymagany" })
+    .email("Wprowadz poprawny adres email")
+    .nullable(),
 });
 
 export const createProductSchema = z.object({
@@ -510,6 +520,12 @@ export const notificationTypeSettingsSchema = z.object({
   birthdayNotifications: z.boolean().optional(),
   weMissYouNotifications: z.boolean().optional(),
   paymentConfirmations: z.boolean().optional(),
+});
+
+// Feature flags per salon (Ustawienia -> Moduły): mapa klucz modułu -> bool.
+// Nieznane/hardOff klucze odfiltrowuje trasa (jedno źródło prawdy: features.ts).
+export const salonModulesSchema = z.object({
+  modules: z.record(z.string(), z.boolean()),
 });
 
 export const weMissYouSettingsSchema = z.object({

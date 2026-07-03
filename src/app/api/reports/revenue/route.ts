@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { appointments, services, employees, clients } from "@/lib/schema";
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
-import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
+import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 import { logger } from "@/lib/logger";
+import { appointments, services, employees, clients } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/reports/revenue - Revenue report with breakdowns by service/employee and trends
 export async function GET(request: Request) {
   try {
@@ -14,7 +12,7 @@ export async function GET(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const salonId = await getUserSalonId();
+    const salonId = searchParams.get("salonId");
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
     const employeeIdsParam = searchParams.get("employeeIds"); // comma-separated employee IDs
@@ -22,8 +20,8 @@ export async function GET(request: Request) {
 
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
+        { success: false, error: "salonId is required" },
+        { status: 400 }
       );
     }
 

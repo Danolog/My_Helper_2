@@ -15,7 +15,10 @@ import {
   CalendarDays,
   Wallet,
 } from "lucide-react";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
+import { RoleGate } from "@/components/dashboard/role-gate";
 import { Button } from "@/components/ui/button";
+import { BASIC_REPORT_SLUGS } from "@/lib/features";
 
 const REPORT_GROUPS = [
   {
@@ -114,6 +117,24 @@ const REPORT_GROUPS = [
 
 export default function ReportsHubPage() {
   return (
+    <RoleGate allow={["owner"]}>
+      <ReportsHubPageInner />
+    </RoleGate>
+  );
+}
+
+function ReportsHubPageInner() {
+  const reportsAdvanced = useModuleEnabled("reportsAdvanced");
+  const groups = reportsAdvanced
+    ? REPORT_GROUPS
+    : REPORT_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.filter((item) =>
+          BASIC_REPORT_SLUGS.includes(item.href.split("/").pop() ?? ""),
+        ),
+      })).filter((group) => group.items.length > 0);
+
+  return (
     <div className="container mx-auto p-6">
       <div className="flex items-center gap-4 mb-6">
         <Button variant="ghost" size="icon" asChild>
@@ -133,7 +154,7 @@ export default function ReportsHubPage() {
       </div>
 
       <div className="space-y-8">
-        {REPORT_GROUPS.map((group) => (
+        {groups.map((group) => (
           <div key={group.title}>
             <h2 className="text-lg font-semibold mb-4">{group.title}</h2>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

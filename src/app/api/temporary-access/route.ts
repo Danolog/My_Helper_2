@@ -1,22 +1,14 @@
-import { NextResponse } from "next/server";
-// temporaryAccess NIE ma kolumny salon_id — to tabela kluczowana userId
-// (FK do user), nie salon-scoped. Izolacja najemcy jest tu POŚREDNIA i
-// realizowana w warstwie aplikacji: trasa ustala salon właściciela (salons.ownerId),
-// pobiera userId pracowników tego salonu (employees.salonId) i filtruje grants po
-// tych userId (inArray). Brak kolumny salon_id => brak kontekstu dla forSalon na
-// samej tabeli temporaryAccess, a cleanupExpiredAccess to globalna konserwacja
-// (kasuje wygasłe wpisy wszystkich salonów). Dlatego trasa pozostaje na surowym db
-// z zachowanymi istniejącymi filtrami. (R2)
-// eslint-disable-next-line no-restricted-imports -- globalna konserwacja (cleanupExpiredAccess), brak salon_id na tabeli
-import { db } from "@/lib/db";
-import { temporaryAccess, employees, salons } from "@/lib/schema";
-import { eq, and, gt, lt, inArray } from "drizzle-orm";
-import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { NextResponse } from "next/server";
+import { eq, and, gt, lt, inArray } from "drizzle-orm";
 import { validateBody, temporaryAccessSchema } from "@/lib/api-validation";
-
+import { auth } from "@/lib/auth";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001: ścieżka user-scoped/token-based (nie salon-scoped) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { temporaryAccess, employees, salons } from "@/lib/schema";
 /**
  * Available feature names that can be granted temporarily.
  * These correspond to dashboard sections that employees/receptionists

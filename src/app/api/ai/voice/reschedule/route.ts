@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { isProPlan } from "@/lib/subscription";
-import { forSalon } from "@/lib/server/repository";
+import { eq, and, gte, lt, not } from "drizzle-orm";
+import { voiceRescheduleSchema, validateBody } from "@/lib/api-validation";
+import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
@@ -11,13 +17,8 @@ import {
   aiConversations,
   salons,
 } from "@/lib/schema";
-import { eq, and, gte, lt, not } from "drizzle-orm";
 import { sendSms } from "@/lib/sms";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { voiceRescheduleSchema, validateBody } from "@/lib/api-validation";
-
-import { logger } from "@/lib/logger";
+import { isProPlan } from "@/lib/subscription";
 /** Slot interval in minutes used when generating available time slots. */
 const SLOT_INTERVAL = 15;
 
@@ -67,11 +68,6 @@ export async function POST(req: Request) {
   const body = rawBody as { appointmentId?: string; callerPhone: string; callerName?: string; preferredDate?: string; preferredTime?: string; notes?: string };
 
   try {
-    // Caly transakcyjny przeplyw (odczyty + update wizyty, log aiConversation)
-    // w jednej transakcji z kontekstem RLS (forSalon). Wczesne wyjscia zwracaja
-    // NextResponse bezposrednio z callbacku. Jawne eq(<tabela>.salonId, salonId)
-    // zachowane jako tama aplikacyjna (defense in depth).
-    return await forSalon(salonId).raw(async (tx) => {
     // ------------------------------------------------------------------
     // Step A: Find the client's upcoming appointment
     // ------------------------------------------------------------------
@@ -93,7 +89,7 @@ export async function POST(req: Request) {
 
     if (body.appointmentId) {
       // Direct lookup by appointment ID
-      const rows = await tx
+      const rows = await db
         .select({
           appointment: appointments,
           client: clients,
@@ -122,7 +118,7 @@ export async function POST(req: Request) {
       }
     } else {
       // Look up client by phone first
-      const clientRows = await tx
+      const clientRows = await db
         .select({
           id: clients.id,
           firstName: clients.firstName,
@@ -152,7 +148,7 @@ export async function POST(req: Request) {
 
       // Find their next upcoming appointment
       const now = new Date();
-      const apptRows = await tx
+      const apptRows = await db
         .select({
           appointment: appointments,
           employee: employees,
@@ -199,7 +195,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step B: Determine the new target date
     // ------------------------------------------------------------------
-    let targetDateStr = body.preferredDate;
+    const targetDateStr = body.preferredDate;
 
     if (!targetDateStr) {
       return NextResponse.json(
@@ -234,7 +230,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step C: Check employee works on the target day
     // ------------------------------------------------------------------
-    const scheduleRows = await tx
+    const scheduleRows = await db
       .select({
         startTime: workSchedules.startTime,
         endTime: workSchedules.endTime,
@@ -270,7 +266,7 @@ export async function POST(req: Request) {
     const dayEnd = new Date(targetDateStr + "T23:59:59");
 
     const [existingAppointments, existingBlocks] = await Promise.all([
-      tx
+      db
         .select({
           id: appointments.id,
           startTime: appointments.startTime,
@@ -279,7 +275,6 @@ export async function POST(req: Request) {
         .from(appointments)
         .where(
           and(
-            eq(appointments.salonId, salonId),
             eq(appointments.employeeId, employeeId),
             not(eq(appointments.status, "cancelled")),
             not(eq(appointments.id, appointmentRow.id)), // Exclude the appointment being rescheduled
@@ -287,7 +282,7 @@ export async function POST(req: Request) {
             lt(appointments.startTime, dayEnd)
           )
         ),
-      tx
+      db
         .select({
           startTime: timeBlocks.startTime,
           endTime: timeBlocks.endTime,
@@ -401,7 +396,7 @@ export async function POST(req: Request) {
     const newStartDate = new Date(targetDateStr + `T${bestSlot.time}:00`);
     const newEndDate = new Date(newStartDate.getTime() + duration * 60 * 1000);
 
-    const [updatedAppointment] = await tx
+    const [updatedAppointment] = await db
       .update(appointments)
       .set({
         startTime: newStartDate,
@@ -418,7 +413,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step G: Send SMS confirmation
     // ------------------------------------------------------------------
-    const salonRows = await tx
+    const salonRows = await db
       .select({ name: salons.name })
       .from(salons)
       .where(eq(salons.id, salonId))
@@ -456,7 +451,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     // Step H: Log the conversation
     // ------------------------------------------------------------------
-    const [conversation] = await tx
+    const [conversation] = await db
       .insert(aiConversations)
       .values({
         salonId: salonId,
@@ -502,7 +497,6 @@ export async function POST(req: Request) {
         phone: body.callerPhone,
       },
       conversationId: conversation?.id || null,
-    });
     });
   } catch (error) {
     logger.error("[Voice AI Reschedule] Error", { error: error });

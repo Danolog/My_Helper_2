@@ -15,12 +15,9 @@ import {
   Trash2,
   Send,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-} from "@/components/ui/card";
+import { toast } from "sonner";
+import { ModuleGate } from "@/components/dashboard/module-gate";
+import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,8 +29,12 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
-import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+} from "@/components/ui/card";
 import { mutationFetch } from "@/lib/api-client";
 
 type ScheduledPost = {
@@ -518,6 +519,14 @@ function PostCard({
 }
 
 export default function ScheduledPostsPage() {
+  return (
+    <ModuleGate module="socialPosts">
+      <ScheduledPostsPageInner />
+    </ModuleGate>
+  );
+}
+
+function ScheduledPostsPageInner() {
   return (
     <ProPlanGate
       featureName="Zaplanowane posty"

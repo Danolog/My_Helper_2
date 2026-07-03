@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
 import { eq, and, sql } from "drizzle-orm";
+import { expirationWarningSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   salonSubscriptions,
   subscriptionPlans,
   notifications,
 } from "@/lib/schema";
-import { forSalon } from "@/lib/server/repository";
-import { expirationWarningSchema, validateBody } from "@/lib/api-validation";
 
-import { logger } from "@/lib/logger";
 const DEFAULT_WARNING_DAYS = 7;
 
 /**
@@ -36,27 +38,23 @@ export async function GET() {
       );
     }
 
-    // Find the current active subscription.
-    // salonSubscriptions jest salon-scoped (jawny eq(salonId) + RLS); innerJoin do
-    // subscriptionPlans (globalny katalog) pod kontekstem forSalon.
-    const [activeSub] = await forSalon(salonId).raw((tx) =>
-      tx
-        .select({
-          subscription: salonSubscriptions,
-          plan: subscriptionPlans,
-        })
-        .from(salonSubscriptions)
-        .innerJoin(
-          subscriptionPlans,
-          eq(salonSubscriptions.planId, subscriptionPlans.id)
+    // Find the current active subscription
+    const [activeSub] = await db
+      .select({
+        subscription: salonSubscriptions,
+        plan: subscriptionPlans,
+      })
+      .from(salonSubscriptions)
+      .innerJoin(
+        subscriptionPlans,
+        eq(salonSubscriptions.planId, subscriptionPlans.id)
+      )
+      .where(
+        and(
+          eq(salonSubscriptions.salonId, salonId),
+          eq(salonSubscriptions.status, "active")
         )
-        .where(
-          and(
-            eq(salonSubscriptions.salonId, salonId),
-            eq(salonSubscriptions.status, "active")
-          )
-        ),
-    );
+      );
 
     if (!activeSub) {
       return NextResponse.json({
@@ -84,21 +82,18 @@ export async function GET() {
     const isNearExpiry =
       daysRemaining !== null && daysRemaining <= warningThreshold && daysRemaining >= 0;
 
-    // Get recent expiration warning notifications.
-    // notifications jest salon-scoped (jawny eq(salonId) + RLS).
-    const recentWarnings = await forSalon(salonId).raw((tx) =>
-      tx
-        .select()
-        .from(notifications)
-        .where(
-          and(
-            eq(notifications.salonId, salonId),
-            sql`${notifications.message} LIKE '%wygasa%' OR ${notifications.message} LIKE '%odnowienia%' OR ${notifications.message} LIKE '%expir%'`
-          )
+    // Get recent expiration warning notifications
+    const recentWarnings = await db
+      .select()
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.salonId, salonId),
+          sql`${notifications.message} LIKE '%wygasa%' OR ${notifications.message} LIKE '%odnowienia%' OR ${notifications.message} LIKE '%expir%'`
         )
-        .orderBy(sql`${notifications.createdAt} DESC`)
-        .limit(5),
-    );
+      )
+      .orderBy(sql`${notifications.createdAt} DESC`)
+      .limit(5);
 
     return NextResponse.json({
       success: true,
@@ -176,27 +171,23 @@ export async function POST(request: Request) {
       // No body or invalid JSON - use defaults
     }
 
-    // Find active subscriptions near expiry.
-    // salonSubscriptions jest salon-scoped (jawny eq(salonId) + RLS); innerJoin do
-    // subscriptionPlans (globalny katalog) pod kontekstem forSalon.
-    const [activeSub] = await forSalon(salonId).raw((tx) =>
-      tx
-        .select({
-          subscription: salonSubscriptions,
-          plan: subscriptionPlans,
-        })
-        .from(salonSubscriptions)
-        .innerJoin(
-          subscriptionPlans,
-          eq(salonSubscriptions.planId, subscriptionPlans.id)
+    // Find active subscriptions near expiry
+    const [activeSub] = await db
+      .select({
+        subscription: salonSubscriptions,
+        plan: subscriptionPlans,
+      })
+      .from(salonSubscriptions)
+      .innerJoin(
+        subscriptionPlans,
+        eq(salonSubscriptions.planId, subscriptionPlans.id)
+      )
+      .where(
+        and(
+          eq(salonSubscriptions.salonId, salonId),
+          eq(salonSubscriptions.status, "active")
         )
-        .where(
-          and(
-            eq(salonSubscriptions.salonId, salonId),
-            eq(salonSubscriptions.status, "active")
-          )
-        ),
-    );
+      );
 
     if (!activeSub) {
       return NextResponse.json({
@@ -220,14 +211,16 @@ export async function POST(request: Request) {
       simulatedEnd.setDate(simulatedEnd.getDate() + 3);
 
       // Actually update the database to move period end closer
-      // (salon-scoped: updateOwned domyka eq(id) AND eq(salonId) + RLS).
-      await forSalon(salonId).updateOwned(salonSubscriptions, sub.id, {
-        currentPeriodEnd: simulatedEnd,
-      });
+      await db
+        .update(salonSubscriptions)
+        .set({
+          currentPeriodEnd: simulatedEnd,
+        })
+        .where(eq(salonSubscriptions.id, sub.id));
 
       effectivePeriodEnd = simulatedEnd;
 
-      // eslint-disable-next-line no-console
+       
       logger.info(`[Subscription Warning] SIMULATION: Period end moved to ${simulatedEnd.toISOString()} (${3} days from now)`);
     }
 
@@ -269,20 +262,17 @@ export async function POST(request: Request) {
       `Aby uniknac przerwy w dostepie, upewnij sie ze metoda platnosci jest aktualna. ` +
       `Mozesz zarzadzac subskrypcja w panelu: /dashboard/subscription`;
 
-    // notifications jest salon-scoped (salonId z sesji + RLS).
-    const emailResults = await forSalon(salonId).raw((tx) =>
-      tx
-        .insert(notifications)
-        .values({
-          salonId: salonId,
-          clientId: null,
-          type: "email",
-          message: warningMessage,
-          status: "sent",
-          sentAt: now,
-        })
-        .returning(),
-    );
+    const emailResults = await db
+      .insert(notifications)
+      .values({
+        salonId: salonId,
+        clientId: null,
+        type: "email",
+        message: warningMessage,
+        status: "sent",
+        sentAt: now,
+      })
+      .returning();
 
     const notification = emailResults[0];
 
@@ -290,23 +280,21 @@ export async function POST(request: Request) {
     const pushMessage =
       `Subskrypcja ${plan.name} wygasa za ${daysRemaining} dni. Odnow teraz aby zachowac dostep.`;
 
-    const pushResults = await forSalon(salonId).raw((tx) =>
-      tx
-        .insert(notifications)
-        .values({
-          salonId: salonId,
-          clientId: null,
-          type: "push",
-          message: pushMessage,
-          status: "sent",
-          sentAt: now,
-        })
-        .returning(),
-    );
+    const pushResults = await db
+      .insert(notifications)
+      .values({
+        salonId: salonId,
+        clientId: null,
+        type: "push",
+        message: pushMessage,
+        status: "sent",
+        sentAt: now,
+      })
+      .returning();
 
     const pushNotification = pushResults[0];
 
-    // eslint-disable-next-line no-console
+     
     logger.info(`[Subscription Warning] Warning sent for subscription ${sub.id}. ` +
         `Plan: ${plan.name}, Days remaining: ${daysRemaining}, ` +
         `Renewal amount: ${plan.priceMonthly} PLN`);

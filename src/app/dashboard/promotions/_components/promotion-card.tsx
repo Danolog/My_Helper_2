@@ -1,11 +1,10 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Edit, Trash2, Tag, Scissors, Package, UserPlus, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { Edit, Trash2, Tag, Scissors, Package, UserPlus, Clock } from "lucide-react";
-import type { Promotion, Service } from "../_types";
 import {
   TYPE_LABELS,
   TYPE_ICONS,
@@ -15,6 +14,7 @@ import {
   isExpired,
   isUpcoming,
 } from "../_types";
+import type { Promotion, Service } from "../_types";
 
 interface PromotionCardProps {
   promo: Promotion;

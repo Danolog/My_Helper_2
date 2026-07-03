@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { CreditCard, ArrowUpRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 
 export function PaymentHistoryCard() {
   return (

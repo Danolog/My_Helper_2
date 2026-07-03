@@ -3,10 +3,10 @@
 import { useState, useEffect, useCallback, useMemo, type Dispatch, type SetStateAction } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { toast } from "sonner";
-import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { mutationFetch } from "@/lib/api-client";
+import { getNetworkErrorMessage } from "@/lib/fetch-with-retry";
 import type { Product, ProductCategory, LowStockNotification } from "../_types";
 
 type ProductFormState = {

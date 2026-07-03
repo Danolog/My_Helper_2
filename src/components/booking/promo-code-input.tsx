@@ -6,15 +6,15 @@ import {
   Clock,
   Scissors,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import type { ServiceItem, ServiceVariant } from "./types";
 import { formatDuration } from "./types";
+import type { ServiceItem, ServiceVariant } from "./types";
 
 // ---------------------------------------------------------------------------
 // Props

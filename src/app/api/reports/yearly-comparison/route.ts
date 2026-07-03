@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
-import { appointments, services, employees } from "@/lib/schema";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { appointments, services, employees } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 interface YearMetrics {
   totalRevenue: string;
   totalAppointments: number;
@@ -268,14 +266,14 @@ export async function GET(request: Request) {
     if (isAuthError(authResult)) return authResult;
 
     const { searchParams } = new URL(request.url);
-    const salonId = await getUserSalonId();
+    const salonId = searchParams.get("salonId");
     const year1Str = searchParams.get("year1");
     const year2Str = searchParams.get("year2");
 
     if (!salonId) {
       return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
+        { success: false, error: "salonId is required" },
+        { status: 400 }
       );
     }
 

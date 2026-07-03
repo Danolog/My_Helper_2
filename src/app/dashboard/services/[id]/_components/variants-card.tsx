@@ -1,10 +1,9 @@
 "use client";
 
+import { Plus, Clock, DollarSign, Layers, Edit2, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -14,13 +13,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Plus, Clock, DollarSign, Layers, Edit2, Trash2 } from "lucide-react";
-import type { ServiceDetail, ServiceVariant } from "../_types";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   formatPrice,
   formatDuration,
   formatModifier,
 } from "../_types";
+import type { ServiceDetail, ServiceVariant } from "../_types";
 
 interface VariantsCardProps {
   service: ServiceDetail;

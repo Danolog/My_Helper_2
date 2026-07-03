@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// eslint-disable-next-line no-restricted-imports -- globalny katalog planów (subscriptionPlans) poza RLS; reszta przez forSalon
+// ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { logger } from "@/lib/logger";
 import {
   salonSubscriptions,
   subscriptionPayments,
   subscriptionPlans,
 } from "@/lib/schema";
-import { forSalon } from "@/lib/server/repository";
 
-import { logger } from "@/lib/logger";
 /**
  * POST /api/subscriptions/renew
  *
@@ -39,27 +39,23 @@ export async function POST() {
       );
     }
 
-    // Find the current active subscription.
-    // salonSubscriptions jest salon-scoped (jawny eq(salonId) + RLS); innerJoin do
-    // subscriptionPlans (globalny katalog) pod kontekstem forSalon.
-    const [activeSub] = await forSalon(salonId).raw((tx) =>
-      tx
-        .select({
-          subscription: salonSubscriptions,
-          plan: subscriptionPlans,
-        })
-        .from(salonSubscriptions)
-        .innerJoin(
-          subscriptionPlans,
-          eq(salonSubscriptions.planId, subscriptionPlans.id)
+    // Find the current active subscription
+    const [activeSub] = await db
+      .select({
+        subscription: salonSubscriptions,
+        plan: subscriptionPlans,
+      })
+      .from(salonSubscriptions)
+      .innerJoin(
+        subscriptionPlans,
+        eq(salonSubscriptions.planId, subscriptionPlans.id)
+      )
+      .where(
+        and(
+          eq(salonSubscriptions.salonId, salonId),
+          eq(salonSubscriptions.status, "active")
         )
-        .where(
-          and(
-            eq(salonSubscriptions.salonId, salonId),
-            eq(salonSubscriptions.status, "active")
-          )
-        ),
-    );
+      );
 
     if (!activeSub) {
       return NextResponse.json(
@@ -85,9 +81,7 @@ export async function POST() {
     let planChanged = false;
 
     if (sub.scheduledPlanId) {
-      // Apply the scheduled plan change.
-      // subscriptionPlans = globalny katalog (BEZ salonId, poza RLS) — odczyt po id
-      // zostaje na surowym db (brak kolumny salonId do zawężenia).
+      // Apply the scheduled plan change
       const [targetPlan] = await db
         .select()
         .from(subscriptionPlans)
@@ -98,15 +92,13 @@ export async function POST() {
         renewPlan = targetPlan;
         planChanged = true;
 
-        // eslint-disable-next-line no-console
+         
         logger.info(`[Subscription Renewal] Applying scheduled plan change: ${plan.slug} → ${targetPlan.slug}`);
       }
     }
 
-    // Record the renewal payment and update subscription atomically.
-    // Obie tabele salon-scoped (subscriptionPayments + salonSubscriptions) — jeden
-    // raw (jedna transakcja, atomowo) z jawnym eq(salonId) + RLS.
-    const { payment, updatedSub } = await forSalon(salonId).raw(async (tx) => {
+    // Record the renewal payment and update subscription atomically
+    const { payment, updatedSub } = await db.transaction(async (tx) => {
       const [_payment] = await tx
         .insert(subscriptionPayments)
         .values({
@@ -131,18 +123,13 @@ export async function POST() {
             ? { scheduledPlanId: null, scheduledChangeAt: null }
             : {}),
         })
-        .where(
-          and(
-            eq(salonSubscriptions.id, sub.id),
-            eq(salonSubscriptions.salonId, salonId),
-          ),
-        )
+        .where(eq(salonSubscriptions.id, sub.id))
         .returning();
 
       return { payment: _payment, updatedSub: _updatedSub };
     });
 
-    // eslint-disable-next-line no-console
+     
     logger.info(`[Subscription Renewal] Subscription ${sub.id} renewed. ` +
         `Plan: ${renewPlan.slug} (${renewPlan.priceMonthly} PLN). ` +
         `New period: ${newPeriodStart.toISOString()} - ${newPeriodEnd.toISOString()}` +
@@ -202,27 +189,23 @@ export async function GET() {
       );
     }
 
-    // Find the current active subscription.
-    // salonSubscriptions jest salon-scoped (jawny eq(salonId) + RLS); innerJoin do
-    // subscriptionPlans (globalny katalog) pod kontekstem forSalon.
-    const [activeSub] = await forSalon(salonId).raw((tx) =>
-      tx
-        .select({
-          subscription: salonSubscriptions,
-          plan: subscriptionPlans,
-        })
-        .from(salonSubscriptions)
-        .innerJoin(
-          subscriptionPlans,
-          eq(salonSubscriptions.planId, subscriptionPlans.id)
+    // Find the current active subscription
+    const [activeSub] = await db
+      .select({
+        subscription: salonSubscriptions,
+        plan: subscriptionPlans,
+      })
+      .from(salonSubscriptions)
+      .innerJoin(
+        subscriptionPlans,
+        eq(salonSubscriptions.planId, subscriptionPlans.id)
+      )
+      .where(
+        and(
+          eq(salonSubscriptions.salonId, salonId),
+          eq(salonSubscriptions.status, "active")
         )
-        .where(
-          and(
-            eq(salonSubscriptions.salonId, salonId),
-            eq(salonSubscriptions.status, "active")
-          )
-        ),
-    );
+      );
 
     if (!activeSub) {
       return NextResponse.json({
@@ -237,8 +220,6 @@ export async function GET() {
     // Check if there's a scheduled plan change
     let scheduledPlanInfo = null;
     if (sub.scheduledPlanId) {
-      // subscriptionPlans = globalny katalog (BEZ salonId, poza RLS) — odczyt po id
-      // zostaje na surowym db (brak kolumny salonId do zawężenia).
       const [targetPlan] = await db
         .select()
         .from(subscriptionPlans)

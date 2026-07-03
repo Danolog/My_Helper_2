@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { promotions } from "@/lib/schema";
 import { validateBody, updatePromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { promotions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/promotions/:id - Get a single promotion
 export async function GET(
   _request: Request,

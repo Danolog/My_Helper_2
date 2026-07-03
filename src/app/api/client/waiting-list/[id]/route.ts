@@ -1,24 +1,16 @@
 import { NextResponse } from "next/server";
-// eslint-disable-next-line no-restricted-imports -- kontekst klienta (scope po userId z sesji)
-import { db } from "@/lib/db";
-import { waitingList, clients } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { clientWaitingListResponseSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+// ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { waitingList, clients } from "@/lib/schema";
 import {
   acceptEarlierSlot,
   declineEarlierSlot,
 } from "@/lib/waiting-list";
-import { clientWaitingListResponseSchema, validateBody } from "@/lib/api-validation";
-
-import { logger } from "@/lib/logger";
-
-/**
- * Kontekst KLIENTA — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
- * Akcept/odrzuć/usuń własny wpis: każda operacja weryfikuje własność przez
- * `entry.client.email === session.user.email` (tożsamość z SESJI) => 403 dla
- * cudzego wpisu (klient B nie ruszy wpisu klienta A). Wpis może być w dowolnym
- * salonie — kontekst właściciela (forSalon) nie pasuje.
- */
 // POST /api/client/waiting-list/[id] - Client accepts or declines a notified slot
 export async function POST(
   request: Request,

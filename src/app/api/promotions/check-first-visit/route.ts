@@ -1,21 +1,11 @@
 import { NextResponse } from "next/server";
-// eslint-disable-next-line no-restricted-imports -- publiczny/quasi-public — salonId z requestu, brak sesji właściciela
-import { db } from "@/lib/db";
-import { promotions, appointments, clients, services } from "@/lib/schema";
 import { eq, and, sql } from "drizzle-orm";
-
+// ADR-001: ścieżka publiczna (bez sesji salonu) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-/**
- * KLASYFIKACJA (R2): PUBLIC / quasi-public — NIE migrowane na forSalon.
- *
- * Wołane przy rezerwacji KLIENTA (brak sesji/requireAuth). `salonId` z query
- * requestu (salon, o który pyta klient). Zapytania do `promotions`, `clients`,
- * `appointments` zawężone jawnym `eq(salonId, ...)` — brak wycieku danych innych
- * salonów. Pozostaje na surowym `db` (poza RLS) celowo — brak kontekstu
- * właściciela (ADR-001, ścieżki publiczne). UWAGA: parametryzacja podzapytania
- * `email` pokryta testem regresyjnym promotions-check-first-visit-sqli.test.ts —
- * NIE zmieniać kształtu zapytania portal-count.
- */
+import { promotions, appointments, clients, services } from "@/lib/schema";
+
 /**
  * GET /api/promotions/check-first-visit
  * Check if a client qualifies for a first-visit discount at a salon.

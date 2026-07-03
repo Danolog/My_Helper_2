@@ -1,16 +1,25 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
-import { useMaterialsData } from "./_hooks/use-materials-data";
-import { ReportHeader } from "./_components/report-header";
-import { SummaryCards } from "./_components/summary-cards";
-import { SecondaryStats } from "./_components/secondary-stats";
-import { TabNavigation } from "./_components/tab-navigation";
-import { ProductSummaryTab } from "./_components/product-summary-tab";
 import { DetailsTab } from "./_components/details-tab";
+import { ProductSummaryTab } from "./_components/product-summary-tab";
+import { ReportHeader } from "./_components/report-header";
+import { SecondaryStats } from "./_components/secondary-stats";
+import { SummaryCards } from "./_components/summary-cards";
+import { TabNavigation } from "./_components/tab-navigation";
+import { useMaterialsData } from "./_hooks/use-materials-data";
 
 export default function MaterialsProfitLossPage() {
+  return (
+    <ModuleGate module="reportsAdvanced">
+      <MaterialsProfitLossPageInner />
+    </ModuleGate>
+  );
+}
+
+function MaterialsProfitLossPageInner() {
   const {
     reportData,
     loading,

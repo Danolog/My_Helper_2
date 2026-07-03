@@ -1,18 +1,11 @@
 import { NextResponse } from "next/server";
-// eslint-disable-next-line no-restricted-imports -- kontekst klienta (scope po userId z sesji)
-import { db } from "@/lib/db";
-import { favoriteSalons } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
+// ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
+import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-
-/**
- * Kontekst KLIENTA — surowy `db`, NIE `forSalon` (ADR-001 sekcja 4 / R2).
- * Sprawdzenie czy salon jest w ulubionych użytkownika: filtr po
- * `eq(favoriteSalons.clientUserId, userId)` z SESJI. Zakres wielo-salonowy —
- * kontekst właściciela (forSalon) nie pasuje.
- */
+import { favoriteSalons } from "@/lib/schema";
 // GET /api/favorites/salons/check?salonId=<uuid> - Check if salon is in favorites
 export async function GET(request: Request) {
   try {

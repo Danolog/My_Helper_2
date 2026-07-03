@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
+import { formatDate } from "../_types";
 import type {
   SubscriptionData,
   PlanData,
@@ -10,7 +11,6 @@ import type {
   AllPlansMap,
   ExpirationData,
 } from "../_types";
-import { formatDate } from "../_types";
 
 interface UseSubscriptionDataReturn {
   subscription: SubscriptionData | null;

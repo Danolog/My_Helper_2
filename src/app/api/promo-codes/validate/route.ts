@@ -1,34 +1,30 @@
 import { NextResponse } from "next/server";
-// eslint-disable-next-line no-restricted-imports -- quasi-public (rezerwacja klienta) — salonId z body, brak sesji właściciela
-import { db } from "@/lib/db";
-import { promoCodes, promotions } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { validateBody, validatePromoCodeSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-
-import { logger } from "@/lib/logger";
+import { withApiHandler } from "@/lib/api-handler";
+import { validatePromoCodeSchema } from "@/lib/api-validation";
+import { promoCodes, promotions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // POST /api/promo-codes/validate - Validate a promo code and return discount info
-export async function POST(request: Request) {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-
-  try {
-    const body = await request.json();
-    const validationError = validateBody(validatePromoCodeSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    schema: validatePromoCodeSchema as z.ZodType<{
+      code: string;
+      salonId: string;
+      serviceId?: string;
+    }>,
+    logLabel: "[PromoCodes Validate API] POST",
+    errorMessage: "Failed to validate promo code",
+  },
+  async ({ body }) => {
     const { code, salonId } = body;
 
     const normalizedCode = code.toUpperCase().trim();
 
-    // ŚCIEŻKA QUASI-PUBLICZNA (rezerwacja klienta): salonId pochodzi z BODY, nie z
-    // sesji właściciela — klient sprawdza kod dla salonu, który rezerwuje (cudzego).
-    // To NIE jest trasa owner-scoped, więc NIE przepuszczamy przez forSalon (który
-    // wymaga salonId z sesji). Zapytanie jest jawnie zawężone do salonId+code z body,
-    // a odpowiedź zwraca tylko status ważności kodu — brak wycieku cudzych danych
-    // poza zamierzonym faktem istnienia/ważności podanego kodu. Zostaje na surowym db.
-    const [result] = await db
+    // Look up the promo code by code + salonId, with joined promotion data
+    const [result] = await forSalon(salonId).raw((tx) =>
+      tx
       .select({
         promoCode: promoCodes,
         promotion: promotions,
@@ -41,7 +37,8 @@ export async function POST(request: Request) {
           eq(promoCodes.salonId, salonId)
         )
       )
-      .limit(1);
+      .limit(1)
+    );
 
     if (!result) {
       return NextResponse.json({
@@ -149,11 +146,5 @@ export async function POST(request: Request) {
       success: true,
       data: response,
     });
-  } catch (error) {
-    logger.error("[PromoCodes Validate API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to validate promo code" },
-      { status: 500 }
-    );
   }
-}
+);

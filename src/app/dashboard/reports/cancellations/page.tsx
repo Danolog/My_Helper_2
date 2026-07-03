@@ -1,15 +1,16 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { RefreshCw } from "lucide-react";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { DateRangeFilter } from "@/components/reports/date-range-filter";
-import { useCancellationReport } from "./_hooks/use-cancellation-report";
-import { ReportHeader } from "./_components/report-header";
 import { ComparisonPeriodFilter } from "./_components/comparison-period-filter";
 import { EmployeeFilterCard } from "./_components/employee-filter-card";
-import { SummaryCards } from "./_components/summary-cards";
 import { PeriodComparisonCard } from "./_components/period-comparison-card";
+import { ReportHeader } from "./_components/report-header";
+import { SummaryCards } from "./_components/summary-cards";
 import { TabNavigation } from "./_components/tab-navigation";
-import dynamic from "next/dynamic";
+import { useCancellationReport } from "./_hooks/use-cancellation-report";
 
 const LostRevenueTab = dynamic(() => import("./_components/lost-revenue-tab").then((m) => m.LostRevenueTab));
 const ReasonTab = dynamic(() => import("./_components/reason-tab").then((m) => m.ReasonTab));
@@ -19,6 +20,14 @@ const DayOfWeekTab = dynamic(() => import("./_components/day-of-week-tab").then(
 const TrendTab = dynamic(() => import("./_components/trend-tab").then((m) => m.TrendTab));
 
 export default function CancellationReportPage() {
+  return (
+    <ModuleGate module="reportsAdvanced">
+      <CancellationReportPageInner />
+    </ModuleGate>
+  );
+}
+
+function CancellationReportPageInner() {
   const {
     reportData,
     loading,

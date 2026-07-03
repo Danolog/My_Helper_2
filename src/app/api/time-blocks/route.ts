@@ -1,26 +1,29 @@
 import { NextResponse } from "next/server";
-import { timeBlocks, employees } from "@/lib/schema";
 import { eq, and, gte, lte, type SQL } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, createTimeBlockSchema } from "@/lib/api-validation";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { apiRateLimit } from "@/lib/rate-limit";
+import { getSalonContext } from "@/lib/salon-context";
+import { timeBlocks, employees } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 // GET /api/time-blocks?employeeId=xxx&startDate=xxx&endDate=xxx
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[TimeBlocks API] GET",
+    errorMessage: "Failed to fetch time blocks",
+  },
+  async ({ request }) => {
+    // Faza 3 (role): odczyt bloków dla wszystkich ról (podgląd kalendarza).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
@@ -45,9 +48,10 @@ export async function GET(request: Request) {
       conditions.push(lte(timeBlocks.startTime, new Date(endDate)));
     }
 
-    // time_blocks bez kolumny salon_id — izolacja przez RLS pośrednią (EXISTS na
-    // employees.salon_id). leftJoin employees pod tym samym kontekstem RLS.
-    const result = await forSalon(salonId).raw((tx) => {
+    // timeBlocks nie ma salonId — scope przez tabelę nadrzędną employees.
+    conditions.push(eq(employees.salonId, salonId));
+
+    const result = await forSalon(salonId).raw(async (tx) => {
       let query = tx
         .select({
           timeBlock: timeBlocks,
@@ -56,11 +60,9 @@ export async function GET(request: Request) {
         .from(timeBlocks)
         .leftJoin(employees, eq(timeBlocks.employeeId, employees.id));
 
-      if (conditions.length > 0) {
-        query = query.where(and(...conditions)) as typeof query;
-      }
+      query = query.where(and(...conditions)) as typeof query;
 
-      return query;
+      return await query;
     });
     logger.info(`[TimeBlocks API] Query returned ${result.length} rows`);
 
@@ -74,37 +76,34 @@ export async function GET(request: Request) {
       data: formattedBlocks,
       count: formattedBlocks.length,
     });
-  } catch (error) {
-    logger.error("[TimeBlocks API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch time blocks" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/time-blocks - Create a new time block (vacation, break, etc.)
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    logLabel: "[TimeBlocks API] POST",
+    errorMessage: "Failed to create time block",
+  },
+  async ({ request }) => {
+    // Faza 3 (role): owner tworzy bloki dowolnemu pracownikowi; employee
+    // wyłącznie SOBIE; receptionist nie tworzy bloków (403).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role === "receptionist") {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
     const body = await request.json();
     const validationError = validateBody(createTimeBlockSchema, body);
@@ -113,12 +112,30 @@ export async function POST(request: Request) {
     }
     const { employeeId, startTime, endTime, blockType, reason } = body;
 
+    if (ctx.role === "employee" && employeeId !== ctx.employeeId) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+
     // Validate block type
     const validTypes = ["break", "vacation", "personal", "holiday", "other"];
     if (!validTypes.includes(blockType)) {
       return NextResponse.json(
         { success: false, error: `Invalid blockType. Must be one of: ${validTypes.join(", ")}` },
         { status: 400 }
+      );
+    }
+
+    // Verify employee exists (w salonie wołającego — timeBlocks nie ma salonId,
+    // scope przez tabelę nadrzędną employees)
+    const employee = await forSalon(salonId).findOne(employees, employeeId);
+
+    if (!employee) {
+      return NextResponse.json(
+        { success: false, error: "Employee not found" },
+        { status: 404 }
       );
     }
 
@@ -134,21 +151,10 @@ export async function POST(request: Request) {
 
     logger.info(`[TimeBlocks API] Creating ${blockType} block for employee: ${employeeId}`);
 
-    // Weryfikacja pracownika + insert w jednej transakcji forSalon (atomowość).
-    // employees pod RLS (bezpośredni salon_id, jawny eq jako defense in depth),
-    // time_blocks pod RLS pośrednią (EXISTS na employees.salon_id).
-    const txResult = await forSalon(salonId).raw(async (tx) => {
-      const [employee] = await tx
-        .select()
-        .from(employees)
-        .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
-        .limit(1);
-
-      if (!employee) {
-        return { notFound: true as const, block: undefined as typeof timeBlocks.$inferSelect | undefined };
-      }
-
-      const [created] = await tx
+    // timeBlocks nie ma kolumny salonId — przynależność do salonu wynika ze
+    // zweryfikowanego wyżej pracownika salonu.
+    const [newBlock] = await forSalon(salonId).raw((tx) =>
+      tx
         .insert(timeBlocks)
         .values({
           employeeId,
@@ -157,19 +163,9 @@ export async function POST(request: Request) {
           blockType,
           reason: reason || null,
         })
-        .returning();
+        .returning()
+    );
 
-      return { notFound: false as const, block: created };
-    });
-
-    if (txResult.notFound) {
-      return NextResponse.json(
-        { success: false, error: "Employee not found" },
-        { status: 404 }
-      );
-    }
-
-    const newBlock = txResult.block;
     logger.info(`[TimeBlocks API] Created time block with id: ${newBlock?.id}`);
 
     return NextResponse.json(
@@ -179,28 +175,33 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[TimeBlocks API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create time block" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/time-blocks - Delete a time block
-export async function DELETE(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[TimeBlocks API] DELETE",
+    errorMessage: "Failed to delete time block",
+  },
+  async ({ request }) => {
+    // Faza 3 (role): owner usuwa dowolny blok salonu; employee wyłącznie
+    // WŁASNY blok; receptionist nie usuwa bloków (403).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role === "receptionist") {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
@@ -214,14 +215,37 @@ export async function DELETE(request: Request) {
 
     logger.info(`[TimeBlocks API] Deleting time block: ${id}`);
 
-    // time_blocks bez salon_id — RLS pośrednia (EXISTS na employees.salon_id) odcina
-    // usunięcie bloku cudzego salonu; zwróci 0 wierszy => 404 (zachowane zachowanie).
-    const deleted = await forSalon(salonId).raw((tx) =>
-      tx
+    // timeBlocks nie ma salonId — sprawdzenie własności przez join z employees
+    // i delete atomowo w jednej transakcji RLS; cudzy blok jest niewidoczny (404).
+    // Employee: blok innego pracownika = sentinel "forbidden" -> 403.
+    const deleted = await forSalon(salonId).raw(async (tx) => {
+      const [owned] = await tx
+        .select({ id: timeBlocks.id, employeeId: timeBlocks.employeeId })
+        .from(timeBlocks)
+        .innerJoin(employees, eq(timeBlocks.employeeId, employees.id))
+        .where(and(eq(timeBlocks.id, id), eq(employees.salonId, salonId)))
+        .limit(1);
+
+      if (!owned) {
+        return [];
+      }
+
+      if (ctx.role === "employee" && owned.employeeId !== ctx.employeeId) {
+        return "forbidden" as const;
+      }
+
+      return tx
         .delete(timeBlocks)
         .where(eq(timeBlocks.id, id))
-        .returning()
-    );
+        .returning();
+    });
+
+    if (deleted === "forbidden") {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
 
     if (deleted.length === 0) {
       return NextResponse.json(
@@ -237,11 +261,5 @@ export async function DELETE(request: Request) {
       data: deleted[0],
       message: "Time block deleted successfully",
     });
-  } catch (error) {
-    logger.error("[TimeBlocks API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to delete time block" },
-      { status: 500 }
-    );
   }
-}
+);

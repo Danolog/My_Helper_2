@@ -98,13 +98,11 @@ vi.mock("@/lib/schema", () => {
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
-  // `sql` używa warstwa repo (forSalon) do SET LOCAL app.current_salon_id ORAZ
-  // `sql.raw('set local role …')` (naprawa W1). Mock musi dostarczyć `.raw`,
-  // inaczej transakcja rzuca TypeError → handler 500. Kształt spójny z
-  // __tests__/api/clients.test.ts.
+  // `sql` używa warstwa repo (forSalon): sql`...` do set_config oraz
+  // sql.raw(...) do SET LOCAL ROLE (naprawa W2) — mock musi mieć oba.
   sql: Object.assign(
     vi.fn((...args: unknown[]) => ({ type: "sql", args })),
-    { raw: vi.fn((...args: unknown[]) => ({ type: "sql_raw", args })) }
+    { raw: vi.fn((query: string) => ({ type: "sql.raw", query })) }
   ),
 }));
 
@@ -151,7 +149,6 @@ import {
   PATCH as patchPhoto,
   DELETE as deletePhoto,
 } from "@/app/api/gallery/[id]/route";
-
 import { getUserSalonId } from "@/lib/get-user-salon";
 const mockGetUserSalonId = vi.mocked(getUserSalonId);
 

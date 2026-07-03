@@ -88,6 +88,18 @@ vi.mock("@/lib/auth-middleware", () => ({
 }));
 
 // Tenant isolation (P0-A): scoped routes resolve the salon from the session.
+// Faza 3 (role): fallback salonu w GET listy przeszedł na getSalonContext.
+// Domyślnie właściciel — scenariusze właścicielskie przechodzą bez zmian.
+vi.mock("@/lib/salon-context", () => ({
+  getSalonContext: vi.fn().mockResolvedValue({
+    salonId: TEST_IDS.SALON_UUID,
+    role: "owner",
+    employeeId: null,
+    userId: "user-1",
+  }),
+  hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
+}));
+
 vi.mock("@/lib/get-user-salon", () => ({
   getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
   getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
@@ -116,16 +128,18 @@ function chainMock(result: unknown[] = []) {
 // Import route handlers
 // -------------------------------------------------------
 
-import { GET as listServices, POST as createService } from "@/app/api/services/route";
 import {
   GET as getService,
   PUT as updateService,
   DELETE as deleteService,
 } from "@/app/api/services/[id]/route";
+import { GET as listServices, POST as createService } from "@/app/api/services/route";
 
 // Mocked tenant resolver — flip it to simulate "no salon" / wrong tenant.
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { getSalonContext } from "@/lib/salon-context";
 const mockGetUserSalonId = vi.mocked(getUserSalonId);
+const mockGetSalonContext = vi.mocked(getSalonContext);
 
 // -------------------------------------------------------
 // Tests
@@ -562,5 +576,33 @@ describe("P0-A tenant isolation — /api/services/[id]", () => {
     expect(status).toBe(404);
     expect(body.success).toBe(false);
     expect(mockGetUserSalonId).toHaveBeenCalled();
+  });
+});
+
+// =======================================================
+// Faza 3 · Role — GET /api/services dostępny dla pracownika/recepcji
+// (podgląd kalendarza wymaga listy usług).
+// =======================================================
+describe("Faza 3 role — GET /api/services", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("employee czyta listę usług swojego salonu (200, salon z kontekstu)", async () => {
+    mockGetSalonContext.mockResolvedValueOnce({
+      salonId: TEST_IDS.SALON_UUID,
+      role: "employee",
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      userId: "user-emp",
+    });
+    mockDbSelect.mockReturnValue(chainMock([{ service: makeService(), category: null }]));
+
+    const request = createMockRequest("http://localhost:3000/api/services");
+    const response = await listServices(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveLength(1);
   });
 });

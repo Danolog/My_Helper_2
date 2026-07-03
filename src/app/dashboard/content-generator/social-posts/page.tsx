@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 import { ImageGenerator } from "@/components/content-generator/image-generator";
 import { StoryGenerator } from "@/components/content-generator/story-generator";
 import { VideoGenerator } from "@/components/content-generator/video-generator";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { PostConfigCard } from "./_components/post-config-card";
 import { PostPreviewCard } from "./_components/post-preview-card";
@@ -82,6 +83,14 @@ function SocialPostsContent() {
 }
 
 export default function SocialPostsPage() {
+  return (
+    <ModuleGate module="socialPosts">
+      <SocialPostsPageInner />
+    </ModuleGate>
+  );
+}
+
+function SocialPostsPageInner() {
   return (
     <ProPlanGate
       featureName="Posty social media"

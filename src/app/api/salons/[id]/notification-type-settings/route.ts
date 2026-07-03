@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { salons } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { validateBody, notificationTypeSettingsSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { salons } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 export interface NotificationTypeSettings {
   smsReminders: boolean; // SMS appointment reminders (1h before)
   pushReminders: boolean; // Push appointment reminders (1h and 24h before)
@@ -38,16 +37,13 @@ export async function GET(
 
     const { id } = await params;
 
-    // salons = korzeń najemcy: RLS izoluje po `id`, forSalon(id) ustawia kontekst.
-    // Dostęp do cudzego salonu odcina ownerId-check (403) — bez IDOR.
-    const salon = await forSalon(id).raw(async (tx) => {
-      const [row] = await tx
+    const [salon] = await forSalon(id).raw((tx) =>
+      tx
         .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
         .from(salons)
         .where(eq(salons.id, id))
-        .limit(1);
-      return row ?? null;
-    });
+        .limit(1)
+    );
 
     if (!salon) {
       return NextResponse.json(
@@ -108,15 +104,14 @@ export async function PUT(
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    // Fetch current salon (forSalon: kontekst RLS na id; ownerId-check gwarantuje brak IDOR)
-    const salon = await forSalon(id).raw(async (tx) => {
-      const [row] = await tx
+    // Fetch current salon
+    const [salon] = await forSalon(id).raw((tx) =>
+      tx
         .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
         .from(salons)
         .where(eq(salons.id, id))
-        .limit(1);
-      return row ?? null;
-    });
+        .limit(1)
+    );
 
     if (!salon) {
       return NextResponse.json(
@@ -171,7 +166,7 @@ export async function PUT(
       notificationTypes: newSettings,
     };
 
-    // Save to database
+    // Save to database (salons: tabela nadrzędna — filtr jawny po id = salonId)
     await forSalon(id).raw((tx) =>
       tx
         .update(salons)

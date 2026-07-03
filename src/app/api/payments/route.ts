@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { depositPayments, subscriptionPayments, appointments, clients, services, salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { forSalon } from "@/lib/server/repository";
-
 import { logger } from "@/lib/logger";
+import { depositPayments, subscriptionPayments, appointments, clients, services, salonSubscriptions, subscriptionPlans } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 /**
  * GET /api/payments
  *
@@ -23,22 +21,21 @@ export async function GET(request: NextRequest) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
-
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
     const { searchParams } = request.nextUrl;
+    const salonId = searchParams.get("salonId");
     const type = searchParams.get("type") || "all";
     const status = searchParams.get("status");
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = parseInt(searchParams.get("limit") || "20", 10);
+
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "salonId is required" },
+        { status: 400 }
+      );
+    }
 
     const offset = (page - 1) * limit;
     const transactions: Array<{
@@ -73,8 +70,6 @@ export async function GET(request: NextRequest) {
         depositConditions.push(lte(depositPayments.createdAt, endDate));
       }
 
-      // deposit_payments ma bezpośredni salon_id (jawny eq zachowany — defense in
-      // depth); leftJoiny pod kontekstem RLS forSalon.
       const depositRows = await forSalon(salonId).raw((tx) =>
         tx
         .select({
@@ -142,8 +137,6 @@ export async function GET(request: NextRequest) {
         subConditions.push(lte(subscriptionPayments.createdAt, endDate));
       }
 
-      // subscription_payments ma bezpośredni salon_id (jawny eq zachowany);
-      // leftJoiny pod kontekstem RLS forSalon.
       const subRows = await forSalon(salonId).raw((tx) =>
         tx
         .select({
