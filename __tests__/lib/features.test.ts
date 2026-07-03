@@ -11,9 +11,12 @@
 import { describe, it, expect } from "vitest";
 import {
   resolveModules,
+  moduleForRoute,
   DEFAULT_MODULES,
   MODULES,
   TOGGLEABLE_MODULES,
+  ROUTE_MODULE_MAP,
+  BASIC_REPORT_SLUGS,
   type ModuleKey,
 } from "@/lib/features";
 
@@ -76,5 +79,43 @@ describe("resolveModules", () => {
     const keys = Object.keys(DEFAULT_MODULES).sort() as ModuleKey[];
     const registryKeys = MODULES.map((m) => m.key).sort();
     expect(keys).toEqual(registryKeys);
+  });
+});
+
+describe("moduleForRoute", () => {
+  it("trasa z mapy => klucz modulu (dopasowanie po prefiksie, takze podstrony)", () => {
+    expect(moduleForRoute("/dashboard/products")).toBe("products");
+    expect(moduleForRoute("/dashboard/products/123/edit")).toBe("products");
+    expect(moduleForRoute("/dashboard/promo-codes")).toBe("promotions");
+    expect(moduleForRoute("/dashboard/settings/loyalty")).toBe("loyalty");
+    expect(moduleForRoute("/dashboard/content-generator/newsletters")).toBe("newsletters");
+  });
+
+  it("trasa rdzenia (bez wpisu w mapie) => null (zawsze dostepna)", () => {
+    expect(moduleForRoute("/dashboard")).toBeNull();
+    expect(moduleForRoute("/dashboard/calendar")).toBeNull();
+    expect(moduleForRoute("/dashboard/clients")).toBeNull();
+  });
+
+  it("kazdy wpis ROUTE_MODULE_MAP wskazuje na modul z rejestru", () => {
+    const registryKeys = new Set(MODULES.map((m) => m.key));
+    for (const entry of ROUTE_MODULE_MAP) {
+      expect(registryKeys.has(entry.module)).toBe(true);
+    }
+  });
+});
+
+describe("BASIC_REPORT_SLUGS", () => {
+  it("raporty podstawowe: przychod, popularnosc uslug i pracownikow", () => {
+    expect(BASIC_REPORT_SLUGS).toEqual([
+      "revenue",
+      "services-popularity",
+      "employee-popularity",
+    ]);
+  });
+
+  it("sluzy do bramkowania: slug spoza listy wymaga reportsAdvanced", () => {
+    expect(BASIC_REPORT_SLUGS.includes("revenue")).toBe(true);
+    expect(BASIC_REPORT_SLUGS.includes("occupancy")).toBe(false);
   });
 });
