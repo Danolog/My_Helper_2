@@ -1,6 +1,7 @@
 "use client";
 
 import { Lock, Users } from "lucide-react";
+import { RoleGate } from "@/components/dashboard/role-gate";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
 import { ClientFilters } from "./_components/ClientFilters";
@@ -9,6 +10,14 @@ import { ClientList } from "./_components/ClientList";
 import { useClientsData } from "./_hooks/use-clients-data";
 
 export default function ClientsPage() {
+  return (
+    <RoleGate allow={["owner", "receptionist"]}>
+      <ClientsPageInner />
+    </RoleGate>
+  );
+}
+
+function ClientsPageInner() {
   const { data: session, isPending } = useSession();
   const { salonId, loading: salonLoading } = useSalonId();
 

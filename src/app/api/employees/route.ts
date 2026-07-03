@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createEmployeeSchema } from "@/lib/api-validation";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { apiRateLimit } from "@/lib/rate-limit";
+import { getSalonContext } from "@/lib/salon-context";
 import { employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -61,20 +61,23 @@ export const GET = withApiHandler(
   async ({ request }) => {
     // Tenant isolation (ADR-001): derive the salon from the session, never
     // trust a client-supplied salonId in the query string (IDOR risk).
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): odczyt listy pracowników dla wszystkich ról (podgląd
+    // kalendarza wymaga listy pracowników); mutacje zostają owner-only.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const activeOnly = searchParams.get("activeOnly") === "true";
 
     logger.info("[Employees API] GET with params", { salonId, activeOnly });
 
-    // Select only the columns needed by list consumers (excludes userId, commissionRate, timestamps)
+    // Select only the columns needed by list consumers (excludes commissionRate, timestamps)
     const employeeColumns = {
       id: employees.id,
       salonId: employees.salonId,
@@ -86,6 +89,8 @@ export const GET = withApiHandler(
       role: employees.role,
       isActive: employees.isActive,
       color: employees.color,
+      // Faza 3: stan polaczenia konta (sekcja "Konto pracownika" w UI)
+      userId: employees.userId,
     };
 
     const allEmployees = await forSalon(salonId).raw((tx) =>
@@ -116,7 +121,6 @@ export const POST = withApiHandler(
     rateLimit: apiRateLimit,
     schema: createEmployeeSchema as z.ZodType<{
       salonId: string;
-      userId?: string | null;
       firstName: string;
       lastName: string;
       phone?: string | null;
@@ -129,7 +133,9 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create employee",
   },
   async ({ body }) => {
-    const { salonId, userId, firstName, lastName, phone, email, photoUrl, role, color } = body;
+    // userId celowo NIE jest przyjmowany z body — łączenie konta wyłącznie
+    // przez PUT /api/employees/[id]/link-account (walidacje cross-tenant).
+    const { salonId, firstName, lastName, phone, email, photoUrl, role, color } = body;
 
     // Get next available color if not provided
     const employeeColor = color || await getNextAvailableColor(salonId);
@@ -140,7 +146,6 @@ export const POST = withApiHandler(
       .insert(employees)
       .values({
         salonId,
-        userId: userId || null,
         firstName,
         lastName,
         phone: phone || null,

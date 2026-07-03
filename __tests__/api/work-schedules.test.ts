@@ -41,10 +41,22 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-// Tenant resolver — trasa pobiera salonId z sesji właściciela.
+// Tenant resolver — POST nadal pobiera salonId z sesji właściciela.
 vi.mock("@/lib/get-user-salon", () => ({
   getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
   getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
+}));
+
+// Faza 3 (role): GET grafików przeszedł na getSalonContext (odczyt dla
+// wszystkich ról). Domyślnie właściciel — asercje bez zmian.
+vi.mock("@/lib/salon-context", () => ({
+  getSalonContext: vi.fn().mockResolvedValue({
+    salonId: TEST_IDS.SALON_UUID,
+    role: "owner",
+    employeeId: null,
+    userId: "user-1",
+  }),
+  hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
 }));
 
 vi.mock("@/lib/schema", () => {
@@ -104,6 +116,8 @@ function chainMock(result: unknown[] = []) {
 // -------------------------------------------------------
 
 import { GET as getWorkSchedules, POST as saveWorkSchedules } from "@/app/api/work-schedules/route";
+import { getSalonContext } from "@/lib/salon-context";
+const mockGetSalonContext = vi.mocked(getSalonContext);
 
 // -------------------------------------------------------
 // Tests
@@ -153,6 +167,26 @@ describe("GET /api/work-schedules", () => {
     expect(body.success).toBe(true);
     expect(body.data).toHaveLength(0);
     expect(body.count).toBe(0);
+  });
+
+  it("should return 200 for receptionist reading schedules (Faza 3 role)", async () => {
+    mockGetSalonContext.mockResolvedValueOnce({
+      salonId: TEST_IDS.SALON_UUID,
+      role: "receptionist",
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      userId: "user-rec",
+    });
+    mockDbSelect.mockReturnValue(chainMock([makeWorkSchedule()]));
+
+    const request = createMockRequest(
+      `http://localhost:3000/api/work-schedules?employeeId=${TEST_IDS.EMPLOYEE_UUID}`
+    );
+    const response = await getWorkSchedules(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.count).toBe(1);
   });
 
   it("should return 500 when database throws", async () => {

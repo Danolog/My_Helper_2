@@ -5,13 +5,16 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { getSalonContext } from "@/lib/salon-context";
 import { salons } from "@/lib/schema";
 
 /**
  * GET /api/salons/mine
  *
- * Returns the salon owned by the currently authenticated user.
- * Looks up salons where ownerId matches the session user's ID.
+ * Returns the salon of the currently authenticated user: the salon they
+ * OWN, or (Faza 3 — role) the salon they WORK IN as an active linked
+ * employee/receptionist (getSalonContext). UI (useSalonId) relies on this
+ * for every dashboard page, so staff must resolve their salon here too.
  *
  * Response shape:
  *   { success: true, salon: { id, name, ... } }    -- salon found
@@ -23,18 +26,21 @@ export async function GET() {
   if (isAuthError(authResult)) return authResult;
 
   try {
-    const [salon] = await db
-      .select({
-        id: salons.id,
-        name: salons.name,
-        phone: salons.phone,
-        email: salons.email,
-        address: salons.address,
-        industryType: salons.industryType,
-      })
-      .from(salons)
-      .where(eq(salons.ownerId, authResult.user.id))
-      .limit(1);
+    const ctx = await getSalonContext();
+    const [salon] = ctx
+      ? await db
+          .select({
+            id: salons.id,
+            name: salons.name,
+            phone: salons.phone,
+            email: salons.email,
+            address: salons.address,
+            industryType: salons.industryType,
+          })
+          .from(salons)
+          .where(eq(salons.id, ctx.salonId))
+          .limit(1)
+      : [];
 
     return NextResponse.json({
       success: true,

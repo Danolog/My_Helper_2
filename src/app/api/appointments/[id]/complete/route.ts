@@ -8,8 +8,8 @@ import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 // owner_id) — czeka na akcesor forOwner; brama zasobu [id] idzie przez forSalon.
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { getSalonContext } from "@/lib/salon-context";
 import {
   appointments,
   treatmentHistory,
@@ -110,13 +110,16 @@ export async function POST(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): owner/receptionist domykają dowolną wizytę salonu,
+    // employee wyłącznie własną (sprawdzenie po pobraniu wizyty niżej).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { id } = await params;
     const body = await request.json();
@@ -143,7 +146,12 @@ export async function POST(
     );
 
     const row = result[0];
-    if (!row) {
+    // Employee: cudza wizyta = 404 (nie 403 — nie zdradzamy istnienia).
+    if (
+      !row ||
+      (ctx.role === "employee" &&
+        (!ctx.employeeId || row.appointment.employeeId !== ctx.employeeId))
+    ) {
       return NextResponse.json(
         { success: false, error: "Appointment not found" },
         { status: 404 }

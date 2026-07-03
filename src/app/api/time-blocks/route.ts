@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { eq, and, gte, lte, type SQL } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, createTimeBlockSchema } from "@/lib/api-validation";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { apiRateLimit } from "@/lib/rate-limit";
+import { getSalonContext } from "@/lib/salon-context";
 import { timeBlocks, employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/time-blocks?employeeId=xxx&startDate=xxx&endDate=xxx
@@ -15,13 +15,15 @@ export const GET = withApiHandler(
     errorMessage: "Failed to fetch time blocks",
   },
   async ({ request }) => {
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): odczyt bloków dla wszystkich ról (podgląd kalendarza).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
@@ -86,13 +88,22 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create time block",
   },
   async ({ request }) => {
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): owner tworzy bloki dowolnemu pracownikowi; employee
+    // wyłącznie SOBIE; receptionist nie tworzy bloków (403).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role === "receptionist") {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
     const body = await request.json();
     const validationError = validateBody(createTimeBlockSchema, body);
@@ -100,6 +111,13 @@ export const POST = withApiHandler(
       return NextResponse.json(validationError, { status: 400 });
     }
     const { employeeId, startTime, endTime, blockType, reason } = body;
+
+    if (ctx.role === "employee" && employeeId !== ctx.employeeId) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
 
     // Validate block type
     const validTypes = ["break", "vacation", "personal", "holiday", "other"];
@@ -168,13 +186,22 @@ export const DELETE = withApiHandler(
     errorMessage: "Failed to delete time block",
   },
   async ({ request }) => {
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): owner usuwa dowolny blok salonu; employee wyłącznie
+    // WŁASNY blok; receptionist nie usuwa bloków (403).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role === "receptionist") {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
@@ -190,9 +217,10 @@ export const DELETE = withApiHandler(
 
     // timeBlocks nie ma salonId — sprawdzenie własności przez join z employees
     // i delete atomowo w jednej transakcji RLS; cudzy blok jest niewidoczny (404).
+    // Employee: blok innego pracownika = sentinel "forbidden" -> 403.
     const deleted = await forSalon(salonId).raw(async (tx) => {
       const [owned] = await tx
-        .select({ id: timeBlocks.id })
+        .select({ id: timeBlocks.id, employeeId: timeBlocks.employeeId })
         .from(timeBlocks)
         .innerJoin(employees, eq(timeBlocks.employeeId, employees.id))
         .where(and(eq(timeBlocks.id, id), eq(employees.salonId, salonId)))
@@ -202,11 +230,22 @@ export const DELETE = withApiHandler(
         return [];
       }
 
+      if (ctx.role === "employee" && owned.employeeId !== ctx.employeeId) {
+        return "forbidden" as const;
+      }
+
       return tx
         .delete(timeBlocks)
         .where(eq(timeBlocks.id, id))
         .returning();
     });
+
+    if (deleted === "forbidden") {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
 
     if (deleted.length === 0) {
       return NextResponse.json(

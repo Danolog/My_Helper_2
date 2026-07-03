@@ -13,6 +13,7 @@ import {
   Blocks,
 } from "lucide-react";
 import { useModules } from "@/components/dashboard/modules-provider";
+import { RoleGate } from "@/components/dashboard/role-gate";
 import { Button } from "@/components/ui/button";
 
 const SETTINGS_ITEMS = [
@@ -63,6 +64,14 @@ const SETTINGS_ITEMS = [
 ];
 
 export default function SettingsHubPage() {
+  return (
+    <RoleGate allow={["owner"]}>
+      <SettingsHubPageInner />
+    </RoleGate>
+  );
+}
+
+function SettingsHubPageInner() {
   const modules = useModules();
   const items = SETTINGS_ITEMS.filter(
     (item) => !("moduleKey" in item) || modules[item.moduleKey],

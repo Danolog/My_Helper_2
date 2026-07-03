@@ -5,9 +5,9 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 R2b: POST to świadomie publiczny booking (gość bez sesji salonu) — świadomie surowe db; GET idzie przez forSalon
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { getSalonContext } from "@/lib/salon-context";
 import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { getOptionalSession } from "@/lib/session";
@@ -20,13 +20,16 @@ export async function GET(request: Request) {
 
     // Tenant isolation: derive the salon from the session, never trust a
     // client-supplied salonId in the query string (IDOR risk).
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): owner/receptionist widzą pełną listę salonu,
+    // employee tylko własne wizyty (filtr niżej).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const startDate = searchParams.get("startDate");
@@ -57,7 +60,17 @@ export async function GET(request: Request) {
       );
     }
 
+    // Rola employee: wynik ograniczony do WŁASNYCH wizyt (spec Fazy 3).
+    // Konto pracownicze bez rekordu employees => pusta lista (fail-closed).
+    if (ctx.role === "employee" && !ctx.employeeId) {
+      return NextResponse.json({ success: true, data: [], count: 0 });
+    }
+
     const conditions = [eq(appointments.salonId, salonId)];
+
+    if (ctx.role === "employee" && ctx.employeeId) {
+      conditions.push(eq(appointments.employeeId, ctx.employeeId));
+    }
 
     if (employeeId) {
       conditions.push(eq(appointments.employeeId, employeeId));

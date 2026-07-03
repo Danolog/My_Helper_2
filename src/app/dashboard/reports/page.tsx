@@ -16,6 +16,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { useModuleEnabled } from "@/components/dashboard/modules-provider";
+import { RoleGate } from "@/components/dashboard/role-gate";
 import { Button } from "@/components/ui/button";
 import { BASIC_REPORT_SLUGS } from "@/lib/features";
 
@@ -115,6 +116,14 @@ const REPORT_GROUPS = [
 ];
 
 export default function ReportsHubPage() {
+  return (
+    <RoleGate allow={["owner"]}>
+      <ReportsHubPageInner />
+    </RoleGate>
+  );
+}
+
+function ReportsHubPageInner() {
   const reportsAdvanced = useModuleEnabled("reportsAdvanced");
   const groups = reportsAdvanced
     ? REPORT_GROUPS

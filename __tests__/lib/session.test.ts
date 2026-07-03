@@ -36,12 +36,20 @@ vi.mock("next/navigation", () => ({
 
 // Mock drizzle-orm
 vi.mock("drizzle-orm", () => ({
-  eq: vi.fn(),
+  eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
+  and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
 }));
 
 // Mock schema
 vi.mock("@/lib/schema", () => ({
   salons: { id: "salons.id", ownerId: "salons.ownerId" },
+  employees: {
+    id: "employees.id",
+    salonId: "employees.salonId",
+    userId: "employees.userId",
+    role: "employees.role",
+    isActive: "employees.isActive",
+  },
 }));
 
 import { auth } from "@/lib/auth";
@@ -52,6 +60,7 @@ import {
   adminRoutes,
   requireAuth,
   requireAdmin,
+  requireDashboardAccess,
   getOptionalSession,
   hasActiveSession,
 } from "@/lib/session";
@@ -261,6 +270,84 @@ describe("requireAdmin", () => {
     });
 
     await expect(requireAdmin()).rejects.toThrow("NEXT_REDIRECT");
+    expect(mockRedirect).toHaveBeenCalledWith("/login");
+  });
+});
+
+describe("requireDashboardAccess", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Reset the db chain mocks
+    mockSelect.mockReturnValue({ from: mockFrom });
+    mockFrom.mockReturnValue({ where: mockWhere });
+    mockWhere.mockReturnValue({ limit: mockLimit });
+  });
+
+  it("should return role 'owner' without db query when user role is 'admin'", async () => {
+    const fakeSession = createFakeSession({ role: "admin" });
+    mockGetSession.mockResolvedValue(fakeSession);
+
+    const result = await requireDashboardAccess();
+
+    expect(result).toEqual({ session: fakeSession, allowed: true, role: "owner" });
+    expect(mockSelect).not.toHaveBeenCalled();
+  });
+
+  it("should return role 'owner' when user owns a salon", async () => {
+    const fakeSession = createFakeSession({ role: "client" });
+    mockGetSession.mockResolvedValue(fakeSession);
+    mockLimit.mockResolvedValueOnce([{ id: "salon-1" }]);
+
+    const result = await requireDashboardAccess();
+
+    expect(result).toEqual({ session: fakeSession, allowed: true, role: "owner" });
+  });
+
+  it("should return role 'employee' for an active linked employee", async () => {
+    const fakeSession = createFakeSession({ role: "client" });
+    mockGetSession.mockResolvedValue(fakeSession);
+    mockLimit
+      .mockResolvedValueOnce([]) // no owned salon
+      .mockResolvedValueOnce([{ role: "employee" }]); // active employee
+
+    const result = await requireDashboardAccess();
+
+    expect(result).toEqual({ session: fakeSession, allowed: true, role: "employee" });
+  });
+
+  it("should return role 'receptionist' for an active linked receptionist", async () => {
+    const fakeSession = createFakeSession({ role: "client" });
+    mockGetSession.mockResolvedValue(fakeSession);
+    mockLimit
+      .mockResolvedValueOnce([]) // no owned salon
+      .mockResolvedValueOnce([{ role: "receptionist" }]);
+
+    const result = await requireDashboardAccess();
+
+    expect(result).toEqual({
+      session: fakeSession,
+      allowed: true,
+      role: "receptionist",
+    });
+  });
+
+  it("should return allowed=false and role=null when user is neither owner nor employee", async () => {
+    const fakeSession = createFakeSession({ role: "client" });
+    mockGetSession.mockResolvedValue(fakeSession);
+    mockLimit.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    const result = await requireDashboardAccess();
+
+    expect(result).toEqual({ session: fakeSession, allowed: false, role: null });
+  });
+
+  it("should redirect to '/login' when not authenticated", async () => {
+    mockGetSession.mockResolvedValue(null);
+    mockRedirect.mockImplementation(() => {
+      throw new Error("NEXT_REDIRECT");
+    });
+
+    await expect(requireDashboardAccess()).rejects.toThrow("NEXT_REDIRECT");
     expect(mockRedirect).toHaveBeenCalledWith("/login");
   });
 });

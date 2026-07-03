@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { SidebarNav } from "@/components/dashboard/dashboard-sidebar";
 import { useModules } from "@/components/dashboard/modules-provider";
+import { useSalonRole } from "@/components/dashboard/role-provider";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -20,6 +21,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { moduleForRoute } from "@/lib/features";
+import { isRouteAllowedForRole } from "@/lib/role-access";
 import { cn } from "@/lib/utils";
 
 interface BottomNavItem {
@@ -68,7 +70,9 @@ export function DashboardBottomNav() {
   const pathname = usePathname();
   const [sheetOpen, setSheetOpen] = useState(false);
   const modules = useModules();
+  const role = useSalonRole();
   const visibleItems = BOTTOM_NAV_ITEMS.filter((item) => {
+    if (!isRouteAllowedForRole(item.href, role)) return false;
     const moduleKey = moduleForRoute(item.href);
     return moduleKey === null || modules[moduleKey];
   });

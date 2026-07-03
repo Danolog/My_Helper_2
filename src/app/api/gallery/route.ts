@@ -3,6 +3,7 @@ import { eq, desc, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createGalleryPhotoSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -89,6 +90,27 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create gallery photo",
   },
   async ({ body }) => {
+    // Faza 3 (role): zdjęcia dodaje owner i employee (spec); receptionist
+    // tylko z czasowym grantem "gallery-manage". Nie-owner wyłącznie do
+    // WŁASNEGO salonu (salonId z body musi zgadzać się z sesją).
+    const ctx = await getSalonContext();
+    if (!ctx) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+    if (
+      (ctx.role === "receptionist" &&
+        !(await hasFeatureAccess(ctx, "gallery-manage"))) ||
+      (ctx.role !== "owner" && body.salonId !== ctx.salonId)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+
     const {
       salonId,
       employeeId,

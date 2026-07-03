@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import {
   employeeCommissions,
   employees,
@@ -20,13 +20,21 @@ export const GET = withApiHandler(
   async ({ request }) => {
     // Tenant isolation (ADR-001): commissions have no salonId column, so the
     // salon scope rides on the employees join (employeeId is NOT NULL).
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): finanse tylko owner, chyba że czasowy grant "finance".
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role !== "owner" && !(await hasFeatureAccess(ctx, "finance"))) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const dateFrom = searchParams.get("dateFrom");

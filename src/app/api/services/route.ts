@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createServiceSchema } from "@/lib/api-validation";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { apiRateLimit } from "@/lib/rate-limit";
+import { getSalonContext } from "@/lib/salon-context";
 import { services, serviceCategories } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -20,7 +20,10 @@ export const GET = withApiHandler(
     const { searchParams } = new URL(request.url);
     // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
     // "lista bez zawężenia" była wyciekiem cross-salon).
-    const salonId = searchParams.get("salonId") || (await getUserSalonId());
+    // Faza 3 (role): getSalonContext obejmuje też recepcję/pracownika (podgląd
+    // kalendarza); mutacje zostają owner-only.
+    const salonId =
+      searchParams.get("salonId") || (await getSalonContext())?.salonId;
     const activeOnly = searchParams.get("activeOnly") === "true";
 
     if (!salonId) {

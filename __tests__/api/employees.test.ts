@@ -77,6 +77,18 @@ vi.mock("@/lib/auth-middleware", () => ({
 }));
 
 // Tenant isolation (P0-A): scoped routes resolve the salon from the session.
+// Faza 3 (role): GET listy pracowników przeszedł na getSalonContext.
+// Domyślnie właściciel — scenariusze właścicielskie przechodzą bez zmian.
+vi.mock("@/lib/salon-context", () => ({
+  getSalonContext: vi.fn().mockResolvedValue({
+    salonId: TEST_IDS.SALON_UUID,
+    role: "owner",
+    employeeId: null,
+    userId: "user-1",
+  }),
+  hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
+}));
+
 vi.mock("@/lib/get-user-salon", () => ({
   getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
   getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
@@ -110,7 +122,9 @@ import { GET as listEmployees, POST as createEmployee } from "@/app/api/employee
 
 // Mocked tenant resolver — flip it to simulate "no salon" / wrong tenant.
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { getSalonContext } from "@/lib/salon-context";
 const mockGetUserSalonId = vi.mocked(getUserSalonId);
+const mockGetSalonContext = vi.mocked(getSalonContext);
 
 // -------------------------------------------------------
 // Tests
@@ -453,5 +467,33 @@ describe("P0-A tenant isolation — /api/employees/[id]", () => {
     expect(status).toBe(404);
     expect(body.success).toBe(false);
     expect(mockGetUserSalonId).toHaveBeenCalled();
+  });
+});
+
+// =======================================================
+// Faza 3 · Role — GET /api/employees dostępny dla recepcji i pracownika
+// (podgląd kalendarza wymaga listy pracowników).
+// =======================================================
+describe("Faza 3 role — GET /api/employees", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("receptionist czyta listę pracowników swojego salonu (200)", async () => {
+    mockGetSalonContext.mockResolvedValueOnce({
+      salonId: TEST_IDS.SALON_UUID,
+      role: "receptionist",
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      userId: "user-rec",
+    });
+    mockDbSelect.mockReturnValue(chainMock([makeEmployee()]));
+
+    const request = createMockRequest("http://localhost:3000/api/employees");
+    const response = await listEmployees(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveLength(1);
   });
 });

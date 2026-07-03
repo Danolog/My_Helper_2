@@ -105,6 +105,18 @@ vi.mock("@/lib/get-user-salon", () => ({
   getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
 }));
 
+// Faza 3 (role): trasa complete przeszła na getSalonContext. Domyślnie
+// właściciel — scenariusze właścicielskie przechodzą bez zmian.
+vi.mock("@/lib/salon-context", () => ({
+  getSalonContext: vi.fn().mockResolvedValue({
+    salonId: TEST_IDS.SALON_UUID,
+    role: "owner",
+    employeeId: null,
+    userId: "user-1",
+  }),
+  hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
+}));
+
 // -------------------------------------------------------
 // Chain builder
 // -------------------------------------------------------

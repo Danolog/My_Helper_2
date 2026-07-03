@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { logger } from "@/lib/logger";
+import { getSalonContext } from "@/lib/salon-context";
 import { workSchedules, employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/work-schedules/by-salon?salonId=xxx&dayOfWeek=1
@@ -14,15 +15,27 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const querySalonId = searchParams.get("salonId");
     const dayOfWeekStr = searchParams.get("dayOfWeek");
 
-    if (!salonId) {
+    if (!querySalonId) {
       return NextResponse.json(
         { success: false, error: "salonId is required" },
         { status: 400 }
       );
     }
+
+    // Faza 3 (role): salon zawsze z sesji (wszystkie 3 role czytają podgląd
+    // kalendarza); salonId z query zostaje tylko dla zgodności kształtu żądania
+    // i nie jest już źródłem zakresu (cudzy salonId nie przecieka danych).
+    const ctx = await getSalonContext();
+    if (!ctx) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+    const salonId = ctx.salonId;
 
     logger.info("[WorkSchedules BySalon API] GET for salon", { salonId });
 

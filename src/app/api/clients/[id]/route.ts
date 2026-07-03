@@ -8,8 +8,8 @@ import { auth } from "@/lib/auth";
 // `account` pozostaje surowym `db` (weryfikacja hasła nie jest salon-scoped):
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import { clients, account } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
@@ -22,13 +22,21 @@ export const GET = withApiHandler(
     errorMessage: "Failed to fetch client",
   },
   async ({ params }) => {
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): kartoteka klientów dla owner/receptionist; employee 403.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role === "employee") {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
     const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
@@ -65,13 +73,21 @@ export const PUT = withApiHandler(
     errorMessage: "Failed to update client",
   },
   async ({ request, params }) => {
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): edycja klientów dla owner/receptionist; employee 403.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role === "employee") {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
     const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
@@ -155,13 +171,23 @@ export async function DELETE(
     }
 
     // 1a. Resolve the caller's salon — tenant isolation
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): usuwanie klientów TYLKO owner, chyba że czasowy grant
+    // "clients-delete" (temporary-access). Rola sprawdzana PRZED istniejącą
+    // logiką (weryfikacja hasła zostaje bez zmian dla dopuszczonych ról).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role !== "owner" && !(await hasFeatureAccess(ctx, "clients-delete"))) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
     // 1b. (ADR-001 sekcja 2.4) Cudzy/nieistniejacy zasob = 404 ZANIM dojdzie do
     // weryfikacji hasla — istnienie cudzego klienta nie moze przeciekac przez

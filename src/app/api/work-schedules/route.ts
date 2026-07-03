@@ -5,6 +5,7 @@ import { createWorkScheduleSchema } from "@/lib/api-validation";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { apiRateLimit } from "@/lib/rate-limit";
+import { getSalonContext } from "@/lib/salon-context";
 import { workSchedules, employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -26,13 +27,16 @@ export const GET = withApiHandler(
       );
     }
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): odczyt grafików dla wszystkich ról (podgląd kalendarza);
+    // zapis (POST) zostaje na getUserSalonId — owner-only.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     logger.info("[WorkSchedules API] GET for employee", { employeeId });
 

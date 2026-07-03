@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
-// ADR-001 R2b grupa B: odczyt `salons` po ownerId (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
-import { db } from "@/lib/db";
-import { invoices, clients, appointments, employees, services, salons } from "@/lib/schema";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
+import { invoices, clients, appointments, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 /**
  * GET /api/invoices
@@ -23,22 +21,25 @@ export const GET = withApiHandler(
     logLabel: "[Invoices API] GET",
     errorMessage: "Nie udalo sie pobrac faktur",
   },
-  async ({ request, auth }) => {
-    // Resolve salon from authenticated user (auth: "user" gwarantuje sesje)
-    const [salon] = await db
-      .select({ id: salons.id })
-      .from(salons)
-      .where(eq(salons.ownerId, auth!.user.id))
-      .limit(1);
+  async ({ request }) => {
+    // Resolve salon from authenticated user (auth: "user" gwarantuje sesje).
+    // Faza 3 (role): faktury tylko owner, chyba że czasowy grant "invoices".
+    const ctx = await getSalonContext();
 
-    if (!salon) {
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Nie znaleziono salonu dla tego uzytkownika" },
         { status: 403 }
       );
     }
+    if (ctx.role !== "owner" && !(await hasFeatureAccess(ctx, "invoices"))) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
 
-    const salonId = salon.id;
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const dateFrom = searchParams.get("dateFrom");

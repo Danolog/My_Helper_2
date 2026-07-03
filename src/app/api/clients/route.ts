@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createClientSchema } from "@/lib/api-validation";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { getSalonContext } from "@/lib/salon-context";
 import { apiRateLimit } from "@/lib/rate-limit";
 import { clients, appointments } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
@@ -25,13 +25,21 @@ export const GET = withApiHandler(
   async ({ request }) => {
     // Tenant isolation (ADR-001): derive the salon from the session, never
     // trust a client-supplied salonId in the query string (IDOR risk).
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Faza 3 (role): kartoteka klientów dla owner/receptionist; employee 403.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role === "employee") {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
 
     const { searchParams } = new URL(request.url);
     const dateAddedFrom = searchParams.get("dateAddedFrom");
@@ -134,6 +142,25 @@ export const POST = withApiHandler(
   },
   async ({ body }) => {
     const { salonId, firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
+
+    // Faza 3 (role): dodawanie klientów dla owner/receptionist; employee 403.
+    // Recepcja tylko we WŁASNYM salonie (salonId z body musi zgadzać się z sesją).
+    const ctx = await getSalonContext();
+    if (!ctx) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+    if (
+      ctx.role === "employee" ||
+      (ctx.role !== "owner" && salonId !== ctx.salonId)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
 
     logger.info(`[Clients API] Executing: INSERT INTO clients (salon_id, first_name, last_name, phone, email, notes, preferences, allergies, favorite_employee_id)`);
     const [newClient] = await forSalon(salonId).raw((tx) =>

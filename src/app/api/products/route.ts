@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { eq, and, like, sql } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createProductSchema } from "@/lib/api-validation";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { apiRateLimit } from "@/lib/rate-limit";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import { products, notifications } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -76,15 +76,27 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
-    // "lista bez zawężenia" była wyciekiem cross-salon).
-    const salonId = searchParams.get("salonId") || (await getUserSalonId());
-    if (!salonId) {
+    // Faza 3 (role): magazyn tylko owner, chyba że czasowy grant "products";
+    // nie-owner zawsze w zakresie WŁASNEGO salonu (query salonId ignorowane).
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    if (ctx.role !== "owner" && !(await hasFeatureAccess(ctx, "products"))) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+    // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
+    // "lista bez zawężenia" była wyciekiem cross-salon).
+    const salonId =
+      ctx.role === "owner"
+        ? searchParams.get("salonId") || ctx.salonId
+        : ctx.salonId;
 
     // Select only the columns needed by the inventory UI
     const productColumns = {
@@ -131,6 +143,25 @@ export const POST = withApiHandler(
   },
   async ({ body }) => {
     const { salonId, name, category, quantity, minQuantity, unit, pricePerUnit } = body;
+
+    // Faza 3 (role): dodawanie produktów tylko owner, chyba że czasowy grant
+    // "products"; nie-owner wyłącznie do WŁASNEGO salonu.
+    const ctx = await getSalonContext();
+    if (!ctx) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+    if (
+      ctx.role !== "owner" &&
+      (!(await hasFeatureAccess(ctx, "products")) || salonId !== ctx.salonId)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
 
     const [newProduct] = await forSalon(salonId).raw((tx) =>
       tx

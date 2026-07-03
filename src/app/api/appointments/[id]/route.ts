@@ -9,13 +9,26 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // sciezka pozytywna DELETE z zadatkiem nie jest pokryta testem R1 (zob. raport).
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
+import { getSalonContext, type SalonContext } from "@/lib/salon-context";
 import { appointments, clients, employees, services, notifications, depositPayments, salons } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
 import { notifyWaitingList } from "@/lib/waiting-list";
+
+// Faza 3 (role): employee widzi/modyfikuje wyłącznie WŁASNE wizyty.
+// Cudza wizyta = 404 (nie 403 — nie zdradzamy istnienia zasobu).
+function isForeignForEmployee(
+  ctx: SalonContext,
+  appointmentEmployeeId: string | null
+): boolean {
+  return (
+    ctx.role === "employee" &&
+    (!ctx.employeeId || appointmentEmployeeId !== ctx.employeeId)
+  );
+}
+
 // GET /api/appointments/[id] - Get a single appointment
 export async function GET(
   _request: Request,
@@ -25,13 +38,14 @@ export async function GET(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { id } = await params;
 
@@ -61,7 +75,7 @@ export async function GET(
     );
 
     const row = result[0];
-    if (!row) {
+    if (!row || isForeignForEmployee(ctx, row.appointment.employeeId)) {
       return NextResponse.json(
         { success: false, error: "Appointment not found" },
         { status: 404 }
@@ -97,13 +111,14 @@ export async function PUT(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { id } = await params;
 
@@ -128,7 +143,7 @@ export async function PUT(
     // wizyta = 404 (scoped findOne, kontekst RLS ustawiony).
     const existing = await forSalon(salonId).findOne(appointments, id);
 
-    if (!existing) {
+    if (!existing || isForeignForEmployee(ctx, existing.employeeId)) {
       return NextResponse.json(
         { success: false, error: "Appointment not found" },
         { status: 404 }
@@ -229,13 +244,14 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Salon not found" },
         { status: 404 }
       );
     }
+    const salonId = ctx.salonId;
 
     const { id } = await params;
     const url = new URL(request.url);
@@ -260,7 +276,7 @@ export async function DELETE(
     );
 
     const row = result[0];
-    if (!row) {
+    if (!row || isForeignForEmployee(ctx, row.appointment.employeeId)) {
       return NextResponse.json(
         { success: false, error: "Appointment not found" },
         { status: 404 }

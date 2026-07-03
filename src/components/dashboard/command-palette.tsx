@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useModules } from "@/components/dashboard/modules-provider";
+import { useSalonRole } from "@/components/dashboard/role-provider";
 import {
   CommandDialog,
   CommandEmpty,
@@ -55,6 +56,7 @@ import {
 import { useAISearch } from "@/hooks/use-ai-search";
 import { useVoiceInput } from "@/hooks/use-voice-input";
 import { BASIC_REPORT_SLUGS, moduleForRoute } from "@/lib/features";
+import { isRouteAllowedForRole } from "@/lib/role-access";
 import { cn } from "@/lib/utils";
 
 interface CommandPage {
@@ -130,8 +132,10 @@ export function CommandPalette() {
   const [search, setSearch] = useState("");
   const router = useRouter();
   const modules = useModules();
+  const role = useSalonRole();
 
   const isPageVisible = (page: CommandPage) => {
+    if (!isRouteAllowedForRole(page.href, role)) return false;
     const moduleKey = moduleForRoute(page.href);
     return moduleKey === null || modules[moduleKey];
   };
@@ -265,7 +269,7 @@ export function CommandPalette() {
         )}
 
         <CommandGroup heading="Szybkie akcje">
-          {QUICK_ACTIONS.map((page) => {
+          {QUICK_ACTIONS.filter(isPageVisible).map((page) => {
             const Icon = page.icon;
             return (
               <CommandItem

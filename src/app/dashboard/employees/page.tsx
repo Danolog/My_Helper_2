@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { Lock, Users, Clock, UserPlus, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { RoleGate } from "@/components/dashboard/role-gate";
+import { useSalonRole } from "@/components/dashboard/role-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,6 +34,8 @@ interface Employee {
   role: string;
   isActive: boolean;
   color: string | null;
+  /** Podpiete konto uzytkownika (Faza 3 — laczenie kont). */
+  userId: string | null;
 }
 
 interface EmployeeDetail extends Employee {
@@ -44,7 +48,16 @@ interface Service {
 }
 
 export default function EmployeesPage() {
+  return (
+    <RoleGate allow={["owner"]}>
+      <EmployeesPageInner />
+    </RoleGate>
+  );
+}
+
+function EmployeesPageInner() {
   const { data: session, isPending } = useSession();
+  const salonRole = useSalonRole();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [salonId, setSalonId] = useState<string | null>(null);
@@ -54,6 +67,8 @@ export default function EmployeesPage() {
   const [editLoading, setEditLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editData, setEditData] = useState<EmployeeDetail | null>(null);
+  const [linkEmail, setLinkEmail] = useState("");
+  const [linkSaving, setLinkSaving] = useState(false);
   const [services, setServices] = useState<Service[]>([]);
   const [selectedServiceIds, setSelectedServiceIds] = useState<Set<string>>(
     new Set()
@@ -129,6 +144,7 @@ export default function EmployeesPage() {
       if (data.success) {
         setEditData(data.data);
         setSelectedServiceIds(new Set(data.data.serviceIds));
+        setLinkEmail(data.data.email ?? "");
       } else {
         toast.error("Nie udalo sie pobrac danych pracownika");
         setEditOpen(false);
@@ -189,6 +205,43 @@ export default function EmployeesPage() {
       toast.error("Blad polaczenia");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Laczenie/odlaczanie konta uzytkownika (email = null => odlaczenie);
+  // wylacznie wlasciciel — API i tak egzekwuje to po stronie serwera.
+  const handleLinkAccount = async (email: string | null) => {
+    if (!editData) return;
+    setLinkSaving(true);
+    try {
+      const res = await mutationFetch(
+        `/api/employees/${editData.id}/link-account`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        }
+      );
+      const data = await res.json();
+      if (data.success) {
+        toast.success(
+          email === null
+            ? "Konto odlaczone od pracownika"
+            : "Konto polaczone z pracownikiem"
+        );
+        setEditData((prev) =>
+          prev ? { ...prev, userId: data.data?.userId ?? null } : prev
+        );
+        fetchEmployees();
+      } else {
+        toast.error(
+          data.error || "Nie udalo sie zaktualizowac konta pracownika"
+        );
+      }
+    } catch {
+      toast.error("Blad polaczenia");
+    } finally {
+      setLinkSaving(false);
     }
   };
 
@@ -378,7 +431,7 @@ export default function EmployeesPage() {
                 >
                   <option value="employee">Pracownik</option>
                   <option value="owner">Wlasciciel</option>
-                  <option value="reception">Recepcja</option>
+                  <option value="receptionist">Recepcja</option>
                 </select>
               </div>
 
@@ -392,6 +445,48 @@ export default function EmployeesPage() {
                   }
                 />
               </div>
+
+              {/* Konto pracownika (Faza 3) — tylko wlasciciel */}
+              {salonRole === "owner" && (
+                <div className="space-y-2 rounded-md border p-3">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="link-email">Konto pracownika</Label>
+                    <Badge variant={editData.userId ? "default" : "secondary"}>
+                      {editData.userId ? "Podpiete" : "Niepodpiete"}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Polacz konto uzytkownika po adresie e-mail, aby pracownik
+                    mogl logowac sie do panelu salonu.
+                  </p>
+                  <Input
+                    id="link-email"
+                    type="email"
+                    placeholder="email@konta.pl"
+                    value={linkEmail}
+                    onChange={(e) => setLinkEmail(e.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => handleLinkAccount(linkEmail.trim())}
+                      disabled={linkSaving || !linkEmail.trim()}
+                    >
+                      {linkSaving ? "Zapisywanie..." : "Polacz konto"}
+                    </Button>
+                    {editData.userId && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleLinkAccount(null)}
+                        disabled={linkSaving}
+                      >
+                        Odlacz
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Service assignments */}
               {services.length > 0 && (

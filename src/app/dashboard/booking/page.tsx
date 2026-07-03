@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Lock, CalendarPlus } from "lucide-react";
+import { RoleGate } from "@/components/dashboard/role-gate";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
 import { BookingModeToggle } from "./_components/booking-mode-toggle";
@@ -17,6 +18,14 @@ import { usePackageBooking } from "./_hooks/use-package-booking";
 import { useServiceBooking } from "./_hooks/use-service-booking";
 
 export default function BookingPage() {
+  return (
+    <RoleGate allow={["owner", "receptionist"]}>
+      <BookingPageInner />
+    </RoleGate>
+  );
+}
+
+function BookingPageInner() {
   const { data: session, isPending } = useSession();
   const { salonId } = useSalonId();
   const [bookingMode, setBookingMode] = useState<"service" | "package">("service");

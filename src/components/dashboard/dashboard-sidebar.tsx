@@ -22,6 +22,7 @@ import {
   Menu,
 } from "lucide-react";
 import { useModules } from "@/components/dashboard/modules-provider";
+import { useSalonRole } from "@/components/dashboard/role-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -33,6 +34,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { moduleForRoute } from "@/lib/features";
+import { isRouteAllowedForRole } from "@/lib/role-access";
 import { cn } from "@/lib/utils";
 import type { LucideIcon } from "lucide-react";
 
@@ -211,9 +213,11 @@ export function SidebarNav({
   onClick?: () => void;
 }) {
   const modules = useModules();
+  const role = useSalonRole();
   const visibleGroups = NAV_GROUPS.map((group) => ({
     ...group,
     items: group.items.filter((item) => {
+      if (!isRouteAllowedForRole(item.href, role)) return false;
       const moduleKey = moduleForRoute(item.href);
       return moduleKey === null || modules[moduleKey];
     }),
@@ -245,10 +249,12 @@ export function SidebarNav({
         ))}
       </div>
 
-      {/* Settings pinned at the bottom */}
-      <div className="mt-4 pt-4 border-t border-sidebar-border">
-        <NavLink item={SETTINGS_ITEM} pathname={pathname} onClick={onClick} />
-      </div>
+      {/* Settings pinned at the bottom (tylko owner) */}
+      {isRouteAllowedForRole(SETTINGS_ITEM.href, role) && (
+        <div className="mt-4 pt-4 border-t border-sidebar-border">
+          <NavLink item={SETTINGS_ITEM} pathname={pathname} onClick={onClick} />
+        </div>
+      )}
     </nav>
   );
 }

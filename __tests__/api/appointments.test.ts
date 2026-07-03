@@ -192,6 +192,18 @@ vi.mock("@/lib/get-user-salon", () => ({
   getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
 }));
 
+// Faza 3 (role): GET listy i trasy [id] przeszły na getSalonContext.
+// Domyślnie właściciel — scenariusze właścicielskie przechodzą bez zmian.
+vi.mock("@/lib/salon-context", () => ({
+  getSalonContext: vi.fn().mockResolvedValue({
+    salonId: TEST_IDS.SALON_UUID,
+    role: "owner",
+    employeeId: null,
+    userId: "user-1",
+  }),
+  hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
+}));
+
 // -------------------------------------------------------
 // Helper to build a chainable mock with specific result
 // -------------------------------------------------------
@@ -227,8 +239,22 @@ import { GET as listAppointments, POST as createAppointment } from "@/app/api/ap
 
 // Mocked tenant resolver — referenced directly so cross-tenant tests can
 // flip the resolved salon (simulate "the caller has no salon" / wrong tenant).
-import { getUserSalonId } from "@/lib/get-user-salon";
-const mockGetUserSalonId = vi.mocked(getUserSalonId);
+import { getSalonContext } from "@/lib/salon-context";
+const mockGetSalonContext = vi.mocked(getSalonContext);
+
+// Konteksty ról (Faza 3) — owner odtwarza dawne zachowanie getUserSalonId.
+const OWNER_CTX = {
+  salonId: TEST_IDS.SALON_UUID,
+  role: "owner" as const,
+  employeeId: null,
+  userId: "user-1",
+};
+const EMPLOYEE_CTX = {
+  salonId: TEST_IDS.SALON_UUID,
+  role: "employee" as const,
+  employeeId: TEST_IDS.EMPLOYEE_UUID,
+  userId: "user-emp",
+};
 
 // -------------------------------------------------------
 // Tests
@@ -1497,8 +1523,8 @@ describe("DELETE /api/appointments/[id]", () => {
 describe("P0-A tenant isolation — /api/appointments/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: caller belongs to SALON_UUID.
-    mockGetUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
+    // Default: caller belongs to SALON_UUID (Faza 3: kontekst ról).
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
   });
 
   it("GET resolves the salon from the session, not from the request", async () => {
@@ -1509,11 +1535,11 @@ describe("P0-A tenant isolation — /api/appointments/[id]", () => {
     await getAppointment(request, params);
 
     // The route must derive the tenant server-side.
-    expect(mockGetUserSalonId).toHaveBeenCalled();
+    expect(mockGetSalonContext).toHaveBeenCalled();
   });
 
   it("GET returns 404 when the caller has no salon (unresolved tenant) and never queries", async () => {
-    mockGetUserSalonId.mockResolvedValue(null);
+    mockGetSalonContext.mockResolvedValue(null);
 
     const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`);
     const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
@@ -1539,7 +1565,7 @@ describe("P0-A tenant isolation — /api/appointments/[id]", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(mockGetUserSalonId).toHaveBeenCalled();
+    expect(mockGetSalonContext).toHaveBeenCalled();
   });
 
   it("PUT returns 404 for an appointment owned by another salon (no cross-tenant mutation)", async () => {
@@ -1571,11 +1597,11 @@ describe("P0-A tenant isolation — /api/appointments/[id]", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(mockGetUserSalonId).toHaveBeenCalled();
+    expect(mockGetSalonContext).toHaveBeenCalled();
   });
 
   it("DELETE returns 404 when the caller has no salon", async () => {
-    mockGetUserSalonId.mockResolvedValue(null);
+    mockGetSalonContext.mockResolvedValue(null);
 
     const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`);
     const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
@@ -1585,5 +1611,67 @@ describe("P0-A tenant isolation — /api/appointments/[id]", () => {
     expect(status).toBe(404);
     expect(body.success).toBe(false);
     expect(body.error).toContain("Salon not found");
+  });
+});
+
+// =======================================================
+// Faza 3 · Role pracownik/recepcja — /api/appointments
+// Employee widzi wyłącznie własne wizyty; cudza wizyta [id] = 404 (nie 403).
+// =======================================================
+describe("Faza 3 role — /api/appointments (employee)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  it("GET (lista) jako employee dokłada filtr własnych wizyt z kontekstu sesji", async () => {
+    mockGetSalonContext.mockResolvedValue(EMPLOYEE_CTX);
+    mockDbSelect.mockReturnValue(chainMock([]));
+
+    const request = createMockRequest("http://localhost:3000/api/appointments");
+    const response = await listAppointments(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    // Filtr eq(appointments.employeeId, ctx.employeeId) musiał zostać zbudowany.
+    const { eq } = await import("drizzle-orm");
+    expect(vi.mocked(eq)).toHaveBeenCalledWith(
+      "appointments.employeeId",
+      TEST_IDS.EMPLOYEE_UUID
+    );
+  });
+
+  it("GET (lista) jako employee bez rekordu employees -> pusta lista bez zapytania", async () => {
+    mockGetSalonContext.mockResolvedValue({ ...EMPLOYEE_CTX, employeeId: null });
+
+    const request = createMockRequest("http://localhost:3000/api/appointments");
+    const response = await listAppointments(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveLength(0);
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it("GET [id] jako employee nie widzi cudzej wizyty (404, nie 403)", async () => {
+    // Wizyta należy do EMPLOYEE_UUID, a wołający pracownik ma inny rekord.
+    mockGetSalonContext.mockResolvedValue({
+      ...EMPLOYEE_CTX,
+      employeeId: "99999999-9999-9999-9999-999999999999",
+    });
+    mockDbSelect.mockReturnValue(
+      chainMock([{ appointment: makeAppointment(), client: null, employee: null, service: null }])
+    );
+
+    const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`);
+    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
+    const response = await getAppointment(request, params);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("not found");
   });
 });

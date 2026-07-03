@@ -123,6 +123,18 @@ vi.mock("@/lib/get-user-salon", () => ({
   getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
 }));
 
+// Faza 3 (role): trasy klientów przeszły na getSalonContext. Domyślnie
+// właściciel — scenariusze właścicielskie przechodzą bez zmian.
+vi.mock("@/lib/salon-context", () => ({
+  getSalonContext: vi.fn().mockResolvedValue({
+    salonId: TEST_IDS.SALON_UUID,
+    role: "owner",
+    employeeId: null,
+    userId: "user-1",
+  }),
+  hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
+}));
+
 // -------------------------------------------------------
 // Chain builder helper
 // -------------------------------------------------------
@@ -166,8 +178,22 @@ import {
 import { GET as listClients, POST as createClient } from "@/app/api/clients/route";
 
 // Mocked tenant resolver — flip it to simulate "no salon" / wrong tenant.
-import { getUserSalonId } from "@/lib/get-user-salon";
-const mockGetUserSalonId = vi.mocked(getUserSalonId);
+import { getSalonContext } from "@/lib/salon-context";
+const mockGetSalonContext = vi.mocked(getSalonContext);
+
+// Konteksty ról (Faza 3) — owner odtwarza dawne zachowanie getUserSalonId.
+const OWNER_CTX = {
+  salonId: TEST_IDS.SALON_UUID,
+  role: "owner" as const,
+  employeeId: null,
+  userId: "user-1",
+};
+const EMPLOYEE_CTX = {
+  salonId: TEST_IDS.SALON_UUID,
+  role: "employee" as const,
+  employeeId: TEST_IDS.EMPLOYEE_UUID,
+  userId: "user-emp",
+};
 
 // -------------------------------------------------------
 // Tests
@@ -743,11 +769,11 @@ describe("DELETE /api/clients/[id]", () => {
 describe("P0-A tenant isolation — /api/clients/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
   });
 
   it("GET returns 404 when the caller has no salon and never queries", async () => {
-    mockGetUserSalonId.mockResolvedValue(null);
+    mockGetSalonContext.mockResolvedValue(null);
 
     const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`);
     const params = createRouteParams(TEST_IDS.CLIENT_UUID);
@@ -770,7 +796,7 @@ describe("P0-A tenant isolation — /api/clients/[id]", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(mockGetUserSalonId).toHaveBeenCalled();
+    expect(mockGetSalonContext).toHaveBeenCalled();
   });
 
   it("PUT returns 404 for a client owned by another salon (no cross-tenant mutation)", async () => {
@@ -786,6 +812,70 @@ describe("P0-A tenant isolation — /api/clients/[id]", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(mockGetUserSalonId).toHaveBeenCalled();
+    expect(mockGetSalonContext).toHaveBeenCalled();
+  });
+});
+
+// =======================================================
+// Faza 3 · Role pracownik/recepcja — /api/clients
+// Kartoteka klientów: owner/receptionist tak, employee 403 "Brak uprawnien".
+// =======================================================
+describe("Faza 3 role — /api/clients (employee 403)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  it("GET (lista) jako employee -> 403 Brak uprawnien i zero zapytań", async () => {
+    mockGetSalonContext.mockResolvedValue(EMPLOYEE_CTX);
+
+    const request = createMockRequest("http://localhost:3000/api/clients");
+    const response = await listClients(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(403);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Brak uprawnien");
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+
+  it("POST jako employee -> 403 Brak uprawnien (nie tworzy klienta)", async () => {
+    mockGetSalonContext.mockResolvedValue(EMPLOYEE_CTX);
+
+    const request = createMockRequest("http://localhost:3000/api/clients", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        firstName: "Jan",
+        lastName: "Kowalski",
+      },
+    });
+    const response = await createClient(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(403);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("Brak uprawnien");
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("GET (lista) jako receptionist -> 200 (pełna kartoteka salonu)", async () => {
+    mockGetSalonContext.mockResolvedValue({
+      ...EMPLOYEE_CTX,
+      role: "receptionist" as const,
+    });
+    const subqueryChain = chainMock([]);
+    const mainChain = chainMock([{ client: makeClient(), lastVisit: null }]);
+    mockDbSelect
+      .mockReturnValueOnce(subqueryChain)
+      .mockReturnValueOnce(mainChain);
+
+    const request = createMockRequest("http://localhost:3000/api/clients");
+    const response = await listClients(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data).toHaveLength(1);
   });
 });

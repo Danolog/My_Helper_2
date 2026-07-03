@@ -8,6 +8,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import { promotions } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/promotions - List promotions with optional salonId filter
@@ -15,8 +16,27 @@ export async function GET(request: Request) {
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    // Faza 3 (role): promocje tylko owner, chyba że czasowy grant "promotions";
+    // nie-owner zawsze w zakresie WŁASNEGO salonu (query salonId ignorowane,
+    // gałąź historyczna "bez filtra" zostaje owner-only).
+    const ctx = await getSalonContext();
+    if (!ctx) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+    if (ctx.role !== "owner" && !(await hasFeatureAccess(ctx, "promotions"))) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const salonId =
+      ctx.role === "owner" ? searchParams.get("salonId") : ctx.salonId;
 
     // Select only the columns needed by the promotions UI
     const promotionColumns = {
@@ -71,8 +91,29 @@ export async function POST(request: Request) {
 
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
+
+    // Faza 3 (role): tworzenie promocji tylko owner, chyba że czasowy grant
+    // "promotions"; nie-owner wyłącznie we WŁASNYM salonie.
+    const ctx = await getSalonContext();
+    if (!ctx) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
     const body = await request.json();
     const { salonId, name, type, value, startDate, endDate, conditionsJson, isActive } = body;
+
+    if (
+      ctx.role !== "owner" &&
+      (!(await hasFeatureAccess(ctx, "promotions")) || salonId !== ctx.salonId)
+    ) {
+      return NextResponse.json(
+        { success: false, error: "Brak uprawnien" },
+        { status: 403 }
+      );
+    }
 
     // Server-side validation with Zod schema
     const validationError = validateBody(createPromotionSchema, body);

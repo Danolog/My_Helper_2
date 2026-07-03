@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { Lock, Scissors, FolderOpen } from "lucide-react";
+import { RoleGate } from "@/components/dashboard/role-gate";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useSession } from "@/lib/auth-client";
@@ -16,6 +17,14 @@ import { useCategoriesData } from "./_hooks/use-categories-data";
 import { useServicesData } from "./_hooks/use-services-data";
 
 export default function ServicesPage() {
+  return (
+    <RoleGate allow={["owner"]}>
+      <ServicesPageInner />
+    </RoleGate>
+  );
+}
+
+function ServicesPageInner() {
   const { data: session, isPending } = useSession();
   const { salonId, loading: salonLoading } = useSalonId();
 
