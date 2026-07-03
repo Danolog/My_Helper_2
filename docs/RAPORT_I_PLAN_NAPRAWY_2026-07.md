@@ -175,6 +175,9 @@ powtórzyć `pnpm install`.
 
 ### Faza 2 — Uproszczenie produktu (równolegle z Fazą 1)
 
+**Spec wykonawcza (2026-07-03):** migracja `salons.enabled_modules jsonb` (default = lean core;
+brak wpisu = mo
+
 Nie kasować kodu — **feature flags per salon** + domyślnie chudy interfejs:
 
 **Widoczne od 1. dnia (Basic):** kalendarz + grafiki · rezerwacje + portal klienta · kartoteka
