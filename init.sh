@@ -124,7 +124,7 @@ if [ ! -f ".env" ]; then
 DATABASE_URL="postgresql://myhelper:myhelper_dev_password@localhost:5432/myhelper"
 
 # Better Auth
-BETTER_AUTH_SECRET="development-secret-key-change-in-production-min-32-chars"
+BETTER_AUTH_SECRET=""  # P0-B: ustaw wlasny sekret (np. openssl rand -base64 48) w env, nie commituj wartosci
 BETTER_AUTH_URL="http://localhost:3000"
 
 # Next.js
