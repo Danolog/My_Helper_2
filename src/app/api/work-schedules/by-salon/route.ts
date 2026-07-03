@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
 import { logger } from "@/lib/logger";
 import { workSchedules, employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/work-schedules/by-salon?salonId=xxx&dayOfWeek=1
 // Returns all work schedules for active employees in a salon, optionally filtered by day
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WorkSchedules BySalon API] GET",
+    errorMessage: "Failed to fetch work schedules",
+  },
+  async ({ request }) => {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const dayOfWeekStr = searchParams.get("dayOfWeek");
@@ -63,11 +66,5 @@ export async function GET(request: Request) {
       data: allSchedules,
       count: allSchedules.length,
     });
-  } catch (error) {
-    logger.error("[WorkSchedules BySalon API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch work schedules" },
-      { status: 500 }
-    );
   }
-}
+);

@@ -1,9 +1,9 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateWaitingListSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalon } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import {
@@ -14,14 +14,13 @@ import {
 } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/waiting-list/[id] - Get a single waiting list entry
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WaitingList API] GET [id]",
+    errorMessage: "Nie udalo sie pobrac wpisu",
+  },
+  async ({ params }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -30,7 +29,8 @@ export async function GET(
       );
     }
 
-    const { id } = await params;
+    // Segment [id] zawsze obecny w tej trasie (noUncheckedIndexedAccess)
+    const id = params.id!;
 
     // Find the salon owned by the current user
     const salon = await getUserSalon();
@@ -94,24 +94,17 @@ export async function GET(
       success: true,
       data: formattedEntry,
     });
-  } catch (error) {
-    logger.error("[WaitingList API] GET [id] Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac wpisu" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // PUT /api/waiting-list/[id] - Update a waiting list entry (accept/decline or modify)
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const PUT = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WaitingList API] PUT",
+    errorMessage: "Nie udalo sie zaktualizowac wpisu",
+  },
+  async ({ request, params }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -120,7 +113,8 @@ export async function PUT(
       );
     }
 
-    const { id } = await params;
+    // Segment [id] zawsze obecny w tej trasie (noUncheckedIndexedAccess)
+    const id = params.id!;
 
     // Find the salon owned by the current user
     const salon = await getUserSalon();
@@ -194,24 +188,17 @@ export async function PUT(
       data: updatedEntry,
       message: "Wpis zostal zaktualizowany",
     });
-  } catch (error) {
-    logger.error("[WaitingList API] PUT Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie zaktualizowac wpisu" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/waiting-list/[id] - Remove an entry from the waiting list
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WaitingList API] DELETE",
+    errorMessage: "Nie udalo sie usunac wpisu",
+  },
+  async ({ params }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -220,7 +207,8 @@ export async function DELETE(
       );
     }
 
-    const { id } = await params;
+    // Segment [id] zawsze obecny w tej trasie (noUncheckedIndexedAccess)
+    const id = params.id!;
 
     // Find the salon owned by the current user
     const salon = await getUserSalon();
@@ -249,11 +237,5 @@ export async function DELETE(
       data: deletedEntry,
       message: "Wpis zostal usuniety z listy oczekujacych",
     });
-  } catch (error) {
-    logger.error("[WaitingList API] DELETE Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie usunac wpisu" },
-      { status: 500 }
-    );
   }
-}
+);

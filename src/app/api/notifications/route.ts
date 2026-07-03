@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { desc, eq, and, sql } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { logger } from "@/lib/logger";
+import { withApiHandler } from "@/lib/api-handler";
 import { notifications, clients } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 /**
@@ -18,10 +17,13 @@ import { forSalon } from "@/lib/server/repository";
  *   - limit: optional - max number of results (default 50)
  *   - offset: optional - pagination offset (default 0)
  */
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Notifications API] GET",
+    errorMessage: "Failed to fetch notifications",
+  },
+  async ({ request }) => {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const type = searchParams.get("type");
@@ -101,11 +103,5 @@ export async function GET(request: Request) {
         offset,
       },
     });
-  } catch (error) {
-    logger.error("[Notifications API] Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch notifications" },
-      { status: 500 }
-    );
   }
-}
+);

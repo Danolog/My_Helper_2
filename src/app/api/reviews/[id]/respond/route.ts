@@ -1,21 +1,20 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, reviewRespondSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalon } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { reviews } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // PATCH /api/reviews/[id]/respond - Save owner response to a review
-export async function PATCH(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const PATCH = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Reviews API] PATCH Respond",
+    errorMessage: "Nie udalo sie zapisac odpowiedzi",
+  },
+  async ({ request, params }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -25,9 +24,11 @@ export async function PATCH(
     }
 
     const userId = session.user.id;
-    const { id: reviewId } = await params;
+    const reviewId = params.id!; // segment [id] zawsze obecny w trasie dynamicznej
 
     // Parse and validate request body
+    // Walidacja pozostaje w handlerze (nie w opcji schema): oryginalna
+    // kolejnosc krokow to sesja -> walidacja, a wrapper walidowalby wczesniej.
     const body = await request.json();
 
     const validationError = validateBody(reviewRespondSchema, body);
@@ -70,24 +71,17 @@ export async function PATCH(
       data: updatedReview,
       message: "Odpowiedz zostala zapisana",
     });
-  } catch (error) {
-    logger.error("[Reviews API] PATCH Respond Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie zapisac odpowiedzi" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/reviews/[id]/respond - Remove owner response from a review
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Reviews API] DELETE Respond",
+    errorMessage: "Nie udalo sie usunac odpowiedzi",
+  },
+  async ({ params }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -97,7 +91,7 @@ export async function DELETE(
     }
 
     const userId = session.user.id;
-    const { id: reviewId } = await params;
+    const reviewId = params.id!; // segment [id] zawsze obecny w trasie dynamicznej
 
     // Find the salon owned by the current user
     const salon = await getUserSalon();
@@ -132,11 +126,5 @@ export async function DELETE(
       data: updatedReview,
       message: "Odpowiedz zostala usunieta",
     });
-  } catch (error) {
-    logger.error("[Reviews API] DELETE Respond Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie usunac odpowiedzi" },
-      { status: 500 }
-    );
   }
-}
+);

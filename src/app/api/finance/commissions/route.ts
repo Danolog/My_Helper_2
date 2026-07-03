@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { logger } from "@/lib/logger";
 import {
   employeeCommissions,
   employees,
@@ -12,11 +11,13 @@ import {
 } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/finance/commissions - List commissions with employee totals
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Finance Commissions API] GET",
+    errorMessage: "Failed to fetch commissions",
+  },
+  async ({ request }) => {
     // Tenant isolation (ADR-001): commissions have no salonId column, so the
     // salon scope rides on the employees join (employeeId is NOT NULL).
     const salonId = await getUserSalonId();
@@ -128,11 +129,5 @@ export async function GET(request: Request) {
         },
       },
     });
-  } catch (error) {
-    logger.error("[Finance Commissions API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch commissions" },
-      { status: 500 }
-    );
   }
-}
+);

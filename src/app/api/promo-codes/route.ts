@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { eq, and, desc } from "drizzle-orm";
-import { validateBody, createPromoCodeSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
+import { createPromoCodeSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { apiRateLimit } from "@/lib/rate-limit";
 import { promoCodes, promotions } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 /**
  * Generate a random 8-character alphanumeric uppercase code.
  * Uses crypto.getRandomValues for better randomness than Math.random.
@@ -18,10 +19,13 @@ function generatePromoCode(): string {
 }
 
 // GET /api/promo-codes - List promo codes with optional salonId filter
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[PromoCodes API] GET",
+    errorMessage: "Failed to fetch promo codes",
+  },
+  async ({ request }) => {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -55,37 +59,25 @@ export async function GET(request: Request) {
       data: formattedCodes,
       count: formattedCodes.length,
     });
-  } catch (error) {
-    logger.error("[PromoCodes API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch promo codes" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/promo-codes - Create a new promo code
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-    const body = await request.json();
-
-    // Server-side validation with Zod schema
-    const validationError = validateBody(createPromoCodeSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    schema: createPromoCodeSchema as z.ZodType<{
+      salonId: string;
+      code?: string;
+      promotionId?: string | null;
+      usageLimit?: number | null;
+      expiresAt?: string | null;
+    }>,
+    logLabel: "[PromoCodes API] POST",
+    errorMessage: "Failed to create promo code",
+  },
+  async ({ body }) => {
     const { salonId, code, promotionId, usageLimit, expiresAt } = body;
 
     // Generate code if not provided
@@ -173,11 +165,5 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[PromoCodes API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create promo code" },
-      { status: 500 }
-    );
   }
-}
+);

@@ -2,9 +2,9 @@ import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { verifyPassword } from "better-auth/crypto";
 import { eq, and } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateClientSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // `account` pozostaje surowym `db` (weryfikacja hasła nie jest salon-scoped):
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
@@ -15,14 +15,13 @@ import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
 
 // GET /api/clients/[id] - Get a single client by ID
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Clients API] GET",
+    errorMessage: "Failed to fetch client",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -31,7 +30,7 @@ export async function GET(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     if (!isValidUuid(id)) {
       return NextResponse.json(
@@ -55,24 +54,17 @@ export async function GET(
       success: true,
       data: client,
     });
-  } catch (error) {
-    logger.error("[Clients API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch client" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // PUT /api/clients/[id] - Update a client
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const PUT = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Clients API] PUT",
+    errorMessage: "Failed to update client",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -81,7 +73,7 @@ export async function PUT(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     if (!isValidUuid(id)) {
       return NextResponse.json(
@@ -93,6 +85,7 @@ export async function PUT(
     const body = await request.json();
 
     // Server-side validation with Zod schema
+    // (walidacja celowo w handlerze, po sprawdzeniu salonu i UUID — jak dotąd)
     const validationError = validateBody(updateClientSchema, body);
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
@@ -131,16 +124,13 @@ export async function PUT(
       success: true,
       data: updated,
     });
-  } catch (error) {
-    logger.error("[Clients API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to update client" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/clients/[id] - Delete a client (requires password confirmation)
+// UWAGA: świadomie NIE zmigrowane na withApiHandler — niestandardowa
+// autoryzacja (bezpośrednio auth.api.getSession + weryfikacja hasła)
+// i warunkowe parsowanie body nie mieszczą się w polityce wrappera.
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }

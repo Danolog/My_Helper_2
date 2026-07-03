@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { eq, desc, sql } from "drizzle-orm";
-import { validateBody, createAlbumSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
+import { createAlbumSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import { albums, photoAlbums } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // GET /api/albums - List albums for a salon
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Albums API] GET",
+    errorMessage: "Failed to fetch albums",
+  },
+  async ({ request }) => {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -45,25 +49,23 @@ export async function GET(request: Request) {
       data: albumsList,
       count: albumsList.length,
     });
-  } catch (error) {
-    logger.error("[Albums API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch albums" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/albums - Create a new album
-export async function POST(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-    const body = await request.json();
-    const validationError = validateBody(createAlbumSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    schema: createAlbumSchema as z.ZodType<{
+      salonId: string;
+      name: string;
+      description?: string | null;
+      category?: string | null;
+    }>,
+    logLabel: "[Albums API] POST",
+    errorMessage: "Failed to create album",
+  },
+  async ({ body }) => {
     const { salonId, name, category } = body;
 
     const [newAlbum] = await forSalon(salonId).raw((tx) =>
@@ -86,11 +88,5 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[Albums API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create album" },
-      { status: 500 }
-    );
   }
-}
+);

@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
 import { eq, and, desc } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
 import { getUserSalon } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { reviews, clients, employees, services, appointments } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/reviews - List reviews for the owner's salon with optional status filter
-export async function GET(request: Request) {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-
-  try {
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Reviews Moderation API] GET",
+    errorMessage: "Nie udalo sie pobrac opinii",
+  },
+  async ({ request }) => {
     // Find the salon owned by the current user
     const salon = await getUserSalon();
 
@@ -75,11 +77,5 @@ export async function GET(request: Request) {
       data: formattedReviews,
       count: formattedReviews.length,
     });
-  } catch (error) {
-    logger.error("[Reviews Moderation API] GET Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac opinii" },
-      { status: 500 }
-    );
   }
-}
+);

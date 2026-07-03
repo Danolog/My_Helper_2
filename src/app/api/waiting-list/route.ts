@@ -1,9 +1,9 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { eq, and, desc, isNull, isNotNull } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, createWaitingListSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalon } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import {
@@ -14,11 +14,13 @@ import {
 } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/waiting-list - List waiting list entries for the salon owner's salon
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WaitingList API] GET",
+    errorMessage: "Nie udalo sie pobrac listy oczekujacych",
+  },
+  async ({ request }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -110,21 +112,17 @@ export async function GET(request: Request) {
       data: formattedEntries,
       count: formattedEntries.length,
     });
-  } catch (error) {
-    logger.error("[WaitingList API] GET Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac listy oczekujacych" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/waiting-list - Add a client to the waiting list (staff action)
-export async function POST(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WaitingList API] POST",
+    errorMessage: "Nie udalo sie dodac klienta do listy oczekujacych",
+  },
+  async ({ request }) => {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) {
       return NextResponse.json(
@@ -219,14 +217,5 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[WaitingList API] POST Error", { error: error });
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Nie udalo sie dodac klienta do listy oczekujacych",
-      },
-      { status: 500 }
-    );
   }
-}
+);

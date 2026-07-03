@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { eq, and, like, sql } from "drizzle-orm";
-import { validateBody, createProductSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
+import { createProductSchema } from "@/lib/api-validation";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { apiRateLimit } from "@/lib/rate-limit";
 import { products, notifications } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 /**
  * Check if a product has low stock and create a notification if needed.
  */
@@ -67,11 +68,13 @@ async function checkAndNotifyLowStock(product: {
 }
 
 // GET /api/products - List products with optional salonId filter
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Products API] GET",
+    errorMessage: "Failed to fetch products",
+  },
+  async ({ request }) => {
     const { searchParams } = new URL(request.url);
     // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
     // "lista bez zawężenia" była wyciekiem cross-salon).
@@ -106,38 +109,27 @@ export async function GET(request: Request) {
       data: result,
       count: result.length,
     });
-  } catch (error) {
-    logger.error("[Products API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch products" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/products - Create a new product
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const body = await request.json();
-
-    // Server-side validation with Zod schema
-    const validationError = validateBody(createProductSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    schema: createProductSchema as z.ZodType<{
+      salonId: string;
+      name: string;
+      category?: string | null;
+      quantity?: string | number | null;
+      minQuantity?: string | number | null;
+      unit?: string | null;
+      pricePerUnit?: string | number | null;
+    }>,
+    logLabel: "[Products API] POST",
+    errorMessage: "Failed to create product",
+  },
+  async ({ body }) => {
     const { salonId, name, category, quantity, minQuantity, unit, pricePerUnit } = body;
 
     const [newProduct] = await forSalon(salonId).raw((tx) =>
@@ -177,11 +169,5 @@ export async function POST(request: Request) {
       data: newProduct,
       lowStockAlert,
     }, { status: 201 });
-  } catch (error) {
-    logger.error("[Products API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create product" },
-      { status: 500 }
-    );
   }
-}
+);

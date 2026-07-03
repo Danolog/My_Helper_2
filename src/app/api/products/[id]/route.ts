@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, like, sql } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateProductSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { products, notifications } from "@/lib/schema";
@@ -69,14 +69,13 @@ async function checkAndNotifyLowStock(product: {
 }
 
 // GET /api/products/[id] - Get a single product
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Products API] GET",
+    errorMessage: "Failed to fetch product",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -85,7 +84,7 @@ export async function GET(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     const product = await forSalon(salonId).findOne(products, id);
 
@@ -100,24 +99,17 @@ export async function GET(
       success: true,
       data: product,
     });
-  } catch (error) {
-    logger.error("[Products API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch product" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // PUT /api/products/[id] - Update a product
-export async function PUT(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const PUT = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Products API] PUT",
+    errorMessage: "Failed to update product",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -126,7 +118,8 @@ export async function PUT(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
+    // Walidacja celowo w handlerze (po sprawdzeniu salonu) — jak dotąd.
     const body = await request.json();
 
     // Server-side validation with Zod schema
@@ -169,24 +162,17 @@ export async function PUT(
       data: updatedProduct,
       lowStockAlert,
     });
-  } catch (error) {
-    logger.error("[Products API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to update product" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/products/[id] - Delete a product
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Products API] DELETE",
+    errorMessage: "Failed to delete product",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -195,7 +181,7 @@ export async function DELETE(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     const deletedProduct = await forSalon(salonId).deleteOwned(products, id);
 
@@ -213,11 +199,5 @@ export async function DELETE(
       data: deletedProduct,
       message: "Product deleted successfully",
     });
-  } catch (error) {
-    logger.error("[Products API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to delete product" },
-      { status: 500 }
-    );
   }
-}
+);

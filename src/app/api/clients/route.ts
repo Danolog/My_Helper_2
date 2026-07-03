@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, isNotNull, sql } from "drizzle-orm";
-import { validateBody, createClientSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
+import { createClientSchema } from "@/lib/api-validation";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { apiRateLimit } from "@/lib/rate-limit";
 import { clients, appointments } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // GET /api/clients - List clients of the caller's salon with optional filtering
 // (salon is derived from the session — ADR-001 tenant isolation)
 // Supported query params:
@@ -15,11 +16,13 @@ import { forSalon } from "@/lib/server/repository";
 //   lastVisitFrom  - clients whose last visit is on or after this ISO date
 //   lastVisitTo    - clients whose last visit is on or before this ISO date
 //   hasAllergies   - "true" to return only clients with allergies set
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Clients API] GET",
+    errorMessage: "Failed to fetch clients",
+  },
+  async ({ request }) => {
     // Tenant isolation (ADR-001): derive the salon from the session, never
     // trust a client-supplied salonId in the query string (IDOR risk).
     const salonId = await getUserSalonId();
@@ -104,38 +107,32 @@ export async function GET(request: Request) {
       data,
       count: data.length,
     });
-  } catch (error) {
-    logger.error("[Clients API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch clients" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/clients - Create a new client
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const body = await request.json();
-
-    // Server-side validation with Zod schema
-    const validationError = validateBody(createClientSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    schema: createClientSchema as z.ZodType<{
+      salonId: string;
+      firstName: string;
+      lastName: string;
+      phone?: string | null;
+      email?: string | null;
+      notes?: string | null;
+      preferences?: string | null;
+      allergies?: string | null;
+      favoriteEmployeeId?: string | null;
+      requireDeposit?: boolean;
+      depositType?: "percentage" | "fixed";
+      depositValue?: string | null;
+    }>,
+    logLabel: "[Clients API] POST",
+    errorMessage: "Failed to create client",
+  },
+  async ({ body }) => {
     const { salonId, firstName, lastName, phone, email, notes, preferences, allergies, favoriteEmployeeId, requireDeposit, depositType, depositValue } = body;
 
     logger.info(`[Clients API] Executing: INSERT INTO clients (salon_id, first_name, last_name, phone, email, notes, preferences, allergies, favorite_employee_id)`);
@@ -165,11 +162,5 @@ export async function POST(request: Request) {
       success: true,
       data: newClient,
     }, { status: 201 });
-  } catch (error) {
-    logger.error("[Clients API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create client" },
-      { status: 500 }
-    );
   }
-}
+);

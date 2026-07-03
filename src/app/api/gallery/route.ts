@@ -1,15 +1,19 @@
 import { NextResponse } from "next/server";
 import { eq, desc, and } from "drizzle-orm";
-import { validateBody, createGalleryPhotoSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
+import { createGalleryPhotoSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // GET /api/gallery - List gallery photos
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Gallery API] GET",
+    errorMessage: "Failed to fetch gallery photos",
+  },
+  async ({ request }) => {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
     const employeeId = searchParams.get("employeeId");
@@ -63,25 +67,28 @@ export async function GET(request: Request) {
       data: photos,
       count: photos.length,
     });
-  } catch (error) {
-    logger.error("[Gallery API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch gallery photos" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/gallery - Create a gallery photo entry
-export async function POST(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-    const body = await request.json();
-    const validationError = validateBody(createGalleryPhotoSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    schema: createGalleryPhotoSchema as z.ZodType<{
+      salonId: string;
+      employeeId?: string | null;
+      serviceId?: string | null;
+      beforePhotoUrl?: string | null;
+      afterPhotoUrl?: string | null;
+      description?: string | null;
+      productsUsed?: string | null;
+      techniques?: string | null;
+      duration?: string | null;
+    }>,
+    logLabel: "[Gallery API] POST",
+    errorMessage: "Failed to create gallery photo",
+  },
+  async ({ body }) => {
     const {
       salonId,
       employeeId,
@@ -120,11 +127,5 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[Gallery API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create gallery photo" },
-      { status: 500 }
-    );
   }
-}
+);

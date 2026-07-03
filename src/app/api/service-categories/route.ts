@@ -1,40 +1,41 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { validateBody, createServiceCategorySchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// Gałąź GET bez salonId listuje kategorie cross-salon (zachowanie zastane) —
-// świadomie surowe db; gałąź z salonId idzie przez forSalon (ADR-001).
-// eslint-disable-next-line no-restricted-imports
-import { db } from "@/lib/db";
+import { withApiHandler } from "@/lib/api-handler";
+import { createServiceCategorySchema } from "@/lib/api-validation";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { serviceCategories } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-// GET /api/service-categories - List all service categories
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+import type { z } from "zod";
 
+// GET /api/service-categories - List service categories for a salon
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[ServiceCategories API] GET",
+    errorMessage: "Failed to fetch service categories",
+  },
+  async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
+    // "lista bez zawężenia" była wyciekiem cross-salon).
+    const salonId = searchParams.get("salonId") || (await getUserSalonId());
+    if (!salonId) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
 
     logger.info("[ServiceCategories API] GET with params", { salonId });
 
-    let result;
-    if (salonId) {
-      result = await forSalon(salonId).raw((tx) =>
-        tx
-          .select()
-          .from(serviceCategories)
-          .where(eq(serviceCategories.salonId, salonId))
-          .orderBy(serviceCategories.sortOrder)
-      );
-    } else {
-      result = await db
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
         .select()
         .from(serviceCategories)
-        .orderBy(serviceCategories.sortOrder);
-    }
+        .where(eq(serviceCategories.salonId, salonId))
+        .orderBy(serviceCategories.sortOrder)
+    );
 
     logger.info(`[ServiceCategories API] Query returned ${result.length} rows`);
 
@@ -45,26 +46,22 @@ export async function GET(request: Request) {
     });
     response.headers.set("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
     return response;
-  } catch (error) {
-    logger.error("[ServiceCategories API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch service categories" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/service-categories - Create a new service category
-export async function POST(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const body = await request.json();
-    const validationError = validateBody(createServiceCategorySchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    schema: createServiceCategorySchema as z.ZodType<{
+      salonId: string;
+      name: string;
+      sortOrder?: number;
+    }>,
+    logLabel: "[ServiceCategories API] POST",
+    errorMessage: "Failed to create service category",
+  },
+  async ({ body }) => {
     const { salonId, name, sortOrder } = body;
 
     logger.info(`[ServiceCategories API] Creating category: ${name}`);
@@ -88,11 +85,5 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[ServiceCategories API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create service category" },
-      { status: 500 }
-    );
   }
-}
+);

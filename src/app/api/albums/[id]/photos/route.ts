@@ -1,20 +1,19 @@
 import { NextResponse } from "next/server";
 import { eq, and, desc } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, albumPhotosSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { albums, photoAlbums, galleryPhotos, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/albums/[id]/photos - Get all photos in an album
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Albums API] GET photos",
+    errorMessage: "Failed to fetch album photos",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -23,7 +22,7 @@ export async function GET(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     // Verify album exists in the caller's salon
     const album = await forSalon(salonId).findOne(albums, id);
@@ -76,24 +75,17 @@ export async function GET(
       },
       count: photos.length,
     });
-  } catch (error) {
-    logger.error("[Albums API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch album photos" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/albums/[id]/photos - Add photo(s) to album
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Albums API] POST photos",
+    errorMessage: "Failed to add photos to album",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -102,7 +94,7 @@ export async function POST(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
     const body = await request.json();
     const validationError = validateBody(albumPhotosSchema, body);
     if (validationError) {
@@ -169,24 +161,17 @@ export async function POST(
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[Albums API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to add photos to album" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/albums/[id]/photos - Remove photo(s) from album
-export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Albums API] DELETE photos",
+    errorMessage: "Failed to remove photo from album",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -195,7 +180,7 @@ export async function DELETE(
       );
     }
 
-    const { id } = await params;
+    const id = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
     const { searchParams } = new URL(request.url);
     const photoId = searchParams.get("photoId");
 
@@ -241,11 +226,5 @@ export async function DELETE(
       success: true,
       message: "Photo removed from album",
     });
-  } catch (error) {
-    logger.error("[Albums API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to remove photo from album" },
-      { status: 500 }
-    );
   }
-}
+);

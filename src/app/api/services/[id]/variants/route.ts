@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, createServiceVariantSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { serviceVariants, services } from "@/lib/schema";
@@ -14,14 +14,13 @@ async function serviceBelongsToSalon(serviceId: string, salonId: string): Promis
 }
 
 // GET /api/services/[id]/variants - List all variants for a service
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Variants API] GET",
+    errorMessage: "Failed to fetch variants",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -30,7 +29,8 @@ export async function GET(
       );
     }
 
-    const { id } = await params;
+    // Segment [id] zawsze obecny w tej trasie (noUncheckedIndexedAccess)
+    const id = params.id!;
 
     // Verify service exists in the caller's salon
     if (!(await serviceBelongsToSalon(id, salonId))) {
@@ -53,24 +53,17 @@ export async function GET(
       data: variants,
       count: variants.length,
     });
-  } catch (error) {
-    logger.error("[Variants API] Error fetching variants", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch variants" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/services/[id]/variants - Create a new variant
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Variants API] POST",
+    errorMessage: "Failed to create variant",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -79,7 +72,9 @@ export async function POST(
       );
     }
 
-    const { id } = await params;
+    // Segment [id] zawsze obecny w tej trasie (noUncheckedIndexedAccess)
+    const id = params.id!;
+    // Walidacja celowo w handlerze (po sprawdzeniu salonu) — jak dotąd.
     const body = await request.json();
     const validationError = validateBody(createServiceVariantSchema, body);
     if (validationError) {
@@ -117,11 +112,5 @@ export async function POST(
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[Variants API] Error creating variant", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create variant" },
-      { status: 500 }
-    );
   }
-}
+);

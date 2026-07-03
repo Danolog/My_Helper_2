@@ -1,10 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
 // ADR-001 R2b grupa B: odczyt `salons` po ownerId (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
-import { logger } from "@/lib/logger";
 import { invoices, clients, appointments, employees, services, salons } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 /**
@@ -18,16 +17,18 @@ import { forSalon } from "@/lib/server/repository";
  *  - type: 'paragon' | 'faktura' (filter by invoice type)
  *  - search: string (search by invoice number, client name, or company name)
  */
-export async function GET(request: NextRequest) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    // Resolve salon from authenticated user
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Invoices API] GET",
+    errorMessage: "Nie udalo sie pobrac faktur",
+  },
+  async ({ request, auth }) => {
+    // Resolve salon from authenticated user (auth: "user" gwarantuje sesje)
     const [salon] = await db
       .select({ id: salons.id })
       .from(salons)
-      .where(eq(salons.ownerId, authResult.user.id))
+      .where(eq(salons.ownerId, auth!.user.id))
       .limit(1);
 
     if (!salon) {
@@ -140,11 +141,5 @@ export async function GET(request: NextRequest) {
         fakturaCount,
       },
     });
-  } catch (error) {
-    logger.error("[Invoices API] GET Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac faktur" },
-      { status: 500 }
-    );
   }
-}
+);

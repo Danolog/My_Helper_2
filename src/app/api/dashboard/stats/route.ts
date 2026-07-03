@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, not, inArray } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
 // ADR-001 R2b: własna weryfikacja własności salonu (ownerId → 403) — świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
-import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
@@ -50,12 +49,15 @@ function getWarsawDateBoundaries() {
 
 // GET /api/dashboard/stats - Dashboard overview data
 // Returns: today's appointments, employees working today, cancellation stats, and 30-day stats
-export async function GET(request: Request) {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-  const { user } = authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Dashboard Stats API] GET",
+    errorMessage: "Nie udalo sie pobrac statystyk dashboardu",
+  },
+  async ({ request, auth }) => {
+    const { user } = auth!; // auth: "user" gwarantuje sesje
 
-  try {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -291,11 +293,5 @@ export async function GET(request: Request) {
         },
       },
     });
-  } catch (error) {
-    logger.error("[Dashboard Stats API] Error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Nie udalo sie pobrac statystyk dashboardu" },
-      { status: 500 }
-    );
   }
-}
+);

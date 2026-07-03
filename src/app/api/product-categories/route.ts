@@ -1,16 +1,19 @@
 import { NextResponse } from "next/server";
 import { eq, asc, sql } from "drizzle-orm";
-import { validateBody, createProductCategorySchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
+import { createProductCategorySchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import { productCategories, products } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // GET /api/product-categories - List product categories with product counts
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Product Categories API] GET",
+    errorMessage: "Failed to fetch product categories",
+  },
+  async ({ request }) => {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
@@ -44,26 +47,21 @@ export async function GET(request: Request) {
       data: categories,
       count: categories.length,
     });
-  } catch (error) {
-    logger.error("[Product Categories API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch product categories" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/product-categories - Create a new product category
-export async function POST(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const body = await request.json();
-    const validationError = validateBody(createProductCategorySchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    schema: createProductCategorySchema as z.ZodType<{
+      salonId: string;
+      name: string;
+    }>,
+    logLabel: "[Product Categories API] POST",
+    errorMessage: "Failed to create product category",
+  },
+  async ({ body }) => {
     const { salonId, name } = body;
 
     // Check for duplicate name within salon
@@ -111,11 +109,5 @@ export async function POST(request: Request) {
       success: true,
       data: newCategory,
     }, { status: 201 });
-  } catch (error) {
-    logger.error("[Product Categories API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create product category" },
-      { status: 500 }
-    );
   }
-}
+);

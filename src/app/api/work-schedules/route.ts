@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
-import { validateBody, createWorkScheduleSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
+import { createWorkScheduleSchema } from "@/lib/api-validation";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { apiRateLimit } from "@/lib/rate-limit";
 import { workSchedules, employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // GET /api/work-schedules?employeeId=xxx
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[WorkSchedules API] GET",
+    errorMessage: "Failed to fetch work schedules",
+  },
+  async ({ request }) => {
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
 
@@ -62,35 +66,28 @@ export async function GET(request: Request) {
       data: schedules,
       count: schedules.length,
     });
-  } catch (error) {
-    logger.error("[WorkSchedules API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch work schedules" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/work-schedules - Create or update work schedule for an employee
 // Accepts a full week schedule: { employeeId, schedules: [{ dayOfWeek, startTime, endTime, isDayOff }] }
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-    const body = await request.json();
-    const validationError = validateBody(createWorkScheduleSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    schema: createWorkScheduleSchema as z.ZodType<{
+      employeeId: string;
+      schedules: {
+        dayOfWeek: number;
+        startTime: string;
+        endTime: string;
+        isDayOff?: boolean;
+      }[];
+    }>,
+    logLabel: "[WorkSchedules API] POST",
+    errorMessage: "Failed to save work schedule",
+  },
+  async ({ body }) => {
     const { employeeId, schedules } = body;
 
     const salonId = await getUserSalonId();
@@ -155,11 +152,5 @@ export async function POST(request: Request) {
       count: insertedSchedules.length,
       message: `Schedule saved with ${insertedSchedules.length} working days`,
     });
-  } catch (error) {
-    logger.error("[WorkSchedules API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to save work schedule" },
-      { status: 500 }
-    );
   }
-}
+);

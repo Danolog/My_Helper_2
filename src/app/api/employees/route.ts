@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
-import { validateBody, createEmployeeSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { withApiHandler } from "@/lib/api-handler";
+import { createEmployeeSchema } from "@/lib/api-validation";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { apiRateLimit } from "@/lib/rate-limit";
 import { employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import type { z } from "zod";
 // Predefined palette of distinct colors for employees
 const EMPLOYEE_COLORS = [
   "#3b82f6", // Blue
@@ -51,11 +52,13 @@ async function getNextAvailableColor(salonId: string): Promise<string> {
 }
 
 // GET /api/employees - List all employees
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Employees API] GET",
+    errorMessage: "Failed to fetch employees",
+  },
+  async ({ request }) => {
     // Tenant isolation (ADR-001): derive the salon from the session, never
     // trust a client-supplied salonId in the query string (IDOR risk).
     const salonId = await getUserSalonId();
@@ -103,38 +106,29 @@ export async function GET(request: Request) {
       data: allEmployees,
       count: allEmployees.length,
     });
-  } catch (error) {
-    logger.error("[Employees API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch employees" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/employees - Create a new employee
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const body = await request.json();
-
-    // Server-side validation with Zod schema
-    const validationError = validateBody(createEmployeeSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    schema: createEmployeeSchema as z.ZodType<{
+      salonId: string;
+      userId?: string | null;
+      firstName: string;
+      lastName: string;
+      phone?: string | null;
+      email?: string | null;
+      photoUrl?: string | null;
+      role?: string;
+      color?: string;
+    }>,
+    logLabel: "[Employees API] POST",
+    errorMessage: "Failed to create employee",
+  },
+  async ({ body }) => {
     const { salonId, userId, firstName, lastName, phone, email, photoUrl, role, color } = body;
 
     // Get next available color if not provided
@@ -165,11 +159,5 @@ export async function POST(request: Request) {
       success: true,
       data: newEmployee,
     }, { status: 201 });
-  } catch (error) {
-    logger.error("[Employees API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create employee" },
-      { status: 500 }
-    );
   }
-}
+);

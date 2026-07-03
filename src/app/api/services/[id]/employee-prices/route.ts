@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { employeeServicePrices, employees, serviceVariants, services } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, employeePriceSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { employeeServicePrices, employees, serviceVariants, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
 /** Verify the service belongs to the caller's salon. */
@@ -12,16 +12,14 @@ async function serviceBelongsToSalon(serviceId: string, salonId: string): Promis
   return !!service;
 }
 
-import { logger } from "@/lib/logger";
 // GET /api/services/[id]/employee-prices - List all employee-specific prices for a service
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Employee Prices API] GET",
+    errorMessage: "Failed to fetch employee prices",
+  },
+  async ({ params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -30,7 +28,7 @@ export async function GET(
       );
     }
 
-    const { id: serviceId } = await params;
+    const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
 
     if (!(await serviceBelongsToSalon(serviceId, salonId))) {
       return NextResponse.json(
@@ -64,24 +62,17 @@ export async function GET(
       data: formatted,
       count: formatted.length,
     });
-  } catch (error) {
-    logger.error("[Employee Prices API] Error fetching prices", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch employee prices" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/services/[id]/employee-prices - Create or update employee-specific price
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Employee Prices API] POST",
+    errorMessage: "Failed to save employee price",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -90,7 +81,8 @@ export async function POST(
       );
     }
 
-    const { id: serviceId } = await params;
+    const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
+    // Walidacja celowo w handlerze (po sprawdzeniu salonu) — jak dotąd.
     const body = await request.json();
     const validationError = validateBody(employeePriceSchema, body);
     if (validationError) {
@@ -177,24 +169,17 @@ export async function POST(
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[Employee Prices API] Error saving price", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to save employee price" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/services/[id]/employee-prices - Delete an employee-specific price
-export async function DELETE(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[Employee Prices API] DELETE",
+    errorMessage: "Failed to delete employee price",
+  },
+  async ({ request, params }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -203,7 +188,7 @@ export async function DELETE(
       );
     }
 
-    const { id: serviceId } = await params;
+    const serviceId = params.id!; // segment [id] zawsze obecny (noUncheckedIndexedAccess)
     const { searchParams } = new URL(request.url);
     const priceId = searchParams.get("priceId");
 
@@ -245,11 +230,5 @@ export async function DELETE(
       success: true,
       data: deleted,
     });
-  } catch (error) {
-    logger.error("[Employee Prices API] Error deleting price", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to delete employee price" },
-      { status: 500 }
-    );
   }
-}
+);

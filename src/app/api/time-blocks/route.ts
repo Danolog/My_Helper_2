@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, type SQL } from "drizzle-orm";
+import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, createTimeBlockSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
+import { apiRateLimit } from "@/lib/rate-limit";
 import { timeBlocks, employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/time-blocks?employeeId=xxx&startDate=xxx&endDate=xxx
-export async function GET(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const GET = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[TimeBlocks API] GET",
+    errorMessage: "Failed to fetch time blocks",
+  },
+  async ({ request }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -72,30 +74,18 @@ export async function GET(request: Request) {
       data: formattedBlocks,
       count: formattedBlocks.length,
     });
-  } catch (error) {
-    logger.error("[TimeBlocks API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to fetch time blocks" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // POST /api/time-blocks - Create a new time block (vacation, break, etc.)
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const POST = withApiHandler(
+  {
+    auth: "user",
+    rateLimit: apiRateLimit,
+    logLabel: "[TimeBlocks API] POST",
+    errorMessage: "Failed to create time block",
+  },
+  async ({ request }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -167,21 +157,17 @@ export async function POST(request: Request) {
       },
       { status: 201 }
     );
-  } catch (error) {
-    logger.error("[TimeBlocks API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create time block" },
-      { status: 500 }
-    );
   }
-}
+);
 
 // DELETE /api/time-blocks - Delete a time block
-export async function DELETE(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
+export const DELETE = withApiHandler(
+  {
+    auth: "user",
+    logLabel: "[TimeBlocks API] DELETE",
+    errorMessage: "Failed to delete time block",
+  },
+  async ({ request }) => {
     const salonId = await getUserSalonId();
     if (!salonId) {
       return NextResponse.json(
@@ -236,11 +222,5 @@ export async function DELETE(request: Request) {
       data: deleted[0],
       message: "Time block deleted successfully",
     });
-  } catch (error) {
-    logger.error("[TimeBlocks API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to delete time block" },
-      { status: 500 }
-    );
   }
-}
+);
