@@ -87,7 +87,7 @@ Fill in your environment variables in the `.env` file:
 POSTGRES_URL="postgresql://username:password@localhost:5432/your_database_name"
 
 # Authentication - Better Auth
-BETTER_AUTH_SECRET="your-random-32-character-secret-key-here"
+BETTER_AUTH_SECRET="<wygeneruj-wlasny-openssl-rand-base64-48>"
 
 # Google OAuth (Get from Google Cloud Console)
 GOOGLE_CLIENT_ID="your-google-client-id"
