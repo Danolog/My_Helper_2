@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,6 +14,11 @@ export function ForgotPasswordForm() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [success, setSuccess] = useState(false)
   const [isPending, setIsPending] = useState(false)
+  // Przycisk aktywny dopiero PO hydratacji: klik przed podpieciem handlerow
+  // Reacta wykonywalby natywny GET-submit formularza (przeladowanie strony,
+  // utrata stanu, zero komunikatu) — realny bug UX i zrodlo flakow E2E.
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => setHydrated(true), [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -91,7 +96,7 @@ export function ForgotPasswordForm() {
       {error && (
         <p className="text-sm text-destructive">{error}</p>
       )}
-      <Button type="submit" className="w-full" disabled={isPending}>
+      <Button type="submit" className="w-full" disabled={!hydrated || isPending}>
         {isPending ? "Wysylanie..." : "Wyslij link resetowania"}
       </Button>
       <div className="text-center text-sm text-muted-foreground">
