@@ -15,56 +15,177 @@ export interface SmsResult {
   error?: string | undefined;
 }
 
+const SMSAPI_URL = "https://api.smsapi.pl/sms.do";
+const DEFAULT_SENDER = "Info";
+
+/**
+ * Normalize a Polish phone number to E.164 format (+48XXXXXXXXX).
+ *
+ * Accepted inputs (spaces and dashes are ignored):
+ * - 9 digits            -> "+48" is prepended
+ * - "+48" + 9 digits    -> returned as-is
+ *
+ * Any other format is rejected and `null` is returned.
+ */
+export function normalizePolishPhoneNumber(raw: string): string | null {
+  const cleaned = raw.replace(/[\s-]/g, "");
+
+  if (/^\d{9}$/.test(cleaned)) {
+    return `+48${cleaned}`;
+  }
+  if (/^\+48\d{9}$/.test(cleaned)) {
+    return cleaned;
+  }
+  return null;
+}
+
+/** Shape of the (partial) SMSAPI.pl JSON response we care about. */
+interface SmsapiResponse {
+  error?: number | string;
+  message?: string;
+  count?: number;
+  list?: Array<{ id?: string }>;
+}
+
+/**
+ * Send a single SMS through the SMSAPI.pl REST API.
+ * Throws on API errors (JSON body with an `error` field), non-2xx HTTP
+ * statuses and network failures.
+ */
+async function sendViaSmsapi(
+  token: string,
+  to: string,
+  message: string
+): Promise<void> {
+  const body = new URLSearchParams({
+    format: "json",
+    to,
+    message,
+    from: process.env.SMSAPI_SENDER || DEFAULT_SENDER,
+    encoding: "utf-8",
+  });
+
+  const response = await fetch(SMSAPI_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+  });
+
+  let data: SmsapiResponse | null = null;
+  try {
+    data = (await response.json()) as SmsapiResponse;
+  } catch {
+    // Non-JSON response body - fall through to the HTTP status check
+  }
+
+  if (data?.error !== undefined && data.error !== null) {
+    const detail = data.message
+      ? `${data.error} - ${data.message}`
+      : String(data.error);
+    throw new Error(`SMSAPI error: ${detail}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`SMSAPI error: HTTP ${response.status}`);
+  }
+
+  logger.info("SMS sent via SMSAPI", {
+    to,
+    count: data?.count,
+    messageId: data?.list?.[0]?.id,
+  });
+}
+
+/**
+ * Save an SMS notification to the notifications table (audit trail).
+ * Returns the id of the created notification, if any.
+ */
+async function saveNotification(
+  msg: SmsMessage,
+  status: "sent" | "failed"
+): Promise<string | undefined> {
+  const [notification] = await db
+    .insert(notifications)
+    .values({
+      salonId: msg.salonId,
+      clientId: msg.clientId || null,
+      type: "sms",
+      message: msg.message,
+      status,
+      ...(status === "sent" ? { sentAt: new Date() } : {}),
+    })
+    .returning();
+
+  return notification?.id;
+}
+
+/**
+ * Best-effort save of a "failed" notification - never throws.
+ */
+async function saveFailedNotification(msg: SmsMessage): Promise<void> {
+  try {
+    await saveNotification(msg, "failed");
+  } catch {
+    // Ignore save failure
+  }
+}
+
 /**
  * Send an SMS message.
  *
- * In development mode, the message is logged to the console instead of
- * actually sending via an SMS provider (SMSAPI, Twilio, etc.).
+ * When `SMSAPI_TOKEN` is configured, the message is sent through the
+ * SMSAPI.pl REST API (sender name taken from `SMSAPI_SENDER`, default "Info").
  *
- * In production, this would integrate with the configured SMS provider.
- * The message is always saved to the notifications table for audit trail.
+ * Without a token (e.g. local development), the message is only logged -
+ * the previous stub behaviour is preserved.
+ *
+ * The message is always saved to the notifications table for audit trail:
+ * status "sent" on success, "failed" on any error.
  */
 export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
+  const normalizedTo = normalizePolishPhoneNumber(msg.to);
+  if (!normalizedTo) {
+    logger.warn("Invalid phone number for SMS", {
+      to: msg.to,
+      salonId: msg.salonId,
+    });
+    await saveFailedNotification(msg);
+    return {
+      success: false,
+      error: `Invalid phone number: ${msg.to}. Expected 9 digits or +48 followed by 9 digits.`,
+    };
+  }
+
+  const token = process.env.SMSAPI_TOKEN;
+
   try {
-    // Log SMS in dev mode (no real SMS provider configured)
-    logger.info("SMS notification", { to: msg.to, message: msg.message });
+    if (token) {
+      // Real delivery through SMSAPI.pl
+      await sendViaSmsapi(token, normalizedTo, msg.message);
+    } else {
+      // Simulation mode - log instead of sending (no SMS provider configured)
+      logger.info("SMS notification (simulated - no SMSAPI_TOKEN)", {
+        to: normalizedTo,
+        message: msg.message,
+      });
+    }
 
     // Save notification to database with 'sent' status
-    // In dev mode we mark as 'sent' since the console log is the delivery mechanism
-    const [notification] = await db
-      .insert(notifications)
-      .values({
-        salonId: msg.salonId,
-        clientId: msg.clientId || null,
-        type: "sms",
-        message: msg.message,
-        status: "sent",
-        sentAt: new Date(),
-      })
-      .returning();
-
-    const notifId = notification?.id;
-    logger.info("SMS notification saved", { notificationId: notifId });
+    const notificationId = await saveNotification(msg, "sent");
+    logger.info("SMS notification saved", { notificationId });
 
     return {
       success: true,
-      notificationId: notifId,
+      notificationId,
     };
   } catch (error) {
-    logger.error("Failed to send/save SMS", { error });
+    logger.error("Failed to send/save SMS", { error, to: normalizedTo });
 
     // Try to save notification with failed status
-    try {
-      await db.insert(notifications).values({
-        salonId: msg.salonId,
-        clientId: msg.clientId || null,
-        type: "sms",
-        message: msg.message,
-        status: "failed",
-      });
-    } catch {
-      // Ignore save failure
-    }
+    await saveFailedNotification(msg);
 
     return {
       success: false,
