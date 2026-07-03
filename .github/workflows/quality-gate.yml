@@ -88,6 +88,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Migracje NAJPIERW: 0005 tworzy role myhelper_app + polityki RLS, bez
+      # ktorych kazda transakcja forSalon (SET LOCAL ROLE) pada. db:push potem
+      # domyka ewentualny dryf schema.ts poza migracjami. (Przyczyna czerwonego
+      # E2E Full od 2026-06-18: push nie zaklada roli z 0005.)
+      - name: Run database migrations
+        run: pnpm db:migrate
       - name: Push database schema
         run: pnpm db:push
 
@@ -156,6 +162,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Migracje NAJPIERW: 0005 tworzy role myhelper_app + polityki RLS, bez
+      # ktorych kazda transakcja forSalon (SET LOCAL ROLE) pada. db:push potem
+      # domyka ewentualny dryf schema.ts poza migracjami. (Przyczyna czerwonego
+      # E2E Full od 2026-06-18: push nie zaklada roli z 0005.)
+      - name: Run database migrations
+        run: pnpm db:migrate
       - name: Push database schema
         run: pnpm db:push
 
