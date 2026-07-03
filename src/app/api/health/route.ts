@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from 'drizzle-orm';
+// ADR-001 sekcja 4: healthcheck systemowy (ping bazy, bez danych najemcy) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from '@/lib/db';
 import { logger } from "@/lib/logger";
 // Health checks must always reflect real-time system state — never cache

@@ -49,14 +49,16 @@ const CSRF_SKIP_PREFIXES = [
   "/api/stripe/",
   "/api/health",
   "/api/test/",
+  // Cron routes are called by schedulers without cookies/CSRF tokens and are
+  // each protected by requireCronSecret (Bearer CRON_SECRET, fail-closed).
+  "/api/cron/",
 ];
 
+// Cron-invoked endpoints outside /api/cron/ — same requireCronSecret guard.
 const CRON_ENDPOINTS = new Set([
   "/api/notifications/birthday",
   "/api/notifications/low-stock",
   "/api/notifications/we-miss-you",
-  "/api/notifications/push-reminders",
-  "/api/subscriptions/expiration-warning",
 ]);
 
 function shouldSkipCsrf(pathname: string): boolean {

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { eq, and, lte } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
+// ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { scheduledPosts } from "@/lib/schema";
@@ -15,7 +17,7 @@ import { scheduledPosts } from "@/lib/schema";
  * (Instagram Graph API, Facebook API, TikTok API) to actually publish.
  * For now, we simulate publishing by updating the status in the database.
  */
-export async function POST(request: Request) {
+async function handlePublish(request: Request) {
   try {
     const cronError = await requireCronSecret(request);
     if (cronError) return cronError;
@@ -113,4 +115,14 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+// Vercel Cron invokes the path with GET (Authorization: Bearer CRON_SECRET);
+// POST stays for external schedulers. Both go through requireCronSecret.
+export async function GET(request: Request) {
+  return handlePublish(request);
+}
+
+export async function POST(request: Request) {
+  return handlePublish(request);
 }

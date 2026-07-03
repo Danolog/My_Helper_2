@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 import { depositConfirmSchema } from "@/lib/api-validation";
-import { db } from "@/lib/db";
+import { confirmDepositPayment } from "@/lib/deposit-confirmation";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
-import { appointments, depositPayments, clients, services, employees } from "@/lib/schema";
-import { sendPaymentConfirmationSms } from "@/lib/sms";
 /**
  * POST /api/deposits/confirm
  *
@@ -17,6 +14,9 @@ import { sendPaymentConfirmationSms } from "@/lib/sms";
  * disabled when NODE_ENV === "production".
  *
  * Rate limiting (strictRateLimit) additionally throttles abuse in dev.
+ *
+ * The actual confirmation logic (payment + appointment update + SMS) is
+ * shared with the Stripe webhook via confirmDepositPayment().
  */
 export async function POST(request: Request) {
   try {
@@ -54,113 +54,40 @@ export async function POST(request: Request) {
     // Read ONLY validated data — never the raw body (P0-D / P1).
     const { depositPaymentId, sessionId } = parsed.data;
 
-    // Get the deposit payment record
-    const [payment] = await db
-      .select()
-      .from(depositPayments)
-      .where(eq(depositPayments.id, depositPaymentId));
+    const result = await confirmDepositPayment(depositPaymentId, {
+      paymentIntentId: sessionId || undefined,
+    });
 
-    if (!payment) {
+    if (!result.success) {
+      if (result.error === "not_pending") {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Platnosc w statusie '${result.depositPayment?.status}' nie moze byc potwierdzona`,
+          },
+          { status: 409 }
+        );
+      }
       return NextResponse.json(
         { success: false, error: "Deposit payment not found" },
         { status: 404 }
       );
     }
 
-    if (payment.status === "succeeded") {
+    if (result.alreadyConfirmed) {
       return NextResponse.json({
         success: true,
         data: { message: "Payment already confirmed", depositPaymentId },
       });
     }
 
-    // Update deposit payment and appointment atomically
-    const { updatedPayment, updatedAppointment } = await db.transaction(async (tx) => {
-      const [_updatedPayment] = await tx
-        .update(depositPayments)
-        .set({
-          status: "succeeded",
-          paidAt: new Date(),
-          stripePaymentIntentId: sessionId || `sim_${Date.now()}`,
-        })
-        .where(eq(depositPayments.id, depositPaymentId))
-        .returning();
-
-      const [_updatedAppointment] = await tx
-        .update(appointments)
-        .set({
-          depositPaid: true,
-          status: "confirmed",
-          updatedAt: new Date(),
-        })
-        .where(eq(appointments.id, payment.appointmentId))
-        .returning();
-
-      return { updatedPayment: _updatedPayment, updatedAppointment: _updatedAppointment };
-    });
-
-    logger.info(`[Deposit API] Payment confirmed: ${depositPaymentId}, appointment: ${payment.appointmentId}`);
-
-    // Send SMS confirmation to client (async, don't block the response)
-    let smsSent = false;
-    try {
-      if (updatedAppointment && updatedAppointment.clientId) {
-        // Fetch client details
-        const [client] = await db
-          .select()
-          .from(clients)
-          .where(eq(clients.id, updatedAppointment.clientId));
-
-        // Fetch employee details
-        const [employee] = await db
-          .select()
-          .from(employees)
-          .where(eq(employees.id, updatedAppointment.employeeId));
-
-        // Fetch service details
-        let serviceName = "Wizyta";
-        if (updatedAppointment.serviceId) {
-          const [service] = await db
-            .select()
-            .from(services)
-            .where(eq(services.id, updatedAppointment.serviceId));
-          if (service) {
-            serviceName = service.name;
-          }
-        }
-
-        if (client && client.phone) {
-          const smsResult = await sendPaymentConfirmationSms({
-            clientPhone: client.phone,
-            clientName: `${client.firstName} ${client.lastName}`,
-            amount: parseFloat(updatedPayment!.amount),
-            currency: updatedPayment!.currency,
-            serviceName,
-            appointmentDate: updatedAppointment.startTime,
-            employeeName: employee
-              ? `${employee.firstName} ${employee.lastName}`
-              : "pracownik",
-            salonId: payment.salonId,
-            clientId: client.id,
-          });
-          smsSent = smsResult.success;
-          logger.info(`[Deposit API] SMS confirmation ${smsSent ? "sent" : "failed"} for client ${client.id}`);
-        } else {
-          logger.info(`[Deposit API] No phone number for client, skipping SMS`);
-        }
-      }
-    } catch (smsError) {
-      // SMS failure should not affect payment confirmation
-      logger.error("[Deposit API] SMS notification error (non-blocking)", { error: smsError });
-    }
-
     return NextResponse.json({
       success: true,
       data: {
-        depositPayment: updatedPayment,
-        appointment: updatedAppointment,
+        depositPayment: result.depositPayment,
+        appointment: result.appointment,
         message: "Platnosc zadatku potwierdzona",
-        smsSent,
+        smsSent: result.smsSent,
       },
     });
   } catch (error) {

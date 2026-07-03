@@ -79,7 +79,20 @@ export async function processAutomaticRefund(
           stripeRefundId = refund.id;
           logger.info("Stripe refund created", { refundId: refund.id, paymentIntentId: payment.stripePaymentIntentId });
         } catch (stripeError) {
-          logger.error("Stripe refund failed, marking as refunded for manual processing", { error: stripeError });
+          // Do NOT mark the payment as refunded when the Stripe refund call
+          // fails — the money is still with us. Leave the payment
+          // "succeeded" so a retry / manual refund is still possible.
+          logger.error("Stripe refund failed — payment left as 'succeeded', manual refund required", {
+            error: stripeError,
+            paymentId: payment.id,
+            paymentIntentId: payment.stripePaymentIntentId,
+          });
+          return {
+            success: false,
+            refunded: false,
+            error: stripeError instanceof Error ? stripeError.message : "Stripe refund failed",
+            message: "Zwrot Stripe nie powiodl sie - wymagana reczna obsluga zwrotu",
+          };
         }
       } else {
         logger.warn("Stripe not configured, marking as refunded for manual processing");

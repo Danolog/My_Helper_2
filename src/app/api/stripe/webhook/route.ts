@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import Stripe from "stripe";
+// ADR-001 sekcja 4: webhook Stripe — kontekst salonu z danych zdarzenia, nie z sesji; świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
+import { confirmDepositPayment } from "@/lib/deposit-confirmation";
 import { logger } from "@/lib/logger";
 import {
+  appointments,
+  depositPayments,
   salonSubscriptions,
   subscriptionPayments,
   subscriptionPlans,
@@ -31,6 +36,21 @@ interface RawInvoiceData {
       subscription?: string | { id: string };
     };
   };
+}
+
+/**
+ * Raw Checkout Session data from Stripe webhook events
+ * (checkout.session.completed / checkout.session.expired).
+ * Deposit sessions are identified by metadata.kind === "deposit"
+ * (set in /api/deposits/create-session).
+ */
+interface RawCheckoutSessionData {
+  id: string;
+  payment_intent?: string | { id: string } | null;
+  /** "paid" | "unpaid" | "no_payment_required" — async methods (P24) send
+   * `completed` with "unpaid" first. */
+  payment_status?: string;
+  metadata?: Record<string, string> | null;
 }
 
 /**
@@ -86,6 +106,12 @@ function getPaymentIntentIdFromInvoice(invoice: RawInvoiceData, fallback: string
  * - invoice.payment_failed: Mark subscription as past_due
  * - customer.subscription.updated: Sync subscription state
  * - customer.subscription.deleted: Mark subscription as canceled
+ *
+ * And deposit (zadatek) Checkout events (metadata.kind === "deposit"):
+ * - checkout.session.completed (payment_status "paid") /
+ *   checkout.session.async_payment_succeeded: confirm deposit + appointment
+ * - checkout.session.expired / checkout.session.async_payment_failed:
+ *   mark the pending deposit payment as failed + cancel the appointment
  *
  * In production, Stripe sends these events automatically when:
  * 1. A recurring payment succeeds (renewal)
@@ -152,6 +178,18 @@ export async function POST(request: Request) {
 
       case "customer.subscription.deleted":
         await handleSubscriptionDeleted(event);
+        break;
+
+      case "checkout.session.completed":
+      // Delayed-notification methods (P24, sometimes BLIK) complete the
+      // session first and report the payment result asynchronously.
+      case "checkout.session.async_payment_succeeded":
+        await handleCheckoutSessionCompleted(event);
+        break;
+
+      case "checkout.session.expired":
+      case "checkout.session.async_payment_failed":
+        await handleDepositSessionFailed(event);
         break;
 
       default:
@@ -391,4 +429,142 @@ async function handleSubscriptionDeleted(event: Stripe.Event) {
     .where(eq(salonSubscriptions.id, sub.id));
 
   logger.info("Subscription deleted/canceled via Stripe", { subscriptionId: sub.id });
+}
+
+/**
+ * Handle checkout.session.completed / checkout.session.async_payment_succeeded
+ * for deposit payments.
+ *
+ * This is the PRODUCTION source of truth for deposit confirmation (the
+ * signature was already verified above). Confirms the deposit payment and
+ * appointment via the shared confirmDepositPayment() (transactional update +
+ * SMS notification), storing the real payment_intent id so refund.ts can
+ * issue automatic refunds later.
+ *
+ * Delayed-notification methods (P24, sometimes BLIK): the `completed` event
+ * can arrive with payment_status "unpaid" — in that case we do NOT confirm
+ * and wait for `async_payment_succeeded` (or `async_payment_failed`).
+ */
+async function handleCheckoutSessionCompleted(event: Stripe.Event) {
+  const checkoutSession = event.data.object as unknown as RawCheckoutSessionData;
+
+  if (checkoutSession.metadata?.kind !== "deposit") {
+    // Subscription checkouts are confirmed by their own flow — ignore here.
+    logger.debug("Checkout session event without deposit metadata, skipping", {
+      eventType: event.type,
+      sessionId: checkoutSession.id,
+    });
+    return;
+  }
+
+  const depositPaymentId = checkoutSession.metadata.depositPaymentId;
+  if (!depositPaymentId) {
+    logger.error("Deposit checkout session event without depositPaymentId", {
+      eventType: event.type,
+      sessionId: checkoutSession.id,
+    });
+    return;
+  }
+
+  if (checkoutSession.payment_status !== "paid") {
+    logger.info(
+      "Deposit checkout session completed but not paid yet (async payment) — waiting",
+      {
+        eventType: event.type,
+        sessionId: checkoutSession.id,
+        depositPaymentId,
+        paymentStatus: checkoutSession.payment_status,
+      }
+    );
+    return;
+  }
+
+  // Persist the payment_intent id only when it is a real pi_ id — otherwise
+  // keep the existing stored reference (the cs_ session id from
+  // create-session) instead of corrupting it.
+  const rawPaymentIntent =
+    typeof checkoutSession.payment_intent === "string"
+      ? checkoutSession.payment_intent
+      : checkoutSession.payment_intent?.id;
+  const paymentIntentId =
+    rawPaymentIntent && rawPaymentIntent.startsWith("pi_")
+      ? rawPaymentIntent
+      : undefined;
+
+  const result = await confirmDepositPayment(
+    depositPaymentId,
+    paymentIntentId ? { paymentIntentId } : {}
+  );
+
+  if (!result.success) {
+    // not_found: broken reference; not_pending: e.g. a late async success
+    // after the cleanup cron cancelled the appointment — money was taken,
+    // manual refund needed.
+    logger.error("Deposit confirmation via webhook failed — manual attention required", {
+      depositPaymentId,
+      sessionId: checkoutSession.id,
+      error: result.error,
+    });
+    return;
+  }
+
+  logger.info("Deposit confirmed via Stripe webhook", {
+    depositPaymentId,
+    sessionId: checkoutSession.id,
+    paymentIntentId,
+    alreadyConfirmed: result.alreadyConfirmed,
+  });
+}
+
+/**
+ * Handle checkout.session.expired / checkout.session.async_payment_failed
+ * for deposit payments.
+ *
+ * The customer did not pay — mark the still-pending payment as "failed"
+ * (consistent with the depositPayments status set: pending/succeeded/
+ * failed/refunded) and CANCEL the appointment so the slot is freed instead
+ * of staying blocked by a dead "scheduled" booking.
+ */
+async function handleDepositSessionFailed(event: Stripe.Event) {
+  const checkoutSession = event.data.object as unknown as RawCheckoutSessionData;
+
+  if (checkoutSession.metadata?.kind !== "deposit") return;
+
+  const depositPaymentId = checkoutSession.metadata.depositPaymentId;
+  if (!depositPaymentId) return;
+
+  // Only flip payments that are still pending — never downgrade a payment
+  // that already succeeded (e.g. out-of-order webhook delivery).
+  const cancelled = await db.transaction(async (tx) => {
+    const [payment] = await tx
+      .update(depositPayments)
+      .set({ status: "failed" })
+      .where(
+        and(
+          eq(depositPayments.id, depositPaymentId),
+          eq(depositPayments.status, "pending")
+        )
+      )
+      .returning();
+
+    if (!payment) return false;
+
+    await tx
+      .update(appointments)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(
+        and(
+          eq(appointments.id, payment.appointmentId),
+          eq(appointments.status, "scheduled")
+        )
+      );
+    return true;
+  });
+
+  logger.info("Deposit checkout session failed/expired", {
+    eventType: event.type,
+    depositPaymentId,
+    sessionId: checkoutSession.id,
+    appointmentCancelled: cancelled,
+  });
 }

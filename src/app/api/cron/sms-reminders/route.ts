@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
+// ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { appointments, clients, employees, services, salons } from "@/lib/schema";
@@ -189,10 +191,14 @@ export async function POST(request: Request) {
 /**
  * GET /api/cron/sms-reminders
  *
- * Returns status information about the SMS reminder system.
- * Useful for monitoring and debugging.
+ * Vercel Cron invokes the path with GET (Authorization: Bearer CRON_SECRET),
+ * so a plain GET triggers the same send as POST. `?status=1` returns status
+ * information instead (monitoring/debugging).
  */
 export async function GET(request: Request) {
+  if (new URL(request.url).searchParams.get("status") !== "1") {
+    return POST(request);
+  }
   try {
     const cronError = await requireCronSecret(request);
     if (cronError) return cronError;

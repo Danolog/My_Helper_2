@@ -193,6 +193,33 @@ export function useBookingData(): UseBookingDataReturn {
     return () => abortController.abort();
   }, [fetchSalon]);
 
+  // Handle the return from Stripe Checkout (?deposit=success|cancelled).
+  // Uses window.location instead of useSearchParams to avoid requiring a
+  // Suspense boundary for this client page.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const depositResult = searchParams.get("deposit");
+    if (!depositResult) return;
+
+    if (depositResult === "success") {
+      toast.success(
+        "Zadatek oplacony! Wizyta zostala potwierdzona. Szczegoly wyslemy SMS-em.",
+        { duration: 8000 },
+      );
+    } else if (depositResult === "cancelled") {
+      toast.warning(
+        "Platnosc zadatku zostala anulowana. Rezerwacja nie jest potwierdzona — sprobuj ponownie.",
+        { duration: 8000 },
+      );
+    }
+
+    // Remove the query param so a refresh doesn't repeat the toast
+    const url = new URL(window.location.href);
+    url.searchParams.delete("deposit");
+    window.history.replaceState({}, "", url.toString());
+  }, []);
+
   // Fetch client-specific deposit settings when session and salon are available
   useEffect(() => {
     if (!session?.user?.email || !salonId) return;
@@ -520,19 +547,11 @@ export function useBookingData(): UseBookingDataReturn {
 
     // If deposit is required, use the deposit flow
     if (depositRequired && depositAmount > 0) {
-      // Validate Blik phone number if Blik P2P selected
-      if (selectedPaymentMethod === "blik") {
-        const cleanedPhone = blikPhoneNumber.replace(/[\s\-()]/g, "");
-        const phoneRegex = /^(\+48)?[0-9]{9}$/;
-        if (!cleanedPhone || !phoneRegex.test(cleanedPhone)) {
-          setBlikPhoneError("Podaj prawidlowy 9-cyfrowy numer telefonu");
-          toast.error("Podaj prawidlowy numer telefonu dla platnosci BLIK");
-          return;
-        }
-        setBlikPhoneError("");
-      }
+      // NOTE: the "Blik P2P" mock (payment request to a phone number) was
+      // removed — BLIK is available as a payment method inside Stripe Checkout.
 
       setIsProcessingPayment(true);
+      let redirectingToStripe = false;
       try {
         const depositBody = {
           salonId,
@@ -545,9 +564,6 @@ export function useBookingData(): UseBookingDataReturn {
           notes: notesText,
           depositAmount,
           paymentMethod: selectedPaymentMethod,
-          ...(selectedPaymentMethod === "blik"
-            ? { blikPhoneNumber: blikPhoneNumber.replace(/[\s\-()]/g, "") }
-            : {}),
           ...(!session
             ? {
                 guestName: guestName.trim(),
@@ -577,22 +593,32 @@ export function useBookingData(): UseBookingDataReturn {
           return;
         }
 
-        const { depositPaymentId: payId, sessionId: sessId } = sessionJson.data;
+        const {
+          depositPaymentId: payId,
+          sessionId: sessId,
+          paymentUrl,
+          simulated,
+        } = sessionJson.data;
         setDepositPaymentId(payId);
         setDepositSessionId(sessId);
 
-        // Step 2: Simulate processing the payment
-        if (selectedPaymentMethod === "blik") {
-          toast.info(
-            `Wysylanie zadania platnosci BLIK na numer ${blikPhoneNumber}...`,
-            { duration: 2000 },
-          );
-        } else {
-          toast.info("Przetwarzanie platnosci zadatku...", { duration: 2000 });
+        // Step 2a: Real Stripe Checkout — redirect the browser to Stripe.
+        // Confirmation happens via the signed Stripe webhook; the user comes
+        // back to this page with ?deposit=success|cancelled.
+        if (!simulated && paymentUrl) {
+          redirectingToStripe = true;
+          toast.info("Przekierowanie do bezpiecznej platnosci...", {
+            duration: 3000,
+          });
+          window.location.href = paymentUrl;
+          return;
         }
+
+        // Step 2b: Dev fallback (Stripe not configured) — simulate processing
+        toast.info("Przetwarzanie platnosci zadatku...", { duration: 2000 });
         await new Promise((resolve) => setTimeout(resolve, 1500));
 
-        // Step 3: Confirm the payment
+        // Step 3: Confirm the payment via the dev-only endpoint
         const confirmRes = await mutationFetch("/api/deposits/confirm", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -613,7 +639,10 @@ export function useBookingData(): UseBookingDataReturn {
       } catch {
         toast.error("Blad przetwarzania platnosci");
       } finally {
-        setIsProcessingPayment(false);
+        // Keep the processing state while the browser navigates to Stripe
+        if (!redirectingToStripe) {
+          setIsProcessingPayment(false);
+        }
       }
       return;
     }

@@ -1,19 +1,38 @@
 import { NextResponse } from "next/server";
-import { eq, and, not, or, lte, gte, lt, gt } from "drizzle-orm";
+import { eq, and, not, lt, gt } from "drizzle-orm";
 import { validateBody, depositCreateSessionSchema } from "@/lib/api-validation";
+// ADR-001 sekcja 4: publiczna ścieżka rezerwacji gościa (brak sesji właściciela salonu) — świadomie surowe db
+// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
+import { calculateExpectedDeposit } from "@/lib/deposit-calculation";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
-import { timeBlocks } from "@/lib/schema";
-import { services, appointments, depositPayments } from "@/lib/schema";
+import { timeBlocks, clients } from "@/lib/schema";
+import { appointments, depositPayments } from "@/lib/schema";
 import { getOptionalSession } from "@/lib/session";
+import { getStripe, isStripeConfigured } from "@/lib/stripe";
 
 /**
  * POST /api/deposits/create-session
  *
- * Creates a deposit payment session for a booking.
- * In production, this would create a Stripe Checkout session.
- * For now, it creates a pending payment record and returns a session ID.
+ * Creates a deposit payment session for a booking:
+ * 1. Validates the slot (overlaps, time blocks), recomputes the deposit
+ *    amount SERVER-SIDE (the body amount is only cross-checked — never
+ *    trusted), and creates the appointment ("scheduled", depositPaid=false)
+ *    + a pending depositPayments record in one transaction.
+ * 2. When Stripe is configured: creates a real Stripe Checkout session
+ *    (mode "payment", card/BLIK/P24) and returns its URL as `paymentUrl`.
+ *    The payment is then confirmed exclusively by the signed Stripe webhook
+ *    (`checkout.session.completed`).
+ * 3. When Stripe is NOT configured (dev): returns `simulated: true` and a
+ *    fake session id — the frontend then confirms via the dev-only
+ *    /api/deposits/confirm endpoint.
+ *
+ * Slot lifecycle: an unpaid deposit appointment DOES block the slot while
+ * the Checkout session is alive (so nobody can steal a slot mid-payment).
+ * It is freed by cancelling the appointment on `checkout.session.expired` /
+ * `async_payment_failed` (webhook) and by the cleanup cron
+ * (/api/cron/cleanup-pending-deposits) as a backstop for lost webhooks.
  */
 export async function POST(request: Request) {
   // Rate limit: deposit payment creation is a sensitive operation
@@ -69,64 +88,96 @@ export async function POST(request: Request) {
       }
     }
 
-    if (parseFloat(depositAmount) <= 0) {
+    // NOTE: the "Blik P2P" mock flow (payment request sent to a phone number)
+    // was removed — BLIK is now handled as a payment method inside Stripe
+    // Checkout. The blikPhoneNumber column stays in the DB (no migration).
+
+    // A deposit session is meaningless without a service (the deposit is
+    // derived from the service price and settings).
+    if (!serviceId) {
       return NextResponse.json(
-        { success: false, error: "Deposit amount must be greater than 0" },
+        { success: false, error: "serviceId jest wymagany dla platnosci zadatku" },
         { status: 400 }
       );
     }
 
-    // Validate Blik phone number is required for Blik P2P payments
-    if (paymentMethod === "blik") {
-      if (!blikPhoneNumber || typeof blikPhoneNumber !== "string") {
+    // clientId (if provided) must belong to this salon — otherwise anyone
+    // could attach an arbitrary client record to the appointment.
+    if (clientId) {
+      const [clientRow] = await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)));
+      if (!clientRow) {
         return NextResponse.json(
-          { success: false, error: "Numer telefonu jest wymagany dla platnosci BLIK" },
-          { status: 400 }
-        );
-      }
-      // Validate Polish phone number format (9 digits, optionally with +48 prefix)
-      const cleanedPhone = blikPhoneNumber.replace(/[\s\-()]/g, "");
-      const phoneRegex = /^(\+48)?[0-9]{9}$/;
-      if (!phoneRegex.test(cleanedPhone)) {
-        return NextResponse.json(
-          { success: false, error: "Nieprawidlowy numer telefonu. Podaj 9-cyfrowy numer." },
+          { success: false, error: "Nieprawidlowy klient dla tego salonu" },
           { status: 400 }
         );
       }
     }
 
-    // Verify the service exists and has deposit required
-    if (serviceId) {
-      const [service] = await db.select({ id: services.id }).from(services).where(eq(services.id, serviceId));
-      if (!service) {
-        return NextResponse.json(
-          { success: false, error: "Service not found" },
-          { status: 404 }
-        );
-      }
+    // SECURITY: recompute the deposit amount on the server from salon/service
+    // /client settings + promotions. The body amount is only compared to
+    // detect a manipulated or stale frontend value — the SERVER value is
+    // stored and charged.
+    const expected = await calculateExpectedDeposit({
+      salonId,
+      serviceId,
+      variantId: variantId || null,
+      startTime: new Date(startTime),
+      sessionEmail: session?.user?.email || null,
+      guestEmail: guestEmail?.trim() || null,
+    });
+
+    if (!expected.ok) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: expected.error === "service_not_found" ? "Service not found" : "Variant not found",
+        },
+        { status: 404 }
+      );
     }
 
-    // Check for overlapping appointments for this employee (only need id for existence check)
+    if (!expected.required || expected.amount <= 0) {
+      return NextResponse.json(
+        { success: false, error: "Zadatek nie jest wymagany dla tej rezerwacji" },
+        { status: 400 }
+      );
+    }
+
+    const requestedAmount = parseFloat(depositAmount);
+    if (Math.abs(requestedAmount - expected.amount) > 0.01) {
+      logger.warn("Deposit amount mismatch — request rejected", {
+        salonId,
+        serviceId,
+        requestedAmount,
+        expectedAmount: expected.amount,
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Nieprawidlowa kwota zadatku. Odswiez strone i sprobuj ponownie.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const depositAmountValue = expected.amount;
+    const serviceName = expected.serviceName;
+
+    // Check for overlapping appointments for this employee. Correct overlap
+    // condition: newStart < existing.end AND newEnd > existing.start — pure
+    // boundary touches (e.g. 11:00-12:00 right after 10:00-11:00) do NOT
+    // collide.
     const overlapping = await db.select({ id: appointments.id })
       .from(appointments)
       .where(
         and(
           eq(appointments.employeeId, employeeId),
           not(eq(appointments.status, "cancelled")),
-          or(
-            and(
-              lte(appointments.startTime, new Date(startTime)),
-              gte(appointments.endTime, new Date(startTime))
-            ),
-            and(
-              lte(appointments.startTime, new Date(endTime)),
-              gte(appointments.endTime, new Date(endTime))
-            ),
-            and(
-              gte(appointments.startTime, new Date(startTime)),
-              lte(appointments.endTime, new Date(endTime))
-            )
-          )
+          lt(appointments.startTime, new Date(endTime)),
+          gt(appointments.endTime, new Date(startTime))
         )
       );
 
@@ -155,67 +206,157 @@ export async function POST(request: Request) {
       );
     }
 
-    // Create the appointment in "pending_payment" status
-    const [newAppointment] = await db
-      .insert(appointments)
-      .values({
-        salonId,
-        clientId: clientId || null,
-        employeeId,
-        serviceId: serviceId || null,
-        variantId: variantId || null,
-        bookedByUserId,
-        startTime: new Date(startTime),
-        endTime: new Date(endTime),
-        notes: notes || null,
-        depositAmount: String(depositAmount),
-        depositPaid: false,
-        status: "scheduled",
-        guestName: guestName?.trim() || null,
-        guestPhone: guestPhone?.trim() || null,
-        guestEmail: guestEmail?.trim() || null,
-      })
-      .returning();
+    // When Stripe is configured every payment (card/BLIK/P24) goes through
+    // Stripe Checkout, so we normalize paymentMethod to "stripe" — refund.ts
+    // only auto-refunds payments with paymentMethod === "stripe".
+    const stripeConfigured = isStripeConfigured();
 
-    if (!newAppointment) {
-      return NextResponse.json(
-        { success: false, error: "Failed to create appointment" },
-        { status: 500 }
-      );
-    }
+    // Create the appointment ("scheduled") + pending deposit payment
+    // atomically — never one without the other.
+    const { newAppointment, depositPayment } = await db.transaction(async (tx) => {
+      const [appointment] = await tx
+        .insert(appointments)
+        .values({
+          salonId,
+          clientId: clientId || null,
+          employeeId,
+          serviceId: serviceId || null,
+          variantId: variantId || null,
+          bookedByUserId,
+          startTime: new Date(startTime),
+          endTime: new Date(endTime),
+          notes: notes || null,
+          depositAmount: String(depositAmountValue),
+          depositPaid: false,
+          status: "scheduled",
+          guestName: guestName?.trim() || null,
+          guestPhone: guestPhone?.trim() || null,
+          guestEmail: guestEmail?.trim() || null,
+        })
+        .returning();
 
-    // Create a pending deposit payment record
-    const [depositPayment] = await db
-      .insert(depositPayments)
-      .values({
-        appointmentId: newAppointment.id,
-        salonId,
-        amount: String(depositAmount),
-        currency: "PLN",
-        paymentMethod: paymentMethod || "stripe",
-        blikPhoneNumber: paymentMethod === "blik" ? blikPhoneNumber : null,
-        status: "pending",
-      })
-      .returning();
+      if (!appointment) {
+        return { newAppointment: undefined, depositPayment: undefined };
+      }
 
-    if (!depositPayment) {
+      const [payment] = await tx
+        .insert(depositPayments)
+        .values({
+          appointmentId: appointment.id,
+          salonId,
+          amount: String(depositAmountValue),
+          currency: "PLN",
+          paymentMethod: stripeConfigured ? "stripe" : paymentMethod || "stripe",
+          blikPhoneNumber: blikPhoneNumber || null,
+          status: "pending",
+        })
+        .returning();
+
+      return { newAppointment: appointment, depositPayment: payment };
+    });
+
+    if (!newAppointment || !depositPayment) {
       return NextResponse.json(
         { success: false, error: "Failed to create deposit payment record" },
         { status: 500 }
       );
     }
 
-    // In production, we'd create a Stripe Checkout session here.
-    // For now, return a session with the payment ID as the session reference.
+    // Real Stripe Checkout session (production path)
+    const stripe = stripeConfigured ? getStripe() : null;
+    if (stripe) {
+      const origin = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+      const customerEmail = session?.user?.email || guestEmail?.trim() || undefined;
+
+      try {
+        const checkoutSession = await stripe.checkout.sessions.create({
+          mode: "payment",
+          // BLIK and Przelewy24 require PLN and must be enabled in the
+          // Stripe Dashboard (Settings -> Payment methods).
+          payment_method_types: ["card", "blik", "p24"],
+          line_items: [
+            {
+              price_data: {
+                currency: "pln",
+                product_data: {
+                  name: `Zadatek — ${serviceName}`,
+                  description: "Zadatek za rezerwacje wizyty",
+                },
+                // Stripe expects the amount in grosze (cents)
+                unit_amount: Math.round(depositAmountValue * 100),
+              },
+              quantity: 1,
+            },
+          ],
+          metadata: {
+            kind: "deposit",
+            depositPaymentId: depositPayment.id,
+            appointmentId: newAppointment.id,
+            salonId,
+          },
+          // Session valid ~30 min (Stripe minimum is 30 min; +1 min for clock skew)
+          expires_at: Math.floor(Date.now() / 1000) + 31 * 60,
+          success_url: `${origin}/salons/${salonId}/book?deposit=success`,
+          cancel_url: `${origin}/salons/${salonId}/book?deposit=cancelled`,
+          ...(customerEmail ? { customer_email: customerEmail } : {}),
+        });
+
+        // There is no dedicated stripe_session_id column, so store the
+        // Checkout session id (cs_...) in stripePaymentIntentId as a
+        // reference. The webhook overwrites it with the real payment_intent
+        // id (pi_...) on completion — refunds (refund.ts) only run on
+        // "succeeded" payments, which always carry the pi_ id by then.
+        await db
+          .update(depositPayments)
+          .set({ stripePaymentIntentId: checkoutSession.id })
+          .where(eq(depositPayments.id, depositPayment.id));
+
+        logger.info("Stripe Checkout session created for deposit", {
+          sessionId: checkoutSession.id,
+          appointmentId: newAppointment.id,
+          depositPaymentId: depositPayment.id,
+          amount: depositAmountValue,
+        });
+
+        return NextResponse.json({
+          success: true,
+          data: {
+            sessionId: checkoutSession.id,
+            appointmentId: newAppointment.id,
+            depositPaymentId: depositPayment.id,
+            amount: depositAmountValue,
+            currency: "PLN",
+            paymentMethod: "stripe",
+            paymentUrl: checkoutSession.url,
+            simulated: false,
+          },
+        }, { status: 201 });
+      } catch (stripeError) {
+        // Do NOT fall back to the dev simulation when Stripe is configured —
+        // in production the appointment would stay unpayable and block the
+        // slot. Clean up (cascade also removes the depositPayments row).
+        logger.error("Stripe Checkout session creation failed for deposit", {
+          error: stripeError instanceof Error ? stripeError.message : stripeError,
+          appointmentId: newAppointment.id,
+        });
+        await db.delete(appointments).where(eq(appointments.id, newAppointment.id));
+        return NextResponse.json(
+          { success: false, error: "Nie udalo sie utworzyc sesji platnosci. Sprobuj ponownie." },
+          { status: 502 }
+        );
+      }
+    }
+
+    // Dev fallback: Stripe not configured — return a simulated session that
+    // the frontend confirms via the dev-only /api/deposits/confirm endpoint.
     const sessionId = `dep_session_${depositPayment.id}`;
 
-    logger.info("Deposit payment session created", {
+    logger.info("Deposit payment session created (dev simulation, Stripe not configured)", {
       sessionId,
       appointmentId: newAppointment.id,
-      amount: depositAmount,
+      amount: depositAmountValue,
       currency: "PLN",
       paymentMethod: paymentMethod || "stripe",
-      ...(paymentMethod === "blik" ? { blikPhoneNumber } : {}),
     });
 
     return NextResponse.json({
@@ -224,14 +365,11 @@ export async function POST(request: Request) {
         sessionId,
         appointmentId: newAppointment.id,
         depositPaymentId: depositPayment.id,
-        amount: depositAmount,
+        amount: depositAmountValue,
         currency: "PLN",
         paymentMethod: paymentMethod || "stripe",
-        ...(paymentMethod === "blik" ? { blikPhoneNumber } : {}),
-        // In production, this would be the Stripe Checkout URL or Blik P2P redirect
-        paymentUrl: paymentMethod === "blik"
-          ? `/api/deposits/blik-confirm?session=${sessionId}`
-          : `/api/deposits/checkout?session=${sessionId}`,
+        paymentUrl: `/api/deposits/checkout?session=${sessionId}`,
+        simulated: true,
       },
     }, { status: 201 });
   } catch (error) {
