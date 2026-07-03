@@ -1,8 +1,9 @@
 "use client"
 
 import { Suspense, useEffect, useState } from "react"
-import { useSearchParams, useRouter } from "next/navigation"
 import Link from "next/link"
+import { useSearchParams, useRouter } from "next/navigation"
+import { CheckCircle2, XCircle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -11,19 +12,22 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { CheckCircle2, XCircle, Loader2 } from "lucide-react"
 
 function VerifyEmailContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const token = searchParams.get("token")
-  const [status, setStatus] = useState<"loading" | "success" | "error">("loading")
-  const [errorMessage, setErrorMessage] = useState("")
+  // Brak tokenu znamy już przy pierwszym renderze — to stan początkowy,
+  // nie efekt (react-hooks/set-state-in-effect).
+  const [status, setStatus] = useState<"loading" | "success" | "error">(
+    token ? "loading" : "error"
+  )
+  const [errorMessage, setErrorMessage] = useState(
+    token ? "" : "No verification token provided"
+  )
 
   useEffect(() => {
     if (!token) {
-      setStatus("error")
-      setErrorMessage("No verification token provided")
       return
     }
 

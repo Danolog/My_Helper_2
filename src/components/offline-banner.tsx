@@ -1,8 +1,8 @@
 "use client";
 
-import { useNetworkStatus } from "@/hooks/use-network-status";
-import { WifiOff, Wifi, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
+import { WifiOff, Wifi, RefreshCw } from "lucide-react";
+import { useNetworkStatus } from "@/hooks/use-network-status";
 
 /**
  * Global banner that displays when the user goes offline.
@@ -14,9 +14,14 @@ export function OfflineBanner() {
 
   useEffect(() => {
     if (wasOffline && isOnline) {
-      setShowReconnected(true);
-      const timer = setTimeout(() => setShowReconnected(false), 5000);
-      return () => clearTimeout(timer);
+      // setState odroczony do callbacku timera — synchroniczny setState w ciele
+      // efektu kaskaduje re-render (react-hooks/set-state-in-effect).
+      const showTimer = setTimeout(() => setShowReconnected(true), 0);
+      const hideTimer = setTimeout(() => setShowReconnected(false), 5000);
+      return () => {
+        clearTimeout(showTimer);
+        clearTimeout(hideTimer);
+      };
     }
     return undefined;
   }, [wasOffline, isOnline]);

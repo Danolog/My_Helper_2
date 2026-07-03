@@ -57,6 +57,8 @@ export function useDraggable(options: UseDraggableOptions = {}) {
   return {
     isDragging,
     dragProps,
-    dragStartPos: dragStartPos.current,
+    // Ref zamiast snapshotu .current — odczyt refa w renderze łamie
+    // react-hooks/refs, a snapshot i tak byłby nieaktualny między renderami.
+    dragStartPosRef: dragStartPos,
   };
 }

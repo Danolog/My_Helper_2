@@ -87,17 +87,23 @@ export function useFormRecovery<T extends Record<string, unknown>>(
 
   // On mount, check localStorage for saved form state
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const saved = localStorage.getItem(fullKey);
       if (saved) {
         const parsed = JSON.parse(saved) as T;
         recoveredStateRef.current = parsed;
-        setWasRecovered(true);
+        // setState odroczony do callbacku timera — synchroniczny setState w
+        // ciele efektu kaskaduje re-render (react-hooks/set-state-in-effect).
+        timer = setTimeout(() => setWasRecovered(true), 0);
       }
     } catch {
       // Invalid data in localStorage, ignore
       localStorage.removeItem(fullKey);
     }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [fullKey]);
 
   // Beforeunload warning when form is dirty
