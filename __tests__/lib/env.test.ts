@@ -173,10 +173,27 @@ describe("checkEnv", () => {
     process.env.STRIPE_SECRET_KEY = "stripe-key";
     process.env.TWILIO_ACCOUNT_SID = "AC_test_sid";
     process.env.TWILIO_AUTH_TOKEN = "test_auth_token";
+    process.env.RESEND_API_KEY = "re_test_key";
 
     checkEnv();
 
     expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("should warn about email when RESEND_API_KEY is missing", () => {
+    process.env.POSTGRES_URL = "postgresql://localhost:5432/test";
+    process.env.BETTER_AUTH_SECRET = "a".repeat(32);
+    (process.env as Record<string, string>).NODE_ENV = "development";
+    delete process.env.RESEND_API_KEY;
+
+    checkEnv();
+
+    const warnCalls = (console.warn as ReturnType<typeof vi.fn>).mock.calls;
+    const emailWarningCalls = warnCalls.filter(
+      (call: unknown[]) =>
+        typeof call[1] === "string" && call[1].includes("RESEND_API_KEY")
+    );
+    expect(emailWarningCalls.length).toBeGreaterThan(0);
   });
 
   it("should warn about Google OAuth when only GOOGLE_CLIENT_ID is set", () => {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, and, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { renderEmailLayout, sendEmail } from "@/lib/email";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
@@ -16,8 +17,6 @@ import { forSalon } from "@/lib/server/repository";
 const sendSchema = z.object({
   // Optional: send only to specific client IDs. If not provided, send to all consented.
   recipientIds: z.array(z.string().uuid()).optional(),
-  // Optional: schedule for later (not yet implemented, just store timestamp)
-  scheduleAt: z.string().datetime().optional(),
 });
 
 /**
@@ -147,19 +146,27 @@ export async function POST(
       status: string;
     }[] = [];
 
+    const escapedContent = newsletter.content
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br/>");
+    const newsletterHtml = renderEmailLayout(newsletter.subject, `<p>${escapedContent}</p>`);
+
     for (const recipient of recipients) {
       const fullName = `${recipient.firstName} ${recipient.lastName}`;
       const email = recipient.email || "";
 
-      try {
-        // Log email send (dev mode — replace with real email service in production)
-        logger.info("Newsletter email sent", {
-          to: email,
-          recipientName: fullName,
-          subject: newsletter.subject,
-          contentPreview: newsletter.content.substring(0, 200),
-        });
+      // No salonId here on purpose: the notifications audit trail for the whole
+      // batch is inserted transactionally below, not per-recipient in sendEmail.
+      const result = await sendEmail({
+        to: email,
+        subject: newsletter.subject,
+        html: newsletterHtml,
+        text: newsletter.content,
+      });
 
+      if (result.success) {
         sentCount++;
         sentDetails.push({
           clientId: recipient.clientId,
@@ -167,10 +174,10 @@ export async function POST(
           name: fullName,
           status: "sent",
         });
-      } catch (err) {
+      } else {
         logger.error("Newsletter send failed for client", {
           clientId: recipient.clientId,
-          error: err,
+          error: result.error,
         });
         failedCount++;
         sentDetails.push({

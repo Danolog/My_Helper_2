@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { sendInvoiceEmailSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { renderEmailLayout, sendEmail } from "@/lib/email";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
@@ -11,8 +12,8 @@ import { forSalon } from "@/lib/server/repository";
  * POST /api/invoices/[id]/send-email
  *
  * Send an invoice via email to the associated client.
- * In development mode, the email content is logged to the console
- * instead of being sent through an email provider.
+ * Delivery goes through src/lib/email.ts (Resend); without RESEND_API_KEY
+ * the email is only logged (simulation mode).
  *
  * Request body (optional):
  *  - email: string (override recipient email)
@@ -20,7 +21,7 @@ import { forSalon } from "@/lib/server/repository";
  * The endpoint:
  * 1. Fetches the invoice and associated client data
  * 2. Determines the recipient email (body override > client email)
- * 3. "Sends" the email (logs to console in dev mode)
+ * 3. Sends the email
  * 4. Updates the invoice with emailSentAt and emailSentTo timestamps
  */
 export async function POST(
@@ -145,20 +146,31 @@ export async function POST(
     const emailSubject = `${invoiceType} ${invoice.invoiceNumber} - ${amount} PLN`;
     const emailBody = buildEmailBody(invoice, invoiceType, clientDisplayName);
 
-    // In development mode, log to console instead of sending
-     
-    logger.info(`
-${"=".repeat(70)}
-INVOICE EMAIL SENT
-${"=".repeat(70)}
-To: ${recipientEmail}
-Subject: ${emailSubject}
-${"─".repeat(70)}
-${emailBody}
-${"─".repeat(70)}
-Attachment: ${invoice.invoiceNumber.replace(/\//g, "_")}.pdf (would be attached in production)
-${"=".repeat(70)}
-`);
+    const escapedBody = emailBody
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br/>");
+
+    const sendResult = await sendEmail({
+      to: recipientEmail,
+      subject: emailSubject,
+      html: renderEmailLayout(emailSubject, `<p>${escapedBody}</p>`),
+      text: emailBody,
+      salonId,
+      clientId: invoice.clientId || undefined,
+    });
+
+    if (!sendResult.success) {
+      logger.error("[Invoice Send Email API] Send failed", {
+        invoiceId: id,
+        error: sendResult.error,
+      });
+      return NextResponse.json(
+        { success: false, error: "Nie udalo sie wyslac faktury emailem" },
+        { status: 500 }
+      );
+    }
 
     // Update invoice with email sent timestamp
     const now = new Date();
