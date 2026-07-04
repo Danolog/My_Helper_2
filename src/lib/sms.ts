@@ -231,6 +231,42 @@ export async function sendAppointmentReminderSms(params: {
 }
 
 /**
+ * Send a booking confirmation SMS right after an appointment is created
+ * without a deposit (deposit bookings get their confirmation after payment).
+ */
+export async function sendBookingConfirmationSms(params: {
+  clientPhone: string;
+  clientName: string;
+  serviceName: string;
+  employeeName: string;
+  appointmentDate: Date;
+  salonName: string;
+  salonId: string;
+  clientId?: string;
+}): Promise<SmsResult> {
+  const formattedDate = params.appointmentDate.toLocaleDateString("pl-PL", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const formattedTime = params.appointmentDate.toLocaleTimeString("pl-PL", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const message =
+    `Potwierdzenie rezerwacji: ${params.clientName}, Twoja wizyta "${params.serviceName}" u ${params.employeeName} w ${params.salonName} zostala umowiona na ${formattedDate} o ${formattedTime}. Do zobaczenia!`;
+
+  return sendSms({
+    to: params.clientPhone,
+    message,
+    salonId: params.salonId,
+    clientId: params.clientId,
+  });
+}
+
+/**
  * Send a payment confirmation SMS to the client after a deposit payment.
  */
 export async function sendPaymentConfirmationSms(params: {

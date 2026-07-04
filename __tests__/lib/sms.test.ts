@@ -33,6 +33,7 @@ vi.mock("@/lib/logger", () => ({
 import {
   sendSms,
   sendAppointmentReminderSms,
+  sendBookingConfirmationSms,
   sendPaymentConfirmationSms,
   normalizePolishPhoneNumber,
 } from "@/lib/sms";
@@ -358,6 +359,51 @@ describe("sendAppointmentReminderSms", () => {
 
     const insertedValues = mockDbValues.mock.calls[0]![0];
     expect(insertedValues.message).toContain("/salons/salon-1/book");
+  });
+});
+
+describe("sendBookingConfirmationSms", () => {
+  beforeEach(() => {
+    resetDbMocks();
+    vi.stubEnv("SMSAPI_TOKEN", "");
+    mockDbReturning.mockResolvedValue([{ id: "notif-booking" }]);
+  });
+
+  it("should send a booking confirmation SMS with correct format", async () => {
+    const result = await sendBookingConfirmationSms({
+      clientPhone: "+48123456789",
+      clientName: "Jan",
+      serviceName: "Strzyzenie",
+      employeeName: "Anna Nowak",
+      appointmentDate: new Date("2024-01-15T14:00:00"),
+      salonName: "Salon Uroda",
+      salonId: "salon-1",
+      clientId: "client-1",
+    });
+
+    expect(result.success).toBe(true);
+    const insertedValues = mockDbValues.mock.calls[0]![0];
+    expect(insertedValues.message).toContain("Potwierdzenie rezerwacji");
+    expect(insertedValues.message).toContain("Jan");
+    expect(insertedValues.message).toContain("Strzyzenie");
+    expect(insertedValues.message).toContain("Anna Nowak");
+    expect(insertedValues.message).toContain("Salon Uroda");
+    expect(insertedValues.clientId).toBe("client-1");
+  });
+
+  it("should fail for an invalid phone number", async () => {
+    const result = await sendBookingConfirmationSms({
+      clientPhone: "123",
+      clientName: "Jan",
+      serviceName: "Strzyzenie",
+      employeeName: "Anna",
+      appointmentDate: new Date("2024-01-15T14:00:00"),
+      salonName: "Salon",
+      salonId: "salon-1",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Invalid phone number");
   });
 });
 
