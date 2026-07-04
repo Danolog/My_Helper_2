@@ -1,3 +1,11 @@
 {
-  "buildCommand": "pnpm build:ci"
+  "buildCommand": "pnpm build:ci",
+  "crons": [
+    { "path": "/api/cron/sms-reminders", "schedule": "*/15 * * * *" },
+    { "path": "/api/cron/push-reminders", "schedule": "*/15 * * * *" },
+    { "path": "/api/cron/push-reminders-24h", "schedule": "0 * * * *" },
+    { "path": "/api/cron/cleanup-pending-deposits", "schedule": "30 * * * *" },
+    { "path": "/api/cron/cleanup-temporary-access", "schedule": "0 3 * * *" },
+    { "path": "/api/cron/publish-scheduled-posts", "schedule": "*/30 * * * *" }
+  ]
 }
