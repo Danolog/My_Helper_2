@@ -15,6 +15,12 @@ import {
   pushSubscriptions,
 } from "@/lib/schema";
 
+// Wysyłka push w pętli może trwać — bez tego domyślny timeout ucina cron w połowie
+export const maxDuration = 300;
+
+// Górna granica na jedno uruchomienie; cron uruchamiany cyklicznie dogoni resztę
+const BATCH_LIMIT = 200;
+
 /**
  * POST /api/cron/push-reminders-24h
  *
@@ -77,11 +83,27 @@ export async function POST(request: Request) {
           ),
           isNull(appointments.reminderPushSentAt)
         )
-      );
+      )
+      .limit(BATCH_LIMIT);
 
     logger.info("Appointments found for 24h push reminder", {
       count: upcomingAppointments.length,
     });
+
+    // Oznacz jako wysłane PRZED pętlą wysyłki. Jeśli funkcja padnie w trakcie,
+    // zgubione przypomnienie jest tańsze niż niezapisane flagi -> kolejne
+    // uruchomienie wysyła duplikaty do wszystkich już powiadomionych.
+    if (upcomingAppointments.length > 0) {
+      await db
+        .update(appointments)
+        .set({ reminderPushSentAt: new Date() })
+        .where(
+          inArray(
+            appointments.id,
+            upcomingAppointments.map((a) => a.appointmentId)
+          )
+        );
+    }
 
     const results: Array<{
       appointmentId: string;
@@ -114,9 +136,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // Track appointment IDs that should be marked as sent after processing
-    const idsToMarkSent: string[] = [];
-
     for (const appt of upcomingAppointments) {
       const clientName = `${appt.clientFirstName} ${appt.clientLastName}`;
       const employeeName = `${appt.employeeFirstName} ${appt.employeeLastName}`;
@@ -135,8 +154,6 @@ export async function POST(request: Request) {
           sent: 0,
           error: "No user account linked",
         });
-        // Mark as sent to avoid retrying
-        idsToMarkSent.push(appt.appointmentId);
         continue;
       }
 
@@ -153,8 +170,6 @@ export async function POST(request: Request) {
           sent: 0,
           error: "No push subscriptions",
         });
-        // Mark as sent to avoid retrying
-        idsToMarkSent.push(appt.appointmentId);
         continue;
       }
 
@@ -170,9 +185,6 @@ export async function POST(request: Request) {
           clientId: appt.clientId,
           appointmentId: appt.appointmentId,
         });
-
-        // Collect for batch update instead of individual UPDATE
-        idsToMarkSent.push(appt.appointmentId);
 
         logger.info("24h push reminder sent", {
           appointmentId: appt.appointmentId,
@@ -202,14 +214,6 @@ export async function POST(request: Request) {
           error: error instanceof Error ? error.message : "Unknown error",
         });
       }
-    }
-
-    // Batch-update all processed appointments in a single query instead of N individual UPDATEs
-    if (idsToMarkSent.length > 0) {
-      await db
-        .update(appointments)
-        .set({ reminderPushSentAt: new Date() })
-        .where(inArray(appointments.id, idsToMarkSent));
     }
 
     const sent = results.filter((r) => r.success).length;
