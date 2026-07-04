@@ -1,7 +1,7 @@
 "use client";
 
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import { toast } from "sonner";
+import { logger } from "@/lib/logger";
 
 export interface PDFReportOptions {
   title: string;
@@ -20,8 +20,30 @@ export interface PDFReportOptions {
 /**
  * Generate a PDF report from structured data.
  * Uses jsPDF + jspdf-autotable for table rendering.
+ *
+ * jsPDF (~150 KB gzip) jest ladowany dynamicznie dopiero przy kliknieciu
+ * eksportu — statyczny import wciagal go do initial bundle ~13 tras raportow.
+ * Funkcja sama obsluguje bledy (toast), bo synchroniczne try/catch w call-site'ach
+ * nie zlapie odrzuconej obietnicy.
  */
-export function generateReportPDF(options: PDFReportOptions): void {
+export async function generateReportPDF(options: PDFReportOptions): Promise<void> {
+  try {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import("jspdf"),
+      import("jspdf-autotable"),
+    ]);
+    renderReportPDF(jsPDF, autoTable, options);
+  } catch (error) {
+    logger.error("PDF export failed", { error });
+    toast.error("Nie udalo sie wygenerowac pliku PDF");
+  }
+}
+
+function renderReportPDF(
+  jsPDF: typeof import("jspdf").default,
+  autoTable: typeof import("jspdf-autotable").default,
+  options: PDFReportOptions
+): void {
   const {
     title,
     subtitle,

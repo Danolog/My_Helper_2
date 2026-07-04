@@ -291,6 +291,16 @@ export async function POST(request: Request) {
       clientPhone: string | null;
     }> = [];
 
+    // Plan salonu jest staly dla calego requestu — jedno zapytanie zamiast
+    // jednego na kazdego klienta w petli
+    let hasPro = false;
+    try {
+      const { isProPlan } = await import("@/lib/subscription");
+      hasPro = await isProPlan(salonId);
+    } catch (planError) {
+      logger.warn("[We Miss You Notifications] Plan check failed, skipping AI personalization", { error: planError });
+    }
+
     for (const client of inactiveClients) {
       if (recentlyNotifiedIds.has(client.id)) {
         logger.info(`[We Miss You Notifications] Already sent notification to ${client.firstName} ${client.lastName} in the last ${SPAM_GUARD_DAYS} days, skipping`);
@@ -306,8 +316,6 @@ export async function POST(request: Request) {
 
       // Try AI personalization if salon has Pro plan (non-blocking)
       try {
-        const { isProPlan } = await import("@/lib/subscription");
-        const hasPro = await isProPlan(salonId);
         if (hasPro) {
           const { createAIClient, getAIModel } = await import("@/lib/ai/openrouter");
           const { generateText } = await import("ai");
