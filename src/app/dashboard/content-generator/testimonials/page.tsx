@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft, Video } from "lucide-react";
 import { TestimonialTemplate } from "@/components/content-generator/testimonial-template";
+import { ModuleGate } from "@/components/dashboard/module-gate";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { Button } from "@/components/ui/button";
 
@@ -33,6 +34,14 @@ function TestimonialsContent() {
 }
 
 export default function TestimonialsPage() {
+  return (
+    <ModuleGate module="videoGen">
+      <TestimonialsPageInner />
+    </ModuleGate>
+  );
+}
+
+function TestimonialsPageInner() {
   return (
     <ProPlanGate
       featureName="Szablony testimoniali wideo"
