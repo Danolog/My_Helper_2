@@ -99,6 +99,9 @@ export async function GET(request: Request) {
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .where(and(...conditions))
+      // Bez filtra dat zapytanie zwracaloby cala historie salonu — twardy cap
+      // chroni baze; kalendarz i listy zawsze przekazuja zakres dat
+      .limit(2000)
     );
     logger.info(`[Appointments API] Query returned ${result.length} rows`);
 
