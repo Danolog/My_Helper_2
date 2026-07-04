@@ -290,15 +290,19 @@ async function handleInvoicePaid(event: Stripe.Event) {
       })
       .where(eq(salonSubscriptions.id, sub.id));
 
-    await tx.insert(subscriptionPayments).values({
-      subscriptionId: sub.id,
-      salonId: sub.salonId,
-      amount,
-      currency: "PLN",
-      stripePaymentIntentId: paymentIntentId,
-      status: "succeeded",
-      paidAt: new Date(),
-    });
+    // Stripe retry tego samego eventu nie może zdublować historii płatności
+    await tx
+      .insert(subscriptionPayments)
+      .values({
+        subscriptionId: sub.id,
+        salonId: sub.salonId,
+        amount,
+        currency: "PLN",
+        stripePaymentIntentId: paymentIntentId,
+        status: "succeeded",
+        paidAt: new Date(),
+      })
+      .onConflictDoNothing({ target: subscriptionPayments.stripePaymentIntentId });
   });
 
   logger.info("Subscription renewed", {
@@ -344,15 +348,18 @@ async function handleInvoicePaymentFailed(event: Stripe.Event) {
       .set({ status: "past_due" })
       .where(eq(salonSubscriptions.id, sub.id));
 
-    await tx.insert(subscriptionPayments).values({
-      subscriptionId: sub.id,
-      salonId: sub.salonId,
-      amount: plan ? plan.priceMonthly : "0.00",
-      currency: "PLN",
-      stripePaymentIntentId: paymentIntentId,
-      status: "failed",
-      paidAt: null,
-    });
+    await tx
+      .insert(subscriptionPayments)
+      .values({
+        subscriptionId: sub.id,
+        salonId: sub.salonId,
+        amount: plan ? plan.priceMonthly : "0.00",
+        currency: "PLN",
+        stripePaymentIntentId: paymentIntentId,
+        status: "failed",
+        paidAt: null,
+      })
+      .onConflictDoNothing({ target: subscriptionPayments.stripePaymentIntentId });
   });
 
   logger.warn("Payment failed, subscription set to past_due", { subscriptionId: sub.id });

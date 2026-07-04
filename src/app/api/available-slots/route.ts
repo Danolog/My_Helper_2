@@ -4,12 +4,24 @@ import { eq, and, gte, lt, not } from "drizzle-orm";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { appointments, workSchedules, timeBlocks } from "@/lib/schema";
 
 // GET /api/available-slots?employeeId=xxx&date=2026-02-10&duration=60
 // Returns available time slots for booking
 export async function GET(request: Request) {
   try {
+    // Publiczny endpoint (3 zapytania DB/wywolanie, enumerowalne employeeId)
+    // — limit per IP; checkAsync uzywa Upstash gdy skonfigurowany, inaczej in-memory
+    const ip = getClientIp(request);
+    const rateLimitResult = await apiRateLimit.checkAsync(ip);
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const employeeId = searchParams.get("employeeId");
     const date = searchParams.get("date"); // YYYY-MM-DD format

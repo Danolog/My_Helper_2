@@ -1,0 +1,2 @@
+CREATE INDEX "notifications_salon_created_idx" ON "notifications" USING btree ("salon_id","created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "subscription_payments_stripe_pi_uq" ON "subscription_payments" USING btree ("stripe_payment_intent_id");
