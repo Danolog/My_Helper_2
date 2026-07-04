@@ -39,12 +39,38 @@ Bez tokena SMS-y są tylko symulowane (log + wpis w bazie), nic nie wychodzi.
 
 ## 3. Harmonogram cronów — CRON_SECRET (przypomnienia w ogóle nie działały w prod)
 
-`vercel.json` ma teraz wpisy `crons` (przypomnienia SMS/push, czyszczenie zadatków).
+Konto Vercel jest na planie **Hobby**, który pozwala na max **2 crony, tylko raz
+dziennie** (deployment z pełnym harmonogramem został odrzucony — to potwierdzone).
+Dlatego `vercel.json` ma teraz tylko 2 dzienne crony czyszczące. Przypomnienia
+SMS/push wymagają uruchamiania co 15 min — masz dwie drogi:
+
+**Wariant A — upgrade do Vercel Pro (20 USD/mies.):**
+1. Vercel → Settings → Billing → upgrade.
+2. Przywróć pełny harmonogram w `vercel.json`:
+   ```json
+   "crons": [
+     { "path": "/api/cron/sms-reminders", "schedule": "*/15 * * * *" },
+     { "path": "/api/cron/push-reminders", "schedule": "*/15 * * * *" },
+     { "path": "/api/cron/push-reminders-24h", "schedule": "0 * * * *" },
+     { "path": "/api/cron/cleanup-pending-deposits", "schedule": "30 * * * *" },
+     { "path": "/api/cron/cleanup-temporary-access", "schedule": "0 3 * * *" },
+     { "path": "/api/cron/publish-scheduled-posts", "schedule": "*/30 * * * *" }
+   ]
+   ```
+
+**Wariant B — darmowy zewnętrzny scheduler (np. https://cron-job.org):**
+1. Załóż konto na cron-job.org (darmowe, interwały do 1 min).
+2. Dodaj zadania (metoda GET lub POST, oba działają):
+   - `https://twojadomena.pl/api/cron/sms-reminders` — co 15 min
+   - `https://twojadomena.pl/api/cron/push-reminders` — co 15 min
+   - `https://twojadomena.pl/api/cron/push-reminders-24h` — co godzinę
+   - `https://twojadomena.pl/api/cron/publish-scheduled-posts` — co 30 min
+3. W każdym zadaniu dodaj nagłówek: `Authorization: Bearer <CRON_SECRET>`.
+
+**W obu wariantach:**
 1. Wygeneruj losowy sekret (min. 32 znaki), np. `openssl rand -hex 32`.
-2. Ustaw w Vercel: `CRON_SECRET` = wygenerowana wartość.
-   Vercel automatycznie doda nagłówek `Authorization: Bearer CRON_SECRET` do wywołań.
-3. Uwaga: 6 cronów z krokiem co 15 min wymaga planu Vercel Pro
-   (na Hobby crony mogą być tylko dzienne — wtedy przypomnienia nie zadziałają o czasie).
+2. Ustaw w Vercel: `CRON_SECRET` = wygenerowana wartość
+   (Vercel Cron sam doda nagłówek; w cron-job.org ustawiasz go ręcznie).
 
 ## 4. Galeria zdjęć — Vercel Blob (upload był zepsuty w prod, kod naprawiony)
 
