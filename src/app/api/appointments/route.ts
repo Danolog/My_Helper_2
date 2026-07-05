@@ -8,7 +8,8 @@ import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getSalonContext } from "@/lib/salon-context";
-import { appointments, clients, employees, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
+import { appointments, clients, employees, salons, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
+import { sendBookingConfirmationSms } from "@/lib/sms";
 import { forSalon } from "@/lib/server/repository";
 import { getOptionalSession } from "@/lib/session";
 import { isValidUuid, isValidDateString } from "@/lib/validations";
@@ -98,6 +99,9 @@ export async function GET(request: Request) {
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .where(and(...conditions))
+      // Bez filtra dat zapytanie zwracaloby cala historie salonu — twardy cap
+      // chroni baze; kalendarz i listy zawsze przekazuja zakres dat
+      .limit(2000)
     );
     logger.info(`[Appointments API] Query returned ${result.length} rows`);
 
@@ -317,6 +321,49 @@ export async function POST(request: Request) {
     }
 
     logger.info(`[Appointments API] Created appointment with id: ${newAppointment?.id}`);
+
+    // Potwierdzenie SMS dla rezerwacji bez zadatku — przy zadatku potwierdzenie
+    // wysyla confirmDepositPayment() po oplaceniu, wiec tu by sie zdublowalo.
+    // Best-effort: blad wysylki nie moze wywrocic utworzonej rezerwacji.
+    if (newAppointment && !depositAmount) {
+      try {
+        const [details] = await db
+          .select({
+            clientFirstName: clients.firstName,
+            clientPhone: clients.phone,
+            serviceName: services.name,
+            employeeFirstName: employees.firstName,
+            employeeLastName: employees.lastName,
+            salonName: salons.name,
+          })
+          .from(appointments)
+          .leftJoin(clients, eq(appointments.clientId, clients.id))
+          .leftJoin(services, eq(appointments.serviceId, services.id))
+          .innerJoin(employees, eq(appointments.employeeId, employees.id))
+          .innerJoin(salons, eq(appointments.salonId, salons.id))
+          .where(eq(appointments.id, newAppointment.id))
+          .limit(1);
+
+        const phone = details?.clientPhone || guestPhone || null;
+        if (details && phone) {
+          await sendBookingConfirmationSms({
+            clientPhone: phone,
+            clientName: details.clientFirstName || guestName || "Kliencie",
+            serviceName: details.serviceName || "wizyta",
+            employeeName: `${details.employeeFirstName} ${details.employeeLastName}`,
+            appointmentDate: new Date(startTime),
+            salonName: details.salonName,
+            salonId,
+            ...(newAppointment.clientId ? { clientId: newAppointment.clientId } : {}),
+          });
+        }
+      } catch (smsError) {
+        logger.warn("[Appointments API] Booking confirmation SMS failed", {
+          appointmentId: newAppointment.id,
+          error: smsError,
+        });
+      }
+    }
 
     return NextResponse.json({
       success: true,

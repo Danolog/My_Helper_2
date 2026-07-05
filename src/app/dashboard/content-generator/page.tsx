@@ -1,11 +1,98 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, PenTool, Instagram, Mail, FileText, ArrowRight, BookOpen, CalendarClock, Clapperboard, Video, Smartphone } from "lucide-react";
+import {
+  ArrowLeft,
+  PenTool,
+  Instagram,
+  Mail,
+  FileText,
+  ArrowRight,
+  BookOpen,
+  CalendarClock,
+  Clapperboard,
+  Video,
+  Smartphone,
+  type LucideIcon,
+} from "lucide-react";
+import { useModules } from "@/components/dashboard/modules-provider";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { Button } from "@/components/ui/button";
+import type { ModuleKey } from "@/lib/features";
+
+interface GeneratorTile {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  href: string;
+  /** Kafelek widoczny tylko gdy moduł jest włączony (hardOff ukrywa go globalnie). */
+  module?: ModuleKey;
+}
+
+const GENERATOR_TILES: GeneratorTile[] = [
+  {
+    icon: Instagram,
+    title: "Posty social media",
+    description: "Generowanie angazujacych postow na Instagram, Facebook i TikTok",
+    href: "/dashboard/content-generator/social-posts",
+    module: "socialPosts",
+  },
+  {
+    icon: FileText,
+    title: "Opisy uslug",
+    description:
+      "Generuj profesjonalne opisy AI w edycji uslugi - otworz usluge i kliknij \"Generuj opis\"",
+    href: "/dashboard/services",
+  },
+  {
+    icon: Mail,
+    title: "Newslettery",
+    description: "Tworzenie newsletterow promocyjnych i informacyjnych",
+    href: "/dashboard/content-generator/newsletters",
+    module: "newsletters",
+  },
+  {
+    icon: BookOpen,
+    title: "Szablony tresci",
+    description: "Gotowe szablony do szybkiego tworzenia tresci",
+    href: "/dashboard/content-generator/templates",
+  },
+  {
+    icon: Clapperboard,
+    title: "Klipy wideo AI",
+    description: "Krotkie klipy promocyjne 4-8 sekund generowane przez Veo 3.1",
+    href: "/dashboard/content-generator/social-posts#video",
+    module: "socialPosts",
+  },
+  {
+    icon: Smartphone,
+    title: "Animowane Stories",
+    description: "Animowane story 9:16 z szablonami i zdjeciami z galerii",
+    href: "/dashboard/content-generator/social-posts#stories",
+    module: "socialPosts",
+  },
+  {
+    icon: Video,
+    title: "Testimoniale wideo",
+    description: "Scenariusze testimoniali wideo z pytaniami i wskazowkami",
+    href: "/dashboard/content-generator/testimonials",
+    module: "videoGen",
+  },
+  {
+    icon: CalendarClock,
+    title: "Zaplanowane posty",
+    description: "Zarzadzaj zaplanowanymi publikacjami na social media",
+    href: "/dashboard/content-generator/scheduled",
+    module: "socialPosts",
+  },
+];
 
 function ContentGeneratorContent() {
+  const modules = useModules();
+  const visibleTiles = GENERATOR_TILES.filter(
+    (tile) => !tile.module || modules[tile.module]
+  );
+
   return (
     <div className="container mx-auto p-6">
       <div className="flex items-center gap-4 mb-6">
@@ -26,104 +113,20 @@ function ContentGeneratorContent() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <Link
-          href="/dashboard/content-generator/social-posts"
-          className="p-6 border rounded-lg space-y-3 hover:border-primary hover:shadow-md transition-all group cursor-pointer"
-        >
-          <Instagram className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold flex items-center gap-2">
-            Posty social media
-            <ArrowRight className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Generowanie angazujacych postow na Instagram, Facebook i TikTok
-          </p>
-        </Link>
-        <div className="p-6 border rounded-lg space-y-3">
-          <FileText className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold">Opisy uslug</h3>
-          <p className="text-sm text-muted-foreground">
-            Profesjonalne opisy uslug przyciagajace nowych klientow
-          </p>
-        </div>
-        <Link
-          href="/dashboard/content-generator/newsletters"
-          className="p-6 border rounded-lg space-y-3 hover:border-primary hover:shadow-md transition-all group cursor-pointer"
-        >
-          <Mail className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold flex items-center gap-2">
-            Newslettery
-            <ArrowRight className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Tworzenie newsletterow promocyjnych i informacyjnych
-          </p>
-        </Link>
-        <Link
-          href="/dashboard/content-generator/templates"
-          className="p-6 border rounded-lg space-y-3 hover:border-primary hover:shadow-md transition-all group cursor-pointer"
-        >
-          <BookOpen className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold flex items-center gap-2">
-            Szablony tresci
-            <ArrowRight className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Gotowe szablony do szybkiego tworzenia tresci
-          </p>
-        </Link>
-        <Link
-          href="/dashboard/content-generator/social-posts#video"
-          className="p-6 border rounded-lg space-y-3 hover:border-primary hover:shadow-md transition-all group cursor-pointer"
-        >
-          <Clapperboard className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold flex items-center gap-2">
-            Klipy wideo AI
-            <ArrowRight className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Krotkie klipy promocyjne 4-8 sekund generowane przez Veo 3.1
-          </p>
-        </Link>
-        <Link
-          href="/dashboard/content-generator/social-posts#stories"
-          className="p-6 border rounded-lg space-y-3 hover:border-primary hover:shadow-md transition-all group cursor-pointer"
-        >
-          <Smartphone className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold flex items-center gap-2">
-            Animowane Stories
-            <ArrowRight className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Animowane story 9:16 z szablonami i zdjeciami z galerii
-          </p>
-        </Link>
-        <Link
-          href="/dashboard/content-generator/testimonials"
-          className="p-6 border rounded-lg space-y-3 hover:border-primary hover:shadow-md transition-all group cursor-pointer"
-        >
-          <Video className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold flex items-center gap-2">
-            Testimoniale wideo
-            <ArrowRight className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Scenariusze testimoniali wideo z pytaniami i wskazowkami
-          </p>
-        </Link>
-        <Link
-          href="/dashboard/content-generator/scheduled"
-          className="p-6 border rounded-lg space-y-3 hover:border-primary hover:shadow-md transition-all group cursor-pointer"
-        >
-          <CalendarClock className="h-8 w-8 text-primary" />
-          <h3 className="font-semibold flex items-center gap-2">
-            Zaplanowane posty
-            <ArrowRight className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Zarzadzaj zaplanowanymi publikacjami na social media
-          </p>
-        </Link>
+        {visibleTiles.map((tile) => (
+          <Link
+            key={tile.href}
+            href={tile.href}
+            className="p-6 border rounded-lg space-y-3 hover:border-primary hover:shadow-md transition-all group cursor-pointer"
+          >
+            <tile.icon className="h-8 w-8 text-primary" />
+            <h3 className="font-semibold flex items-center gap-2">
+              {tile.title}
+              <ArrowRight className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </h3>
+            <p className="text-sm text-muted-foreground">{tile.description}</p>
+          </Link>
+        ))}
       </div>
     </div>
   );

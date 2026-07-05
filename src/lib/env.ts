@@ -36,6 +36,10 @@ const serverEnvSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_PHONE_NUMBER: z.string().optional(),
 
+  // Email (Resend)
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().optional(),
+
   // Push notifications (VAPID keys)
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_SUBJECT: z.string().optional(),
@@ -132,6 +136,12 @@ export function checkEnv(): void {
 
   if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN) {
     warnings.push("Twilio credentials are not set. Voice telephony features will be disabled.");
+  }
+
+  if (!process.env.RESEND_API_KEY) {
+    warnings.push(
+      "RESEND_API_KEY is not set. Emails (verification, password reset, newsletters, invoices) will only be logged."
+    );
   }
 
   // Log warnings in development

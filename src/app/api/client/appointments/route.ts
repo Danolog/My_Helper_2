@@ -27,7 +27,9 @@ export async function GET() {
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .leftJoin(salons, eq(appointments.salonId, salons.id))
       .where(eq(appointments.bookedByUserId, userId))
-      .orderBy(desc(appointments.startTime));
+      .orderBy(desc(appointments.startTime))
+      // Twardy cap — najnowsze 500 wizyt uzytkownika wystarcza dla portalu
+      .limit(500);
 
     const formattedAppointments = result.map((row) => ({
       id: row.appointment.id,

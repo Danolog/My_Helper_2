@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, inArray } from "drizzle-orm";
 import { validateBody, clientWaitingListSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
@@ -38,36 +38,25 @@ export async function GET() {
     const clientIds = clientRecords.map((c) => c.id);
 
     // Fetch waiting list entries for all client records linked to this user
-    const allEntries = [];
-
-    for (const clientId of clientIds) {
-      const result = await db
-        .select({
-          entry: waitingList,
-          client: clients,
-          service: services,
-          employee: employees,
-          salon: salons,
-        })
-        .from(waitingList)
-        .innerJoin(clients, eq(waitingList.clientId, clients.id))
-        .leftJoin(services, eq(waitingList.serviceId, services.id))
-        .leftJoin(
-          employees,
-          eq(waitingList.preferredEmployeeId, employees.id)
-        )
-        .leftJoin(salons, eq(waitingList.salonId, salons.id))
-        .where(eq(waitingList.clientId, clientId))
-        .orderBy(desc(waitingList.createdAt));
-
-      allEntries.push(...result);
-    }
-
-    allEntries.sort((a, b) => {
-      const dateA = new Date(a.entry.createdAt).getTime();
-      const dateB = new Date(b.entry.createdAt).getTime();
-      return dateB - dateA;
-    });
+    // in one query (previously one query per client record — N+1)
+    const allEntries = await db
+      .select({
+        entry: waitingList,
+        client: clients,
+        service: services,
+        employee: employees,
+        salon: salons,
+      })
+      .from(waitingList)
+      .innerJoin(clients, eq(waitingList.clientId, clients.id))
+      .leftJoin(services, eq(waitingList.serviceId, services.id))
+      .leftJoin(
+        employees,
+        eq(waitingList.preferredEmployeeId, employees.id)
+      )
+      .leftJoin(salons, eq(waitingList.salonId, salons.id))
+      .where(inArray(waitingList.clientId, clientIds))
+      .orderBy(desc(waitingList.createdAt));
 
     // Build a map of offered employee names for entries that have offeredEmployeeId
     const offeredEmployeeIds = allEntries
@@ -75,15 +64,17 @@ export async function GET() {
       .filter((eid): eid is string => eid !== null);
     const offeredEmployeeNames: Record<string, string> = {};
     if (offeredEmployeeIds.length > 0) {
-      for (const eid of [...new Set(offeredEmployeeIds)]) {
-        const [emp] = await db
-          .select()
-          .from(employees)
-          .where(eq(employees.id, eid))
-          .limit(1);
-        if (emp) {
-          offeredEmployeeNames[eid] = `${emp.firstName} ${emp.lastName}`;
-        }
+      // One query for all offered employees (previously one per employee)
+      const offeredEmployees = await db
+        .select({
+          id: employees.id,
+          firstName: employees.firstName,
+          lastName: employees.lastName,
+        })
+        .from(employees)
+        .where(inArray(employees.id, [...new Set(offeredEmployeeIds)]));
+      for (const emp of offeredEmployees) {
+        offeredEmployeeNames[emp.id] = `${emp.firstName} ${emp.lastName}`;
       }
     }
 

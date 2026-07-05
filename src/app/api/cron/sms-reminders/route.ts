@@ -8,6 +8,12 @@ import { logger } from "@/lib/logger";
 import { appointments, clients, employees, services, salons } from "@/lib/schema";
 import { sendAppointmentReminderSms } from "@/lib/sms";
 
+// Wysyłka SMS w pętli może trwać — bez tego domyślny timeout ucina cron w połowie
+export const maxDuration = 300;
+
+// Górna granica na jedno uruchomienie; cron co 5-10 min dogoni resztę
+const BATCH_LIMIT = 200;
+
 /**
  * POST /api/cron/sms-reminders
  *
@@ -71,11 +77,28 @@ export async function POST(request: Request) {
           // 1h reminder not yet sent
           isNull(appointments.reminder1hSentAt)
         )
-      );
+      )
+      .limit(BATCH_LIMIT);
 
     logger.info("Appointments found for SMS reminder", {
       count: upcomingAppointments.length,
     });
+
+    // Mark as sent BEFORE the send loop. If the function dies mid-loop,
+    // a lost reminder is far cheaper than the alternative: flags never
+    // written -> next run resends every already-delivered SMS (duplicate
+    // loop, real SMSAPI cost, spam to clients).
+    if (upcomingAppointments.length > 0) {
+      await db
+        .update(appointments)
+        .set({ reminder1hSentAt: new Date() })
+        .where(
+          inArray(
+            appointments.id,
+            upcomingAppointments.map((a) => a.appointmentId)
+          )
+        );
+    }
 
     const results: Array<{
       appointmentId: string;
@@ -83,9 +106,6 @@ export async function POST(request: Request) {
       success: boolean;
       error?: string | undefined;
     }> = [];
-
-    // Track appointment IDs that should be marked as sent after processing
-    const idsToMarkSent: string[] = [];
 
     for (const appt of upcomingAppointments) {
       const clientName = `${appt.clientFirstName} ${appt.clientLastName}`;
@@ -119,10 +139,6 @@ export async function POST(request: Request) {
           clientId: appt.clientId,
         });
 
-        // Collect for batch update instead of individual UPDATE
-        // Mark regardless of SMS delivery status to prevent retry loops
-        idsToMarkSent.push(appt.appointmentId);
-
         logger.info("SMS reminder sent", {
           appointmentId: appt.appointmentId,
           clientName,
@@ -147,14 +163,6 @@ export async function POST(request: Request) {
           error: error instanceof Error ? error.message : "Unknown error",
         });
       }
-    }
-
-    // Batch-update all processed appointments in a single query instead of N individual UPDATEs
-    if (idsToMarkSent.length > 0) {
-      await db
-        .update(appointments)
-        .set({ reminder1hSentAt: new Date() })
-        .where(inArray(appointments.id, idsToMarkSent));
     }
 
     const sent = results.filter((r) => r.success).length;

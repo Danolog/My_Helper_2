@@ -43,7 +43,6 @@ All AI features require Pro plan (149 PLN/mies). Gated by `requireProAI()` serve
 - `TestimonialTemplate` — Video testimonial scripts
 - `BannerGenerator` — Promotional banners
 - `PhotoEnhanceDialog` — Gallery photo enhancement
-- `ServiceIllustrationButton` — Service image generation
 
 ### AI Hooks
 - `useVoiceInput` — MediaRecorder + ElevenLabs STT

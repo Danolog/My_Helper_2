@@ -100,7 +100,9 @@ export const GET = withApiHandler(
         })
         .from(clients)
         .leftJoin(lastVisitSubquery, eq(clients.id, lastVisitSubquery.clientId))
-        .where(and(...conditions));
+        .where(and(...conditions))
+        // Twardy cap — kartoteka bez limitu ladowala wszystkich klientow salonu
+        .limit(2000);
     });
     logger.info(`[Clients API] Query returned ${result.length} rows`);
 

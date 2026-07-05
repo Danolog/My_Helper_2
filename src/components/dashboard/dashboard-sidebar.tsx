@@ -18,8 +18,12 @@ import {
   BarChart3,
   FileText,
   CreditCard,
+  HandCoins,
+  Hourglass,
   Settings,
+  Star,
   Menu,
+  Wallet,
 } from "lucide-react";
 import { useModules } from "@/components/dashboard/modules-provider";
 import { useSalonRole } from "@/components/dashboard/role-provider";
@@ -103,6 +107,12 @@ export const NAV_GROUPS: NavGroup[] = [
         isActive: (pathname: string) => pathname.startsWith("/dashboard/products"),
       },
       {
+        label: "Lista oczekujacych",
+        href: "/dashboard/waiting-list",
+        icon: Hourglass,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/waiting-list"),
+      },
+      {
         label: "Powiadomienia",
         href: "/dashboard/notifications",
         icon: Bell,
@@ -123,7 +133,15 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Promocje",
         href: "/dashboard/promotions",
         icon: Percent,
-        isActive: (pathname: string) => pathname.startsWith("/dashboard/promotions"),
+        isActive: (pathname: string) =>
+          pathname.startsWith("/dashboard/promotions") ||
+          pathname.startsWith("/dashboard/promo-codes"),
+      },
+      {
+        label: "Opinie",
+        href: "/dashboard/reviews",
+        icon: Star,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/reviews"),
       },
       {
         label: "Asystent AI",
@@ -146,6 +164,18 @@ export const NAV_GROUPS: NavGroup[] = [
         href: "/dashboard/reports",
         icon: BarChart3,
         isActive: (pathname: string) => pathname.startsWith("/dashboard/reports"),
+      },
+      {
+        label: "Platnosci",
+        href: "/dashboard/payments",
+        icon: Wallet,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/payments"),
+      },
+      {
+        label: "Rozliczenia",
+        href: "/dashboard/finance",
+        icon: HandCoins,
+        isActive: (pathname: string) => pathname.startsWith("/dashboard/finance"),
       },
       {
         label: "Faktury",

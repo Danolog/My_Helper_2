@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, index, uuid, jsonb, integer, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, index, uniqueIndex, uuid, jsonb, integer, numeric } from "drizzle-orm/pg-core";
 
 // IMPORTANT! ID fields should ALWAYS use UUID types, EXCEPT the BetterAuth tables.
 
@@ -536,6 +536,9 @@ export const notifications = pgTable(
     index("notifications_salon_id_idx").on(table.salonId),
     index("notifications_client_id_idx").on(table.clientId),
     index("notifications_status_idx").on(table.status),
+    // Lista powiadomien: WHERE salonId ORDER BY createdAt DESC LIMIT/OFFSET —
+    // kompozyt obsluguje sortowanie z indeksu zamiast sortu w pamieci
+    index("notifications_salon_created_idx").on(table.salonId, table.createdAt),
   ]
 );
 
@@ -974,6 +977,9 @@ export const subscriptionPayments = pgTable(
     index("subscription_payments_subscription_id_idx").on(table.subscriptionId),
     index("subscription_payments_salon_id_idx").on(table.salonId),
     index("subscription_payments_status_idx").on(table.status),
+    // Stripe dostarcza webhooki at-least-once — UNIQUE + ON CONFLICT DO NOTHING
+    // w handlerze invoice.paid deduplikuje retry (NULL-e nie koliduja)
+    uniqueIndex("subscription_payments_stripe_pi_uq").on(table.stripePaymentIntentId),
   ]
 );
 

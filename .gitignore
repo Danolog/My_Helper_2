@@ -68,6 +68,11 @@ claude-progress.txt
 
 # test artifacts
 test-results/
+test-results 2/
 playwright-report/
 tests/.auth/
 .env.cron-secret.local
+
+# local-only (personal config, session memory)
+CLAUDE.local.md
+memory/

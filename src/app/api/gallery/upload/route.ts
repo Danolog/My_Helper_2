@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
 import sharp from "sharp";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { upload } from "@/lib/storage";
 
 
 // Rozszerzenie nadajemy WYŁĄCZNIE z formatu wykrytego przez sharp (magic
@@ -82,22 +81,22 @@ export async function POST(request: Request) {
     // Generate unique filename (extension from sniffed format, not file.name)
     const filename = `${randomUUID()}.${ext}`;
 
-    // Ensure upload directory exists
-    const uploadDir = path.join(process.cwd(), "public", "uploads", "gallery");
-    await mkdir(uploadDir, { recursive: true });
+    // Real thumbnail (max 400px wide) instead of a full-size copy
+    const thumbBuffer = await sharp(buffer)
+      .resize({ width: 400, withoutEnlargement: true })
+      .toBuffer();
 
-    // Write file to disk
-    const filePath = path.join(uploadDir, filename);
-    await writeFile(filePath, buffer);
+    // Storage layer: Vercel Blob when BLOB_READ_WRITE_TOKEN is set, local
+    // filesystem otherwise (dev). Writing straight to public/uploads would
+    // 404 on Vercel — the runtime filesystem is ephemeral and per-instance.
+    const maxConfig = { maxSize };
+    const [fileResult, thumbResult] = await Promise.all([
+      upload(buffer, filename, "gallery", maxConfig),
+      upload(thumbBuffer, filename, "gallery/thumbs", maxConfig),
+    ]);
 
-    // Generate thumbnail (simple copy for now, could use sharp for real thumbnails)
-    const thumbDir = path.join(uploadDir, "thumbs");
-    await mkdir(thumbDir, { recursive: true });
-    const thumbPath = path.join(thumbDir, filename);
-    await writeFile(thumbPath, buffer);
-
-    const url = `/uploads/gallery/${filename}`;
-    const thumbnailUrl = `/uploads/gallery/thumbs/${filename}`;
+    const url = fileResult.url;
+    const thumbnailUrl = thumbResult.url;
 
     logger.info(`[Gallery Upload] File uploaded: ${filename} (${file.size} bytes)`);
 

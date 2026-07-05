@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { db } from "./db"
 import { logger } from "./logger"
+import { isEmailConfigured, sendPasswordResetEmail, sendVerificationEmail } from "./email"
 
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
@@ -48,17 +49,21 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8, // Minimum 8 characters per spec
-    requireEmailVerification: false,
+    // Spec wymaga weryfikacji email po rejestracji. Wymóg jest aktywny tylko
+    // gdy skonfigurowany jest provider email (RESEND_API_KEY) — inaczej
+    // (dev/CI bez klucza) użytkownik nigdy nie dostałby linku i nie mógłby się zalogować.
+    requireEmailVerification: isEmailConfigured(),
     sendResetPassword: async ({ user, url }) => {
-      // Log password reset URL (no email integration yet)
       logger.info("Password reset requested", { email: user.email, resetUrl: url })
+      await sendPasswordResetEmail({ to: user.email, url })
     },
   },
   emailVerification: {
     sendOnSignUp: true,
+    // Przy requireEmailVerification: niezweryfikowany sign-in ponawia wysyłkę linku
     sendVerificationEmail: async ({ user, url }) => {
-      // Log verification URL (no email integration yet)
       logger.info("Email verification sent", { email: user.email, verificationUrl: url })
+      await sendVerificationEmail({ to: user.email, url })
     },
   },
 })

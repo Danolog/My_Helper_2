@@ -48,6 +48,8 @@ export const GET = withApiHandler(
         .leftJoin(services, eq(appointments.serviceId, services.id))
         .where(and(...conditions))
         .orderBy(desc(reviews.createdAt))
+        // Twardy cap — lista opinii bez limitu rosla bez ograniczen
+        .limit(1000)
     );
 
     const formattedReviews = result.map((row) => ({
