@@ -7,8 +7,8 @@ import { ArrowLeft, Blocks, Save, CheckCircle, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
-import { useSession } from "@/lib/auth-client";
 import {
   MODULES,
   TOGGLEABLE_MODULES,
@@ -20,53 +20,31 @@ const HARD_OFF_MODULES = MODULES.filter((m) => m.hardOff);
 
 export default function ModulesSettingsPage() {
   const router = useRouter();
-  const { data: session } = useSession();
-  const [salonId, setSalonId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Salon zalogowanego uzytkownika przez /api/salons/mine (dziala tez dla
+  // pracownikow i salonow bez adresu/telefonu) — NIE przez publiczny katalog
+  // /api/salons, ktory odfiltrowuje niekompletne salony.
+  const { salonId, loading: salonLoading } = useSalonId();
+  const [modulesLoading, setModulesLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedSuccessfully, setSavedSuccessfully] = useState(false);
   const [modules, setModules] = useState<ModulesState | null>(null);
-
-  // Fetch salon ID
-  useEffect(() => {
-    async function fetchSalonId() {
-      try {
-        const res = await fetch("/api/salons");
-        const data = await res.json();
-        if (data.success && data.data.length > 0) {
-          const userId = session?.user?.id;
-          const userSalon = userId
-            ? data.data.find(
-                (s: { ownerId: string | null }) => s.ownerId === userId
-              )
-            : null;
-          setSalonId(userSalon ? userSalon.id : data.data[0].id);
-        } else {
-          setLoading(false);
-        }
-      } catch {
-        setLoading(false);
-      }
-    }
-    if (session?.user) {
-      fetchSalonId();
-    }
-  }, [session]);
 
   // Fetch resolved modules state
   const fetchModules = useCallback(async () => {
     if (!salonId) return;
     try {
-      setLoading(true);
+      setModulesLoading(true);
       const res = await fetch(`/api/salons/${salonId}/modules`);
       const data = await res.json();
       if (data.success) {
         setModules(data.data);
+      } else {
+        toast.error(data.error || "Nie udalo sie zaladowac ustawien");
       }
     } catch {
       toast.error("Nie udalo sie zaladowac ustawien");
     } finally {
-      setLoading(false);
+      setModulesLoading(false);
     }
   }, [salonId]);
 
@@ -75,6 +53,8 @@ export default function ModulesSettingsPage() {
       fetchModules();
     }
   }, [salonId, fetchModules]);
+
+  const loading = salonLoading || (Boolean(salonId) && modulesLoading);
 
   const handleToggle = (key: ModuleKey, value: boolean) => {
     setModules((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -124,7 +104,7 @@ export default function ModulesSettingsPage() {
     );
   }
 
-  if (!salonId || !modules) {
+  if (!salonId) {
     return (
       <div className="container mx-auto p-6">
         <div className="max-w-3xl mx-auto text-center">
@@ -132,6 +112,20 @@ export default function ModulesSettingsPage() {
           <p className="text-muted-foreground">
             Nie znaleziono salonu. Utworz salon, aby skonfigurowac moduly.
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!modules) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="max-w-3xl mx-auto text-center">
+          <h1 className="text-2xl font-bold mb-2">Blad ladowania</h1>
+          <p className="text-muted-foreground mb-4">
+            Nie udalo sie zaladowac ustawien modulow.
+          </p>
+          <Button onClick={fetchModules}>Sprobuj ponownie</Button>
         </div>
       </div>
     );

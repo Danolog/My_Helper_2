@@ -1,0 +1,149 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import ModulesSettingsPage from "@/app/dashboard/settings/modules/page";
+
+// Mock Next.js Link
+vi.mock("next/link", () => ({
+  default: ({
+    children,
+    href,
+    ...props
+  }: {
+    children: React.ReactNode;
+    href: string;
+    [key: string]: unknown;
+  }) => (
+    <a href={href} {...props}>
+      {children}
+    </a>
+  ),
+}));
+
+// Mock Next.js navigation
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }),
+}));
+
+// Mock sonner toasts
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+// Mock auth session — zalogowany wlasciciel
+vi.mock("@/lib/auth-client", () => ({
+  useSession: () => ({ data: { user: { id: "user-1" } } }),
+}));
+
+// Mock api-client (PUT nie jest testowany tutaj)
+vi.mock("@/lib/api-client", () => ({
+  mutationFetch: vi.fn(),
+}));
+
+const SALON_ID = "salon-1";
+
+const MODULES_STATE = {
+  products: false,
+  promotions: false,
+  loyalty: false,
+  waitingList: false,
+  newsletters: false,
+  invoices: false,
+  reportsAdvanced: false,
+  voiceAi: false,
+  videoGen: false,
+  fiscal: false,
+  socialPosts: false,
+};
+
+/**
+ * Scenariusz bledu (bug 2026-07): salon ISTNIEJE (salons/mine go zwraca),
+ * ale nie ma jeszcze adresu/telefonu/branzy — publiczny katalog GET /api/salons
+ * odfiltrowuje go i zwraca pusta liste. Strona Moduly nie moze na tej
+ * podstawie twierdzic, ze salonu nie ma.
+ */
+function mockFetchIncompleteSalon() {
+  return vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/api/salons/mine")) {
+      return {
+        json: async () => ({
+          success: true,
+          salon: { id: SALON_ID, name: "Salon Testowy" },
+        }),
+      } as Response;
+    }
+    if (url.includes(`/api/salons/${SALON_ID}/modules`)) {
+      return {
+        json: async () => ({ success: true, data: MODULES_STATE }),
+      } as Response;
+    }
+    if (url.includes("/api/salons")) {
+      // publiczny katalog: salon niekompletny -> odfiltrowany
+      return {
+        json: async () => ({ success: true, data: [], count: 0 }),
+      } as Response;
+    }
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+}
+
+describe("ModulesSettingsPage", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", mockFetchIncompleteSalon());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("pokazuje przelaczniki modulow gdy salon istnieje, ale jest niekompletny (nieobecny w publicznym katalogu)", async () => {
+    render(<ModulesSettingsPage />);
+
+    // Strona musi zaladowac moduly salonu z salons/mine, nie z katalogu
+    await waitFor(() => {
+      expect(screen.getByText("Magazyn")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Brak salonu")).not.toBeInTheDocument();
+  });
+
+  it("nie pobiera salonu z publicznego katalogu GET /api/salons (fallback bral cudzy salon)", async () => {
+    render(<ModulesSettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Magazyn")).toBeInTheDocument();
+    });
+
+    const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => String(c[0])
+    );
+    const catalogCalls = calls.filter(
+      (u) => /\/api\/salons\/?(\?|$)/.test(u) // dokladnie /api/salons, nie /mine ani /[id]/modules
+    );
+    expect(catalogCalls).toHaveLength(0);
+  });
+
+  it("pokazuje 'Brak salonu' tylko gdy uzytkownik faktycznie nie ma salonu", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/salons/mine")) {
+          return {
+            json: async () => ({ success: true, salon: null }),
+          } as Response;
+        }
+        return {
+          json: async () => ({ success: true, data: [], count: 0 }),
+        } as Response;
+      })
+    );
+
+    render(<ModulesSettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Brak salonu")).toBeInTheDocument();
+    });
+  });
+});

@@ -21,8 +21,8 @@ import { ModuleGate } from "@/components/dashboard/module-gate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
-import { useSession } from "@/lib/auth-client";
 
 interface RewardTier {
   id: string;
@@ -50,9 +50,11 @@ export default function LoyaltySettingsPage() {
 }
 
 function LoyaltySettingsPageInner() {
-  const { data: session } = useSession();
-  const [salonId, setSalonId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Salon zalogowanego uzytkownika przez /api/salons/mine (dziala tez dla
+  // pracownikow i salonow bez adresu/telefonu) — NIE przez publiczny katalog
+  // /api/salons, ktory odfiltrowuje niekompletne salony.
+  const { salonId, loading: salonLoading } = useSalonId();
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedSuccessfully, setSavedSuccessfully] = useState(false);
 
@@ -77,37 +79,11 @@ function LoyaltySettingsPageInner() {
     description: "",
   });
 
-  // Fetch salon ID
-  useEffect(() => {
-    async function fetchSalonId() {
-      try {
-        const res = await fetch("/api/salons");
-        const data = await res.json();
-        if (data.success && data.data.length > 0) {
-          const userId = session?.user?.id;
-          const userSalon = userId
-            ? data.data.find(
-                (s: { ownerId: string | null }) => s.ownerId === userId
-              )
-            : null;
-          setSalonId(userSalon ? userSalon.id : data.data[0].id);
-        } else {
-          setLoading(false);
-        }
-      } catch {
-        setLoading(false);
-      }
-    }
-    if (session?.user) {
-      fetchSalonId();
-    }
-  }, [session]);
-
   // Fetch loyalty settings
   const fetchSettings = useCallback(async () => {
     if (!salonId) return;
     try {
-      setLoading(true);
+      setSettingsLoading(true);
       const res = await fetch(`/api/salons/${salonId}/loyalty-settings`);
       const data = await res.json();
       if (data.success) {
@@ -123,7 +99,7 @@ function LoyaltySettingsPageInner() {
     } catch {
       toast.error("Nie udalo sie zaladowac ustawien");
     } finally {
-      setLoading(false);
+      setSettingsLoading(false);
     }
   }, [salonId]);
 
@@ -132,6 +108,8 @@ function LoyaltySettingsPageInner() {
       fetchSettings();
     }
   }, [salonId, fetchSettings]);
+
+  const loading = salonLoading || (Boolean(salonId) && settingsLoading);
 
   // Save settings
   const handleSave = async () => {
