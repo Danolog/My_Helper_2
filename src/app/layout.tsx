@@ -111,6 +111,9 @@ export default async function RootLayout({
         <script
           nonce={nonce}
           type="application/ld+json"
+          // Przegladarka ukrywa nonce w atrybucie DOM (zwraca ""), wiec React
+          // przy hydracji zawsze widzi roznice — to jedyny sposob jej wyciszenia
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       </head>
