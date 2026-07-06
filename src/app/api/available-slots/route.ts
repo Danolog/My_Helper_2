@@ -176,11 +176,21 @@ export async function GET(request: Request) {
 
     const slots: Array<{ time: string; available: boolean }> = [];
 
+    // Sloty z przeszlosci nie sa rezerwowalne: dla dnia dzisiejszego odcinamy
+    // godziny <= teraz, dla dat wstecznych caly dzien (UAT B-5)
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const isPastDay = requestedDate < todayStart;
+    const isToday = requestedDate.getTime() === todayStart.getTime();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
     for (let slotStart = workStartMinutes; slotStart + duration <= workEndMinutes; slotStart += SLOT_INTERVAL) {
       const slotEnd = slotStart + duration;
 
+      const isPast = isPastDay || (isToday && slotStart <= nowMinutes);
+
       // Check if this slot overlaps with any blocked range
-      const isBlocked = blockedRanges.some((range) => {
+      const isBlocked = isPast || blockedRanges.some((range) => {
         return slotStart < range.end && slotEnd > range.start;
       });
 
