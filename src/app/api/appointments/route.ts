@@ -158,6 +158,19 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
+    // UAT X-1: personel salonu (owner/employee/recepcja) tworzy wizyty tylko
+    // we wlasnym salonie. Gosc/klient portalu bez kontekstu salonu bookuje jak
+    // dotad. Wczesniej salonId z body byl ufany bez sprawdzenia -> zapis cross-tenant.
+    if (session) {
+      const staffCtx = await getSalonContext();
+      if (staffCtx && salonId !== staffCtx.salonId) {
+        return NextResponse.json(
+          { success: false, error: "Brak dostepu do tego salonu" },
+          { status: 403 }
+        );
+      }
+    }
+
     // Guest validation: require name and phone when not logged in
     if (!session) {
       if (!guestName?.trim() || guestName.trim().length < 2) {

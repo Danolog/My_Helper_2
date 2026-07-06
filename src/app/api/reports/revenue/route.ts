@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, desc, inArray } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { requireReportSalon } from "@/lib/reports/require-report-salon";
 import { createExcelWorkbook, excelResponseHeaders } from "@/lib/excel-export";
 import { logger } from "@/lib/logger";
 import { appointments, services, employees, clients } from "@/lib/schema";
@@ -13,6 +14,9 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
+
+    const salonGuard = await requireReportSalon(request);
+    if (salonGuard.error) return salonGuard.error;
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
     const employeeIdsParam = searchParams.get("employeeIds"); // comma-separated employee IDs

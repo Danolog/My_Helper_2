@@ -618,6 +618,27 @@ describe("POST /api/appointments", () => {
     expect(body.error).not.toContain("(");
   });
 
+  // UAT X-1: personel nie moze utworzyc wizyty w cudzym salonie
+  it("should return 403 when staff passes a different salonId (cross-tenant)", async () => {
+    // getSalonContext (mock) i getOptionalSession domyslnie: owner SALON_UUID
+    const request = createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: "99999999-9999-4999-8999-999999999999", // inny salon
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+      },
+    });
+
+    const response = await createAppointment(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(403);
+    expect(body.success).toBe(false);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
   it("should return 201 with valid promo code and increment usage count", async () => {
     const PROMO_CODE_UUID = "77777777-7777-7777-7777-777777777777";
     const newAppointment = makeAppointment({ promoCodeId: PROMO_CODE_UUID, discountAmount: "20.00" });

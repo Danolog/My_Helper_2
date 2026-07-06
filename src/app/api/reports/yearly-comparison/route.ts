@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { requireReportSalon } from "@/lib/reports/require-report-salon";
 import { logger } from "@/lib/logger";
 import { appointments, services, employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
@@ -267,6 +268,9 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
+
+    const salonGuard = await requireReportSalon(request);
+    if (salonGuard.error) return salonGuard.error;
     const year1Str = searchParams.get("year1");
     const year2Str = searchParams.get("year2");
 

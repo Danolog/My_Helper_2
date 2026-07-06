@@ -303,6 +303,26 @@ describe("POST /api/clients", () => {
     expect(body.data).toBeDefined();
   });
 
+  // UAT X-1: owner nie moze utworzyc klienta w cudzym salonie
+  it("should return 403 when an owner passes a different salonId (cross-tenant)", async () => {
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX); // owner of SALON_UUID
+    const request = createMockRequest("http://localhost:3000/api/clients", {
+      method: "POST",
+      body: {
+        salonId: "99999999-9999-4999-8999-999999999999", // inny salon
+        firstName: "Intruz",
+        lastName: "Test",
+      },
+    });
+
+    const response = await createClient(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(403);
+    expect(body.success).toBe(false);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
   it("should return 400 when required fields are missing", async () => {
     const request = createMockRequest("http://localhost:3000/api/clients", {
       method: "POST",

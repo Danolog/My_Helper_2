@@ -154,10 +154,10 @@ export const POST = withApiHandler(
         { status: 404 }
       );
     }
-    if (
-      ctx.role === "employee" ||
-      (ctx.role !== "owner" && salonId !== ctx.salonId)
-    ) {
+    // UAT X-1: salonId z body musi zgadzac sie z sesja dla KAZDEJ roli
+    // (wczesniej owner byl zwolniony z dopasowania -> zapis cross-tenant).
+    // Employee nie moze dodawac klientow.
+    if (ctx.role === "employee" || salonId !== ctx.salonId) {
       return NextResponse.json(
         { success: false, error: "Brak uprawnien" },
         { status: 403 }
