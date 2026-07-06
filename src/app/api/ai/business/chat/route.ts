@@ -1,6 +1,7 @@
 import { UIMessage } from "ai";
 import { z } from "zod";
 import { streamBusinessChat } from "@/lib/ai/business/chat";
+import { trackAIUsage } from "@/lib/ai/openrouter";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { isProPlan } from "@/lib/subscription";
@@ -90,6 +91,11 @@ export async function POST(req: Request) {
       },
     );
   }
+
+  // Fire-and-forget: liczy sie w /dashboard/ai-usage i budzecie AI (UAT B-9)
+  void trackAIUsage(salonId, "business_chat", {
+    messageCount: messages.length,
+  });
 
   // Gather salon data, build the industry-aware prompt and stream the answer
   return streamBusinessChat({ salonId, apiKey, messages });

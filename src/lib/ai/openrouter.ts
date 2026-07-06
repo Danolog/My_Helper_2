@@ -482,12 +482,13 @@ export async function trackAIUsage(
   salonId: string,
   feature: string,
   metadata?: Record<string, unknown>,
+  options?: { type?: string; provider?: string },
 ): Promise<void> {
   try {
     await db.insert(aiGeneratedMedia).values({
       salonId,
-      type: "text",
-      provider: "openrouter",
+      type: options?.type ?? "text",
+      provider: options?.provider ?? "openrouter",
       prompt: feature,
       status: "completed",
       metadata: { feature, ...metadata },
