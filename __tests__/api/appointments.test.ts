@@ -542,7 +542,7 @@ describe("POST /api/appointments", () => {
 
     expect(status).toBe(409);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("conflicts");
+    expect(body.error).toContain("Termin koliduje");
   });
 
   it("should return 409 when employee has a time block during requested time", async () => {
@@ -1183,7 +1183,7 @@ describe("PUT /api/appointments/[id]", () => {
 
     expect(status).toBe(409);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("conflicts");
+    expect(body.error).toContain("Termin koliduje");
   });
 
   it("should return 200 when updating only notes without changing times", async () => {

@@ -212,7 +212,7 @@ export async function PUT(
 
     if (conflict.conflicting) {
       return NextResponse.json(
-        { success: false, error: "Time slot conflicts with existing appointment", conflictingAppointment: conflict.conflicting },
+        { success: false, error: "Termin koliduje z istniejaca wizyta. Wybierz inna godzine", conflictingAppointment: conflict.conflicting },
         { status: 409 }
       );
     }

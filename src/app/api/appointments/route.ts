@@ -197,7 +197,7 @@ export async function POST(request: Request) {
 
     if (overlapping.length > 0) {
       return NextResponse.json(
-        { success: false, error: "Time slot conflicts with existing appointment" },
+        { success: false, error: "Termin koliduje z istniejaca wizyta. Wybierz inna godzine" },
         { status: 409 }
       );
     }
