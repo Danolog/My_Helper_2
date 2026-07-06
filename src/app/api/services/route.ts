@@ -62,7 +62,9 @@ export const GET = withApiHandler(
       data: formattedServices,
       count: formattedServices.length,
     });
-    response.headers.set("Cache-Control", "private, max-age=15, stale-while-revalidate=30");
+    // Bez max-age/SWR: cache przegladarki lamal read-after-write w panelu
+    // (lista uslug o 1 w tyle po dodaniu — UAT B-6)
+    response.headers.set("Cache-Control", "private, no-store");
     return response;
   }
 );

@@ -167,6 +167,22 @@ describe("GET /api/services", () => {
     expect((body as any).data[0].name).toBe("Strzyzenie");
   });
 
+  it("does not allow browser HTTP caching (read-after-write w panelu)", async () => {
+    // UAT B-6: Cache-Control max-age powodowal, ze refetch listy po POST
+    // dostawal stara odpowiedz z cache przegladarki (lista o 1 w tyle)
+    const service = makeService();
+    mockDbSelect.mockReturnValue(chainMock([{ service, category: null }]));
+
+    const request = createMockRequest(
+      `http://localhost:3000/api/services?salonId=${TEST_IDS.SALON_UUID}`
+    );
+    const response = await listServices(request);
+
+    const cacheControl = response.headers.get("Cache-Control");
+    expect(cacheControl ?? "").not.toMatch(/max-age=(?!0\b)\d+/);
+    expect(cacheControl ?? "").not.toContain("stale-while-revalidate");
+  });
+
   it("should return 200 with empty list", async () => {
     mockDbSelect.mockReturnValue(chainMock([]));
 
