@@ -6,7 +6,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { strictRateLimit, apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getSalonContext } from "@/lib/salon-context";
 import { appointments, clients, employees, salons, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
 import { sendBookingConfirmationSms } from "@/lib/sms";
@@ -131,17 +131,20 @@ export async function GET(request: Request) {
 // Auth is optional: logged-in users book with their session, guests provide contact info.
 export async function POST(request: Request) {
   try {
-    // Rate limit to prevent abuse (especially from unauthenticated guests)
+    const session = await getOptionalSession();
+
+    // Rate limit by role (UAT S-1): zalogowany wlasciciel/recepcja zapelniajacy
+    // kalendarz uzywa ogolnego limitu (60/min); goscie portalu — scislego (5/min)
+    // anty-abuse. Wczesniej strict blokowal takze panel po 5 wizytach na minute.
     const ip = getClientIp(request);
-    const rateLimitResult = strictRateLimit.check(ip);
+    const limiter = session ? apiRateLimit : strictRateLimit;
+    const rateLimitResult = limiter.check(ip);
     if (!rateLimitResult.success) {
       return NextResponse.json(
         { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
         { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
       );
     }
-
-    const session = await getOptionalSession();
 
     const body = await request.json();
     const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId, promoCodeId, discountAmount, guestName, guestPhone, guestEmail } = body;
