@@ -65,7 +65,11 @@ const phoneField = z
   );
 
 const requiredString = (fieldName: string) =>
-  z.string({ message: `${fieldName} jest wymagane` }).min(1, `${fieldName} jest wymagane`);
+  z
+    .string({ message: `${fieldName} jest wymagane` })
+    .min(1, `${fieldName} jest wymagane`)
+    // UAT X-4: gorny limit dlugosci — bez tego np. imie 300 znakow przechodzilo
+    .max(200, `${fieldName} jest zbyt dlugie (max 200 znakow)`);
 
 /**
  * Parse a value to a positive number (> 0) with custom error messages.
@@ -82,17 +86,21 @@ const positiveNumberField = (fieldName: string) =>
   );
 
 /**
- * Parse a value to a non-negative number (>= 0) with custom error messages.
+ * Kwota pieniezna: nieujemna i miesci sie w kolumnie numeric(10,2)
+ * (max 99 999 999.99). Bez gornego limitu przepelnienie leci jako 500 z DB
+ * (UAT C3).
  */
-const nonNegativeNumberField = (fieldName: string) =>
+const priceField = (fieldName: string) =>
   z.preprocess(
     (val) => {
       if (typeof val === "number") return val;
       if (typeof val === "string" && val.trim() !== "") return Number(val);
       return undefined;
     },
-    z.number({ message: `${fieldName} musi byc liczba` })
+    z
+      .number({ message: `${fieldName} musi byc liczba` })
       .nonnegative(`${fieldName} nie moze byc ujemna`)
+      .max(99999999.99, `${fieldName} jest zbyt duza (max 99 999 999.99)`)
   );
 
 // ==========================================
@@ -104,7 +112,7 @@ export const createServiceSchema = z.object({
   categoryId: z.string().nullable().optional(),
   name: requiredString("Nazwa"),
   description: z.string().nullable().optional(),
-  basePrice: nonNegativeNumberField("Cena"),
+  basePrice: priceField("Cena"),
   baseDuration: positiveNumberField("Czas trwania"),
 });
 
@@ -232,7 +240,17 @@ export const createPromotionSchema = z.object({
   conditionsJson: z.any().optional(),
   isActive: z.boolean().optional(),
   applicableServiceIds: z.array(z.string()).optional(),
-});
+}).refine(
+  // UAT X-3: data konca nie moze byc wczesniejsza niz rozpoczecia
+  (data) => {
+    if (!data.startDate || !data.endDate) return true;
+    const start = new Date(data.startDate);
+    const end = new Date(data.endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return true;
+    return end >= start;
+  },
+  { message: "Data zakonczenia nie moze byc wczesniejsza niz rozpoczecia", path: ["endDate"] }
+);
 
 // ==========================================
 // Update Schemas (for PUT/PATCH endpoints)
@@ -408,7 +426,17 @@ export const updatePromotionSchema = z.object({
   conditionsJson: z.any().optional(),
   isActive: z.boolean().optional(),
   applicableServiceIds: z.array(z.string()).optional(),
-});
+}).refine(
+  // UAT X-3: data konca nie moze byc wczesniejsza niz rozpoczecia
+  (data) => {
+    if (!data.startDate || !data.endDate) return true;
+    const start = new Date(data.startDate);
+    const end = new Date(data.endDate);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return true;
+    return end >= start;
+  },
+  { message: "Data zakonczenia nie moze byc wczesniejsza niz rozpoczecia", path: ["endDate"] }
+);
 
 /**
  * Schema for POST /api/promo-codes — create a promo code.

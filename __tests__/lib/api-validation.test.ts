@@ -115,6 +115,26 @@ describe("createServiceSchema", () => {
     expect(result).not.toBeNull();
   });
 
+  // UAT C3: cena poza zakresem numeric(10,2) powinna byc 400, nie 500 z DB
+  it("should fail when basePrice exceeds the numeric(10,2) range", () => {
+    const result = validateBody(createServiceSchema, {
+      ...validService,
+      basePrice: 999999999,
+    });
+    expect(result).not.toBeNull();
+    expect(result!.details.basePrice).toBeDefined();
+  });
+
+  // UAT X-4: brak limitu dlugosci nazwy
+  it("should fail when name is absurdly long", () => {
+    const result = validateBody(createServiceSchema, {
+      ...validService,
+      name: "A".repeat(300),
+    });
+    expect(result).not.toBeNull();
+    expect(result!.details.name).toBeDefined();
+  });
+
   it("should fail when baseDuration is zero", () => {
     const result = validateBody(createServiceSchema, {
       ...validService,
@@ -481,6 +501,26 @@ describe("createPromotionSchema", () => {
 
   it("should pass for valid promotion data", () => {
     expect(validateBody(createPromotionSchema, validPromotion)).toBeNull();
+  });
+
+  // UAT X-3: data konca wczesniejsza niz startu musi byc odrzucona
+  it("should fail when endDate is before startDate", () => {
+    const result = validateBody(createPromotionSchema, {
+      ...validPromotion,
+      startDate: "2026-08-31",
+      endDate: "2026-08-01",
+    });
+    expect(result).not.toBeNull();
+    expect(result!.details.endDate).toBeDefined();
+  });
+
+  it("should pass when endDate is after startDate", () => {
+    const result = validateBody(createPromotionSchema, {
+      ...validPromotion,
+      startDate: "2026-08-01",
+      endDate: "2026-08-31",
+    });
+    expect(result).toBeNull();
   });
 
   it("should fail for invalid promotion type", () => {

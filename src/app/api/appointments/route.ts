@@ -158,6 +158,41 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
+    // UAT X-1: personel salonu (owner/employee/recepcja) tworzy wizyty tylko
+    // we wlasnym salonie. Gosc/klient portalu bez kontekstu salonu bookuje jak
+    // dotad. Wczesniej salonId z body byl ufany bez sprawdzenia -> zapis cross-tenant.
+    if (session) {
+      const staffCtx = await getSalonContext();
+      if (staffCtx && salonId !== staffCtx.salonId) {
+        return NextResponse.json(
+          { success: false, error: "Brak dostepu do tego salonu" },
+          { status: 403 }
+        );
+      }
+    }
+
+    // UAT X-2: walidacja formatu identyfikatorow — malformed UUID leci jako
+    // 500 z bazy ("invalid input syntax for type uuid"). Zwracamy 400.
+    if (!isValidUuid(employeeId)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidlowy identyfikator pracownika" },
+        { status: 400 }
+      );
+    }
+    if (serviceId && !isValidUuid(serviceId)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidlowy identyfikator uslugi" },
+        { status: 400 }
+      );
+    }
+    // "none" to sentinel gościa (brak klienta) — pomijamy walidację UUID
+    if (clientId && clientId !== "none" && !isValidUuid(clientId)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidlowy identyfikator klienta" },
+        { status: 400 }
+      );
+    }
+
     // Guest validation: require name and phone when not logged in
     if (!session) {
       if (!guestName?.trim() || guestName.trim().length < 2) {
