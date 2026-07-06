@@ -292,7 +292,7 @@ export default function CalendarAllPage() {
         {/* Navigation & Controls */}
         <div className="flex items-center gap-2">
           {/* Add employee button */}
-          <Link href="/employees/add">
+          <Link href="/dashboard/employees/add">
             <Button variant="outline" size="sm" title="Dodaj pracownika">
               <Plus className="h-4 w-4 mr-1" />
               Pracownik
@@ -344,7 +344,7 @@ export default function CalendarAllPage() {
           <p className="text-muted-foreground mb-4">
             Brak pracownikow w salonie. Dodaj pracownikow, aby korzystac z kalendarza.
           </p>
-          <Link href="/employees/add">
+          <Link href="/dashboard/employees/add">
             <Button>
               <Plus className="h-4 w-4 mr-2" />
               Dodaj pracownika
