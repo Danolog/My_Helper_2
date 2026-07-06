@@ -19,7 +19,7 @@ import {
   employeeServicePrices,
   serviceProducts,
   products,
-  productUsage,
+  appointmentMaterials,
   notifications,
   loyaltyPoints,
   loyaltyTransactions,
@@ -344,13 +344,17 @@ export async function POST(
             .set({ quantity: newQty.toString() })
             .where(eq(products.id, linked.productId));
 
-          // Record usage in productUsage table
+          // Zapis zuzycia do appointmentMaterials — tabeli, ktora czytaja
+          // raporty materialow/rentownosci (UAT S-2). Wczesniej pisalismy do
+          // productUsage, ktorej zaden raport nie czyta, wiec koszt auto-
+          // zuzytych materialow byl niewidoczny w sprawozdawczosci.
           await tx
-            .insert(productUsage)
+            .insert(appointmentMaterials)
             .values({
-              productId: linked.productId,
               appointmentId: id,
-              quantity: qtyToDeduct.toString(),
+              productId: linked.productId,
+              quantityUsed: qtyToDeduct.toString(),
+              notes: "Automatyczne zuzycie (usluga)",
             });
 
           logger.info("Stock deducted", {

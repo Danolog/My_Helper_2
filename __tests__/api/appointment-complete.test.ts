@@ -68,6 +68,7 @@ vi.mock("@/lib/schema", () => {
     serviceProducts: createTable("serviceProducts"),
     products: createTable("products"),
     productUsage: createTable("productUsage"),
+    appointmentMaterials: createTable("appointmentMaterials"),
     notifications: createTable("notifications"),
     loyaltyPoints: createTable("loyaltyPoints"),
     loyaltyTransactions: createTable("loyaltyTransactions"),
@@ -618,8 +619,16 @@ describe("POST /api/appointments/[id]/complete", () => {
     // Stock update + appointment update = 2 updates (+ any commission)
     // product update is one of the update calls
     expect(mockDbUpdate).toHaveBeenCalledTimes(2); // appointment update + product stock update
-    // treatment insert + commission insert + product usage insert = 3 inserts
+    // treatment insert + commission insert + material usage insert = 3 inserts
     expect(mockDbInsert).toHaveBeenCalledTimes(3);
+
+    // UAT S-2: auto-zuzycie musi trafic do appointmentMaterials (tabela, ktora
+    // czytaja raporty materialow), nie do martwej tabeli productUsage
+    const insertedTables = mockDbInsert.mock.calls.map(
+      (c) => (c[0] as { _table?: string })?._table,
+    );
+    expect(insertedTables).toContain("appointmentMaterials");
+    expect(insertedTables).not.toContain("productUsage");
   });
 
   it("should skip linked product when productName is null (deleted product)", async () => {

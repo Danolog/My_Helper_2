@@ -994,7 +994,10 @@ describe("POST /api/appointments", () => {
     expect(body.error).toContain("min. 2 znaki");
   });
 
-  it("should return 429 when rate limited", async () => {
+  it("should return 429 for a GUEST when strict rate limit is exceeded", async () => {
+    // Guest (no session) uses the strict limiter (5/min anti-abuse)
+    const { getOptionalSession } = await import("@/lib/session");
+    vi.mocked(getOptionalSession).mockResolvedValueOnce(null);
     const { strictRateLimit } = await import("@/lib/rate-limit");
     vi.mocked(strictRateLimit.check).mockReturnValueOnce({
       success: false,
@@ -1018,6 +1021,72 @@ describe("POST /api/appointments", () => {
     expect(status).toBe(429);
     expect(body.success).toBe(false);
     expect(body.error).toContain("Zbyt wiele");
+  });
+
+  // UAT S-1: strictRateLimit (5/min) bylo sprawdzane przed auth i blokowalo
+  // zalogowanego wlasciciela/recepcje zapelniajacych kalendarz.
+  it("does NOT apply the strict guest limiter to an authenticated user", async () => {
+    const { strictRateLimit, apiRateLimit } = await import("@/lib/rate-limit");
+    // Strict limiter would block (guest cap) — must be ignored for a logged-in user
+    vi.mocked(strictRateLimit.check).mockReturnValue({
+      success: false,
+      remaining: 0,
+      reset: 30000,
+    });
+    vi.mocked(apiRateLimit.check).mockReturnValue({
+      success: true,
+      remaining: 59,
+      reset: 60000,
+    });
+    // getOptionalSession defaults to an authenticated user (mock at top of file)
+
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([])) // overlap check
+      .mockReturnValueOnce(chainMock([])); // time block check
+    mockDbInsert.mockReturnValue(chainMock([makeAppointment()]));
+
+    const request = createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        serviceId: TEST_IDS.SERVICE_UUID,
+        clientId: TEST_IDS.CLIENT_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+      },
+    });
+
+    const response = await createAppointment(request);
+    const { status } = await parseResponse(response);
+
+    expect(status).toBe(201);
+    expect(apiRateLimit.check).toHaveBeenCalled();
+  });
+
+  it("returns 429 for an authenticated user only when the api limiter is exhausted", async () => {
+    const { apiRateLimit } = await import("@/lib/rate-limit");
+    vi.mocked(apiRateLimit.check).mockReturnValueOnce({
+      success: false,
+      remaining: 0,
+      reset: 60000,
+    });
+
+    const request = createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+      },
+    });
+
+    const response = await createAppointment(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(429);
+    expect(body.success).toBe(false);
   });
 });
 
