@@ -50,4 +50,21 @@ describe("requireReportSalon", () => {
     const r = await requireReportSalon(req(OWN));
     expect((r as { error: Response }).error.status).toBe(401);
   });
+
+  // UAT F2: niepoprawny format daty -> 400, nie 500 z DB
+  it("returns 400 for an unparseable dateFrom", async () => {
+    const request = new Request(
+      `http://localhost/api/reports/revenue?salonId=${OWN}&dateFrom=garbage&dateTo=2026-07-01`,
+    );
+    const r = await requireReportSalon(request);
+    expect((r as { error: Response }).error.status).toBe(400);
+  });
+
+  it("accepts valid dateFrom/dateTo", async () => {
+    const request = new Request(
+      `http://localhost/api/reports/revenue?salonId=${OWN}&dateFrom=2026-06-01&dateTo=2026-07-01`,
+    );
+    const r = await requireReportSalon(request);
+    expect(r).toEqual({ salonId: OWN });
+  });
 });

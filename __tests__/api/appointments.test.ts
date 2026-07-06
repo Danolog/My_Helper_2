@@ -618,6 +618,26 @@ describe("POST /api/appointments", () => {
     expect(body.error).not.toContain("(");
   });
 
+  // UAT X-2 (A9c): malformed UUID -> 400, nie 500 z bazy
+  it("should return 400 for a malformed employeeId (not a UUID)", async () => {
+    const request = createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: "not-a-uuid",
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+      },
+    });
+
+    const response = await createAppointment(request);
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
   // UAT X-1: personel nie moze utworzyc wizyty w cudzym salonie
   it("should return 403 when staff passes a different salonId (cross-tenant)", async () => {
     // getSalonContext (mock) i getOptionalSession domyslnie: owner SALON_UUID

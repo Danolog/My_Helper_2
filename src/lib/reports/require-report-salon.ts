@@ -24,7 +24,8 @@ export async function requireReportSalon(
     };
   }
 
-  const requested = new URL(request.url).searchParams.get("salonId");
+  const params = new URL(request.url).searchParams;
+  const requested = params.get("salonId");
   if (!requested) {
     return {
       error: NextResponse.json(
@@ -40,6 +41,19 @@ export async function requireReportSalon(
         { status: 403 },
       ),
     };
+  }
+
+  // UAT F2/X-2: niepoprawny format daty leci jako 500 z DB — waliduj tutaj
+  for (const key of ["dateFrom", "dateTo"] as const) {
+    const value = params.get(key);
+    if (value && isNaN(new Date(value).getTime())) {
+      return {
+        error: NextResponse.json(
+          { success: false, error: `Nieprawidlowy format daty (${key})` },
+          { status: 400 },
+        ),
+      };
+    }
   }
 
   return { salonId: ctx.salonId };
