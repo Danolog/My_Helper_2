@@ -3,6 +3,8 @@
 export interface UserSalon {
   id: string;
   name: string;
+  address: string | null;
+  phone: string | null;
 }
 
 export interface TodayAppointment {

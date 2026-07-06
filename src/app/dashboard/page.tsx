@@ -9,6 +9,7 @@ import { DashboardQuickActions } from "@/components/dashboard/dashboard-quick-ac
 import { DashboardStatsRow } from "@/components/dashboard/dashboard-stats-row";
 import { DashboardTodayAppointments } from "@/components/dashboard/dashboard-today-appointments";
 import { DashboardTrialBanner } from "@/components/dashboard/dashboard-trial-banner";
+import { SalonProfileBanner } from "@/components/dashboard/salon-profile-banner";
 import type { DashboardStats, UserSalon } from "@/components/dashboard/dashboard-types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSubscription } from "@/hooks/use-subscription";
@@ -45,7 +46,7 @@ const CreateSalonPrompt = dynamic(
 export default function DashboardPage() {
   const { data: session, isPending } = useSession();
   const { isProPlan } = useSubscription();
-  const [, setSalon] = useState<UserSalon | null>(null);
+  const [salon, setSalon] = useState<UserSalon | null>(null);
   const [noSalon, setNoSalon] = useState(false);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -75,7 +76,12 @@ export default function DashboardPage() {
           return;
         }
 
-        setSalon({ id: salonJson.salon.id, name: salonJson.salon.name });
+        setSalon({
+          id: salonJson.salon.id,
+          name: salonJson.salon.name,
+          address: salonJson.salon.address ?? null,
+          phone: salonJson.salon.phone ?? null,
+        });
 
         // Step 2: Fetch dashboard stats using the salon ID
         const res = await fetch(
@@ -145,6 +151,8 @@ export default function DashboardPage() {
       </div>
 
       <DashboardTrialBanner />
+
+      <SalonProfileBanner salon={salon} />
 
       {/* Daily AI Recommendations - shown for Pro plan users (Feature #32) */}
       {isProPlan && <DailyRecommendations />}
