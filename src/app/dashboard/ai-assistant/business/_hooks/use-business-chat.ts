@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
+import { parseUIStreamLine } from "@/lib/ai/ui-stream";
 import { getUserFriendlyMessage } from "@/lib/error-messages";
 import type { ChatMessage } from "../_types";
 
@@ -116,42 +117,9 @@ export function useBusinessChat(): UseBusinessChatReturn {
           buffer = lines.pop() || "";
 
           for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-
-            // UI Message Stream Protocol: data: {"type":"text","text":"..."}
-            if (trimmed.startsWith("data: ")) {
-              const payload = trimmed.slice(6);
-              if (payload === "[DONE]") continue;
-              try {
-                const parsed = JSON.parse(payload);
-                if (parsed.type === "text" && typeof parsed.text === "string") {
-                  fullText += parsed.text;
-                } else if (parsed.type === "error" && parsed.errorText) {
-                  throw new Error(parsed.errorText);
-                }
-              } catch (parseErr) {
-                // Re-throw stream errors (not JSON parse errors)
-                if (
-                  parseErr instanceof Error &&
-                  !parseErr.message.includes("Unexpected") &&
-                  !parseErr.message.includes("JSON")
-                ) {
-                  throw parseErr;
-                }
-              }
-            }
-            // Also support legacy Data Stream Protocol: 0:"text content"
-            else if (trimmed.startsWith("0:")) {
-              try {
-                const textContent = JSON.parse(trimmed.slice(2));
-                if (typeof textContent === "string") {
-                  fullText += textContent;
-                }
-              } catch {
-                // Not valid JSON, skip
-              }
-            }
+            const { textDelta, error } = parseUIStreamLine(line);
+            if (error) throw new Error(error);
+            if (textDelta) fullText += textDelta;
           }
 
           setMessages((prev) =>
