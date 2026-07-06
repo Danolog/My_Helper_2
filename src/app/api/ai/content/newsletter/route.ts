@@ -2,6 +2,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
 import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
+import { trackAIUsage } from "@/lib/ai/openrouter";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
@@ -274,6 +275,9 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
 
     // Word count
     const wordCount = content.split(/\s+/).filter(Boolean).length;
+
+    // Fire-and-forget: liczy sie w /dashboard/ai-usage i budzecie AI (UAT B-9)
+    void trackAIUsage(salonId, "newsletter", { wordCount });
 
     // Optionally save to database
     let savedId: string | null = null;

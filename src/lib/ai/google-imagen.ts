@@ -21,8 +21,8 @@ export function createGoogleAIClient(): GoogleGenAI {
 // Constants
 // ────────────────────────────────────────────────────────────
 
-/** Imagen model for image generation */
-export const IMAGEN_MODEL = "imagen-3.0-generate-002";
+/** Imagen model for image generation (imagen-3.x zostal wycofany z API) */
+export const IMAGEN_MODEL = "imagen-4.0-generate-001";
 
 /**
  * Style presets tailored for the salon / beauty industry.

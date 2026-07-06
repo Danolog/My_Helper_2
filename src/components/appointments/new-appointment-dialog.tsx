@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { mutationFetch } from "@/lib/api-client";
+import { checkOutsideSchedule, type DaySchedule } from "@/lib/schedule-utils";
 
 interface Client {
   id: string;
@@ -218,6 +219,29 @@ export function NewAppointmentDialog({
     }
   }, [open, salonId, fetchClients, fetchServices, fetchEmployees]);
 
+  // Grafik wybranego pracownika — do nieblokujacego ostrzezenia,
+  // gdy termin wypada poza godzinami pracy (wlasciciel moze nadpisac)
+  const [employeeSchedules, setEmployeeSchedules] = useState<DaySchedule[]>([]);
+
+  useEffect(() => {
+    if (!selectedEmployeeId) {
+      setEmployeeSchedules([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/work-schedules?employeeId=${selectedEmployeeId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && data.success) setEmployeeSchedules(data.data);
+      })
+      .catch(() => {
+        // Brak grafiku = brak ostrzezenia
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEmployeeId]);
+
   // Fetch variants when service changes
   useEffect(() => {
     if (selectedServiceId) {
@@ -373,6 +397,17 @@ export function NewAppointmentDialog({
   };
 
   const { price, duration } = getEffectivePriceAndDuration();
+
+  // Nieblokujace ostrzezenie o terminie poza grafikiem pracownika (UAT B-4)
+  const scheduleCheck =
+    selectedEmployeeId && appointmentDate && appointmentTime
+      ? checkOutsideSchedule(
+          employeeSchedules,
+          appointmentDate,
+          appointmentTime,
+          duration > 0 ? duration : 60,
+        )
+      : null;
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) resetForm(); onOpenChange(v); }}>
@@ -573,6 +608,19 @@ export function NewAppointmentDialog({
                 )}
               </div>
             </div>
+            {scheduleCheck?.outside && (
+              <div
+                className="mt-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40 px-3 py-2 text-sm text-amber-800 dark:text-amber-200"
+                data-testid="schedule-warning"
+              >
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>
+                  {scheduleCheck.reason === "day_off"
+                    ? "Pracownik ma w tym dniu wolne. Mozesz mimo to utworzyc wizyte."
+                    : `Termin poza godzinami pracy pracownika (${scheduleCheck.workStart}–${scheduleCheck.workEnd}). Mozesz mimo to utworzyc wizyte.`}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Notes */}

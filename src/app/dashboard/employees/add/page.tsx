@@ -206,7 +206,7 @@ export default function AddEmployeePage() {
 
         // Redirect to calendar after a short delay
         setTimeout(() => {
-          router.replace("/calendar/all");
+          router.replace("/dashboard/employees");
         }, 2000);
       } else {
         toast.error("Nie udalo sie dodac pracownika", {
@@ -245,9 +245,9 @@ export default function AddEmployeePage() {
   return (
     <div className="container mx-auto p-6 max-w-2xl">
       {/* Back link */}
-      <Link href="/calendar/all" className="inline-flex items-center text-muted-foreground hover:text-foreground mb-6">
+      <Link href="/dashboard/employees" className="inline-flex items-center text-muted-foreground hover:text-foreground mb-6">
         <ArrowLeft className="h-4 w-4 mr-2" />
-        Powrot do kalendarza
+        Powrot do listy pracownikow
       </Link>
 
       <Card>
@@ -405,7 +405,7 @@ export default function AddEmployeePage() {
                   </>
                 )}
               </Button>
-              <Link href="/calendar/all">
+              <Link href="/dashboard/employees">
                 <Button type="button" variant="outline">
                   Anuluj
                 </Button>

@@ -11,6 +11,7 @@ import {
   requireProAI,
   isProAIError,
   getSalonContext,
+  trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 import { upload } from "@/lib/storage";
@@ -219,6 +220,15 @@ export async function POST(req: Request) {
       size,
       bannerSize: banner.length,
     });
+
+    // Fire-and-forget: bez tego wiersza limit obrazow i /dashboard/ai-usage
+    // nie widza wygenerowanych banerow (UAT B-9)
+    void trackAIUsage(
+      salonId,
+      "banner",
+      { style, size },
+      { type: "banner", provider: "google_imagen" },
+    );
 
     return Response.json({
       success: true,

@@ -97,10 +97,19 @@ async function ensureCsrfCookies(
 // ============================================================
 
 function buildCsp(nonce: string): string {
+  // Dev: React DevTools wymaga eval(), a next-devtools wstrzykuje inline
+  // style bez nonce — bez tych zluzowan konsola tonie w ~20 bledach CSP
+  // na strone (UAT B-11). Produkcyjna polityka pozostaje scisla.
+  const isDev = process.env.NODE_ENV === "development";
+  const scriptExtra = isDev ? " 'unsafe-eval'" : "";
+  const styleSrc = isDev
+    ? "style-src 'self' 'unsafe-inline' fonts.googleapis.com"
+    : `style-src 'self' 'nonce-${nonce}' fonts.googleapis.com`;
+
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' storage.googleapis.com`,
-    `style-src 'self' 'nonce-${nonce}' fonts.googleapis.com`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${scriptExtra} storage.googleapis.com`,
+    styleSrc,
     "font-src 'self' fonts.gstatic.com",
     "img-src 'self' data: blob: lh3.googleusercontent.com avatars.githubusercontent.com *.public.blob.vercel-storage.com images.unsplash.com",
     "connect-src 'self' *.googleapis.com accounts.google.com",

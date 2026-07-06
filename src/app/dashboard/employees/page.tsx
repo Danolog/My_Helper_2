@@ -286,7 +286,7 @@ function EmployeesPageInner() {
           </div>
         </div>
         <Button asChild>
-          <Link href="/employees/add">
+          <Link href="/dashboard/employees/add">
             <UserPlus className="h-4 w-4 mr-2" />
             Dodaj pracownika
           </Link>
@@ -305,7 +305,7 @@ function EmployeesPageInner() {
               Brak pracownikow. Dodaj pierwszego pracownika, aby rozpoczac.
             </p>
             <Button asChild>
-              <Link href="/employees/add">
+              <Link href="/dashboard/employees/add">
                 <UserPlus className="h-4 w-4 mr-2" />
                 Dodaj pracownika
               </Link>
