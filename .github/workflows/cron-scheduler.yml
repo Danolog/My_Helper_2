@@ -17,15 +17,17 @@
 name: App Cron Scheduler
 
 on:
-  schedule:
-    # co 5 min: przypomnienia SMS/push, publikacja postów, cleanup zadatków
-    - cron: "*/5 * * * *"
-    # przesunięte o 13 min względem pełnej godziny: przypomnienia 24h (co 30 min)
-    - cron: "13,43 * * * *"
-    # co godzinę: czyszczenie wygasłych uprawnień tymczasowych
-    - cron: "7 * * * *"
-    # codziennie 05:00 UTC (06:00/07:00 PL): urodziny, niski stan, we-miss-you
-    - cron: "0 5 * * *"
+  # HARMONOGRAM WYŁĄCZONY — automatyczne uruchomienia crona są zatrzymane.
+  # Aby przywrócić, odkomentuj poniższy blok `schedule:`.
+  # schedule:
+  #   # co 5 min: przypomnienia SMS/push, publikacja postów, cleanup zadatków
+  #   - cron: "*/5 * * * *"
+  #   # przesunięte o 13 min względem pełnej godziny: przypomnienia 24h (co 30 min)
+  #   - cron: "13,43 * * * *"
+  #   # co godzinę: czyszczenie wygasłych uprawnień tymczasowych
+  #   - cron: "7 * * * *"
+  #   # codziennie 05:00 UTC (06:00/07:00 PL): urodziny, niski stan, we-miss-you
+  #   - cron: "0 5 * * *"
   workflow_dispatch:
     inputs:
       endpoint:
