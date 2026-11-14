@@ -151,6 +151,8 @@ describe("frozenModuleForApiPath", () => {
     "/api/invoices/", // ukośnik końcowy
     "/api//invoices", // podwójny ukośnik
     "/api/%69nvoices", // litera zakodowana procentowo
+    "/API/Invoices", // inna wielkość liter
+    "/api/Clients/abc/Loyalty",
     "/api/invoices/abc/send-email/",
     "/api/clients/abc/loyalty/",
   ])("warianty zapisu ścieżki też są zamrożone: %s", (path) => {
@@ -188,6 +190,9 @@ describe("frozenModuleForPage", () => {
     ["/dashboard/content-generator/newsletters", "newsletters"],
     ["/dashboard/ai-assistant/voice", "voiceAi"],
     ["/dashboard/settings/fiscal", "fiscal"],
+    ["/Dashboard/Invoices", "invoices"],
+    ["/dashboard//invoices", "invoices"],
+    ["/dashboard/%69nvoices", "invoices"],
   ])("%s → %s", (path, module) => {
     expect(frozenModuleForPage(path)).toBe(module);
   });

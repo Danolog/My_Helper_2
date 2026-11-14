@@ -136,14 +136,15 @@ export async function proxy(request: NextRequest) {
   // --- 0. Moduly zamrozone (hardOff) — przed CSRF i auth, dla kazdej metody ---
   // Rejestr (src/lib/features.ts) jest jedynym nosnikiem reguly; tu tylko
   // egzekucja. Trasa API => 404 MODULE_DISABLED, strona panelu => /dashboard.
-  if (pathname.startsWith("/api/")) {
-    if (frozenModuleForApiPath(pathname)) {
-      return NextResponse.json(
-        { success: false, code: MODULE_DISABLED_CODE, error: MODULE_DISABLED_MESSAGE },
-        { status: 404 }
-      );
-    }
-  } else if (frozenModuleForPage(pathname)) {
+  // Oba pytania ida do rejestru bez wstepnego filtra po prefiksie — rejestr
+  // sam normalizuje sciezke (kodowanie, podwojne ukosniki, wielkosc liter).
+  if (frozenModuleForApiPath(pathname)) {
+    return NextResponse.json(
+      { success: false, code: MODULE_DISABLED_CODE, error: MODULE_DISABLED_MESSAGE },
+      { status: 404 }
+    );
+  }
+  if (frozenModuleForPage(pathname)) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

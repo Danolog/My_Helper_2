@@ -255,9 +255,12 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
 ];
 
 /**
- * Ścieżka w postaci, w jakiej dopasuje ją router: zdekodowana z kodowania
- * procentowego i bez powtórzonych ukośników. Bez tego `/api/%69nvoices` albo
- * `/api//invoices` ominęłyby wzorce. Niepoprawne kodowanie zostaje bez zmian.
+ * Ścieżka sprowadzona do jednej postaci przed dopasowaniem: zdekodowana z
+ * kodowania procentowego, bez powtórzonych ukośników, małymi literami. Bez
+ * tego `/api/%69nvoices`, `/api//invoices` albo `/API/Invoices` ominęłyby
+ * wzorce, gdyby router uznał je za tę samą trasę. Blokada jest celowo
+ * szersza niż router — wariant, którego router nie zna, i tak kończy się 404.
+ * Niepoprawne kodowanie zostaje bez zmian.
  */
 function normalizePathname(pathname: string): string {
   let decoded = pathname;
@@ -266,7 +269,7 @@ function normalizePathname(pathname: string): string {
   } catch {
     // niepoprawna sekwencja %xx — dopasowujemy ścieżkę surową
   }
-  return decoded.replace(/\/{2,}/g, "/");
+  return decoded.replace(/\/{2,}/g, "/").toLowerCase();
 }
 
 /**

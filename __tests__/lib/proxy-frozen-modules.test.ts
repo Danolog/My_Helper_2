@@ -100,6 +100,8 @@ describe("proxy: trasy API modułów zamrożonych", () => {
     "/api/invoices/abc/send-email/?x=1",
     "/api//invoices",
     "/api/%69nvoices",
+    "/API/Invoices",
+    "/Api/invoices/abc",
     "/api/notifications/birthday?salonId=abc",
   ])("wariant zapisu ścieżki %s → 404", async (path) => {
     const response = await proxy(request(path, "GET", SESSION));
@@ -175,6 +177,7 @@ describe("proxy: strony panelu modułów zamrożonych", () => {
     "/dashboard/invoices/abc-123",
     "/dashboard/invoices?status=paid",
     "/dashboard/invoices/",
+    "/Dashboard/Invoices",
     "/dashboard/settings/loyalty?tab=rewards",
   ])("podstrona i parametry: %s → /dashboard", async (path) => {
     const response = await proxy(request(path, "GET", SESSION));
