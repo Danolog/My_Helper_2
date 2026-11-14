@@ -90,6 +90,7 @@ vi.mock("@/lib/waiting-list", () => ({
 }));
 
 import { GET, POST } from "@/app/api/client/waiting-list/route";
+import { acceptEarlierSlot } from "@/lib/waiting-list";
 import {
   POST as respondToEntry,
   DELETE as deleteEntry,
@@ -293,5 +294,62 @@ describe("POST/DELETE /api/client/waiting-list/[id] — wlasnosc tylko po zweryf
 
     expect(status).toBe(200);
     expect(mockUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  // Strażnik zwraca null dla niezweryfikowanego konta. Gdyby zabrakło
+  // warunku `!userEmail ||`, porównanie null !== null przepuściłoby konto
+  // do wpisu klienta bez e-maila (clients.email = null) w obcym salonie.
+  const foreignEntryWithoutEmail = (acceptToken: string | null) => [
+    {
+      entry: {
+        ...entryRowOfB.entry,
+        salonId: "99999999-9999-4999-8999-999999999999",
+        notifiedAt: new Date(),
+        acceptToken,
+      },
+      client: { email: null },
+    },
+  ];
+
+  it.each([
+    ["niezweryfikowane konto", false, EMAIL_B],
+    ["konto bez e-maila", true, null],
+  ])("DELETE: %s, wpis klienta bez e-maila w obcym salonie => 403, nic nie usuniete", async (_l, verified, email) => {
+    sessionUser(verified, email);
+    selectResults.push(foreignEntryWithoutEmail(null));
+
+    const res = await deleteEntry(createMockRequest("http://localhost/x", { method: "DELETE" }), params);
+
+    expect(res.status).toBe(403);
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["niezweryfikowane konto", false, EMAIL_B],
+    ["konto bez e-maila", true, null],
+  ])("POST: %s, wpis klienta bez e-maila w obcym salonie => 403, brak decyzji", async (_l, verified, email) => {
+    sessionUser(verified, email);
+    selectResults.push(foreignEntryWithoutEmail(null));
+
+    const res = await respondToEntry(
+      createMockRequest("http://localhost/x", { method: "POST", body: { accepted: true } }),
+      params
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("POST: niezweryfikowane konto, wpis z tokenem bez e-maila klienta => 403, bez akceptacji terminu", async () => {
+    sessionUser(false);
+    selectResults.push(foreignEntryWithoutEmail("token-obcego-wpisu"));
+
+    const res = await respondToEntry(
+      createMockRequest("http://localhost/x", { method: "POST", body: { accepted: true } }),
+      params
+    );
+
+    expect(res.status).toBe(403);
+    expect(vi.mocked(acceptEarlierSlot)).not.toHaveBeenCalled();
   });
 });
