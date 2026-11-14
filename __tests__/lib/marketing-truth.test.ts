@@ -18,7 +18,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { MODULES } from "@/lib/features";
-import { PLAN_FEATURES } from "@/lib/plan-features";
+import { PLAN_FEATURES, PLAN_SUMMARY } from "@/lib/plan-features";
 
 const ROOT = process.cwd();
 const read = (relPath: string) => readFileSync(join(ROOT, relPath), "utf8");
@@ -188,7 +188,7 @@ describe("prawda w marketingu", () => {
   describe("listy funkcji planów (źródło dla tabeli subscription_plans)", () => {
     const all = [...PLAN_FEATURES.basic, ...PLAN_FEATURES.pro];
 
-    it.each(all)("„%s” nie obiecuje wyłączonej funkcji", (feature) => {
+    it.each([...all, PLAN_SUMMARY.basic, PLAN_SUMMARY.pro])("„%s” nie obiecuje wyłączonej funkcji", (feature) => {
       for (const key of FROZEN_MODULE_KEYS) {
         expect(feature, `moduł zamrożony: ${key}`).not.toMatch(FROZEN_MODULE_PROMISES[key]!);
       }
@@ -215,9 +215,38 @@ describe("prawda w marketingu", () => {
       expect(new Set(all).size).toBe(all.length);
     });
 
-    it("trasa /api/subscription-plans i seed testowy biorą listy z jednego źródła", () => {
-      expect(read("src/app/api/subscription-plans/route.ts")).toMatch(/PLAN_FEATURES/);
-      expect(read("scripts/seed-test.ts")).toMatch(/PLAN_FEATURES/);
+    // Każde miejsce, które pokazuje albo zapisuje listę funkcji planu, woła
+    // `src/lib/plan-features.ts` — import ORAZ wywołanie, nie samo słowo
+    // w komentarzu. Że pokazane pozycje są równe wynikowi tych funkcji,
+    // sprawdza `__tests__/components/PlanFeaturesSingleSource.test.tsx`.
+    const CONSUMERS: Array<[file: string, call: RegExp]> = [
+      ["src/app/api/subscription-plans/route.ts", /\bfeaturesFor\(|PLAN_FEATURES\.(basic|pro)/],
+      ["src/app/api/subscriptions/current/route.ts", /\bfeaturesFor\(/],
+      ["scripts/seed-test.ts", /PLAN_FEATURES\.(basic|pro)/],
+      ["src/app/(site)/dla-salonow/_components/DlaSalonowPricing.tsx", /\bplanHighlights\(/],
+      ["src/app/(site)/pricing/page.tsx", /\bplanComparison\(/],
+      ["src/components/dashboard/create-salon-prompt.tsx", /\bplanHighlights\(/],
+      ["src/app/dashboard/subscription/_components/plan-actions.tsx", /\bproOnlyFeatures\(/],
+    ];
+
+    /** Źródło bez komentarzy — słowo w komentarzu nie jest wywołaniem. */
+    const code = (relPath: string) =>
+      read(relPath)
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/^\s*\/\/.*$/gm, "");
+
+    it.each(CONSUMERS)("%s importuje i woła jedno źródło list funkcji", (file, call) => {
+      const source = code(file);
+      expect(source).toMatch(/from ["'](@\/lib\/plan-features|\.\.\/src\/lib\/plan-features)["']/);
+      expect(source).toMatch(call);
+    });
+
+    it.each(CONSUMERS)("%s nie ma listy funkcji wpisanej ręcznie", (file) => {
+      const source = code(file);
+      // Ręczna kopia: tablica napisów pod kluczem `features` albo wiersz
+      // tabeli porównania `{ name: "…", basic: …, pro: … }`.
+      expect(source).not.toMatch(/features:\s*\[\s*["'`]/);
+      expect(source).not.toMatch(/name:\s*["'`][^"'`]+["'`],\s*basic:/);
     });
   });
 });
