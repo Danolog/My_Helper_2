@@ -72,6 +72,15 @@ SMS/push wymagają uruchamiania co 15 min — masz dwie drogi:
 2. Ustaw w Vercel: `CRON_SECRET` = wygenerowana wartość
    (Vercel Cron sam doda nagłówek; w cron-job.org ustawiasz go ręcznie).
 
+**Dzienne powiadomienia (spoza listy wyżej):** usunięty w 11.2026 workflow
+`.github/workflows/cron-scheduler.yml` (wyczerpał limit GitHub Actions, od 31.07 był
+wyłączony) wołał raz dziennie o 05:00 UTC jeszcze trzy trasy. Nic innego ich nie
+uruchamia, więc jeśli mają działać, dopisz je do `crons` albo do zewnętrznego schedulera
+(GET, ten sam `CRON_SECRET`):
+- `/api/notifications/birthday`
+- `/api/notifications/low-stock`
+- `/api/notifications/we-miss-you`
+
 ## 4. Galeria zdjęć — Vercel Blob (upload był zepsuty w prod, kod naprawiony)
 
 1. Vercel → Storage → Create → Blob → podłącz do projektu.

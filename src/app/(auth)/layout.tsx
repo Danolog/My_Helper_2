@@ -1,5 +1,4 @@
 import Image from "next/image";
-import { Star } from "lucide-react";
 
 export default function AuthLayout({
   children,
@@ -51,20 +50,8 @@ export default function AuthLayout({
             <br />z elegancja
           </h2>
           <p className="text-white/80 text-lg max-w-md mb-8">
-            Dolacz do setek salonow, ktore juz korzystaja z MyHelper do zarzadzania wizytami, klientami i zespolem.
+            Wizyty, klienci i zespół w jednym miejscu.
           </p>
-          {/* Testimonial card */}
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 max-w-sm border border-white/20">
-            <div className="flex gap-0.5 mb-2">
-              {[1, 2, 3, 4, 5].map((i) => (
-                <Star key={i} className="h-3.5 w-3.5 fill-white/90 text-white/90" />
-              ))}
-            </div>
-            <p className="text-sm text-white/90 leading-relaxed italic mb-2">
-              &ldquo;Od kiedy korzystam z MyHelper, moj salon dziala sprawniej niz kiedykolwiek.&rdquo;
-            </p>
-            <p className="text-xs text-white/60">Anna K. — Salon Elegancja</p>
-          </div>
         </div>
       </div>
       <div className="flex-1 flex items-center justify-center p-4 lg:p-8">

@@ -5,54 +5,27 @@ import { PLANS } from "@/lib/constants";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { PLAN_FEATURES, featuresFor } from "@/lib/plan-features";
 import { subscriptionPlans } from "@/lib/schema";
 // Subscription plans rarely change — revalidate every hour to reduce DB queries
 export const revalidate = 3600;
 
 /**
  * Default plan data - used to seed the database if no plans exist.
- * Prices are in PLN.
+ * Prices are in PLN. Feature lists live in `src/lib/plan-features.ts`.
  */
 const DEFAULT_PLANS = [
   {
     name: PLANS.basic.name,
     slug: PLANS.basic.slug,
     priceMonthly: PLANS.basic.priceMonthly.toFixed(2),
-    featuresJson: [
-      "Pelne zarzadzanie salonem",
-      "Kalendarz i grafiki pracownikow",
-      "Kartoteka klientow",
-      "System rezerwacji online",
-      "Portal klienta z rezerwacja",
-      "Powiadomienia SMS i email",
-      "Zarzadzanie uslugami i wariantami",
-      "Magazyn produktow",
-      "System opinii i ocen",
-      "Raporty podstawowe",
-      "Platnosci zadatkow (Stripe + Blik)",
-      "Integracja z drukarka fiskalna",
-      "Galeria zdjec salonu",
-      "Promocje i programy lojalnosciowe",
-    ],
+    featuresJson: [...PLAN_FEATURES.basic],
   },
   {
     name: PLANS.pro.name,
     slug: PLANS.pro.slug,
     priceMonthly: PLANS.pro.priceMonthly.toFixed(2),
-    featuresJson: [
-      "Wszystko z planu Basic",
-      "Asystent AI glosowy (odbieranie polaczen)",
-      "Asystent AI biznesowy (analiza danych)",
-      "Asystent AI content (generowanie tresci)",
-      "Rekomendacje AI na dashboardzie",
-      "Analiza trendow i konkurencji",
-      "Generowanie postow na social media",
-      "Generowanie opisow uslug",
-      "Tworzenie i wysylka newsletterow",
-      "Widget planowania marketingowego",
-      "Proaktywne sugestie biznesowe",
-      "Priorytetowe wsparcie techniczne",
-    ],
+    featuresJson: [...PLAN_FEATURES.pro],
   },
 ];
 
@@ -111,7 +84,7 @@ export async function GET() {
         name: plan.name,
         slug: plan.slug,
         priceMonthly: plan.priceMonthly,
-        features: plan.featuresJson as string[],
+        features: featuresFor(plan.slug, plan.featuresJson),
         isActive: plan.isActive,
       })),
     });
