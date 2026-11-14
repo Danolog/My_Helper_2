@@ -1,5 +1,6 @@
 {
   "buildCommand": "pnpm build:ci",
+  "regions": ["fra1"],
   "crons": [
     { "path": "/api/cron/cleanup-pending-deposits", "schedule": "30 2 * * *" },
     { "path": "/api/cron/cleanup-temporary-access", "schedule": "0 3 * * *" }
