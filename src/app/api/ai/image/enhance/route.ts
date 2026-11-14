@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import sharp, { type Sharp } from "sharp";
 import { z } from "zod";
 import { requireProAI, isProAIError } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
@@ -24,7 +24,7 @@ const requestSchema = z.object({
  * All presets are non-destructive — they operate on a copy of the original
  * and produce a new JPEG output.
  */
-const PRESETS: Record<string, (img: sharp.Sharp) => sharp.Sharp> = {
+const PRESETS: Record<string, (img: Sharp) => Sharp> = {
   auto: (img) =>
     img
       .modulate({ brightness: 1.05, saturation: 1.1 })
