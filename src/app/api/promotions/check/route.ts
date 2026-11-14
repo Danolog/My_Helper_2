@@ -100,7 +100,8 @@ export async function GET(request: Request) {
     const [service] = await db
       .select()
       .from(services)
-      .where(eq(services.id, serviceId))
+      // Zwiazanie z salonem z requestu — usluga innego salonu nie wejdzie do wyliczenia promocji.
+      .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
       .limit(1);
 
     const servicePrice = service ? parseFloat(service.basePrice) : 0;

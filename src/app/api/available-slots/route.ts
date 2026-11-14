@@ -159,7 +159,9 @@ export async function GET(request: Request) {
         start: startMinutes,
         end: endMinutes,
         type: block.blockType,
-        label: block.reason || block.blockType,
+        // NIE ujawniamy `block.reason` (prywatny powód blokady, np. „wizyta lekarska")
+        // w publicznej odpowiedzi rezerwacji — etykieta to wyłącznie typ bloku.
+        label: block.blockType,
       });
     }
 

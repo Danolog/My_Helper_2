@@ -56,7 +56,8 @@ export async function GET(request: Request) {
       const packageServices = await db
         .select()
         .from(services)
-        .where(inArray(services.id, packageServiceIds));
+        // Zwiazanie z salonem z requestu — usluga innego salonu nie wejdzie do wyliczenia promocji.
+        .where(and(inArray(services.id, packageServiceIds), eq(services.salonId, salonId)));
 
       // Keep the original order
       const orderedServices = packageServiceIds
