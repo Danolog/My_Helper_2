@@ -156,6 +156,18 @@ describe("requireSalonStaff", () => {
     expect(r.ctx?.salonId).toBe(SALON_A);
   });
 
+  it("konto z kilkoma aktywnymi rekordami pracownika => 403 z komunikatem (bez zgadywania salonu)", async () => {
+    mockGetSession.mockResolvedValue({ user: { id: "staff-2" } });
+    mockDbLimit.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { id: "emp-1", salonId: SALON_A, role: "employee" },
+      { id: "emp-2", salonId: SALON_B, role: "employee" },
+    ]);
+    const r = await requireSalonStaff();
+    expect(await status(r)).toBe(403);
+    const body = await r.error!.json();
+    expect(body.error).toMatch(/kilku aktywnych rekord/);
+  });
+
   it("nie polega na user.role: konto z user.role='owner' bez salonu => 404", async () => {
     mockGetSession.mockResolvedValue({ user: { id: "u-x", role: "owner" } });
     mockDbLimit.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
