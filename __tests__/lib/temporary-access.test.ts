@@ -66,6 +66,7 @@ import {
   hasTemporaryAccess,
   getActiveTemporaryAccess,
   cleanupExpiredTemporaryAccess,
+  revokeSalonGrantsForUser,
 } from "@/lib/temporary-access";
 
 // WHERE musi zawierać salons.id = salon z kontekstu (and(...) z mocka drizzle-orm).
@@ -189,5 +190,26 @@ describe("cleanupExpiredTemporaryAccess", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     await cleanupExpiredTemporaryAccess();
     expect(logSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("revokeSalonGrantsForUser", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbDeleteFrom.mockReturnValue({ where: mockDbDeleteWhere });
+    mockDbDeleteWhere.mockReturnValue({ returning: mockDbReturning });
+  });
+
+  it("kasuje tylko granty konta nadane przez danego właściciela (granted_by)", async () => {
+    mockDbReturning.mockResolvedValue([{ id: "g-1" }, { id: "g-2" }]);
+    const count = await revokeSalonGrantsForUser("user-x", "owner-a");
+    expect(count).toBe(2);
+    expect(mockDbDeleteWhere).toHaveBeenCalledWith({
+      type: "and",
+      args: [
+        { type: "eq", args: ["temporaryAccess.userId", "user-x"] },
+        { type: "eq", args: ["temporaryAccess.grantedBy", "owner-a"] },
+      ],
+    });
   });
 });

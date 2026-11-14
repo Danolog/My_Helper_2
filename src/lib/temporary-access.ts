@@ -73,6 +73,31 @@ export async function getActiveTemporaryAccess(userId: string, salonId: string) 
 }
 
 /**
+ * Kasuje granty konta `userId` nadane przez właściciela `grantedBy` — czyli
+ * granty JEDNEGO salonu (tego, którego właścicielem jest grantedBy). Wołane
+ * przy odpięciu konta od pracownika, żeby grant nie „ożył" po ponownym
+ * podpięciu. Granty z innych salonów zostają nietknięte.
+ *
+ * @returns liczba skasowanych grantów
+ */
+export async function revokeSalonGrantsForUser(
+  userId: string,
+  grantedBy: string
+): Promise<number> {
+  const revoked = await db
+    .delete(temporaryAccess)
+    .where(
+      and(
+        eq(temporaryAccess.userId, userId),
+        eq(temporaryAccess.grantedBy, grantedBy)
+      )
+    )
+    .returning({ id: temporaryAccess.id });
+
+  return revoked.length;
+}
+
+/**
  * Clean up all expired temporary access entries from the database.
  * Should be called periodically (e.g., via cron) or on API access.
  *
