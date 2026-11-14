@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -36,7 +37,11 @@ export async function getSalonContext(): Promise<SalonContext | null> {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) return null;
 
-  const userId = session.user.id;
+  return resolveSalonContext(session.user.id);
+}
+
+/** Rdzeń getSalonContext dla znanego userId (bez ponownego pobierania sesji). */
+async function resolveSalonContext(userId: string): Promise<SalonContext | null> {
 
   // 1. Salon właścicielski
   const [salon] = await db
@@ -98,4 +103,64 @@ export async function hasFeatureAccess(
 ): Promise<boolean> {
   if (ctx.role === "owner") return true;
   return hasTemporaryAccess(ctx.userId, feature);
+}
+
+export interface SalonStaffOptions {
+  /**
+   * Role salonu dopuszczone BEZ grantu. Właściciel (salons.ownerId) przechodzi
+   * zawsze. Brak `roles` i brak `feature` => każdy członek personelu salonu;
+   * brak `roles` przy podanym `feature` => tylko właściciel albo grant.
+   */
+  roles?: readonly SalonRole[];
+  /** Czasowy grant temporary_access, który otwiera dostęp roli spoza `roles`. */
+  feature?: string;
+  /**
+   * salonId podany przez żądanie (query/body). NIGDY nie wybiera salonu —
+   * jest wyłącznie porównywany z salonem sesji: inny => 403. Pusty => salon sesji.
+   */
+  requestedSalonId?: string | null;
+}
+
+export type SalonStaffResult =
+  | { ctx: SalonContext; error?: undefined }
+  | { ctx?: undefined; error: NextResponse };
+
+function deny(status: 401 | 403 | 404, error: string): SalonStaffResult {
+  return { error: NextResponse.json({ success: false, error }, { status }) };
+}
+
+/**
+ * Bramka tras salon-scoped: salon WYŁĄCZNIE z sesji (getSalonContext), nie z
+ * żądania. RLS (forSalon) porównuje salon_id z tym, co mu podamy — jeśli podamy
+ * salonId z query/body, nie chroni przed niczym. Ta funkcja jest źródłem
+ * salonId dla forSalon(ctx.salonId).
+ *
+ * Statusy: brak sesji 401; konto bez salonu 404; salonId z żądania inny niż
+ * salon sesji 403; rola spoza `roles` bez grantu `feature` 403.
+ *
+ * Uprawnień NIE bierze z user.role (na produkcji rola "owner" jest tylko na
+ * części kont właścicieli) — własność = salons.ownerId, rola = employees.role.
+ */
+export async function requireSalonStaff(
+  options: SalonStaffOptions = {}
+): Promise<SalonStaffResult> {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) return deny(401, "Wymagane logowanie");
+
+  const ctx = await resolveSalonContext(session.user.id);
+  if (!ctx) return deny(404, "Salon not found");
+
+  const { roles, feature, requestedSalonId } = options;
+  if (requestedSalonId && requestedSalonId !== ctx.salonId) {
+    return deny(403, "Brak dostepu do tego salonu");
+  }
+
+  if (ctx.role === "owner") return { ctx };
+
+  const allowedRoles: readonly SalonRole[] =
+    roles ?? (feature ? [] : ["receptionist", "employee"]);
+  if (allowedRoles.includes(ctx.role)) return { ctx };
+  if (feature && (await hasTemporaryAccess(ctx.userId, feature))) return { ctx };
+
+  return deny(403, "Brak uprawnien");
 }
