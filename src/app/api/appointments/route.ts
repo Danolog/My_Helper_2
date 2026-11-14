@@ -6,6 +6,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { checkPromotionApplicable, computePromoDiscount, type PromotionRejection } from "@/lib/promo-discount";
 import { strictRateLimit, apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getSalonContext } from "@/lib/salon-context";
 import { appointments, clients, employees, salons, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
@@ -147,7 +148,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId, promoCodeId, discountAmount, guestName, guestPhone, guestEmail } = body;
+    const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId, promoCodeId, guestName, guestPhone, guestEmail } = body;
 
     // bookedByUserId WYLACZNIE z sesji (null dla goscia). Wartosc z body jest
     // ignorowana: pozwalala przypisac wizyte do cudzego konta (portal klienta,
@@ -280,12 +281,15 @@ export async function POST(request: Request) {
       );
     }
 
-    // Validate promo code if provided
+    // Validate promo code if provided. Kwote rabatu liczy serwer z promocji
+    // zawezonej do salonu wizyty; discountAmount z zadania jest ignorowany
+    // (P1: klient mogl sam ustawic rabat, ktory obniza punkty lojalnosciowe
+    // i statystyki przychodu).
     let validatedPromoCodeId: string | null = null;
     let validatedDiscountAmount: string | null = null;
 
     if (promoCodeId) {
-      // Verify the promo code exists and is valid
+      // Verify the promo code exists, is valid and belongs to this salon
       const [promoCode] = await db
         .select({
           promoCode: promoCodes,
@@ -293,10 +297,16 @@ export async function POST(request: Request) {
         })
         .from(promoCodes)
         .leftJoin(promotions, eq(promoCodes.promotionId, promotions.id))
-        .where(eq(promoCodes.id, promoCodeId))
+        .where(and(eq(promoCodes.id, promoCodeId), eq(promoCodes.salonId, salonId)))
         .limit(1);
 
-      if (!promoCode) {
+      // Kod (lub promocja) innego salonu traktujemy jak nieistniejacy —
+      // nie zdradzamy, ze taki identyfikator istnieje gdzie indziej.
+      if (
+        !promoCode ||
+        promoCode.promoCode.salonId !== salonId ||
+        (promoCode.promotion && promoCode.promotion.salonId !== salonId)
+      ) {
         return NextResponse.json(
           { success: false, error: "Nieprawidlowy kod promocyjny" },
           { status: 400 }
@@ -322,16 +332,48 @@ export async function POST(request: Request) {
         );
       }
 
-      // Check linked promotion is active
-      if (promoCode.promotion && !promoCode.promotion.isActive) {
+      // Check linked promotion: active, within its dates, applicable to the service
+      if (promoCode.promotion) {
+        const rejection = checkPromotionApplicable(promoCode.promotion, serviceId ?? "", now);
+        if (rejection) {
+          const messages: Record<PromotionRejection, string> = {
+            inactive: "Promocja powiazana z kodem jest nieaktywna",
+            not_started: "Promocja powiazana z kodem jeszcze sie nie rozpoczela",
+            ended: "Promocja powiazana z kodem juz sie zakonczyla",
+            service_not_applicable: "Kod promocyjny nie dotyczy wybranej uslugi",
+          };
+          return NextResponse.json(
+            { success: false, error: messages[rejection] },
+            { status: 400 }
+          );
+        }
+      }
+
+      // Rabat liczymy od ceny uslugi z tego salonu — bez uslugi nie ma od czego.
+      if (!serviceId) {
         return NextResponse.json(
-          { success: false, error: "Promocja powiazana z kodem jest nieaktywna" },
+          { success: false, error: "Kod promocyjny wymaga wybranej uslugi" },
+          { status: 400 }
+        );
+      }
+      const [service] = await db
+        .select({ basePrice: services.basePrice })
+        .from(services)
+        .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
+        .limit(1);
+      if (!service) {
+        return NextResponse.json(
+          { success: false, error: "Nieprawidlowa usluga dla tego salonu" },
           { status: 400 }
         );
       }
 
-      validatedPromoCodeId = promoCodeId;
-      validatedDiscountAmount = discountAmount ? String(discountAmount) : null;
+      const discount = promoCode.promotion
+        ? computePromoDiscount(service.basePrice, promoCode.promotion)
+        : 0;
+
+      validatedPromoCodeId = pc.id;
+      validatedDiscountAmount = discount > 0 ? discount.toFixed(2) : null;
     }
 
     logger.info(`[Appointments API] Creating appointment for employee ${employeeId}, bookedBy: ${bookedByUserId}, promoCode: ${validatedPromoCodeId}`);

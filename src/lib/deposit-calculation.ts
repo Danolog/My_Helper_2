@@ -1,9 +1,8 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import {
-  appointments,
   clients,
   promotions,
   services,
@@ -19,16 +18,16 @@ import {
  * src/app/(client)/salons/[id]/book/_hooks/use-booking-data.ts:
  *
  *   baseEffectivePrice = service.basePrice + variant.priceModifier
- *   bestDiscount       = max(happyHours, firstVisit) — Math.round(base*pct)/100
- *   effectivePrice     = baseEffectivePrice - bestDiscount
+ *   discount           = happyHours — Math.round(base*pct)/100
+ *                        (the first-visit promotion is frozen, never applied)
+ *   effectivePrice     = baseEffectivePrice - discount
  *   deposit:
  *     - client settings (requireDeposit) override service settings
  *       - fixed      -> depositValue PLN
  *       - percentage -> Math.ceil(effectivePrice * depositValue / 100)
  *     - else service.depositRequired -> Math.ceil(effectivePrice * pct / 100)
  *
- * Promo eligibility mirrors /api/promotions/check-happy-hours and
- * /api/promotions/check-first-visit.
+ * Promo eligibility mirrors /api/promotions/check-happy-hours.
  */
 
 export type ExpectedDeposit =
@@ -124,77 +123,6 @@ async function getHappyHoursDiscountPercent(
   return best;
 }
 
-/**
- * Best first-visit discount percent for a client identified by email
- * (0 when not eligible). Mirrors /api/promotions/check-first-visit.
- */
-async function getFirstVisitDiscountPercent(
-  salonId: string,
-  email: string
-): Promise<number> {
-  const activePromotions = await db
-    .select()
-    .from(promotions)
-    .where(
-      and(
-        eq(promotions.salonId, salonId),
-        eq(promotions.type, "first_visit"),
-        eq(promotions.isActive, true)
-      )
-    );
-
-  const now = new Date();
-  const validPromotions = activePromotions.filter((promo) => {
-    if (promo.startDate && new Date(promo.startDate) > now) return false;
-    if (promo.endDate && new Date(promo.endDate) < now) return false;
-    return true;
-  });
-
-  if (validPromotions.length === 0) return 0;
-
-  // Existing appointments via client records (by email in this salon)
-  const clientRecords = await db
-    .select({ id: clients.id })
-    .from(clients)
-    .where(and(eq(clients.salonId, salonId), eq(clients.email, email)));
-
-  let totalAppointments = 0;
-  if (clientRecords.length > 0) {
-    const clientIds = clientRecords.map((c) => c.id);
-    const countResult = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(appointments)
-      .where(
-        and(
-          eq(appointments.salonId, salonId),
-          inArray(appointments.clientId, clientIds),
-          sql`${appointments.status} != 'cancelled'`
-        )
-      );
-    totalAppointments += countResult[0]?.count || 0;
-  }
-
-  // Also appointments booked via the client portal (bookedByUserId by email)
-  const portalCountResult = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(appointments)
-    .where(
-      and(
-        eq(appointments.salonId, salonId),
-        sql`${appointments.bookedByUserId} IN (SELECT id FROM "user" WHERE email = ${email})`,
-        sql`${appointments.status} != 'cancelled'`
-      )
-    );
-  totalAppointments += portalCountResult[0]?.count || 0;
-
-  if (totalAppointments > 0) return 0;
-
-  return validPromotions.reduce(
-    (best, promo) => Math.max(best, parseFloat(promo.value)),
-    0
-  );
-}
-
 export async function calculateExpectedDeposit(params: {
   salonId: string;
   serviceId: string;
@@ -202,10 +130,13 @@ export async function calculateExpectedDeposit(params: {
   startTime: Date;
   /** Logged-in user's email — used for client deposit settings + first visit. */
   sessionEmail?: string | null;
-  /** Guest email — used for the first-visit promo only (mirrors frontend). */
+  /**
+   * Guest email. Unused since the first-visit promotion is frozen (it was
+   * only needed for that lookup); kept so callers need no change.
+   */
   guestEmail?: string | null;
 }): Promise<ExpectedDeposit> {
-  const { salonId, serviceId, variantId, startTime, sessionEmail, guestEmail } = params;
+  const { salonId, serviceId, variantId, startTime, sessionEmail } = params;
 
   // 1. Service (price + deposit settings)
   const [service] = await db
@@ -237,19 +168,16 @@ export async function calculateExpectedDeposit(params: {
   // 3. Promotions (best single discount, no stacking — same as frontend)
   const happyHoursPercent = await getHappyHoursDiscountPercent(salonId, startTime);
 
-  const emailForFirstVisit = sessionEmail || guestEmail || null;
-  const firstVisitPercent = emailForFirstVisit
-    ? await getFirstVisitDiscountPercent(salonId, emailForFirstVisit)
-    : 0;
+  // The first-visit promotion is frozen: /api/promotions/check-first-visit
+  // answers "not eligible" for everyone, so the booking UI never shows that
+  // discount — and the deposit computed here must match the price the client
+  // saw. No first-visit lookup (promotions, client records, visit counts).
 
   // Frontend rounding: Math.round(base * pct) / 100
   const happyHoursDiscount =
     happyHoursPercent > 0 ? Math.round(baseEffectivePrice * happyHoursPercent) / 100 : 0;
-  const firstVisitDiscount =
-    firstVisitPercent > 0 ? Math.round(baseEffectivePrice * firstVisitPercent) / 100 : 0;
 
-  const bestDiscount = Math.max(happyHoursDiscount, firstVisitDiscount);
-  const effectivePrice = baseEffectivePrice - bestDiscount;
+  const effectivePrice = baseEffectivePrice - happyHoursDiscount;
 
   // 4. Client-level deposit settings (only for logged-in users — mirrors the
   // frontend, which fetches /api/clients/deposit-settings by session email)
@@ -305,7 +233,7 @@ export async function calculateExpectedDeposit(params: {
     salonId,
     serviceId,
     baseEffectivePrice,
-    bestDiscount,
+    discount: happyHoursDiscount,
     ...result,
   });
 
