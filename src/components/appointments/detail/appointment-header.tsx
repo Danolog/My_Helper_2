@@ -8,6 +8,7 @@ import {
   Printer,
   Receipt,
 } from "lucide-react";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { Button } from "@/components/ui/button";
 import type { AppointmentDetail, InvoiceData, FiscalReceiptData } from "./types";
 
@@ -35,6 +36,9 @@ export function AppointmentHeader({
   const startDate = new Date(appointment.startTime);
   const isActive = appointment.status !== "completed" && appointment.status !== "cancelled";
   const isCompleted = appointment.status === "completed";
+  // Faktury to moduł z rejestru (src/lib/features.ts) — wyłączony albo
+  // zamrożony chowa przyciski faktury.
+  const invoicesEnabled = useModuleEnabled("invoices");
 
   return (
     <div className="flex items-center gap-4 mb-6">
@@ -80,25 +84,26 @@ export function AppointmentHeader({
       )}
       {isCompleted && (
         <div className="flex items-center gap-2">
-          {invoice ? (
-            <Button
-              variant="outline"
-              onClick={onInvoiceAction}
-              data-testid="view-invoice-btn"
-            >
-              <FileText className="h-4 w-4 mr-2" />
-              Podglad faktury
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              onClick={onInvoiceAction}
-              data-testid="generate-invoice-btn"
-            >
-              <FileText className="h-4 w-4 mr-2" />
-              Generuj fakture
-            </Button>
-          )}
+          {invoicesEnabled &&
+            (invoice ? (
+              <Button
+                variant="outline"
+                onClick={onInvoiceAction}
+                data-testid="view-invoice-btn"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Podglad faktury
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={onInvoiceAction}
+                data-testid="generate-invoice-btn"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Generuj fakture
+              </Button>
+            ))}
           {fiscalReceipt ? (
             <Button
               variant="outline"
