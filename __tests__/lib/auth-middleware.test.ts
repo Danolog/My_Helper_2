@@ -2,8 +2,7 @@
  * requireAuth — brama sesji dla tras API (P0 audytu: 91 endpointow bez auth).
  * Kontrakt:
  *   - brak sesji => NextResponse 401,
- *   - requiredRole i inna rola usera => NextResponse 403,
- *   - zgodna rola / brak wymogu roli => { session, user },
+ *   - sesja => { session, user } (bez sprawdzania user.role),
  *   - isAuthError odroznia NextResponse od wyniku auth.
  * (requireCronSecret jest testowany przy trasach cronowych.)
  */
@@ -51,31 +50,15 @@ describe("requireAuth", () => {
     expect(result).toEqual({ session, user: session.user });
   });
 
-  it("zwraca 403, gdy rola usera nie zgadza sie z wymagana", async () => {
-    mockGetSession.mockResolvedValue({ user: { id: "u1", role: "employee" } });
-
-    const result = await requireAuth("owner");
-    expect(isAuthError(result)).toBe(true);
-    const response = result as NextResponse;
-    expect(response.status).toBe(403);
-    const body = await response.json();
-    expect(body).toEqual({ success: false, error: "Brak uprawnień" });
-  });
-
-  it("zwraca 403 takze gdy user w ogole nie ma roli", async () => {
-    mockGetSession.mockResolvedValue({ user: { id: "u1" } });
-
-    const result = await requireAuth("owner");
-    expect(isAuthError(result)).toBe(true);
-    expect((result as NextResponse).status).toBe(403);
-  });
-
-  it("przepuszcza usera ze zgodna rola", async () => {
-    const session = { user: { id: "u1", role: "owner" } };
+  it("nie przyjmuje roli — user.role nie jest uprawnieniem (sygnatura bez argumentu)", async () => {
+    const session = { user: { id: "u1", role: "employee" } };
     mockGetSession.mockResolvedValue(session);
 
-    const result = await requireAuth("owner");
-    expect(isAuthError(result)).toBe(false);
+    // requireAuth nie ma już parametru roli: uprawnienia salonu =
+    // requireSalonStaff (salons.ownerId / employees.role), admin platformy =
+    // requirePlatformAdmin (ADMIN_EMAILS).
+    expect(requireAuth.length).toBe(0);
+    const result = await requireAuth();
     expect(result).toEqual({ session, user: session.user });
   });
 });

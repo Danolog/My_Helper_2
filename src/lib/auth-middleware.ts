@@ -3,8 +3,6 @@ import { NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { auth } from "./auth";
 
-type UserRole = "owner" | "employee" | "receptionist" | "client";
-
 type Session = NonNullable<Awaited<ReturnType<typeof auth.api.getSession>>>;
 
 export interface AuthResult {
@@ -13,15 +11,19 @@ export interface AuthResult {
 }
 
 /**
- * Require authenticated session. Optionally check user role.
- * Returns AuthResult on success, or NextResponse (401/403) on failure.
+ * Require authenticated session.
+ * Returns AuthResult on success, or NextResponse (401) on failure.
+ *
+ * Celowo BEZ parametru roli: user.role nie jest uprawnieniem (na produkcji
+ * "owner" ma jedno konto). Uprawnienia w salonie => requireSalonStaff
+ * (salons.ownerId / employees.role); admin platformy => requirePlatformAdmin.
  *
  * Usage:
  *   const authResult = await requireAuth();
  *   if (isAuthError(authResult)) return authResult;
  *   const { user } = authResult;
  */
-export async function requireAuth(requiredRole?: UserRole): Promise<AuthResult | NextResponse> {
+export async function requireAuth(): Promise<AuthResult | NextResponse> {
   const session = await auth.api.getSession({ headers: await headers() });
 
   if (!session) {
@@ -29,16 +31,6 @@ export async function requireAuth(requiredRole?: UserRole): Promise<AuthResult |
       { success: false, error: "Wymagane logowanie" },
       { status: 401 }
     );
-  }
-
-  if (requiredRole) {
-    const userRole = (session.user as Record<string, unknown>).role as string | undefined;
-    if (userRole !== requiredRole) {
-      return NextResponse.json(
-        { success: false, error: "Brak uprawnień" },
-        { status: 403 }
-      );
-    }
   }
 
   return { session, user: session.user };
