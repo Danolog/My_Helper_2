@@ -5,6 +5,9 @@
  * (`hardOff` w `src/lib/features.ts`), zadatków płatnych online (decyzja D1)
  * ani powoływać się na zmyślony dowód społeczny (liczba salonów, oceny,
  * opinie). Test czyta źródła stron i pilnuje, żeby te obietnice nie wróciły.
+ *
+ * Nie mogą też obiecywać funkcji, których w kodzie w ogóle nie ma (analiza
+ * sentymentu opinii).
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -21,11 +24,26 @@ const SALES_FILES = [
   ...readdirSync(join(ROOT, SALES_DIR)).map((f) => `${SALES_DIR}/${f}`),
 ];
 
+// Pliki, które pokazują ofertę planów: strona sprzedażowa, cennik, wybór
+// planu przy rejestracji, panel subskrypcji, bramka planu Pro.
+const SUBSCRIPTION_DIR = "src/app/dashboard/subscription/_components";
+const PLAN_OFFER_FILES = [
+  ...SALES_FILES,
+  "src/app/(site)/pricing/page.tsx",
+  "src/components/auth/_components/StepPlanSelection.tsx",
+  "src/components/dashboard/create-salon-prompt.tsx",
+  "src/components/subscription/pro-plan-gate.tsx",
+  ...readdirSync(join(ROOT, SUBSCRIPTION_DIR)).map((f) => `${SUBSCRIPTION_DIR}/${f}`),
+];
+
 const VOICE = /g[łl]osow|odbieranie po[łl][ąa]cze[ńn]/i;
 const VIDEO = /wideo|video/i;
 const SOCIAL_POSTS = /post(y|[óo]w)\b[^"\n]*social/i;
 const FISCAL = /drukark[ąa] fiskaln/i;
 const ONLINE_DEPOSITS = /Stripe \+ Blik|p[łl]atno[śs]ci zadatk[óo]w|zadatk[óo]w przez Stripe/i;
+// Analizy sentymentu nie ma w kodzie: `grep -rniE "sentyment|sentiment" src`
+// nie znajduje żadnej implementacji.
+const SENTIMENT = /sentyment|sentiment/i;
 const FAKE_SOCIAL_PROOF = /setek salon|Tester Beta|zadowolonych w[łl]a[śs]cicieli|>4[.,]9</i;
 
 function expectNoMatch(relPath: string, pattern: RegExp) {
@@ -114,6 +132,12 @@ describe("prawda w marketingu", () => {
     });
   });
 
+  describe("oferta planów: cennik, rejestracja, panel subskrypcji", () => {
+    it.each(PLAN_OFFER_FILES)("%s nie obiecuje analizy sentymentu", (file) => {
+      expectNoMatch(file, SENTIMENT);
+    });
+  });
+
   describe("listy funkcji planów (źródło dla tabeli subscription_plans)", () => {
     const all = [...PLAN_FEATURES.basic, ...PLAN_FEATURES.pro];
 
@@ -124,6 +148,7 @@ describe("prawda w marketingu", () => {
       expect(feature).not.toMatch(FISCAL);
       expect(feature).not.toMatch(/Stripe|Blik/i);
       expect(feature).not.toMatch(/Widget planowania/i);
+      expect(feature).not.toMatch(SENTIMENT);
     });
 
     it("plan Pro zaczyna się od wiersza, który filtruje dialog upgrade'u", () => {

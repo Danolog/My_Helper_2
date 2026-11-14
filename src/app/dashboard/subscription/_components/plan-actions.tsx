@@ -295,10 +295,6 @@ function DowngradeDialog({
                     <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
                     <span>Automatyczne odpowiedzi na opinie</span>
                   </div>
-                  <div className="flex items-start gap-2 text-sm">
-                    <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
-                    <span>Analiza sentymentu opinii</span>
-                  </div>
                 </div>
               </div>
 
