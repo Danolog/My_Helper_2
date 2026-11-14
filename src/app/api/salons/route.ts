@@ -171,46 +171,8 @@ export async function POST(request: Request) {
   }
 }
 
-// DELETE /api/salons?id=<uuid> - Delete a salon by ID
-export async function DELETE(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get("id");
-
-    if (!id) {
-      return NextResponse.json(
-        { success: false, error: "Salon ID is required" },
-        { status: 400 }
-      );
-    }
-
-    logger.info(`[Salons API] Executing: DELETE FROM salons WHERE id = '${id}'`);
-    const [deleted] = await db
-      .delete(salons)
-      .where(eq(salons.id, id))
-      .returning();
-
-    if (!deleted) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
-    logger.info(`[Salons API] DELETE successful, removed salon: ${deleted.name}`);
-
-    return NextResponse.json({
-      success: true,
-      data: deleted,
-    });
-  } catch (error) {
-    logger.error("[Salons API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to delete salon" },
-      { status: 500 }
-    );
-  }
-}
+// DELETE /api/salons — świadomie brak (P0, Ryan): trasa bez wołającego w UI
+// kasowała dowolny salon po id dla każdego zalogowanego konta, a 26 FK do
+// salons.id ma ON DELETE CASCADE (klienci, wizyty, subskrypcje). Usunięcie
+// salonu wymaga osobnego przepływu (potwierdzenie, Stripe, RODO, audyt) —
+// do tego czasu Next.js odpowiada 405.
