@@ -1035,6 +1035,93 @@ describe("POST /api/appointments", () => {
     expect(body.error).toContain("min. 2 znaki");
   });
 
+  // -------------------------------------------------------
+  // bookedByUserId: tylko z sesji. Wczesniej brany z body, wiec wizyte mozna
+  // bylo przypisac do cudzego konta (portal klienta, odwolanie, opinia,
+  // przypomnienia push trafialy do ofiary).
+  // -------------------------------------------------------
+
+  describe("bookedByUserId tylko z sesji", () => {
+    const VICTIM_USER_ID = "victim-user-id";
+
+    function arrangeInsert() {
+      const insertChain = chainMock([makeAppointment()]);
+      mockDbSelect
+        .mockReturnValueOnce(chainMock([]))
+        .mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValue(insertChain);
+      return insertChain;
+    }
+
+    function bookedByOf(insertChain: ReturnType<typeof chainMock>) {
+      return (insertChain.values!.mock.calls[0]![0] as Record<string, unknown>).bookedByUserId;
+    }
+
+    it("zalogowany: bookedByUserId z body jest ignorowany, zapisany jest uzytkownik sesji", async () => {
+      const insertChain = arrangeInsert();
+
+      const response = await createAppointment(
+        createMockRequest("http://localhost:3000/api/appointments", {
+          method: "POST",
+          body: {
+            salonId: TEST_IDS.SALON_UUID,
+            employeeId: TEST_IDS.EMPLOYEE_UUID,
+            clientId: TEST_IDS.CLIENT_UUID,
+            startTime: "2026-04-01T10:00:00Z",
+            endTime: "2026-04-01T11:00:00Z",
+            bookedByUserId: VICTIM_USER_ID,
+          },
+        })
+      );
+
+      expect(response.status).toBe(201);
+      expect(bookedByOf(insertChain)).toBe("test-user-id");
+    });
+
+    it("gosc: bookedByUserId z body jest ignorowany, zapisany jest null", async () => {
+      const { getOptionalSession } = await import("@/lib/session");
+      vi.mocked(getOptionalSession).mockResolvedValueOnce(null);
+      const insertChain = arrangeInsert();
+
+      const response = await createAppointment(
+        createMockRequest("http://localhost:3000/api/appointments", {
+          method: "POST",
+          body: {
+            salonId: TEST_IDS.SALON_UUID,
+            employeeId: TEST_IDS.EMPLOYEE_UUID,
+            startTime: "2026-04-01T10:00:00Z",
+            endTime: "2026-04-01T11:00:00Z",
+            guestName: "Jan Kowalski",
+            guestPhone: "123456789",
+            bookedByUserId: VICTIM_USER_ID,
+          },
+        })
+      );
+
+      expect(response.status).toBe(201);
+      expect(bookedByOf(insertChain)).toBeNull();
+    });
+
+    it("zalogowany bez bookedByUserId w body: zapisany jest uzytkownik sesji", async () => {
+      const insertChain = arrangeInsert();
+
+      const response = await createAppointment(
+        createMockRequest("http://localhost:3000/api/appointments", {
+          method: "POST",
+          body: {
+            salonId: TEST_IDS.SALON_UUID,
+            employeeId: TEST_IDS.EMPLOYEE_UUID,
+            startTime: "2026-04-01T10:00:00Z",
+            endTime: "2026-04-01T11:00:00Z",
+          },
+        })
+      );
+
+      expect(response.status).toBe(201);
+      expect(bookedByOf(insertChain)).toBe("test-user-id");
+    });
+  });
+
   it("should return 429 for a GUEST when strict rate limit is exceeded", async () => {
     // Guest (no session) uses the strict limiter (5/min anti-abuse)
     const { getOptionalSession } = await import("@/lib/session");

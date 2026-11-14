@@ -149,8 +149,15 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId, promoCodeId, discountAmount, guestName, guestPhone, guestEmail } = body;
 
-    // Use provided bookedByUserId, fall back to session user, or null for guests
-    const bookedByUserId: string | null = bodyUserId || session?.user?.id || null;
+    // bookedByUserId WYLACZNIE z sesji (null dla goscia). Wartosc z body jest
+    // ignorowana: pozwalala przypisac wizyte do cudzego konta (portal klienta,
+    // odwolanie, opinia, przypomnienia push). Zaden front jej nie wysyla.
+    const bookedByUserId: string | null = session?.user?.id || null;
+    if (bodyUserId && bodyUserId !== bookedByUserId) {
+      logger.warn("[Appointments API] Ignored client-supplied bookedByUserId", {
+        sessionUserId: bookedByUserId,
+      });
+    }
 
     // Server-side validation with Zod schema
     const validationError = validateBody(createAppointmentSchema, body);
