@@ -2,13 +2,20 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
-import { clients } from "@/lib/schema";
+import { clients, salons } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import { isValidUuid } from "@/lib/validations";
 /**
- * GET /api/clients/deposit-settings?salonId=...&email=...
+ * GET /api/clients/deposit-settings?salonId=...
  *
- * Looks up a client in a salon by email and returns their deposit settings.
- * Used by the booking page to determine if a client has custom deposit requirements.
+ * Returns the deposit settings of the LOGGED-IN user's own client record in a
+ * salon. Used by the booking page to determine if the client has custom
+ * deposit requirements.
+ *
+ * P1 (IDOR): the email is taken ONLY from the session — an `email` query
+ * parameter is ignored — and the response carries only what booking needs
+ * (no clientId, no name). Previously any logged-in account could read another
+ * person's name, clientId and deposit settings in any salon.
  */
 export async function GET(request: Request) {
   try {
@@ -17,54 +24,59 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
-    const email = searchParams.get("email");
 
-    if (!salonId || !email) {
+    if (!salonId || !isValidUuid(salonId)) {
       return NextResponse.json(
-        { success: false, error: "salonId and email are required" },
+        { success: false, error: "Valid salonId is required" },
         { status: 400 }
       );
     }
 
-    // Look up the client in the salon by email
-    const [client] = await forSalon(salonId).raw((tx) =>
-      tx
-      .select({
-        id: clients.id,
-        firstName: clients.firstName,
-        lastName: clients.lastName,
-        requireDeposit: clients.requireDeposit,
-        depositType: clients.depositType,
-        depositValue: clients.depositValue,
-      })
-      .from(clients)
-      .where(and(eq(clients.salonId, salonId), eq(clients.email, email)))
-      .limit(1)
-    );
+    const notFound = {
+      found: false,
+      requireDeposit: false,
+      depositType: null,
+      depositValue: null,
+    };
+    const sessionEmail = authResult.user.email;
 
-    if (!client) {
-      return NextResponse.json({
-        success: true,
-        data: {
-          found: false,
-          requireDeposit: false,
-          depositType: null,
-          depositValue: null,
-        },
-      });
-    }
+    const settings = await forSalon(salonId).raw(async (tx) => {
+      const [salon] = await tx
+        .select({ id: salons.id })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .limit(1);
+      if (!salon) return null;
+      if (!sessionEmail) return notFound;
 
-    return NextResponse.json({
-      success: true,
-      data: {
+      // Own client record only: lookup by the session email, never the query
+      const [client] = await tx
+        .select({
+          requireDeposit: clients.requireDeposit,
+          depositType: clients.depositType,
+          depositValue: clients.depositValue,
+        })
+        .from(clients)
+        .where(and(eq(clients.salonId, salonId), eq(clients.email, sessionEmail)))
+        .limit(1);
+      if (!client) return notFound;
+
+      return {
         found: true,
-        clientId: client.id,
-        clientName: `${client.firstName} ${client.lastName}`,
         requireDeposit: client.requireDeposit ?? false,
         depositType: client.depositType || "percentage",
         depositValue: client.depositValue,
-      },
+      };
     });
+
+    if (!settings) {
+      return NextResponse.json(
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ success: true, data: settings });
   } catch (error) {
     logger.error("[Client Deposit Settings API] Error", { error: error });
     return NextResponse.json(
