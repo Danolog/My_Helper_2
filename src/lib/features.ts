@@ -9,9 +9,19 @@
  * w Ustawienia → Moduły. Stan zapisujemy w `salons.settingsJson.modules`
  * (bez migracji SQL; brak wpisu = wartość domyślna modułu).
  *
- * Moduły `hardOff` (asystent głosowy, generowanie wideo, fiskalizacja,
- * publikacja postów social) są wyłączone globalnie i NIE mają przełącznika
- * w UI — włączymy je osobną decyzją produktową (RAPORT sekcja Faza 2).
+ * Moduły `hardOff` są ZAMROŻONE: wyłączone globalnie, bez przełącznika w UI,
+ * niezależnie od zapisu w ustawieniach salonu. Odmrożenie to osobna decyzja
+ * produktowa (plan wejścia na rynek 2026-11, krok B).
+ *
+ * Ten plik jest JEDYNYM nośnikiem reguły zamrożenia. Egzekutorzy tylko go
+ * wołają i nie trzymają własnych list:
+ * - `src/proxy.ts` — trasa API modułu zamrożonego (`API_MODULE_PATTERNS`)
+ *   dostaje 404 `MODULE_DISABLED`, strona panelu (`ROUTE_MODULE_MAP`)
+ *   przekierowanie na `/dashboard`;
+ * - `POST /api/appointments/[id]/complete` — punkty lojalnościowe naliczane
+ *   tylko, gdy `resolveModules(...).loyalty`;
+ * - interfejs — `useModuleEnabled()` / `<ModuleGate>` / `moduleForRoute()`.
+ * Pilnuje tego `__tests__/lib/frozen-modules.test.ts`.
  */
 
 export type ModuleKey =
@@ -25,7 +35,10 @@ export type ModuleKey =
   | "voiceAi"
   | "videoGen"
   | "fiscal"
-  | "socialPosts";
+  | "socialPosts"
+  | "clientMarketing"
+  | "aiNotifications"
+  | "pushNotifications";
 
 export interface ModuleDef {
   key: ModuleKey;
@@ -34,7 +47,10 @@ export interface ModuleDef {
   description: string;
   /** Stan gdy salon nie ma wpisu w settingsJson.modules. */
   defaultEnabled: boolean;
-  /** Wyłączony globalnie — bez przełącznika w UI, resolver zawsze zwraca false. */
+  /**
+   * Zamrożony: wyłączony globalnie — bez przełącznika w UI, resolver zawsze
+   * zwraca false, a proxy blokuje jego trasy API i strony panelu.
+   */
   hardOff?: boolean;
 }
 
@@ -56,6 +72,7 @@ export const MODULES: readonly ModuleDef[] = [
     label: "Program lojalnościowy",
     description: "Punkty za wizyty i nagrody dla stałych klientów.",
     defaultEnabled: false,
+    hardOff: true,
   },
   {
     key: "waitingList",
@@ -68,12 +85,14 @@ export const MODULES: readonly ModuleDef[] = [
     label: "Newslettery",
     description: "Wysyłka wiadomości marketingowych do bazy klientów.",
     defaultEnabled: false,
+    hardOff: true,
   },
   {
     key: "invoices",
     label: "Faktury",
     description: "Wystawianie i wysyłka faktur za wizyty.",
     defaultEnabled: false,
+    hardOff: true,
   },
   {
     key: "reportsAdvanced",
@@ -112,10 +131,48 @@ export const MODULES: readonly ModuleDef[] = [
     defaultEnabled: false,
     hardOff: true,
   },
+  {
+    key: "clientMarketing",
+    label: "Życzenia urodzinowe i „Tęsknimy”",
+    description:
+      "Wiadomości urodzinowe i przypomnienia dla klientów, którzy dawno nie byli w salonie.",
+    defaultEnabled: false,
+    hardOff: true,
+  },
+  {
+    key: "aiNotifications",
+    label: "Powiadomienia pisane przez AI",
+    description: "Personalizacja treści powiadomień przez AI.",
+    defaultEnabled: false,
+    hardOff: true,
+  },
+  {
+    // Zamrożony tylko w interfejsie (przełącznik „Powiadomienia Push” i panel
+    // subskrypcji push). Trasy /api/push/* i crony push nie mają wzorca w
+    // API_MODULE_PATTERNS — harmonogram ich nie wywołuje (aneks C).
+    key: "pushNotifications",
+    label: "Powiadomienia push",
+    description: "Przypomnienia push o wizytach dla klientów z kontem.",
+    defaultEnabled: false,
+    hardOff: true,
+  },
 ] as const;
 
 /** Moduły z przełącznikiem w Ustawienia → Moduły. */
 export const TOGGLEABLE_MODULES: readonly ModuleDef[] = MODULES.filter((m) => !m.hardOff);
+
+const FROZEN_MODULE_KEYS: ReadonlySet<ModuleKey> = new Set(
+  MODULES.filter((m) => m.hardOff).map((m) => m.key)
+);
+
+/** Czy moduł jest zamrożony (`hardOff`) — wyłączony globalnie, bez przełącznika. */
+export function isModuleFrozen(key: ModuleKey): boolean {
+  return FROZEN_MODULE_KEYS.has(key);
+}
+
+/** Kod błędu i komunikat dla zamrożonej funkcji (odpowiedź proxy i bramka strony). */
+export const MODULE_DISABLED_CODE = "MODULE_DISABLED";
+export const MODULE_DISABLED_MESSAGE = "Ta funkcja jest obecnie niedostępna.";
 
 export type ModulesState = Record<ModuleKey, boolean>;
 
@@ -173,6 +230,65 @@ export const ROUTE_MODULE_MAP: ReadonlyArray<{ prefix: string; module: ModuleKey
 export function moduleForRoute(pathname: string): ModuleKey | null {
   const entry = ROUTE_MODULE_MAP.find((e) => pathname.startsWith(e.prefix));
   return entry ? entry.module : null;
+}
+
+/**
+ * Trasy API należące do modułów — wzorce, bo `[id]` bywa w środku ścieżki.
+ * Każdy wzorzec kończy się `(\/|$)`, żeby nie łapać tras sąsiednich
+ * (`/api/invoicesx`). Proxy blokuje trasę, gdy jej moduł jest zamrożony.
+ *
+ * Nowa trasa w katalogu modułu zamrożonego musi być objęta wzorcem — test
+ * `frozen-modules.test.ts` chodzi po `src/app/api` i tego pilnuje.
+ */
+export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: ModuleKey }> = [
+  { pattern: /^\/api\/clients\/[^/]+\/loyalty(\/|$)/, module: "loyalty" },
+  { pattern: /^\/api\/salons\/[^/]+\/loyalty-settings(\/|$)/, module: "loyalty" },
+  { pattern: /^\/api\/newsletters(\/|$)/, module: "newsletters" },
+  { pattern: /^\/api\/ai\/content\/newsletter(\/|$)/, module: "newsletters" },
+  { pattern: /^\/api\/invoices(\/|$)/, module: "invoices" },
+  { pattern: /^\/api\/appointments\/[^/]+\/invoice(\/|$)/, module: "invoices" },
+  { pattern: /^\/api\/notifications\/birthday(\/|$)/, module: "clientMarketing" },
+  { pattern: /^\/api\/notifications\/we-miss-you(\/|$)/, module: "clientMarketing" },
+  { pattern: /^\/api\/salons\/[^/]+\/birthday-settings(\/|$)/, module: "clientMarketing" },
+  { pattern: /^\/api\/salons\/[^/]+\/we-miss-you-settings(\/|$)/, module: "clientMarketing" },
+  { pattern: /^\/api\/ai\/notifications(\/|$)/, module: "aiNotifications" },
+];
+
+/**
+ * Ścieżka w postaci, w jakiej dopasuje ją router: zdekodowana z kodowania
+ * procentowego i bez powtórzonych ukośników. Bez tego `/api/%69nvoices` albo
+ * `/api//invoices` ominęłyby wzorce. Niepoprawne kodowanie zostaje bez zmian.
+ */
+function normalizePathname(pathname: string): string {
+  let decoded = pathname;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    // niepoprawna sekwencja %xx — dopasowujemy ścieżkę surową
+  }
+  return decoded.replace(/\/{2,}/g, "/");
+}
+
+/**
+ * Moduł zamrożony, do którego należy trasa API (null = trasa działa).
+ * Jedyny egzekutor: `src/proxy.ts`.
+ */
+export function frozenModuleForApiPath(pathname: string): ModuleKey | null {
+  const path = normalizePathname(pathname);
+  const entry = API_MODULE_PATTERNS.find(
+    (e) => isModuleFrozen(e.module) && e.pattern.test(path)
+  );
+  return entry ? entry.module : null;
+}
+
+/**
+ * Moduł zamrożony, do którego należy strona panelu (null = strona działa).
+ * Moduły przełączalne zwracają null — ich stan zależy od salonu i jest
+ * egzekwowany w interfejsie (`ModuleGate`), nie w proxy.
+ */
+export function frozenModuleForPage(pathname: string): ModuleKey | null {
+  const key = moduleForRoute(normalizePathname(pathname));
+  return key && isModuleFrozen(key) ? key : null;
 }
 
 /**

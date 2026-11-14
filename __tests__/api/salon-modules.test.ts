@@ -146,7 +146,7 @@ describe("/api/salons/[id]/modules", () => {
         body: {
           modules: {
             products: true, // przelaczalny => zapisany
-            voiceAi: true, // hardOff => ignorowany
+            loyalty: true, // hardOff => ignorowany
             notAModule: true, // nieznany => ignorowany
           },
         },
@@ -166,7 +166,7 @@ describe("/api/salons/[id]/modules", () => {
     // Odpowiedz zwraca rozwiazany stan: products wlaczony, hardOff nadal false.
     const data = body.data as Record<string, boolean>;
     expect(data.products).toBe(true);
-    expect(data.voiceAi).toBe(false);
+    expect(data.loyalty).toBe(false);
     expect(data.notAModule).toBeUndefined();
   });
 

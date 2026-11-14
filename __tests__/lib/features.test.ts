@@ -48,10 +48,10 @@ describe("resolveModules", () => {
     expect((state as Record<string, boolean>).notAModule).toBeUndefined();
   });
 
-  it("hardOff (voiceAi) jest zawsze false, nawet przy zapisie true", () => {
-    const state = resolveModules({ modules: { voiceAi: true } });
+  it("hardOff (loyalty) jest zawsze false, nawet przy zapisie true", () => {
+    const state = resolveModules({ modules: { loyalty: true } });
 
-    expect(state.voiceAi).toBe(false);
+    expect(state.loyalty).toBe(false);
 
     // Zaden modul hardOff nie wystepuje wsrod przelaczalnych.
     for (const mod of TOGGLEABLE_MODULES) {
@@ -61,12 +61,12 @@ describe("resolveModules", () => {
 
   it("wartosc nie-boolean jest ignorowana (wraca default)", () => {
     const state = resolveModules({
-      modules: { products: "yes", loyalty: 1, invoices: null },
+      modules: { products: "yes", promotions: 1, waitingList: null },
     });
 
     expect(state.products).toBe(false);
-    expect(state.loyalty).toBe(false);
-    expect(state.invoices).toBe(false);
+    expect(state.promotions).toBe(false);
+    expect(state.waitingList).toBe(false);
   });
 
   it("settingsJson bez pola modules lub nie-obiekt => defaults", () => {

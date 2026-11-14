@@ -65,7 +65,18 @@ describe("prawda w marketingu", () => {
     // Jeśli któryś moduł przestanie być hardOff, ten test trzeba świadomie
     // zaktualizować razem z tekstami sprzedażowymi.
     const hardOff = MODULES.filter((m) => m.hardOff).map((m) => m.key).sort();
-    expect(hardOff).toEqual(["fiscal", "socialPosts", "videoGen", "voiceAi"]);
+    expect(hardOff).toEqual([
+      "aiNotifications",
+      "clientMarketing",
+      "fiscal",
+      "invoices",
+      "loyalty",
+      "newsletters",
+      "pushNotifications",
+      "socialPosts",
+      "videoGen",
+      "voiceAi",
+    ]);
   });
 
   describe("strona sprzedażowa /dla-salonow", () => {
