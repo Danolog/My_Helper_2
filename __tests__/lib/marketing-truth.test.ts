@@ -44,6 +44,10 @@ const ONLINE_DEPOSITS = /Stripe \+ Blik|p[łl]atno[śs]ci zadatk[óo]w|zadatk[ó
 // Analizy sentymentu nie ma w kodzie: `grep -rniE "sentyment|sentiment" src`
 // nie znajduje żadnej implementacji.
 const SENTIMENT = /sentyment|sentiment/i;
+// Odpowiedzi na opinie AI tylko generuje, na żądanie właściciela (przycisk
+// „Generuj odpowiedz AI” w `src/app/dashboard/reviews/page.tsx`); zapisuje je
+// człowiek. Nic nie odpowiada automatycznie — nie ma takiego zadania cron.
+const AUTO_REVIEW_REPLIES = /automatyczn[a-z]* odpowied/i;
 // Znaczek przy planie nie może twierdzić nic o popularności (nie mamy liczb,
 // które by to pokrywały) ani oceniać planu („Polecany” — ocena bez podstaw
 // przy planie trzy razy droższym). Znaczek opisuje różnicę: „Z asystentem AI”.
@@ -142,6 +146,10 @@ describe("prawda w marketingu", () => {
       expectNoMatch(file, SENTIMENT);
     });
 
+    it.each(PLAN_OFFER_FILES)("%s nie obiecuje automatycznych odpowiedzi na opinie", (file) => {
+      expectNoMatch(file, AUTO_REVIEW_REPLIES);
+    });
+
     it.each(PLAN_OFFER_FILES)("%s nie twierdzi, że któryś plan jest najpopularniejszy ani polecany", (file) => {
       expectNoMatch(file, POPULARITY_CLAIM);
     });
@@ -158,6 +166,7 @@ describe("prawda w marketingu", () => {
       expect(feature).not.toMatch(/Stripe|Blik/i);
       expect(feature).not.toMatch(/Widget planowania/i);
       expect(feature).not.toMatch(SENTIMENT);
+      expect(feature).not.toMatch(AUTO_REVIEW_REPLIES);
       expect(feature).not.toMatch(POPULARITY_CLAIM);
     });
 
