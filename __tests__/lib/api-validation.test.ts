@@ -531,21 +531,26 @@ describe("createPromotionSchema", () => {
     expect(result).not.toBeNull();
   });
 
-  it("should accept all valid promotion types", () => {
-    const types = [
-      "percentage",
-      "fixed",
-      "package",
-      "buy2get1",
-      "happy_hours",
-      "first_visit",
-    ];
-    for (const type of types) {
+  it("should accept simple discount promotion types", () => {
+    for (const type of ["percentage", "fixed"]) {
       const result = validateBody(createPromotionSchema, {
         ...validPromotion,
         type,
       });
       expect(result).toBeNull();
+    }
+  });
+
+  // Promocje zlozone sa zamrozone (FROZEN_PROMOTION_TYPES w src/lib/features.ts)
+  // — schemat zna te typy, ale je odrzuca. Wczesniej ten test sprawdzal, ze
+  // wszystkie szesc typow przechodzi.
+  it("should reject frozen complex promotion types", () => {
+    for (const type of ["package", "buy2get1", "happy_hours", "first_visit"]) {
+      const result = validateBody(createPromotionSchema, {
+        ...validPromotion,
+        type,
+      });
+      expect(result).not.toBeNull();
     }
   });
 
