@@ -1,9 +1,13 @@
 # MyHelper — stan aplikacji i plan wejścia na rynek
 
-**Data:** 2026-11-14 · **Wersja:** 1.1.2 · **Badane:** kod (`main` @ 1320e69), produkcja `my-helper-2.vercel.app`, dokumenty z lipca 2026
+**Data:** 2026-11-14 · **Wersja planu:** 1.2 (aplikacja 1.1.2) · **Badane:** kod (`main` @ 1320e69), produkcja `my-helper-2.vercel.app`, dokumenty z lipca 2026
 
 Ten dokument uzupełnia `RAPORT_I_PLAN_NAPRAWY_2026-07.md`. Tamten raport zamknął jakość kodu.
 Ten dotyczy tego, czego kod nie pokazuje: działania na produkcji, pieniędzy, prawa i wyglądu.
+
+> **Zmiana 1.2 (2026-11-14, decyzja Darka): hosting i baza przenoszą się z Vercel + Neon na GCP**, region
+> `europe-central2` (Warszawa). Projekt i konto rozliczeniowe GCP istnieją. Asystent AI w aplikacji zostaje bez zmian
+> (OpenRouter). Zmienione: etap 0, tabela 4.4, B3, B4, B5, B10, B13, zadanie 4.3. Reszta planu bez zmian.
 
 ---
 
@@ -48,14 +52,14 @@ Wszystko poniżej zweryfikowane w kodzie albo na produkcji, chyba że zaznaczono
 |---|---|---|---|
 | B1 | **Trial nigdy nie wygasa, brak blokady dostępu** | `src/lib/subscription.ts:26-45` uznaje status `trialing` bez sprawdzania `trialEndsAt`; nie ma crona, który zmienia status. Konto testowe: trial skończył się 20.07.2026, 14.11 nadal ma pełny plan Pro i baner „kończy się za 0 dni". Brak subskrypcji = darmowy Basic bez limitu czasu. Layout panelu nie sprawdza subskrypcji. | Krytyczna |
 | B2 | **Zadatki trafiają na konto platformy** | `deposits/create-session/route.ts:272` tworzy zwykłą sesję Checkout na Twoim koncie Stripe. W całym `src` nie ma Stripe Connect (`transfer_data`, `on_behalf_of`, konta połączone). Pieniądze klientów salonu lądują u Ciebie i nie ma jak ich przekazać. Przyjmowanie cudzych pieniędzy to usługa płatnicza — do potwierdzenia z prawnikiem, ale w tej postaci nie nadaje się do sprzedaży. | Krytyczna |
-| B3 | **Funkcje w USA, baza we Frankfurcie** | Nagłówek `x-vercel-id: arn1::iad1`, baza Neon `eu-central-1`. Każde zapytanie do bazy leci przez Atlantyk. Pomiar: TTFB stron panelu 2,5–3,5 s, pojedyncze API 1,4–3 s, `get-session` 0,8 s. Strony publiczne (bez bazy) 250 ms. | Krytyczna, naprawa jedną linią |
-| B4 | **Przypomnienia nie działają na produkcji** | `vercel.json` ma tylko 2 dzienne crony czyszczące (limit planu Hobby). Harmonogram w GitHub Actions wyłączony 31.07. Crony `sms-reminders`, `push-reminders`, `push-reminders-24h` nie są przez nic wywoływane. | Krytyczna |
-| B5 | **Vercel Hobby nie pozwala na użytek komercyjny** | Warunki Vercela. Plan Pro (20 USD/mies.) jest konieczny przed sprzedażą i przy okazji rozwiązuje B4. | Krytyczna |
+| B3 | **Funkcje w USA, baza we Frankfurcie** | Nagłówek `x-vercel-id: arn1::iad1`, baza Neon `eu-central-1`. Każde zapytanie do bazy leci przez Atlantyk. Pomiar: TTFB stron panelu 2,5–3,5 s, pojedyncze API 1,4–3 s, `get-session` 0,8 s. Strony publiczne (bez bazy) 250 ms. | Krytyczna — rozwiązuje ją przeniesienie na GCP (aplikacja i baza w Warszawie) |
+| B4 | **Przypomnienia nie działają na produkcji** | `vercel.json` ma tylko 2 dzienne crony czyszczące (limit planu Hobby). Harmonogram w GitHub Actions wyłączony 31.07. Crony `sms-reminders`, `push-reminders`, `push-reminders-24h` nie są przez nic wywoływane. | Krytyczna — na GCP: Cloud Scheduler |
+| B5 | **Vercel Hobby nie pozwala na użytek komercyjny** | Warunki Vercela. ~~Plan Pro (20 USD/mies.) jest konieczny przed sprzedażą.~~ | **Nieaktualne od 1.2** — wychodzimy z Vercela |
 | B6 | **CI nie działa od 31.07** | Każde zadanie kończy się po kilku sekundach: „The job was not started because an Actions budget is preventing further use". Limit wyczerpał cron uruchamiany co kilka minut. Od tego czasu nic nie pilnuje jakości przy pushu. | Wysoka |
 | B7 | **Strony prawne nie istnieją** | `/privacy`, `/terms`, `/contact` → 404 na produkcji, a stopka do nich linkuje (`site-footer.tsx:41-43`). Brak usuwania konta i eksportu danych. | Krytyczna |
 | B8 | **Kartoteka przechowuje alergie klientów** | To prawdopodobnie dane o zdrowiu (art. 9 RODO), wymagające wyraźnej zgody i mocniejszej ochrony. Do potwierdzenia z prawnikiem. | Wysoka |
 | B9 | **Marketing obiecuje wyłączone funkcje** | „Asystent głosowy" jest w statystykach na stronie głównej, w planie Pro w cenniku, w rejestracji i na stronie subskrypcji, a moduł `voiceAi` ma `hardOff`. Do tego „Dołącz do setek salonów", ocena 4,9 i opinie podpisane „Tester Beta". | Wysoka |
-| B10 | **Produkcja i development dzielą jedną bazę** | Publiczna lista salonów pokazuje „Salon Test User" i „Beauty Studio Demo". `.env.local` wskazuje tę samą bazę Neon co produkcja. | Wysoka |
+| B10 | **Produkcja i development dzielą jedną bazę** | Publiczna lista salonów pokazuje „Salon Test User" i „Beauty Studio Demo". `.env.local` wskazuje tę samą bazę Neon co produkcja. | Wysoka — na GCP: osobna instancja Cloud SQL dla produkcji |
 | B11 | **Sesja wygasa po 15 minutach bezczynności** | `src/lib/auth.ts:26-27`. Właścicielka przy fotelu będzie wylogowywana kilkanaście razy dziennie. `updateAge: 0` dodatkowo zapisuje sesję do bazy przy każdym żądaniu. | Wysoka |
 | B12 | **Brak monitoringu błędów** | W `package.json` nie ma Sentry ani odpowiednika. O awarii dowiesz się od klienta. | Wysoka |
 | B13 | **Brak własnej domeny** | Adres `my-helper-2.vercel.app`. Domena jest potrzebna do Resend (DKIM), nazwy nadawcy SMS i zaufania. | Wysoka |
@@ -171,9 +175,10 @@ plus „Więcej" na dodatki i ustawienia. Na telefonie cztery ikony i środkowy 
 
 | Zmiana | Efekt |
 |---|---|
-| Funkcje Vercela w `fra1` | Panel kilka razy szybszy, zero zmian w kodzie aplikacji |
-| Jeden harmonogram: Vercel Cron na planie Pro | Znika workflow crona w GitHub Actions i zewnętrzne schedulery |
-| Osobna baza dla produkcji, lokalnie Docker | Koniec z testowaniem na danych klientów |
+| Cloud Run i Cloud SQL w `europe-central2` | Aplikacja i baza w jednym regionie — panel kilka razy szybszy |
+| Jeden harmonogram: Cloud Scheduler → `/api/cron/*` z `CRON_SECRET` | Znika workflow crona w GitHub Actions i crony w `vercel.json` |
+| Osobna instancja Cloud SQL dla produkcji, lokalnie Docker | Koniec z testowaniem na danych klientów |
+| `@vercel/blob` → Cloud Storage, `@vercel/analytics` usunięte | Brak zależności od Vercela w kodzie (dziś tylko `src/lib/storage.ts` i `src/app/layout.tsx`) |
 | `subscriptions/current` pobierane raz i współdzielone | Dziś 2–3 wywołania na stronę po 1,7 s każde |
 | Dane pulpitu i list ładowane po stronie serwera | Znika kaskada `salons/mine` → dane i ekrany ze spinnerami |
 | Usunięcie `twilio`, `elevenlabs` (D4) | Mniej zależności i podatności |
@@ -267,18 +272,23 @@ Wybierzesz kierunek na makiecie, a nie po przeróbce 87 stron.
 
 Rozmiary: S = do pół dnia, M = 1–2 dni, L = 3–5 dni pracy z agentem. To szacunki, nie zobowiązania.
 
-### Etap 0 — Fundament (bez pisania funkcji)
+### Etap 0 — Fundament na GCP (bez pisania funkcji)
 
 | # | Zadanie | Rozmiar | Kto |
 |---|---|---|---|
-| 0.1 | `git push origin main` — poprawki bezpieczeństwa z 14.11 na produkcję | S | Darek |
-| 0.2 | `"regions": ["fra1"]` w `vercel.json`, pomiar przed i po | S | agent |
-| 0.3 | Vercel Pro, pełny harmonogram cronów w `vercel.json`, `CRON_SECRET` | S | Darek + agent |
-| 0.4 | Odblokowanie GitHub Actions (limit wydatków), usunięcie workflow crona | S | Darek + agent |
-| 0.5 | Domena, DNS, `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL` | S | Darek |
-| 0.6 | Osobna baza produkcyjna w Neon, lokalnie Docker, usunięcie danych testowych | M | Darek + agent |
-| 0.7 | Przegląd zmiennych na Vercelu według `ZADANIA_WLASCICIELA.md`: Resend, SMSAPI, Blob, Upstash, Stripe | M | Darek |
-| 0.8 | Sentry + alert dostępności na `/api/health` | S | agent |
+| 0.1 | ~~`git push origin main` — poprawki bezpieczeństwa z 14.11~~ — zrobione (`1320e69` na `origin/main`) | S | Darek |
+| 0.2 | Konteneryzacja: `output: 'standalone'` w `next.config.ts`, `Dockerfile`, build lokalny i uruchomienie obrazu | S | agent |
+| 0.3 | GCP: włączenie API, Artifact Registry, konto serwisowe z minimalnymi rolami, Secret Manager na wszystkie sekrety | S | Darek + agent |
+| 0.4 | Cloud SQL Postgres 18 w `europe-central2` (pgvector, kopie automatyczne, PITR, połączenie przez Cloud SQL connector), osobna baza produkcyjna; lokalnie Docker | M | Darek + agent |
+| 0.5 | Przeniesienie danych Neon → Cloud SQL (zrzut i odtworzenie, role RLS/BYPASSRLS, weryfikacja liczby wierszy), usunięcie danych testowych z produkcji. Działanie nieodwracalne na danych produkcyjnych — wykonuje Darek albo Ethan po rozszerzeniu delegacji v1.12 z Neon na Cloud SQL | M | Darek / Ethan |
+| 0.6 | Cloud Run w `europe-central2`, pomiar TTFB przed i po (punkt odniesienia: 2,5–3,5 s na Vercelu) | S | agent |
+| 0.7 | Cloud Scheduler dla 6 cronów z `src/app/api/cron/` z `CRON_SECRET`; usunięcie `vercel.json` i `cron-scheduler.yml` | S | agent |
+| 0.8 | `@vercel/blob` → Cloud Storage w `src/lib/storage.ts`, przeniesienie istniejących plików; usunięcie `@vercel/analytics` | S | agent |
+| 0.9 | CI/CD: odblokowanie GitHub Actions (limit wydatków), wdrożenie na Cloud Run z `main` (Workload Identity Federation, bez kluczy JSON), `e2e-production.yml` przepięty z wdrożenia Vercela | M | Darek + agent |
+| 0.10 | Domena i DNS na Cloud Run, `BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL`, przekierowania OAuth Google i webhook Stripe na nowy adres | S | Darek |
+| 0.11 | Przegląd zmiennych według `ZADANIA_WLASCICIELA.md` (Resend, SMSAPI, Upstash, Stripe) przeniesionych do Secret Manager | M | Darek |
+| 0.12 | Sentry + uptime check i alert w Cloud Monitoring na `/api/health`; budżet i alert kosztów w GCP | S | agent |
+| 0.13 | Wyłączenie projektu na Vercelu i bazy Neon dopiero po tygodniu stabilnej pracy na GCP i udanym odtworzeniu kopii | S | Darek |
 
 ### Etap 1 — Pieniądze i prawda
 
@@ -322,7 +332,7 @@ Rozmiary: S = do pół dnia, M = 1–2 dni, L = 3–5 dni pracy z agentem. To sz
 |---|---|---|
 | 4.1 | Scenariusz na produkcji z prawdziwymi usługami: rejestracja → e-mail weryfikacyjny → trial → płatność Stripe → rezerwacja gościa → SMS potwierdzenia → przypomnienie z crona → anulowanie → wygaśnięcie trialu | L |
 | 4.2 | Ten sam scenariusz jako test E2E uruchamiany po każdym wdrożeniu | M |
-| 4.3 | Próbne odtworzenie bazy z kopii | S |
+| 4.3 | Próbne odtworzenie bazy z kopii Cloud SQL (PITR) | S |
 | 4.4 | Beta z 3–5 zaprzyjaźnionymi salonami przez 2 tygodnie, za darmo, z cotygodniową rozmową | — |
 | 4.5 | Lista kontrolna wydania i pierwsza płatna sprzedaż | S |
 
@@ -353,3 +363,4 @@ Rozmiary: S = do pół dnia, M = 1–2 dni, L = 3–5 dni pracy z agentem. To sz
 3. Czy są salony gotowe do bety?
 4. Kto zrobi regulamin i umowę powierzenia: prawnik czy szablon do weryfikacji?
 5. Jeden plan czy dwa na start? Dwa plany to zmiana planu w trakcie okresu, rozliczenia proporcjonalne i limity AI. Jeden plan na premierę uprościłby etap 1.1.
+6. Kto wykonuje przeniesienie danych produkcyjnych Neon → Cloud SQL (0.5): Ty czy Ethan po rozszerzeniu delegacji v1.12?
