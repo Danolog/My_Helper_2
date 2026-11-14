@@ -130,7 +130,7 @@ export function DlaSalonowPricing() {
               <div className="absolute -top-4 left-1/2 -translate-x-1/2 z-10">
                 <Badge variant="default" className="px-5 py-1.5 text-sm shadow-md rounded-full bg-primary hover:bg-primary/80 text-primary-foreground border-none">
                   <Star className="h-4 w-4 mr-2 fill-background" />
-                  Najczęstszy Wybór
+                  Polecany
                 </Badge>
               </div>
               <CardHeader className="pb-6 pt-12 px-8 relative z-10">

@@ -151,7 +151,7 @@ export function StepPlanSelection({
                 >
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                     <Badge className="px-3 py-0.5 text-xs shadow-sm">
-                      Najpopularniejszy
+                      Polecany
                     </Badge>
                   </div>
                   {selectedPlan === "pro" && (
