@@ -71,7 +71,7 @@ export const PUT = withApiHandler(
 
     // Konto o podanym e-mailu musi istnieć
     const [account] = await db
-      .select({ id: user.id })
+      .select({ id: user.id, emailVerified: user.emailVerified })
       .from(user)
       .where(eq(user.email, body.email))
       .limit(1);
@@ -79,6 +79,21 @@ export const PUT = withApiHandler(
       return NextResponse.json(
         { success: false, error: "Nie znaleziono konta o tym adresie e-mail" },
         { status: 404 }
+      );
+    }
+
+    // Podpinamy tylko konto z POTWIERDZONYM e-mailem (ta sama reguła co
+    // src/lib/client-match.ts). Inaczej ktoś, kto założy konto na e-mail
+    // przyszłego pracownika, dostałby po podpięciu dostęp do salonu. Błąd jest
+    // jawny, bo właściciel musi wiedzieć, dlaczego podpięcie się nie udało.
+    if (account.emailVerified !== true) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "To konto nie ma potwierdzonego adresu e-mail. Popros pracownika o potwierdzenie adresu (link z wiadomosci po rejestracji) i sprobuj ponownie.",
+        },
+        { status: 409 }
       );
     }
 
