@@ -4,7 +4,7 @@ import { withApiHandler } from "@/lib/api-handler";
 import { createEmployeeSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import { apiRateLimit } from "@/lib/rate-limit";
-import { getSalonContext } from "@/lib/salon-context";
+import { getSalonContext, requireSalonStaff } from "@/lib/salon-context";
 import { employees } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -133,9 +133,17 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create employee",
   },
   async ({ body }) => {
+    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
+    // pozwalał każdemu zalogowanemu kontu dodać pracownika do cudzego salonu.
+    // body.salonId tylko porównywany (inny => 403). Dodawanie pracowników: tylko
+    // właściciel (salons.ownerId), bez grantów — jak PUT /api/employees/[id].
+    const guard = await requireSalonStaff({ roles: [], requestedSalonId: body.salonId });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
+
     // userId celowo NIE jest przyjmowany z body — łączenie konta wyłącznie
     // przez PUT /api/employees/[id]/link-account (walidacje cross-tenant).
-    const { salonId, firstName, lastName, phone, email, photoUrl, role, color } = body;
+    const { firstName, lastName, phone, email, photoUrl, role, color } = body;
 
     // Get next available color if not provided
     const employeeColor = color || await getNextAvailableColor(salonId);
