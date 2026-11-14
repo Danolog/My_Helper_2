@@ -6,7 +6,6 @@ import {
   Sparkles,
   ArrowRight,
   Search,
-  Star,
   CalendarCheck,
   Calendar,
 } from "lucide-react";
@@ -127,18 +126,6 @@ export function DlaSalonowHero() {
                         <div className="text-xs text-muted-foreground">w tym tygodniu</div>
                       </div>
                     </div>
-                  </div>
-                  {/* Rating floating card */}
-                  <div className="absolute -left-4 md:-left-12 -bottom-2 md:-bottom-4 bg-card/90 backdrop-blur-sm border border-border/30 rounded-xl p-3 md:p-4 shadow-[var(--shadow-warm-md)]">
-                    <div className="flex items-center gap-2">
-                      <div className="flex">
-                        {[1, 2, 3, 4, 5].map((i) => (
-                          <Star key={i} className="h-3.5 w-3.5 fill-gold text-gold" />
-                        ))}
-                      </div>
-                      <span className="text-sm font-semibold">4.9</span>
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">Od naszych klientow</div>
                   </div>
                 </div>
               </div>

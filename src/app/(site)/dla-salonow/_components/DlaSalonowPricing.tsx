@@ -28,7 +28,7 @@ const PLANS_PREVIEW = {
       "Pelne zarzadzanie salonem bez narzedzi AI. Idealny na start.",
     features: [
       "Kalendarz pracownikow i grafiki",
-      "Rezerwacje online i platnosci",
+      "Rezerwacje online",
       "Kartoteka klientow",
       "Raporty i statystyki",
       "Powiadomienia SMS i email",
@@ -38,10 +38,9 @@ const PLANS_PREVIEW = {
     name: PLANS.pro.name,
     price: PLANS.pro.priceMonthly,
     description:
-      "Pelna funkcjonalnosc z asystentem AI glosowym, biznesowym i content marketingowym.",
+      "Pełna funkcjonalność z asystentem AI biznesowym i content marketingowym.",
     features: [
       "Wszystko z planu Basic",
-      "Asystent glosowy AI",
       "Asystent biznesowy AI",
       "Generowanie tresci marketingowych",
       "Proaktywne sugestie i analizy",
@@ -131,7 +130,7 @@ export function DlaSalonowPricing() {
               <div className="absolute -top-4 left-1/2 -translate-x-1/2 z-10">
                 <Badge variant="default" className="px-5 py-1.5 text-sm shadow-md rounded-full bg-primary hover:bg-primary/80 text-primary-foreground border-none">
                   <Star className="h-4 w-4 mr-2 fill-background" />
-                  Najczęstszy Wybór
+                  Z asystentem AI
                 </Badge>
               </div>
               <CardHeader className="pb-6 pt-12 px-8 relative z-10">

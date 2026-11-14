@@ -46,8 +46,8 @@ const FEATURES = [
   },
   {
     icon: Shield,
-    title: "Platnosci online",
-    description: "Bezpieczne platnosci zadatkow przez Stripe i rezerwacje online 24/7.",
+    title: "Rezerwacje online",
+    description: "Klienci rezerwują wizyty przez internet o każdej porze, a Ty od razu widzisz je w kalendarzu.",
     color: "sage" as const,
   },
   {

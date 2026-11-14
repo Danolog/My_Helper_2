@@ -7,6 +7,7 @@ import {
   Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TRIAL_DAYS } from "@/lib/constants";
 
 export function DlaSalonowCta() {
   return (
@@ -33,12 +34,12 @@ export function DlaSalonowCta() {
             Gotowy na zmianę?
           </h2>
           <p className="text-muted-foreground max-w-2xl mx-auto text-xl font-light mb-12">
-            Dołącz do setek salonów, które już wzmocniły swój wizerunek.
-            14 dni za darmo, bez zobowiązań.
+            Sprawdź MyHelper w swoim salonie.
+            {TRIAL_DAYS} dni za darmo, bez zobowiązań.
           </p>
           <Button asChild size="lg" className="h-16 px-12 text-lg rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:shadow-[0_12px_40px_rgb(0,0,0,0.18)] hover:-translate-y-1 transition-all">
             <Link href="/register">
-              Rozpocznij ekskluzywny dostęp
+              Załóż konto za darmo
               <ArrowRight className="h-5 w-5 ml-2" />
             </Link>
           </Button>
