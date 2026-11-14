@@ -23,7 +23,9 @@ import {
   TOGGLEABLE_MODULES,
   frozenModuleForApiPath,
   frozenModuleForPage,
+  frozenModuleForPath,
   isModuleFrozen,
+  normalizePathname,
   resolveModules,
   type ModuleKey,
 } from "@/lib/features";
@@ -179,6 +181,85 @@ describe("frozenModuleForApiPath", () => {
     "/api/%zz", // niepoprawne kodowanie nie może wywrócić proxy
   ])("trasa sąsiednia przechodzi: %s", (path) => {
     expect(frozenModuleForApiPath(path)).toBeNull();
+  });
+});
+
+describe("normalizePathname — jedna postać ścieżki przed dopasowaniem", () => {
+  it.each<[string, string]>([
+    ["/api/invoices", "/api/invoices"],
+    ["/api/invoices/", "/api/invoices"],
+    // powtórzone ukośniki, także na początku
+    ["//api/invoices", "/api/invoices"],
+    ["/api//invoices///abc", "/api/invoices/abc"],
+    // segmenty `.` i `..` — bez polegania na parserze URL
+    ["/api/./invoices", "/api/invoices"],
+    ["/api/x/../invoices", "/api/invoices"],
+    ["/api/x/y/../../invoices/abc", "/api/invoices/abc"],
+    ["/../../api/invoices", "/api/invoices"],
+    ["/api/invoices/..", "/api"],
+    // kodowanie procentowe: litery, kropki, ukośnik, odwrócony ukośnik
+    ["/api/%69nvoices", "/api/invoices"],
+    ["/%61pi/invoices", "/api/invoices"],
+    ["/api/x/%2e%2e/invoices", "/api/invoices"],
+    ["/api/x/%2E%2E/invoices", "/api/invoices"],
+    ["/api%2Finvoices", "/api/invoices"],
+    ["/api%5Cinvoices", "/api/invoices"],
+    ["/api\\invoices", "/api/invoices"],
+    // wielkość liter
+    ["/API/Invoices", "/api/invoices"],
+    // błędne kodowanie w jednym miejscu nie wyłącza dekodowania reszty
+    ["/api/%69nvoices/%zz", "/api/invoices/%zz"],
+    ["/api/%69nvoices/%E0%A4%A", "/api/invoices/%e0%a4%a"],
+    ["/api/%zz", "/api/%zz"],
+    ["", "/"],
+  ])("%s → %s", (raw, expected) => {
+    expect(normalizePathname(raw)).toBe(expected);
+  });
+
+  it("jest idempotentna dla ścieżek już znormalizowanych", () => {
+    for (const route of API_ROUTES) {
+      expect(normalizePathname(route)).toBe(route);
+      expect(normalizePathname(normalizePathname(route))).toBe(route);
+    }
+  });
+});
+
+describe("frozenModuleForPath — jedno pytanie o trasę API i stronę", () => {
+  it.each<[string, "api" | "page", ModuleKey]>([
+    ["/api/invoices", "api", "invoices"],
+    ["/api/x/../invoices", "api", "invoices"],
+    ["/api/./clients/abc/./loyalty/redeem", "api", "loyalty"],
+    ["/api/x/%2e%2e/notifications/birthday", "api", "clientMarketing"],
+    ["//api/newsletters", "api", "newsletters"],
+    ["/api/%69nvoices/%zz", "api", "invoices"],
+    ["/api\\invoices", "api", "invoices"],
+    ["/dashboard/invoices", "page", "invoices"],
+    ["/dashboard/x/../invoices/abc", "page", "invoices"],
+    ["/dashboard/./settings/loyalty", "page", "loyalty"],
+    ["//dashboard/content-generator/newsletters", "page", "newsletters"],
+    ["/x/../dashboard/%69nvoices", "page", "invoices"],
+  ])("%s → %s:%s", (path, kind, module) => {
+    expect(frozenModuleForPath(path)).toEqual({ kind, module });
+  });
+
+  it.each([
+    // `..` wychodzi z katalogu modułu zamrożonego — trasa sąsiednia działa
+    "/api/invoices/../clients",
+    "/api/clients/abc/loyalty/../appointments",
+    "/dashboard/invoices/../clients",
+    "/api/clients",
+    "/dashboard",
+    "/",
+    "/api/%zz",
+  ])("normalizacja nie blokuje tras sąsiednich: %s", (path) => {
+    expect(frozenModuleForPath(path)).toBeNull();
+  });
+
+  it("frozenModuleForApiPath i frozenModuleForPage to to samo pytanie zawężone do rodzaju", () => {
+    expect(frozenModuleForApiPath("/api/x/../invoices")).toBe("invoices");
+    expect(frozenModuleForPage("/api/x/../invoices")).toBeNull();
+    expect(frozenModuleForPage("/dashboard/x/../invoices")).toBe("invoices");
+    expect(frozenModuleForApiPath("/dashboard/x/../invoices")).toBeNull();
   });
 });
 

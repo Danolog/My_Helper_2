@@ -18,8 +18,7 @@ import {
 import {
   MODULE_DISABLED_CODE,
   MODULE_DISABLED_MESSAGE,
-  frozenModuleForApiPath,
-  frozenModuleForPage,
+  frozenModuleForPath,
 } from "@/lib/features";
 
 // ============================================================
@@ -136,15 +135,18 @@ export async function proxy(request: NextRequest) {
   // --- 0. Moduly zamrozone (hardOff) — przed CSRF i auth, dla kazdej metody ---
   // Rejestr (src/lib/features.ts) jest jedynym nosnikiem reguly; tu tylko
   // egzekucja. Trasa API => 404 MODULE_DISABLED, strona panelu => /dashboard.
-  // Oba pytania ida do rejestru bez wstepnego filtra po prefiksie — rejestr
-  // sam normalizuje sciezke (kodowanie, podwojne ukosniki, wielkosc liter).
-  if (frozenModuleForApiPath(pathname)) {
+  // Jedno pytanie do rejestru, bez wstepnego filtra po surowym prefiksie:
+  // rejestr raz normalizuje sciezke (kodowanie procentowe, powtorzone
+  // ukosniki, segmenty . i .., wielkosc liter) i sprawdza OBA dopasowania —
+  // trase API i strone panelu. Wariant zapisu sciezki nie omija blokady.
+  const frozen = frozenModuleForPath(pathname);
+  if (frozen?.kind === "api") {
     return NextResponse.json(
       { success: false, code: MODULE_DISABLED_CODE, error: MODULE_DISABLED_MESSAGE },
       { status: 404 }
     );
   }
-  if (frozenModuleForPage(pathname)) {
+  if (frozen?.kind === "page") {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

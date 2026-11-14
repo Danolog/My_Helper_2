@@ -255,43 +255,81 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
 ];
 
 /**
- * Ścieżka sprowadzona do jednej postaci przed dopasowaniem: zdekodowana z
- * kodowania procentowego, bez powtórzonych ukośników, małymi literami. Bez
- * tego `/api/%69nvoices`, `/api//invoices` albo `/API/Invoices` ominęłyby
- * wzorce, gdyby router uznał je za tę samą trasę. Blokada jest celowo
- * szersza niż router — wariant, którego router nie zna, i tak kończy się 404.
- * Niepoprawne kodowanie zostaje bez zmian.
+ * Ścieżka sprowadzona do jednej postaci przed dopasowaniem do rejestru —
+ * JEDYNE miejsce normalizacji; wzorce i prefiksy rejestru zakładają tę postać:
+ * 1. zdekodowana z kodowania procentowego (`/api/%69nvoices`, `/api%2Finvoices`);
+ *    przy błędnym kodowaniu dekodujemy pojedyncze sekwencje ASCII, a błędne
+ *    zostają — jedno `%zz` nie wyłącza dekodowania reszty ścieżki,
+ * 2. odwrócone ukośniki jak zwykłe (tak czyta je parser URL),
+ * 3. bez pustych segmentów (`//api//invoices`) i bez segmentów `.` / `..`
+ *    (`/api/x/../invoices`) — także zakodowanych (`%2e%2e`),
+ * 4. bez ukośnika końcowego, małymi literami.
+ *
+ * Blokada jest celowo szersza niż router: wariant, którego router nie zna,
+ * i tak kończy się 404, a wariant, który router sprowadza do trasy
+ * kanonicznej, musi dostać tę samą decyzję co ona. Funkcja nie polega na tym,
+ * że parser URL wcześniej ścieżkę uporządkował.
  */
-function normalizePathname(pathname: string): string {
-  let decoded = pathname;
+export function normalizePathname(pathname: string): string {
+  let decoded: string;
   try {
     decoded = decodeURIComponent(pathname);
   } catch {
-    // niepoprawna sekwencja %xx — dopasowujemy ścieżkę surową
+    decoded = pathname.replace(/%[0-7][0-9a-f]/gi, (seq) =>
+      String.fromCharCode(parseInt(seq.slice(1), 16))
+    );
   }
-  return decoded.replace(/\/{2,}/g, "/").toLowerCase();
+
+  const segments: string[] = [];
+  for (const segment of decoded.replace(/\\/g, "/").split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return `/${segments.join("/")}`.toLowerCase();
+}
+
+export interface FrozenTarget {
+  /** `api` — trasa API (odpowiedź 404), `page` — strona panelu (przekierowanie). */
+  kind: "api" | "page";
+  module: ModuleKey;
 }
 
 /**
- * Moduł zamrożony, do którego należy trasa API (null = trasa działa).
- * Jedyny egzekutor: `src/proxy.ts`.
- */
-export function frozenModuleForApiPath(pathname: string): ModuleKey | null {
-  const path = normalizePathname(pathname);
-  const entry = API_MODULE_PATTERNS.find(
-    (e) => isModuleFrozen(e.module) && e.pattern.test(path)
-  );
-  return entry ? entry.module : null;
-}
-
-/**
- * Moduł zamrożony, do którego należy strona panelu (null = strona działa).
+ * Czy ścieżka należy do modułu zamrożonego — jedno pytanie dla tras API
+ * i stron panelu, na ścieżce znormalizowanej raz. Jedyny egzekutor:
+ * `src/proxy.ts`. null = ścieżka działa.
+ *
  * Moduły przełączalne zwracają null — ich stan zależy od salonu i jest
  * egzekwowany w interfejsie (`ModuleGate`), nie w proxy.
  */
+export function frozenModuleForPath(pathname: string): FrozenTarget | null {
+  const path = normalizePathname(pathname);
+
+  const api = API_MODULE_PATTERNS.find(
+    (e) => isModuleFrozen(e.module) && e.pattern.test(path)
+  );
+  if (api) return { kind: "api", module: api.module };
+
+  const page = moduleForRoute(path);
+  if (page && isModuleFrozen(page)) return { kind: "page", module: page };
+
+  return null;
+}
+
+/** Moduł zamrożony, do którego należy trasa API (null = trasa działa). */
+export function frozenModuleForApiPath(pathname: string): ModuleKey | null {
+  const target = frozenModuleForPath(pathname);
+  return target?.kind === "api" ? target.module : null;
+}
+
+/** Moduł zamrożony, do którego należy strona panelu (null = strona działa). */
 export function frozenModuleForPage(pathname: string): ModuleKey | null {
-  const key = moduleForRoute(normalizePathname(pathname));
-  return key && isModuleFrozen(key) ? key : null;
+  const target = frozenModuleForPath(pathname);
+  return target?.kind === "page" ? target.module : null;
 }
 
 /**

@@ -60,6 +60,21 @@ function request(path: string, method: string = "GET", cookie?: string) {
 
 const SESSION = "better-auth.session_token=test-session";
 
+/**
+ * Żądanie z DOKŁADNIE taką ścieżką, jaką podano — bez parsera URL, który
+ * sam usuwa segmenty `.` i `..`. Proxy nie może polegać na tym, że ktoś
+ * wcześniej ścieżkę uporządkował.
+ */
+function rawRequest(pathname: string, method: string = "GET"): NextRequest {
+  return {
+    nextUrl: { pathname, search: "" },
+    url: `${ORIGIN}/`,
+    method,
+    headers: new Headers(),
+    cookies: { get: () => undefined, has: () => false },
+  } as unknown as NextRequest;
+}
+
 /** Odpowiedź „przepuść dalej” z NextResponse.next(). */
 function passedThrough(response: Response): boolean {
   return response.headers.get("x-middleware-next") === "1";
@@ -107,6 +122,53 @@ describe("proxy: trasy API modułów zamrożonych", () => {
     const response = await proxy(request(path, "GET", SESSION));
     expect(response.status).toBe(404);
     expect((await response.json()).code).toBe(MODULE_DISABLED_CODE);
+  });
+
+  // Możliwe obejście (przegląd bezpieczeństwa): ścieżka zapisana inaczej niż
+  // w rejestrze. Każdy wariant ma dostać tę samą blokadę co postać kanoniczna.
+  it.each([
+    "//api/invoices",
+    "/api//clients//abc//loyalty",
+    "/api/./invoices",
+    "/api/x/../invoices",
+    "/api/x/y/../../invoices/abc/send-email",
+    "/api/clients/abc/x/../loyalty/redeem",
+    "/api/x/%2e%2e/invoices",
+    "/api/%2e/notifications/birthday",
+    "/%61pi/invoices",
+    "/api/%6Eewsletters",
+    "/api%2Finvoices",
+    "/api\\invoices",
+    "/api/%69nvoices/%zz",
+    "/API/Clients/abc/Loyalty/",
+  ])("surowa ścieżka %s → 404 MODULE_DISABLED (każda metoda)", async (path) => {
+    for (const method of METHODS) {
+      const response = await proxy(rawRequest(path, method));
+      expect(response.status, `${method} ${path}`).toBe(404);
+      expect((await response.json()).code).toBe(MODULE_DISABLED_CODE);
+    }
+  });
+
+  it.each([
+    "//dashboard/invoices",
+    "/dashboard/./invoices",
+    "/dashboard/x/../invoices/abc",
+    "/dashboard/x/%2e%2e/settings/loyalty",
+    "/x/../dashboard/content-generator/newsletters",
+    "/dashboard%2Finvoices",
+    "/Dashboard/%69nvoices/",
+  ])("surowa ścieżka strony %s → przekierowanie na /dashboard", async (path) => {
+    const response = await proxy(rawRequest(path));
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/dashboard`);
+  });
+
+  it.each([
+    "/api/invoices/../clients",
+    "/api/clients/abc/loyalty/../appointments",
+  ])("surowa ścieżka %s wychodzi z modułu zamrożonego — nie jest blokowana", async (path) => {
+    const response = await proxy(rawRequest(path));
+    expect(response.status).not.toBe(404);
   });
 
   it("komunikat blokady to tekst uzgodniony z produktem", () => {
