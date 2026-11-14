@@ -30,6 +30,18 @@ const DEFAULT_PLANS = [
 ];
 
 /**
+ * Feature lists come from code (`PLAN_FEATURES`), not from `features_json`:
+ * rows seeded earlier promise features that are switched off (B9). Unknown
+ * slugs keep their stored list.
+ */
+function featuresFor(slug: string, stored: unknown): string[] {
+  if (slug in PLAN_FEATURES) {
+    return [...PLAN_FEATURES[slug as keyof typeof PLAN_FEATURES]];
+  }
+  return Array.isArray(stored) ? (stored as string[]) : [];
+}
+
+/**
  * Seed plans into database if they don't exist.
  */
 async function ensurePlansExist() {
@@ -84,7 +96,7 @@ export async function GET() {
         name: plan.name,
         slug: plan.slug,
         priceMonthly: plan.priceMonthly,
-        features: plan.featuresJson as string[],
+        features: featuresFor(plan.slug, plan.featuresJson),
         isActive: plan.isActive,
       })),
     });

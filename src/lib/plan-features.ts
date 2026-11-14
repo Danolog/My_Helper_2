@@ -5,8 +5,8 @@
  * `/api/subscription-plans` przy pustej tabeli oraz `scripts/seed-test.ts`)
  * i stamtąd są pokazywane w cenniku, rejestracji i na stronie subskrypcji.
  *
- * UWAGA: zmiana tutaj NIE aktualizuje istniejących wierszy w bazie — po
- * edycji trzeba wykonać UPDATE na `subscription_plans` (SQL w opisie PR).
+ * API (`GET /api/subscription-plans`) zawsze zwraca listy stąd, niezależnie
+ * od zawartości `features_json` w bazie — UPDATE na produkcji niepotrzebny.
  *
  * Zasada (plan wejścia na rynek, B9): na liście jest tylko to, co produkt
  * faktycznie robi. Moduły `hardOff` z `src/lib/features.ts` (asystent
