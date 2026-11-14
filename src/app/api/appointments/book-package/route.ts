@@ -4,6 +4,7 @@ import { validateBody, bookPackageSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { assertSalonRefs } from "@/lib/salon-refs";
 import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 /**
@@ -42,6 +43,12 @@ export async function POST(request: Request) {
       );
     }
     const repo = forSalon(salonId);
+
+    // P1 (Ryan): klient i pracownik z body musza nalezec do salonu z sesji —
+    // inaczej pakiet podpinalby cudzego klienta albo blokowal kalendarz
+    // pracownika innego salonu (overlap/timeBlocks filtruja po employeeId).
+    const refsError = await assertSalonRefs(salonId, { clientId, employeeId });
+    if (refsError) return refsError;
 
     // 1. Get the package promotion (scoped to the caller's salon)
     const promotion = await repo.findOne(promotions, promotionId);
