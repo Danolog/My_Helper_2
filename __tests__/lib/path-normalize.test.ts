@@ -34,6 +34,11 @@ describe("isAmbiguousPath — odmowa z góry", () => {
     "/api/x/%252e%252e/invoices",
     "/api/%2569nvoices",
     "/api/%25252finvoices",
+    // po jednym dekodowaniu w ścieżce nadal jest znak procentu
+    "/search/100%25",
+    "/a%25b",
+    "/api/%25",
+    "/api/%25zz",
     // bajt zerowy
     "/api/invoices%00",
     // błędne kodowanie procentowe
@@ -61,8 +66,6 @@ describe("isAmbiguousPath — odmowa z góry", () => {
     "/dashboard/clients/Jan%20Kowalski",
     "/salons/%C5%BB%C3%B3%C5%82ty-salon",
     "/a%2Db/c%40d",
-    // dosłowny znak procentu (zakodowany raz)
-    "/search/100%25",
     "/_next/static/chunks/app/dashboard/clients/%5Bid%5D/page.js",
   ])("%s → jednoznaczna", (path) => {
     expect(isAmbiguousPath(path)).toBe(false);

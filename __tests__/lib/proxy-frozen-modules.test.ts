@@ -207,6 +207,9 @@ describe("proxy: ścieżka dwuznaczna jest odrzucana z góry", () => {
     "/api/%zz",
     "/api/clients%",
     "/salons/%C5",
+    // po jednym dekodowaniu nadal jest znak procentu
+    "/api/search/100%25",
+    "/salons/a%25b",
   ];
 
   it.each(ambiguous)("%s → 404 INVALID_PATH (każda metoda)", async (path) => {
@@ -229,7 +232,6 @@ describe("proxy: ścieżka dwuznaczna jest odrzucana z góry", () => {
     "/api/clients/%C5%82ukasz",
     "/api/clients/Jan%20Kowalski",
     "/api/salons/%C5%BB%C3%B3%C5%82ty",
-    "/api/search/100%25",
     "/api/%68ealth",
   ])("poprawna ścieżka API %s przechodzi dalej", async (path) => {
     const response = await proxy(request(path, "GET", SESSION));
