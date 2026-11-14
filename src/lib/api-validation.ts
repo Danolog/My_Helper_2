@@ -5,6 +5,7 @@
  * Returns field-level error messages in Polish for consistency with the UI.
  */
 import { z } from "zod";
+import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
 
 // ==========================================
 // Validation Helper
@@ -717,14 +718,39 @@ export const albumPhotosSchema = z.object({
   photoIds: z.array(z.string()).min(1, "Wymagane co najmniej jedno zdjecie"),
 });
 
-export const createGalleryPhotoSchema = z.object({
-  salonId: requiredString("Salon ID"),
-  employeeId: z.string().nullable().optional(),
-  imageUrl: requiredString("URL zdjecia"),
-  title: z.string().nullable().optional(),
-  description: z.string().nullable().optional(),
-  tags: z.array(z.string()).optional(),
-});
+// Id pracownika/uslugi: kolumny uuid w bazie, wiec smiec dalby 500. Celowo
+// luzny format UUID (dowolny wariant), nie z.uuid() — id z seeda
+// ("00000000-0000-0000-0000-...") nie sa v4, a UI wysyla je 1:1.
+const optionalUuidLikeId = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "Nieprawidlowy identyfikator")
+  .nullable()
+  .optional();
+
+// Adres zdjecia: wylacznie to, co zwrocil nasz upload galerii (lib/upload-url).
+const galleryUploadUrl = z
+  .string()
+  .refine(isOwnGalleryUploadUrl, "Adres zdjecia musi pochodzic z uploadu galerii")
+  .nullable()
+  .optional();
+
+// Kontrakt = body z src/components/gallery/photo-upload-dialog.tsx.
+export const createGalleryPhotoSchema = z
+  .object({
+    salonId: requiredString("Salon ID"),
+    employeeId: optionalUuidLikeId,
+    serviceId: optionalUuidLikeId,
+    beforePhotoUrl: galleryUploadUrl,
+    afterPhotoUrl: galleryUploadUrl,
+    description: z.string().max(2000).nullable().optional(),
+    productsUsed: z.string().max(1000).nullable().optional(),
+    techniques: z.string().max(1000).nullable().optional(),
+    duration: z.number().int().min(0).max(1440, "Czas trwania maksymalnie 1440 minut").nullable().optional(),
+  })
+  .refine((d) => Boolean(d.beforePhotoUrl || d.afterPhotoUrl), {
+    message: "Wymagane co najmniej jedno zdjecie (przed lub po)",
+    path: ["afterPhotoUrl"],
+  });
 
 export const updateGalleryPhotoSchema = z.object({
   title: z.string().nullable().optional(),
