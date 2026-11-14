@@ -22,6 +22,8 @@ export const revalidate = 30;
  */
 const getCachedSalonDetail = unstable_cache(
   async (id: string) => {
+    // Trasa PUBLICZNA (katalog) — WYŁĄCZNIE pola publiczne. Bez `settingsJson`
+    // (konfig fiskalny/drukarka/loyalty) i `ownerId` — wyciek w nieautoryzowanej odpowiedzi.
     const salonColumns = {
       id: salons.id,
       name: salons.name,
@@ -29,8 +31,6 @@ const getCachedSalonDetail = unstable_cache(
       email: salons.email,
       address: salons.address,
       industryType: salons.industryType,
-      settingsJson: salons.settingsJson,
-      ownerId: salons.ownerId,
       createdAt: salons.createdAt,
       updatedAt: salons.updatedAt,
     };

@@ -99,3 +99,43 @@ describe("GET /api/available-slots — past slots", () => {
     expect(body.data.slots).toEqual([]);
   });
 });
+
+describe("GET /api/available-slots — time block privacy", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T08:00:00"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does not leak private time block reason in public response", async () => {
+    mockDbSelect
+      .mockReturnValueOnce(
+        chainMock([{ employeeId: EMPLOYEE_ID, dayOfWeek: 2, startTime: "09:00", endTime: "17:00" }]),
+      )
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(
+        chainMock([
+          {
+            employeeId: EMPLOYEE_ID,
+            startTime: new Date("2026-07-07T13:00:00"),
+            endTime: new Date("2026-07-07T14:00:00"),
+            blockType: "personal",
+            reason: "Wizyta u lekarza - onkolog",
+          },
+        ]),
+      );
+
+    const res = await GET(requestFor("2026-07-07"));
+    const body = await res.json();
+
+    expect(body.success).toBe(true);
+    expect(body.data.blockedRanges).toEqual([
+      { start: "13:00", end: "14:00", type: "personal", label: "personal" },
+    ]);
+    expect(JSON.stringify(body)).not.toContain("lekarza");
+  });
+});
