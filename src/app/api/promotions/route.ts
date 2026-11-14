@@ -1,42 +1,24 @@
 import { NextResponse } from "next/server";
 import { eq, desc } from "drizzle-orm";
 import { validateBody, createPromotionSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// GET bez salonId listuje promocje bez filtra najemcy (zachowanie historyczne)
-// — ta gałąź świadomie zostaje na surowym db (gałąź z salonId idzie przez forSalon):
-// eslint-disable-next-line no-restricted-imports
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { getSalonContext, hasFeatureAccess, requireSalonStaff } from "@/lib/salon-context";
+import { requireSalonStaff } from "@/lib/salon-context";
 import { promotions } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-// GET /api/promotions - List promotions with optional salonId filter
+// GET /api/promotions - List promotions of the session salon
 export async function GET(request: Request) {
   try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    // Faza 3 (role): promocje tylko owner, chyba że czasowy grant "promotions";
-    // nie-owner zawsze w zakresie WŁASNEGO salonu (query salonId ignorowane,
-    // gałąź historyczna "bez filtra" zostaje owner-only).
-    const ctx = await getSalonContext();
-    if (!ctx) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-    if (ctx.role !== "owner" && !(await hasFeatureAccess(ctx, "promotions"))) {
-      return NextResponse.json(
-        { success: false, error: "Brak uprawnien" },
-        { status: 403 }
-      );
-    }
-
+    // Faza 3 (role) + P0 (przegląd Ryana): promocje tylko owner albo czasowy
+    // grant "promotions", ZAWSZE salon z sesji. Wcześniej właściciel czytał
+    // salon z query (dowolny), a bez salonId — promocje wszystkich salonów.
     const { searchParams } = new URL(request.url);
-    const salonId =
-      ctx.role === "owner" ? searchParams.get("salonId") : ctx.salonId;
+    const guard = await requireSalonStaff({
+      feature: "promotions",
+      requestedSalonId: searchParams.get("salonId"),
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
 
     // Select only the columns needed by the promotions UI
     const promotionColumns = {
@@ -52,16 +34,14 @@ export async function GET(request: Request) {
       createdAt: promotions.createdAt,
     };
 
-    // Gałąź z salonId — przez forSalon (RLS + jawny eq(salonId), obowiązek raw()).
-    const result = salonId
-      ? await forSalon(salonId).raw((tx) =>
-          tx
-            .select(promotionColumns)
-            .from(promotions)
-            .where(eq(promotions.salonId, salonId))
-            .orderBy(desc(promotions.createdAt))
-        )
-      : await db.select(promotionColumns).from(promotions).orderBy(desc(promotions.createdAt));
+    // forSalon: RLS + jawny eq(salonId), obowiązek raw().
+    const result = await forSalon(salonId).raw((tx) =>
+      tx
+        .select(promotionColumns)
+        .from(promotions)
+        .where(eq(promotions.salonId, salonId))
+        .orderBy(desc(promotions.createdAt))
+    );
 
     return NextResponse.json({
       success: true,

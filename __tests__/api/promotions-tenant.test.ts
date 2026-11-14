@@ -8,7 +8,7 @@
  * czasowy grant "promotions".
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { POST } from "@/app/api/promotions/route";
+import { GET, POST } from "@/app/api/promotions/route";
 import { SALON_A, SALON_B } from "./salon-staff-harness";
 
 const m = await vi.hoisted(async () =>
@@ -97,5 +97,49 @@ describe("POST /api/promotions — izolacja salonu", () => {
     m.getSession.mockResolvedValue(null);
     const res = await create(promo(SALON_A));
     expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /api/promotions — izolacja salonu", () => {
+  beforeEach(() => m.reset());
+
+  const list = (query: string) =>
+    GET(new Request(`http://localhost/api/promotions${query}`));
+
+  it("właściciel salonu A nie listuje promocji salonu B (403)", async () => {
+    m.asOwnerOf(SALON_A);
+    m.txRows.push([{ id: "p-b", salonId: SALON_B, name: "Tajna -90%" }]);
+
+    const res = await list(`?salonId=${SALON_B}`);
+
+    expect(res.status).toBe(403);
+    expect(m.rlsSalonIds()).toEqual([]);
+  });
+
+  it("właściciel bez salonId => tylko własny salon (nie katalog wszystkich salonów)", async () => {
+    m.asOwnerOf(SALON_A);
+    m.txRows.push([{ id: "p-a", salonId: SALON_A, name: "Lato" }]);
+
+    const res = await list("");
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data).toEqual([{ id: "p-a", salonId: SALON_A, name: "Lato" }]);
+    expect(new Set(m.rlsSalonIds())).toEqual(new Set([SALON_A]));
+  });
+
+  it("pracownik bez grantu => 403", async () => {
+    m.asStaffOf(SALON_A, "employee");
+    const res = await list(`?salonId=${SALON_A}`);
+    expect(res.status).toBe(403);
+  });
+
+  it("pracownik z grantem => własny salon", async () => {
+    m.asStaffOf(SALON_A, "receptionist");
+    m.hasTemporaryAccess.mockResolvedValue(true);
+    m.txRows.push([{ id: "p-a", salonId: SALON_A, name: "Lato" }]);
+    const res = await list(`?salonId=${SALON_A}`);
+    expect(res.status).toBe(200);
+    expect(new Set(m.rlsSalonIds())).toEqual(new Set([SALON_A]));
   });
 });
