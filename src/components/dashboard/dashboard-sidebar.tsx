@@ -37,7 +37,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { moduleForRoute } from "@/lib/features";
+import { isRouteEnabledForModules } from "@/lib/features";
 import { isRouteAllowedForRole } from "@/lib/role-access";
 import { cn } from "@/lib/utils";
 import type { LucideIcon } from "lucide-react";
@@ -248,8 +248,7 @@ export function SidebarNav({
     ...group,
     items: group.items.filter((item) => {
       if (!isRouteAllowedForRole(item.href, role)) return false;
-      const moduleKey = moduleForRoute(item.href);
-      return moduleKey === null || modules[moduleKey];
+      return isRouteEnabledForModules(item.href, modules);
     }),
   })).filter((group) => group.items.length > 0);
 

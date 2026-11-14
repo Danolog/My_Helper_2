@@ -243,6 +243,18 @@ export function moduleForRoute(pathname: string): ModuleKey | null {
 }
 
 /**
+ * Czy pozycja nawigacji prowadząca pod `href` ma być widoczna przy danym
+ * stanie modułów salonu: trasa rdzenia zawsze, trasa modułu tylko gdy moduł
+ * jest włączony i niezamrożony. Jedyny warunek filtra — wołają go menu
+ * boczne, dolna nawigacja i paleta poleceń (pilnuje
+ * `__tests__/components/DashboardNavFilter.test.tsx`).
+ */
+export function isRouteEnabledForModules(href: string, modules: ModulesState): boolean {
+  const key = moduleForRoute(href);
+  return key === null || (modules[key] === true && !isModuleFrozen(key));
+}
+
+/**
  * Trasy API należące do modułów — wzorce, bo `[id]` bywa w środku ścieżki.
  * Każdy wzorzec kończy się `(\/|$)`, żeby nie łapać tras sąsiednich
  * (`/api/invoicesx`). Proxy blokuje trasę, gdy jej moduł jest zamrożony.

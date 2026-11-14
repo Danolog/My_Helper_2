@@ -55,7 +55,7 @@ import {
 } from "@/components/ui/command";
 import { useAISearch } from "@/hooks/use-ai-search";
 import { useVoiceInput } from "@/hooks/use-voice-input";
-import { BASIC_REPORT_SLUGS, moduleForRoute } from "@/lib/features";
+import { BASIC_REPORT_SLUGS, isRouteEnabledForModules } from "@/lib/features";
 import { isRouteAllowedForRole } from "@/lib/role-access";
 import { cn } from "@/lib/utils";
 
@@ -136,8 +136,7 @@ export function CommandPalette() {
 
   const isPageVisible = (page: CommandPage) => {
     if (!isRouteAllowedForRole(page.href, role)) return false;
-    const moduleKey = moduleForRoute(page.href);
-    return moduleKey === null || modules[moduleKey];
+    return isRouteEnabledForModules(page.href, modules);
   };
   const visibleNavPages = NAV_PAGES.filter(isPageVisible);
   const visibleReportPages = REPORT_PAGES.filter((page) => {
