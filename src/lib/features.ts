@@ -2,7 +2,7 @@
  * Feature flags per salon (Faza 2 planu wydania — „chudy UI domyślnie").
  *
  * Rdzeń produktu (kalendarz, rezerwacje, klienci, usługi, pracownicy,
- * zadatki, przypomnienia SMS/push, opinie, galeria, 3 podstawowe raporty)
+ * zadatki, przypomnienia SMS, opinie, galeria, 3 podstawowe raporty)
  * jest ZAWSZE włączony i nie występuje w tym rejestrze.
  *
  * Moduły opcjonalne są domyślnie WYŁĄCZONE — właściciel salonu włącza je
@@ -171,6 +171,14 @@ const FROZEN_MODULE_KEYS: ReadonlySet<ModuleKey> = new Set(
 export function isModuleFrozen(key: ModuleKey): boolean {
   return FROZEN_MODULE_KEYS.has(key);
 }
+
+/**
+ * Informacja w Ustawienia → Moduły o funkcjach, których salon mógł używać
+ * przed zamrożeniem, i o tym, co dzieje się z jego danymi. Żeby ją zdjąć,
+ * wystarczy ustawić `null` — strona jej wtedy nie pokazuje.
+ */
+export const FROZEN_MODULES_NOTICE: string | null =
+  "Faktury i program lojalnościowy są obecnie niedostępne. Wystawione faktury i punkty klientów pozostają zapisane na koncie salonu.";
 
 /** Kod błędu i komunikat dla zamrożonej funkcji (odpowiedź proxy i bramka strony). */
 export const MODULE_DISABLED_CODE = "MODULE_DISABLED";

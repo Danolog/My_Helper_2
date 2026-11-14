@@ -1,7 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import ModulesSettingsPage from "@/app/dashboard/settings/modules/page";
-import { DEFAULT_MODULES, MODULES, TOGGLEABLE_MODULES } from "@/lib/features";
+import {
+  DEFAULT_MODULES,
+  FROZEN_MODULES_NOTICE,
+  MODULES,
+  TOGGLEABLE_MODULES,
+} from "@/lib/features";
 
 // Mock Next.js Link
 vi.mock("next/link", () => ({
@@ -120,6 +125,19 @@ describe("ModulesSettingsPage", () => {
     expect(document.body.textContent).not.toMatch(/wkr[óo]tce/i);
     expect(document.body.textContent).not.toMatch(/kolejnych wydaniach/i);
     expect(screen.getAllByRole("switch")).toHaveLength(TOGGLEABLE_MODULES.length);
+  });
+
+  it("informuje, ze faktury i program lojalnosciowy sa niedostepne, a dane zostaja", async () => {
+    render(<ModulesSettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Magazyn")).toBeInTheDocument();
+    });
+
+    expect(FROZEN_MODULES_NOTICE).toBe(
+      "Faktury i program lojalnościowy są obecnie niedostępne. Wystawione faktury i punkty klientów pozostają zapisane na koncie salonu."
+    );
+    expect(screen.getByTestId("frozen-modules-notice")).toHaveTextContent(FROZEN_MODULES_NOTICE!);
   });
 
   it("nie pobiera salonu z publicznego katalogu GET /api/salons (fallback bral cudzy salon)", async () => {

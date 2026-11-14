@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
 import {
+  FROZEN_MODULES_NOTICE,
   TOGGLEABLE_MODULES,
   type ModuleKey,
   type ModulesState,
@@ -169,6 +170,15 @@ export default function ModulesSettingsPage() {
           ))}
         </div>
       </div>
+
+      {FROZEN_MODULES_NOTICE && (
+        <p
+          className="text-sm text-muted-foreground mb-6"
+          data-testid="frozen-modules-notice"
+        >
+          {FROZEN_MODULES_NOTICE}
+        </p>
+      )}
 
       {/* Save Button */}
       <div className="flex items-center justify-between">
