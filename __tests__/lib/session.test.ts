@@ -217,26 +217,19 @@ describe("requireAdmin", () => {
     mockWhere.mockReturnValue({ limit: mockLimit });
   });
 
-  it("should return isAdmin=true when user role is 'admin'", async () => {
-    const fakeSession = createFakeSession({ role: "admin" });
-    mockGetSession.mockResolvedValue(fakeSession);
+  it.each(["admin", "owner"])(
+    "user.role '%s' bez salonu NIE daje isAdmin (własność = salons.ownerId)",
+    async (role) => {
+      const fakeSession = createFakeSession({ role });
+      mockGetSession.mockResolvedValue(fakeSession);
+      mockLimit.mockResolvedValue([]); // brak salonu
 
-    const result = await requireAdmin();
+      const result = await requireAdmin();
 
-    expect(result).toEqual({ session: fakeSession, isAdmin: true });
-    // Should not query the database when role is already admin
-    expect(mockSelect).not.toHaveBeenCalled();
-  });
-
-  it("should return isAdmin=true when user role is 'owner'", async () => {
-    const fakeSession = createFakeSession({ role: "owner" });
-    mockGetSession.mockResolvedValue(fakeSession);
-
-    const result = await requireAdmin();
-
-    expect(result).toEqual({ session: fakeSession, isAdmin: true });
-    expect(mockSelect).not.toHaveBeenCalled();
-  });
+      expect(result).toEqual({ session: fakeSession, isAdmin: false });
+      expect(mockSelect).toHaveBeenCalled();
+    }
+  );
 
   it("should return isAdmin=true when user owns a salon", async () => {
     const fakeSession = createFakeSession({ role: "client" });
@@ -283,20 +276,50 @@ describe("requireDashboardAccess", () => {
     mockWhere.mockReturnValue({ limit: mockLimit });
   });
 
-  it("should return role 'owner' without db query when user role is 'admin'", async () => {
-    const fakeSession = createFakeSession({ role: "admin" });
+  it.each(["admin", "owner"])(
+    "user.role '%s' bez salonu i bez rekordu pracownika => brak wstępu do panelu",
+    async (role) => {
+      const fakeSession = createFakeSession({ role });
+      mockGetSession.mockResolvedValue(fakeSession);
+      mockLimit.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+      const result = await requireDashboardAccess();
+
+      expect(result).toEqual({ session: fakeSession, allowed: false, role: null });
+    }
+  );
+
+  it("user.role 'owner' u pracownika => rola z employees, nie 'owner'", async () => {
+    const fakeSession = createFakeSession({ role: "owner" });
     mockGetSession.mockResolvedValue(fakeSession);
+    mockLimit
+      .mockResolvedValueOnce([]) // brak salonu właścicielskiego
+      .mockResolvedValueOnce([{ id: "emp-1", salonId: "salon-1", role: "employee" }]);
 
     const result = await requireDashboardAccess();
 
-    expect(result).toEqual({ session: fakeSession, allowed: true, role: "owner" });
-    expect(mockSelect).not.toHaveBeenCalled();
+    expect(result).toEqual({ session: fakeSession, allowed: true, role: "employee" });
+  });
+
+  it("konto z kilkoma aktywnymi rekordami pracownika => brak wstępu (fail-closed)", async () => {
+    const fakeSession = createFakeSession({ role: "client" });
+    mockGetSession.mockResolvedValue(fakeSession);
+    mockLimit.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { id: "emp-1", salonId: "salon-1", role: "employee" },
+      { id: "emp-2", salonId: "salon-2", role: "employee" },
+    ]);
+
+    const result = await requireDashboardAccess();
+
+    expect(result).toEqual({ session: fakeSession, allowed: false, role: null });
   });
 
   it("should return role 'owner' when user owns a salon", async () => {
     const fakeSession = createFakeSession({ role: "client" });
     mockGetSession.mockResolvedValue(fakeSession);
-    mockLimit.mockResolvedValueOnce([{ id: "salon-1" }]);
+    mockLimit
+      .mockResolvedValueOnce([{ id: "salon-1" }])
+      .mockResolvedValueOnce([]); // brak własnego rekordu employees
 
     const result = await requireDashboardAccess();
 
@@ -308,7 +331,7 @@ describe("requireDashboardAccess", () => {
     mockGetSession.mockResolvedValue(fakeSession);
     mockLimit
       .mockResolvedValueOnce([]) // no owned salon
-      .mockResolvedValueOnce([{ role: "employee" }]); // active employee
+      .mockResolvedValueOnce([{ id: "emp-1", salonId: "salon-1", role: "employee" }]); // active employee
 
     const result = await requireDashboardAccess();
 
@@ -320,7 +343,7 @@ describe("requireDashboardAccess", () => {
     mockGetSession.mockResolvedValue(fakeSession);
     mockLimit
       .mockResolvedValueOnce([]) // no owned salon
-      .mockResolvedValueOnce([{ role: "receptionist" }]);
+      .mockResolvedValueOnce([{ id: "emp-2", salonId: "salon-1", role: "receptionist" }]);
 
     const result = await requireDashboardAccess();
 

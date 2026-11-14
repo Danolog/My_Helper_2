@@ -44,6 +44,42 @@ export async function requireAuth(requiredRole?: UserRole): Promise<AuthResult |
   return { session, user: session.user };
 }
 
+/**
+ * Admin PLATFORMY (narzędzia operacyjne, np. /api/diagnostics) — jawna lista
+ * e-maili z env ADMIN_EMAILS (po przecinku, bez rozróżniania wielkości liter).
+ * Pusta/nieustawiona lista => nikt. NIE używa user.role: rola konta nie
+ * oznacza admina platformy (na produkcji "owner" ma jedno konto właściciela
+ * salonu), a własność salonu to salons.ownerId.
+ *
+ * Na liście umieszczaj tylko e-maile ISTNIEJĄCYCH kont — e-mail jest unikalny,
+ * więc nikt inny nie zarejestruje się na zajęty adres.
+ */
+export async function requirePlatformAdmin(): Promise<AuthResult | NextResponse> {
+  const session = await auth.api.getSession({ headers: await headers() });
+
+  if (!session) {
+    return NextResponse.json(
+      { success: false, error: "Wymagane logowanie" },
+      { status: 401 }
+    );
+  }
+
+  const admins = (process.env.ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  const email = session.user.email?.trim().toLowerCase();
+
+  if (!email || !admins.includes(email)) {
+    return NextResponse.json(
+      { success: false, error: "Brak uprawnień" },
+      { status: 403 }
+    );
+  }
+
+  return { session, user: session.user };
+}
+
 /** Type guard: returns true when requireAuth returned an error response */
 export function isAuthError(result: AuthResult | NextResponse): result is NextResponse {
   return result instanceof NextResponse;
