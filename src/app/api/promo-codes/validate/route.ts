@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { validatePromoCodeSchema } from "@/lib/api-validation";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import { promoCodes, promotions } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -79,6 +80,20 @@ export const POST = withApiHandler(
           valid: false,
           errorType: "usage_limit",
           reason: `Limit uzycia tego kodu zostal wyczerpany (${promoCode.usedCount}/${promoCode.usageLimit}).`,
+          code: promoCode.code,
+        },
+      });
+    }
+
+    // Kod powiazany z promocja typu zamrozonego (src/lib/features.ts: happy
+    // hours, pakiety, 2+1, pierwsza wizyta) nie daje rabatu.
+    if (promotion && isPromotionTypeFrozen(promotion.type)) {
+      return NextResponse.json({
+        success: true,
+        data: {
+          valid: false,
+          errorType: "promotion_unavailable",
+          reason: "Promocja powiazana z tym kodem jest obecnie niedostepna.",
           code: promoCode.code,
         },
       });

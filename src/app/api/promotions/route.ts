@@ -6,6 +6,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // — ta gałąź świadomie zostaje na surowym db (gałąź z salonId idzie przez forSalon):
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
@@ -63,10 +64,14 @@ export async function GET(request: Request) {
         )
       : await db.select(promotionColumns).from(promotions).orderBy(desc(promotions.createdAt));
 
+    // Promocje typow zamrozonych (src/lib/features.ts) zostaja w bazie, ale
+    // panel ich nie widzi — nie da sie ich edytowac ani wlaczyc.
+    const visible = result.filter((promotion) => !isPromotionTypeFrozen(promotion.type));
+
     return NextResponse.json({
       success: true,
-      data: result,
-      count: result.length,
+      data: visible,
+      count: visible.length,
     });
   } catch (error) {
     logger.error("[Promotions API] Database error", { error: error });

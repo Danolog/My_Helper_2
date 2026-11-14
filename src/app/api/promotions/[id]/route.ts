@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { validateBody, updatePromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { promotions } from "@/lib/schema";
@@ -26,7 +27,8 @@ export async function GET(
 
     const promotion = await forSalon(salonId).findOne(promotions, id);
 
-    if (!promotion) {
+    // Promocja typu zamrozonego (src/lib/features.ts) jest dla panelu niewidoczna.
+    if (!promotion || isPromotionTypeFrozen(promotion.type)) {
       return NextResponse.json(
         { success: false, error: "Promotion not found" },
         { status: 404 }
@@ -77,7 +79,8 @@ export async function PUT(
     // Check promotion exists in the caller's salon
     const existing = await forSalon(salonId).findOne(promotions, id);
 
-    if (!existing) {
+    // Promocji typu zamrozonego (src/lib/features.ts) nie da sie edytowac ani wlaczyc.
+    if (!existing || isPromotionTypeFrozen(existing.type)) {
       return NextResponse.json(
         { success: false, error: "Promotion not found" },
         { status: 404 }

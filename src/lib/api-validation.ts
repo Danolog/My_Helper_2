@@ -5,6 +5,20 @@
  * Returns field-level error messages in Polish for consistency with the UI.
  */
 import { z } from "zod";
+import { isPromotionTypeFrozen } from "@/lib/features";
+
+/**
+ * Typ promocji. Typy zamrozone (FROZEN_PROMOTION_TYPES w src/lib/features.ts:
+ * happy hours, pakiety, 2+1, pierwsza wizyta) sa odrzucane juz na walidacji —
+ * nie da sie ich utworzyc ani zmienic na nie istniejacej promocji.
+ */
+const promotionTypeSchema = z
+  .enum(["percentage", "fixed", "package", "buy2get1", "happy_hours", "first_visit"], {
+    message: "Nieprawidlowy typ promocji",
+  })
+  .refine((type) => !isPromotionTypeFrozen(type), {
+    message: "Ten typ promocji jest obecnie niedostępny",
+  });
 
 // ==========================================
 // Validation Helper
@@ -224,9 +238,7 @@ export const createAppointmentSchema = z.object({
 export const createPromotionSchema = z.object({
   salonId: requiredString("Salon ID"),
   name: requiredString("Nazwa"),
-  type: z.enum(["percentage", "fixed", "package", "buy2get1", "happy_hours", "first_visit"], {
-    message: "Nieprawidlowy typ promocji",
-  }),
+  type: promotionTypeSchema,
   value: z.preprocess(
     (val) => {
       if (typeof val === "number") return val;
@@ -417,9 +429,7 @@ export const updateSalonSchema = z.object({
  */
 export const updatePromotionSchema = z.object({
   name: z.string().min(1, "Nazwa jest wymagana").optional(),
-  type: z.enum(["percentage", "fixed", "package", "buy2get1", "happy_hours", "first_visit"], {
-    message: "Nieprawidlowy typ promocji",
-  }).optional(),
+  type: promotionTypeSchema.optional(),
   value: z.union([z.string(), z.number()]).optional(),
   startDate: z.string().nullable().optional(),
   endDate: z.string().nullable().optional(),
