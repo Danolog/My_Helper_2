@@ -7,7 +7,7 @@ jobs:
   e2e-production:
     name: Production Health Checks
     if: github.event.deployment_status.state == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Playwright 1.58.2 nie obsługuje Ubuntu 26 (ubuntu-latest)
     timeout-minutes: 5
     env:
       BASE_URL: ${{ secrets.BETTER_AUTH_BASE_URL_PROD }}
