@@ -7,6 +7,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { featuresFor } from "@/lib/plan-features";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 
 /**
@@ -81,7 +82,7 @@ export async function GET() {
           name: targetPlan.name,
           slug: targetPlan.slug,
           priceMonthly: targetPlan.priceMonthly,
-          features: targetPlan.featuresJson as string[],
+          features: featuresFor(targetPlan.slug, targetPlan.featuresJson),
         };
       }
     }
@@ -108,7 +109,7 @@ export async function GET() {
         name: row.plan.name,
         slug: row.plan.slug,
         priceMonthly: row.plan.priceMonthly,
-        features: row.plan.featuresJson as string[],
+        features: featuresFor(row.plan.slug, row.plan.featuresJson),
         isActive: row.plan.isActive,
       },
       scheduledPlan,

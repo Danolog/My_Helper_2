@@ -1,12 +1,16 @@
 /**
  * Listy funkcji planów Basic i Pro — jedno źródło prawdy w repo.
  *
- * Trafiają do tabeli `subscription_plans.features_json` (auto-seed w
- * `/api/subscription-plans` przy pustej tabeli oraz `scripts/seed-test.ts`)
- * i stamtąd są pokazywane w cenniku, rejestracji i na stronie subskrypcji.
+ * Obie trasy, które oddają listy do interfejsu, biorą je stąd przez
+ * `featuresFor()`, niezależnie od zawartości `features_json` w bazie:
+ * - `GET /api/subscription-plans` (cennik, rejestracja, zmiana planu),
+ * - `GET /api/subscriptions/current` (karta planu na stronie subskrypcji,
+ *   także plan zaplanowany po obniżeniu).
+ * Dlatego UPDATE starych wierszy na produkcji jest niepotrzebny.
  *
- * API (`GET /api/subscription-plans`) zawsze zwraca listy stąd, niezależnie
- * od zawartości `features_json` w bazie — UPDATE na produkcji niepotrzebny.
+ * Kolumna `subscription_plans.features_json` nadal jest zapisywana (auto-seed
+ * w `/api/subscription-plans` przy pustej tabeli oraz `scripts/seed-test.ts`),
+ * ale dla planów Basic i Pro nikt jej nie czyta.
  *
  * Zasada (plan wejścia na rynek, B9): na liście jest tylko to, co produkt
  * faktycznie robi. Moduły `hardOff` z `src/lib/features.ts` (asystent
@@ -43,3 +47,16 @@ export const PLAN_FEATURES = {
     "Priorytetowe wsparcie techniczne",
   ],
 } as const satisfies Record<"basic" | "pro", readonly string[]>;
+
+/**
+ * Lista funkcji planu do pokazania w interfejsie. Dla planów z
+ * `PLAN_FEATURES` zawsze lista z kodu — `stored` (kolumna `features_json`)
+ * jest ignorowane, bo wiersze założone wcześniej obiecują wyłączone funkcje
+ * (B9). Plan o nieznanym slugu zachowuje listę z bazy.
+ */
+export function featuresFor(slug: string, stored: unknown): string[] {
+  if (slug in PLAN_FEATURES) {
+    return [...PLAN_FEATURES[slug as keyof typeof PLAN_FEATURES]];
+  }
+  return Array.isArray(stored) ? (stored as string[]) : [];
+}

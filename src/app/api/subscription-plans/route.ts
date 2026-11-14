@@ -5,7 +5,7 @@ import { PLANS } from "@/lib/constants";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { PLAN_FEATURES } from "@/lib/plan-features";
+import { PLAN_FEATURES, featuresFor } from "@/lib/plan-features";
 import { subscriptionPlans } from "@/lib/schema";
 // Subscription plans rarely change — revalidate every hour to reduce DB queries
 export const revalidate = 3600;
@@ -28,18 +28,6 @@ const DEFAULT_PLANS = [
     featuresJson: [...PLAN_FEATURES.pro],
   },
 ];
-
-/**
- * Feature lists come from code (`PLAN_FEATURES`), not from `features_json`:
- * rows seeded earlier promise features that are switched off (B9). Unknown
- * slugs keep their stored list.
- */
-function featuresFor(slug: string, stored: unknown): string[] {
-  if (slug in PLAN_FEATURES) {
-    return [...PLAN_FEATURES[slug as keyof typeof PLAN_FEATURES]];
-  }
-  return Array.isArray(stored) ? (stored as string[]) : [];
-}
 
 /**
  * Seed plans into database if they don't exist.
