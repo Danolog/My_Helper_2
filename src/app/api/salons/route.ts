@@ -146,6 +146,21 @@ export async function POST(request: Request) {
     const { name, phone, email, address, industryType } = body;
     const ownerId = authResult.user.id;
 
+    // Jedno konto = jeden salon: salon-context i get-user-salon rozwiązują
+    // salon po ownerId z limit(1) bez ORDER BY — drugi salon robi kontekst
+    // właściciela niedeterministycznym.
+    const [existing] = await db
+      .select({ id: salons.id })
+      .from(salons)
+      .where(eq(salons.ownerId, ownerId))
+      .limit(1);
+    if (existing) {
+      return NextResponse.json(
+        { success: false, error: "To konto ma już salon" },
+        { status: 409 }
+      );
+    }
+
     const [newSalon] = await db
       .insert(salons)
       .values({

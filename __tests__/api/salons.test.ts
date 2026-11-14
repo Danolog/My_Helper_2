@@ -220,3 +220,20 @@ describe("POST /api/salons — właściciel wyłącznie z sesji", () => {
     expect(store.salons).toHaveLength(2);
   });
 });
+
+describe("POST /api/salons — jedno konto, jeden salon", () => {
+  // salon-context / get-user-salon szukają salonu po ownerId z limit(1) bez
+  // ORDER BY — drugi salon tego samego konta robi kontekst niedeterministycznym.
+  it("konto, które ma już salon — 409, drugi salon nie powstaje", async () => {
+    sessionUserId = OWNER_A;
+    const { status } = await callPost({ name: "Drugi salon A" });
+    expect(status).toBe(409);
+    expect(salonsOf(OWNER_A)).toHaveLength(1);
+  });
+
+  it("konto bez salonu tworzy pierwszy — 201", async () => {
+    sessionUserId = CLIENT;
+    expect((await callPost({ name: "Pierwszy" })).status).toBe(201);
+    expect(salonsOf(CLIENT)).toHaveLength(1);
+  });
+});
