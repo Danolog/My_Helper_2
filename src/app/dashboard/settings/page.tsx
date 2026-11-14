@@ -37,7 +37,7 @@ const SETTINGS_ITEMS = [
   },
   {
     label: "Powiadomienia",
-    description: "Szablony SMS, email, push i ustawienia urodzinowe",
+    description: "Kanaly powiadomien: przypomnienia SMS i potwierdzenia platnosci",
     href: "/dashboard/settings/notifications",
     icon: Bell,
   },

@@ -106,7 +106,7 @@ const SETTINGS_PAGES: CommandPage[] = [
   { label: "Ustawienia", href: "/dashboard/settings", icon: Settings },
   { label: "Dane salonu", href: "/dashboard/settings/salon", icon: Building2 },
   { label: "Platnosci Stripe", href: "/dashboard/settings/payments", icon: CreditCard },
-  { label: "Powiadomienia (ustawienia)", href: "/dashboard/settings/notifications", icon: Bell, keywords: ["urodziny"] },
+  { label: "Powiadomienia (ustawienia)", href: "/dashboard/settings/notifications", icon: Bell, keywords: ["sms", "przypomnienia"] },
   { label: "Program lojalnosciowy", href: "/dashboard/settings/loyalty", icon: Gift, keywords: ["punkty", "nagrody"] },
   { label: "Drukarka fiskalna", href: "/dashboard/settings/fiscal", icon: Printer, keywords: ["kasa", "paragon"] },
 ];

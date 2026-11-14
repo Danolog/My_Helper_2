@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { mutationFetch } from "@/lib/api-client";
 import type { Notification, BirthdayClient, InactiveClient } from "../_types";
 
@@ -42,6 +43,9 @@ interface UseNotificationsDataReturn {
 }
 
 export function useNotificationsData(): UseNotificationsDataReturn {
+  // Urodziny i "tesknimy" to modul clientMarketing z rejestru
+  // (src/lib/features.ts) — wylaczony albo zamrozony: nie pytamy jego tras.
+  const clientMarketingEnabled = useModuleEnabled("clientMarketing");
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -155,10 +159,10 @@ export function useNotificationsData(): UseNotificationsDataReturn {
 
   // Auto-check birthdays when salonId is available
   useEffect(() => {
-    if (salonId && !birthdayChecked) {
+    if (clientMarketingEnabled && salonId && !birthdayChecked) {
       checkBirthdayClients();
     }
-  }, [salonId, birthdayChecked, checkBirthdayClients]);
+  }, [clientMarketingEnabled, salonId, birthdayChecked, checkBirthdayClients]);
 
   // Send birthday notifications
   const sendBirthdayNotifications = async () => {
@@ -223,10 +227,10 @@ export function useNotificationsData(): UseNotificationsDataReturn {
 
   // Auto-check inactive clients when salonId is available
   useEffect(() => {
-    if (salonId && !inactiveChecked) {
+    if (clientMarketingEnabled && salonId && !inactiveChecked) {
       checkInactiveClients();
     }
-  }, [salonId, inactiveChecked, checkInactiveClients]);
+  }, [clientMarketingEnabled, salonId, inactiveChecked, checkInactiveClients]);
 
   // Send "We miss you" notifications
   const sendWeMissYouNotifications = async () => {
