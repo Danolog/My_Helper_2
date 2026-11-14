@@ -10,6 +10,7 @@
 import { useRef } from "react";
 import { Mic, MicOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useVoiceInput } from "@/hooks/use-voice-input";
@@ -26,6 +27,9 @@ export function VoiceTextarea({
   ...props
 }: VoiceTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Głos to moduł z rejestru (src/lib/features.ts) — wyłączony albo zamrożony:
+  // zwykłe pole tekstowe, bez mikrofonu (trasa STT zwraca wtedy 404).
+  const voiceEnabled = useModuleEnabled("voiceAi");
 
   const { isListening, isProcessing, startListening, stopListening, isSupported } =
     useVoiceInput({
@@ -66,10 +70,10 @@ export function VoiceTextarea({
     <div className="relative">
       <Textarea
         ref={textareaRef}
-        className={cn("pr-12", className)}
+        className={cn(voiceEnabled && "pr-12", className)}
         {...props}
       />
-      {isSupported && (
+      {voiceEnabled && isSupported && (
         <Button
           type="button"
           variant="ghost"

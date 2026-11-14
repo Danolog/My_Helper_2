@@ -39,6 +39,8 @@ export function AppointmentHeader({
   // Faktury to moduł z rejestru (src/lib/features.ts) — wyłączony albo
   // zamrożony chowa przyciski faktury.
   const invoicesEnabled = useModuleEnabled("invoices");
+  // Fiskalizacja tak samo: wyłączona albo zamrożona chowa przyciski paragonu.
+  const fiscalEnabled = useModuleEnabled("fiscal");
 
   return (
     <div className="flex items-center gap-4 mb-6">
@@ -104,24 +106,25 @@ export function AppointmentHeader({
                 Generuj fakture
               </Button>
             ))}
-          {fiscalReceipt ? (
-            <Button
-              variant="outline"
-              onClick={onReceiptAction}
-              data-testid="view-receipt-btn"
-            >
-              <Receipt className="h-4 w-4 mr-2" />
-              Podglad paragonu
-            </Button>
-          ) : (
-            <Button
-              onClick={onReceiptAction}
-              data-testid="print-receipt-btn"
-            >
-              <Printer className="h-4 w-4 mr-2" />
-              Drukuj paragon
-            </Button>
-          )}
+          {fiscalEnabled &&
+            (fiscalReceipt ? (
+              <Button
+                variant="outline"
+                onClick={onReceiptAction}
+                data-testid="view-receipt-btn"
+              >
+                <Receipt className="h-4 w-4 mr-2" />
+                Podglad paragonu
+              </Button>
+            ) : (
+              <Button
+                onClick={onReceiptAction}
+                data-testid="print-receipt-btn"
+              >
+                <Printer className="h-4 w-4 mr-2" />
+                Drukuj paragon
+              </Button>
+            ))}
         </div>
       )}
     </div>

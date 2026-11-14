@@ -276,18 +276,16 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
   { pattern: /^\/api\/ai\/notifications(\/|$)/, module: "aiNotifications" },
   { pattern: /^\/api\/push(\/|$)/, module: "pushNotifications" },
   { pattern: /^\/api\/cron\/push-reminders(-24h)?(\/|$)/, module: "pushNotifications" },
-  // Moduły zamrożone wcześniej (kod kasowany w B3–B5). Trzy trasy głosowe
-  // (stt, tts, interpret-command) są jeszcze wołane z niezamrożonego
-  // interfejsu — zamraża je osobna zmiana razem z ukryciem wywołujących.
-  {
-    pattern: /^\/api\/ai\/voice\/(?!(stt|tts|interpret-command)(\/|$))/,
-    module: "voiceAi",
-  },
+  // Moduły zamrożone wcześniej (kod kasowany w B3–B5). Wywołujący trasy
+  // głosowe (dyktowanie, czytanie na głos) i paragon wizyty są schowani
+  // w interfejsie przez useModuleEnabled("voiceAi") / ("fiscal").
+  { pattern: /^\/api\/ai\/voice(\/|$)/, module: "voiceAi" },
   { pattern: /^\/api\/ai\/video(\/|$)/, module: "videoGen" },
   { pattern: /^\/api\/scheduled-posts(\/|$)/, module: "socialPosts" },
   { pattern: /^\/api\/ai\/content\/social-post(\/|$)/, module: "socialPosts" },
   { pattern: /^\/api\/cron\/publish-scheduled-posts(\/|$)/, module: "socialPosts" },
   { pattern: /^\/api\/salons\/[^/]+\/fiscal-settings(\/|$)/, module: "fiscal" },
+  { pattern: /^\/api\/appointments\/[^/]+\/fiscal-receipt(\/|$)/, module: "fiscal" },
 ];
 
 export interface FrozenTarget {

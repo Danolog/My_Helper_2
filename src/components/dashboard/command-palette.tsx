@@ -42,7 +42,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useModules } from "@/components/dashboard/modules-provider";
+import { useModuleEnabled, useModules } from "@/components/dashboard/modules-provider";
 import { useSalonRole } from "@/components/dashboard/role-provider";
 import {
   CommandDialog,
@@ -133,6 +133,9 @@ export function CommandPalette() {
   const router = useRouter();
   const modules = useModules();
   const role = useSalonRole();
+  // Dyktowanie wyszukiwania wola trase STT modulu voiceAi — przy module
+  // wylaczonym albo zamrozonym mikrofonu nie pokazujemy.
+  const voiceEnabled = useModuleEnabled("voiceAi");
 
   const isPageVisible = (page: CommandPage) => {
     if (!isRouteAllowedForRole(page.href, role)) return false;
@@ -362,7 +365,7 @@ export function CommandPalette() {
           <span className="text-xs">⌘</span>K
         </kbd>
         <span>aby otworzyc</span>
-        {voiceSupported && (
+        {voiceEnabled && voiceSupported && (
           <button
             type="button"
             className={cn(
