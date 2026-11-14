@@ -1,5 +1,6 @@
 /**
- * Next.js 16 Proxy — handles three concerns:
+ * Next.js 16 Proxy — handles four concerns:
+ * 0. Frozen modules (hardOff in src/lib/features.ts): API → 404, page → /dashboard
  * 1. CSP with per-request nonce (replaces 'unsafe-inline' in script-src)
  * 2. CSRF protection via signed double-submit cookie
  * 3. Auth protection for dashboard routes
@@ -14,6 +15,12 @@ import {
   hmacSign,
   validateCsrfToken,
 } from "@/lib/csrf";
+import {
+  MODULE_DISABLED_CODE,
+  MODULE_DISABLED_MESSAGE,
+  frozenModuleForApiPath,
+  frozenModuleForPage,
+} from "@/lib/features";
 
 // ============================================================
 // Auth helpers
@@ -125,6 +132,20 @@ function buildCsp(nonce: string): string {
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // --- 0. Moduly zamrozone (hardOff) — przed CSRF i auth, dla kazdej metody ---
+  // Rejestr (src/lib/features.ts) jest jedynym nosnikiem reguly; tu tylko
+  // egzekucja. Trasa API => 404 MODULE_DISABLED, strona panelu => /dashboard.
+  if (pathname.startsWith("/api/")) {
+    if (frozenModuleForApiPath(pathname)) {
+      return NextResponse.json(
+        { success: false, code: MODULE_DISABLED_CODE, error: MODULE_DISABLED_MESSAGE },
+        { status: 404 }
+      );
+    }
+  } else if (frozenModuleForPage(pathname)) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
 
   // --- 1. API mutations: validate CSRF (no CSP needed for JSON responses) ---
   if (

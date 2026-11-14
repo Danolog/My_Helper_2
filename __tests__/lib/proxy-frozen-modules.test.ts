@@ -1,0 +1,211 @@
+// @vitest-environment node
+/**
+ * Strażnik egzekucji zamrożenia w `src/proxy.ts` (krok B1).
+ *
+ * Proxy to kod Next.js wykonywany przed każdą stroną i każdym endpointem.
+ * Dla modułu zamrożonego (`hardOff` w `src/lib/features.ts`):
+ * - trasa API → 404 z kodem `MODULE_DISABLED`, dla KAŻDEJ metody HTTP
+ *   i zanim zadziała kontrola CSRF,
+ * - strona panelu → przekierowanie na `/dashboard`.
+ * Trasy i strony sąsiednie przechodzą bez zmian.
+ *
+ * Lista ścieżek pochodzi z rejestru (`API_MODULE_PATTERNS`) — test nie ma
+ * własnej listy modułów, dopasowuje wzorce do tras z systemu plików.
+ */
+import { readdirSync, statSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+import { NextRequest } from "next/server";
+import { describe, it, expect } from "vitest";
+import {
+  API_MODULE_PATTERNS,
+  MODULE_DISABLED_CODE,
+  MODULE_DISABLED_MESSAGE,
+  ROUTE_MODULE_MAP,
+  isModuleFrozen,
+} from "@/lib/features";
+import { proxy } from "@/proxy";
+
+const ORIGIN = "http://localhost:3000";
+const API_DIR = join(process.cwd(), "src/app/api");
+const METHODS = ["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"] as const;
+
+function listApiRoutes(dir: string = API_DIR): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) {
+      out.push(...listApiRoutes(full));
+    } else if (name === "route.ts") {
+      const rel = relative(API_DIR, dir).split(sep).join("/");
+      out.push(`/api/${rel}`.replace(/\[[^\]]+\]/g, "x1"));
+    }
+  }
+  return out.sort();
+}
+
+const ALL_ROUTES = listApiRoutes();
+const FROZEN_ROUTES = ALL_ROUTES.filter((route) =>
+  API_MODULE_PATTERNS.some((p) => isModuleFrozen(p.module) && p.pattern.test(route))
+);
+const FROZEN_PAGES = ROUTE_MODULE_MAP.filter((e) => isModuleFrozen(e.module)).map(
+  (e) => e.prefix
+);
+
+function request(path: string, method: string = "GET", cookie?: string) {
+  return new NextRequest(`${ORIGIN}${path}`, {
+    method,
+    headers: cookie ? { cookie } : {},
+  });
+}
+
+const SESSION = "better-auth.session_token=test-session";
+
+/** Odpowiedź „przepuść dalej” z NextResponse.next(). */
+function passedThrough(response: Response): boolean {
+  return response.headers.get("x-middleware-next") === "1";
+}
+
+describe("proxy: trasy API modułów zamrożonych", () => {
+  it("rejestr wskazuje trasy do zamrożenia (kontrola, że test nie jest pusty)", () => {
+    expect(FROZEN_ROUTES.length).toBeGreaterThanOrEqual(16);
+    expect(FROZEN_ROUTES).toContain("/api/invoices");
+    expect(FROZEN_ROUTES).toContain("/api/clients/x1/loyalty/redeem");
+    expect(FROZEN_ROUTES).toContain("/api/newsletters/x1/send");
+    expect(FROZEN_ROUTES).toContain("/api/notifications/birthday");
+    expect(FROZEN_ROUTES).toContain("/api/notifications/we-miss-you");
+    expect(FROZEN_ROUTES).toContain("/api/ai/notifications/personalize");
+  });
+
+  describe.each(FROZEN_ROUTES)("%s", (route) => {
+    it.each(METHODS)("%s → 404 MODULE_DISABLED", async (method) => {
+      const response = await proxy(request(route, method, SESSION));
+
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({
+        success: false,
+        code: MODULE_DISABLED_CODE,
+        error: MODULE_DISABLED_MESSAGE,
+      });
+    });
+  });
+
+  it("blokada działa przed kontrolą CSRF (POST bez tokenu → 404, nie 403)", async () => {
+    const response = await proxy(request("/api/invoices", "POST"));
+    expect(response.status).toBe(404);
+  });
+
+  it.each([
+    "/api/invoices/",
+    "/api/invoices?salonId=abc",
+    "/api/invoices/abc/send-email/?x=1",
+    "/api//invoices",
+    "/api/%69nvoices",
+    "/api/notifications/birthday?salonId=abc",
+  ])("wariant zapisu ścieżki %s → 404", async (path) => {
+    const response = await proxy(request(path, "GET", SESSION));
+    expect(response.status).toBe(404);
+    expect((await response.json()).code).toBe(MODULE_DISABLED_CODE);
+  });
+
+  it("komunikat blokady to tekst uzgodniony z produktem", () => {
+    expect(MODULE_DISABLED_MESSAGE).toBe("Ta funkcja jest obecnie niedostępna.");
+    expect(MODULE_DISABLED_CODE).toBe("MODULE_DISABLED");
+  });
+});
+
+describe("proxy: trasy sąsiednie przechodzą", () => {
+  const neighbours = [
+    "/api/clients",
+    "/api/clients/x1",
+    "/api/notifications",
+    "/api/notifications/low-stock",
+    "/api/salons/x1/notification-type-settings",
+    "/api/salons/x1/modules",
+    "/api/appointments/x1/complete",
+    "/api/ai/image/enhance",
+    "/api/subscription-plans",
+  ];
+
+  it("trasy sąsiednie istnieją w repo (kontrola listy)", () => {
+    for (const route of neighbours) {
+      expect(ALL_ROUTES, route).toContain(route);
+    }
+  });
+
+  it.each(neighbours)("GET %s nie jest blokowane", async (route) => {
+    const response = await proxy(request(route, "GET", SESSION));
+    expect(response.status).toBe(200);
+    expect(passedThrough(response)).toBe(true);
+  });
+
+  it("żadna trasa spoza rejestru nie dostaje MODULE_DISABLED", async () => {
+    const open = ALL_ROUTES.filter((route) => !FROZEN_ROUTES.includes(route));
+    expect(open.length).toBeGreaterThan(100);
+    for (const route of open) {
+      const response = await proxy(request(route, "GET", SESSION));
+      expect(response.status, route).not.toBe(404);
+    }
+  });
+
+  it("POST na trasę sąsiednią nadal podlega CSRF (403 bez tokenu)", async () => {
+    const response = await proxy(request("/api/clients", "POST", SESSION));
+    expect(response.status).toBe(403);
+  });
+});
+
+describe("proxy: strony panelu modułów zamrożonych", () => {
+  it("rejestr wskazuje strony do zamrożenia (kontrola, że test nie jest pusty)", () => {
+    expect(FROZEN_PAGES).toEqual(
+      expect.arrayContaining([
+        "/dashboard/invoices",
+        "/dashboard/settings/loyalty",
+        "/dashboard/content-generator/newsletters",
+      ])
+    );
+  });
+
+  it.each(FROZEN_PAGES)("%s → przekierowanie na /dashboard", async (page) => {
+    const response = await proxy(request(page, "GET", SESSION));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/dashboard`);
+  });
+
+  it.each([
+    "/dashboard/invoices/abc-123",
+    "/dashboard/invoices?status=paid",
+    "/dashboard/invoices/",
+    "/dashboard/settings/loyalty?tab=rewards",
+  ])("podstrona i parametry: %s → /dashboard", async (path) => {
+    const response = await proxy(request(path, "GET", SESSION));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`${ORIGIN}/dashboard`);
+  });
+
+  it("bez sesji też nie pokazuje strony zamrożonej (przekierowanie)", async () => {
+    const response = await proxy(request("/dashboard/invoices"));
+    expect(response.status).toBe(307);
+  });
+
+  it.each([
+    "/dashboard",
+    "/dashboard/clients",
+    "/dashboard/notifications",
+    "/dashboard/settings/notifications",
+    "/dashboard/products",
+    "/dashboard/promotions",
+  ])("strona %s z sesją przechodzi", async (path) => {
+    const response = await proxy(request(path, "GET", SESSION));
+
+    expect(response.status).toBe(200);
+    expect(passedThrough(response)).toBe(true);
+  });
+
+  it("strona rdzenia bez sesji nadal prowadzi do logowania", async () => {
+    const response = await proxy(request("/dashboard/clients"));
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toContain("/login?returnTo=");
+  });
+});
