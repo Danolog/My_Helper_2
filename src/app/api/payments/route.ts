@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
+import { requireSalonStaff } from "@/lib/salon-context";
 import { depositPayments, subscriptionPayments, appointments, clients, services, salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 /**
@@ -9,7 +9,8 @@ import { forSalon } from "@/lib/server/repository";
  *
  * Returns a unified list of all payment transactions (deposits + subscriptions).
  * Supports filtering by:
- *  - salonId (required)
+ *  - salonId (optional) — musi byc salonem z sesji (inny => 403); salon
+ *    zawsze z sesji (requireSalonStaff). Dostep: wlasciciel albo grant "finance".
  *  - type: 'deposit' | 'subscription' | 'all' (default: 'all')
  *  - status: payment status filter
  *  - dateFrom: ISO date string for start date filter
@@ -19,23 +20,21 @@ import { forSalon } from "@/lib/server/repository";
  */
 export async function GET(request: NextRequest) {
   try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
     const { searchParams } = request.nextUrl;
-    const salonId = searchParams.get("salonId");
+    // P0 (przeglad Ryana): salon z sesji, query salonId tylko porownywany.
+    // Zadatki z nazwiskami + platnosci abonamentu = finanse salonu.
+    const guard = await requireSalonStaff({
+      feature: "finance",
+      requestedSalonId: searchParams.get("salonId"),
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
     const type = searchParams.get("type") || "all";
     const status = searchParams.get("status");
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = parseInt(searchParams.get("limit") || "20", 10);
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
-      );
-    }
 
     const offset = (page - 1) * limit;
     const transactions: Array<{

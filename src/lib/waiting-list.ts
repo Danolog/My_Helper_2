@@ -138,13 +138,16 @@ export async function notifyWaitingList(
       }
 
       // Send push notification if the client has a linked user account.
-      // We look up the user by email to find the userId for push delivery.
+      // We look up the user by email to find the userId for push delivery —
+      // ONLY accounts with a VERIFIED email (same rule as src/lib/client-match.ts):
+      // an account registered on someone else's address must not receive the
+      // client's name, salon, service, employee and time.
       if (row.client.email) {
         try {
           const [linkedUser] = await db
             .select({ id: user.id })
             .from(user)
-            .where(eq(user.email, row.client.email))
+            .where(and(eq(user.email, row.client.email), eq(user.emailVerified, true)))
             .limit(1);
 
           if (linkedUser) {

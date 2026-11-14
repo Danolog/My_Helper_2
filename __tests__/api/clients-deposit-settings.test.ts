@@ -77,11 +77,17 @@ const clientB = {
   depositValue: "50.00",
 };
 
-function loggedInAs(email: string | null) {
-  mockRequireAuth.mockResolvedValue({
-    session: { user: { id: "user-a", email } },
-    user: { id: "user-a", email },
-  });
+// Domyslnie konto ze zweryfikowanym e-mailem; "missing" odwzorowuje brak
+// pola emailVerified w obiekcie sesji.
+function loggedInAs(
+  email: string | null,
+  emailVerified: boolean | null | "missing" = true
+) {
+  const user =
+    emailVerified === "missing"
+      ? { id: "user-a", email }
+      : { id: "user-a", email, emailVerified };
+  mockRequireAuth.mockResolvedValue({ session: { user }, user });
 }
 
 function url(query: string) {
@@ -198,6 +204,109 @@ describe("GET /api/clients/deposit-settings — e-mail tylko z sesji (P1 IDOR)",
   it("salonId niebedacy UUID => 400, bez zapytan do bazy", async () => {
     const res = await GET(createMockRequest(url("salonId=nie-uuid")));
     expect(res.status).toBe(400);
+    expect(mockSelect).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Strażnik verifiedClientMatchEmail (PR #31): dopasowanie konta z sesji do
+ * `clients` po e-mailu tylko przy emailVerified === true. Konto założone na
+ * cudzy adres (bez potwierdzenia) nie może odczytać ustawień zadatku osoby,
+ * której rekord personel założył z tym e-mailem. Inaczej => „nie znaleziono”.
+ */
+describe("GET /api/clients/deposit-settings — tylko zweryfikowany e-mail sesji", () => {
+  const notFound = {
+    found: false,
+    requireDeposit: false,
+    depositType: null,
+    depositValue: null,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectResults.length = 0;
+  });
+
+  it("zweryfikowany e-mail => szuka po e-mailu sesji i zwraca ustawienia", async () => {
+    loggedInAs(EMAIL_A, true);
+    selectResults.push([{ id: SALON_UUID }], [clientB]);
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+    const { status, body } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(emailsQueried()).toEqual([EMAIL_A]);
+    expect((body.data as { found: boolean }).found).toBe(true);
+  });
+
+  it("niezweryfikowany e-mail => 200 found:false, bez wyszukiwania klienta", async () => {
+    loggedInAs(EMAIL_B, false);
+    // gdyby trasa szukala klienta, baza zwrocilaby rekord osoby B
+    selectResults.push([{ id: SALON_UUID }], [clientB]);
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+    const { status, body } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(body.data).toEqual(notFound);
+    expect(emailsQueried()).toEqual([]);
+    expect(mockSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("emailVerified: null => 200 found:false, bez wyszukiwania klienta", async () => {
+    loggedInAs(EMAIL_B, null);
+    selectResults.push([{ id: SALON_UUID }], [clientB]);
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+    const { status, body } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(body.data).toEqual(notFound);
+    expect(emailsQueried()).toEqual([]);
+  });
+
+  it("brak flagi emailVerified w sesji => 200 found:false, bez wyszukiwania klienta", async () => {
+    loggedInAs(EMAIL_B, "missing");
+    selectResults.push([{ id: SALON_UUID }], [clientB]);
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+    const { status, body } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(body.data).toEqual(notFound);
+    expect(emailsQueried()).toEqual([]);
+  });
+
+  it("zweryfikowany, ale pusty e-mail => 200 found:false, bez wyszukiwania klienta", async () => {
+    loggedInAs("   ", true);
+    selectResults.push([{ id: SALON_UUID }], [clientB]);
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+    const { status, body } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(body.data).toEqual(notFound);
+    expect(emailsQueried()).toEqual([]);
+  });
+
+  it("niezweryfikowany e-mail, salon nie istnieje => 404 (strażnik nie maskuje 404)", async () => {
+    loggedInAs(EMAIL_B, false);
+    selectResults.push([]);
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+
+    expect(res.status).toBe(404);
+    expect(emailsQueried()).toEqual([]);
+  });
+
+  it("brak sesji => 401, bez zapytan do bazy", async () => {
+    mockRequireAuth.mockResolvedValue(
+      NextResponse.json({ success: false, error: "Wymagane logowanie" }, { status: 401 })
+    );
+
+    const res = await GET(createMockRequest(url(`salonId=${SALON_UUID}`)));
+
+    expect(res.status).toBe(401);
     expect(mockSelect).not.toHaveBeenCalled();
   });
 });
