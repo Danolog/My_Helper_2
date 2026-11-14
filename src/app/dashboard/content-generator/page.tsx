@@ -56,6 +56,8 @@ const GENERATOR_TILES: GeneratorTile[] = [
     title: "Szablony tresci",
     description: "Gotowe szablony do szybkiego tworzenia tresci",
     href: "/dashboard/content-generator/templates",
+    // Szablony prowadza wylacznie do newsletterow — chowamy je razem z nimi.
+    module: "newsletters",
   },
   {
     icon: Clapperboard,
@@ -139,7 +141,6 @@ export default function ContentGeneratorPage() {
       featureDescription="AI tworzy profesjonalne opisy usług dopasowane do Twojego salonu."
       proBenefits={[
         "Profesjonalne opisy uslug",
-        "Gotowe szablony tresci",
         "Dostosowane do branzy beauty i wellness",
       ]}
     >
