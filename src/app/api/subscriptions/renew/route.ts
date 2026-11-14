@@ -6,169 +6,50 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import {
-  salonSubscriptions,
-  subscriptionPayments,
-  subscriptionPlans,
-} from "@/lib/schema";
+import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
+import { getStripe } from "@/lib/stripe";
 
 /**
  * POST /api/subscriptions/renew
  *
- * Simulates automatic subscription renewal for dev/testing.
- * In production, renewals are handled by Stripe webhooks (invoice.paid).
+ * Ręczne odnowienie NIE istnieje. Okres subskrypcji przedłuża wyłącznie
+ * webhook Stripe `invoice.paid` (podpisany, po faktycznym obciążeniu),
+ * razem z zapisem płatności i zastosowaniem zaplanowanej zmiany planu.
  *
- * This endpoint:
- * 1. Finds the active subscription
- * 2. Creates a new payment record (simulating the automatic charge)
- * 3. Updates the subscription period dates (advances by 1 month)
- * 4. Applies any scheduled plan changes (e.g., pending downgrades)
+ * Wcześniej ta trasa „symulowała” odnowienie: przesuwała currentPeriodEnd
+ * o miesiąc i zapisywała płatność `sim_renewal_pi_*` bez Stripe — każdy
+ * właściciel z aktywną subskrypcją dostawał darmowy miesiąc na kliknięcie.
  *
- * Response: { success: true, subscription: {...}, payment: {...} }
+ * Trasa nigdy niczego nie zapisuje:
+ * - Stripe nieskonfigurowany → 503 STRIPE_UNAVAILABLE (spójnie z checkout),
+ * - Stripe skonfigurowany → 409 RENEWAL_MANAGED_BY_STRIPE.
  */
 export async function POST() {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
+  const authResult = await requireAuth();
+  if (isAuthError(authResult)) return authResult;
 
-    const salonId = await getUserSalonId();
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
-    // Find the current active subscription
-    const [activeSub] = await db
-      .select({
-        subscription: salonSubscriptions,
-        plan: subscriptionPlans,
-      })
-      .from(salonSubscriptions)
-      .innerJoin(
-        subscriptionPlans,
-        eq(salonSubscriptions.planId, subscriptionPlans.id)
-      )
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          eq(salonSubscriptions.status, "active")
-        )
-      );
-
-    if (!activeSub) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Brak aktywnej subskrypcji do odnowienia",
-        },
-        { status: 404 }
-      );
-    }
-
-    const { subscription: sub, plan } = activeSub;
-
-    // Calculate new period dates
-    const now = new Date();
-    const newPeriodStart = sub.currentPeriodEnd || now;
-    const newPeriodEnd = new Date(newPeriodStart);
-    newPeriodEnd.setMonth(newPeriodEnd.getMonth() + 1);
-
-    // Check for scheduled plan change (downgrade at period end)
-    let renewPlanId = sub.planId;
-    let renewPlan = plan;
-    let planChanged = false;
-
-    if (sub.scheduledPlanId) {
-      // Apply the scheduled plan change
-      const [targetPlan] = await db
-        .select()
-        .from(subscriptionPlans)
-        .where(eq(subscriptionPlans.id, sub.scheduledPlanId));
-
-      if (targetPlan) {
-        renewPlanId = targetPlan.id;
-        renewPlan = targetPlan;
-        planChanged = true;
-
-         
-        logger.info(`[Subscription Renewal] Applying scheduled plan change: ${plan.slug} → ${targetPlan.slug}`);
-      }
-    }
-
-    // Record the renewal payment and update subscription atomically
-    const { payment, updatedSub } = await db.transaction(async (tx) => {
-      const [_payment] = await tx
-        .insert(subscriptionPayments)
-        .values({
-          subscriptionId: sub.id,
-          salonId,
-          amount: renewPlan.priceMonthly,
-          currency: "PLN",
-          stripePaymentIntentId: `sim_renewal_pi_${Date.now()}`,
-          status: "succeeded",
-          paidAt: now,
-        })
-        .returning();
-
-      const [_updatedSub] = await tx
-        .update(salonSubscriptions)
-        .set({
-          planId: renewPlanId,
-          currentPeriodStart: newPeriodStart,
-          currentPeriodEnd: newPeriodEnd,
-          // Clear scheduled changes if applied
-          ...(planChanged
-            ? { scheduledPlanId: null, scheduledChangeAt: null }
-            : {}),
-        })
-        .where(eq(salonSubscriptions.id, sub.id))
-        .returning();
-
-      return { payment: _payment, updatedSub: _updatedSub };
-    });
-
-     
-    logger.info(`[Subscription Renewal] Subscription ${sub.id} renewed. ` +
-        `Plan: ${renewPlan.slug} (${renewPlan.priceMonthly} PLN). ` +
-        `New period: ${newPeriodStart.toISOString()} - ${newPeriodEnd.toISOString()}` +
-        (planChanged ? ` (plan changed from ${plan.slug} to ${renewPlan.slug})` : ""));
-
-    return NextResponse.json({
-      success: true,
-      message: planChanged
-        ? `Subskrypcja odnowiona z nowym planem ${renewPlan.name}`
-        : "Subskrypcja zostala automatycznie odnowiona",
-      subscription: {
-        id: updatedSub?.id ?? sub.id,
-        planId: renewPlanId,
-        planName: renewPlan.name,
-        planSlug: renewPlan.slug,
-        status: "active",
-        currentPeriodStart: newPeriodStart,
-        currentPeriodEnd: newPeriodEnd,
-        amount: renewPlan.priceMonthly,
-      },
-      payment: payment
-        ? {
-            id: payment.id,
-            amount: payment.amount,
-            status: payment.status,
-            paidAt: payment.paidAt,
-          }
-        : null,
-      planChanged,
-      previousPlan: planChanged ? plan.slug : null,
-      newPlan: renewPlan.slug,
-    });
-  } catch (error) {
-    logger.error("[Subscription Renewal] Error", { error: error });
+  if (!getStripe()) {
+    logger.warn("Subscription renewal refused: Stripe not configured");
     return NextResponse.json(
-      { success: false, error: "Nie udalo sie odnowic subskrypcji" },
-      { status: 500 }
+      {
+        success: false,
+        code: "STRIPE_UNAVAILABLE",
+        error:
+          "Płatności online są chwilowo niedostępne. Subskrypcja nie została odnowiona — spróbuj ponownie później.",
+      },
+      { status: 503 },
     );
   }
+
+  return NextResponse.json(
+    {
+      success: false,
+      code: "RENEWAL_MANAGED_BY_STRIPE",
+      error:
+        "Subskrypcja odnawia się automatycznie po pobraniu opłaty przez Stripe. Ręczne odnowienie nie jest dostępne.",
+    },
+    { status: 409 },
+  );
 }
 
 /**
