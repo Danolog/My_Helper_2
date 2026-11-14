@@ -8,7 +8,7 @@ vi.mock("@/lib/salon-context", () => ({
 import { requireReportSalon } from "@/lib/reports/require-report-salon";
 
 const OWN = "3c0b7926-3bcf-41ee-82c2-0b65ed48585c";
-const OTHER = "00000000-0000-0000-0000-000000000001";
+const OTHER = "00000000-0000-4000-8000-000000000001";
 
 function req(salonId?: string) {
   const url = salonId
