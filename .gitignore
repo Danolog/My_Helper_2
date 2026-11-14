@@ -76,3 +76,6 @@ tests/.auth/
 # local-only (personal config, session memory)
 CLAUDE.local.md
 memory/
+
+# Katalog roboczy agentow (pliki tymczasowe, nie commitowac)
+scratchpad/

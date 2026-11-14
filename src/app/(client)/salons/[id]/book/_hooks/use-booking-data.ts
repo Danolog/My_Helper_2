@@ -73,7 +73,6 @@ export function useBookingData(): UseBookingDataReturn {
 
   // Promotion state
   const [happyHoursPromo, setHappyHoursPromo] = useState<HappyHoursPromo | null>(null);
-  const [firstVisitPromo, setFirstVisitPromo] = useState<FirstVisitPromo | null>(null);
 
   // Step card refs for auto-scroll on progressive disclosure
   const variantStepRef = useRef<HTMLDivElement>(null);
@@ -103,20 +102,15 @@ export function useBookingData(): UseBookingDataReturn {
       ? Math.round(baseEffectivePrice * happyHoursPromo.discountPercent) / 100
       : 0;
 
-  // Apply first visit discount if applicable
-  const firstVisitDiscountAmount =
-    firstVisitPromo?.eligible && firstVisitPromo.discountPercent
-      ? Math.round(baseEffectivePrice * firstVisitPromo.discountPercent) / 100
-      : 0;
+  // Rabat pierwszej wizyty nie jest juz sprawdzany po stronie klienta:
+  // wymagal wyslania e-maila w URL (dane osobowe w logach zadan), a trasa
+  // check-first-visit zawsze zwraca eligible:false (decyzja PO, aneks B2).
+  // Pola zostaja w kontrakcie hooka jako stale, zeby nie ruszac UI.
+  const firstVisitPromo: FirstVisitPromo | null = null;
+  const firstVisitDiscountAmount = 0;
 
-  // Use the highest applicable discount (don't stack)
-  const bestDiscountAmount = Math.max(happyHoursDiscountAmount, firstVisitDiscountAmount);
-  const activePromoType: ActivePromoType =
-    bestDiscountAmount === 0
-      ? "none"
-      : firstVisitDiscountAmount >= happyHoursDiscountAmount
-        ? "first_visit"
-        : "happy_hours";
+  const bestDiscountAmount = happyHoursDiscountAmount;
+  const activePromoType: ActivePromoType = bestDiscountAmount === 0 ? "none" : "happy_hours";
   const effectivePrice = baseEffectivePrice - bestDiscountAmount;
 
   const effectiveDuration = selectedService
@@ -334,36 +328,6 @@ export function useBookingData(): UseBookingDataReturn {
     setSelectedTimeSlot("");
     return undefined;
   }, [selectedEmployeeId, selectedDate, effectiveDuration, fetchAvailableSlots]);
-
-  // Check first visit promotion when service is selected
-  useEffect(() => {
-    const emailForCheck = session?.user?.email || guestEmail;
-    if (!salonId || !selectedServiceId || !emailForCheck) {
-      setFirstVisitPromo(null);
-      return;
-    }
-
-    const abortController = new AbortController();
-
-    async function checkFirstVisit() {
-      try {
-        const res = await fetch(
-          `/api/promotions/check-first-visit?salonId=${salonId}&email=${encodeURIComponent(emailForCheck!)}&serviceId=${selectedServiceId}`,
-          { signal: abortController.signal },
-        );
-        const json = await res.json();
-        if (json.success) {
-          setFirstVisitPromo(json.data);
-        }
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") return;
-        setFirstVisitPromo(null);
-      }
-    }
-    checkFirstVisit();
-
-    return () => abortController.abort();
-  }, [salonId, session?.user?.email, guestEmail, selectedServiceId]);
 
   // Check happy hours promotion when time slot is selected
   useEffect(() => {
@@ -712,7 +676,6 @@ export function useBookingData(): UseBookingDataReturn {
     setDepositPaymentId("");
     setDepositSessionId("");
     setHappyHoursPromo(null);
-    setFirstVisitPromo(null);
     setGuestName("");
     setGuestPhone("");
     setGuestEmail("");
