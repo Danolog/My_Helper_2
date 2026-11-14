@@ -305,7 +305,7 @@ function AIUsageContent() {
                   <BarChart3 className="h-10 w-10 mx-auto mb-3 opacity-30" />
                   <p>Brak danych o zuzyciu w wybranym okresie.</p>
                   <p className="text-xs mt-1">
-                    Korzystaj z funkcji AI (tekst, obrazy, banery, wideo), aby zobaczyc statystyki.
+                    Korzystaj z funkcji AI (tekst, obrazy, banery), aby zobaczyć statystyki.
                   </p>
                 </CardContent>
               </Card>
@@ -456,7 +456,7 @@ export default function AIUsagePage() {
       featureName="Koszty AI"
       featureDescription="Monitoruj zuzycie funkcji AI w Twoim salonie i sledz szacowane koszty generowania mediow."
       proBenefits={[
-        "Podglad kosztow generowania obrazow, wideo i banerow",
+        "Podgląd kosztów generowania obrazów i banerów",
         "Prognoza miesieczna na podstawie biezacego zuzycia",
         "Szczegolowy rozklad zuzycia wg typu i dostawcy",
         "Cennik referencyjny wszystkich funkcji AI",

@@ -148,8 +148,8 @@ function UpgradeDialog({
           <AlertDialogDescription asChild>
             <div className="space-y-4">
               <p>
-                Przejdz na plan Pro i odblokuj wszystkie funkcje AI, w tym
-                asystenta glosowego, biznesowego i content marketingowego.
+                Przejdź na plan Pro i odblokuj funkcje AI, w tym asystenta
+                biznesowego i content marketingowego.
               </p>
 
               {/* Price comparison */}
@@ -283,10 +283,6 @@ function DowngradeDialog({
                   Funkcje AI, ktore stracisz
                 </p>
                 <div className="grid gap-1.5">
-                  <div className="flex items-start gap-2 text-sm">
-                    <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
-                    <span>Asystent glosowy AI</span>
-                  </div>
                   <div className="flex items-start gap-2 text-sm">
                     <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
                     <span>Asystent biznesowy AI</span>

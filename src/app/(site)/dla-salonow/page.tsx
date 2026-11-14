@@ -7,7 +7,6 @@ import { DlaSalonowFeatures } from "./_components/DlaSalonowFeatures";
 import { DlaSalonowHero } from "./_components/DlaSalonowHero";
 import { DlaSalonowImageBreak } from "./_components/DlaSalonowImageBreak";
 import { DlaSalonowPricing } from "./_components/DlaSalonowPricing";
-import { DlaSalonowTestimonials } from "./_components/DlaSalonowTestimonials";
 import { DlaSalonowTrustBar } from "./_components/DlaSalonowTrustBar";
 
 export default function Home() {
@@ -20,7 +19,6 @@ export default function Home() {
       <DlaSalonowImageBreak />
       <DlaSalonowClientCta />
       <DlaSalonowPricing />
-      <DlaSalonowTestimonials />
       <DlaSalonowCta />
     </div>
     </MotionConfig>
