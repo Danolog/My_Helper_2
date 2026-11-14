@@ -9,6 +9,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { hashPassword } from "better-auth/crypto";
+import { PLAN_FEATURES } from "../src/lib/plan-features";
 import {
   user,
   account,
@@ -289,27 +290,14 @@ async function seed() {
       name: "Basic",
       slug: "basic",
       priceMonthly: "49.00",
-      featuresJson: [
-        "Kalendarz wizyt",
-        "Baza klientow",
-        "Zarzadzanie pracownikami",
-        "Raporty podstawowe",
-        "Powiadomienia SMS/email",
-      ],
+      featuresJson: [...PLAN_FEATURES.basic],
     },
     {
       id: "00000000-0000-0000-0000-a10000000002",
       name: "Pro",
       slug: "pro",
       priceMonthly: "149.00",
-      featuresJson: [
-        "Wszystko z Basic",
-        "Asystent AI glosowy",
-        "AI Business Intelligence",
-        "Generator tresci AI",
-        "Zaawansowane raporty",
-        "Rekomendacje AI",
-      ],
+      featuresJson: [...PLAN_FEATURES.pro],
     },
   ];
 
