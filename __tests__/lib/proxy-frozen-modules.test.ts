@@ -138,13 +138,9 @@ describe("proxy: trasy API modułów zamrożonych", () => {
     "/api/x/../invoices",
     "/api/x/y/../../invoices/abc/send-email",
     "/api/clients/abc/x/../loyalty/redeem",
-    "/api/x/%2e%2e/invoices",
-    "/api/%2e/notifications/birthday",
     "/%61pi/invoices",
     "/api/%6Eewsletters",
-    "/api%2Finvoices",
-    "/api\\invoices",
-    "/api/%69nvoices/%zz",
+    "/api/%70ush/subscribe",
     "/API/Clients/abc/Loyalty/",
   ])("surowa ścieżka %s → 404 MODULE_DISABLED (każda metoda)", async (path) => {
     for (const method of METHODS) {
@@ -158,9 +154,7 @@ describe("proxy: trasy API modułów zamrożonych", () => {
     "//dashboard/invoices",
     "/dashboard/./invoices",
     "/dashboard/x/../invoices/abc",
-    "/dashboard/x/%2e%2e/settings/loyalty",
     "/x/../dashboard/content-generator/newsletters",
-    "/dashboard%2Finvoices",
     "/Dashboard/%69nvoices/",
   ])("surowa ścieżka strony %s → przekierowanie na /dashboard", async (path) => {
     const response = await proxy(rawRequest(path));
@@ -179,6 +173,78 @@ describe("proxy: trasy API modułów zamrożonych", () => {
   it("komunikat blokady to tekst uzgodniony z produktem", () => {
     expect(MODULE_DISABLED_MESSAGE).toBe("Ta funkcja jest obecnie niedostępna.");
     expect(MODULE_DISABLED_CODE).toBe("MODULE_DISABLED");
+  });
+});
+
+describe("proxy: ścieżka dwuznaczna jest odrzucana z góry", () => {
+  // Zakodowany separator, zakodowana kropka, podwójne albo błędne kodowanie:
+  // router i bramka mogłyby przeczytać taką ścieżkę różnie, więc nie
+  // zgadujemy — 404, zanim zadziała cokolwiek innego (także dla tras
+  // niezamrożonych). Aplikacja nie ma poprawnych ścieżek tego rodzaju.
+  const ambiguous = [
+    // do zamrożonego modułu
+    "/api/x/..%2finvoices",
+    "/api/x/..%2Finvoices",
+    "/api%2finvoices",
+    "/api%2Finvoices",
+    "/api%5cinvoices",
+    "/api/x/..%5cinvoices",
+    "/api\\invoices",
+    "/api/x/%2e%2e/invoices",
+    "/api/%2e/notifications/birthday",
+    "/api%252finvoices",
+    "/api/x/%252e%252e/invoices",
+    "/api/%2569nvoices",
+    "/api/%69nvoices/%zz",
+    "/api/invoices%00",
+    "/dashboard%2Finvoices",
+    "/dashboard/x/%2e%2e/settings/loyalty",
+    // do tras niezamrożonych — ta sama odmowa
+    "/api%2Fclients",
+    "/api/cron/..%2fclients",
+    "/api/auth/%2e%2e/clients",
+    "/dashboard%2Fclients",
+    "/api/%zz",
+    "/api/clients%",
+    "/salons/%C5",
+  ];
+
+  it.each(ambiguous)("%s → 404 INVALID_PATH (każda metoda)", async (path) => {
+    for (const method of METHODS) {
+      const response = await proxy(rawRequest(path, method));
+      expect(response.status, `${method} ${path}`).toBe(404);
+      expect((await response.json()).code, `${method} ${path}`).toBe("INVALID_PATH");
+    }
+  });
+
+  it("odmowa działa przed kontrolą CSRF i auth", async () => {
+    // POST bez tokenu CSRF dostałby 403, strona panelu bez sesji — logowanie.
+    expect((await proxy(rawRequest("/api%2Fclients", "POST"))).status).toBe(404);
+    expect((await proxy(rawRequest("/dashboard%2Fclients"))).status).toBe(404);
+  });
+
+  it.each([
+    "/api/clients",
+    "/api/clients/x1",
+    "/api/clients/%C5%82ukasz",
+    "/api/clients/Jan%20Kowalski",
+    "/api/salons/%C5%BB%C3%B3%C5%82ty",
+    "/api/search/100%25",
+    "/api/%68ealth",
+  ])("poprawna ścieżka API %s przechodzi dalej", async (path) => {
+    const response = await proxy(request(path, "GET", SESSION));
+    expect(response.status).toBe(200);
+    expect(passedThrough(response)).toBe(true);
+  });
+
+  it.each([
+    "/salons/%C5%82ukasz",
+    "/salons/Salon%20Pi%C4%99kna",
+    "/dashboard/clients/abc%2Ddef",
+  ])("poprawna strona %s przechodzi dalej", async (path) => {
+    const response = await proxy(request(path, "GET", SESSION));
+    expect(response.status).toBe(200);
+    expect(passedThrough(response)).toBe(true);
   });
 });
 

@@ -1,5 +1,6 @@
 /**
- * Next.js 16 Proxy — handles four concerns:
+ * Next.js 16 Proxy — handles five concerns:
+ * -1. Ambiguous paths (encoded separators/dots, bad percent-encoding) → 404
  * 0. Frozen modules (hardOff in src/lib/features.ts): API → 404, page → /dashboard
  * 1. CSP with per-request nonce (replaces 'unsafe-inline' in script-src)
  * 2. CSRF protection via signed double-submit cookie
@@ -20,6 +21,7 @@ import {
   MODULE_DISABLED_MESSAGE,
   frozenModuleForPath,
 } from "@/lib/features";
+import { isAmbiguousPath } from "@/lib/path-normalize";
 
 // ============================================================
 // Auth helpers
@@ -132,13 +134,25 @@ function buildCsp(nonce: string): string {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // --- -1. Sciezka dwuznaczna — odmowa z gory, przed wszystkim innym ---
+  // Zakodowany separator (%2f, %5c), zakodowana kropka (%2e), podwojne albo
+  // bledne kodowanie procentowe: router i bramki ponizej moglyby przeczytac
+  // taka sciezke roznie, wiec jej nie obslugujemy (src/lib/path-normalize.ts).
+  // Aplikacja nie ma poprawnych sciezek tego rodzaju.
+  if (isAmbiguousPath(pathname)) {
+    return NextResponse.json(
+      { success: false, code: "INVALID_PATH", error: "Nie znaleziono." },
+      { status: 404 }
+    );
+  }
+
   // --- 0. Moduly zamrozone (hardOff) — przed CSRF i auth, dla kazdej metody ---
   // Rejestr (src/lib/features.ts) jest jedynym nosnikiem reguly; tu tylko
   // egzekucja. Trasa API => 404 MODULE_DISABLED, strona panelu => /dashboard.
   // Jedno pytanie do rejestru, bez wstepnego filtra po surowym prefiksie:
-  // rejestr raz normalizuje sciezke (kodowanie procentowe, powtorzone
-  // ukosniki, segmenty . i .., wielkosc liter) i sprawdza OBA dopasowania —
-  // trase API i strone panelu. Wariant zapisu sciezki nie omija blokady.
+  // rejestr sprawdza OBA dopasowania (trasa API i strona panelu) na OBU
+  // postaciach kanonicznych sciezki — doslownej i zdekodowanej. Wariant
+  // zapisu sciezki (//, .., %69, wielkosc liter) nie omija blokady.
   const frozen = frozenModuleForPath(pathname);
   if (frozen?.kind === "api") {
     return NextResponse.json(

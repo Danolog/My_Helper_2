@@ -25,7 +25,6 @@ import {
   frozenModuleForPage,
   frozenModuleForPath,
   isModuleFrozen,
-  normalizePathname,
   resolveModules,
   type ModuleKey,
 } from "@/lib/features";
@@ -193,46 +192,6 @@ describe("frozenModuleForApiPath", () => {
   });
 });
 
-describe("normalizePathname — jedna postać ścieżki przed dopasowaniem", () => {
-  it.each<[string, string]>([
-    ["/api/invoices", "/api/invoices"],
-    ["/api/invoices/", "/api/invoices"],
-    // powtórzone ukośniki, także na początku
-    ["//api/invoices", "/api/invoices"],
-    ["/api//invoices///abc", "/api/invoices/abc"],
-    // segmenty `.` i `..` — bez polegania na parserze URL
-    ["/api/./invoices", "/api/invoices"],
-    ["/api/x/../invoices", "/api/invoices"],
-    ["/api/x/y/../../invoices/abc", "/api/invoices/abc"],
-    ["/../../api/invoices", "/api/invoices"],
-    ["/api/invoices/..", "/api"],
-    // kodowanie procentowe: litery, kropki, ukośnik, odwrócony ukośnik
-    ["/api/%69nvoices", "/api/invoices"],
-    ["/%61pi/invoices", "/api/invoices"],
-    ["/api/x/%2e%2e/invoices", "/api/invoices"],
-    ["/api/x/%2E%2E/invoices", "/api/invoices"],
-    ["/api%2Finvoices", "/api/invoices"],
-    ["/api%5Cinvoices", "/api/invoices"],
-    ["/api\\invoices", "/api/invoices"],
-    // wielkość liter
-    ["/API/Invoices", "/api/invoices"],
-    // błędne kodowanie w jednym miejscu nie wyłącza dekodowania reszty
-    ["/api/%69nvoices/%zz", "/api/invoices/%zz"],
-    ["/api/%69nvoices/%E0%A4%A", "/api/invoices/%e0%a4%a"],
-    ["/api/%zz", "/api/%zz"],
-    ["", "/"],
-  ])("%s → %s", (raw, expected) => {
-    expect(normalizePathname(raw)).toBe(expected);
-  });
-
-  it("jest idempotentna dla ścieżek już znormalizowanych", () => {
-    for (const route of API_ROUTES) {
-      expect(normalizePathname(route)).toBe(route);
-      expect(normalizePathname(normalizePathname(route))).toBe(route);
-    }
-  });
-});
-
 describe("frozenModuleForPath — jedno pytanie o trasę API i stronę", () => {
   it.each<[string, "api" | "page", ModuleKey]>([
     ["/api/invoices", "api", "invoices"],
@@ -262,6 +221,24 @@ describe("frozenModuleForPath — jedno pytanie o trasę API i stronę", () => {
     "/api/%zz",
   ])("normalizacja nie blokuje tras sąsiednich: %s", (path) => {
     expect(frozenModuleForPath(path)).toBeNull();
+  });
+
+  // Wzorce sprawdzamy na OBU postaciach ścieżki — dosłownej (bez dekodowania)
+  // i zdekodowanej. Blokada, jeśli pasuje którakolwiek: nie zgadujemy, którą
+  // z nich wybierze router.
+  it.each<[string, "api" | "page", ModuleKey]>([
+    // pasuje tylko postać zdekodowana
+    ["/%61pi/invoices", "api", "invoices"],
+    ["/api%2Finvoices", "api", "invoices"],
+    ["/api/x/..%2finvoices", "api", "invoices"],
+    ["/api/x/%2e%2e/push/subscribe", "api", "pushNotifications"],
+    ["/dashboard%2Finvoices", "page", "invoices"],
+    // pasuje tylko postać dosłowna (zakodowane `..` nie wyprowadza z modułu)
+    ["/api/invoices/%2e%2e/clients", "api", "invoices"],
+    ["/api/invoices/abc%2f..%2f..%2f..%2fclients", "api", "invoices"],
+    ["/dashboard/invoices/%2e%2e/clients", "page", "invoices"],
+  ])("jedna z dwóch postaci wystarcza: %s → %s:%s", (path, kind, module) => {
+    expect(frozenModuleForPath(path)).toEqual({ kind, module });
   });
 
   it("frozenModuleForApiPath i frozenModuleForPage to to samo pytanie zawężone do rodzaju", () => {

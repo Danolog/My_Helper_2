@@ -24,6 +24,8 @@
  * Pilnuje tego `__tests__/lib/frozen-modules.test.ts`.
  */
 
+import { decodedCanonicalPath, literalCanonicalPath } from "@/lib/path-normalize";
+
 export type ModuleKey =
   | "products"
   | "promotions"
@@ -256,61 +258,14 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
   { pattern: /^\/api\/cron\/push-reminders(-24h)?(\/|$)/, module: "pushNotifications" },
 ];
 
-/**
- * Ścieżka sprowadzona do jednej postaci przed dopasowaniem do rejestru —
- * JEDYNE miejsce normalizacji; wzorce i prefiksy rejestru zakładają tę postać:
- * 1. zdekodowana z kodowania procentowego (`/api/%69nvoices`, `/api%2Finvoices`);
- *    przy błędnym kodowaniu dekodujemy pojedyncze sekwencje ASCII, a błędne
- *    zostają — jedno `%zz` nie wyłącza dekodowania reszty ścieżki,
- * 2. odwrócone ukośniki jak zwykłe (tak czyta je parser URL),
- * 3. bez pustych segmentów (`//api//invoices`) i bez segmentów `.` / `..`
- *    (`/api/x/../invoices`) — także zakodowanych (`%2e%2e`),
- * 4. bez ukośnika końcowego, małymi literami.
- *
- * Blokada jest celowo szersza niż router: wariant, którego router nie zna,
- * i tak kończy się 404, a wariant, który router sprowadza do trasy
- * kanonicznej, musi dostać tę samą decyzję co ona. Funkcja nie polega na tym,
- * że parser URL wcześniej ścieżkę uporządkował.
- */
-export function normalizePathname(pathname: string): string {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(pathname);
-  } catch {
-    decoded = pathname.replace(/%[0-7][0-9a-f]/gi, (seq) =>
-      String.fromCharCode(parseInt(seq.slice(1), 16))
-    );
-  }
-
-  const segments: string[] = [];
-  for (const segment of decoded.replace(/\\/g, "/").split("/")) {
-    if (segment === "" || segment === ".") continue;
-    if (segment === "..") {
-      segments.pop();
-      continue;
-    }
-    segments.push(segment);
-  }
-  return `/${segments.join("/")}`.toLowerCase();
-}
-
 export interface FrozenTarget {
   /** `api` — trasa API (odpowiedź 404), `page` — strona panelu (przekierowanie). */
   kind: "api" | "page";
   module: ModuleKey;
 }
 
-/**
- * Czy ścieżka należy do modułu zamrożonego — jedno pytanie dla tras API
- * i stron panelu, na ścieżce znormalizowanej raz. Jedyny egzekutor:
- * `src/proxy.ts`. null = ścieżka działa.
- *
- * Moduły przełączalne zwracają null — ich stan zależy od salonu i jest
- * egzekwowany w interfejsie (`ModuleGate`), nie w proxy.
- */
-export function frozenModuleForPath(pathname: string): FrozenTarget | null {
-  const path = normalizePathname(pathname);
-
+/** Dopasowanie jednej postaci kanonicznej ścieżki do rejestru. */
+function frozenTargetForCanonicalPath(path: string): FrozenTarget | null {
   const api = API_MODULE_PATTERNS.find(
     (e) => isModuleFrozen(e.module) && e.pattern.test(path)
   );
@@ -320,6 +275,27 @@ export function frozenModuleForPath(pathname: string): FrozenTarget | null {
   if (page && isModuleFrozen(page)) return { kind: "page", module: page };
 
   return null;
+}
+
+/**
+ * Czy ścieżka należy do modułu zamrożonego — jedno pytanie dla tras API
+ * i stron panelu. Jedyny egzekutor: `src/proxy.ts`. null = ścieżka działa.
+ *
+ * Wzorce i prefiksy rejestru zakładają postać kanoniczną ścieżki
+ * (`src/lib/path-normalize.ts`). Sprawdzamy OBIE postaci — dosłowną (bez
+ * dekodowania) i zdekodowaną — i blokujemy, jeśli pasuje którakolwiek: nie
+ * zgadujemy, którą z nich wybierze router. Inny zapis tej samej trasy
+ * (`//api//invoices`, `/api/x/../invoices`, `/%61pi/invoices`,
+ * `/API/Invoices`) dostaje tę samą decyzję co postać kanoniczna.
+ *
+ * Moduły przełączalne zwracają null — ich stan zależy od salonu i jest
+ * egzekwowany w interfejsie (`ModuleGate`), nie w proxy.
+ */
+export function frozenModuleForPath(pathname: string): FrozenTarget | null {
+  return (
+    frozenTargetForCanonicalPath(literalCanonicalPath(pathname)) ??
+    frozenTargetForCanonicalPath(decodedCanonicalPath(pathname))
+  );
 }
 
 /** Moduł zamrożony, do którego należy trasa API (null = trasa działa). */
