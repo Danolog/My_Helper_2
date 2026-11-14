@@ -721,11 +721,10 @@ export const albumPhotosSchema = z.object({
 // Id pracownika/uslugi: kolumny uuid w bazie, wiec smiec dalby 500. Celowo
 // luzny format UUID (dowolny wariant), nie z.uuid() — id z seeda
 // ("00000000-0000-0000-0000-...") nie sa v4, a UI wysyla je 1:1.
-const optionalUuidLikeId = z
+const uuidLikeId = z
   .string()
-  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "Nieprawidlowy identyfikator")
-  .nullable()
-  .optional();
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "Nieprawidlowy identyfikator");
+const optionalUuidLikeId = uuidLikeId.nullable().optional();
 
 // Adres zdjecia: wylacznie to, co zwrocil nasz upload galerii (lib/upload-url).
 const galleryUploadUrl = z
@@ -944,13 +943,22 @@ export const temporaryAccessSchema = z.object({
   durationMinutes: z.number().int().positive().optional(),
 });
 
+// Kontrakt = body z block-time-dialog.tsx i use-schedule-data.ts. Salon
+// trasa bierze z sesji (getSalonContext), wiec salonId nie jest czescia body.
+const isoDateTime = (fieldName: string) =>
+  requiredString(fieldName).refine(
+    (v) => !Number.isNaN(Date.parse(v)),
+    `${fieldName}: nieprawidlowa data`
+  );
+
 export const createTimeBlockSchema = z.object({
-  salonId: requiredString("Salon ID"),
-  employeeId: requiredString("Pracownik"),
-  startTime: requiredString("Czas rozpoczecia"),
-  endTime: requiredString("Czas zakonczenia"),
-  reason: z.string().nullable().optional(),
-  isRecurring: z.boolean().optional(),
+  employeeId: uuidLikeId,
+  startTime: isoDateTime("Czas rozpoczecia"),
+  endTime: isoDateTime("Czas zakonczenia"),
+  blockType: z.enum(["break", "vacation", "personal", "holiday", "other"], {
+    message: "Nieprawidlowy typ blokady",
+  }),
+  reason: z.string().max(500).nullable().optional(),
 });
 
 export const createWorkScheduleSchema = z.object({
