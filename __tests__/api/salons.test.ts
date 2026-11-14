@@ -169,3 +169,54 @@ describe("DELETE /api/salons — trasa zdjęta, żaden salon nie znika", () => {
     expect((route as Record<string, unknown>).DELETE).toBeUndefined();
   });
 });
+
+// -------------------------------------------------------
+// POST
+// -------------------------------------------------------
+
+async function callPost(body: Row): Promise<{ status: number; body: Row }> {
+  const res = await route.POST(
+    createMockRequest("http://localhost/api/salons", { method: "POST", body }),
+  );
+  return { status: res.status, body: (await res.json()) as Row };
+}
+
+const salonsOf = (ownerId: string) => store.salons.filter((s) => s.ownerId === ownerId);
+
+describe("POST /api/salons — właściciel wyłącznie z sesji", () => {
+  it("body z cudzym ownerId — salon należy do konta z sesji, nie do ofiary", async () => {
+    sessionUserId = CLIENT;
+    const { status, body } = await callPost({ name: "Nowy", ownerId: OWNER_B });
+    expect(status).toBe(201);
+    expect((body.data as Row).ownerId).toBe(CLIENT);
+    expect(salonsOf(CLIENT)).toHaveLength(1);
+    expect(salonsOf(OWNER_B)).toHaveLength(1); // tylko pierwotny Salon B
+  });
+
+  it("body z ownerId: null — salon nie zostaje bez właściciela", async () => {
+    sessionUserId = CLIENT;
+    const { status, body } = await callPost({ name: "Nowy", ownerId: null });
+    expect(status).toBe(201);
+    expect((body.data as Row).ownerId).toBe(CLIENT);
+  });
+
+  it("body bez ownerId — właściciel z sesji", async () => {
+    sessionUserId = CLIENT;
+    const { status, body } = await callPost({ name: "Nowy" });
+    expect(status).toBe(201);
+    expect((body.data as Row).ownerId).toBe(CLIENT);
+  });
+
+  it("brak sesji — 401, nic nie powstaje", async () => {
+    const { status } = await callPost({ name: "Nowy", ownerId: OWNER_B });
+    expect(status).toBe(401);
+    expect(store.salons).toHaveLength(2);
+  });
+
+  it("brak nazwy — 400, nic nie powstaje", async () => {
+    sessionUserId = CLIENT;
+    const { status } = await callPost({ ownerId: CLIENT });
+    expect(status).toBe(400);
+    expect(store.salons).toHaveLength(2);
+  });
+});

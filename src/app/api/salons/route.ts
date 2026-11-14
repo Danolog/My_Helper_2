@@ -141,9 +141,11 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    const { name, phone, email, address, industryType, ownerId } = body;
+    // Właściciel wyłącznie z sesji — `ownerId` z body jest ignorowany (inaczej
+    // salon na cudze konto albo bez właściciela).
+    const { name, phone, email, address, industryType } = body;
+    const ownerId = authResult.user.id;
 
-    logger.info(`[Salons API] Executing: INSERT INTO salons (name, phone, email, address, industry_type, owner_id)`);
     const [newSalon] = await db
       .insert(salons)
       .values({
@@ -152,7 +154,7 @@ export async function POST(request: Request) {
         email: email || null,
         address: address || null,
         industryType: industryType || null,
-        ownerId: ownerId || null,
+        ownerId,
       })
       .returning();
 
