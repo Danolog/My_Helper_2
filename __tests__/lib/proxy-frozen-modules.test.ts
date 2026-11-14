@@ -12,9 +12,9 @@
  * Lista ścieżek pochodzi z rejestru (`API_MODULE_PATTERNS`) — test nie ma
  * własnej listy modułów, dopasowuje wzorce do tras z systemu plików.
  */
+import { NextRequest } from "next/server";
 import { readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { NextRequest } from "next/server";
 import { describe, it, expect } from "vitest";
 import {
   API_MODULE_PATTERNS,

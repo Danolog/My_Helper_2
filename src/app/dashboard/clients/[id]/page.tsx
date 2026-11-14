@@ -18,11 +18,11 @@ import { ClientLoyaltyTab } from "@/components/clients/client-loyalty-tab";
 import { ClientProfileHeader } from "@/components/clients/client-profile-header";
 import { ClientProfileTab } from "@/components/clients/client-profile-tab";
 import type { ClientData, Employee } from "@/components/clients/types";
-import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import {
   parseCommaSeparated,
   serializeCommaSeparated,
 } from "@/components/clients/utils";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
