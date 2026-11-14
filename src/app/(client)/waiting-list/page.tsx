@@ -25,18 +25,13 @@ import { useSession } from "@/lib/auth-client";
 
 interface WaitingListEntry {
   id: string;
-  salonId: string;
   salonName: string;
-  serviceId: string | null;
   serviceName: string | null;
-  preferredEmployeeId: string | null;
   preferredEmployeeName: string | null;
-  preferredDate: string | null;
   notifiedAt: string | null;
   accepted: boolean | null;
   offeredStartTime: string | null;
   offeredEndTime: string | null;
-  offeredEmployeeId: string | null;
   offeredEmployeeName: string | null;
   existingAppointmentId: string | null;
   createdAt: string;
