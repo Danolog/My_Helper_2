@@ -8,6 +8,7 @@
  * - PUT /api/appointments/[id] (reschedule with overlap check)
  * - DELETE /api/appointments/[id] (cancel with deposit rules)
  */
+import { eq } from "drizzle-orm";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   createMockRequest,
@@ -671,6 +672,7 @@ describe("POST /api/appointments", () => {
     const promoChain = chainMock([{
       promoCode: {
         id: PROMO_CODE_UUID,
+        salonId: TEST_IDS.SALON_UUID,
         expiresAt: new Date("2027-01-01T00:00:00Z"),
         usageLimit: 100,
         usedCount: 5,
@@ -678,9 +680,14 @@ describe("POST /api/appointments", () => {
       },
       promotion: {
         id: "promo-1",
+        salonId: TEST_IDS.SALON_UUID,
+        type: "percentage",
+        value: "20.00",
         isActive: true,
       },
     }]);
+    // 4th select: service of this salon (price base for the discount)
+    const serviceChain = chainMock([makeService()]);
     // insert: returns the new appointment
     const insertChain = chainMock([newAppointment]);
     // update: increment promo code usedCount
@@ -689,7 +696,8 @@ describe("POST /api/appointments", () => {
     mockDbSelect
       .mockReturnValueOnce(overlapChain)
       .mockReturnValueOnce(timeBlockChain)
-      .mockReturnValueOnce(promoChain);
+      .mockReturnValueOnce(promoChain)
+      .mockReturnValueOnce(serviceChain);
     mockDbInsert.mockReturnValue(insertChain);
     mockDbUpdate.mockReturnValue(updatePromoChain);
 
@@ -715,6 +723,10 @@ describe("POST /api/appointments", () => {
     expect(body.data).toBeDefined();
     // Verify promo code usage was incremented (update was called)
     expect(mockDbUpdate).toHaveBeenCalled();
+    // Discount computed by the server: 20% of 100 PLN
+    expect(insertChain.values).toHaveBeenCalledWith(
+      expect.objectContaining({ promoCodeId: PROMO_CODE_UUID, discountAmount: "20.00" })
+    );
   });
 
   it("should return 400 when promo code is expired", async () => {
@@ -726,6 +738,7 @@ describe("POST /api/appointments", () => {
     const promoChain = chainMock([{
       promoCode: {
         id: PROMO_CODE_UUID,
+        salonId: TEST_IDS.SALON_UUID,
         expiresAt: new Date("2020-01-01T00:00:00Z"),
         usageLimit: 100,
         usedCount: 5,
@@ -733,6 +746,7 @@ describe("POST /api/appointments", () => {
       },
       promotion: {
         id: "promo-1",
+        salonId: TEST_IDS.SALON_UUID,
         isActive: true,
       },
     }]);
@@ -770,6 +784,7 @@ describe("POST /api/appointments", () => {
     const promoChain = chainMock([{
       promoCode: {
         id: PROMO_CODE_UUID,
+        salonId: TEST_IDS.SALON_UUID,
         expiresAt: new Date("2027-01-01T00:00:00Z"),
         usageLimit: 10,
         usedCount: 10,
@@ -777,6 +792,7 @@ describe("POST /api/appointments", () => {
       },
       promotion: {
         id: "promo-1",
+        salonId: TEST_IDS.SALON_UUID,
         isActive: true,
       },
     }]);
@@ -814,6 +830,7 @@ describe("POST /api/appointments", () => {
     const promoChain = chainMock([{
       promoCode: {
         id: PROMO_CODE_UUID,
+        salonId: TEST_IDS.SALON_UUID,
         expiresAt: new Date("2027-01-01T00:00:00Z"),
         usageLimit: 100,
         usedCount: 5,
@@ -821,6 +838,7 @@ describe("POST /api/appointments", () => {
       },
       promotion: {
         id: "promo-1",
+        salonId: TEST_IDS.SALON_UUID,
         isActive: false,
       },
     }]);
@@ -1128,6 +1146,230 @@ describe("POST /api/appointments", () => {
 
     expect(status).toBe(429);
     expect(body.success).toBe(false);
+  });
+});
+
+// -------------------------------------------------------
+// P1 (Ryan): rabat wizyty liczy serwer, nie klient.
+// Publiczny POST zapisywal discountAmount prosto z zadania, a promoCodeId
+// szukal bez zawezenia do salonu wizyty. Kwota rabatu wplywa na punkty
+// lojalnosciowe przy zakonczeniu wizyty i na statystyki przychodu.
+// -------------------------------------------------------
+
+describe("POST /api/appointments — rabat liczony przez serwer (P1)", () => {
+  const PROMO_CODE_UUID = "77777777-7777-4777-8777-777777777777";
+  const OTHER_SALON_UUID = "99999999-9999-4999-8999-999999999999";
+
+  type PromoRowOverrides = {
+    promoCode?: Record<string, unknown>;
+    promotion?: Record<string, unknown> | null;
+  };
+
+  function promoRow(overrides: PromoRowOverrides = {}) {
+    return {
+      promoCode: {
+        id: PROMO_CODE_UUID,
+        salonId: TEST_IDS.SALON_UUID,
+        code: "LATO10",
+        expiresAt: new Date("2099-01-01T00:00:00Z"),
+        usageLimit: 100,
+        usedCount: 5,
+        promotionId: "promo-1",
+        ...overrides.promoCode,
+      },
+      promotion:
+        overrides.promotion === null
+          ? null
+          : {
+              id: "promo-1",
+              salonId: TEST_IDS.SALON_UUID,
+              type: "percentage",
+              value: "10.00",
+              isActive: true,
+              startDate: null,
+              endDate: null,
+              conditionsJson: {},
+              ...overrides.promotion,
+            },
+    };
+  }
+
+  /** Kolejnosc selectow: overlap, blokady czasu, kod promocyjny, usluga. */
+  function arrangeBooking(row: unknown | null, service: unknown | null = makeService()) {
+    const insertChain = chainMock([makeAppointment()]);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(chainMock(row ? [row] : []))
+      .mockReturnValueOnce(chainMock(service ? [service] : []));
+    mockDbInsert.mockReturnValue(insertChain);
+    mockDbUpdate.mockReturnValue(chainMock([]));
+    return insertChain;
+  }
+
+  function bookingRequest(extra: Record<string, unknown>) {
+    return createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        serviceId: TEST_IDS.SERVICE_UUID,
+        clientId: TEST_IDS.CLIENT_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+        ...extra,
+      },
+    });
+  }
+
+  function insertedValues(insertChain: ReturnType<typeof chainMock>) {
+    return insertChain.values!.mock.calls[0]![0] as Record<string, unknown>;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    mockDbUpdate.mockReset();
+  });
+
+  it("ignoruje discountAmount z zadania i zapisuje rabat policzony z promocji (10% z 100 zl = 10.00)", async () => {
+    const insertChain = arrangeBooking(promoRow());
+
+    const response = await createAppointment(
+      bookingRequest({ promoCodeId: PROMO_CODE_UUID, discountAmount: "99.00" })
+    );
+
+    expect(response.status).toBe(201);
+    expect(insertedValues(insertChain).discountAmount).toBe("10.00");
+    expect(insertedValues(insertChain).promoCodeId).toBe(PROMO_CODE_UUID);
+  });
+
+  it("odrzuca kod promocyjny innego salonu (400, bez zapisu i bez zuzycia kodu)", async () => {
+    arrangeBooking(
+      promoRow({
+        promoCode: { salonId: OTHER_SALON_UUID },
+        promotion: { salonId: OTHER_SALON_UUID },
+      })
+    );
+
+    const response = await createAppointment(
+      bookingRequest({ promoCodeId: PROMO_CODE_UUID, discountAmount: "50.00" })
+    );
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(400);
+    expect(body.error).toContain("Nieprawidlowy kod promocyjny");
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("zaweza wyszukanie kodu promocyjnego do salonu wizyty w zapytaniu", async () => {
+    arrangeBooking(promoRow());
+
+    await createAppointment(bookingRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    expect(vi.mocked(eq)).toHaveBeenCalledWith("promoCodes.salonId", TEST_IDS.SALON_UUID);
+  });
+
+  it("bez kodu promocyjnego discountAmount z zadania jest ignorowany (null)", async () => {
+    const insertChain = arrangeBooking(null);
+
+    const response = await createAppointment(bookingRequest({ discountAmount: "40.00" }));
+
+    expect(response.status).toBe(201);
+    expect(insertedValues(insertChain).discountAmount).toBeNull();
+    expect(insertedValues(insertChain).promoCodeId).toBeNull();
+  });
+
+  it("rabat kwotowy wiekszy niz cena uslugi jest obcinany do ceny (150 zl na 100 zl = 100.00)", async () => {
+    const insertChain = arrangeBooking(promoRow({ promotion: { type: "fixed", value: "150.00" } }));
+
+    const response = await createAppointment(
+      bookingRequest({ promoCodeId: PROMO_CODE_UUID, discountAmount: "150.00" })
+    );
+
+    expect(response.status).toBe(201);
+    expect(insertedValues(insertChain).discountAmount).toBe("100.00");
+  });
+
+  it("rabat procentowy ponad 100% jest obcinany do ceny uslugi", async () => {
+    const insertChain = arrangeBooking(promoRow({ promotion: { value: "150.00" } }));
+
+    const response = await createAppointment(bookingRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    expect(response.status).toBe(201);
+    expect(insertedValues(insertChain).discountAmount).toBe("100.00");
+  });
+
+  it("kod bez powiazanej promocji: zapisuje kod, rabat null mimo kwoty w zadaniu", async () => {
+    const insertChain = arrangeBooking(promoRow({ promotion: null, promoCode: { promotionId: null } }));
+
+    const response = await createAppointment(
+      bookingRequest({ promoCodeId: PROMO_CODE_UUID, discountAmount: "30.00" })
+    );
+
+    expect(response.status).toBe(201);
+    expect(insertedValues(insertChain).promoCodeId).toBe(PROMO_CODE_UUID);
+    expect(insertedValues(insertChain).discountAmount).toBeNull();
+  });
+
+  it("odrzuca kod, gdy powiazana promocja jest nieaktywna", async () => {
+    arrangeBooking(promoRow({ promotion: { isActive: false } }));
+
+    const response = await createAppointment(bookingRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    expect(response.status).toBe(400);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("odrzuca kod, gdy powiazana promocja juz sie zakonczyla", async () => {
+    arrangeBooking(promoRow({ promotion: { endDate: new Date("2020-01-01T00:00:00Z") } }));
+
+    const response = await createAppointment(bookingRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    expect(response.status).toBe(400);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("odrzuca kod, gdy promocja jeszcze sie nie rozpoczela", async () => {
+    arrangeBooking(promoRow({ promotion: { startDate: new Date("2099-01-01T00:00:00Z") } }));
+
+    const response = await createAppointment(bookingRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    expect(response.status).toBe(400);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("odrzuca kod, ktory nie dotyczy wybranej uslugi (applicableServiceIds)", async () => {
+    arrangeBooking(
+      promoRow({ promotion: { conditionsJson: { applicableServiceIds: ["inna-usluga"] } } })
+    );
+
+    const response = await createAppointment(bookingRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    expect(response.status).toBe(400);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("odrzuca kod bez wybranej uslugi (brak ceny, od ktorej liczyc rabat)", async () => {
+    arrangeBooking(promoRow());
+
+    const response = await createAppointment(
+      bookingRequest({ serviceId: null, promoCodeId: PROMO_CODE_UUID, discountAmount: "20.00" })
+    );
+
+    expect(response.status).toBe(400);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("odrzuca kod, gdy usluga nie nalezy do salonu wizyty", async () => {
+    arrangeBooking(promoRow(), null);
+
+    const response = await createAppointment(bookingRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    expect(response.status).toBe(400);
+    expect(mockDbInsert).not.toHaveBeenCalled();
   });
 });
 
