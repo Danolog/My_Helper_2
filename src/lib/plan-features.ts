@@ -53,9 +53,12 @@ export const PLAN_FEATURES = {
  * `PLAN_FEATURES` zawsze lista z kodu — `stored` (kolumna `features_json`)
  * jest ignorowane, bo wiersze założone wcześniej obiecują wyłączone funkcje
  * (B9). Plan o nieznanym slugu zachowuje listę z bazy.
+ *
+ * `Object.hasOwn`, nie `in`: operator `in` uznaje też nazwy odziedziczone
+ * (`"constructor"`, `"toString"`) za znane plany.
  */
 export function featuresFor(slug: string, stored: unknown): string[] {
-  if (slug in PLAN_FEATURES) {
+  if (Object.hasOwn(PLAN_FEATURES, slug)) {
     return [...PLAN_FEATURES[slug as keyof typeof PLAN_FEATURES]];
   }
   return Array.isArray(stored) ? (stored as string[]) : [];

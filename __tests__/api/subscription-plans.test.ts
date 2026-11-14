@@ -67,6 +67,14 @@ describe("GET /api/subscription-plans", () => {
     expect(body.data[0].features).toEqual([]);
   });
 
+  it("slug będący nazwą odziedziczoną (constructor) nie wywraca trasy", async () => {
+    rows.push(row("constructor", ["Dedykowany opiekun"]));
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data[0].features).toEqual(["Dedykowany opiekun"]);
+  });
+
   it("błąd bazy -> 500", async () => {
     const { db } = await import("@/lib/db");
     vi.mocked(db.select).mockImplementationOnce(() => {
