@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { clientWaitingListResponseSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { verifiedClientMatchEmail } from "@/lib/client-match";
 // ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
@@ -20,7 +21,8 @@ export async function POST(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const userEmail = authResult.user.email;
+    // Wlasnosc wpisu po e-mailu tylko dla zweryfikowanego e-maila
+    const userEmail = verifiedClientMatchEmail(authResult.user);
     const { id } = await params;
 
     const rawBody = await request.json();
@@ -34,7 +36,7 @@ export async function POST(
     const [entry] = await db
       .select({
         entry: waitingList,
-        client: clients,
+        client: { email: clients.email },
       })
       .from(waitingList)
       .innerJoin(clients, eq(waitingList.clientId, clients.id))
@@ -49,7 +51,7 @@ export async function POST(
     }
 
     // Verify the entry belongs to a client linked to this user (by email)
-    if (entry.client.email !== userEmail) {
+    if (!userEmail || entry.client.email !== userEmail) {
       return NextResponse.json(
         { success: false, error: "Brak dostepu do tego wpisu" },
         { status: 403 }
@@ -148,14 +150,15 @@ export async function DELETE(
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const userEmail = authResult.user.email;
+    // Wlasnosc wpisu po e-mailu tylko dla zweryfikowanego e-maila
+    const userEmail = verifiedClientMatchEmail(authResult.user);
     const { id } = await params;
 
     // Find the waiting list entry with client info for ownership verification
     const [entry] = await db
       .select({
         entry: waitingList,
-        client: clients,
+        client: { email: clients.email },
       })
       .from(waitingList)
       .innerJoin(clients, eq(waitingList.clientId, clients.id))
@@ -170,7 +173,7 @@ export async function DELETE(
     }
 
     // Verify the entry belongs to a client linked to this user (by email)
-    if (entry.client.email !== userEmail) {
+    if (!userEmail || entry.client.email !== userEmail) {
       return NextResponse.json(
         { success: false, error: "Brak dostepu do tego wpisu" },
         { status: 403 }
