@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Ręczne uruchomienie na dowolnej gałęzi (zakładka Actions -> Run workflow,
+  # albo: gh workflow run quality-gate.yml --ref <gałąź>). Jedyna różnica względem
+  # pull_request: uruchamia się też pełny zestaw E2E (@full), który normalnie
+  # biega dopiero po scaleniu do main.
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -126,7 +131,7 @@ jobs:
 
   e2e-full:
     name: E2E Full Tests
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     needs: [e2e-smoke]
     runs-on: ubuntu-24.04 # Playwright 1.58.2 nie obsługuje Ubuntu 26 (ubuntu-latest)
     timeout-minutes: 35
