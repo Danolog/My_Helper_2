@@ -82,7 +82,15 @@ function passedThrough(response: Response): boolean {
 
 describe("proxy: trasy API modułów zamrożonych", () => {
   it("rejestr wskazuje trasy do zamrożenia (kontrola, że test nie jest pusty)", () => {
-    expect(FROZEN_ROUTES.length).toBeGreaterThanOrEqual(21);
+    expect(FROZEN_ROUTES.length).toBeGreaterThanOrEqual(48);
+    expect(FROZEN_ROUTES).toContain("/api/ai/voice/stt");
+    expect(FROZEN_ROUTES).toContain("/api/ai/voice/tts");
+    expect(FROZEN_ROUTES).toContain("/api/ai/voice/interpret-command");
+    expect(FROZEN_ROUTES).toContain("/api/appointments/x1/fiscal-receipt");
+    expect(FROZEN_ROUTES).toContain("/api/ai/voice/incoming");
+    expect(FROZEN_ROUTES).toContain("/api/ai/video/generate");
+    expect(FROZEN_ROUTES).toContain("/api/scheduled-posts");
+    expect(FROZEN_ROUTES).toContain("/api/salons/x1/fiscal-settings");
     expect(FROZEN_ROUTES).toContain("/api/push/subscribe");
     expect(FROZEN_ROUTES).toContain("/api/push/unsubscribe");
     expect(FROZEN_ROUTES).toContain("/api/push/test");

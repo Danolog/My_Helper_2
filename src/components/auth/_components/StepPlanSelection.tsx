@@ -18,6 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { TRIAL_DAYS } from "@/lib/constants";
+import { PLAN_SUMMARY } from "@/lib/plan-features";
 import type { Plan } from "../_hooks/use-registration";
 
 interface StepPlanSelectionProps {
@@ -103,7 +104,7 @@ export function StepPlanSelection({
                       </CardTitle>
                     </div>
                     <CardDescription>
-                      Pelne zarzadzanie salonem bez narzedzi AI
+                      {PLAN_SUMMARY.basic}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col">
@@ -171,7 +172,7 @@ export function StepPlanSelection({
                       </CardTitle>
                     </div>
                     <CardDescription>
-                      Pelna funkcjonalnosc z asystentem AI
+                      {PLAN_SUMMARY.pro}
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col">

@@ -62,6 +62,20 @@ describe("AppointmentHeader — faktury zamrożone", () => {
     expect(screen.getByTestId("back-btn")).toBeInTheDocument();
   });
 
+  it("fiskalizacja zamrożona: nie ma przycisków paragonu", () => {
+    renderHeader({});
+
+    expect(screen.queryByTestId("print-receipt-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("view-receipt-btn")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/paragon/i);
+  });
+
+  it("kontrola: przy module fiskalizacji włączonym przycisk paragonu wraca", () => {
+    renderHeader({ modules: { ...DEFAULT_MODULES, fiscal: true } });
+
+    expect(screen.getByTestId("print-receipt-btn")).toBeInTheDocument();
+  });
+
   it("kontrola: przy module faktur włączonym przyciski wracają", () => {
     const thawed = { ...DEFAULT_MODULES, invoices: true };
 

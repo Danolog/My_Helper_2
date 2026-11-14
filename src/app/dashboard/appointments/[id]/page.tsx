@@ -61,6 +61,8 @@ export default function AppointmentDetailPage() {
   // Faktury to modul z rejestru (src/lib/features.ts) — wylaczony albo
   // zamrozony: strona nie pyta API o fakture i nie laduje dialogu.
   const invoicesEnabled = useModuleEnabled("invoices");
+  // Fiskalizacja tak samo: bez pytania o paragon i bez dialogu paragonu.
+  const fiscalEnabled = useModuleEnabled("fiscal");
 
   const [appointment, setAppointment] = useState<AppointmentDetail | null>(null);
   const [materials, setMaterials] = useState<MaterialRecord[]>([]);
@@ -172,6 +174,7 @@ export default function AppointmentDetailPage() {
   }, [appointmentId]);
 
   const fetchFiscalReceipt = useCallback(async (signal: AbortSignal | null = null) => {
+    if (!fiscalEnabled) return;
     try {
       const res = await fetch(`/api/appointments/${appointmentId}/fiscal-receipt`, { signal });
       if (!res.ok) return;
@@ -182,7 +185,7 @@ export default function AppointmentDetailPage() {
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
     }
-  }, [appointmentId]);
+  }, [appointmentId, fiscalEnabled]);
 
   const fetchInvoice = useCallback(async (signal: AbortSignal | null = null) => {
     if (!invoicesEnabled) return;
@@ -342,14 +345,16 @@ export default function AppointmentDetailPage() {
       )}
 
       {/* Fiscal Receipt Dialog */}
-      <FiscalReceiptDialog
-        open={receiptDialogOpen}
-        onOpenChange={setReceiptDialogOpen}
-        appointment={appointment}
-        fiscalReceipt={fiscalReceipt}
-        totalMaterialCost={totalMaterialCost}
-        onReceiptPrinted={setFiscalReceipt}
-      />
+      {fiscalEnabled && (
+        <FiscalReceiptDialog
+          open={receiptDialogOpen}
+          onOpenChange={setReceiptDialogOpen}
+          appointment={appointment}
+          fiscalReceipt={fiscalReceipt}
+          totalMaterialCost={totalMaterialCost}
+          onReceiptPrinted={setFiscalReceipt}
+        />
+      )}
 
       {/* Invoice Dialog */}
       {invoicesEnabled && (

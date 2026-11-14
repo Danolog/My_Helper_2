@@ -72,11 +72,12 @@ const API_DIR_NAMES: Record<string, RegExp | null> = {
   // Generowanie obrazów modelem. /api/ai/image/enhance (obróbka zdjęcia
   // biblioteką sharp, bez modelu) zostaje.
   imageGen: /\/ai\/image\/(generate|banner|service-illustration)/,
-  // Kod tych modułów jest kasowany w B3–B5 razem z trasami.
-  voiceAi: null,
-  videoGen: null,
-  fiscal: null,
-  socialPosts: null,
+  // Moduły zamrożone wcześniej (kod kasowany w B3–B5) — trasy też są
+  // blokowane: płatne generowanie mowy i wideo nie może być osiągalne.
+  voiceAi: /\/ai\/voice(\/|$)/,
+  videoGen: /\/ai\/video(\/|$)/,
+  fiscal: /fiscal/,
+  socialPosts: /scheduled-posts|social-post/,
 };
 
 const FROZEN_KEYS = MODULES.filter((m) => m.hardOff).map((m) => m.key);
@@ -167,6 +168,21 @@ describe("frozenModuleForApiPath", () => {
     ["/api/ai/image/generate", "imageGen"],
     ["/api/ai/image/banner", "imageGen"],
     ["/api/ai/image/service-illustration", "imageGen"],
+    ["/api/ai/voice/incoming", "voiceAi"],
+    ["/api/ai/voice/twilio/webhook", "voiceAi"],
+    ["/api/ai/voice/config", "voiceAi"],
+    ["/api/ai/voice/stt", "voiceAi"],
+    ["/api/ai/voice/tts", "voiceAi"],
+    ["/api/ai/voice/interpret-command", "voiceAi"],
+    ["/api/appointments/abc/fiscal-receipt", "fiscal"],
+    ["/api/ai/video/generate", "videoGen"],
+    ["/api/ai/video/status/abc", "videoGen"],
+    ["/api/scheduled-posts", "socialPosts"],
+    ["/api/scheduled-posts/abc", "socialPosts"],
+    ["/api/ai/content/social-post", "socialPosts"],
+    ["/api/cron/publish-scheduled-posts", "socialPosts"],
+    ["/api/salons/abc/fiscal-settings", "fiscal"],
+    ["/api/salons/abc/fiscal-settings/test-print", "fiscal"],
   ])("%s → %s", (path, module) => {
     expect(frozenModuleForApiPath(path)).toBe(module);
   });
@@ -206,6 +222,11 @@ describe("frozenModuleForApiPath", () => {
     "/api/appointments/book",
     "/api/ai/image/enhance",
     "/api/ai/image/generated",
+    "/api/ai/content/generate-description",
+    "/api/ai/content/generate-review-response",
+    "/api/ai/videos",
+    "/api/cron/sms-reminders",
+    "/api/salons/abc/notification-type-settings",
     "/api/appointments/abc",
     "/api/appointments/abc/complete",
     "/api/ai/image/enhance",

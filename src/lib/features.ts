@@ -2,7 +2,7 @@
  * Feature flags per salon (Faza 2 planu wydania — „chudy UI domyślnie").
  *
  * Rdzeń produktu (kalendarz, rezerwacje, klienci, usługi, pracownicy,
- * zadatki, przypomnienia SMS/push, opinie, galeria, 3 podstawowe raporty)
+ * zadatki, przypomnienia SMS, opinie, galeria, 3 podstawowe raporty)
  * jest ZAWSZE włączony i nie występuje w tym rejestrze.
  *
  * Moduły opcjonalne są domyślnie WYŁĄCZONE — właściciel salonu włącza je
@@ -217,6 +217,14 @@ export function isPromotionTypeFrozen(type: string | null | undefined): boolean 
   );
 }
 
+/**
+ * Informacja w Ustawienia → Moduły o funkcjach, których salon mógł używać
+ * przed zamrożeniem, i o tym, co dzieje się z jego danymi. Żeby ją zdjąć,
+ * wystarczy ustawić `null` — strona jej wtedy nie pokazuje.
+ */
+export const FROZEN_MODULES_NOTICE: string | null =
+  "Faktury i program lojalnościowy są obecnie niedostępne. Wystawione faktury i punkty klientów pozostają zapisane na koncie salonu.";
+
 /** Kod błędu i komunikat dla zamrożonej funkcji (odpowiedź proxy i bramka strony). */
 export const MODULE_DISABLED_CODE = "MODULE_DISABLED";
 export const MODULE_DISABLED_MESSAGE = "Ta funkcja jest obecnie niedostępna.";
@@ -280,6 +288,18 @@ export function moduleForRoute(pathname: string): ModuleKey | null {
 }
 
 /**
+ * Czy pozycja nawigacji prowadząca pod `href` ma być widoczna przy danym
+ * stanie modułów salonu: trasa rdzenia zawsze, trasa modułu tylko gdy moduł
+ * jest włączony i niezamrożony. Jedyny warunek filtra — wołają go menu
+ * boczne, dolna nawigacja i paleta poleceń (pilnuje
+ * `__tests__/components/DashboardNavFilter.test.tsx`).
+ */
+export function isRouteEnabledForModules(href: string, modules: ModulesState): boolean {
+  const key = moduleForRoute(href);
+  return key === null || (modules[key] === true && !isModuleFrozen(key));
+}
+
+/**
  * Trasy API należące do modułów — wzorce, bo `[id]` bywa w środku ścieżki.
  * Każdy wzorzec kończy się `(\/|$)`, żeby nie łapać tras sąsiednich
  * (`/api/invoicesx`). Proxy blokuje trasę, gdy jej moduł jest zamrożony.
@@ -310,6 +330,16 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
     pattern: /^\/api\/ai\/image\/(generate|banner|service-illustration)(\/|$)/,
     module: "imageGen",
   },
+  // Moduły zamrożone wcześniej (kod kasowany w B3–B5). Wywołujący trasy
+  // głosowe (dyktowanie, czytanie na głos) i paragon wizyty są schowani
+  // w interfejsie przez useModuleEnabled("voiceAi") / ("fiscal").
+  { pattern: /^\/api\/ai\/voice(\/|$)/, module: "voiceAi" },
+  { pattern: /^\/api\/ai\/video(\/|$)/, module: "videoGen" },
+  { pattern: /^\/api\/scheduled-posts(\/|$)/, module: "socialPosts" },
+  { pattern: /^\/api\/ai\/content\/social-post(\/|$)/, module: "socialPosts" },
+  { pattern: /^\/api\/cron\/publish-scheduled-posts(\/|$)/, module: "socialPosts" },
+  { pattern: /^\/api\/salons\/[^/]+\/fiscal-settings(\/|$)/, module: "fiscal" },
+  { pattern: /^\/api\/appointments\/[^/]+\/fiscal-receipt(\/|$)/, module: "fiscal" },
 ];
 
 export interface FrozenTarget {

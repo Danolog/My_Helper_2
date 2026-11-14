@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Mic, MicOff, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { Button } from "@/components/ui/button";
 import { useSubscription } from "@/hooks/use-subscription";
 import { useVoiceInput } from "@/hooks/use-voice-input";
@@ -21,6 +22,7 @@ import { cn } from "@/lib/utils";
  */
 export function VoiceCommandButton() {
   const router = useRouter();
+  const voiceEnabled = useModuleEnabled("voiceAi");
   const { isProPlan, loading: subscriptionLoading } = useSubscription();
   const [showTranscript, setShowTranscript] = useState(false);
   const [interpreting, setInterpreting] = useState(false);
@@ -88,7 +90,9 @@ export function VoiceCommandButton() {
 
   // Don't render until subscription data is loaded, or if
   // the user isn't on Pro, or the browser lacks MediaRecorder.
-  if (subscriptionLoading || !isProPlan || !isSupported) return null;
+  // Głos to moduł z rejestru (src/lib/features.ts) — wyłączony albo zamrożony:
+  // nie renderujemy nic (trasy STT i interpret-command zwracają wtedy 404).
+  if (!voiceEnabled || subscriptionLoading || !isProPlan || !isSupported) return null;
 
   const handleClick = () => {
     if (isListening) {

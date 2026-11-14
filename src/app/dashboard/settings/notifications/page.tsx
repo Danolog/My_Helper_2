@@ -97,7 +97,7 @@ export default function NotificationSettingsPage() {
             <div className="text-sm text-muted-foreground">
               {clientMarketingEnabled
                 ? "Przejdz do strony powiadomien, aby wyslac lub sprawdzic powiadomienia urodzinowe i re-engagement"
-                : "Przejdz do strony powiadomien, aby sprawdzic wyslane powiadomienia"}
+                : "Przejdź do strony powiadomień, aby sprawdzić wysłane powiadomienia"}
             </div>
           </div>
           <Button variant="outline" asChild>

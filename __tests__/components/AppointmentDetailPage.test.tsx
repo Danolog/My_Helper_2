@@ -104,6 +104,27 @@ describe("AppointmentDetailPage — faktury zamrożone", () => {
     expect(screen.queryByTestId("stub-invoice-card")).not.toBeInTheDocument();
   });
 
+  it("fiskalizacja zamrożona: zakończona wizyta renderuje się bez pytania o paragon i bez błędów", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("stub-header")).toBeInTheDocument();
+    });
+
+    expect(fetchedUrls().filter((u) => u.includes("fiscal-receipt"))).toEqual([]);
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("kontrola: przy module fiskalizacji włączonym strona pyta o paragon", async () => {
+    renderPage({ ...DEFAULT_MODULES, fiscal: true });
+
+    await waitFor(() => {
+      expect(fetchedUrls()).toContain("/api/appointments/appt-1/fiscal-receipt");
+    });
+  });
+
   it("kontrola: przy module faktur włączonym strona pobiera fakturę i pokazuje kartę", async () => {
     renderPage({ ...DEFAULT_MODULES, invoices: true });
 

@@ -37,7 +37,7 @@ const SETTINGS_ITEMS = [
   },
   {
     label: "Powiadomienia",
-    description: "Kanaly powiadomien: przypomnienia SMS i potwierdzenia platnosci",
+    description: "Kanały powiadomień: przypomnienia SMS i potwierdzenia płatności",
     href: "/dashboard/settings/notifications",
     icon: Bell,
   },

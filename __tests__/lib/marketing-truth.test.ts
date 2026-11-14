@@ -230,10 +230,32 @@ describe("prawda w marketingu", () => {
       const visible = visibleHubText(file);
       // Kontrola, że filtr nie wyciął całego pliku.
       expect(visible).toMatch(/ProPlanGate/);
+      // Szablony treści prowadzą wyłącznie do zamrożonych newsletterów —
+      // kafelek jest schowany razem z nimi, a szablonów nie obiecujemy.
+      expect(visible).not.toMatch(/szablon/i);
       for (const key of FROZEN_MODULE_KEYS) {
         const match = visible.match(FROZEN_MODULE_PROMISES[key]!);
         expect(match?.[0], `${file} obiecuje moduł zamrożony ${key}: „${match?.[0]}”`).toBeUndefined();
       }
+    });
+  });
+
+  describe("teksty zmienione przy zamrożeniu mają polskie znaki", () => {
+    it.each<[string, string]>([
+      [
+        "src/app/dashboard/settings/page.tsx",
+        "Kanały powiadomień: przypomnienia SMS i potwierdzenia płatności",
+      ],
+      [
+        "src/app/dashboard/settings/notifications/page.tsx",
+        "Przejdź do strony powiadomień, aby sprawdzić wysłane powiadomienia",
+      ],
+      [
+        "src/app/dashboard/subscription/_components/plan-actions.tsx",
+        "Funkcje planu Pro, które stracisz",
+      ],
+    ])("%s zawiera „%s”", (file, text) => {
+      expect(read(file)).toContain(text);
     });
   });
 
@@ -293,7 +315,15 @@ describe("prawda w marketingu", () => {
       ["src/app/(site)/pricing/page.tsx", /\bplanComparison\(/],
       ["src/components/dashboard/create-salon-prompt.tsx", /\bplanHighlights\(/],
       ["src/app/dashboard/subscription/_components/plan-actions.tsx", /\bproOnlyFeatures\(/],
+      ["src/components/auth/_components/StepPlanSelection.tsx", /PLAN_SUMMARY\.(basic|pro)/],
     ];
+
+    it("wybór planu przy rejestracji bierze opisy planów z PLAN_SUMMARY, nie z ręki", () => {
+      const source = read("src/components/auth/_components/StepPlanSelection.tsx");
+      expect(source).toMatch(/\{PLAN_SUMMARY\.basic\}/);
+      expect(source).toMatch(/\{PLAN_SUMMARY\.pro\}/);
+      expect(source).not.toMatch(/Pe[łl]ne zarz[ąa]dzanie salonem|Pe[łl]na funkcjonalno[śs][ćc]/);
+    });
 
     /** Źródło bez komentarzy — słowo w komentarzu nie jest wywołaniem. */
     const code = (relPath: string) =>
