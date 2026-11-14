@@ -82,7 +82,12 @@ function passedThrough(response: Response): boolean {
 
 describe("proxy: trasy API modułów zamrożonych", () => {
   it("rejestr wskazuje trasy do zamrożenia (kontrola, że test nie jest pusty)", () => {
-    expect(FROZEN_ROUTES.length).toBeGreaterThanOrEqual(16);
+    expect(FROZEN_ROUTES.length).toBeGreaterThanOrEqual(21);
+    expect(FROZEN_ROUTES).toContain("/api/push/subscribe");
+    expect(FROZEN_ROUTES).toContain("/api/push/unsubscribe");
+    expect(FROZEN_ROUTES).toContain("/api/push/test");
+    expect(FROZEN_ROUTES).toContain("/api/cron/push-reminders");
+    expect(FROZEN_ROUTES).toContain("/api/cron/push-reminders-24h");
     expect(FROZEN_ROUTES).toContain("/api/invoices");
     expect(FROZEN_ROUTES).toContain("/api/clients/x1/loyalty/redeem");
     expect(FROZEN_ROUTES).toContain("/api/newsletters/x1/send");
@@ -183,6 +188,8 @@ describe("proxy: trasy sąsiednie przechodzą", () => {
     "/api/clients/x1",
     "/api/notifications",
     "/api/notifications/low-stock",
+    "/api/cron/sms-reminders",
+    "/api/cron/cleanup-pending-deposits",
     "/api/salons/x1/notification-type-settings",
     "/api/salons/x1/modules",
     "/api/appointments/x1/complete",

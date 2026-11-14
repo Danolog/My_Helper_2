@@ -147,9 +147,9 @@ export const MODULES: readonly ModuleDef[] = [
     hardOff: true,
   },
   {
-    // Zamrożony tylko w interfejsie (przełącznik „Powiadomienia Push” i panel
-    // subskrypcji push). Trasy /api/push/* i crony push nie mają wzorca w
-    // API_MODULE_PATTERNS — harmonogram ich nie wywołuje (aneks C).
+    // Cały moduł push: przełącznik „Powiadomienia Push” i panel subskrypcji
+    // w interfejsie, trasy /api/push/* oraz crony przypomnień push
+    // (na starcie przypominamy tylko SMS-em).
     key: "pushNotifications",
     label: "Powiadomienia push",
     description: "Przypomnienia push o wizytach dla klientów z kontem.",
@@ -252,6 +252,8 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
   { pattern: /^\/api\/salons\/[^/]+\/birthday-settings(\/|$)/, module: "clientMarketing" },
   { pattern: /^\/api\/salons\/[^/]+\/we-miss-you-settings(\/|$)/, module: "clientMarketing" },
   { pattern: /^\/api\/ai\/notifications(\/|$)/, module: "aiNotifications" },
+  { pattern: /^\/api\/push(\/|$)/, module: "pushNotifications" },
+  { pattern: /^\/api\/cron\/push-reminders(-24h)?(\/|$)/, module: "pushNotifications" },
 ];
 
 /**

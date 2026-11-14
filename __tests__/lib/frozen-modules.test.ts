@@ -62,9 +62,8 @@ const API_DIR_NAMES: Record<string, RegExp | null> = {
   invoices: /invoice/,
   clientMarketing: /birthday|we-miss-you/,
   aiNotifications: /^\/api\/ai\/notifications(\/|$)/,
-  // Tylko interfejs: przełącznik i panel subskrypcji push są schowane; trasy
-  // /api/push/* i crony push zostają (harmonogram ich nie wywołuje — aneks C).
-  pushNotifications: null,
+  // Cały moduł push: subskrypcje (/api/push/*) i crony przypomnień push.
+  pushNotifications: /\/push(\/|-|$)/,
   // Kod tych modułów jest kasowany w B3–B5 razem z trasami.
   voiceAi: null,
   videoGen: null,
@@ -145,6 +144,11 @@ describe("frozenModuleForApiPath", () => {
     ["/api/salons/abc/birthday-settings", "clientMarketing"],
     ["/api/salons/abc/we-miss-you-settings", "clientMarketing"],
     ["/api/ai/notifications/personalize", "aiNotifications"],
+    ["/api/push/subscribe", "pushNotifications"],
+    ["/api/push/unsubscribe", "pushNotifications"],
+    ["/api/push/test", "pushNotifications"],
+    ["/api/cron/push-reminders", "pushNotifications"],
+    ["/api/cron/push-reminders-24h", "pushNotifications"],
   ])("%s → %s", (path, module) => {
     expect(frozenModuleForApiPath(path)).toBe(module);
   });
@@ -170,6 +174,11 @@ describe("frozenModuleForApiPath", () => {
     "/api/salons/abc/notification-type-settings",
     "/api/notifications",
     "/api/notifications/low-stock",
+    "/api/cron/sms-reminders",
+    "/api/cron/cleanup-pending-deposits",
+    "/api/cron/cleanup-temporary-access",
+    "/api/cron/push-reminders-48h",
+    "/api/pushx",
     "/api/appointments/abc",
     "/api/appointments/abc/complete",
     "/api/ai/image/enhance",
