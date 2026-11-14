@@ -9,7 +9,7 @@
  * - DELETE /api/appointments/[id] (cancel with deposit rules)
  */
 import { eq } from "drizzle-orm";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createMockRequest,
   createRouteParams,
@@ -204,6 +204,28 @@ vi.mock("@/lib/salon-context", () => ({
   }),
   hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
 }));
+
+// P1 (Ryan): przynależność clientId/employeeId/serviceId do salonu.
+// Helper ma własne testy (__tests__/lib/salon-refs.test.ts) — tu sprawdzamy,
+// że trasa go woła z właściwymi id i honoruje odrzucenie. Domyślnie: OK (null).
+const mockAssertSalonRefs = vi.fn(async (..._args: unknown[]): Promise<Response | null> => null);
+vi.mock("@/lib/salon-refs", () => ({
+  assertSalonRefs: (...args: unknown[]) => mockAssertSalonRefs(...args),
+  SALON_REF_ERROR: "Nieprawidlowe dane dla tego salonu",
+}));
+
+// SMS potwierdzenia — atrapa (zero realnych wysyłek w testach).
+const mockSendBookingSms = vi.fn(async (..._args: unknown[]) => undefined);
+vi.mock("@/lib/sms", () => ({
+  sendBookingConfirmationSms: (...args: unknown[]) => mockSendBookingSms(...args),
+}));
+
+function salonRefRejection() {
+  return new Response(
+    JSON.stringify({ success: false, error: "Nieprawidlowe dane dla tego salonu" }),
+    { status: 400, headers: { "Content-Type": "application/json" } }
+  );
+}
 
 // -------------------------------------------------------
 // Helper to build a chainable mock with specific result
@@ -1457,6 +1479,183 @@ describe("POST /api/appointments — rabat liczony przez serwer (P1)", () => {
 
     expect(response.status).toBe(400);
     expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+});
+
+// -------------------------------------------------------
+// P1 (Ryan): clientId/employeeId/serviceId z body POST musza nalezec do
+// salonu wizyty; gosc nie podpina cudzego klienta; depositAmount z body
+// ignorowany (zadatek tylko przez /api/deposits/create-session).
+// -------------------------------------------------------
+
+describe("POST /api/appointments — referencje z body nalezace do salonu (P1)", () => {
+  const FOREIGN_CLIENT_UUID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+  function arrange() {
+    const insertChain = chainMock([makeAppointment()]);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([])) // overlap
+      .mockReturnValueOnce(chainMock([])) // blokady czasu
+      .mockReturnValue(chainMock([])); // szczegoly do SMS
+    mockDbInsert.mockReturnValue(insertChain);
+    return insertChain;
+  }
+
+  function req(extra: Record<string, unknown> = {}) {
+    return createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        serviceId: TEST_IDS.SERVICE_UUID,
+        clientId: TEST_IDS.CLIENT_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+        ...extra,
+      },
+    });
+  }
+
+  function inserted(insertChain: ReturnType<typeof chainMock>) {
+    return insertChain.values!.mock.calls[0]![0] as Record<string, unknown>;
+  }
+
+  async function asGuest() {
+    const { getOptionalSession } = await import("@/lib/session");
+    vi.mocked(getOptionalSession).mockResolvedValueOnce(null);
+    // Wczesniejsze testy limitu (429) zostawiaja strict limiter wyczerpany.
+    const { strictRateLimit } = await import("@/lib/rate-limit");
+    vi.mocked(strictRateLimit.check).mockReturnValue({ success: true, remaining: 4, reset: 60000 });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  // Niezuzyte mockReturnValueOnce nie moga przeciec do kolejnych describe.
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    mockAssertSalonRefs.mockReset();
+    mockAssertSalonRefs.mockImplementation(async () => null);
+    mockGetSalonContext.mockReset();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  it("personel: sprawdza clientId, employeeId i serviceId w salonie wizyty", async () => {
+    arrange();
+    const res = await createAppointment(req());
+    expect(res.status).toBe(201);
+    expect(mockAssertSalonRefs).toHaveBeenCalledWith(TEST_IDS.SALON_UUID, {
+      clientId: TEST_IDS.CLIENT_UUID,
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      serviceId: TEST_IDS.SERVICE_UUID,
+    });
+  });
+
+  it("obcy clientId/employeeId/serviceId -> 400, bez sprawdzania kolizji, zapisu i SMS", async () => {
+    mockAssertSalonRefs.mockResolvedValueOnce(salonRefRejection());
+    arrange();
+    const res = await createAppointment(req({ clientId: FOREIGN_CLIENT_UUID }));
+    const { status, body } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(body).toEqual({ success: false, error: "Nieprawidlowe dane dla tego salonu" });
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockSendBookingSms).not.toHaveBeenCalled();
+  });
+
+  it("gosc: obcy employeeId (inny salon) -> 400 — nie blokuje kalendarza innego salonu", async () => {
+    await asGuest();
+    mockAssertSalonRefs.mockResolvedValueOnce(salonRefRejection());
+    arrange();
+    const res = await createAppointment(
+      req({ clientId: undefined, guestName: "Jan Kowalski", guestPhone: "123456789" })
+    );
+    expect(res.status).toBe(400);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("gosc: clientId z body jest ignorowany (zapis null, nie sprawdzany, SMS na telefon goscia)", async () => {
+    await asGuest();
+    // Szczegoly do SMS: brak klienta (clientId null) -> telefon goscia
+    const insertChain = chainMock([makeAppointment({ clientId: null })]);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(
+        chainMock([
+          {
+            clientFirstName: null,
+            clientPhone: null,
+            serviceName: "Strzyzenie",
+            employeeFirstName: "Anna",
+            employeeLastName: "Nowak",
+            salonName: "Salon",
+          },
+        ])
+      );
+    mockDbInsert.mockReturnValue(insertChain);
+
+    const res = await createAppointment(
+      req({ clientId: FOREIGN_CLIENT_UUID, guestName: "Jan Kowalski", guestPhone: "123456789" })
+    );
+
+    expect(res.status).toBe(201);
+    expect(inserted(insertChain).clientId).toBeNull();
+    expect(mockAssertSalonRefs).toHaveBeenCalledWith(TEST_IDS.SALON_UUID, {
+      clientId: null,
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      serviceId: TEST_IDS.SERVICE_UUID,
+    });
+    expect(mockSendBookingSms).toHaveBeenCalledTimes(1);
+    const sms = mockSendBookingSms.mock.calls[0]![0] as Record<string, unknown>;
+    expect(sms.clientPhone).toBe("123456789");
+    expect(sms).not.toHaveProperty("clientId");
+  });
+
+  it("zalogowany klient portalu (bez kontekstu salonu): clientId z body ignorowany", async () => {
+    mockGetSalonContext.mockResolvedValueOnce(null);
+    const insertChain = arrange();
+    const res = await createAppointment(req({ clientId: FOREIGN_CLIENT_UUID }));
+    expect(res.status).toBe(201);
+    expect(inserted(insertChain).clientId).toBeNull();
+  });
+
+  it("clientId 'none' (sentinel) zapisuje null", async () => {
+    const insertChain = arrange();
+    const res = await createAppointment(req({ clientId: "none" }));
+    expect(res.status).toBe(201);
+    expect(inserted(insertChain).clientId).toBeNull();
+  });
+
+  it("depositAmount z body jest ignorowany (null) i nie wylacza potwierdzenia SMS", async () => {
+    const insertChain = chainMock([makeAppointment({ depositAmount: null })]);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(
+        chainMock([
+          {
+            clientFirstName: "Ewa",
+            clientPhone: "500600700",
+            serviceName: "Strzyzenie",
+            employeeFirstName: "Anna",
+            employeeLastName: "Nowak",
+            salonName: "Salon",
+          },
+        ])
+      );
+    mockDbInsert.mockReturnValue(insertChain);
+
+    const res = await createAppointment(req({ depositAmount: "0.01" }));
+
+    expect(res.status).toBe(201);
+    expect(inserted(insertChain).depositAmount).toBeNull();
+    expect(mockSendBookingSms).toHaveBeenCalledTimes(1);
   });
 });
 
