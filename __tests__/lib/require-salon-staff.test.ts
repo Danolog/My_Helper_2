@@ -115,7 +115,19 @@ describe("requireSalonStaff", () => {
     asStaff("employee");
     const r = await requireSalonStaff({ roles: ["owner"], feature: "promotions" });
     expect(await status(r)).toBe(403);
-    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("staff-1", "promotions");
+    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("staff-1", "promotions", SALON_A);
+  });
+
+  it("grant sprawdzany w salonie z sesji (grant z salonu B nie otwiera salonu A)", async () => {
+    // Pracownik salonu A; grant istnieje tylko w salonie B => sprawdzenie
+    // zawężone do SALON_A musi go nie znaleźć.
+    asStaff("employee", SALON_A);
+    mockHasTemporaryAccess.mockImplementation(
+      async (_u: string, _f: string, salonId?: string) => salonId === SALON_B
+    );
+    const r = await requireSalonStaff({ roles: ["owner"], feature: "promotions" });
+    expect(await status(r)).toBe(403);
+    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("staff-1", "promotions", SALON_A);
   });
 
   it("pracownik z grantem feature => OK", async () => {

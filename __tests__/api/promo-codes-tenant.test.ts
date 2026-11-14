@@ -98,7 +98,7 @@ describe("POST /api/promo-codes — izolacja salonu", () => {
     const res = await create({ salonId: SALON_A, code: "X1" });
     expect(res.status).toBe(403);
     expect(m.insertedValues).toEqual([]);
-    expect(m.hasTemporaryAccess).toHaveBeenCalledWith("staff-a", "promotions");
+    expect(m.hasTemporaryAccess).toHaveBeenCalledWith("staff-a", "promotions", SALON_A);
   });
 
   it("pracownik z grantem 'promotions' tworzy kod we własnym salonie", async () => {

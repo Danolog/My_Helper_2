@@ -95,14 +95,15 @@ async function resolveSalonContext(userId: string): Promise<SalonContext | null>
 /**
  * Czy użytkownik w danym kontekście ma dostęp do funkcji `feature`?
  * Właściciel: zawsze. Pracownik/recepcja: tylko z aktywnym grantem
- * temporary_access (Feature #25, hasTemporaryAccess sprawdza wygaśnięcie).
+ * temporary_access nadanym przez właściciela salonu z kontekstu (grant z innego
+ * salonu się nie liczy; hasTemporaryAccess sprawdza też wygaśnięcie).
  */
 export async function hasFeatureAccess(
   ctx: SalonContext,
   feature: string
 ): Promise<boolean> {
   if (ctx.role === "owner") return true;
-  return hasTemporaryAccess(ctx.userId, feature);
+  return hasTemporaryAccess(ctx.userId, feature, ctx.salonId);
 }
 
 export interface SalonStaffOptions {
@@ -160,7 +161,10 @@ export async function requireSalonStaff(
   const allowedRoles: readonly SalonRole[] =
     roles ?? (feature ? [] : ["receptionist", "employee"]);
   if (allowedRoles.includes(ctx.role)) return { ctx };
-  if (feature && (await hasTemporaryAccess(ctx.userId, feature))) return { ctx };
+  // Grant liczy się tylko w salonie, w którym nadał go jego właściciel.
+  if (feature && (await hasTemporaryAccess(ctx.userId, feature, ctx.salonId))) {
+    return { ctx };
+  }
 
   return deny(403, "Brak uprawnien");
 }

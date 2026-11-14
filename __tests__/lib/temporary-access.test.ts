@@ -9,15 +9,18 @@ const {
   mockDbWhere,
   mockDbFrom,
   mockDbSelect,
+  mockDbInnerJoin,
 } = vi.hoisted(() => {
   const mockDbReturning = vi.fn();
   const mockDbDeleteWhere = vi.fn().mockReturnValue({ returning: mockDbReturning });
   const mockDbDeleteFrom = vi.fn().mockReturnValue({ where: mockDbDeleteWhere });
   const mockDbLimit = vi.fn();
   const mockDbWhere = vi.fn().mockReturnValue({ limit: mockDbLimit });
-  const mockDbFrom = vi.fn().mockReturnValue({ where: mockDbWhere });
+  const mockDbInnerJoin = vi.fn().mockReturnValue({ where: mockDbWhere });
+  const mockDbFrom = vi.fn().mockReturnValue({ where: mockDbWhere, innerJoin: mockDbInnerJoin });
   const mockDbSelect = vi.fn().mockReturnValue({ from: mockDbFrom });
   return {
+    mockDbInnerJoin,
     mockDbReturning,
     mockDbDeleteWhere,
     mockDbDeleteFrom,
@@ -49,7 +52,13 @@ vi.mock("@/lib/schema", () => ({
     id: "temporaryAccess.id",
     userId: "temporaryAccess.userId",
     featureName: "temporaryAccess.featureName",
+    grantedBy: "temporaryAccess.grantedBy",
     expiresAt: "temporaryAccess.expiresAt",
+    createdAt: "temporaryAccess.createdAt",
+  },
+  salons: {
+    id: "salons.id",
+    ownerId: "salons.ownerId",
   },
 }));
 
@@ -59,33 +68,54 @@ import {
   cleanupExpiredTemporaryAccess,
 } from "@/lib/temporary-access";
 
+// WHERE musi zawierać salons.id = salon z kontekstu (and(...) z mocka drizzle-orm).
+function salonFilter(salonId: string) {
+  return {
+    type: "and",
+    args: expect.arrayContaining([{ type: "eq", args: ["salons.id", salonId] }]),
+  };
+}
+
 describe("hasTemporaryAccess", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbSelect.mockReturnValue({ from: mockDbFrom });
-    mockDbFrom.mockReturnValue({ where: mockDbWhere });
+    mockDbFrom.mockReturnValue({ where: mockDbWhere, innerJoin: mockDbInnerJoin });
+    mockDbInnerJoin.mockReturnValue({ where: mockDbWhere });
     mockDbWhere.mockReturnValue({ limit: mockDbLimit });
   });
 
   it("should return true when user has active temporary access", async () => {
     mockDbLimit.mockResolvedValue([{ id: "grant-1" }]);
-    const result = await hasTemporaryAccess("user-123", "reports");
+    const result = await hasTemporaryAccess("user-123", "reports", "salon-A");
     expect(result).toBe(true);
   });
 
   it("should return false when no grant is found", async () => {
     mockDbLimit.mockResolvedValue([]);
-    const result = await hasTemporaryAccess("user-123", "reports");
+    const result = await hasTemporaryAccess("user-123", "reports", "salon-A");
     expect(result).toBe(false);
   });
 
   it("should call db.select with correct structure", async () => {
     mockDbLimit.mockResolvedValue([]);
-    await hasTemporaryAccess("user-123", "reports");
+    await hasTemporaryAccess("user-123", "reports", "salon-A");
     expect(mockDbSelect).toHaveBeenCalled();
     expect(mockDbFrom).toHaveBeenCalled();
     expect(mockDbWhere).toHaveBeenCalled();
     expect(mockDbLimit).toHaveBeenCalledWith(1);
+  });
+
+  it("zawęża grant do salonu: grantedBy = salons.ownerId salonu z kontekstu", async () => {
+    // Grant nadany przez właściciela salonu B nie może otwierać salonu A —
+    // zapytanie łączy salons po ownerId = grantedBy i filtruje salons.id.
+    mockDbLimit.mockResolvedValue([]);
+    await hasTemporaryAccess("user-123", "reports", "salon-A");
+    expect(mockDbInnerJoin).toHaveBeenCalledWith(
+      expect.anything(),
+      { type: "eq", args: ["salons.ownerId", "temporaryAccess.grantedBy"] }
+    );
+    expect(mockDbWhere).toHaveBeenCalledWith(salonFilter("salon-A"));
   });
 });
 
@@ -106,17 +136,18 @@ describe("getActiveTemporaryAccess", () => {
       { id: "2", userId: "user-1", featureName: "settings", expiresAt: new Date() },
     ];
     const mockWhere = vi.fn().mockResolvedValue(grants);
-    mockDbFrom.mockReturnValue({ where: mockWhere });
+    mockDbFrom.mockReturnValue({ innerJoin: vi.fn().mockReturnValue({ where: mockWhere }) });
 
-    const result = await getActiveTemporaryAccess("user-1");
+    const result = await getActiveTemporaryAccess("user-1", "salon-A");
     expect(result).toEqual(grants);
+    expect(mockWhere).toHaveBeenCalledWith(salonFilter("salon-A"));
   });
 
   it("should return empty array when no active grants exist", async () => {
     const mockWhere = vi.fn().mockResolvedValue([]);
-    mockDbFrom.mockReturnValue({ where: mockWhere });
+    mockDbFrom.mockReturnValue({ innerJoin: vi.fn().mockReturnValue({ where: mockWhere }) });
 
-    const result = await getActiveTemporaryAccess("user-1");
+    const result = await getActiveTemporaryAccess("user-1", "salon-A");
     expect(result).toEqual([]);
   });
 });

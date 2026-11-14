@@ -87,7 +87,7 @@ describe("GET /api/payments — izolacja salonu", () => {
     m.asStaffOf(SALON_A, "receptionist");
     const res = await get(`?salonId=${SALON_A}`);
     expect(res.status).toBe(403);
-    expect(m.hasTemporaryAccess).toHaveBeenCalledWith("staff-a", "finance");
+    expect(m.hasTemporaryAccess).toHaveBeenCalledWith("staff-a", "finance", SALON_A);
   });
 
   it("pracownik z grantem 'finance' czyta własny salon", async () => {

@@ -247,7 +247,7 @@ describe("hasFeatureAccess", () => {
     const result = await hasFeatureAccess(employeeCtx, "reports");
 
     expect(result).toBe(false);
-    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-emp", "reports");
+    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-emp", "reports", "salon-1");
   });
 
   it("should return true for employee with an active temporary access grant", async () => {
@@ -256,7 +256,7 @@ describe("hasFeatureAccess", () => {
     const result = await hasFeatureAccess(employeeCtx, "reports");
 
     expect(result).toBe(true);
-    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-emp", "reports");
+    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-emp", "reports", "salon-1");
   });
 
   it("should consult temporary access for receptionist as well", async () => {
@@ -265,6 +265,6 @@ describe("hasFeatureAccess", () => {
     const result = await hasFeatureAccess(receptionistCtx, "sms");
 
     expect(result).toBe(false);
-    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-rec", "sms");
+    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-rec", "sms", "salon-1");
   });
 });
