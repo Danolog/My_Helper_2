@@ -4,6 +4,25 @@ import { db } from "./db"
 import { logger } from "./logger"
 import { isEmailConfigured, sendPasswordResetEmail, sendVerificationEmail } from "./email"
 
+/**
+ * Kontekst logu dla zdarzeń „wysłano link resetu hasła / weryfikacji e-mail".
+ *
+ * Link jest jednorazowym poświadczeniem — kto go ma, przejmuje konto. Na produkcji
+ * do logów trafia więc wyłącznie identyfikator użytkownika: bez adresu URL, bez
+ * tokenu i bez adresu e-mail. Poza produkcją link zostaje w logu, żeby dało się
+ * pracować lokalnie bez dostawcy poczty (RESEND_API_KEY).
+ */
+function authLinkLogContext(
+  user: { id: string; email: string },
+  urlKey: "resetUrl" | "verificationUrl",
+  url: string
+): Record<string, string> {
+  if (process.env.NODE_ENV === "production") {
+    return { userId: user.id }
+  }
+  return { userId: user.id, email: user.email, [urlKey]: url }
+}
+
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
   database: drizzleAdapter(db, {
@@ -54,7 +73,7 @@ export const auth = betterAuth({
     // (dev/CI bez klucza) użytkownik nigdy nie dostałby linku i nie mógłby się zalogować.
     requireEmailVerification: isEmailConfigured(),
     sendResetPassword: async ({ user, url }) => {
-      logger.info("Password reset requested", { email: user.email, resetUrl: url })
+      logger.info("Password reset requested", authLinkLogContext(user, "resetUrl", url))
       await sendPasswordResetEmail({ to: user.email, url })
     },
   },
@@ -62,7 +81,7 @@ export const auth = betterAuth({
     sendOnSignUp: true,
     // Przy requireEmailVerification: niezweryfikowany sign-in ponawia wysyłkę linku
     sendVerificationEmail: async ({ user, url }) => {
-      logger.info("Email verification sent", { email: user.email, verificationUrl: url })
+      logger.info("Email verification sent", authLinkLogContext(user, "verificationUrl", url))
       await sendVerificationEmail({ to: user.email, url })
     },
   },
