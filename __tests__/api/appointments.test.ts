@@ -1892,6 +1892,114 @@ describe("PUT /api/appointments/[id]", () => {
   });
 });
 
+// -------------------------------------------------------
+// P1 (Ryan): PUT — clientId/employeeId/serviceId z body musza nalezec do
+// salonu; depositAmount/depositPaid zmienia tylko wlasciciel (pracownik nie
+// "oplaca" zadatku recznie; normalnie ustawia go potwierdzenie platnosci).
+// -------------------------------------------------------
+
+describe("PUT /api/appointments/[id] — referencje i zadatek (P1)", () => {
+  const RECEPTION_CTX = { ...EMPLOYEE_CTX, role: "receptionist" as const, employeeId: null };
+
+  function arrange() {
+    const updateChain = chainMock([makeAppointment()]);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([makeAppointment()])) // findOne
+      .mockReturnValueOnce(chainMock([])); // overlap
+    mockDbUpdate.mockReturnValue(updateChain);
+    return updateChain;
+  }
+
+  function put(body: Record<string, unknown>) {
+    return updateAppointment(
+      createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+        method: "PUT",
+        body,
+      }),
+      createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+    );
+  }
+
+  function updated(updateChain: ReturnType<typeof chainMock>) {
+    return updateChain.set!.mock.calls[0]![0] as Record<string, unknown>;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+    mockAssertSalonRefs.mockReset();
+    mockAssertSalonRefs.mockImplementation(async () => null);
+    mockGetSalonContext.mockReset();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  it("sprawdza clientId, employeeId i serviceId w salonie z sesji", async () => {
+    arrange();
+    const res = await put({
+      clientId: TEST_IDS.CLIENT_UUID,
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      serviceId: TEST_IDS.SERVICE_UUID,
+    });
+    expect(res.status).toBe(200);
+    expect(mockAssertSalonRefs).toHaveBeenCalledWith(TEST_IDS.SALON_UUID, {
+      clientId: TEST_IDS.CLIENT_UUID,
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      serviceId: TEST_IDS.SERVICE_UUID,
+    });
+  });
+
+  it("obcy clientId/employeeId/serviceId -> 400 i brak zapisu", async () => {
+    mockAssertSalonRefs.mockResolvedValueOnce(salonRefRejection());
+    arrange();
+    const res = await put({ employeeId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" });
+    const { status, body } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(body).toEqual({ success: false, error: "Nieprawidlowe dane dla tego salonu" });
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("wyczyszczenie klienta/uslugi (null) nadal dziala", async () => {
+    const updateChain = arrange();
+    const res = await put({ clientId: null, serviceId: null });
+    expect(res.status).toBe(200);
+    expect(updated(updateChain)).toMatchObject({ clientId: null, serviceId: null });
+  });
+
+  it.each([
+    ["pracownik", "depositPaid", true],
+    ["pracownik", "depositAmount", "0.01"],
+    ["recepcja", "depositPaid", true],
+    ["recepcja", "depositAmount", null],
+  ])("%s ustawiajacy %s -> 403, brak zapisu", async (who, field, value) => {
+    mockGetSalonContext.mockResolvedValue(who === "pracownik" ? EMPLOYEE_CTX : RECEPTION_CTX);
+    arrange();
+    const res = await put({ [field]: value });
+    expect(res.status).toBe(403);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("wlasciciel moze ustawic depositPaid (reczne rozliczenie)", async () => {
+    const updateChain = arrange();
+    const res = await put({ depositPaid: true });
+    expect(res.status).toBe(200);
+    expect(updated(updateChain).depositPaid).toBe(true);
+  });
+
+  it("pracownik przenosi wlasna wizyte bez pol zadatku -> 200", async () => {
+    mockGetSalonContext.mockResolvedValue(EMPLOYEE_CTX);
+    arrange();
+    const res = await put({ startTime: "2026-04-01T14:00:00Z", endTime: "2026-04-01T15:00:00Z" });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("DELETE /api/appointments/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
