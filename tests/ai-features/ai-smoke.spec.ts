@@ -48,24 +48,22 @@ test.describe('AI Features Smoke Tests', () => {
     ).toBeVisible({ timeout: 10000 });
   });
 
-  test('should load social posts page', { tag: '@smoke' }, async ({ page }) => {
+  // Moduły zamrożone (hardOff w src/lib/features.ts): proxy przekierowuje
+  // ich strony na pulpit zamiast je pokazywać.
+  test('should redirect frozen social posts page to dashboard', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('/dashboard/content-generator/social-posts');
     await page.waitForLoadState('domcontentloaded');
 
+    await expect(page).toHaveURL(/\/dashboard\/?(\?.*)?$/);
     await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
-    await expect(
-      page.getByText(/post|social|media|instagram|facebook/i).first()
-    ).toBeVisible({ timeout: 10000 });
   });
 
-  test('should load testimonials page', { tag: '@smoke' }, async ({ page }) => {
+  test('should redirect frozen testimonials page to dashboard', { tag: '@smoke' }, async ({ page }) => {
     await page.goto('/dashboard/content-generator/testimonials');
     await page.waitForLoadState('domcontentloaded');
 
-    // UI: "Szablony testimoniali wideo" or Pro gate
-    await expect(
-      page.getByText(/testimonial|wideo|pro/i).first()
-    ).toBeVisible({ timeout: 10000 });
+    await expect(page).toHaveURL(/\/dashboard\/?(\?.*)?$/);
+    await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
   });
 
   // ── Gallery (may include AI enhance button) ─────────────────────────────
