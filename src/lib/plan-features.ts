@@ -13,10 +13,11 @@
  * ale dla planów Basic i Pro nikt jej nie czyta.
  *
  * Zasada (plan wejścia na rynek, B9): na liście jest tylko to, co produkt
- * faktycznie robi. Moduły `hardOff` z `src/lib/features.ts` (asystent
- * głosowy, wideo, fiskalizacja, publikacja postów social) i płatność
- * zadatków online (decyzja D1) nie mogą tu wrócić — pilnuje tego
- * `__tests__/lib/marketing-truth.test.ts`.
+ * faktycznie robi. Moduły zamrożone (`hardOff` w `src/lib/features.ts` —
+ * m.in. lojalność, newslettery, faktury, asystent głosowy, wideo,
+ * fiskalizacja, posty social) i płatność zadatków online (decyzja D1) nie
+ * mogą tu wrócić — pilnuje tego `__tests__/lib/marketing-truth.test.ts`,
+ * który listę modułów zamrożonych bierze z rejestru.
  */
 export const PLAN_FEATURES = {
   basic: [
@@ -32,17 +33,15 @@ export const PLAN_FEATURES = {
     "Raporty podstawowe",
     "Zadatki za wizyty (ustalane przez salon)",
     "Galeria zdjęć salonu",
-    "Promocje i program lojalnościowy",
+    "Promocje i kody rabatowe",
   ],
   pro: [
     // Ten wiersz jest filtrowany w dialogu upgrade'u (plan-actions.tsx) — nie zmieniaj brzmienia.
     "Wszystko z planu Basic",
     "Asystent AI biznesowy (analiza danych)",
-    "Asystent AI content (generowanie treści)",
     "Rekomendacje AI na dashboardzie",
     "Analiza trendów i konkurencji",
     "Generowanie opisów usług",
-    "Tworzenie i wysyłka newsletterów",
     "Proaktywne sugestie biznesowe",
     "Priorytetowe wsparcie techniczne",
   ],

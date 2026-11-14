@@ -8,6 +8,11 @@
  *
  * Nie mogą też obiecywać funkcji, których w kodzie w ogóle nie ma (analiza
  * sentymentu opinii).
+ *
+ * Lista modułów zamrożonych pochodzi z rejestru (`MODULES` z flagą `hardOff`),
+ * nie z tego pliku. Tu żyje tylko mapa „moduł zamrożony → po czym poznać jego
+ * obietnicę w tekście” (`FROZEN_MODULE_PROMISES`); test kompletności pada,
+ * gdy rejestr i mapa się rozjadą.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -54,6 +59,31 @@ const AUTO_REVIEW_REPLIES = /automatyczn[a-z]* odpowied/i;
 const POPULARITY_CLAIM =
   /najpopularniejsz|najcz[ęe]stszy wyb[óo]r|najcz[ęe][śs]ciej wybieran|polecan/i;
 const FAKE_SOCIAL_PROOF = /setek salon|Tester Beta|zadowolonych w[łl]a[śs]cicieli|>4[.,]9</i;
+// „Asystent AI content” obiecywał generowanie treści marketingowych. Po
+// zamrożeniu newsletterów i postów social zostaje z niego tylko generowanie
+// opisów usług — i tak ma się to nazywać.
+const AI_CONTENT =
+  /asystent\w*\s+(AI\s+)?content|content\s+marketing|generowani[ea]\s+tre[śs]ci/i;
+
+/**
+ * Po czym poznać w tekście obietnicę modułu zamrożonego. Klucze muszą być
+ * dokładnie zbiorem modułów `hardOff` z rejestru — zamrożenie nowego modułu
+ * bez wzorca albo odmrożenie bez zdjęcia wzorca czerwieni test kompletności.
+ */
+const FROZEN_MODULE_PROMISES: Record<string, RegExp> = {
+  voiceAi: VOICE,
+  videoGen: VIDEO,
+  socialPosts: SOCIAL_POSTS,
+  fiscal: FISCAL,
+  loyalty: /lojalno[śs]ciow|punkt(y|[óo]w) za wizyt/i,
+  newsletters: /newsletter/i,
+  invoices: /faktur/i,
+  clientMarketing: /urodzin|t[ęe]sknimy/i,
+  aiNotifications: /powiadomie\S+ (pisan|generowan|personalizowan)\S+ przez AI/i,
+  pushNotifications: /\bpush\b/i,
+};
+
+const FROZEN_MODULE_KEYS = MODULES.filter((m) => m.hardOff).map((m) => m.key);
 
 function expectNoMatch(relPath: string, pattern: RegExp) {
   const match = read(relPath).match(pattern);
@@ -61,22 +91,11 @@ function expectNoMatch(relPath: string, pattern: RegExp) {
 }
 
 describe("prawda w marketingu", () => {
-  it("rejestr modułów nadal wyłącza globalnie funkcje, których nie obiecujemy", () => {
-    // Jeśli któryś moduł przestanie być hardOff, ten test trzeba świadomie
-    // zaktualizować razem z tekstami sprzedażowymi.
-    const hardOff = MODULES.filter((m) => m.hardOff).map((m) => m.key).sort();
-    expect(hardOff).toEqual([
-      "aiNotifications",
-      "clientMarketing",
-      "fiscal",
-      "invoices",
-      "loyalty",
-      "newsletters",
-      "pushNotifications",
-      "socialPosts",
-      "videoGen",
-      "voiceAi",
-    ]);
+  it("każdy moduł zamrożony w rejestrze ma wzorzec obietnicy — i żaden inny", () => {
+    // Lista modułów pochodzi z rejestru. Jeśli moduł zostanie zamrożony albo
+    // odmrożony, mapę wzorców trzeba świadomie zaktualizować razem z tekstami.
+    expect(FROZEN_MODULE_KEYS.length).toBeGreaterThan(0);
+    expect(Object.keys(FROZEN_MODULE_PROMISES).sort()).toEqual([...FROZEN_MODULE_KEYS].sort());
   });
 
   describe("strona sprzedażowa /dla-salonow", () => {
@@ -170,15 +189,19 @@ describe("prawda w marketingu", () => {
     const all = [...PLAN_FEATURES.basic, ...PLAN_FEATURES.pro];
 
     it.each(all)("„%s” nie obiecuje wyłączonej funkcji", (feature) => {
-      expect(feature).not.toMatch(VOICE);
-      expect(feature).not.toMatch(VIDEO);
-      expect(feature).not.toMatch(SOCIAL_POSTS);
-      expect(feature).not.toMatch(FISCAL);
+      for (const key of FROZEN_MODULE_KEYS) {
+        expect(feature, `moduł zamrożony: ${key}`).not.toMatch(FROZEN_MODULE_PROMISES[key]!);
+      }
+      expect(feature).not.toMatch(AI_CONTENT);
       expect(feature).not.toMatch(/Stripe|Blik/i);
       expect(feature).not.toMatch(/Widget planowania/i);
       expect(feature).not.toMatch(SENTIMENT);
       expect(feature).not.toMatch(AUTO_REVIEW_REPLIES);
       expect(feature).not.toMatch(POPULARITY_CLAIM);
+    });
+
+    it("plan Pro nadal obiecuje generowanie opisów usług (jedyne, co zostało z „AI content”)", () => {
+      expect(PLAN_FEATURES.pro).toContain("Generowanie opisów usług");
     });
 
     it("plan Pro zaczyna się od wiersza, który filtruje dialog upgrade'u", () => {
