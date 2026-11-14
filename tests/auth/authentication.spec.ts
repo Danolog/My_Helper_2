@@ -97,6 +97,49 @@ test.describe('Flow 1: Authentication', () => {
       ).toBeVisible({ timeout: 10000 });
     });
 
+    // Regresja (2026-11-14): przy PIERWSZEJ wizycie service worker po instalacji
+    // przejmuje strone (sw.js: clients.claim() -> zdarzenie "controllerchange").
+    // SwRegister przeladowywal wtedy strone: znikal wybrany plan ("Dalej" wracal
+    // do disabled), kasowaly sie wpisane dane, a trwajace logowanie bylo zrywane.
+    // Test jest deterministyczny — nie zalezy od tego, czy przeladowanie trafi
+    // akurat w klikniecie: liczy ladowania dokumentu do chwili po przejeciu strony.
+    test('should not reload the page when the service worker takes control on first visit', { tag: '@smoke' }, async ({ page }) => {
+      test.skip(!process.env.CI, 'Service worker rejestruje sie tylko w buildzie produkcyjnym (CI: pnpm start)');
+
+      // Liczymy pelne ladowania dokumentu (zadania nawigacyjne glownej ramki);
+      // history.replaceState routera Next.js nie jest takim zadaniem.
+      let documentLoads = 0;
+      page.on('request', (request) => {
+        if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documentLoads += 1;
+      });
+
+      await page.goto('/register');
+      const basicCard = page.getByText(/basic/i).first();
+      await expect(basicCard).toBeVisible({ timeout: 15000 });
+      const dalej = page.getByRole('button', { name: /dalej/i });
+      // Wybor planu ponawiany do skutku: klik przed hydratacja nie ustawia stanu.
+      await expect(async () => {
+        await basicCard.click();
+        await expect(dalej).toBeEnabled({ timeout: 1000 });
+      }).toPass({ timeout: 15000 });
+
+      // Czekamy, az service worker faktycznie przejmie strone...
+      await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
+        timeout: 20000,
+      });
+      // ...i dajemy ewentualnemu przeladowaniu czas na wykonanie (w CI trwalo ~100 ms).
+      await page.waitForTimeout(2000);
+
+      expect(
+        documentLoads,
+        'strona przeladowala sie po przejeciu przez service worker — uzytkowniczka traci wybrany plan i wpisane dane'
+      ).toBe(1);
+      // Zachowanie widziane przez uzytkowniczke: plan nadal wybrany, mozna isc dalej.
+      await expect(dalej).toBeEnabled();
+      await dalej.click();
+      await expect(page.locator('#name')).toBeVisible({ timeout: 10000 });
+    });
+
     test('should login with valid credentials and redirect to dashboard', { tag: '@smoke' }, async ({ page }) => {
       await page.goto('/login');
       await fillLoginForm(page, SEEDED_OWNER.email, SEEDED_OWNER.password);

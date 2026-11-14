@@ -13,8 +13,9 @@ const SW_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
  * - Dispatches a `sw-update-available` custom event when a new version is
  *   found waiting, so other components (e.g. SwUpdateToast) can prompt the
  *   user to refresh.
- * - Reloads the page when the new service worker takes control
- *   (`controllerchange`).
+ * - Reloads the page when an *updated* service worker takes control
+ *   (`controllerchange`) -- but never on the first install, when the page
+ *   had no controller yet (see `onControllerChange`).
  *
  * Renders nothing -- this is a side-effect-only component.
  */
@@ -69,8 +70,21 @@ export function SwRegister() {
 
     registerSW();
 
-    // Reload the page when the new service worker takes over.
+    // Reload the page when an *updated* service worker takes over.
+    //
+    // On the very first visit the page has no controller. sw.js calls
+    // `clients.claim()` right after install, which fires "controllerchange"
+    // as well -- reloading then would wipe whatever the visitor has already
+    // selected or typed (plan on /register, login form) and abort in-flight
+    // requests, a second or two after the page became interactive.
+    let hasController = Boolean(navigator.serviceWorker.controller);
+
     const onControllerChange = () => {
+      if (!hasController) {
+        // First install: the worker just claimed this page. Nothing to refresh.
+        hasController = true;
+        return;
+      }
       window.location.reload();
     };
 
