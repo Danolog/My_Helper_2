@@ -14,7 +14,6 @@
       "Write(tests/**)"
     ],
     "deny": [
-      "Bash(git push*)",
       "Bash(pnpm publish*)",
       "Bash(rm -rf*)"
     ]
