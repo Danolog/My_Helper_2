@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockGetSalonContext = vi.fn();
+const mockHasFeatureAccess = vi.fn();
 vi.mock("@/lib/salon-context", () => ({
   getSalonContext: () => mockGetSalonContext(),
+  hasFeatureAccess: (...args: unknown[]) => mockHasFeatureAccess(...args),
 }));
 
 import { requireReportSalon } from "@/lib/reports/require-report-salon";
@@ -26,6 +28,7 @@ describe("requireReportSalon", () => {
       employeeId: null,
       userId: "u1",
     });
+    mockHasFeatureAccess.mockResolvedValue(true);
   });
 
   it("returns the session salon when the param matches", async () => {
@@ -49,6 +52,16 @@ describe("requireReportSalon", () => {
     mockGetSalonContext.mockResolvedValue(null);
     const r = await requireReportSalon(req(OWN));
     expect((r as { error: Response }).error.status).toBe(401);
+  });
+
+  // P1 (Ethan): pracownik salonu bez grantu "reports" nie czyta raportów
+  it("returns 403 for staff without the reports grant", async () => {
+    const staff = { salonId: OWN, role: "employee", employeeId: "e1", userId: "u2" };
+    mockGetSalonContext.mockResolvedValue(staff);
+    mockHasFeatureAccess.mockResolvedValue(false);
+    const r = await requireReportSalon(req(OWN));
+    expect((r as { error: Response }).error.status).toBe(403);
+    expect(mockHasFeatureAccess).toHaveBeenCalledWith(staff, "reports");
   });
 
   // UAT F2: niepoprawny format daty -> 400, nie 500 z DB
