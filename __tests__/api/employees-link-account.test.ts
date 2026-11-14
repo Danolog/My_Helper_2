@@ -128,7 +128,7 @@ describe("PUT /api/employees/[id]/link-account", () => {
     // konto podpiete pod INNEGO pracownika -> salon wlascicielski konta.
     mockDbSelect
       .mockReturnValueOnce(chainMock([makeEmployee()]))
-      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID }]))
+      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
       .mockReturnValueOnce(chainMock([])) // nie podpiety pod innego pracownika
       .mockReturnValueOnce(chainMock([])); // nie jest wlascicielem zadnego salonu
     const updateChain = chainMock([makeEmployee({ userId: LINKED_USER_ID })]);
@@ -181,10 +181,28 @@ describe("PUT /api/employees/[id]/link-account", () => {
     expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
+  // Konto znalezione po e-mailu podpinamy tylko przy potwierdzonym adresie:
+  // inaczej ktos, kto zalozy konto na e-mail przyszlego pracownika, dostanie
+  // po podpieciu dostep pracownika do salonu (straznik jak src/lib/client-match.ts).
+  it("zwraca 409 z czytelnym bledem, gdy konto ma niepotwierdzony e-mail (bez podpiecia)", async () => {
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([makeEmployee()]))
+      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: false }]));
+    mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: LINKED_USER_ID })]));
+
+    const response = await callPut({ email: "anna@konto.pl" });
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(409);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("nie ma potwierdzonego adresu e-mail");
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
   it("zwraca 409, gdy konto jest juz podpiete pod innego pracownika", async () => {
     mockDbSelect
       .mockReturnValueOnce(chainMock([makeEmployee()]))
-      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID }]))
+      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
       .mockReturnValueOnce(chainMock([{ id: "emp-w-innym-salonie" }])); // juz podpiety
 
     const response = await callPut({ email: "anna@konto.pl" });
@@ -199,7 +217,7 @@ describe("PUT /api/employees/[id]/link-account", () => {
   it("zwraca 409, gdy konto nalezy do wlasciciela salonu", async () => {
     mockDbSelect
       .mockReturnValueOnce(chainMock([makeEmployee()]))
-      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID }]))
+      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
       .mockReturnValueOnce(chainMock([])) // nie podpiety pod innego pracownika
       .mockReturnValueOnce(chainMock([{ id: "salon-innego-wlasciciela" }])); // wlasciciel
 

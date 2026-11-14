@@ -125,7 +125,7 @@ export async function POST(request: Request) {
       serviceId,
       variantId: variantId || null,
       startTime: new Date(startTime),
-      sessionEmail: session?.user?.email || null,
+      sessionUser: session?.user ?? null,
       guestEmail: guestEmail?.trim() || null,
     });
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { verifiedClientMatchEmail } from "@/lib/client-match";
 import { logger } from "@/lib/logger";
 import { clients, salons } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
@@ -16,6 +17,10 @@ import { isValidUuid } from "@/lib/validations";
  * parameter is ignored — and the response carries only what booking needs
  * (no clientId, no name). Previously any logged-in account could read another
  * person's name, clientId and deposit settings in any salon.
+ *
+ * The session email is matched to `clients` only when it is verified
+ * (verifiedClientMatchEmail) — an unverified, missing-flag or empty email
+ * yields "not found", not an error.
  */
 export async function GET(request: Request) {
   try {
@@ -38,7 +43,7 @@ export async function GET(request: Request) {
       depositType: null,
       depositValue: null,
     };
-    const sessionEmail = authResult.user.email;
+    const sessionEmail = verifiedClientMatchEmail(authResult.user);
 
     const settings = await forSalon(salonId).raw(async (tx) => {
       const [salon] = await tx
