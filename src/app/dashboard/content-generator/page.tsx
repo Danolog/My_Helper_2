@@ -136,10 +136,10 @@ export default function ContentGeneratorPage() {
   return (
     <ProPlanGate
       featureName="Generator tresci"
-      featureDescription="AI tworzy profesjonalne treści marketingowe dopasowane do Twojego salonu — opisy usług i newslettery."
+      featureDescription="AI tworzy profesjonalne opisy usług dopasowane do Twojego salonu."
       proBenefits={[
         "Profesjonalne opisy uslug",
-        "Tworzenie newsletterow promocyjnych",
+        "Gotowe szablony tresci",
         "Dostosowane do branzy beauty i wellness",
       ]}
     >

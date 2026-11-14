@@ -80,8 +80,38 @@ const FROZEN_MODULE_PROMISES: Record<string, RegExp> = {
   invoices: /faktur/i,
   clientMarketing: /urodzin|t[ęe]sknimy/i,
   aiNotifications: /powiadomie\S+ (pisan|generowan|personalizowan)\S+ przez AI/i,
-  pushNotifications: /\bpush\b/i,
+  // `(?<!\.)` — wywołanie `router.push(...)` to kod, nie obietnica.
+  pushNotifications: /(?<!\.)\bpush\b/i,
 };
+
+/**
+ * Wyjątki od wzorców modułów zamrożonych w plikach oferty — z powodem.
+ * Wpis zwalnia jeden plik z jednego wzorca, nic więcej.
+ */
+const FROZEN_PROMISE_EXCEPTIONS: Record<string, string[]> = {
+  // Etykieta kanału, którym wysłano ostrzeżenie o wygasającej subskrypcji
+  // (historia wysyłek), nie opis oferty.
+  "src/app/dashboard/subscription/_components/expiration-warning-card.tsx": ["pushNotifications"],
+};
+
+// Huby panelu z kafelkami funkcji i bramką planu Pro.
+const HUB_FILES = [
+  "src/app/dashboard/ai-assistant/page.tsx",
+  "src/app/dashboard/content-generator/page.tsx",
+];
+
+/**
+ * Źródło huba bez importów i bez kafelków ukrytych przez rejestr: kafelek
+ * z `module: "<klucz zamrożony>"` nie jest pokazywany (filtr `modules[...]`),
+ * więc jego tekst nie jest obietnicą. Wszystko inne użytkownik widzi.
+ */
+function visibleHubText(relPath: string): string {
+  return read(relPath)
+    .replace(/^import[\s\S]*?from\s+["'][^"']+["'];?\s*$/gm, "")
+    .replace(/\{[^{}]*?module: "(\w+)",\s*\}/g, (tile, key: string) =>
+      (FROZEN_MODULE_KEYS as string[]).includes(key) ? "" : tile
+    );
+}
 
 const FROZEN_MODULE_KEYS = MODULES.filter((m) => m.hardOff).map((m) => m.key);
 
@@ -168,6 +198,40 @@ describe("prawda w marketingu", () => {
       const source = read("src/app/dashboard/ai-usage/page.tsx");
       const gate = source.slice(source.indexOf("proBenefits"));
       expect(gate).not.toMatch(VIDEO);
+    });
+  });
+
+  describe("moduły zamrożone w tekstach oferty i w hubach panelu", () => {
+    it.each(PLAN_OFFER_FILES)("%s nie obiecuje funkcji modułu zamrożonego", (file) => {
+      for (const key of FROZEN_MODULE_KEYS) {
+        if (FROZEN_PROMISE_EXCEPTIONS[file]?.includes(key)) continue;
+        expectNoMatch(file, FROZEN_MODULE_PROMISES[key]!);
+      }
+    });
+
+    it.each(PLAN_OFFER_FILES)("%s nie obiecuje „asystenta AI content”", (file) => {
+      expectNoMatch(file, AI_CONTENT);
+    });
+
+    it("wyjątki dotyczą istniejących plików i kluczy zamrożonych", () => {
+      for (const [file, keys] of Object.entries(FROZEN_PROMISE_EXCEPTIONS)) {
+        expect(PLAN_OFFER_FILES, file).toContain(file);
+        for (const key of keys) {
+          expect(FROZEN_MODULE_KEYS as string[], key).toContain(key);
+          // Wyjątek bez trafienia jest martwy — trzeba go usunąć.
+          expect(read(file), `${file}: ${key}`).toMatch(FROZEN_MODULE_PROMISES[key]!);
+        }
+      }
+    });
+
+    it.each(HUB_FILES)("%s: widoczne kafelki i bramka Pro nie obiecują funkcji zamrożonych", (file) => {
+      const visible = visibleHubText(file);
+      // Kontrola, że filtr nie wyciął całego pliku.
+      expect(visible).toMatch(/ProPlanGate/);
+      for (const key of FROZEN_MODULE_KEYS) {
+        const match = visible.match(FROZEN_MODULE_PROMISES[key]!);
+        expect(match?.[0], `${file} obiecuje moduł zamrożony ${key}: „${match?.[0]}”`).toBeUndefined();
+      }
     });
   });
 

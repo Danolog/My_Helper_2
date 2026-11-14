@@ -149,8 +149,8 @@ function UpgradeDialog({
           <AlertDialogDescription asChild>
             <div className="space-y-4">
               <p>
-                Przejdź na plan Pro i odblokuj funkcje AI, w tym asystenta
-                biznesowego i content marketingowego.
+                Przejdź na plan Pro i odblokuj funkcje AI: asystenta
+                biznesowego, rekomendacje i generowanie opisów usług.
               </p>
 
               {/* Price comparison */}
