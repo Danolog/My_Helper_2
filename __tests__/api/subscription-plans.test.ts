@@ -4,9 +4,12 @@
  * Stare wiersze w bazie produkcyjnej obiecują wyłączone funkcje (B9).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { GET } from "@/app/api/subscription-plans/route";
 import { PLAN_FEATURES } from "@/lib/plan-features";
 
-const rows: Array<Record<string, unknown>> = [];
+// vi.hoisted: `vi.mock` jest wynoszone nad importy, więc dane dla atrapy bazy
+// muszą istnieć, zanim trasa zaimportuje `@/lib/db`.
+const { rows } = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>> }));
 
 vi.mock("@/lib/db", () => {
   const where = vi.fn(async () => rows);
@@ -21,8 +24,6 @@ vi.mock("@/lib/db", () => {
 vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }));
-
-import { GET } from "@/app/api/subscription-plans/route";
 
 const STALE = ["Asystent głosowy AI", "Publikacja postów social", "Drukarka fiskalna"];
 
