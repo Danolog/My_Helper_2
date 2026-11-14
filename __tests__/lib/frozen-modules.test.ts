@@ -19,12 +19,14 @@ import { join, relative, sep } from "node:path";
 import { describe, it, expect } from "vitest";
 import {
   API_MODULE_PATTERNS,
+  FROZEN_PROMOTION_TYPES,
   MODULES,
   TOGGLEABLE_MODULES,
   frozenModuleForApiPath,
   frozenModuleForPage,
   frozenModuleForPath,
   isModuleFrozen,
+  isPromotionTypeFrozen,
   resolveModules,
   type ModuleKey,
 } from "@/lib/features";
@@ -63,6 +65,13 @@ const API_DIR_NAMES: Record<string, RegExp | null> = {
   aiNotifications: /^\/api\/ai\/notifications(\/|$)/,
   // Cały moduł push: subskrypcje (/api/push/*) i crony przypomnień push.
   pushNotifications: /\/push(\/|-|$)/,
+  // Promocje złożone: sprawdzanie 2+1, happy hours, pakietów i pierwszej
+  // wizyty oraz rezerwacja pakietu. Proste rabaty i kody (/api/promotions,
+  // /api/promo-codes) zostają — pilnuje ich frozen-promotions.test.ts.
+  complexPromotions: /\/promotions\/check|\/book-package/,
+  // Generowanie obrazów modelem. /api/ai/image/enhance (obróbka zdjęcia
+  // biblioteką sharp, bez modelu) zostaje.
+  imageGen: /\/ai\/image\/(generate|banner|service-illustration)/,
   // Kod tych modułów jest kasowany w B3–B5 razem z trasami.
   voiceAi: null,
   videoGen: null,
@@ -77,7 +86,9 @@ describe("rejestr modułów zamrożonych", () => {
     expect([...FROZEN_KEYS].sort()).toEqual([
       "aiNotifications",
       "clientMarketing",
+      "complexPromotions",
       "fiscal",
+      "imageGen",
       "invoices",
       "loyalty",
       "newsletters",
@@ -148,6 +159,14 @@ describe("frozenModuleForApiPath", () => {
     ["/api/push/test", "pushNotifications"],
     ["/api/cron/push-reminders", "pushNotifications"],
     ["/api/cron/push-reminders-24h", "pushNotifications"],
+    ["/api/promotions/check", "complexPromotions"],
+    ["/api/promotions/check-happy-hours", "complexPromotions"],
+    ["/api/promotions/check-package", "complexPromotions"],
+    ["/api/promotions/check-first-visit", "complexPromotions"],
+    ["/api/appointments/book-package", "complexPromotions"],
+    ["/api/ai/image/generate", "imageGen"],
+    ["/api/ai/image/banner", "imageGen"],
+    ["/api/ai/image/service-illustration", "imageGen"],
   ])("%s → %s", (path, module) => {
     expect(frozenModuleForApiPath(path)).toBe(module);
   });
@@ -178,6 +197,15 @@ describe("frozenModuleForApiPath", () => {
     "/api/cron/cleanup-temporary-access",
     "/api/cron/push-reminders-48h",
     "/api/pushx",
+    "/api/promotions",
+    "/api/promotions/abc",
+    "/api/promotions/checkout",
+    "/api/promo-codes",
+    "/api/promo-codes/validate",
+    "/api/reports/promotions",
+    "/api/appointments/book",
+    "/api/ai/image/enhance",
+    "/api/ai/image/generated",
     "/api/appointments/abc",
     "/api/appointments/abc/complete",
     "/api/ai/image/enhance",
@@ -324,5 +352,32 @@ describe("pokrycie tras API wzorcami (system plików)", () => {
         frozenModuleForApiPath(route) !== null && !names.some((n) => n.test(route))
     );
     expect(collateral).toEqual([]);
+  });
+});
+
+describe("typy promocji zamrożone", () => {
+  it("zamrożone są dokładnie promocje złożone", () => {
+    expect([...FROZEN_PROMOTION_TYPES].sort()).toEqual([
+      "buy2get1",
+      "first_visit",
+      "happy_hours",
+      "package",
+    ]);
+  });
+
+  it.each(["happy_hours", "package", "buy2get1", "first_visit"])("%s jest zamrożony", (type) => {
+    expect(isPromotionTypeFrozen(type)).toBe(true);
+  });
+
+  it.each(["percentage", "fixed"])("prosty rabat %s działa", (type) => {
+    expect(isPromotionTypeFrozen(type)).toBe(false);
+  });
+
+  it.each([null, undefined, "", "HAPPY_HOURS", "unknown"])("wartość %j nie jest typem zamrożonym", (type) => {
+    expect(isPromotionTypeFrozen(type)).toBe(false);
+  });
+
+  it("typy są zamrożone tak długo, jak moduł complexPromotions", () => {
+    expect(isModuleFrozen("complexPromotions")).toBe(true);
   });
 });

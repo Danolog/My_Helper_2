@@ -40,7 +40,9 @@ export type ModuleKey =
   | "socialPosts"
   | "clientMarketing"
   | "aiNotifications"
-  | "pushNotifications";
+  | "pushNotifications"
+  | "complexPromotions"
+  | "imageGen";
 
 export interface ModuleDef {
   key: ModuleKey;
@@ -65,8 +67,8 @@ export const MODULES: readonly ModuleDef[] = [
   },
   {
     key: "promotions",
-    label: "Promocje i pakiety",
-    description: "Happy hours, promocje pierwszej wizyty, pakiety usług i kody promocyjne.",
+    label: "Rabaty i kody rabatowe",
+    description: "Rabat procentowy lub kwotowy oraz kody rabatowe.",
     defaultEnabled: false,
   },
   {
@@ -158,6 +160,25 @@ export const MODULES: readonly ModuleDef[] = [
     defaultEnabled: false,
     hardOff: true,
   },
+  {
+    // Część modułu `promotions`, której nie da się zamrozić jego kluczem:
+    // proste rabaty i kody zostają, promocje złożone (FROZEN_PROMOTION_TYPES)
+    // są zamrożone — ich trasy sprawdzające i rezerwacja pakietu.
+    key: "complexPromotions",
+    label: "Promocje złożone",
+    description: "Happy hours, pakiety usług, 2+1 gratis i promocja pierwszej wizyty.",
+    defaultEnabled: false,
+    hardOff: true,
+  },
+  {
+    // Generowanie obrazów modelem (baner promocji, grafika, ilustracja
+    // usługi). Poprawianie zdjęć galerii (/api/ai/image/enhance) zostaje.
+    key: "imageGen",
+    label: "Generowanie obrazów (AI)",
+    description: "Banery promocji, grafiki i ilustracje usług generowane przez AI.",
+    defaultEnabled: false,
+    hardOff: true,
+  },
 ] as const;
 
 /** Moduły z przełącznikiem w Ustawienia → Moduły. */
@@ -170,6 +191,30 @@ const FROZEN_MODULE_KEYS: ReadonlySet<ModuleKey> = new Set(
 /** Czy moduł jest zamrożony (`hardOff`) — wyłączony globalnie, bez przełącznika. */
 export function isModuleFrozen(key: ModuleKey): boolean {
   return FROZEN_MODULE_KEYS.has(key);
+}
+
+/**
+ * Typy promocji należące do zamrożonych promocji złożonych. Jedyna lista —
+ * wołają ją trasy promocji i kodów rabatowych, wyliczenie zadatku oraz
+ * formularze i rezerwacja w interfejsie. Proste rabaty (`percentage`,
+ * `fixed`) i kody rabatowe działają.
+ */
+export const FROZEN_PROMOTION_TYPES = [
+  "happy_hours",
+  "package",
+  "buy2get1",
+  "first_visit",
+] as const;
+
+/**
+ * Czy typ promocji jest zamrożony. Lista obowiązuje tak długo, jak zamrożony
+ * jest moduł `complexPromotions` — odmrożenie modułu odmraża typy.
+ */
+export function isPromotionTypeFrozen(type: string | null | undefined): boolean {
+  return (
+    isModuleFrozen("complexPromotions") &&
+    (FROZEN_PROMOTION_TYPES as readonly string[]).includes(type ?? "")
+  );
 }
 
 /** Kod błędu i komunikat dla zamrożonej funkcji (odpowiedź proxy i bramka strony). */
@@ -256,6 +301,15 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
   { pattern: /^\/api\/ai\/notifications(\/|$)/, module: "aiNotifications" },
   { pattern: /^\/api\/push(\/|$)/, module: "pushNotifications" },
   { pattern: /^\/api\/cron\/push-reminders(-24h)?(\/|$)/, module: "pushNotifications" },
+  {
+    pattern: /^\/api\/promotions\/check(-happy-hours|-package|-first-visit)?(\/|$)/,
+    module: "complexPromotions",
+  },
+  { pattern: /^\/api\/appointments\/book-package(\/|$)/, module: "complexPromotions" },
+  {
+    pattern: /^\/api\/ai\/image\/(generate|banner|service-illustration)(\/|$)/,
+    module: "imageGen",
+  },
 ];
 
 export interface FrozenTarget {

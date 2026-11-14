@@ -82,6 +82,8 @@ const FROZEN_MODULE_PROMISES: Record<string, RegExp> = {
   aiNotifications: /powiadomie\S+ (pisan|generowan|personalizowan)\S+ przez AI/i,
   // `(?<!\.)` — wywołanie `router.push(...)` to kod, nie obietnica.
   pushNotifications: /(?<!\.)\bpush\b/i,
+  complexPromotions: /happy hours|pakiet(y|[óo]w)? us[łl]ug|2\+1|pierwsz(a|ej|[ąa]) wizyt/i,
+  imageGen: /generowani[ea] (grafik|obraz[óo]w|baner)|baner(y|[óo]w)? (promocyjn|AI)|ilustracj[eai] us[łl]ug/i,
 };
 
 /**
