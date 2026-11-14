@@ -28,7 +28,7 @@ const PLANS_PREVIEW = {
       "Pelne zarzadzanie salonem bez narzedzi AI. Idealny na start.",
     features: [
       "Kalendarz pracownikow i grafiki",
-      "Rezerwacje online i platnosci",
+      "Rezerwacje online",
       "Kartoteka klientow",
       "Raporty i statystyki",
       "Powiadomienia SMS i email",
@@ -38,10 +38,9 @@ const PLANS_PREVIEW = {
     name: PLANS.pro.name,
     price: PLANS.pro.priceMonthly,
     description:
-      "Pelna funkcjonalnosc z asystentem AI glosowym, biznesowym i content marketingowym.",
+      "Pełna funkcjonalność z asystentem AI biznesowym i content marketingowym.",
     features: [
       "Wszystko z planu Basic",
-      "Asystent glosowy AI",
       "Asystent biznesowy AI",
       "Generowanie tresci marketingowych",
       "Proaktywne sugestie i analizy",

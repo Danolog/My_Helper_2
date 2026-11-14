@@ -61,7 +61,7 @@ const COMPARISON_FEATURES = [
     features: [
       { name: "System rezerwacji online", basic: true, pro: true },
       { name: "Portal klienta z rezerwacja", basic: true, pro: true },
-      { name: "Platnosci zadatkow (Stripe + Blik)", basic: true, pro: true },
+      { name: "Zadatki za wizyty (ustalane przez salon)", basic: true, pro: true },
       { name: "Powiadomienia SMS i email", basic: true, pro: true },
       { name: "System opinii i ocen", basic: true, pro: true },
     ],
@@ -71,15 +71,13 @@ const COMPARISON_FEATURES = [
     features: [
       { name: "Magazyn produktow", basic: true, pro: true },
       { name: "Raporty i statystyki", basic: true, pro: true },
-      { name: "Integracja z drukarka fiskalna", basic: true, pro: true },
-      { name: "Faktury i paragony", basic: true, pro: true },
+      { name: "Faktury", basic: true, pro: true },
       { name: "Promocje i program lojalnosciowy", basic: true, pro: true },
     ],
   },
   {
     category: "Asystent AI",
     features: [
-      { name: "Asystent glosowy (odbieranie polaczen)", basic: false, pro: true },
       { name: "Asystent biznesowy (analiza danych)", basic: false, pro: true },
       { name: "Asystent content (generowanie tresci)", basic: false, pro: true },
       { name: "Rekomendacje AI na dashboardzie", basic: false, pro: true },
@@ -89,10 +87,8 @@ const COMPARISON_FEATURES = [
   {
     category: "Marketing AI",
     features: [
-      { name: "Generowanie postow na social media", basic: false, pro: true },
       { name: "Generowanie opisow uslug", basic: false, pro: true },
       { name: "Tworzenie newsletterow", basic: false, pro: true },
-      { name: "Widget planowania marketingowego", basic: false, pro: true },
       { name: "Proaktywne sugestie biznesowe", basic: false, pro: true },
     ],
   },
@@ -326,8 +322,8 @@ export default function PricingPage() {
                   <CardTitle className="text-2xl">{proPlan.name}</CardTitle>
                 </div>
                 <CardDescription className="text-base">
-                  Pelna funkcjonalnosc z asystentem AI glosowym, biznesowym i
-                  content marketingowym.
+                  Pełna funkcjonalność z asystentem AI biznesowym i content
+                  marketingowym.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col">

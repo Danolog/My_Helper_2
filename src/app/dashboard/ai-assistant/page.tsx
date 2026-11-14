@@ -33,7 +33,7 @@ const AI_TILES: AiTile[] = [
     icon: PenTool,
     title: "Generator tresci",
     description:
-      "Posty social media, newslettery, opisy uslug, grafiki i wideo tworzone przez AI",
+      "Opisy usług, newslettery i szablony treści tworzone przez AI",
     href: "/dashboard/content-generator",
     cta: "Otworz generator",
   },
@@ -131,7 +131,7 @@ export default function AiAssistantPage() {
       featureName="Asystent AI"
       featureDescription="Asystent AI pomaga w zarzadzaniu salonem - tworzy tresci marketingowe, analizuje dane i podpowiada najlepsze decyzje biznesowe."
       proBenefits={[
-        "Generator tresci - posty, newslettery, grafiki i wideo",
+        "Generator treści — opisy usług, newslettery i szablony",
         "Analiza danych biznesowych i rekomendacje",
         "Chat AI z kontekstem Twojego salonu",
         "Proaktywne sugestie optymalizacji",

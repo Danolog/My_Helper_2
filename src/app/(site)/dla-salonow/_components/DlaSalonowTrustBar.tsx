@@ -1,8 +1,10 @@
 "use client";
 
+import { TRIAL_DAYS } from "@/lib/constants";
+
 const TRUST_STATS = [
-  { value: "30+", label: "Funkcji" },
-  { value: "AI", label: "Asystent glosowy" },
+  { value: `${TRIAL_DAYS} dni`, label: "Okres próbny za darmo" },
+  { value: "AI", label: "Asystent biznesowy w planie Pro" },
   { value: "24/7", label: "Rezerwacje online" },
   { value: "100%", label: "Polski produkt" },
 ] as const;

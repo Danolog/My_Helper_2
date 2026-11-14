@@ -136,12 +136,10 @@ export default function ContentGeneratorPage() {
   return (
     <ProPlanGate
       featureName="Generator tresci"
-      featureDescription="AI tworzy profesjonalne tresci marketingowe dopasowane do Twojego salonu - posty na social media, opisy uslug i newslettery."
+      featureDescription="AI tworzy profesjonalne treści marketingowe dopasowane do Twojego salonu — opisy usług i newslettery."
       proBenefits={[
-        "Generowanie postow na social media (Instagram, Facebook)",
         "Profesjonalne opisy uslug",
         "Tworzenie newsletterow promocyjnych",
-        "Widget planowania marketingowego",
         "Dostosowane do branzy beauty i wellness",
       ]}
     >
