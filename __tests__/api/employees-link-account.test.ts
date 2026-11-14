@@ -279,7 +279,7 @@ describe("PUT /api/employees/[id]/link-account", () => {
   it("przepiecie na inne konto kasuje granty poprzedniego konta", async () => {
     mockDbSelect
       .mockReturnValueOnce(chainMock([makeEmployee({ userId: "user-old" })]))
-      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID }]))
+      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
       .mockReturnValueOnce(chainMock([]))
       .mockReturnValueOnce(chainMock([]));
     mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: LINKED_USER_ID })]));
@@ -293,7 +293,7 @@ describe("PUT /api/employees/[id]/link-account", () => {
   it("ponowne podpiecie tego samego konta nie kasuje jego grantow", async () => {
     mockDbSelect
       .mockReturnValueOnce(chainMock([makeEmployee({ userId: LINKED_USER_ID })]))
-      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID }]))
+      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
       .mockReturnValueOnce(chainMock([]))
       .mockReturnValueOnce(chainMock([]));
     mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: LINKED_USER_ID })]));
