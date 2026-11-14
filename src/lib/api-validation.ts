@@ -673,9 +673,10 @@ export const loyaltyRedeemSchema = z.object({
   pointsToRedeem: z.number().int().positive("Liczba punktow musi byc wieksza od 0"),
 });
 
+// Kontrakt = body z use-appointment-detail.ts: comment to trim() || null.
 export const clientReviewSchema = z.object({
   rating: z.number().int().min(1).max(5, "Ocena musi byc od 1 do 5"),
-  comment: z.string().max(2000).optional(),
+  comment: z.string().max(2000).nullable().optional(),
 });
 
 export const clientWaitingListSchema = z.object({
