@@ -311,7 +311,7 @@ export default function PricingPage() {
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                 <Badge className="px-4 py-1 text-sm shadow-sm">
                   <Star className="h-3.5 w-3.5 mr-1.5" />
-                  Polecany
+                  Z asystentem AI
                 </Badge>
               </div>
               <CardHeader className="pb-4 pt-8">

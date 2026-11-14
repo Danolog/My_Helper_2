@@ -44,9 +44,11 @@ const ONLINE_DEPOSITS = /Stripe \+ Blik|p[łl]atno[śs]ci zadatk[óo]w|zadatk[ó
 // Analizy sentymentu nie ma w kodzie: `grep -rniE "sentyment|sentiment" src`
 // nie znajduje żadnej implementacji.
 const SENTIMENT = /sentyment|sentiment/i;
-// Znaczek przy planie nie może twierdzić nic o popularności — nie mamy liczb,
-// które by to pokrywały. Dopuszczalne brzmienie: „Polecany” (nasza rekomendacja).
-const POPULARITY_CLAIM = /najpopularniejsz|najcz[ęe]stszy wyb[óo]r|najcz[ęe][śs]ciej wybieran/i;
+// Znaczek przy planie nie może twierdzić nic o popularności (nie mamy liczb,
+// które by to pokrywały) ani oceniać planu („Polecany” — ocena bez podstaw
+// przy planie trzy razy droższym). Znaczek opisuje różnicę: „Z asystentem AI”.
+const POPULARITY_CLAIM =
+  /najpopularniejsz|najcz[ęe]stszy wyb[óo]r|najcz[ęe][śs]ciej wybieran|polecan/i;
 const FAKE_SOCIAL_PROOF = /setek salon|Tester Beta|zadowolonych w[łl]a[śs]cicieli|>4[.,]9</i;
 
 function expectNoMatch(relPath: string, pattern: RegExp) {
@@ -140,7 +142,7 @@ describe("prawda w marketingu", () => {
       expectNoMatch(file, SENTIMENT);
     });
 
-    it.each(PLAN_OFFER_FILES)("%s nie twierdzi, że któryś plan jest najpopularniejszy", (file) => {
+    it.each(PLAN_OFFER_FILES)("%s nie twierdzi, że któryś plan jest najpopularniejszy ani polecany", (file) => {
       expectNoMatch(file, POPULARITY_CLAIM);
     });
   });
