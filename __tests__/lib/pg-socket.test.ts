@@ -80,4 +80,23 @@ describe("pg-socket: migrate.mjs", () => {
     expect(r.stdout + r.stderr).not.toContain("TAJNE-HASLO");
     expect(r.stdout + r.stderr).toContain("[migrate] failed");
   });
+
+  // Zachowanie, nie tekst (Leo, #151 pkt 1): adres z `host=/…` musi pójść
+  // gniazdem (ENOENT — gniazda nie ma), a nie TCP na localhost.
+  // Kontrola: adres TCP na zamknięty port daje ECONNREFUSED.
+  it.each([
+    ["gniazdo, którego nie ma → ENOENT", "postgresql://u:TAJNE-HASLO@localhost/x?host=/nonexistent-cloudsql/p:r:i", "ENOENT"],
+    ["kontrola: TCP na zamknięty port → ECONNREFUSED", "postgresql://u:TAJNE-HASLO@127.0.0.1:1/x", "ECONNREFUSED"],
+  ])("%s", (_l, url, code) => {
+    const r = spawnSync("node", [join(ROOT, "infra/db/migrate.mjs")], {
+      encoding: "utf8",
+      env: { NODE_ENV: "test", PATH: process.env.PATH, POSTGRES_URL: url, PGCONNECT_TIMEOUT: "3" },
+      timeout: 20_000,
+    });
+    const out = r.stdout + r.stderr;
+    expect(r.status).toBe(1);
+    expect(out).toContain(`(code: ${code})`);
+    expect(out).not.toContain("TAJNE-HASLO");
+    expect(out).not.toContain("nonexistent-cloudsql");
+  });
 });

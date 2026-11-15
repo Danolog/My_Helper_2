@@ -43,8 +43,24 @@ try {
   await migrate(drizzle(sql), { migrationsFolder });
   console.log("[migrate] done");
 } catch (error) {
-  console.error("[migrate] failed:", error instanceof Error ? error.message : String(error));
+  // Kod błędu sieci/bazy (np. ENOENT — brak gniazda, ECONNREFUSED — TCP)
+  // bez adresu: drizzle owija błąd i w `message` zostaje tylko „Failed query”
+  // (Leo, #151 pkt 1). Tylko kody w postaci [A-Z0-9_].
+  const code = errorCode(error);
+  console.error(
+    "[migrate] failed:",
+    error instanceof Error ? error.message : String(error),
+    ...(code ? [`(code: ${code})`] : []),
+  );
   process.exitCode = 1;
 } finally {
   await sql.end({ timeout: 5 });
+}
+
+/** @param {unknown} error */
+function errorCode(error) {
+  for (let e = error, depth = 0; e && typeof e === "object" && depth < 5; e = e.cause, depth++) {
+    if (typeof e.code === "string" && /^[A-Z0-9_]{2,32}$/.test(e.code)) return e.code;
+  }
+  return undefined;
 }
