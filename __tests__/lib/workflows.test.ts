@@ -17,8 +17,11 @@
  *  - e2e po wdrożeniu idzie na URL Cloud Run, nigdy na sekretny URL Vercela.
  * Mutacje: dopisać `push:`; przywrócić wejście `ref`; usunąć warunek main;
  * usunąć krok is-ancestor; environment → production; cancel-in-progress →
- * true; base_url → vars.NEXT_PUBLIC_APP_URL; BASE_URL z sekretu w workflow_call.
+ * true; base_url → vars.NEXT_PUBLIC_APP_URL; BASE_URL z sekretu w workflow_call;
+ * id-token: write z powrotem na poziomie workflow; `permissions: write-all`
+ * na jobie e2e; allowlista bez https albo poluzowana do dowolnego hosta.
  */
+import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -90,8 +93,16 @@ describe("G-C6: deploy-cloud-run.yml", () => {
     expect(DEPLOY).toMatch(/^concurrency:\n {2}group: deploy-cloud-run\n {2}cancel-in-progress: false\n/m);
   });
 
-  it("permissions: id-token: write, contents: read", () => {
-    expect(DEPLOY).toMatch(/^permissions:\n {2}id-token: write\n {2}contents: read\n/m);
+  it("permissions: workflow i job e2e tylko contents: read; id-token: write wyłącznie na jobie deploy", () => {
+    expect(DEPLOY).toMatch(/^permissions:\n {2}contents: read\n(?! )/m);
+    const deployJob = DEPLOY.slice(DEPLOY.indexOf("\n  deploy:\n"), DEPLOY.indexOf("\n    steps:"));
+    expect(deployJob).toContain("\n    permissions:\n      id-token: write\n      contents: read\n");
+    const e2eJob = DEPLOY.slice(DEPLOY.indexOf("\n  e2e:\n"));
+    expect([...e2eJob.matchAll(/^ {4}permissions:(.*)$/gm)].map((m) => m[1])).toEqual([""]);
+    expect(e2eJob).toMatch(/\n {4}permissions:\n {6}contents: read\n(?! {6})/);
+    const c = code(DEPLOY);
+    expect(c.match(/id-token:/g)).toHaveLength(1);
+    expect(c).not.toMatch(/write-all/);
   });
 
   it("bez kluczy JSON i bez sekretów w workflow (tylko vars.*)", () => {
@@ -239,14 +250,46 @@ describe("G-C6: e2e-production.yml", () => {
     expect(code(E2E).match(/secrets\./g)).toHaveLength(1);
   });
 
-  it("tryb Cloud Run odmawia pustego, nie-https albo Vercelowego URL, przed checkoutem", () => {
-    const guard = E2E.indexOf("Cloud Run mode must not target Vercel");
-    expect(guard).toBeGreaterThan(0);
-    expect(guard).toBeLessThan(E2E.indexOf("actions/checkout"));
-    const step = E2E.slice(guard, E2E.indexOf("\n\n", guard));
+  const guardStep = () => {
+    const at = E2E.indexOf("Cloud Run mode must target a *.run.app URL");
+    expect(at).toBeGreaterThan(0);
+    return { at, step: E2E.slice(at, E2E.indexOf("\n\n", at)) };
+  };
+
+  it("tryb Cloud Run: krok-allowlista przed checkoutem, tylko poza deployment_status", () => {
+    const { at, step } = guardStep();
+    expect(at).toBeLessThan(E2E.indexOf("actions/checkout"));
     expect(step).toContain("if: github.event_name != 'deployment_status'");
+    expect(step).toContain('"$BASE_URL" != https://*');
     expect(step).toContain('"$BASE_URL" == *vercel.app*');
+    expect(step).toContain("\\.run\\.app(/.*)?$");
     expect(step).toContain("exit 1");
+  });
+
+  it.each([
+    ["https://myhelper-abc123-lm.a.run.app", 0],
+    ["https://sha-99fe315---myhelper-abc123-lm.a.run.app", 0],
+    ["https://myhelper-abc123-lm.a.run.app/", 0],
+    ["", 1],
+    ["http://myhelper-abc123-lm.a.run.app", 1],
+    ["https://myhelper.vercel.app", 1],
+    ["https://my-helper-2.vercel.app.run.app.evil.com", 1],
+    ["https://myhelper.pl", 1],
+    ["https://myhelper.run.app.evil.com", 1],
+    ["https://evil.com/x.run.app", 1],
+    ["https://x.run.app@evil.com", 1],
+    ["https://evil.com@x.run.app", 1],
+    ["https://x.run.app:8443", 1],
+    ["https://run.app", 1],
+  ])("allowlista (wykonana w bash): %j → exit %i", (url, exit) => {
+    const { step } = guardStep();
+    const script = step
+      .split("\n")
+      .slice(step.split("\n").findIndex((l) => l.trim() === "run: |") + 1)
+      .map((l) => l.replace(/^ {10}/, ""))
+      .join("\n");
+    const r = spawnSync("bash", ["-c", script], { env: { BASE_URL: url }, encoding: "utf8" });
+    expect(r.status, r.stderr).toBe(exit);
   });
 
   it("deployment_status nadal tylko dla udanego Production", () => {

@@ -28,8 +28,9 @@ on:
         type: boolean
         default: false
 
+# Na poziomie workflow tylko odczyt; `id-token: write` (token OIDC dla WIF)
+# wyłącznie na jobie deploy — job e2e (pnpm install + Playwright) go nie widzi.
 permissions:
-  id-token: write
   contents: read
 
 concurrency:
@@ -40,6 +41,9 @@ jobs:
   deploy:
     name: Build, verify, deploy
     if: github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write
+      contents: read
     environment: production-gcp
     runs-on: ubuntu-24.04 # amd64 — Cloud Run wymaga linux/amd64
     timeout-minutes: 45
@@ -200,6 +204,8 @@ jobs:
   e2e:
     name: Production E2E on Cloud Run
     needs: deploy
+    permissions:
+      contents: read
     uses: ./.github/workflows/e2e-production.yml
     # URL Cloud Run (tag nowej rewizji, po promocji kieruje na nią), NIE
     # domena aplikacji — do przełączenia DNS ta wskazuje Vercela. Bez
