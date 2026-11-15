@@ -67,6 +67,8 @@ vi.mock("@/lib/schema", () => {
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  or: vi.fn((...args: unknown[]) => ({ type: "or", args })),
+  inArray: vi.fn((...args: unknown[]) => ({ type: "inArray", args })),
   desc: vi.fn((...args: unknown[]) => ({ type: "desc", args })),
   sql: Object.assign(
     vi.fn((...args: unknown[]) => ({ type: "sql", args })),
@@ -80,14 +82,22 @@ vi.mock("@/lib/logger", () => ({
 
 function chainMock(result: unknown[] = []) {
   const chain: Record<string, unknown> = {};
-  for (const m of ["select", "from", "where", "limit", "leftJoin", "orderBy", "returning"]) {
+  let table: unknown;
+  for (const m of ["select", "where", "limit", "leftJoin", "orderBy", "returning"]) {
     chain[m] = vi.fn().mockReturnValue(chain);
   }
+  chain.from = (t: unknown) => {
+    table = t;
+    return chain;
+  };
   chain.values = (...args: unknown[]) => {
     mockInsertValues(...args);
     return chain;
   };
-  chain.then = (resolve: (val: unknown[]) => unknown) => resolve(result);
+  // SELECT z gallery_photos = sprawdzenie duplikatu adresu: tu zawsze brak
+  // (przypadek duplikatu pilnuje gallery-security.test.ts).
+  chain.then = (resolve: (val: unknown[]) => unknown) =>
+    resolve((table as { _table?: string } | undefined)?._table === "galleryPhotos" ? [] : result);
   return chain;
 }
 

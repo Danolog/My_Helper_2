@@ -750,12 +750,30 @@ export const createGalleryPhotoSchema = z
     path: ["afterPhotoUrl"],
   });
 
-export const updateGalleryPhotoSchema = z.object({
-  title: z.string().nullable().optional(),
-  description: z.string().nullable().optional(),
-  tags: z.array(z.string()).optional(),
-  employeeId: z.string().nullable().optional(),
-});
+// Kontrakt PATCH /api/gallery/[id] = body z src/components/gallery/
+// photo-edit-dialog.tsx (pola formularza) i photo-link-dialog.tsx (jedno z
+// beforePhotoUrl/afterPhotoUrl). .strict(): pole spoza kontraktu (salonId, id,
+// stare title/tags) to 400, nie ciche pominięcie. Adresy zdjęć — ta sama
+// allowlista co w POST (inaczej POST z dobrym adresem + PATCH z dowolnym
+// omijał ją). Przynależność employeeId/serviceId do salonu sprawdza trasa
+// (assertSalonRefs), bo schemat nie zna salonu sesji.
+export const updateGalleryPhotoSchema = z
+  .object({
+    description: z.string().max(2000).nullable().optional(),
+    techniques: z.string().max(1000).nullable().optional(),
+    productsUsed: z.string().max(1000).nullable().optional(),
+    employeeId: optionalUuidId,
+    serviceId: optionalUuidId,
+    duration: z.number().int().min(0).max(1440, "Czas trwania maksymalnie 1440 minut").nullable().optional(),
+    showProductsToClients: z.boolean().optional(),
+    beforePhotoUrl: galleryUploadUrl,
+    afterPhotoUrl: galleryUploadUrl,
+  })
+  .strict()
+  .refine((d) => Object.values(d).some((v) => v !== undefined), {
+    message: "Brak pol do aktualizacji",
+    path: ["_root"],
+  });
 
 // ==========================================
 // Payment & Subscription Schemas

@@ -186,3 +186,22 @@ describe("POST /api/time-blocks — kontrakt z UI", () => {
     expect(mockTxInsert).not.toHaveBeenCalled();
   });
 });
+
+// Uwaga Leo F2 (#32): bez refine'a w isoDateTime `new Date("x")` daje Invalid
+// Date, `start >= end` jest wtedy fałszywe i insert leci do Postgresa (500).
+// Każde z pól osobno i oba naraz muszą dać 400 jeszcze przed bazą.
+describe("POST /api/time-blocks — nieparsowalna data -> 400 (F2)", () => {
+  it.each([
+    ["startTime", { startTime: "nie-data" }],
+    ["endTime", { endTime: "nie-data" }],
+    ["oba pola", { startTime: "x", endTime: "y" }],
+    ["miesiąc 13", { endTime: "2026-13-01T12:00:00.000Z" }],
+    ["pusty napis", { endTime: "" }],
+  ])("400 — %s, bez zapytania do bazy i zapisu", async (_label, overrides) => {
+    const { status, body } = await post(uiBreakBody(overrides));
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(mockTxSelect).not.toHaveBeenCalled();
+    expect(mockTxInsert).not.toHaveBeenCalled();
+  });
+});
