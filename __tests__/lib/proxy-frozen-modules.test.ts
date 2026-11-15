@@ -82,11 +82,9 @@ function passedThrough(response: Response): boolean {
 
 describe("proxy: trasy API modułów zamrożonych", () => {
   it("rejestr wskazuje trasy do zamrożenia (kontrola, że test nie jest pusty)", () => {
-    // B3: −13 tras głosu (usunięte, nie zamrożone).
-    expect(FROZEN_ROUTES.length).toBeGreaterThanOrEqual(43);
+    // B3: −13 tras głosu, B4: −10 tras wideo i social (usunięte, nie zamrożone).
+    expect(FROZEN_ROUTES.length).toBeGreaterThanOrEqual(33);
     expect(FROZEN_ROUTES).toContain("/api/appointments/x1/fiscal-receipt");
-    expect(FROZEN_ROUTES).toContain("/api/ai/video/generate");
-    expect(FROZEN_ROUTES).toContain("/api/scheduled-posts");
     expect(FROZEN_ROUTES).toContain("/api/salons/x1/fiscal-settings");
     expect(FROZEN_ROUTES).toContain("/api/push/subscribe");
     expect(FROZEN_ROUTES).toContain("/api/push/unsubscribe");
