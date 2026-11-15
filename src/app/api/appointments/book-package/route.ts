@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { eq, and, not, lte, gte, or, lt, gt, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { validateBody, bookPackageSchema } from "@/lib/api-validation";
+import { appointmentConflictWhere, overlapsRange } from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { depositGuardResponse } from "@/lib/deposit-guard";
 import { getUserSalonId } from "@/lib/get-user-salon";
@@ -170,27 +171,8 @@ export async function POST(request: Request) {
       tx
         .select()
         .from(appointments)
-        .where(
-          and(
-            eq(appointments.salonId, salonId),
-            eq(appointments.employeeId, employeeId),
-            not(eq(appointments.status, "cancelled")),
-            or(
-              and(
-                lte(appointments.startTime, firstStart),
-                gte(appointments.endTime, firstStart)
-              ),
-              and(
-                lte(appointments.startTime, lastEnd),
-                gte(appointments.endTime, lastEnd)
-              ),
-              and(
-                gte(appointments.startTime, firstStart),
-                lte(appointments.endTime, lastEnd)
-              )
-            )
-          )
-        )
+        // Cały pakiet jako jeden przedział półotwarty [firstStart, lastEnd) (#165).
+        .where(appointmentConflictWhere({ salonId, employeeId, start: firstStart, end: lastEnd }))
     );
 
     if (overlapping.length > 0) {
@@ -210,8 +192,7 @@ export async function POST(request: Request) {
         .where(
           and(
             eq(timeBlocks.employeeId, employeeId),
-            lt(timeBlocks.startTime, lastEnd),
-            gt(timeBlocks.endTime, firstStart)
+            overlapsRange(timeBlocks.startTime, timeBlocks.endTime, firstStart, lastEnd)
           )
         )
     );

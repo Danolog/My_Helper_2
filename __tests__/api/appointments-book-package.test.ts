@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST as bookPackage } from "@/app/api/appointments/book-package/route";
 import { createMockRequest, parseResponse, TEST_IDS } from "./helpers";
+import { sqlMatches } from "./sql-predicate";
 
 /**
  * Moduł `complexPromotions` jest zamrożony (B2) i trasa odpowiada 404 zanim
@@ -34,6 +35,12 @@ const { mockAssertSalonRefs, mockFindOne, mockListOwned, mockInsertValues, txQue
   /** Wyniki kolejnych tx.select(): overlap, blokady czasu. */
   txQueue: [] as unknown[][],
 }));
+
+/**
+ * #165: wiersze z kolejki przechodzą przez warunek WHERE trasy (prawdziwy
+ * drizzle, `sqlMatches`) — wynik kolizji zależy od znaczenia predykatu.
+ */
+const rowFilter = vi.hoisted(() => ({ fn: null as null | ((where: unknown, row: Record<string, unknown>) => boolean) }));
 
 // #63: personel rozpoznawany jak w create-session (getSalonContext), a
 // wymóg zadatku liczy deposit-calculation (atrapa — kontrolujemy werdykt).
@@ -73,8 +80,18 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("@/lib/server/repository", () => {
   const chain = (rows: unknown[]) => {
     const c: Record<string, unknown> = {};
-    for (const m of ["from", "where", "limit"]) c[m] = () => c;
-    c.then = (resolve: (v: unknown[]) => unknown) => resolve(rows);
+    let where: unknown;
+    for (const m of ["from", "limit"]) c[m] = () => c;
+    c.where = (w: unknown) => {
+      where = w;
+      return c;
+    };
+    c.then = (resolve: (v: unknown[]) => unknown) =>
+      resolve(
+        where !== undefined && rowFilter.fn
+          ? rows.filter((r) => rowFilter.fn!(where, r as Record<string, unknown>))
+          : rows
+      );
     return c;
   };
   const tx = {
@@ -95,6 +112,8 @@ vi.mock("@/lib/server/repository", () => {
     }),
   };
 });
+
+rowFilter.fn = (where, row) => sqlMatches(where as Parameters<typeof sqlMatches>[0], row);
 
 const SERVICE_1 = "33333333-0000-4000-8000-000000000001";
 const SERVICE_2 = "33333333-0000-4000-8000-000000000002";
@@ -266,5 +285,92 @@ describe("POST /api/appointments/book-package — zadatek (#63, na wypadek odmro
     const res = await bookPackage(request());
     expect(res.status).toBe(201);
     expect(mockCalcDeposit).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("POST /api/appointments/book-package — kolizja półotwarta (#165)", () => {
+  // Pakiet: 30 + 45 min od 10:00, czyli jeden przedział [10:00, 11:15).
+  const appt = (start: string, end: string, extra: Record<string, unknown> = {}) => ({
+    id: "aaaaaaaa-0000-4000-8000-000000000001",
+    salon_id: TEST_IDS.SALON_UUID,
+    employee_id: TEST_IDS.EMPLOYEE_UUID,
+    status: "scheduled",
+    start_time: new Date(`2026-04-01T${start}:00Z`),
+    end_time: new Date(`2026-04-01T${end}:00Z`),
+    ...extra,
+  });
+  const block = (start: string, end: string) => ({
+    id: "block-165",
+    employee_id: TEST_IDS.EMPLOYEE_UUID,
+    start_time: new Date(`2026-04-01T${start}:00Z`),
+    end_time: new Date(`2026-04-01T${end}:00Z`),
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    txQueue.length = 0;
+    mockAssertSalonRefs.mockImplementation(async () => null);
+    mockGetSalonContext.mockResolvedValue({ salonId: TEST_IDS.SALON_UUID, role: "owner" });
+    mockFindOne.mockResolvedValue({
+      id: PROMOTION,
+      salonId: TEST_IDS.SALON_UUID,
+      name: "Pakiet",
+      type: "package",
+      isActive: true,
+      startDate: null,
+      endDate: null,
+      value: "150.00",
+      conditionsJson: { packageServiceIds: [SERVICE_1, SERVICE_2] },
+    });
+    mockListOwned.mockResolvedValue([
+      { id: SERVICE_1, name: "A", basePrice: "100.00", baseDuration: 30 },
+      { id: SERVICE_2, name: "B", basePrice: "80.00", baseDuration: 45 },
+    ]);
+  });
+
+  it("wizyta na styku przed pakietem (09–10) → 201", async () => {
+    txQueue.push([appt("09:00", "10:00")], []);
+    expect((await bookPackage(request())).status).toBe(201);
+  });
+
+  it("wizyta na styku po pakiecie (11:15–12) → 201", async () => {
+    txQueue.push([appt("11:15", "12:00")], []);
+    expect((await bookPackage(request())).status).toBe(201);
+  });
+
+  it("wizyta nachodząca o 1 minutę na koniec pakietu → 409, bez zapisu", async () => {
+    txQueue.push([appt("11:14", "12:00")], []);
+    const res = await bookPackage(request());
+    const { status, body } = await parseResponse(res);
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+    expect(mockInsertValues).not.toHaveBeenCalled();
+  });
+
+  it("wizyta w środku pakietu (10:30–10:45) → 409", async () => {
+    txQueue.push([appt("10:30", "10:45")], []);
+    expect((await bookPackage(request())).status).toBe(409);
+  });
+
+  it("anulowana wizyta w terminie pakietu nie koliduje → 201", async () => {
+    txQueue.push([appt("10:00", "11:00", { status: "cancelled" })], []);
+    expect((await bookPackage(request())).status).toBe(201);
+  });
+
+  it("wizyta innego salonu nie koliduje (filtr salonu) → 201", async () => {
+    txQueue.push([appt("10:00", "11:00", { salon_id: "cccccccc-0000-4000-8000-000000000003" })], []);
+    expect((await bookPackage(request())).status).toBe(201);
+  });
+
+  it("blokada czasu na styku po pakiecie (11:15–12) → 201", async () => {
+    txQueue.push([], [block("11:15", "12:00")]);
+    expect((await bookPackage(request())).status).toBe(201);
+  });
+
+  it("blokada czasu nachodząca o 1 minutę → 409", async () => {
+    txQueue.push([], [block("11:14", "12:00")]);
+    const { status, body } = await parseResponse(await bookPackage(request()));
+    expect(status).toBe(409);
+    expect(body.error).toBe("Employee has time block during the requested period");
   });
 });
