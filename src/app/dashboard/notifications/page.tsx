@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { PushNotificationManager } from "@/components/push-notification-manager";
 import { NotificationsFilters } from "./_components/NotificationsFilters";
 import { NotificationsHeader } from "./_components/NotificationsHeader";
@@ -46,6 +47,10 @@ export default function NotificationsPage() {
     checkInactiveClients,
     sendWeMissYouNotifications,
   } = useNotificationsData();
+  // Moduly z rejestru (src/lib/features.ts): urodziny i "tesknimy" to
+  // clientMarketing, panel subskrypcji push to pushNotifications.
+  const clientMarketingEnabled = useModuleEnabled("clientMarketing");
+  const pushEnabled = useModuleEnabled("pushNotifications");
 
   return (
     <div className="container mx-auto p-6">
@@ -55,35 +60,41 @@ export default function NotificationsPage() {
       />
 
       {/* Push Notification Settings */}
-      <div className="mb-6">
-        <PushNotificationManager />
-      </div>
+      {pushEnabled && (
+        <div className="mb-6">
+          <PushNotificationManager />
+        </div>
+      )}
 
-      <BirthdaySection
-        birthdayClients={birthdayClients}
-        loadingBirthday={loadingBirthday}
-        birthdayChecked={birthdayChecked}
-        sendingBirthday={sendingBirthday}
-        birthdayDiscount={birthdayDiscount}
-        onBirthdayDiscountChange={setBirthdayDiscount}
-        birthdaySettingsLoaded={birthdaySettingsLoaded}
-        birthdayGiftType={birthdayGiftType}
-        birthdayProductName={birthdayProductName}
-        birthdayEnabled={birthdayEnabled}
-        onCheckBirthdays={checkBirthdayClients}
-        onSendBirthday={sendBirthdayNotifications}
-      />
+      {clientMarketingEnabled && (
+        <BirthdaySection
+          birthdayClients={birthdayClients}
+          loadingBirthday={loadingBirthday}
+          birthdayChecked={birthdayChecked}
+          sendingBirthday={sendingBirthday}
+          birthdayDiscount={birthdayDiscount}
+          onBirthdayDiscountChange={setBirthdayDiscount}
+          birthdaySettingsLoaded={birthdaySettingsLoaded}
+          birthdayGiftType={birthdayGiftType}
+          birthdayProductName={birthdayProductName}
+          birthdayEnabled={birthdayEnabled}
+          onCheckBirthdays={checkBirthdayClients}
+          onSendBirthday={sendBirthdayNotifications}
+        />
+      )}
 
-      <WeMissYouSection
-        inactiveClients={inactiveClients}
-        loadingInactive={loadingInactive}
-        inactiveChecked={inactiveChecked}
-        sendingWeMissYou={sendingWeMissYou}
-        inactiveDays={inactiveDays}
-        weMissYouEnabled={weMissYouEnabled}
-        onCheckInactive={checkInactiveClients}
-        onSendWeMissYou={sendWeMissYouNotifications}
-      />
+      {clientMarketingEnabled && (
+        <WeMissYouSection
+          inactiveClients={inactiveClients}
+          loadingInactive={loadingInactive}
+          inactiveChecked={inactiveChecked}
+          sendingWeMissYou={sendingWeMissYou}
+          inactiveDays={inactiveDays}
+          weMissYouEnabled={weMissYouEnabled}
+          onCheckInactive={checkInactiveClients}
+          onSendWeMissYou={sendWeMissYouNotifications}
+        />
+      )}
 
       <NotificationsFilters
         typeFilter={typeFilter}

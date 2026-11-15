@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { mutationFetch } from "@/lib/api-client";
 import { useSalonId } from "@/hooks/use-salon-id";
 import {
@@ -52,6 +53,9 @@ export function useNotificationSettings(): UseNotificationSettingsReturn {
   // Salon zalogowanego konta (/api/salons/mine), NIE pierwszy salon z
   // publicznego katalogu GET /api/salons (nie zwraca ownerId) — API wymusza salon z sesji.
   const { salonId, loading: salonLoading } = useSalonId();
+  // Urodziny i "tesknimy" to modul clientMarketing z rejestru
+  // (src/lib/features.ts) — wylaczony albo zamrozony: nie pytamy jego tras.
+  const clientMarketingEnabled = useModuleEnabled("clientMarketing");
   const [loading, setLoading] = useState(true);
 
   // Birthday settings state
@@ -88,19 +92,27 @@ export function useNotificationSettings(): UseNotificationSettingsReturn {
       setLoading(true);
       try {
         const [birthdayRes, weMissYouRes, channelsRes] = await Promise.all([
-          fetch(`/api/salons/${salonId}/birthday-settings`, { signal }),
-          fetch(`/api/salons/${salonId}/we-miss-you-settings`, { signal }),
+          clientMarketingEnabled
+            ? fetch(`/api/salons/${salonId}/birthday-settings`, { signal })
+            : null,
+          clientMarketingEnabled
+            ? fetch(`/api/salons/${salonId}/we-miss-you-settings`, { signal })
+            : null,
           fetch(`/api/salons/${salonId}/notification-type-settings`, {
             signal,
           }),
         ]);
-        const birthdayData = await birthdayRes.json();
-        if (birthdayData.success) {
-          setBirthdaySettings(birthdayData.data);
+        if (birthdayRes) {
+          const birthdayData = await birthdayRes.json();
+          if (birthdayData.success) {
+            setBirthdaySettings(birthdayData.data);
+          }
         }
-        const weMissYouData = await weMissYouRes.json();
-        if (weMissYouData.success) {
-          setWeMissYouSettings(weMissYouData.data);
+        if (weMissYouRes) {
+          const weMissYouData = await weMissYouRes.json();
+          if (weMissYouData.success) {
+            setWeMissYouSettings(weMissYouData.data);
+          }
         }
         const channelsData = await channelsRes.json();
         if (channelsData.success) {
@@ -117,7 +129,7 @@ export function useNotificationSettings(): UseNotificationSettingsReturn {
         setLoading(false);
       }
     },
-    [salonId],
+    [salonId, clientMarketingEnabled],
   );
 
   useEffect(() => {

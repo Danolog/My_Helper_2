@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { PLANS } from "@/lib/constants";
+import { PRO_INCLUDES_BASIC, proOnlyFeatures } from "@/lib/plan-features";
 import { formatDate } from "../_types";
 import type { SubscriptionData, PlanData, AllPlansMap } from "../_types";
 
@@ -148,8 +149,8 @@ function UpgradeDialog({
           <AlertDialogDescription asChild>
             <div className="space-y-4">
               <p>
-                Przejdź na plan Pro i odblokuj funkcje AI, w tym asystenta
-                biznesowego i content marketingowego.
+                Przejdź na plan Pro i odblokuj funkcje AI: asystenta
+                biznesowego, rekomendacje i generowanie opisów usług.
               </p>
 
               {/* Price comparison */}
@@ -197,7 +198,7 @@ function UpgradeDialog({
                       .filter(
                         (f) =>
                           !plan.features.includes(f) &&
-                          f !== "Wszystko z planu Basic",
+                          f !== PRO_INCLUDES_BASIC,
                       )
                       .map((feature, idx) => (
                         <div
@@ -277,25 +278,19 @@ function DowngradeDialog({
                 biezacego okresu rozliczeniowego stracisz dostep do:
               </p>
 
-              {/* AI features that will be lost */}
+              {/* Pro-only features that will be lost — lista z src/lib/plan-features.ts */}
               <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-4 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-300">
-                  Funkcje AI, ktore stracisz
+                  Funkcje planu Pro, które stracisz
                 </p>
-                <div className="grid gap-1.5">
-                  <div className="flex items-start gap-2 text-sm">
-                    <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
-                    <span>Asystent biznesowy AI</span>
-                  </div>
-                  <div className="flex items-start gap-2 text-sm">
-                    <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
-                    <span>Content marketing AI</span>
-                  </div>
-                  <div className="flex items-start gap-2 text-sm">
-                    <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
-                    <span>Generowanie odpowiedzi na opinie</span>
-                  </div>
-                </div>
+                <ul className="grid gap-1.5" data-testid="downgrade-lost-features">
+                  {proOnlyFeatures().map((feature) => (
+                    <li key={feature} className="flex items-start gap-2 text-sm">
+                      <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
 
               {/* Price comparison */}

@@ -26,6 +26,7 @@ import type {
   InvoiceData,
   FiscalReceiptData,
 } from "@/components/appointments/detail";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { useTabSync } from "@/hooks/use-tab-sync";
 import { useSession } from "@/lib/auth-client";
@@ -57,6 +58,11 @@ export default function AppointmentDetailPage() {
   const appointmentId = params.id as string;
   const { data: session, isPending } = useSession();
   const { salonId } = useSalonId();
+  // Faktury to modul z rejestru (src/lib/features.ts) — wylaczony albo
+  // zamrozony: strona nie pyta API o fakture i nie laduje dialogu.
+  const invoicesEnabled = useModuleEnabled("invoices");
+  // Fiskalizacja tak samo: bez pytania o paragon i bez dialogu paragonu.
+  const fiscalEnabled = useModuleEnabled("fiscal");
 
   const [appointment, setAppointment] = useState<AppointmentDetail | null>(null);
   const [materials, setMaterials] = useState<MaterialRecord[]>([]);
@@ -168,6 +174,7 @@ export default function AppointmentDetailPage() {
   }, [appointmentId]);
 
   const fetchFiscalReceipt = useCallback(async (signal: AbortSignal | null = null) => {
+    if (!fiscalEnabled) return;
     try {
       const res = await fetch(`/api/appointments/${appointmentId}/fiscal-receipt`, { signal });
       if (!res.ok) return;
@@ -178,9 +185,10 @@ export default function AppointmentDetailPage() {
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
     }
-  }, [appointmentId]);
+  }, [appointmentId, fiscalEnabled]);
 
   const fetchInvoice = useCallback(async (signal: AbortSignal | null = null) => {
+    if (!invoicesEnabled) return;
     try {
       const res = await fetch(`/api/appointments/${appointmentId}/invoice`, { signal });
       if (!res.ok) return;
@@ -191,7 +199,7 @@ export default function AppointmentDetailPage() {
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
     }
-  }, [appointmentId]);
+  }, [appointmentId, invoicesEnabled]);
 
   // --- Initial data load with AbortController cleanup ---
 
@@ -337,24 +345,28 @@ export default function AppointmentDetailPage() {
       )}
 
       {/* Fiscal Receipt Dialog */}
-      <FiscalReceiptDialog
-        open={receiptDialogOpen}
-        onOpenChange={setReceiptDialogOpen}
-        appointment={appointment}
-        fiscalReceipt={fiscalReceipt}
-        totalMaterialCost={totalMaterialCost}
-        onReceiptPrinted={setFiscalReceipt}
-      />
+      {fiscalEnabled && (
+        <FiscalReceiptDialog
+          open={receiptDialogOpen}
+          onOpenChange={setReceiptDialogOpen}
+          appointment={appointment}
+          fiscalReceipt={fiscalReceipt}
+          totalMaterialCost={totalMaterialCost}
+          onReceiptPrinted={setFiscalReceipt}
+        />
+      )}
 
       {/* Invoice Dialog */}
-      <InvoiceDialog
-        open={invoiceDialogOpen}
-        onOpenChange={setInvoiceDialogOpen}
-        appointment={appointment}
-        invoice={invoice}
-        totalMaterialCost={totalMaterialCost}
-        onInvoiceGenerated={setInvoice}
-      />
+      {invoicesEnabled && (
+        <InvoiceDialog
+          open={invoiceDialogOpen}
+          onOpenChange={setInvoiceDialogOpen}
+          appointment={appointment}
+          invoice={invoice}
+          totalMaterialCost={totalMaterialCost}
+          onInvoiceGenerated={setInvoice}
+        />
+      )}
     </div>
   );
 }

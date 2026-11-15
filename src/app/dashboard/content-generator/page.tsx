@@ -56,6 +56,8 @@ const GENERATOR_TILES: GeneratorTile[] = [
     title: "Szablony tresci",
     description: "Gotowe szablony do szybkiego tworzenia tresci",
     href: "/dashboard/content-generator/templates",
+    // Szablony prowadza wylacznie do newsletterow — chowamy je razem z nimi.
+    module: "newsletters",
   },
   {
     icon: Clapperboard,
@@ -136,10 +138,9 @@ export default function ContentGeneratorPage() {
   return (
     <ProPlanGate
       featureName="Generator tresci"
-      featureDescription="AI tworzy profesjonalne treści marketingowe dopasowane do Twojego salonu — opisy usług i newslettery."
+      featureDescription="AI tworzy profesjonalne opisy usług dopasowane do Twojego salonu."
       proBenefits={[
         "Profesjonalne opisy uslug",
-        "Tworzenie newsletterow promocyjnych",
         "Dostosowane do branzy beauty i wellness",
       ]}
     >

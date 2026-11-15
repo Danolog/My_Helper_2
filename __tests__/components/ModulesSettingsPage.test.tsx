@@ -1,6 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import ModulesSettingsPage from "@/app/dashboard/settings/modules/page";
+import {
+  DEFAULT_MODULES,
+  FROZEN_MODULES_NOTICE,
+  MODULES,
+  TOGGLEABLE_MODULES,
+} from "@/lib/features";
 
 // Mock Next.js Link
 vi.mock("next/link", () => ({
@@ -41,19 +47,7 @@ vi.mock("@/lib/api-client", () => ({
 
 const SALON_ID = "salon-1";
 
-const MODULES_STATE = {
-  products: false,
-  promotions: false,
-  loyalty: false,
-  waitingList: false,
-  newsletters: false,
-  invoices: false,
-  reportsAdvanced: false,
-  voiceAi: false,
-  videoGen: false,
-  fiscal: false,
-  socialPosts: false,
-};
+const MODULES_STATE = { ...DEFAULT_MODULES };
 
 /**
  * Scenariusz bledu (bug 2026-07): salon ISTNIEJE (salons/mine go zwraca),
@@ -106,6 +100,44 @@ describe("ModulesSettingsPage", () => {
     });
 
     expect(screen.queryByText("Brak salonu")).not.toBeInTheDocument();
+  });
+
+  it("pokazuje tylko moduly przelaczalne — zamrozonych nie ma na liscie ani w bloku „Wkrótce”", async () => {
+    render(<ModulesSettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Magazyn")).toBeInTheDocument();
+    });
+
+    for (const mod of TOGGLEABLE_MODULES) {
+      expect(screen.getByText(mod.label)).toBeInTheDocument();
+      expect(screen.getByRole("switch", { name: mod.label })).toBeEnabled();
+    }
+
+    const frozen = MODULES.filter((m) => m.hardOff);
+    expect(frozen.length).toBeGreaterThan(0);
+    for (const mod of frozen) {
+      expect(screen.queryByText(mod.label)).not.toBeInTheDocument();
+      expect(screen.queryByRole("switch", { name: mod.label })).not.toBeInTheDocument();
+    }
+
+    // Zadnych obietnic przyszlych wydan.
+    expect(document.body.textContent).not.toMatch(/wkr[óo]tce/i);
+    expect(document.body.textContent).not.toMatch(/kolejnych wydaniach/i);
+    expect(screen.getAllByRole("switch")).toHaveLength(TOGGLEABLE_MODULES.length);
+  });
+
+  it("informuje, ze faktury i program lojalnosciowy sa niedostepne, a dane zostaja", async () => {
+    render(<ModulesSettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Magazyn")).toBeInTheDocument();
+    });
+
+    expect(FROZEN_MODULES_NOTICE).toBe(
+      "Faktury i program lojalnościowy są obecnie niedostępne. Wystawione faktury i punkty klientów pozostają zapisane na koncie salonu."
+    );
+    expect(screen.getByTestId("frozen-modules-notice")).toHaveTextContent(FROZEN_MODULES_NOTICE!);
   });
 
   it("nie pobiera salonu z publicznego katalogu GET /api/salons (fallback bral cudzy salon)", async () => {

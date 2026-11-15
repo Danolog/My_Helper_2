@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import webpush from "web-push";
 import { db } from "@/lib/db";
+import { isModuleFrozen } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import {
   PUSH_SEND_CONCURRENCY,
@@ -57,6 +58,13 @@ export async function sendPushNotification(
   userId: string,
   msg: PushMessage
 ): Promise<PushResult> {
+  // Push to modul z rejestru (src/lib/features.ts). Zamrozony: nic nie
+  // wysylamy — sprawdzenie u zrodla, wiec obejmuje kazdego wywolujacego
+  // (lista oczekujacych, przypomnienia, trasy push), takze przyszlego.
+  if (isModuleFrozen("pushNotifications")) {
+    return { success: false, sent: 0, failed: 0, error: "Push notifications are disabled" };
+  }
+
   try {
     // Get all push subscriptions for this user
     const subs = await db

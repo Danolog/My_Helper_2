@@ -3,20 +3,18 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Blocks, Save, CheckCircle, Clock } from "lucide-react";
+import { ArrowLeft, Blocks, Save, CheckCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
 import {
-  MODULES,
+  FROZEN_MODULES_NOTICE,
   TOGGLEABLE_MODULES,
   type ModuleKey,
   type ModulesState,
 } from "@/lib/features";
-
-const HARD_OFF_MODULES = MODULES.filter((m) => m.hardOff);
 
 export default function ModulesSettingsPage() {
   const router = useRouter();
@@ -173,30 +171,14 @@ export default function ModulesSettingsPage() {
         </div>
       </div>
 
-      {/* Hard-off modules (globally disabled) */}
-      <div className="border border-border rounded-lg p-6 mb-6">
-        <h2 className="text-xl font-semibold mb-1 flex items-center gap-2">
-          <Clock className="w-5 h-5 text-muted-foreground" />
-          Wkrótce
-        </h2>
-        <p className="text-sm text-muted-foreground mb-4">
-          Te moduly sa jeszcze niedostepne — wlaczymy je w kolejnych wydaniach.
+      {FROZEN_MODULES_NOTICE && (
+        <p
+          className="text-sm text-muted-foreground mb-6"
+          data-testid="frozen-modules-notice"
+        >
+          {FROZEN_MODULES_NOTICE}
         </p>
-        <div className="space-y-1 divide-y divide-border">
-          {HARD_OFF_MODULES.map((mod) => (
-            <div
-              key={mod.key}
-              className="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0 opacity-60"
-            >
-              <div>
-                <p className="font-medium">{mod.label}</p>
-                <p className="text-sm text-muted-foreground">{mod.description}</p>
-              </div>
-              <Switch checked={false} disabled aria-label={mod.label} />
-            </div>
-          ))}
-        </div>
-      </div>
+      )}
 
       {/* Save Button */}
       <div className="flex items-center justify-between">

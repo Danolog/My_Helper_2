@@ -41,7 +41,7 @@ const FEATURES = [
   {
     icon: Bot,
     title: "Asystent AI",
-    description: "Inteligentne rekomendacje, analiza biznesowa i generowanie tresci.",
+    description: "Inteligentne rekomendacje, analiza biznesowa i opisy usług pisane przez AI.",
     color: "rose" as const,
   },
   {
@@ -52,8 +52,8 @@ const FEATURES = [
   },
   {
     icon: Heart,
-    title: "Program lojalnosciowy",
-    description: "Buduj relacje z klientami przez system punktow, promocje i prezenty.",
+    title: "Opinie i galeria",
+    description: "Zbieraj opinie po wizytach i pokazuj zdjęcia swoich prac na stronie salonu.",
     color: "gold" as const,
   },
 ] as const;
