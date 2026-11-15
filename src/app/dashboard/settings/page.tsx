@@ -8,7 +8,6 @@ import {
   CreditCard,
   Bell,
   Gift,
-  Printer,
   Crown,
   Blocks,
 } from "lucide-react";
@@ -47,13 +46,6 @@ const SETTINGS_ITEMS = [
     href: "/dashboard/settings/loyalty",
     icon: Gift,
     moduleKey: "loyalty" as const,
-  },
-  {
-    label: "Drukarka fiskalna",
-    description: "Konfiguracja integracji z drukarka fiskalna i kasa",
-    href: "/dashboard/settings/fiscal",
-    icon: Printer,
-    moduleKey: "fiscal" as const,
   },
   {
     label: "Subskrypcja",
