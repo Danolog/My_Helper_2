@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
-import { validateBody, createAppointmentSchema } from "@/lib/api-validation";
+import { parseBody, createAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 R2b: POST to świadomie publiczny booking (gość bez sesji salonu) — świadomie surowe db; GET idzie przez forSalon
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
+import { depositGuardResponse } from "@/lib/deposit-guard";
 import { logger } from "@/lib/logger";
 import { checkPromotionApplicable, computePromoDiscount, type PromotionRejection } from "@/lib/promo-discount";
 import { strictRateLimit, apiRateLimit, getClientIp } from "@/lib/rate-limit";
@@ -149,7 +150,32 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { salonId, clientId: bodyClientId, employeeId, serviceId, startTime, endTime, notes, depositAmount: bodyDepositAmount, bookedByUserId: bodyUserId, promoCodeId, guestName, guestPhone, guestEmail } = body;
+
+    // Server-side validation with Zod schema. #63/#64: czytamy SPARSOWANE
+    // dane (null -> undefined, pola gościa przycięte, telefon w E.164).
+    const parsed = parseBody(createAppointmentSchema, body);
+    if (!parsed.ok) {
+      // Portal pokazuje `error` w toaście: błąd pola gościa idzie jako
+      // konkretny komunikat (jak dotąd z walidacji w trasie), reszta bez zmian.
+      const d = parsed.error.details;
+      const guestMessage = d.guestName ?? d.guestPhone ?? d.guestEmail;
+      return NextResponse.json(
+        guestMessage ? { ...parsed.error, error: guestMessage } : parsed.error,
+        { status: 400 }
+      );
+    }
+    const { salonId, clientId: bodyClientId, employeeId, serviceId, variantId, startTime, endTime, notes, depositAmount: bodyDepositAmount, bookedByUserId: bodyUserId, promoCodeId, guestName, guestPhone, guestEmail } = parsed.data;
+
+    // #67: JEDEN znormalizowany obiekt rezerwacji — z niego czyta strażnik
+    // zadatku (wycena: usługa + wariant + termin) i z niego idzie zapis. Wycena
+    // i zapis nie mogą się rozjechać (np. wariant wyceniony, ale nie zapisany).
+    const booking = {
+      salonId,
+      serviceId: serviceId ?? null,
+      variantId: variantId ?? null,
+      startTime: new Date(startTime),
+      endTime: new Date(endTime),
+    };
 
     // bookedByUserId WYLACZNIE z sesji (null dla goscia). Wartosc z body jest
     // ignorowana: pozwalala przypisac wizyte do cudzego konta (portal klienta,
@@ -159,12 +185,6 @@ export async function POST(request: Request) {
       logger.warn("[Appointments API] Ignored client-supplied bookedByUserId", {
         sessionUserId: bookedByUserId,
       });
-    }
-
-    // Server-side validation with Zod schema
-    const validationError = validateBody(createAppointmentSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
     }
 
     // UAT X-1: personel salonu (owner/employee/recepcja) tworzy wizyty tylko
@@ -179,7 +199,10 @@ export async function POST(request: Request) {
           { status: 403 }
         );
       }
-      isStaff = !!staffCtx;
+      // Personel TEGO salonu — jak w create-session. Porównanie salonId
+      // zostaje jawne (nie !!staffCtx), żeby wyjątek od zadatku (#63) nie
+      // zależał od tego, że 403 wyżej zawsze wyprzedza tę linię.
+      isStaff = staffCtx?.salonId === salonId;
     }
 
     // P1 (Ryan): clientId wybiera WYLACZNIE personel salonu (panel). Gosc i
@@ -223,15 +246,16 @@ export async function POST(request: Request) {
       );
     }
 
-    // Guest validation: require name and phone when not logged in
+    // Guest validation: require name and phone when not logged in.
+    // Format (trim, min. 2 znaki, telefon PL -> E.164) sprawdził schemat.
     if (!session) {
-      if (!guestName?.trim() || guestName.trim().length < 2) {
+      if (!guestName) {
         return NextResponse.json(
           { success: false, error: "Imię i nazwisko jest wymagane (min. 2 znaki)" },
           { status: 400 }
         );
       }
-      if (!guestPhone?.trim() || !/^(\+48)?[0-9]{9}$/.test(guestPhone.trim().replace(/[\s\-()]/g, ""))) {
+      if (!guestPhone) {
         return NextResponse.json(
           { success: false, error: "Podaj prawidłowy numer telefonu (9 cyfr)" },
           { status: 400 }
@@ -242,8 +266,37 @@ export async function POST(request: Request) {
     // P1 (Ryan): klient, pracownik i usluga musza nalezec do salonu wizyty —
     // przed sprawdzeniem kolizji (obcy employeeId nie moze nawet sondowac
     // kalendarza innego salonu). Jeden, niezdradzajacy komunikat 400.
-    const refsError = await assertSalonRefs(salonId, { clientId, employeeId, serviceId });
+    // Wariant (#67): należy do tej usługi, a usługa do salonu — inaczej 400.
+    const refsError = await assertSalonRefs(salonId, {
+      clientId,
+      employeeId,
+      serviceId: booking.serviceId,
+      variantId: booking.variantId,
+    });
     if (refsError) return refsError;
+
+    // #63: usługa z deposit_required / klient z require_deposit nie powstaje
+    // tu bez wpłaty — jedyną drogą jest /api/deposits/create-session.
+    // Wyjątek: personel tego salonu (ręczne rozliczenie zadatku w panelu).
+    // PRZED kolizjami i zapisem; błąd wyliczenia = 503, brak zapisu.
+    if (!isStaff) {
+      // Zadatek wynika z usługi — bez usługi nie da się go sprawdzić, więc
+      // rezerwacja spoza personelu musi ją wskazać (portal zawsze wysyła).
+      if (!booking.serviceId) {
+        return NextResponse.json(
+          { success: false, error: "Wybierz usługę" },
+          { status: 400 }
+        );
+      }
+      const depositError = await depositGuardResponse({
+        salonId: booking.salonId,
+        serviceId: booking.serviceId,
+        variantId: booking.variantId,
+        startTime: booking.startTime,
+        sessionUser: session?.user ?? null,
+      });
+      if (depositError) return depositError;
+    }
 
     // Check for overlapping appointments for this employee (only need id for existence check)
     const overlapping = await db.select({ id: appointments.id })
@@ -409,20 +462,21 @@ export async function POST(request: Request) {
     const [newAppointment] = await db
       .insert(appointments)
       .values({
-        salonId,
+        salonId: booking.salonId,
         clientId,
         employeeId,
-        serviceId: serviceId || null,
+        serviceId: booking.serviceId,
+        variantId: booking.variantId,
         bookedByUserId,
-        startTime: new Date(startTime),
-        endTime: new Date(endTime),
+        startTime: booking.startTime,
+        endTime: booking.endTime,
         notes: notes || null,
         depositAmount: null,
         promoCodeId: validatedPromoCodeId,
         discountAmount: validatedDiscountAmount,
-        guestName: guestName || null,
-        guestPhone: guestPhone || null,
-        guestEmail: guestEmail || null,
+        guestName: guestName ?? null,
+        guestPhone: guestPhone ?? null,
+        guestEmail: guestEmail ?? null,
         status: "scheduled",
       })
       .returning();

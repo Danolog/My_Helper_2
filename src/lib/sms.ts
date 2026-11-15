@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { maskPhoneNumber, normalizePolishPhoneNumber } from "@/lib/phone";
 import { notifications } from "@/lib/schema";
 
 export interface SmsMessage {
@@ -18,26 +19,9 @@ export interface SmsResult {
 const SMSAPI_URL = "https://api.smsapi.pl/sms.do";
 const DEFAULT_SENDER = "Info";
 
-/**
- * Normalize a Polish phone number to E.164 format (+48XXXXXXXXX).
- *
- * Accepted inputs (spaces and dashes are ignored):
- * - 9 digits            -> "+48" is prepended
- * - "+48" + 9 digits    -> returned as-is
- *
- * Any other format is rejected and `null` is returned.
- */
-export function normalizePolishPhoneNumber(raw: string): string | null {
-  const cleaned = raw.replace(/[\s-]/g, "");
-
-  if (/^\d{9}$/.test(cleaned)) {
-    return `+48${cleaned}`;
-  }
-  if (/^\+48\d{9}$/.test(cleaned)) {
-    return cleaned;
-  }
-  return null;
-}
+// Format E.164 i maskowanie żyją w czystym module (importuje go też schemat
+// Zod); re-eksport zostaje dla dotychczasowych importów z "@/lib/sms".
+export { normalizePolishPhoneNumber };
 
 /** Shape of the (partial) SMSAPI.pl JSON response we care about. */
 interface SmsapiResponse {
@@ -148,14 +132,16 @@ async function saveFailedNotification(msg: SmsMessage): Promise<void> {
 export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
   const normalizedTo = normalizePolishPhoneNumber(msg.to);
   if (!normalizedTo) {
+    // N2 (Ryan): numer zamaskowany — log i wynik błędu trafiają do
+    // notifications/logów Vercela, pełny numer to dana osobowa.
     logger.warn("Invalid phone number for SMS", {
-      to: msg.to,
+      to: maskPhoneNumber(msg.to),
       salonId: msg.salonId,
     });
     await saveFailedNotification(msg);
     return {
       success: false,
-      error: `Invalid phone number: ${msg.to}. Expected 9 digits or +48 followed by 9 digits.`,
+      error: `Invalid phone number: ${maskPhoneNumber(msg.to)}. Expected 9 digits or +48 followed by 9 digits.`,
     };
   }
 

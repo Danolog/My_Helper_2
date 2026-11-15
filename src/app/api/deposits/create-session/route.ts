@@ -5,6 +5,11 @@ import { parseBody, depositCreateSessionSchema } from "@/lib/api-validation";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { calculateExpectedDeposit } from "@/lib/deposit-calculation";
+import {
+  DEPOSIT_CHECK_UNAVAILABLE_MESSAGE,
+  DEPOSIT_NOT_APPLICABLE_CODE,
+  depositDecision,
+} from "@/lib/deposit-guard";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getSalonContext } from "@/lib/salon-context";
@@ -26,8 +31,10 @@ import { getStripe, isStripeConfigured } from "@/lib/stripe";
  *    (mode "payment", card/BLIK/P24) and returns its URL as `paymentUrl`.
  *    The payment is then confirmed exclusively by the signed Stripe webhook
  *    (`checkout.session.completed`).
- * 3. When Stripe is NOT configured (dev): returns `simulated: true` and a
- *    fake session id — the frontend then confirms via the dev-only
+ * 3. When Stripe is NOT configured outside Vercel (dev, CI E2E): returns
+ *    `simulated: true` and a
+ *    fake session id (on a Vercel production/preview deployment: 503
+ *    instead) — the frontend then confirms via the dev-only
  *    /api/deposits/confirm endpoint.
  *
  * Slot lifecycle: an unpaid deposit appointment DOES block the slot while
@@ -36,6 +43,12 @@ import { getStripe, isStripeConfigured } from "@/lib/stripe";
  * `async_payment_failed` (webhook) and by the cleanup cron
  * (/api/cron/cleanup-pending-deposits) as a backstop for lost webhooks.
  */
+/** Wdrożenie Vercela, na którym symulacja płatności jest zabroniona. */
+function isVercelDeployment(): boolean {
+  const env = process.env.VERCEL_ENV;
+  return env === "production" || env === "preview";
+}
+
 export async function POST(request: Request) {
   // Rate limit: deposit payment creation is a sensitive operation
   const ip = getClientIp(request);
@@ -56,7 +69,14 @@ export async function POST(request: Request) {
     // telefony. Surowe body omijało tę normalizację.
     const parsed = parseBody(depositCreateSessionSchema, body);
     if (!parsed.ok) {
-      return NextResponse.json(parsed.error, { status: 400 });
+      // Quinn: front pokazuje `error` w toaście — zamiast ogólnego
+      // "Validation failed" pierwszy konkretny komunikat (np. za krótkie
+      // imię). `details` bez zmian, `code` dla klientów maszynowych.
+      const firstMessage = Object.values(parsed.error.details)[0];
+      return NextResponse.json(
+        { ...parsed.error, error: firstMessage ?? parsed.error.error, code: "VALIDATION_FAILED" },
+        { status: 400 }
+      );
     }
     const {
       salonId,
@@ -108,6 +128,23 @@ export async function POST(request: Request) {
       );
     }
 
+    // #69/Ethan (#61): wdrożenie Vercela (production/preview) bez klucza
+    // Stripe → 503, nic nie zapisane. Symulacja (wizyta "scheduled" bez
+    // wpłaty) tylko poza Vercelem: dev i serwer E2E w CI (`pnpm start`,
+    // NODE_ENV=production, bez klucza — dlatego nie sam NODE_ENV). Sprawdzamy
+    // wyłącznie obecność klucza, nigdy wartość.
+    if (!isStripeConfigured() && isVercelDeployment()) {
+      logger.error("[Deposits API] Stripe not configured on a Vercel deployment — deposit booking refused");
+      return NextResponse.json(
+        {
+          success: false,
+          code: "STRIPE_UNAVAILABLE",
+          error: "Płatności online są chwilowo niedostępne. Spróbuj ponownie później lub skontaktuj się z salonem.",
+        },
+        { status: 503 }
+      );
+    }
+
     // P1 (Ryan), wzorzec z #39: clientId wybiera WYLACZNIE personel TEGO
     // salonu. Gosc i klient portalu (jedyny front tej trasy) nie podpinaja
     // rekordu klienta — gosc jest opisany przez guestName/guestPhone/guestEmail.
@@ -130,14 +167,25 @@ export async function POST(request: Request) {
     // /client settings + promotions. The body amount is only compared to
     // detect a manipulated or stale frontend value — the SERVER value is
     // stored and charged.
-    const expected = await calculateExpectedDeposit({
-      salonId,
-      serviceId,
-      variantId: variantId ?? null,
-      startTime: new Date(startTime),
-      sessionUser: session?.user ?? null,
-      guestEmail: guestEmail ?? null,
-    });
+    // Błąd wyliczenia = 503 i nic nie zapisane (jak strażnik /api/appointments),
+    // a nie ogólne 500 z catch na końcu trasy.
+    let expected: Awaited<ReturnType<typeof calculateExpectedDeposit>>;
+    try {
+      expected = await calculateExpectedDeposit({
+        salonId,
+        serviceId,
+        variantId: variantId ?? null,
+        startTime: new Date(startTime),
+        sessionUser: session?.user ?? null,
+        guestEmail: guestEmail ?? null,
+      });
+    } catch (error) {
+      logger.error("[Deposits API] Deposit calculation failed", { salonId, serviceId, error });
+      return NextResponse.json(
+        { success: false, error: DEPOSIT_CHECK_UNAVAILABLE_MESSAGE },
+        { status: 503, headers: { "Retry-After": "5" } }
+      );
+    }
 
     if (!expected.ok) {
       return NextResponse.json(
@@ -149,20 +197,35 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!expected.required || expected.amount <= 0) {
+    // Ta sama reguła co strażnik /api/appointments (depositDecision, #67):
+    // "none" (brak wymogu albo kwota ≤ 0 przy required) → 400
+    // DEPOSIT_NOT_APPLICABLE, portal rezerwuje wtedy zwykłą ścieżką;
+    // "error" (kwota NaN) → 503, nic nie zapisane.
+    const decision = depositDecision(expected, { salonId, serviceId, variantId: variantId ?? null });
+    if (decision.kind === "error") {
       return NextResponse.json(
-        { success: false, error: "Zadatek nie jest wymagany dla tej rezerwacji" },
+        { success: false, error: DEPOSIT_CHECK_UNAVAILABLE_MESSAGE },
+        { status: 503, headers: { "Retry-After": "5" } }
+      );
+    }
+    if (decision.kind === "none") {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Zadatek nie jest wymagany dla tej rezerwacji",
+          code: DEPOSIT_NOT_APPLICABLE_CODE,
+        },
         { status: 400 }
       );
     }
 
     const requestedAmount = depositAmount;
-    if (Math.abs(requestedAmount - expected.amount) > 0.01) {
+    if (Math.abs(requestedAmount - decision.amount) > 0.01) {
       logger.warn("Deposit amount mismatch — request rejected", {
         salonId,
         serviceId,
         requestedAmount,
-        expectedAmount: expected.amount,
+        expectedAmount: decision.amount,
       });
       return NextResponse.json(
         {
@@ -173,7 +236,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const depositAmountValue = expected.amount;
+    const depositAmountValue = decision.amount;
     const serviceName = expected.serviceName;
 
     // Check for overlapping appointments for this employee. Correct overlap

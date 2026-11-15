@@ -20,16 +20,21 @@ const SERVICE_A = "aaaaaaaa-0000-4000-8000-0000000000f1";
 const SERVICE_B = "bbbbbbbb-0000-4000-8000-0000000000f2";
 const CATEGORY_A = "aaaaaaaa-0000-4000-8000-0000000000c1";
 const CATEGORY_B = "bbbbbbbb-0000-4000-8000-0000000000c2";
+const VARIANT_A = "aaaaaaaa-0000-4000-8000-0000000000a1"; // wariant SERVICE_A
+const VARIANT_A2 = "aaaaaaaa-0000-4000-8000-0000000000a2"; // wariant innej usługi salonu A
+const SERVICE_A2 = "aaaaaaaa-0000-4000-8000-0000000000f3";
+const VARIANT_B = "bbbbbbbb-0000-4000-8000-0000000000b1"; // wariant SERVICE_B (salon B)
 const UNKNOWN = "99999999-9999-4999-8999-999999999999";
 
 type Cond = { type: string; args: unknown[] };
 
-const { STORE, queries, mockRaw, mockWarn } = vi.hoisted(() => {
+const { STORE, VARIANTS, queries, mockRaw, mockWarn } = vi.hoisted(() => {
   const STORE: Record<string, Array<{ id: string; salonId: string }>> = {};
+  const VARIANTS: Array<{ id: string; serviceId: string }> = [];
   const queries: Array<{ table: string; where: unknown }> = [];
   const mockRaw = vi.fn();
   const mockWarn = vi.fn();
-  return { STORE, queries, mockRaw, mockWarn };
+  return { STORE, VARIANTS, queries, mockRaw, mockWarn };
 });
 
 vi.mock("drizzle-orm", () => ({
@@ -44,6 +49,7 @@ vi.mock("@/lib/schema", () => {
     employees: table("employees"),
     services: table("services"),
     serviceCategories: table("serviceCategories"),
+    serviceVariants: { _table: "serviceVariants", id: "serviceVariants.id", serviceId: "serviceVariants.serviceId" },
   };
 });
 
@@ -65,10 +71,28 @@ function flatten(cond: unknown): Cond[] {
   return c?.type === "eq" ? [c] : [];
 }
 
+/** Wariant JOIN usługa: wiersz tylko, gdy wariant ma eq(id), eq(serviceId) i usługa eq(salonId). */
+function variantJoin(where: unknown) {
+  return {
+    limit: async () => {
+      queries.push({ table: "serviceVariants", where });
+      const eqs = flatten(where);
+      const vId = eqs.find((e) => e.args[0] === "serviceVariants.id")?.args[1];
+      const sId = eqs.find((e) => e.args[0] === "serviceVariants.serviceId")?.args[1];
+      const salon = eqs.find((e) => e.args[0] === "services.salonId")?.args[1];
+      if (vId === undefined || sId === undefined || salon === undefined) return []; // brak filtra = nic
+      return VARIANTS.filter((v) => v.id === vId && v.serviceId === sId)
+        .filter((v) => (STORE.services ?? []).some((svc) => svc.id === v.serviceId && svc.salonId === salon))
+        .map((v) => ({ id: v.id }));
+    },
+  };
+}
+
 function fakeTx() {
   return {
     select: () => ({
       from: (table: { _table: string }) => ({
+        innerJoin: () => ({ where: (where: unknown) => variantJoin(where) }),
         where: (where: unknown) => ({
           limit: async () => {
             queries.push({ table: table._table, where });
@@ -108,6 +132,13 @@ describe("assertSalonRefs", () => {
       { id: SERVICE_A, salonId: SALON_A },
       { id: SERVICE_B, salonId: SALON_B },
     ];
+    STORE.services.push({ id: SERVICE_A2, salonId: SALON_A });
+    VARIANTS.length = 0;
+    VARIANTS.push(
+      { id: VARIANT_A, serviceId: SERVICE_A },
+      { id: VARIANT_A2, serviceId: SERVICE_A2 },
+      { id: VARIANT_B, serviceId: SERVICE_B }
+    );
     STORE.serviceCategories = [
       { id: CATEGORY_A, salonId: SALON_A },
       { id: CATEGORY_B, salonId: SALON_B },
@@ -175,6 +206,37 @@ describe("assertSalonRefs", () => {
       expect.objectContaining({ ref: "employeeId", reason: "not_in_salon", salonId: SALON_A })
     );
     expect(JSON.stringify(await res!.json())).not.toContain("employee");
+  });
+
+  // #67: wariant musi należeć do usługi z tych samych refs, a usługa do salonu
+  it("wariant tej usługi w tym salonie -> null", async () => {
+    expect(await assertSalonRefs(SALON_A, { serviceId: SERVICE_A, variantId: VARIANT_A })).toBeNull();
+    expect(queries.map((q) => q.table)).toEqual(["services", "serviceVariants"]);
+  });
+
+  it("wariant INNEJ usługi tego salonu -> 400", async () => {
+    await expect400(await assertSalonRefs(SALON_A, { serviceId: SERVICE_A, variantId: VARIANT_A2 }));
+  });
+
+  it("wariant usługi INNEGO salonu -> 400 (także gdy podano obcą usługę razem z wariantem)", async () => {
+    await expect400(await assertSalonRefs(SALON_A, { serviceId: SERVICE_A, variantId: VARIANT_B }));
+    await expect400(await assertSalonRefs(SALON_A, { serviceId: SERVICE_B, variantId: VARIANT_B }));
+  });
+
+  it("wariant usunięty (nieistniejący) -> 400", async () => {
+    await expect400(await assertSalonRefs(SALON_A, { serviceId: SERVICE_A, variantId: UNKNOWN }));
+  });
+
+  it("wariant bez usługi -> 400 bez zapytania; zły format wariantu -> 400 bez zapytania", async () => {
+    await expect400(await assertSalonRefs(SALON_A, { variantId: VARIANT_A }));
+    await expect400(await assertSalonRefs(SALON_A, { serviceId: SERVICE_A, variantId: "nie-uuid" }));
+    expect(mockRaw).not.toHaveBeenCalled();
+  });
+
+  it("zapytanie o wariant zawężone do salonu usługi (eq(services.salonId, salonId))", async () => {
+    await assertSalonRefs(SALON_A, { serviceId: SERVICE_A, variantId: VARIANT_A });
+    const q = queries.find((x) => x.table === "serviceVariants")!;
+    expect(flatten(q.where).find((e) => e.args[0] === "services.salonId")?.args[1]).toBe(SALON_A);
   });
 
   it("błąd bazy propaguje się (trasa zwraca 500 w swoim catch)", async () => {

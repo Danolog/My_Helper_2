@@ -1,6 +1,11 @@
 import crypto from "crypto";
 import { eq, and, isNull, or, not } from "drizzle-orm";
 import { db } from "@/lib/db";
+import {
+  checkBookingWithoutDeposit,
+  DEPOSIT_CHECK_UNAVAILABLE_MESSAGE,
+  DEPOSIT_REQUIRED_MESSAGE,
+} from "@/lib/deposit-guard";
 import { logger } from "@/lib/logger";
 import { sendPushNotification } from "@/lib/push";
 import {
@@ -332,6 +337,29 @@ export async function acceptEarlierSlot(
   let appointmentId: string;
   let oldStartTime: Date | undefined;
 
+  // #63: NOWA wizyta z listy oczekujących podlega tej samej regule co
+  // /api/appointments — usługa z deposit_required / klient z require_deposit
+  // (po clientId wpisu, ustawionym przez salon) nie powstaje bez wpłaty.
+  // Wpis zostaje nierozstrzygnięty, klient może zarezerwować termin w portalu
+  // z zadatkiem. Przeniesienie istniejącej wizyty nie tworzy nowej rezerwacji.
+  const depositBlocksNewAppointment = async (): Promise<AcceptResult | null> => {
+    if (!entry.serviceId) return null; // bez usługi nie ma zadatku
+    const verdict = await checkBookingWithoutDeposit({
+      salonId: entry.salonId,
+      serviceId: entry.serviceId,
+      startTime: offeredStart,
+      clientId: entry.clientId,
+    });
+    if (verdict.allowed) return null;
+    const message =
+      verdict.reason === "unavailable"
+        ? DEPOSIT_CHECK_UNAVAILABLE_MESSAGE
+        : verdict.reason === "not_found"
+          ? "Usługa z tego wpisu nie jest już dostępna"
+          : DEPOSIT_REQUIRED_MESSAGE;
+    return { success: false, message };
+  };
+
   // 7. Move existing appointment or create a new one
   if (entry.existingAppointmentId) {
     // Move existing appointment to the earlier slot
@@ -360,6 +388,8 @@ export async function acceptEarlierSlot(
       });
     } else {
       // Existing appointment was cancelled or missing – create new
+      const blocked = await depositBlocksNewAppointment();
+      if (blocked) return blocked;
       const [newAppt] = await db
         .insert(appointments)
         .values({
@@ -377,6 +407,8 @@ export async function acceptEarlierSlot(
     }
   } else {
     // No existing appointment – create new
+    const blocked = await depositBlocksNewAppointment();
+    if (blocked) return blocked;
     const [newAppt] = await db
       .insert(appointments)
       .values({

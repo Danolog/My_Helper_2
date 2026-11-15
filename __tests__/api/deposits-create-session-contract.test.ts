@@ -10,9 +10,11 @@
  *
  * Kody trasy (201 sukces, nie 200; 401/403 — patrz opis przy testach):
  * 201, 400, "401" (gość bez sesji = 400, nie 401), "403" (nie-personel →
- * clientId ignorowany, nie 403), 404, 409, 500.
+ * clientId ignorowany, nie 403), 404, 409 (kolizja wizyty i blokada czasu),
+ * 500. Telefon zapisywany w E.164 (#64 pkt 4, Ryan N1).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { DrizzleQueryError } from "drizzle-orm";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockRequest, parseResponse, createChainMock } from "./helpers";
 import { buildDepositBody, type DepositBodyInput } from "@/app/(client)/salons/[id]/book/_lib/deposit-body";
 
@@ -228,9 +230,10 @@ describe("telefon gościa", () => {
 
   it.each([
     ["+48 123 456 789", "+48123456789"],
-    ["123-456-789", "123456789"],
-    ["(12) 345-67-89", "123456789"],
-    ["123456789", "123456789"],
+    ["123-456-789", "+48123456789"],
+    ["(12) 345-67-89", "+48123456789"],
+    ["123456789", "+48123456789"],
+    ["+48123456789", "+48123456789"],
   ])("%s → 201, zapis %s", async (input, stored) => {
     const res = await post(buildDepositBody(formState({ ...GUEST, guestPhone: input })));
 
@@ -400,5 +403,301 @@ describe("kody odpowiedzi trasy", () => {
 
     expect(status).toBe(500);
     expect(body.success).toBe(false);
+  });
+});
+
+// -------------------------------------------------------
+// fix/deposit-hardening: kolizje, trim, limity, daty, logi
+// -------------------------------------------------------
+
+describe("409: obie ścieżki kolizji (Ethan, #65)", () => {
+  beforeEach(() => mockGetOptionalSession.mockResolvedValue(LOGGED_IN));
+
+  it("409: termin zajęty przez inną wizytę, nic nie zapisane", async () => {
+    mockDbSelect.mockReset();
+    mockDbSelect.mockReturnValueOnce(createChainMock([{ id: "inna-wizyta" }]));
+    const res = await post(buildDepositBody(formState()));
+    const { status, body } = await parseResponse<{ error: string }>(res);
+
+    expect(status).toBe(409);
+    expect(body.error).toMatch(/zajety/);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("409: pracownik ma blokadę czasu (urlop/przerwa), nic nie zapisane", async () => {
+    mockDbSelect.mockReset();
+    mockDbSelect
+      .mockReturnValueOnce(createChainMock([])) // brak kolizji wizyt
+      .mockReturnValueOnce(createChainMock([{ id: "blokada" }])); // blokada czasu
+    const res = await post(buildDepositBody(formState()));
+    const { status, body } = await parseResponse<{ error: string }>(res);
+
+    expect(status).toBe(409);
+    expect(body.error).toMatch(/nie jest dostepny/);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("pola gościa: trim, limity, komunikaty (Quinn)", () => {
+  beforeEach(() => mockGetOptionalSession.mockResolvedValue(null));
+
+  // Builder frontu przycina sam — ten test omija go i wysyła surowe body,
+  // więc czerwienieje, gdy schemat przestanie przycinać guestName.
+  it("nieprzycięte imię z surowego body → zapis przycięty", async () => {
+    const raw = { ...buildDepositBody(formState(GUEST)), guestName: "   Anna Nowak   " };
+    const res = await post(raw);
+
+    expect(res.status).toBe(201);
+    expect(insertedAppointment()).toMatchObject({ guestName: "Anna Nowak" });
+  });
+
+  it.each(["A", "  A  "])("jednoznakowe imię %j → 400 z dedykowanym komunikatem w `error`", async (name) => {
+    const res = await post({ ...buildDepositBody(formState(GUEST)), guestName: name });
+    const { status, body } = await parseResponse<{ error: string; code: string; details: Record<string, string> }>(res);
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("Imię i nazwisko musi mieć min. 2 znaki (jedna litera to za mało)");
+    expect(body.code).toBe("VALIDATION_FAILED");
+    expect(body.details.guestName).toBe(body.error);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["guestName", "A".repeat(201)],
+    ["guestEmail", `${"a".repeat(250)}@x.pl`],
+    ["notes", "x".repeat(1001)],
+  ])("%s ponad limit → 400, nic nie zapisane", async (field, value) => {
+    const res = await post({ ...buildDepositBody(formState(GUEST)), [field]: value });
+    const { status, body } = await parseResponse<{ details: Record<string, string> }>(res);
+
+    expect(status).toBe(400);
+    expect(body.details[field]).toBeDefined();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["guestName", "A".repeat(200)],
+    ["notes", "x".repeat(1000)],
+  ])("%s dokładnie na limicie → 201", async (field, value) => {
+    const res = await post({ ...buildDepositBody(formState(GUEST)), [field]: value });
+    expect(res.status).toBe(201);
+  });
+});
+
+describe("startTime/endTime: format i kolejność", () => {
+  beforeEach(() => mockGetOptionalSession.mockResolvedValue(LOGGED_IN));
+
+  it.each([
+    ["startTime", "jutro o 10"],
+    ["endTime", "2026-13-45T99:00"],
+    ["startTime", ""],
+  ])("%s = %j → 400", async (field, value) => {
+    const res = await post({ ...buildDepositBody(formState()), [field]: value });
+    const { status, body } = await parseResponse<{ details: Record<string, string> }>(res);
+
+    expect(status).toBe(400);
+    expect(body.details[field]).toBeDefined();
+    expect(mockCalcDeposit).not.toHaveBeenCalled();
+  });
+
+  it("endTime przed startTime → 400 na endTime", async () => {
+    const start = new Date("2026-12-01T10:00:00.000Z");
+    const res = await post(
+      buildDepositBody(formState({ startTime: start, endTime: new Date(start.getTime() - 60000) }))
+    );
+    const { status, body } = await parseResponse<{ details: Record<string, string> }>(res);
+
+    expect(status).toBe(400);
+    expect(body.details.endTime).toMatch(/później/);
+  });
+});
+
+describe("N3: log ogólnego catch bez danych gościa", () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => errorSpy.mockRestore());
+
+  it("DrizzleQueryError z parametrami → 500, log bez imienia, telefonu i e-maila", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockDbInsert.mockReset();
+    mockDbInsert.mockImplementationOnce(() => {
+      throw new DrizzleQueryError(
+        'insert into "appointments" ("guest_name", "guest_phone", "guest_email") values ($1, $2, $3)',
+        ["Anna Nowak", "+48123456789", "anna@test.pl"],
+        Object.assign(new Error("duplicate key"), { code: "23505", detail: "Key (guest_email)=(anna@test.pl)" })
+      );
+    });
+
+    const res = await post(
+      buildDepositBody(formState({ ...GUEST, guestEmail: "anna@test.pl", guestPhone: "+48 123 456 789" }))
+    );
+    expect(res.status).toBe(500);
+
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(logged).toContain("Deposit session creation failed");
+    expect(logged).toContain("23505"); // kod błędu zostaje do diagnozy
+    expect(logged).not.toContain("Anna");
+    expect(logged).not.toContain("123456789");
+    expect(logged).not.toContain("anna@test.pl");
+  });
+});
+
+// -------------------------------------------------------
+// #67: jedna reguła zadatku (depositDecision) — trzy gałęzie
+// -------------------------------------------------------
+
+describe("#67: depositDecision w create-session", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it("deposit (required, kwota > 0) → 201, kwota z serwera", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(201);
+  });
+
+  it("none: required z kwotą 0 → 400 DEPOSIT_NOT_APPLICABLE + warn bez danych osobowych, nic nie zapisane", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockResolvedValue({ ok: true, required: true, amount: 0, serviceName: "Strzyzenie" });
+
+    const res = await post(buildDepositBody(formState({ ...GUEST, guestEmail: "anna@test.pl" }) /* front z nieaktualną kwotą 50 */));
+    const { status, body: json } = await parseResponse<{ code: string }>(res);
+
+    expect(status).toBe(400);
+    expect(json.code).toBe("DEPOSIT_NOT_APPLICABLE");
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    const warned = JSON.stringify(warnSpy.mock.calls);
+    expect(warned).toContain("amount is <= 0");
+    expect(warned).not.toContain("Anna");
+    expect(warned).not.toContain("123456789");
+    expect(warned).not.toContain("anna@test.pl");
+  });
+
+  it("none: wymóg niezgłoszony → 400 DEPOSIT_NOT_APPLICABLE (portal wraca do zwykłej rezerwacji)", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockResolvedValue({ ok: true, required: false, amount: 0, serviceName: "Strzyzenie" });
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(400);
+    expect(((await parseResponse<{ code: string }>(res)).body).code).toBe("DEPOSIT_NOT_APPLICABLE");
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("error: kwota NaN → 503, nic nie zapisane (bez cichego 'none')", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockResolvedValue({ ok: true, required: true, amount: Number.NaN, serviceName: "Strzyzenie" });
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("5");
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("error: wyjątek wyliczenia → 503 (nie ogólne 500), nic nie zapisane", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockRejectedValue(new Error("db down"));
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(503);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+});
+
+// -------------------------------------------------------
+// #69: usunięta / wyłączona usługa z nieaktualnej strony portalu
+// -------------------------------------------------------
+
+describe("#69: usługa usunięta lub wyłączona", () => {
+  it("usługa wyłączona albo usunięta (wyliczenie: service_not_found) → 404, nic nie zapisane", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockResolvedValue({ ok: false, error: "service_not_found" });
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(404);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("wariant usunięty → 404, nic nie zapisane", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockResolvedValue({ ok: false, error: "variant_not_found" });
+    const res = await post(buildDepositBody(formState({ ...GUEST, variantId: VARIANT_UUID })));
+    expect(res.status).toBe(404);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("usługa spoza salonu / usunięta (salon-refs) → 400, bez wyliczenia i zapisu", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    const { NextResponse } = await import("next/server");
+    mockAssertSalonRefs.mockResolvedValue(
+      NextResponse.json({ success: false, error: "Nieprawidlowe dane dla tego salonu" }, { status: 400 })
+    );
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(400);
+    expect(mockCalcDeposit).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+});
+
+// -------------------------------------------------------
+// Ethan (#61) / #69: wdrożenie bez klucza Stripe nie symuluje płatności
+// -------------------------------------------------------
+
+describe("bez klucza Stripe: symulacja tylko poza wdrożeniem Vercela", () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    errorSpy.mockRestore();
+  });
+
+  it.each(["production", "preview"])("VERCEL_ENV=%s bez klucza → 503 STRIPE_UNAVAILABLE, nic nie zapisane", async (env) => {
+    vi.stubEnv("VERCEL_ENV", env);
+    mockGetOptionalSession.mockResolvedValue(null);
+    const res = await post(buildDepositBody(formState(GUEST)));
+    const { status, body: json } = await parseResponse<{ code: string }>(res);
+    expect(status).toBe(503);
+    expect(json.code).toBe("STRIPE_UNAVAILABLE");
+    expect(mockCalcDeposit).not.toHaveBeenCalled();
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("dev bez klucza → symulacja jak dotąd (201, simulated: true)", async () => {
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("NODE_ENV", "development");
+    mockGetOptionalSession.mockResolvedValue(null);
+    const res = await post(buildDepositBody(formState(GUEST)));
+    const { status, body: json } = await parseResponse<{ data: { simulated: boolean } }>(res);
+    expect(status).toBe(201);
+    expect(json.data.simulated).toBe(true);
+  });
+
+  it("serwer E2E w CI (NODE_ENV=production, poza Vercelem) bez klucza → symulacja (testy @full portalu)", async () => {
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("NODE_ENV", "production");
+    mockGetOptionalSession.mockResolvedValue(null);
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(201);
+  });
+});
+
+describe("#67: kod DEPOSIT_NOT_APPLICABLE wspólny dla serwera i portalu", () => {
+  it("front (deposit-body) i serwer (deposit-guard) używają tej samej wartości", async () => {
+    const server = await import("@/lib/deposit-guard");
+    const front = await import("@/app/(client)/salons/[id]/book/_lib/deposit-body");
+    expect(front.DEPOSIT_NOT_APPLICABLE_CODE).toBe(server.DEPOSIT_NOT_APPLICABLE_CODE);
+    expect(front.isDepositNotApplicable(400, { code: server.DEPOSIT_NOT_APPLICABLE_CODE })).toBe(true);
+    expect(front.isDepositNotApplicable(409, { code: server.DEPOSIT_NOT_APPLICABLE_CODE })).toBe(false);
+    expect(front.isDepositNotApplicable(400, { code: "VALIDATION_FAILED" })).toBe(false);
+    expect(front.isDepositNotApplicable(400, null)).toBe(false);
   });
 });
