@@ -30,15 +30,29 @@ vi.mock("@/lib/logger", () => ({
   },
 }));
 
+import { logger } from "@/lib/logger";
 import {
   sendSms,
   sendAppointmentReminderSms,
   sendBookingConfirmationSms,
   sendPaymentConfirmationSms,
   normalizePolishPhoneNumber,
+  SMS_SEND_FAILED_ERROR,
+  SMS_TEST_PHONE_ERROR,
 } from "@/lib/sms";
+import {
+  TEST_PHONE,
+  TEST_PHONE_NUMBERS,
+  isTestPhoneNumber,
+} from "@/lib/test-phone";
 
 const mockFetch = vi.fn();
+
+/** `error.message` z pierwszego wywołania logger.error (logger zmockowany — bez redakcji). */
+function loggedErrorMessage(): string {
+  const meta = vi.mocked(logger.error).mock.calls[0]?.[1] as { error?: unknown } | undefined;
+  return meta?.error instanceof Error ? meta.error.message : "";
+}
 
 function resetDbMocks() {
   vi.clearAllMocks();
@@ -143,7 +157,8 @@ describe("sendSms (simulation mode - no SMSAPI_TOKEN)", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe("DB error");
+    expect(result.error).toBe(SMS_SEND_FAILED_ERROR);
+    expect(result.error).not.toContain("DB error");
   });
 
   it("should handle notification with undefined id gracefully", async () => {
@@ -256,8 +271,10 @@ describe("sendSms (real delivery via SMSAPI)", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("SMSAPI error");
-    expect(result.error).toContain("Authorization failed");
+    // Ryan: szczegół dostawcy tylko w logu, wołający dostaje ogólny komunikat
+    expect(result.error).toBe(SMS_SEND_FAILED_ERROR);
+    expect(result.error).not.toContain("Authorization failed");
+    expect(loggedErrorMessage()).toContain("Authorization failed");
     expect(result.notificationId).toBeUndefined();
     expect(mockDbValues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "failed" })
@@ -280,7 +297,8 @@ describe("sendSms (real delivery via SMSAPI)", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("HTTP 500");
+    expect(result.error).toBe(SMS_SEND_FAILED_ERROR);
+    expect(loggedErrorMessage()).toContain("HTTP 500");
     expect(mockDbValues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "failed" })
     );
@@ -296,7 +314,7 @@ describe("sendSms (real delivery via SMSAPI)", () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe("fetch failed");
+    expect(result.error).toBe(SMS_SEND_FAILED_ERROR);
     expect(mockDbValues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "failed" })
     );
@@ -324,6 +342,147 @@ describe("sendSms (real delivery via SMSAPI)", () => {
     expect(mockDbValues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "failed" })
     );
+  });
+});
+
+describe("sendSms: logi bez pełnego numeru i bez treści (Ryan)", () => {
+  const PHONE = "+48 512 345 678";
+  const CONTENT = "Anna Nowak, koloryzacja u Ewy jutro o 10:00";
+
+  function allLogCalls(): string {
+    return JSON.stringify([
+      vi.mocked(logger.debug).mock.calls,
+      vi.mocked(logger.info).mock.calls,
+      vi.mocked(logger.warn).mock.calls,
+      vi.mocked(logger.error).mock.calls,
+    ]);
+  }
+
+  function expectNoPii(log: string) {
+    expect(log).not.toContain("512345678");
+    expect(log).not.toContain("512 345 678");
+    expect(log).not.toContain("Anna Nowak");
+    expect(log).not.toContain("koloryzacja");
+  }
+
+  beforeEach(() => {
+    resetDbMocks();
+    mockDbReturning.mockResolvedValue([{ id: "notif-log" }]);
+  });
+
+  it("tryb symulacji: numer zamaskowany, bez treści", async () => {
+    vi.stubEnv("SMSAPI_TOKEN", "");
+    const result = await sendSms({ to: PHONE, message: CONTENT, salonId: "salon-1" });
+
+    expect(result.success).toBe(true);
+    const log = allLogCalls();
+    expectNoPii(log);
+    expect(log).toContain("***678");
+  });
+
+  it("wysyłka przez SMSAPI: log sukcesu z zamaskowanym numerem", async () => {
+    vi.stubEnv("SMSAPI_TOKEN", "test-token");
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ count: 1, list: [{ id: "msg-log" }] }),
+    });
+    const result = await sendSms({ to: PHONE, message: CONTENT, salonId: "salon-1" });
+
+    expect(result.success).toBe(true);
+    expectNoPii(allLogCalls());
+  });
+
+  it("catch: log z zamaskowanym numerem, wynik z ogólnym komunikatem", async () => {
+    vi.stubEnv("SMSAPI_TOKEN", "test-token");
+    mockFetch.mockRejectedValue(new TypeError("fetch failed"));
+    const result = await sendSms({ to: PHONE, message: CONTENT, salonId: "salon-1" });
+
+    expect(result).toEqual({ success: false, error: SMS_SEND_FAILED_ERROR });
+    const log = allLogCalls();
+    expectNoPii(log);
+    expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).toContain("***678");
+  });
+
+  it("catch błędu bazy: parametry zapytania nie wracają do wołającego", async () => {
+    vi.stubEnv("SMSAPI_TOKEN", "");
+    mockDbReturning.mockRejectedValue(
+      new Error(`Failed query: insert into notifications\nparams: salon-1,${CONTENT}`)
+    );
+    const result = await sendSms({ to: PHONE, message: CONTENT, salonId: "salon-1" });
+
+    expect(result).toEqual({ success: false, error: SMS_SEND_FAILED_ERROR });
+  });
+});
+
+describe("TEST_PHONE: numery testowe", () => {
+  it("TEST_PHONE jest na liście i jest rozpoznawany w każdym formacie", () => {
+    expect(TEST_PHONE_NUMBERS).toContain("+48000600700");
+    expect(isTestPhoneNumber(TEST_PHONE)).toBe(true);
+    expect(isTestPhoneNumber("000600700")).toBe(true);
+    expect(isTestPhoneNumber("+48-000-600-700")).toBe(true);
+  });
+
+  it("numery spoza listy i puste wejście nie są testowe", () => {
+    expect(isTestPhoneNumber("+48 500 600 700")).toBe(false);
+    expect(isTestPhoneNumber("+48 000 600 799")).toBe(false);
+    expect(isTestPhoneNumber("")).toBe(false);
+    expect(isTestPhoneNumber(null)).toBe(false);
+    expect(isTestPhoneNumber(undefined)).toBe(false);
+  });
+
+  it("lista jest zamrożona (nie da się dopisać numeru w runtime)", () => {
+    expect(Object.isFrozen(TEST_PHONE_NUMBERS)).toBe(true);
+  });
+});
+
+describe("sendSms: blokada numerów testowych", () => {
+  beforeEach(() => {
+    resetDbMocks();
+    vi.stubEnv("SMSAPI_TOKEN", "test-token");
+    mockDbReturning.mockResolvedValue([{ id: "notif-test" }]);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ count: 1, list: [{ id: "msg-test" }] }),
+    });
+  });
+
+  it.each(TEST_PHONE_NUMBERS.map((n) => [n]))(
+    "%s: z tokenem SMS nie idzie do dostawcy ani do notifications",
+    async (phone) => {
+      const result = await sendSms({ to: phone, message: "Hello", salonId: "salon-1" });
+
+      expect(result).toEqual({ success: false, error: SMS_TEST_PHONE_ERROR });
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockDbInsertInto).not.toHaveBeenCalled();
+    }
+  );
+
+  it("blokuje numer testowy w formacie krajowym i z odstępami", async () => {
+    for (const to of ["000 600 701", "+48 000-600-702"]) {
+      const result = await sendSms({ to, message: "Hello", salonId: "salon-1" });
+      expect(result.error).toBe(SMS_TEST_PHONE_ERROR);
+    }
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("blokuje też w trybie symulacji (bez tokenu) i loguje numer zamaskowany", async () => {
+    vi.stubEnv("SMSAPI_TOKEN", "");
+    const result = await sendSms({ to: TEST_PHONE, message: "Hello", salonId: "salon-1" });
+
+    expect(result.error).toBe(SMS_TEST_PHONE_ERROR);
+    expect(mockDbInsertInto).not.toHaveBeenCalled();
+    const log = JSON.stringify(vi.mocked(logger.info).mock.calls);
+    expect(log).toContain("***700");
+    expect(log).not.toContain("000600700");
+  });
+
+  it("numer spoza listy nadal wychodzi przez dostawcę", async () => {
+    const result = await sendSms({ to: "+48 000 600 799", message: "Hello", salonId: "salon-1" });
+
+    expect(result.success).toBe(true);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
 
