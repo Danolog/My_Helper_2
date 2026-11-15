@@ -27,6 +27,78 @@ const isProduction = process.env.NODE_ENV === "production";
 /** N3: redakcja parametrów zapytania i `detail` — wspólny helper `@/lib/safe-error`. */
 const serializeError = toSafeErrorMeta;
 
+/** Wartość zastępująca dane osobowe w kontekście logu. */
+export const REDACTED = "[redacted]";
+
+/**
+ * Klucze, których WARTOŚĆ nigdy nie trafia do logu (hotfix P1, dane osobowe
+ * w logach; lista: decyzja Olivera 16:30). Porównanie bez wielkości liter,
+ * na każdym poziomie zagnieżdżenia, także w tablicach, w każdym środowisku.
+ * `message` i `name` celowo NIE są na liście — wycięłyby treść i nazwę
+ * każdego błędu (`toSafeErrorMeta`). Osobę z kluczem `name` poprawia się
+ * w miejscu wywołania, nie tutaj.
+ */
+export const PII_LOG_KEYS: readonly string[] = [
+  "notes",
+  "note",
+  "phone",
+  "phoneNumber",
+  "email",
+  "firstName",
+  "lastName",
+  "fullName",
+  "clientName",
+  "customerName",
+  "employeeName",
+  "comment",
+  "content",
+  "address",
+  "nip",
+  "pesel",
+  "body",
+  // Z inwentaryzacji: surowa odpowiedź modelu AI o kliencie/wizycie
+  // (personalize, categorize, insights, auto-summary).
+  "rawText",
+  "responseText",
+];
+
+const PII_KEY_SET = new Set(PII_LOG_KEYS.map((k) => k.toLowerCase()));
+
+/** Granica zagnieżdżenia — głębiej logujemy znacznik, nie wartość. */
+const MAX_REDACTION_DEPTH = 8;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Siatka na dane osobowe: kopia wartości z wartościami kluczy z
+ * `PII_LOG_KEYS` zamienionymi na `[redacted]`. Błędy (`Error`) przechodzą
+ * przez `toSafeErrorMeta` (message, name, stack zostają), napisy — przez
+ * redakcję parametrów zapytania. Obiekty niebędące zwykłymi obiektami
+ * (Date itp.) zostają bez zmian. Wejście nie jest modyfikowane.
+ */
+export function redactLogContext(value: unknown, depth = 0, seen: WeakSet<object> = new WeakSet()): unknown {
+  if (value instanceof Error || typeof value === "string") return serializeError(value);
+  if (value === null || typeof value !== "object") return value;
+  if (!Array.isArray(value) && !isPlainObject(value)) return value;
+  if (seen.has(value)) return "[circular]";
+  if (depth >= MAX_REDACTION_DEPTH) return "[depth-limit]";
+  seen.add(value);
+  const out = Array.isArray(value)
+    ? value.map((item) => redactLogContext(item, depth + 1, seen))
+    : Object.fromEntries(
+        Object.entries(value).map(([k, v]) => [
+          k,
+          PII_KEY_SET.has(k.toLowerCase()) ? REDACTED : redactLogContext(v, depth + 1, seen),
+        ]),
+      );
+  seen.delete(value);
+  return out;
+}
+
 /**
  * Format and output a log entry.
  *
@@ -38,10 +110,10 @@ const serializeError = toSafeErrorMeta;
  */
 function formatLog(level: LogLevel, message: string, context?: LogContext) {
   // Normalize error objects in context so they serialize properly
+  // Błędy serializowane (message/name/stack), dane osobowe zredagowane po
+  // nazwie klucza na każdym poziomie (redactLogContext).
   const normalizedContext = context
-    ? Object.fromEntries(
-        Object.entries(context).map(([k, v]) => [k, serializeError(v)]),
-      )
+    ? (redactLogContext(context) as LogContext)
     : undefined;
 
   if (isProduction) {

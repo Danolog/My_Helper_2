@@ -252,7 +252,7 @@ export async function POST(request: Request) {
 
     for (const client of birthdayClients) {
       if (alreadyNotifiedIds.has(client.id)) {
-        logger.info(`[Birthday Notifications] Already sent birthday notification to ${client.firstName} ${client.lastName} today, skipping`);
+        logger.info(`[Birthday Notifications] Already sent birthday notification to client ${client.id} today, skipping`);
         continue;
       }
 
@@ -320,7 +320,7 @@ export async function POST(request: Request) {
         clientPhone: client.phone,
       });
 
-      logger.info(`[Birthday Notifications] Queued birthday notification for ${client.firstName} ${client.lastName} (${notificationType})`);
+      logger.info(`[Birthday Notifications] Queued birthday notification for client ${client.id} (${notificationType})`);
     }
 
     // Batch-insert all notifications in a single query instead of N individual INSERTs
