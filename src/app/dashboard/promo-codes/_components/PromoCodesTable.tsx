@@ -4,6 +4,7 @@ import { Tag, Edit, Trash2, Calendar, Copy, Plus, Ticket } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import { TYPE_LABELS, formatDate, isExpired, formatPromotionValue } from "../_types";
 import type { PromoCode } from "../_types";
 
@@ -55,7 +56,10 @@ export function PromoCodesTable({
         const usedUp =
           promoCode.usageLimit != null &&
           (promoCode.usedCount ?? 0) >= promoCode.usageLimit;
-        const isInactive = expired || usedUp;
+        // Kod powiązany z zamrożonym typem promocji nie daje rabatu (validate odrzuca).
+        const promotionFrozen =
+          promoCode.promotion != null && isPromotionTypeFrozen(promoCode.promotion.type);
+        const isInactive = expired || usedUp || promotionFrozen;
 
         return (
           <Card
@@ -88,7 +92,22 @@ export function PromoCodesTable({
             <CardContent>
               <div className="space-y-2 text-sm">
                 {/* Linked promotion */}
-                {promoCode.promotion ? (
+                {promoCode.promotion && promotionFrozen ? (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Promocja:</span>
+                      <span className="font-medium">
+                        {promoCode.promotion.name}
+                      </span>
+                      <Badge variant="destructive" className="text-xs">
+                        Promocja niedostępna
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Ten kod nie daje rabatu. Powiąż go z rabatem procentowym lub kwotowym.
+                    </p>
+                  </div>
+                ) : promoCode.promotion ? (
                   <div className="flex items-center gap-2">
                     <span className="text-muted-foreground">Promocja:</span>
                     <span className="font-medium">
