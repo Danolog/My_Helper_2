@@ -11,10 +11,10 @@
  *  - pusta lista + łańcuch XFF poza Vercelem: Better Auth → null (wspólny
  *    kubełek), my → prawy wpis (zatwierdzone przez Ethana: błąd w stronę
  *    „surowiej", nie „obejście");
- *  - normalizacja adresu: Better Auth tnie IPv6 do /64 i zamienia
- *    ::ffff:a.b.c.d na a.b.c.d, my zwracamy adres bez zmian (osobny PR
- *    z normalizacją w getClientIp — ticket Leo). Test „znane rozbieżności"
- *    niżej pilnuje, że to jedyna różnica przy tym samym wybranym hopie.
+ *
+ * Normalizacja klucza jest wspólna: IPv6 → /64 w pełnym zapisie,
+ * ::ffff:a.b.c.d → a.b.c.d (normalizeClientIp). Test „normalizacja” niżej
+ * pilnuje zgodności zapisu dla tych samych adresów w obu gałęziach VERCEL.
  */
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -120,12 +120,45 @@ describe("parzystość klucza: Better Auth vs getClientIp", () => {
     });
   });
 
-  it("znane rozbieżności (normalizacja, osobny PR): ten sam hop, inny zapis", () => {
-    delete process.env.VERCEL;
-    process.env.TRUSTED_PROXIES = LB;
-    const mapped = { "x-forwarded-for": `::ffff:203.0.113.50, ${LB}` };
-    expect(ourKey(mapped)).toBe("::ffff:203.0.113.50");
-    expect(betterAuthKey(mapped)).toBe("203.0.113.50");
+  // Ten sam wybrany hop musi dać ten sam zapis klucza (IPv6 /64, IPv4-mapped).
+  const normalizationAddrs = [
+    "2001:db8:1:2:3:4:5:6",
+    "2001:DB8:1:2::ABCD",
+    "2001:db8::1",
+    "2600:1901:0:1234:aaaa:bbbb:cccc:dddd",
+    "fe80::1",
+    "::1",
+    "::ffff:203.0.113.50",
+    "::FFFF:203.0.113.50",
+    "203.0.113.50",
+  ];
+
+  describe("normalizacja: poza Vercelem, TRUSTED_PROXIES = LB, klient za LB", () => {
+    it.each(normalizationAddrs)("%s", (addr) => {
+      delete process.env.VERCEL;
+      process.env.TRUSTED_PROXIES = LB;
+      const headers = { "x-forwarded-for": `6.6.6.6, ${addr}, ${LB}` };
+      expect(ourKey(headers)).not.toBeNull();
+      expect(ourKey(headers)).toBe(betterAuthKey(headers));
+    });
+  });
+
+  describe("normalizacja: poza Vercelem, pusta lista, pojedynczy XFF", () => {
+    it.each(normalizationAddrs)("%s", (addr) => {
+      delete process.env.VERCEL;
+      delete process.env.TRUSTED_PROXIES;
+      const headers = { "x-forwarded-for": addr };
+      expect(ourKey(headers)).toBe(betterAuthKey(headers));
+    });
+  });
+
+  describe("normalizacja: VERCEL=1, x-real-ip", () => {
+    it.each(normalizationAddrs)("%s", (addr) => {
+      process.env.VERCEL = "1";
+      delete process.env.TRUSTED_PROXIES;
+      const headers = { "x-forwarded-for": "6.6.6.6, 76.76.21.1", "x-real-ip": addr };
+      expect(ourKey(headers)).toBe(betterAuthKey(headers));
+    });
   });
 
   it("sanity: przypadki faktycznie dają adres (test nie przechodzi na samych null)", () => {

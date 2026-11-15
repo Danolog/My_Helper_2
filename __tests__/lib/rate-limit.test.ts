@@ -472,3 +472,77 @@ describe("getClientIp", () => {
     });
   });
 });
+
+// -------------------------------------------------------
+// getClientIp — normalizacja klucza (IPv6 /64, IPv4-mapped), jak Better Auth
+// -------------------------------------------------------
+
+describe("getClientIp: normalizacja klucza limitu", () => {
+  const originalTrusted = process.env.TRUSTED_PROXIES;
+  const originalVercel = process.env.VERCEL;
+
+  beforeEach(() => {
+    delete process.env.TRUSTED_PROXIES;
+    delete process.env.VERCEL;
+  });
+
+  afterEach(() => {
+    if (originalTrusted === undefined) delete process.env.TRUSTED_PROXIES;
+    else process.env.TRUSTED_PROXIES = originalTrusted;
+    if (originalVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = originalVercel;
+  });
+
+  const ipOf = (headers: Record<string, string>) =>
+    getClientIp(new Request("http://localhost", { headers }));
+
+  it.each([
+    ["2001:db8:1:2:3:4:5:6", "2001:0db8:0001:0002:0000:0000:0000:0000"],
+    ["2001:DB8:1:2::ABCD", "2001:0db8:0001:0002:0000:0000:0000:0000"],
+    ["2001:db8::1", "2001:0db8:0000:0000:0000:0000:0000:0000"],
+    ["::1", "0000:0000:0000:0000:0000:0000:0000:0000"],
+    ["fe80::1", "fe80:0000:0000:0000:0000:0000:0000:0000"],
+    ["::ffff:203.0.113.50", "203.0.113.50"],
+    ["::FFFF:203.0.113.50", "203.0.113.50"],
+    ["::ffff:cb00:7132", "203.0.113.50"],
+    ["203.0.113.50", "203.0.113.50"],
+    ["garbage", "garbage"],
+  ])("XFF %s → klucz %s", (xff, expected) => {
+    expect(ipOf({ "x-forwarded-for": xff })).toBe(expected);
+  });
+
+  it("na Vercelu normalizuje też x-real-ip", () => {
+    process.env.VERCEL = "1";
+    expect(ipOf({ "x-real-ip": "2001:db8:1:2:aaaa::1" })).toBe(
+      "2001:0db8:0001:0002:0000:0000:0000:0000"
+    );
+    expect(ipOf({ "x-real-ip": "::ffff:203.0.113.50" })).toBe("203.0.113.50");
+  });
+
+  it("za LB z listy normalizuje wybrany hop klienta", () => {
+    process.env.TRUSTED_PROXIES = "34.120.10.5";
+    expect(ipOf({ "x-forwarded-for": "6.6.6.6, 2001:db8:1:2::99, 34.120.10.5" })).toBe(
+      "2001:0db8:0001:0002:0000:0000:0000:0000"
+    );
+  });
+
+  it("dwa adresy z tego samego /64 dzielą jeden kubełek (rotacja w /64 nie omija limitu)", () => {
+    const limiter = createRateLimit({ interval: 60_000, limit: 1 });
+    expect(limiter.check(ipOf({ "x-forwarded-for": "2001:db8:1:2::1" })).success).toBe(true);
+    expect(limiter.check(ipOf({ "x-forwarded-for": "2001:db8:1:2:ffff:ffff:ffff:ffff" })).success).toBe(
+      false
+    );
+  });
+
+  it("adresy z różnych /64 mają osobne kubełki", () => {
+    const limiter = createRateLimit({ interval: 60_000, limit: 1 });
+    expect(limiter.check(ipOf({ "x-forwarded-for": "2001:db8:1:2::1" })).success).toBe(true);
+    expect(limiter.check(ipOf({ "x-forwarded-for": "2001:db8:1:3::1" })).success).toBe(true);
+  });
+
+  it("IPv4 i ten sam adres jako IPv4-mapped dzielą kubełek", () => {
+    const limiter = createRateLimit({ interval: 60_000, limit: 1 });
+    expect(limiter.check(ipOf({ "x-forwarded-for": "203.0.113.50" })).success).toBe(true);
+    expect(limiter.check(ipOf({ "x-forwarded-for": "::ffff:203.0.113.50" })).success).toBe(false);
+  });
+});
