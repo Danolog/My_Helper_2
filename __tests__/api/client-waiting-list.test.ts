@@ -1,0 +1,355 @@
+/**
+ * Portal klienta: /api/client/waiting-list i /api/client/waiting-list/[id].
+ *
+ * P1 (Ryan, ocena w #29): dopasowanie konta z sesji do rekordu `clients` po
+ * e-mailu dziala tylko dla zweryfikowanego e-maila. Konto z niezweryfikowanym
+ * e-mailem rownym e-mailowi klienta B nie moze widziec ani zmieniac wpisow B
+ * na liscie oczekujacych (we wszystkich salonach).
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
+import { createMockRequest, parseResponse } from "./helpers";
+
+const SALON_UUID = "11111111-1111-4111-8111-111111111111";
+const CLIENT_B_UUID = "33333333-3333-4333-8333-333333333333";
+const ENTRY_UUID = "55555555-5555-4555-8555-555555555555";
+const EMAIL_B = "osoba.b@example.com";
+
+// Kolejka wynikow kolejnych db.select(...) (mock ignoruje where/join).
+const selectResults: unknown[][] = [];
+const mockSelect = vi.fn();
+const mockInsert = vi.fn();
+const mockDelete = vi.fn();
+const mockUpdate = vi.fn();
+
+function chain(result: () => unknown[]) {
+  const c: Record<string, unknown> = {};
+  for (const m of [
+    "select", "from", "where", "limit", "leftJoin", "innerJoin", "orderBy",
+    "values", "returning", "set",
+  ]) {
+    c[m] = vi.fn(() => c);
+  }
+  c.then = (resolve: (v: unknown[]) => unknown) => resolve(result());
+  return c;
+}
+
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: (...args: unknown[]) => {
+      mockSelect(...args);
+      return chain(() => selectResults.shift() ?? []);
+    },
+    insert: (...args: unknown[]) => {
+      mockInsert(...args);
+      return chain(() => [{ id: "new-row" }]);
+    },
+    delete: (...args: unknown[]) => {
+      mockDelete(...args);
+      return chain(() => [{ id: ENTRY_UUID }]);
+    },
+    update: (...args: unknown[]) => {
+      mockUpdate(...args);
+      return chain(() => [{ id: ENTRY_UUID }]);
+    },
+  },
+}));
+
+vi.mock("@/lib/schema", () => {
+  const table = (name: string) =>
+    new Proxy({}, { get: (_t, col) => `${name}.${String(col)}` });
+  return {
+    waitingList: table("waitingList"),
+    clients: table("clients"),
+    services: table("services"),
+    employees: table("employees"),
+    salons: table("salons"),
+  };
+});
+
+vi.mock("drizzle-orm", () => ({
+  eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
+  and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  desc: vi.fn((...args: unknown[]) => ({ type: "desc", args })),
+  inArray: vi.fn((...args: unknown[]) => ({ type: "inArray", args })),
+}));
+
+const mockRequireAuth = vi.fn();
+vi.mock("@/lib/auth-middleware", () => ({
+  requireAuth: (...args: unknown[]) => mockRequireAuth(...args),
+  isAuthError: (r: unknown) => r instanceof NextResponse,
+}));
+
+vi.mock("@/lib/logger", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock("@/lib/waiting-list", () => ({
+  acceptEarlierSlot: vi.fn(),
+  declineEarlierSlot: vi.fn(),
+}));
+
+import { GET, POST } from "@/app/api/client/waiting-list/route";
+import { acceptEarlierSlot } from "@/lib/waiting-list";
+import {
+  POST as respondToEntry,
+  DELETE as deleteEntry,
+} from "@/app/api/client/waiting-list/[id]/route";
+
+function sessionUser(emailVerified: boolean | undefined, email: string | null = EMAIL_B) {
+  const user = { id: "user-x", name: "Konto X", email, emailVerified };
+  mockRequireAuth.mockResolvedValue({ session: { user }, user });
+}
+
+/** Wiersz z zapytania listy (wpis B w salonie) — tak jak zwraca go baza. */
+const entryRowOfB = {
+  entry: {
+    id: ENTRY_UUID,
+    salonId: SALON_UUID,
+    clientId: CLIENT_B_UUID,
+    serviceId: "svc-1",
+    preferredEmployeeId: "emp-1",
+    preferredDate: new Date("2026-08-01T00:00:00Z"),
+    notifiedAt: null,
+    accepted: null,
+    offeredStartTime: null,
+    offeredEndTime: null,
+    offeredEmployeeId: null,
+    existingAppointmentId: null,
+    acceptToken: "sekretny-token",
+    createdAt: new Date("2026-07-01T00:00:00Z"),
+  },
+  client: {
+    id: CLIENT_B_UUID,
+    firstName: "Barbara",
+    lastName: "Bielska",
+    phone: "600700800",
+    email: EMAIL_B,
+    notes: "alergia na lateks",
+  },
+  service: { name: "Strzyzenie" },
+  employee: { firstName: "Ewa", lastName: "Nowak" },
+  salon: { name: "Salon Testowy" },
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  selectResults.length = 0;
+});
+
+describe("GET /api/client/waiting-list — dopasowanie tylko po zweryfikowanym e-mailu", () => {
+  it("niezweryfikowany e-mail rowny e-mailowi klienta B => pusta lista, bez zapytan o klientow", async () => {
+    sessionUser(false);
+    selectResults.push([{ id: CLIENT_B_UUID }], [entryRowOfB]);
+
+    const { status, body } = await parseResponse<{ data: unknown[]; count: number }>(await GET());
+
+    expect(status).toBe(200);
+    expect(body.data).toEqual([]);
+    expect(body.count).toBe(0);
+    expect(mockSelect).not.toHaveBeenCalled();
+  });
+
+  it("brak flagi emailVerified w sesji => traktowane jak niezweryfikowane", async () => {
+    sessionUser(undefined);
+    selectResults.push([{ id: CLIENT_B_UUID }], [entryRowOfB]);
+
+    const { body } = await parseResponse<{ data: unknown[] }>(await GET());
+
+    expect(body.data).toEqual([]);
+    expect(mockSelect).not.toHaveBeenCalled();
+  });
+
+  it("zweryfikowany e-mail => wpisy wlasciciela, tylko pola uzywane przez portal", async () => {
+    sessionUser(true);
+    selectResults.push([{ id: CLIENT_B_UUID }], [entryRowOfB]);
+
+    const { status, body } = await parseResponse<{ data: Record<string, unknown>[] }>(await GET());
+
+    expect(status).toBe(200);
+    expect(body.data).toHaveLength(1);
+    expect(Object.keys(body.data[0]!).sort()).toEqual(
+      [
+        "id",
+        "salonName",
+        "serviceName",
+        "preferredEmployeeName",
+        "notifiedAt",
+        "accepted",
+        "offeredStartTime",
+        "offeredEndTime",
+        "offeredEmployeeName",
+        "existingAppointmentId",
+        "createdAt",
+      ].sort()
+    );
+    const serialized = JSON.stringify(body);
+    for (const secret of ["Barbara", "600700800", "lateks", "sekretny-token", CLIENT_B_UUID]) {
+      expect(serialized).not.toContain(secret);
+    }
+  });
+
+  it("zapytanie listy nie pobiera calego wiersza klienta", async () => {
+    sessionUser(true);
+    selectResults.push([{ id: CLIENT_B_UUID }], []);
+
+    await GET();
+
+    const listSelection = mockSelect.mock.calls[1]?.[0] as Record<string, unknown>;
+    expect(listSelection).toBeDefined();
+    expect(listSelection).not.toHaveProperty("client");
+  });
+
+  it("brak sesji => 401", async () => {
+    mockRequireAuth.mockResolvedValue(
+      NextResponse.json({ success: false, error: "Wymagane logowanie" }, { status: 401 })
+    );
+
+    const res = await GET();
+
+    expect(res.status).toBe(401);
+    expect(mockSelect).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/client/waiting-list — zapis tylko ze zweryfikowanym e-mailem", () => {
+  const joinRequest = () =>
+    createMockRequest("http://localhost:3000/api/client/waiting-list", {
+      method: "POST",
+      body: { salonId: SALON_UUID },
+    });
+
+  it("niezweryfikowany e-mail => 403, bez podpinania pod rekord B i bez tworzenia klienta", async () => {
+    sessionUser(false);
+    selectResults.push([{ id: SALON_UUID }], [{ id: CLIENT_B_UUID, email: EMAIL_B }]);
+
+    const res = await POST(joinRequest());
+
+    expect(res.status).toBe(403);
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it("zweryfikowany e-mail => 201", async () => {
+    sessionUser(true);
+    selectResults.push([{ id: SALON_UUID }], [{ id: CLIENT_B_UUID, email: EMAIL_B }]);
+
+    const res = await POST(joinRequest());
+
+    expect(res.status).toBe(201);
+    expect(mockInsert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST/DELETE /api/client/waiting-list/[id] — wlasnosc tylko po zweryfikowanym e-mailu", () => {
+  const params = { params: Promise.resolve({ id: ENTRY_UUID }) };
+  const ownedEntry = () => [
+    {
+      entry: { ...entryRowOfB.entry, notifiedAt: new Date(), acceptToken: null },
+      client: { email: EMAIL_B },
+    },
+  ];
+
+  it("DELETE: niezweryfikowany e-mail rowny e-mailowi B => 403, nic nie usuniete", async () => {
+    sessionUser(false);
+    selectResults.push(ownedEntry());
+
+    const res = await deleteEntry(createMockRequest("http://localhost/x", { method: "DELETE" }), params);
+
+    expect(res.status).toBe(403);
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  it("DELETE: zweryfikowany wlasciciel => 200", async () => {
+    sessionUser(true);
+    selectResults.push(ownedEntry());
+
+    const res = await deleteEntry(createMockRequest("http://localhost/x", { method: "DELETE" }), params);
+
+    expect(res.status).toBe(200);
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("POST: niezweryfikowany e-mail rowny e-mailowi B => 403, brak decyzji", async () => {
+    sessionUser(false);
+    selectResults.push(ownedEntry());
+
+    const res = await respondToEntry(
+      createMockRequest("http://localhost/x", { method: "POST", body: { accepted: true } }),
+      params
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("POST: zweryfikowany wlasciciel => 200", async () => {
+    sessionUser(true);
+    selectResults.push(ownedEntry());
+
+    const res = await respondToEntry(
+      createMockRequest("http://localhost/x", { method: "POST", body: { accepted: false } }),
+      params
+    );
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  // Strażnik zwraca null dla niezweryfikowanego konta. Gdyby zabrakło
+  // warunku `!userEmail ||`, porównanie null !== null przepuściłoby konto
+  // do wpisu klienta bez e-maila (clients.email = null) w obcym salonie.
+  const foreignEntryWithoutEmail = (acceptToken: string | null) => [
+    {
+      entry: {
+        ...entryRowOfB.entry,
+        salonId: "99999999-9999-4999-8999-999999999999",
+        notifiedAt: new Date(),
+        acceptToken,
+      },
+      client: { email: null },
+    },
+  ];
+
+  it.each([
+    ["niezweryfikowane konto", false, EMAIL_B],
+    ["konto bez e-maila", true, null],
+  ])("DELETE: %s, wpis klienta bez e-maila w obcym salonie => 403, nic nie usuniete", async (_l, verified, email) => {
+    sessionUser(verified, email);
+    selectResults.push(foreignEntryWithoutEmail(null));
+
+    const res = await deleteEntry(createMockRequest("http://localhost/x", { method: "DELETE" }), params);
+
+    expect(res.status).toBe(403);
+    expect(mockDelete).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["niezweryfikowane konto", false, EMAIL_B],
+    ["konto bez e-maila", true, null],
+  ])("POST: %s, wpis klienta bez e-maila w obcym salonie => 403, brak decyzji", async (_l, verified, email) => {
+    sessionUser(verified, email);
+    selectResults.push(foreignEntryWithoutEmail(null));
+
+    const res = await respondToEntry(
+      createMockRequest("http://localhost/x", { method: "POST", body: { accepted: true } }),
+      params
+    );
+
+    expect(res.status).toBe(403);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("POST: niezweryfikowane konto, wpis z tokenem bez e-maila klienta => 403, bez akceptacji terminu", async () => {
+    sessionUser(false);
+    selectResults.push(foreignEntryWithoutEmail("token-obcego-wpisu"));
+
+    const res = await respondToEntry(
+      createMockRequest("http://localhost/x", { method: "POST", body: { accepted: true } }),
+      params
+    );
+
+    expect(res.status).toBe(403);
+    expect(vi.mocked(acceptEarlierSlot)).not.toHaveBeenCalled();
+  });
+});

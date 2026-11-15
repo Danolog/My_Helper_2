@@ -1,14 +1,33 @@
-import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { eq, and, gt, lt, inArray } from "drizzle-orm";
+import { eq, and, gt, lt } from "drizzle-orm";
 import { validateBody, temporaryAccessSchema } from "@/lib/api-validation";
-import { auth } from "@/lib/auth";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001: ścieżka user-scoped/token-based (nie salon-scoped) — świadomie surowe db
+// ADR-001: temporary_access nie ma salon_id (zawężenie po granted_by = właściciel
+// salonu z sesji) — świadomie surowe db, warunki salonu jawnie w WHERE.
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { temporaryAccess, employees, salons } from "@/lib/schema";
+import { requireSalonStaff, type SalonContext } from "@/lib/salon-context";
+import { temporaryAccess, employees } from "@/lib/schema";
+
+/**
+ * Uprawnienia (bez user.role — na produkcji rola "owner" jest tylko na części
+ * kont): nadaje, cofa i listuje WYŁĄCZNIE właściciel salonu z kontekstu sesji
+ * (salons.ownerId). Grant należy do salonu, którego właściciel go nadał
+ * (granted_by) — tabela nie ma kolumny salon_id (docelowo migracja).
+ */
+async function requireSalonOwner(
+  forbiddenMessage: string
+): Promise<{ ctx: SalonContext; error?: undefined } | { ctx?: undefined; error: NextResponse }> {
+  const gate = await requireSalonStaff();
+  if (gate.error) return gate;
+  if (gate.ctx.role !== "owner") {
+    return {
+      error: NextResponse.json({ success: false, error: forbiddenMessage }, { status: 403 }),
+    };
+  }
+  return { ctx: gate.ctx };
+}
+
 /**
  * Available feature names that can be granted temporarily.
  * These correspond to dashboard sections that employees/receptionists
@@ -46,77 +65,36 @@ async function cleanupExpiredAccess(): Promise<number> {
   return expired.length;
 }
 
-// GET /api/temporary-access - List active temporary access grants
-// Query params: userId (optional - filter by user)
+// GET /api/temporary-access - List active temporary access grants of the
+// caller's salon (granted by its owner). Query params: userId (optional filter)
 export async function GET(request: Request) {
   try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    // Verify the caller is authenticated
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 }
-      );
-    }
+    const gate = await requireSalonOwner(
+      "Tylko wlasciciel salonu moze przegladac czasowe dostepy"
+    );
+    if (gate.error) return gate.error;
+    const { ctx } = gate;
 
     // Clean up expired entries first
     await cleanupExpiredAccess();
-
-    // Resolve the caller's salon to scope results
-    const [callerSalon] = await db
-      .select({ id: salons.id })
-      .from(salons)
-      .where(eq(salons.ownerId, session.user.id))
-      .limit(1);
 
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId");
 
     const now = new Date();
 
-    // Build query for active (non-expired) grants only, scoped to caller's salon
-    let grants: (typeof temporaryAccess.$inferSelect)[];
-    if (userId) {
-      grants = await db
-        .select()
-        .from(temporaryAccess)
-        .where(
-          and(
-            eq(temporaryAccess.userId, userId),
-            gt(temporaryAccess.expiresAt, now)
-          )
-        );
-    } else if (callerSalon) {
-      // Scope to only employees belonging to the caller's salon
-      const salonEmployeeIds = await db
-        .select({ userId: employees.userId })
-        .from(employees)
-        .where(eq(employees.salonId, callerSalon.id));
-
-      const userIds = salonEmployeeIds
-        .map((e) => e.userId)
-        .filter((id): id is string => id !== null);
-
-      if (userIds.length === 0) {
-        grants = [];
-      } else {
-        grants = await db
-          .select()
-          .from(temporaryAccess)
-          .where(
-            and(
-              inArray(temporaryAccess.userId, userIds),
-              gt(temporaryAccess.expiresAt, now)
-            )
-          );
-      }
-    } else {
-      // No salon found - return empty results
-      grants = [];
-    }
+    // Tylko granty nadane przez właściciela salonu z sesji (ctx.userId =
+    // salons.ownerId). ?userId= zawęża dalej, nigdy nie wychodzi poza salon.
+    const grants = await db
+      .select()
+      .from(temporaryAccess)
+      .where(
+        and(
+          eq(temporaryAccess.grantedBy, ctx.userId),
+          ...(userId ? [eq(temporaryAccess.userId, userId)] : []),
+          gt(temporaryAccess.expiresAt, now)
+        )
+      );
 
     logger.info(`[Temporary Access] Found ${grants.length} active grants${userId ? ` for user ${userId}` : ""}`);
 
@@ -138,39 +116,12 @@ export async function GET(request: Request) {
 // Body: { userId, featureName, durationMinutes }
 export async function POST(request: Request) {
   try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    // Verify the caller is authenticated and is a salon owner
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 }
-      );
-    }
-
-    // Verify the caller is a salon owner (only owners can grant access)
-    const [salon] = await db
-      .select({ id: salons.id })
-      .from(salons)
-      .where(eq(salons.ownerId, session.user.id))
-      .limit(1);
-
-    const userRole = (session.user as { role?: string }).role;
-    const isOwner =
-      userRole === "admin" || userRole === "owner" || !!salon;
-
-    if (!isOwner) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Tylko wlasciciel salonu moze nadawac czasowy dostep",
-        },
-        { status: 403 }
-      );
-    }
+    // Only the owner of the session's salon can grant access
+    const gate = await requireSalonOwner(
+      "Tylko wlasciciel salonu moze nadawac czasowy dostep"
+    );
+    if (gate.error) return gate.error;
+    const { ctx } = gate;
 
     // Clean up expired entries
     await cleanupExpiredAccess();
@@ -223,35 +174,35 @@ export async function POST(request: Request) {
       );
     }
 
-    // Verify the target user exists as an employee in the owner's salon
-    if (salon) {
-      const [employee] = await db
-        .select({ id: employees.id })
-        .from(employees)
-        .where(
-          and(
-            eq(employees.userId, userId),
-            eq(employees.salonId, salon.id)
-          )
+    // The target must ALWAYS be an employee of the session's salon
+    const [employee] = await db
+      .select({ id: employees.id })
+      .from(employees)
+      .where(
+        and(
+          eq(employees.userId, userId),
+          eq(employees.salonId, ctx.salonId)
         )
-        .limit(1);
+      )
+      .limit(1);
 
-      if (!employee) {
-        return NextResponse.json(
-          {
-            success: false,
-            error:
-              "Uzytkownik nie jest pracownikiem tego salonu",
-          },
-          { status: 404 }
-        );
-      }
+    if (!employee) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Uzytkownik nie jest pracownikiem tego salonu",
+        },
+        { status: 404 }
+      );
     }
 
     // Calculate expiration time
     const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000);
 
-    // Check if there's already an active grant for this user+feature
+    // Check if there's already an active grant for this user+feature IN THIS
+    // salon (granted_by = owner) — a grant from another salon is never
+    // updated/taken over.
     const now = new Date();
     const [existing] = await db
       .select()
@@ -260,6 +211,7 @@ export async function POST(request: Request) {
         and(
           eq(temporaryAccess.userId, userId),
           eq(temporaryAccess.featureName, featureName),
+          eq(temporaryAccess.grantedBy, ctx.userId),
           gt(temporaryAccess.expiresAt, now)
         )
       )
@@ -269,7 +221,7 @@ export async function POST(request: Request) {
       // Update the existing grant with new expiration
       const [updated] = await db
         .update(temporaryAccess)
-        .set({ expiresAt, grantedBy: session.user.id })
+        .set({ expiresAt })
         .where(eq(temporaryAccess.id, existing.id))
         .returning();
 
@@ -288,12 +240,12 @@ export async function POST(request: Request) {
       .values({
         userId,
         featureName,
-        grantedBy: session.user.id,
+        grantedBy: ctx.userId,
         expiresAt,
       })
       .returning();
 
-    logger.info(`[Temporary Access] Granted ${featureName} to user ${userId} until ${expiresAt.toISOString()} by ${session.user.email}`);
+    logger.info(`[Temporary Access] Granted ${featureName} to user ${userId} until ${expiresAt.toISOString()} by owner ${ctx.userId} (salon ${ctx.salonId})`);
 
     return NextResponse.json(
       {
@@ -316,38 +268,12 @@ export async function POST(request: Request) {
 // Body: { grantId } or query param: ?grantId=xxx
 export async function DELETE(request: Request) {
   try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    // Verify the caller is authenticated
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session) {
-      return NextResponse.json(
-        { success: false, error: "Wymagane logowanie" },
-        { status: 401 }
-      );
-    }
-
-    // Verify the caller is a salon owner
-    const [salon] = await db
-      .select({ id: salons.id })
-      .from(salons)
-      .where(eq(salons.ownerId, session.user.id))
-      .limit(1);
-
-    const userRole = (session.user as { role?: string }).role;
-    const isOwner =
-      userRole === "admin" || userRole === "owner" || !!salon;
-
-    if (!isOwner) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Tylko wlasciciel salonu moze cofnac czasowy dostep",
-        },
-        { status: 403 }
-      );
-    }
+    // Only the owner of the session's salon can revoke access
+    const gate = await requireSalonOwner(
+      "Tylko wlasciciel salonu moze cofnac czasowy dostep"
+    );
+    if (gate.error) return gate.error;
+    const { ctx } = gate;
 
     // Get grantId from query params or body
     const { searchParams } = new URL(request.url);
@@ -369,11 +295,17 @@ export async function DELETE(request: Request) {
       );
     }
 
-    // Fetch the grant first to verify ownership
+    // Fetch the grant scoped to the session's salon (granted_by = owner);
+    // a grant from another salon is invisible (404, no existence disclosure).
     const [grant] = await db
       .select()
       .from(temporaryAccess)
-      .where(eq(temporaryAccess.id, grantId))
+      .where(
+        and(
+          eq(temporaryAccess.id, grantId),
+          eq(temporaryAccess.grantedBy, ctx.userId)
+        )
+      )
       .limit(1);
 
     if (!grant) {
@@ -383,30 +315,14 @@ export async function DELETE(request: Request) {
       );
     }
 
-    // Verify the grant's userId belongs to an employee of the caller's salon
-    if (salon) {
-      const [employee] = await db
-        .select({ id: employees.id })
-        .from(employees)
-        .where(
-          and(
-            eq(employees.userId, grant.userId),
-            eq(employees.salonId, salon.id)
-          )
-        )
-        .limit(1);
-
-      if (!employee) {
-        return NextResponse.json(
-          { success: false, error: "To uprawnienie nie nalezy do pracownika Twojego salonu" },
-          { status: 403 }
-        );
-      }
-    }
-
     const [deleted] = await db
       .delete(temporaryAccess)
-      .where(eq(temporaryAccess.id, grantId))
+      .where(
+        and(
+          eq(temporaryAccess.id, grantId),
+          eq(temporaryAccess.grantedBy, ctx.userId)
+        )
+      )
       .returning();
 
     if (!deleted) {
@@ -416,7 +332,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    logger.info(`[Temporary Access] Revoked grant ${grantId} (${deleted.featureName} for user ${deleted.userId}) by ${session.user.email}`);
+    logger.info(`[Temporary Access] Revoked grant ${grantId} (${deleted.featureName} for user ${deleted.userId}) by owner ${ctx.userId}`);
 
     return NextResponse.json({
       success: true,

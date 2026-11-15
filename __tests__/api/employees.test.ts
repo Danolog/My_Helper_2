@@ -87,6 +87,11 @@ vi.mock("@/lib/salon-context", () => ({
     userId: "user-1",
   }),
   hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
+  // P1: POST przeszedł na requireSalonStaff — izolację salonu testuje
+  // employees-tenant.test.ts (prawdziwa bramka); tu właściciel salonu testowego.
+  requireSalonStaff: vi.fn(async () => ({
+    ctx: { salonId: TEST_IDS.SALON_UUID, role: "owner", employeeId: null, userId: "user-1" },
+  })),
 }));
 
 vi.mock("@/lib/get-user-salon", () => ({

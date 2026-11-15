@@ -8,6 +8,7 @@ import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { getSalonContext } from "@/lib/salon-context";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
@@ -94,14 +95,17 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     // Tenant isolation (P0-A): resolve the salon from the session, never from
     // the URL. A photo belonging to another salon must be invisible (404), so
     // a salon-A owner can never edit a salon-B photo by guessing its UUID.
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // Role comes from the salon context (salons.ownerId / employees.role),
+    // never from user.role.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Photo not found" },
         { status: 404 }
       );
     }
 
+    const salonId = ctx.salonId;
     const repo = forSalon(salonId);
 
     // Get the photo scoped to the caller's salon — a foreign record yields
@@ -118,24 +122,10 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     // Authorization within the caller's own salon:
     // Owners can edit any photo in their salon
     // Non-owners (employees) can only edit photos assigned to their employee profile
-    const userRole = (session.user as Record<string, unknown>).role as string | undefined;
-    const isOwner = userRole === "owner" || userRole === "admin";
-
-    if (!isOwner) {
-      // Check if user is an employee linked to this photo (salon-scoped lookup).
-      const [employeeRecord] = await repo.raw((tx) =>
-        tx
-          .select()
-          .from(employees)
-          .where(
-            and(
-              eq(employees.userId, session.user.id),
-              eq(employees.salonId, salonId)
-            )
-          )
-      );
-
-      if (!employeeRecord) {
+    // Owner = salons.ownerId (ctx.role "owner"); staff = active linked
+    // employee of THIS salon (ctx.employeeId from the salon context).
+    if (ctx.role !== "owner") {
+      if (!ctx.employeeId) {
         return NextResponse.json(
           { success: false, error: "You do not have permission to edit this photo" },
           { status: 403 }
@@ -143,7 +133,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       }
 
       // Employee can only edit their own photos
-      if (photo.employeeId !== employeeRecord.id) {
+      if (photo.employeeId !== ctx.employeeId) {
         return NextResponse.json(
           { success: false, error: "You can only edit your own photos" },
           { status: 403 }
@@ -248,15 +238,16 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     // Tenant isolation (P0-A): resolve the salon from the session, never from
     // the URL. A foreign-salon photo must be invisible (404) so a salon-A owner
     // can never delete a salon-B photo — and the file unlink below stays behind
-    // this ownership gate.
-    const salonId = await getUserSalonId();
-    if (!salonId) {
+    // this ownership gate. Role from the salon context, never from user.role.
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
         { success: false, error: "Photo not found" },
         { status: 404 }
       );
     }
 
+    const salonId = ctx.salonId;
     const repo = forSalon(salonId);
 
     // Get photo scoped to the caller's salon (also yields the file path).
@@ -272,24 +263,10 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     // Authorization within the caller's own salon:
     // Owners can delete any photo in their salon
     // Non-owners (employees) can only delete photos assigned to their employee profile
-    const userRole = (session.user as Record<string, unknown>).role as string | undefined;
-    const isOwner = userRole === "owner" || userRole === "admin";
-
-    if (!isOwner) {
-      // Check if user is an employee linked to this photo (salon-scoped lookup).
-      const [employeeRecord] = await repo.raw((tx) =>
-        tx
-          .select()
-          .from(employees)
-          .where(
-            and(
-              eq(employees.userId, session.user.id),
-              eq(employees.salonId, salonId)
-            )
-          )
-      );
-
-      if (!employeeRecord) {
+    // Owner = salons.ownerId (ctx.role "owner"); staff = active linked
+    // employee of THIS salon (ctx.employeeId from the salon context).
+    if (ctx.role !== "owner") {
+      if (!ctx.employeeId) {
         return NextResponse.json(
           { success: false, error: "You do not have permission to delete this photo" },
           { status: 403 }
@@ -297,7 +274,7 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
       }
 
       // Employee can only delete their own photos
-      if (photo.employeeId !== employeeRecord.id) {
+      if (photo.employeeId !== ctx.employeeId) {
         return NextResponse.json(
           { success: false, error: "You can only delete your own photos" },
           { status: 403 }
