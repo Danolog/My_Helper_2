@@ -55,6 +55,7 @@ const TYPE_LABELS: Record<
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
   image: { label: "Obrazy", icon: Image },
+  // Wideo usunięte w B4 — etykieta zostaje dla wierszy historycznych.
   video: { label: "Wideo", icon: Video },
   banner: { label: "Banery", icon: Image },
   text: { label: "Tekst AI", icon: Sparkles },
