@@ -97,6 +97,14 @@ jobs:
       - name: Push database schema
         run: pnpm db:push
 
+      # T3: blokady subskrypcji na prawdziwym Postgresie (confirm ‖ webhook,
+      # pg_locks, 40P01). Własne wiersze z unikalnymi id, sprzątane po teście;
+      # adres = ten sam service container (localhost), bez nowych sekretów.
+      - name: Integration test — subscription locks (real Postgres)
+        run: pnpm test:pg
+        env:
+          INTEGRATION_POSTGRES_URL: postgresql://dev_user:dev_password@localhost:5432/pos_dev
+
       - name: Seed test data
         run: pnpm db:seed:test
 
