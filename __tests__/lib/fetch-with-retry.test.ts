@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  getNetworkErrorMessage,
+  fetchWithRetry,
+} from "@/lib/fetch-with-retry";
 
-// Mock the network status hooks
+// Mock the network status hooks (vi.mock is hoisted above the imports)
 vi.mock("@/hooks/use-network-status", () => ({
   isNetworkError: vi.fn((error: unknown) => {
     if (error instanceof TypeError) {
@@ -18,11 +22,6 @@ vi.mock("@/hooks/use-network-status", () => ({
     return false;
   }),
 }));
-
-import {
-  getNetworkErrorMessage,
-  fetchWithRetry,
-} from "@/lib/fetch-with-retry";
 
 describe("getNetworkErrorMessage", () => {
   beforeEach(() => {
@@ -135,15 +134,15 @@ describe("fetchWithRetry", () => {
   describe("browser offline", () => {
     // Offline = natychmiastowy błąd sieci, bez ponowień: ponawianie bez sieci
     // nic nie daje, a użytkownik czekałby 1 s + 2 s na backoffie.
-    it("should return a network error immediately (< 100 ms, real timers) without calling fetch", async () => {
+    // Brak backoffu dowodzi deterministycznie test niżej (fake timers,
+    // getTimerCount() === 0) — bez asercji na czas zegarowy, która zależy
+    // od planisty systemu.
+    it("should return a network error without calling fetch", async () => {
       vi.stubGlobal("navigator", { onLine: false });
       vi.stubGlobal("fetch", vi.fn());
 
-      const start = performance.now();
       const result = await fetchWithRetry(TEST_URL);
-      const elapsed = performance.now() - start;
 
-      expect(elapsed).toBeLessThan(100);
       // fetch should never be called because the offline check happens first
       expect(fetch).not.toHaveBeenCalled();
       expect(result.data).toBeNull();
