@@ -4,15 +4,9 @@ import Link from "next/link";
 import {
   ArrowLeft,
   PenTool,
-  Instagram,
   Mail,
   FileText,
   ArrowRight,
-  BookOpen,
-  CalendarClock,
-  Clapperboard,
-  Video,
-  Smartphone,
   type LucideIcon,
 } from "lucide-react";
 import { useModules } from "@/components/dashboard/modules-provider";
@@ -31,13 +25,6 @@ interface GeneratorTile {
 
 const GENERATOR_TILES: GeneratorTile[] = [
   {
-    icon: Instagram,
-    title: "Posty social media",
-    description: "Generowanie angazujacych postow na Instagram, Facebook i TikTok",
-    href: "/dashboard/content-generator/social-posts",
-    module: "socialPosts",
-  },
-  {
     icon: FileText,
     title: "Opisy uslug",
     description:
@@ -50,42 +37,6 @@ const GENERATOR_TILES: GeneratorTile[] = [
     description: "Tworzenie newsletterow promocyjnych i informacyjnych",
     href: "/dashboard/content-generator/newsletters",
     module: "newsletters",
-  },
-  {
-    icon: BookOpen,
-    title: "Szablony tresci",
-    description: "Gotowe szablony do szybkiego tworzenia tresci",
-    href: "/dashboard/content-generator/templates",
-    // Szablony prowadza wylacznie do newsletterow — chowamy je razem z nimi.
-    module: "newsletters",
-  },
-  {
-    icon: Clapperboard,
-    title: "Klipy wideo AI",
-    description: "Krotkie klipy promocyjne 4-8 sekund generowane przez Veo 3.1",
-    href: "/dashboard/content-generator/social-posts#video",
-    module: "socialPosts",
-  },
-  {
-    icon: Smartphone,
-    title: "Animowane Stories",
-    description: "Animowane story 9:16 z szablonami i zdjeciami z galerii",
-    href: "/dashboard/content-generator/social-posts#stories",
-    module: "socialPosts",
-  },
-  {
-    icon: Video,
-    title: "Testimoniale wideo",
-    description: "Scenariusze testimoniali wideo z pytaniami i wskazowkami",
-    href: "/dashboard/content-generator/testimonials",
-    module: "videoGen",
-  },
-  {
-    icon: CalendarClock,
-    title: "Zaplanowane posty",
-    description: "Zarzadzaj zaplanowanymi publikacjami na social media",
-    href: "/dashboard/content-generator/scheduled",
-    module: "socialPosts",
   },
 ];
 

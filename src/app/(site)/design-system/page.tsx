@@ -215,7 +215,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "What AI features are included in the Pro plan?",
-    a: "The Pro plan includes a voice assistant for hands-free scheduling, an AI business advisor that analyzes trends and suggests optimizations, and a content marketing generator for social media posts, promotions, and client communications -- all powered by Claude Sonnet.",
+    a: "The Pro plan includes an AI business advisor that analyzes trends and suggests optimizations, and a content marketing generator for social media posts, promotions, and client communications -- all powered by Claude Sonnet.",
   },
 ];
 
