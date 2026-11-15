@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { requirePlatformAdmin, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 sekcja 4: seed deweloperski (cross-salon, poza produkcją) — świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
@@ -12,7 +12,8 @@ export async function POST() {
     return NextResponse.json({ error: "Seed route is disabled in production" }, { status: 403 });
   }
 
-  const authResult = await requireAuth("owner");
+  // Tylko admini platformy z ADMIN_EMAILS (nie user.role).
+  const authResult = await requirePlatformAdmin();
   if (isAuthError(authResult)) return authResult;
 
   try {

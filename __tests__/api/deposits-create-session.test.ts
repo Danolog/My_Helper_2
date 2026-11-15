@@ -189,7 +189,7 @@ describe("POST /api/deposits/create-session — Stripe configured", () => {
       expect.objectContaining({
         salonId: SALON_UUID,
         serviceId: SERVICE_UUID,
-        sessionEmail: "klient@test.pl",
+        sessionUser: expect.objectContaining({ email: "klient@test.pl" }),
       })
     );
   });
