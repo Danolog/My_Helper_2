@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   LayoutDashboard,
@@ -33,7 +33,6 @@ import {
   Ticket,
   Receipt,
   Brain,
-  Mic,
   Loader2,
   MessageSquare,
   PenTool,
@@ -41,8 +40,7 @@ import {
   Search,
   Sparkles,
 } from "lucide-react";
-import { toast } from "sonner";
-import { useModuleEnabled, useModules } from "@/components/dashboard/modules-provider";
+import { useModules } from "@/components/dashboard/modules-provider";
 import { useSalonRole } from "@/components/dashboard/role-provider";
 import {
   CommandDialog,
@@ -54,10 +52,8 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { useAISearch } from "@/hooks/use-ai-search";
-import { useVoiceInput } from "@/hooks/use-voice-input";
 import { BASIC_REPORT_SLUGS, isRouteEnabledForModules } from "@/lib/features";
 import { isRouteAllowedForRole } from "@/lib/role-access";
-import { cn } from "@/lib/utils";
 
 interface CommandPage {
   label: string;
@@ -113,7 +109,6 @@ const SETTINGS_PAGES: CommandPage[] = [
 
 const AI_PAGES: CommandPage[] = [
   { label: "Asystent AI", href: "/dashboard/ai-assistant", icon: Bot },
-  { label: "Asystent glosowy", href: "/dashboard/ai-assistant/voice", icon: Mic },
   { label: "Asystent biznesowy", href: "/dashboard/ai-assistant/business", icon: Brain },
   { label: "Rekomendacje AI", href: "/dashboard/ai-recommendations", icon: Lightbulb },
   { label: "Generator tresci", href: "/dashboard/content-generator", icon: PenTool },
@@ -133,9 +128,6 @@ export function CommandPalette() {
   const router = useRouter();
   const modules = useModules();
   const role = useSalonRole();
-  // Dyktowanie wyszukiwania wola trase STT modulu voiceAi — przy module
-  // wylaczonym albo zamrozonym mikrofonu nie pokazujemy.
-  const voiceEnabled = useModuleEnabled("voiceAi");
 
   const isPageVisible = (page: CommandPage) => {
     if (!isRouteAllowedForRole(page.href, role)) return false;
@@ -151,37 +143,12 @@ export function CommandPalette() {
   const visibleSettingsPages = SETTINGS_PAGES.filter(isPageVisible);
   const visibleAiPages = AI_PAGES.filter(isPageVisible);
 
-  // Voice input integration: transcribed text populates the search field
-  const handleVoiceTranscript = useCallback((text: string) => {
-    setSearch(text);
-  }, []);
-
-  const {
-    isListening,
-    isProcessing: sttProcessing,
-    startListening,
-    stopListening,
-    isSupported: voiceSupported,
-  } = useVoiceInput({
-    onTranscript: handleVoiceTranscript,
-    onError: (error) => toast.error(error),
-  });
-
   // AI-powered natural language search (activates for queries > 3 words)
   const {
     results: aiResults,
     isSearching: aiSearching,
     description: aiDescription,
   } = useAISearch(search);
-
-  // Stop voice recording when the dialog closes
-  const prevOpenRef = useRef(open);
-  useEffect(() => {
-    if (prevOpenRef.current && !open && isListening) {
-      stopListening();
-    }
-    prevOpenRef.current = open;
-  }, [open, isListening, stopListening]);
 
   // Reset search when dialog reopens
   const handleOpenChange = useCallback(
@@ -209,14 +176,6 @@ export function CommandPalette() {
   const navigateTo = (href: string) => {
     setOpen(false);
     router.push(href);
-  };
-
-  const handleVoiceToggle = () => {
-    if (isListening) {
-      stopListening();
-    } else {
-      startListening();
-    }
   };
 
   return (
@@ -365,24 +324,6 @@ export function CommandPalette() {
           <span className="text-xs">⌘</span>K
         </kbd>
         <span>aby otworzyc</span>
-        {voiceEnabled && voiceSupported && (
-          <button
-            type="button"
-            className={cn(
-              "ml-auto p-1 rounded hover:bg-muted transition-colors",
-              isListening && "text-red-500",
-            )}
-            onClick={handleVoiceToggle}
-            disabled={sttProcessing}
-            aria-label={isListening ? "Zatrzymaj dyktowanie" : "Dyktuj wyszukiwanie"}
-          >
-            {sttProcessing ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Mic className="h-3 w-3" />
-            )}
-          </button>
-        )}
       </div>
     </CommandDialog>
   );

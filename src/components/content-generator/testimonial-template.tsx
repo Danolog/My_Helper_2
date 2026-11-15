@@ -27,7 +27,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ReadAloudButton } from "@/components/ui/read-aloud-button";
 import {
   Select,
   SelectContent,
@@ -353,7 +352,6 @@ export function TestimonialTemplate() {
                   <p className="bg-muted/50 rounded-lg p-3 text-sm leading-relaxed border flex-1">
                     {template.intro}
                   </p>
-                  <ReadAloudButton text={template.intro} />
                 </div>
               </CardContent>
             </Card>

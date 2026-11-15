@@ -6,8 +6,8 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { processAutomaticRefund } from "@/lib/refund";
-import { appointments, employees, services, salons, depositPayments } from "@/lib/schema";
+import { refundAppointmentDeposits } from "@/lib/refund";
+import { appointments, employees, services, salons } from "@/lib/schema";
 import { notifyWaitingList } from "@/lib/waiting-list";
 // GET /api/client/appointments/[id]/cancel - Get cancellation policy info for client
 export async function GET(
@@ -238,7 +238,7 @@ export async function POST(
     // Process automatic refund if eligible (24h+ before appointment, deposit paid)
     let refundResult = null;
     if (depositRefunded) {
-      refundResult = await processAutomaticRefund(
+      refundResult = await refundAppointmentDeposits(
         id,
         "Anulacja wizyty przez klienta - wiecej niz 24h przed terminem"
       );
@@ -247,17 +247,23 @@ export async function POST(
 
     // Mark deposit as forfeited if late cancellation (<24h)
     if (depositForfeited) {
+      // Zatrzymana tylko najstarsza płatność `succeeded`; kolejne (np. druga
+      // sesja Checkout) wracają do klienta (Ethan, #98).
       try {
-        await db
-          .update(depositPayments)
-          .set({
-            status: "forfeited",
-            refundReason: "Anulacja wizyty przez klienta mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
-          })
-          .where(eq(depositPayments.appointmentId, id));
-        logger.info(`[Client Cancel API] Deposit marked as forfeited for appointment ${id}`);
+        const forfeitResult = await refundAppointmentDeposits(
+          id,
+          "Dodatkowa wplata zadatku - zwrot przy anulacji ponizej 24h",
+          { forfeitReason: "Anulacja wizyty przez klienta mniej niz 24h przed terminem - zadatek zatrzymany przez salon" }
+        );
+        logger.info(`[Client Cancel API] Deposit forfeited for appointment ${id}`, {
+          forfeitedPaymentId: forfeitResult.forfeitedPaymentId ?? null,
+          extraRefunds: forfeitResult.results.length,
+        });
       } catch (forfeitError) {
-        logger.error("[Client Cancel API] Failed to mark deposit as forfeited", { error: forfeitError });
+        logger.error("[Client Cancel API] Failed to mark deposit as forfeited", {
+          appointmentId: id,
+          errorName: forfeitError instanceof Error ? forfeitError.name : typeof forfeitError,
+        });
       }
     }
 

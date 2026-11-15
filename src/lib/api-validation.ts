@@ -11,6 +11,7 @@ import {
   isValidPushAuth,
   isValidPushEndpoint,
 } from "@/lib/push-subscription";
+import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 import { normalizePolishPhoneNumber } from "@/lib/phone";
 import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
 
@@ -261,8 +262,14 @@ function normalizedPlPhone(message: string) {
  * Data-czas ISO 8601 (np. z toISOString() frontu): kształt sprawdzany
  * regexem, bo Date.parse jest pobłażliwy ("jutro o 10" -> rok 2010), a potem
  * Date.parse odrzuca nieistniejące wartości (miesiąc 13, godzina 99).
+ * Strefa (`Z` albo `±hh:mm`) jest WYMAGANA: wartość bez strefy Date.parse
+ * czyta w strefie serwera (UTC na Vercelu), więc "10:00" z Polski byłoby
+ * zapisane godzinę lub dwie później (Ethan, przegląd #71). Wszyscy nadawcy
+ * wysyłają toISOString(), czyli `Z`.
  */
-const ISO_DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?$/;
+const ISO_DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+const NOTES_TOO_LONG = `Uwagi mogą mieć maks. ${APPOINTMENT_NOTES_MAX_LENGTH} znaków`;
 
 function isoDateString(field: string) {
   return z
@@ -304,7 +311,7 @@ export const createAppointmentSchema = z.object({
   startTime: isoDateString("Czas rozpoczecia"),
   endTime: isoDateString("Czas zakonczenia"),
   // #66: limit jak w create-session; null/""/same spacje = brak uwag.
-  notes: absentAsUndefined(z.string().max(1000, "Uwagi mogą mieć maks. 1000 znaków")),
+  notes: absentAsUndefined(z.string().max(APPOINTMENT_NOTES_MAX_LENGTH, NOTES_TOO_LONG)),
   depositAmount: z.string().nullable().optional(),
   bookedByUserId: z.string().nullable().optional(),
   promoCodeId: z.string().nullable().optional(),
@@ -375,7 +382,13 @@ export const updateAppointmentSchema = z.object({
   employeeId: z.string().optional(),
   clientId: z.string().nullable().optional(),
   serviceId: z.string().nullable().optional(),
-  notes: z.string().nullable().optional(),
+  // PUT: null, "" i same spacje = wyczyść notatki (null), brak pola = bez zmian
+  // (undefined). Inaczej niż w POST, gdzie brak uwag to undefined: tu null jest
+  // poleceniem (edit-appointment-dialog wysyła `notes.trim() || null`).
+  notes: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+    z.string().max(APPOINTMENT_NOTES_MAX_LENGTH, NOTES_TOO_LONG).nullable().optional()
+  ),
   status: z.enum(["scheduled", "confirmed", "completed", "cancelled", "no_show"], {
     message: "Nieprawidlowy status wizyty",
   }).optional(),
@@ -898,7 +911,7 @@ export const depositCreateSessionSchema = z.object({
   ),
   blikPhoneNumber: normalizedPlPhone("Nieprawidlowy numer telefonu BLIK (9 cyfr)"),
   ...guestFields,
-  notes: absentAsUndefined(z.string().max(1000, "Uwagi mogą mieć maks. 1000 znaków")),
+  notes: absentAsUndefined(z.string().max(APPOINTMENT_NOTES_MAX_LENGTH, NOTES_TOO_LONG)),
 }).refine((d) => Date.parse(d.endTime) > Date.parse(d.startTime), {
   message: "Czas zakończenia musi być późniejszy niż czas rozpoczęcia",
   path: ["endTime"],
@@ -955,66 +968,6 @@ export const validatePromoCodeSchema = z.object({
   code: requiredString("Kod promocyjny"),
   salonId: requiredString("Salon ID"),
   serviceId: z.string().optional(),
-});
-
-// ==========================================
-// Voice AI Schemas
-// ==========================================
-
-export const voiceBookSchema = z.object({
-  serviceId: z.string().min(1, "serviceId is required"),
-  employeeId: z.string().optional(),
-  preferredDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Format daty: YYYY-MM-DD").optional(),
-  preferredTime: z.string().regex(/^\d{2}:\d{2}$/, "Format czasu: HH:MM").optional(),
-  callerPhone: z.string().min(1, "callerPhone is required"),
-  callerName: z.string().max(100).optional(),
-  notes: z.string().max(500).optional(),
-});
-
-export const voiceCancelSchema = z.object({
-  appointmentId: z.string().optional(),
-  callerPhone: z.string().min(1, "callerPhone is required"),
-  callerName: z.string().max(100).optional(),
-  notes: z.string().max(500).optional(),
-});
-
-export const voiceRescheduleSchema = z.object({
-  appointmentId: z.string().optional(),
-  callerPhone: z.string().min(1, "callerPhone is required"),
-  callerName: z.string().max(100).optional(),
-  preferredDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Format daty: YYYY-MM-DD").optional(),
-  preferredTime: z.string().regex(/^\d{2}:\d{2}$/, "Format czasu: HH:MM").optional(),
-  notes: z.string().max(500).optional(),
-});
-
-export const voiceMessageSchema = z.object({
-  callerPhone: z.string().min(1, "callerPhone is required"),
-  callerName: z.string().max(100).optional(),
-  message: z.string().min(1, "message is required").max(2000),
-  conversationId: z.string().optional(),
-});
-
-export const voiceIncomingSchema = z.object({
-  callerMessage: z.string().min(1, "callerMessage is required"),
-  callerPhone: z.string().optional(),
-});
-
-export const voiceConfigSchema = z.object({
-  enabled: z.boolean(),
-  greeting: z.string().max(500).optional(),
-  businessHoursOnly: z.boolean().optional(),
-  language: z.enum(["pl", "en"]).optional(),
-  voiceStyle: z.enum(["professional", "friendly", "warm"]).optional(),
-  maxCallDuration: z.number().min(60).max(600).optional(),
-  transferToHumanEnabled: z.boolean().optional(),
-  transferPhoneNumber: z.string().max(20).optional(),
-  capabilities: z.object({
-    bookAppointments: z.boolean().optional(),
-    checkAvailability: z.boolean().optional(),
-    cancelAppointments: z.boolean().optional(),
-    rescheduleAppointments: z.boolean().optional(),
-    answerFaq: z.boolean().optional(),
-  }).optional(),
 });
 
 // ==========================================

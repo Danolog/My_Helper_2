@@ -498,6 +498,9 @@ describe("startTime/endTime: format i kolejność", () => {
     ["startTime", "jutro o 10"],
     ["endTime", "2026-13-45T99:00"],
     ["startTime", ""],
+    // Follow-up #71: bez strefy → 400 przed wyceną (Date.parse czytałby czas serwera).
+    ["startTime", "2026-12-01T10:00:00"],
+    ["endTime", "2026-12-01T11:00:00.000"],
   ])("%s = %j → 400", async (field, value) => {
     const res = await post({ ...buildDepositBody(formState()), [field]: value });
     const { status, body } = await parseResponse<{ details: Record<string, string> }>(res);
@@ -724,6 +727,27 @@ describe("bez klucza Stripe: symulacja tylko po jawnym opt-in", () => {
     vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
     await expectRefused();
     expect(JSON.stringify(errorSpy.mock.calls)).toContain("ALLOW_PAYMENT_SIMULATION=1 ignored on Vercel");
+  });
+
+  it("#84: VERCEL=1 + NODE_ENV=development, bez flagi → 503 (bramka Vercela przed development), bez błędu o fladze", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL", "1");
+    await expectRefused();
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("ALLOW_PAYMENT_SIMULATION");
+  });
+
+  it("#84: VERCEL=1 + NODE_ENV=development + flaga → 503 i błąd o zignorowanej fladze", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
+    await expectRefused();
+    expect(JSON.stringify(errorSpy.mock.calls)).toContain("ALLOW_PAYMENT_SIMULATION=1 ignored on Vercel");
+  });
+
+  it.each(["0", "", "true"])("VERCEL=%j (nie \"1\") nie blokuje: NODE_ENV=development → symulacja", async (vercel) => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL", vercel);
+    await expectSimulated();
   });
 
   it.each(["production", "preview", "development"])(
