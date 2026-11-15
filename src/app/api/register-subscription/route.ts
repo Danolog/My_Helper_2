@@ -7,14 +7,20 @@ import { TRIAL_DAYS } from "@/lib/constants";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { subscriptionPlans, salonSubscriptions, salons, user as userTable } from "@/lib/schema";
+import { subscriptionPlans, salonSubscriptions, salons } from "@/lib/schema";
 /**
  * POST /api/register-subscription
  *
- * Called after user registration to store the selected subscription plan.
- * Creates a salon subscription in 'trialing' status with a trial period.
+ * Start triala dla salonu ZALOGOWANEGO konta. Wołana z dwóch miejsc:
+ *  - formularz rejestracji (use-registration.ts) zaraz po signUp — gdy
+ *    rejestracja wymaga potwierdzenia e-maila, sesji jeszcze nie ma i trasa
+ *    zwraca 401 (UI traktuje to jako niekrytyczne),
+ *  - CreateSalonPrompt w panelu, gdy zalogowane konto nie ma salonu.
  *
- * Body: { planSlug: "basic" | "pro", email: string }
+ * Body: { planSlug: "basic" | "pro", email?: string } — `email` jest
+ * ignorowany: konto zawsze z sesji (authResult.user). Istniejącej
+ * subskrypcji ta trasa nie zmienia (409) — zmiana planu tylko przez Stripe
+ * (/api/subscriptions/checkout, /api/subscriptions/downgrade).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -25,7 +31,8 @@ export async function POST(request: NextRequest) {
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
     }
-    const { planSlug, email } = rawBody as { planSlug: string; email: string };
+    const { planSlug } = rawBody as { planSlug: string };
+    const account = authResult.user;
 
     // Find the subscription plan
     const [plan] = await db
@@ -41,25 +48,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find the user by email
-    const [registeredUser] = await db
-      .select()
-      .from(userTable)
-      .where(eq(userTable.email, email))
-      .limit(1);
-
-    if (!registeredUser) {
-      return NextResponse.json(
-        { success: false, error: "User not found" },
-        { status: 404 }
-      );
-    }
-
     // Find the salon owned by this user
     const [salon] = await db
       .select()
       .from(salons)
-      .where(eq(salons.ownerId, registeredUser.id))
+      .where(eq(salons.ownerId, account.id))
       .limit(1);
 
     let salonId: string;
@@ -71,9 +64,9 @@ export async function POST(request: NextRequest) {
       const [newSalon] = await db
         .insert(salons)
         .values({
-          name: `Salon ${registeredUser.name || "Nowy"}`,
-          email: registeredUser.email,
-          ownerId: registeredUser.id,
+          name: `Salon ${account.name || "Nowy"}`,
+          email: account.email,
+          ownerId: account.id,
         })
         .returning();
       salonId = newSalon!.id;
@@ -87,23 +80,15 @@ export async function POST(request: NextRequest) {
       .limit(1);
 
     if (existingSub) {
-      // Update existing subscription with new plan
-      await db
-        .update(salonSubscriptions)
-        .set({
-          planId: plan.id,
-        })
-        .where(eq(salonSubscriptions.id, existingSub.id));
-
-      return NextResponse.json({
-        success: true,
-        data: {
-          subscriptionId: existingSub.id,
-          planName: plan.name,
-          planSlug: plan.slug,
-          status: existingSub.status,
+      // Bez zmiany planu: ta trasa nie pobiera płatności, więc podniesienie
+      // planu tutaj = Pro za darmo. Zmiana planu wyłącznie przez Stripe.
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Salon ma juz subskrypcje. Zmiana planu odbywa sie w ustawieniach subskrypcji.",
         },
-      });
+        { status: 409 }
+      );
     }
 
     // Create salon subscription with trial period
