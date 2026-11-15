@@ -668,11 +668,27 @@ export const bookPackageSchema = z.object({
 // Client Sub-resource Schemas
 // ==========================================
 
-export const clientConsentsSchema = z.object({
-  marketingEmail: z.boolean().optional(),
-  marketingSms: z.boolean().optional(),
-  marketingPush: z.boolean().optional(),
-});
+// Zgody marketingowe RODO (P2, Ryan). Kontrakt = body z client-consents-card.tsx:
+// { consents: { email|sms|phone: boolean } } (UI wysyła jeden typ na żądanie).
+// Wartość wyłącznie boolean — bez koercji: "false" jako tekst to błąd, nie zgoda.
+// .strict() na obu poziomach: nieznany typ zgody albo pole spoza kontraktu => 400.
+export const CONSENT_TYPES = ["email", "sms", "phone"] as const;
+export type ConsentType = (typeof CONSENT_TYPES)[number];
+
+export const clientConsentsSchema = z
+  .object({
+    consents: z
+      .object({
+        email: z.boolean().optional(),
+        sms: z.boolean().optional(),
+        phone: z.boolean().optional(),
+      })
+      .strict()
+      .refine((c) => Object.keys(c).length > 0, {
+        message: "Podaj co najmniej jeden typ zgody",
+      }),
+  })
+  .strict();
 
 export const loyaltyRedeemSchema = z.object({
   tierId: requiredString("Nagroda"),
