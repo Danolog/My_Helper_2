@@ -493,9 +493,10 @@ export type TrackedAIUsageProvider = (typeof TRACKED_AI_USAGE_PROVIDERS)[number]
  * Track an AI text generation call for cost monitoring.
  * Non-blocking — database errors are logged but never propagated to the caller.
  * A `type`/`provider` outside the allowlists above is a programming error:
- * nothing is written and the returned promise rejects. Callers use
- * `void trackAIUsage(...)`, so the user's request is not affected; the
- * rejection is logged here and by the Next.js unhandled-rejection handler.
+ * nothing is written, one `logger.error` is emitted and the promise still
+ * resolves. Callers use `void trackAIUsage(...)`, so a rejection would be
+ * unhandled — Node ends the process on those by default, and we do not rely
+ * on the Next.js handler to catch it (decyzja Olivera, #117).
  *
  * @param salonId  - Salon that initiated the AI call
  * @param feature  - Feature identifier for grouping (e.g. "auto_summary", "search")
@@ -513,14 +514,13 @@ export async function trackAIUsage(
     !(TRACKED_AI_USAGE_TYPES as readonly unknown[]).includes(type) ||
     !(TRACKED_AI_USAGE_PROVIDERS as readonly unknown[]).includes(provider)
   ) {
+    // Tylko odrzucone wartości i salon — bez feature/metadata (treść żądania).
     logger.error("[AI] Rejected usage record outside the allowlist", {
-      feature,
-      type: String(type),
-      provider: String(provider),
+      salonId,
+      type: String(type).slice(0, 64),
+      provider: String(provider).slice(0, 64),
     });
-    throw new Error(
-      `trackAIUsage: type/provider outside the allowlist (${String(type)}/${String(provider)})`,
-    );
+    return;
   }
   try {
     await db.insert(aiGeneratedMedia).values({

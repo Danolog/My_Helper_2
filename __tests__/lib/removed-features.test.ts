@@ -157,6 +157,24 @@ const TRACK_USAGE_TYPE_BYPASS: Array<[string, RegExp]> = [
   ["dyrektywa @ts-* nad wywołaniem trackAIUsage", TRACK_USAGE_TS_DIRECTIVE],
 ];
 
+/**
+ * Jedyny plik, który zapisuje do `aiGeneratedMedia` (Ryan #117, N6).
+ * Kolumna `type` to `text`, więc bezpośredni insert z `"vid" + "eo"` omija
+ * allowlistę `trackAIUsage`, regułę G6 na literały i tsc.
+ */
+const AI_MEDIA_WRITER = "src/lib/ai/openrouter.ts";
+const AI_MEDIA_WRITE: Array<[string, RegExp]> = [
+  // db./tx./dowolny klient, także `schema.aiGeneratedMedia` i łamanie linii.
+  ["insert/update(aiGeneratedMedia)", /\.\s*(insert|update)\s*\(\s*(\w+\s*\.\s*)*aiGeneratedMedia\b/],
+  // Alias tabeli: `aiGeneratedMedia as X`, `{ aiGeneratedMedia: X }`, `const X = aiGeneratedMedia;`.
+  [
+    "alias tabeli aiGeneratedMedia",
+    /\baiGeneratedMedia\s+as\s+\w|\baiGeneratedMedia\s*:\s*[A-Za-z_$]|[=:]\s*(\w+\s*\.\s*)*aiGeneratedMedia\s*[;,)}\n]/,
+  ],
+  // Surowy SQL na nazwie tabeli.
+  ["surowy SQL insert/update ai_generated_media", /\b(insert\s+into|update)\s+["'`]?(public["'`]?\.["'`]?)?ai_generated_media\b/i],
+];
+
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
@@ -216,6 +234,43 @@ describe("G6 — usunięte funkcje nie wracają (B3: głos, B4: wideo i social, 
     const plain = `void trackAIUsage(salonId, "banner", { style }, { type: "banner", provider: "google_imagen" });\nconst x = y as Record<string, unknown>;`;
     expect(cast.test(plain)).toBe(false);
     expect(directive.test(plain)).toBe(false);
+  });
+
+  it.each(AI_MEDIA_WRITE)(`zapis do aiGeneratedMedia tylko w ${AI_MEDIA_WRITER}: %s`, (_label, pattern) => {
+    const hits = SRC_FILES.filter((f) => f.path !== AI_MEDIA_WRITER && pattern.test(f.text)).map((f) => f.path);
+    expect(hits).toEqual([]);
+  });
+
+  it(`kontrola: ${AI_MEDIA_WRITER} jest na liście skanera i zawiera jedyny insert`, () => {
+    const writer = SRC_FILES.find((f) => f.path === AI_MEDIA_WRITER);
+    expect(writer).toBeDefined();
+    expect(AI_MEDIA_WRITE[0]![1].test(writer!.text)).toBe(true);
+  });
+
+  it("kontrola: reguły N6 łapią warianty zapisu, a nie odczyt", () => {
+    const hit = (s: string) => AI_MEDIA_WRITE.some(([, re]) => re.test(s));
+    for (const sample of [
+      `await db.insert(aiGeneratedMedia).values({ type: "vid" + "eo" });`,
+      `await tx\n  .insert(\n    aiGeneratedMedia,\n  )\n  .values(row);`,
+      `await db.insert(schema.aiGeneratedMedia).values(row);`,
+      `await db.update(aiGeneratedMedia).set({ type: t });`,
+      `import { aiGeneratedMedia as media } from "@/lib/schema";`,
+      `const { aiGeneratedMedia: media } = schema;`,
+      `const media = aiGeneratedMedia;`,
+      `const t = { table: schema.aiGeneratedMedia };`,
+      "await db.execute(sql`INSERT INTO ai_generated_media (type) VALUES (${t})`);",
+      `await db.execute(sql.raw('update "public"."ai_generated_media" set type = 1'));`,
+    ]) {
+      expect(hit(sample), sample).toBe(true);
+    }
+    for (const sample of [
+      `import { aiGeneratedMedia } from "@/lib/schema";`,
+      `const rows = await db.select({ type: aiGeneratedMedia.type }).from(aiGeneratedMedia).where(eq(aiGeneratedMedia.salonId, id));`,
+      `.groupBy(aiGeneratedMedia.type, aiGeneratedMedia.provider);`,
+      "// (`ai_generated_media.type = 'video'`): bez niego",
+    ]) {
+      expect(hit(sample), sample).toBe(false);
+    }
   });
 
   it("kontrola: filtr skanera obejmuje każde rozszerzenie TS/JS, a nie inne pliki", () => {

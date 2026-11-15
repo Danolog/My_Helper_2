@@ -88,16 +88,30 @@ describe("trackAIUsage", () => {
       ["pusty typ", { type: cast<"text">("") }],
       ["typ nie-string", { type: cast<"text">({ toString: () => "text" }) }],
       ["wielkie litery", { type: cast<"text">("TEXT") }],
-    ])("%s → odrzucenie i brak zapisu", async (_label, options) => {
-      await expect(trackAIUsage("salon-1", "x", {}, options)).rejects.toThrow(
-        /outside the allowlist/,
-      );
+    ])("%s → rozwiązana obietnica, brak zapisu, dokładnie jeden logger.error", async (_label, options: { type?: unknown; provider?: unknown }) => {
+      await expect(
+        trackAIUsage("salon-1", "x", { prompt: "treść żądania" }, options as Parameters<typeof trackAIUsage>[3]),
+      ).resolves.toBeUndefined();
       expect(mockInsert).not.toHaveBeenCalled();
       expect(mockValues).not.toHaveBeenCalled();
-      expect(logger.error).toHaveBeenCalledWith(
-        "[AI] Rejected usage record outside the allowlist",
-        expect.objectContaining({ feature: "x" }),
-      );
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      const [message, context] = vi.mocked(logger.error).mock.calls[0]!;
+      expect(message).toBe("[AI] Rejected usage record outside the allowlist");
+      // Dokładnie salon i odrzucone wartości — bez feature i metadata żądania
+      // (Leo #117: M4 log bez type/provider, M5 log z metadata).
+      expect(context).toEqual({
+        salonId: "salon-1",
+        type: String(options.type ?? "text"),
+        provider: String(options.provider ?? "openrouter"),
+      });
+      expect(JSON.stringify(context)).not.toContain("treść żądania");
+    });
+
+    it("bardzo długa wartość spoza listy trafia do logu przycięta do 64 znaków", async () => {
+      await trackAIUsage("salon-1", "x", {}, { type: "v".repeat(500) as "text" });
+      const context = vi.mocked(logger.error).mock.calls[0]![1] as { type: string };
+      expect(context.type).toHaveLength(64);
+      expect(mockInsert).not.toHaveBeenCalled();
     });
 
     it("każda para z allowlisty zapisuje się jak dotąd", async () => {
