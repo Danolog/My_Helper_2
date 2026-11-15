@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, sql, count, desc } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { isProAIError, requireProPlan } from "@/lib/ai/gate";
 import { logger } from "@/lib/logger";
 import {
   appointments,
@@ -12,25 +11,10 @@ import {
   products,
 } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-import { isProPlan } from "@/lib/subscription";
 export async function GET(_request: Request) {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-
-  // Auth check and resolve salon
-  const salonId = await getUserSalonId();
-  if (!salonId) {
-    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
-  }
-
-  // Pro plan check
-  const hasPro = await isProPlan();
-  if (!hasPro) {
-    return NextResponse.json(
-      { error: "Funkcje AI sa dostepne tylko w Planie Pro." },
-      { status: 403 }
-    );
-  }
+  const gate = await requireProPlan();
+  if (isProAIError(gate)) return gate;
+  const { salonId } = gate;
 
   try {
     const now = new Date();

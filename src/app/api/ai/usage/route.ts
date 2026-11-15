@@ -1,5 +1,5 @@
 import { eq, and, gte, count } from "drizzle-orm";
-import { requireProAI, isProAIError } from "@/lib/ai/openrouter";
+import { isProAIError, requireProPlan } from "@/lib/ai/gate";
 // Cost-per-use map shared with the hard budget limits (single source of truth)
 import { COST_MAP, DEFAULT_COST_PER_USE } from "@/lib/ai/usage-limits";
 import { logger } from "@/lib/logger";
@@ -11,7 +11,8 @@ import { forSalon } from "@/lib/server/repository";
 // ────────────────────────────────────────────────────────────
 
 export async function GET(req: Request) {
-  const proResult = await requireProAI();
+  // Tylko plan: strona zużycia ma działać także przy wyczerpanym budżecie
+  const proResult = await requireProPlan();
   if (isProAIError(proResult)) return proResult;
   const { salonId } = proResult;
 

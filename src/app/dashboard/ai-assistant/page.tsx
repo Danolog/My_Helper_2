@@ -7,7 +7,6 @@ import {
   Bot,
   Brain,
   Lightbulb,
-  MessageSquare,
   TrendingUp,
   type LucideIcon,
 } from "lucide-react";
@@ -48,13 +47,6 @@ const AI_TILES: AiTile[] = [
     description: "Codzienne i tygodniowe rekomendacje dzialan dla Twojego salonu",
     href: "/dashboard/ai-recommendations",
     cta: "Zobacz rekomendacje",
-  },
-  {
-    icon: MessageSquare,
-    title: "Chat AI",
-    description: "Rozmowa z asystentem AI o Twoim biznesie",
-    href: "/chat",
-    cta: "Otworz chat",
   },
   {
     icon: BarChart3,
@@ -114,7 +106,7 @@ export default function AiAssistantPage() {
       proBenefits={[
         "Generator treści — opisy usług",
         "Analiza danych biznesowych i rekomendacje",
-        "Chat AI z kontekstem Twojego salonu",
+        "Asystent biznesowy: rozmowa z AI o danych Twojego salonu",
         "Proaktywne sugestie optymalizacji",
         "Analiza trendow i konkurencji",
       ]}
