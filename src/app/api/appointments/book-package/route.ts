@@ -167,6 +167,15 @@ export async function POST(request: Request) {
     const firstStart = appointmentSlots[0]!.start;
     const lastEnd = appointmentSlots[appointmentSlots.length - 1]!.end;
 
+    // Pakiet o zerowym łącznym czasie (usługi z baseDuration 0 w bazie) to
+    // przedział pusty — nie trafiłby w warunek kolizji półotwartej (#165).
+    if (!(lastEnd.getTime() > firstStart.getTime())) {
+      return NextResponse.json(
+        { success: false, error: "Package services must have a positive total duration" },
+        { status: 400 }
+      );
+    }
+
     const overlapping = await repo.raw((tx) =>
       tx
         .select()

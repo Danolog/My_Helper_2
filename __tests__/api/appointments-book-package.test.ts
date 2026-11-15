@@ -367,6 +367,27 @@ describe("POST /api/appointments/book-package — kolizja półotwarta (#165)", 
     expect((await bookPackage(request())).status).toBe(201);
   });
 
+  it("pakiet o zerowym łącznym czasie (baseDuration 0) → 400, bez sprawdzania kolizji i zapisu", async () => {
+    mockListOwned.mockResolvedValue([
+      { id: SERVICE_1, name: "A", basePrice: "100.00", baseDuration: 0 },
+      { id: SERVICE_2, name: "B", basePrice: "80.00", baseDuration: 0 },
+    ]);
+    txQueue.push([appt("10:00", "11:00")], []);
+    const { status, body } = await parseResponse(await bookPackage(request()));
+    expect(status).toBe(400);
+    expect(body.error).toBe("Package services must have a positive total duration");
+    expect(txQueue).toHaveLength(2);
+    expect(mockInsertValues).not.toHaveBeenCalled();
+  });
+
+  it("nieprawidłowy startTime → 400, bez sprawdzania kolizji i zapisu", async () => {
+    txQueue.push([], []);
+    const { status } = await parseResponse(await bookPackage(request({ startTime: "nie-data" })));
+    expect(status).toBe(400);
+    expect(txQueue).toHaveLength(2);
+    expect(mockInsertValues).not.toHaveBeenCalled();
+  });
+
   it("blokada czasu nachodząca o 1 minutę → 409", async () => {
     txQueue.push([], [block("11:14", "12:00")]);
     const { status, body } = await parseResponse(await bookPackage(request()));
