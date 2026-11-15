@@ -55,7 +55,7 @@ export interface SalonCancellationDetails {
   depositRefunded?: boolean;
   depositVariant?: CancellationDepositVariant;
   refundFailed?: boolean;
-  refund?: { amount?: number | null } | null;
+  refund?: { amount?: number | null; failedAmount?: number | null } | null;
 }
 
 export type CancelToast =
@@ -66,10 +66,12 @@ export type CancelToast =
 export function salonCancelToast(details: SalonCancellationDetails | undefined): CancelToast {
   const amount = details?.refund?.amount ?? details?.depositAmount ?? 0;
   if (details?.refundFailed) {
+    // Kwota, która NIE wróciła — nie suma udanych zwrotów (Leo, #98).
+    const failedAmount = details?.refund?.failedAmount ?? details?.depositAmount ?? 0;
     return {
       kind: "error",
       title: REFUND_FAILED_TOAST_TITLE,
-      description: refundFailedToastDescription(amount),
+      description: refundFailedToastDescription(failedAmount),
       duration: Infinity,
     };
   }

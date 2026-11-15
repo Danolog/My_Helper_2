@@ -363,7 +363,7 @@ describe("refundAppointmentDeposits — wszystkie 'succeeded' wizyty", () => {
 
     const result = await refundAppointmentDeposits("appt-1", "powod");
 
-    expect(result).toMatchObject({ success: false, refunded: false, amount: 50, error: "stripe_refund_failed" });
+    expect(result).toMatchObject({ success: false, refunded: false, amount: 50, failedAmount: 50, error: "stripe_refund_failed" });
     expect(result.results.map((r) => [r.depositPaymentId, r.refunded])).toEqual([
       ["pay-1", true],
       ["pay-2", false],
@@ -376,6 +376,19 @@ describe("refundAppointmentDeposits — wszystkie 'succeeded' wizyty", () => {
       expect.objectContaining({ depositPaymentId: "pay-2", appointmentId: "appt-1", salonId: "salon-1" })
     );
     expect(appointmentSets()).toHaveLength(0);
+  });
+
+  it("failedAmount (Leo, #98): pełna porażka 1 × 50 => 50; częściowa 2 × 25 => 25", async () => {
+    queuePayments(payment());
+    mockStripeRefundsCreate.mockRejectedValueOnce(new Error("boom"));
+    const full = await refundAppointmentDeposits("appt-1", "powod");
+    expect(full).toMatchObject({ success: false, amount: 0, failedAmount: 50 });
+
+    resetAll();
+    queuePayments(payment({ amount: "25.00" }), payment({ id: "pay-2", amount: "25.00", stripePaymentIntentId: "pi_2" }));
+    mockStripeRefundsCreate.mockResolvedValueOnce({ id: "re_1" }).mockRejectedValueOnce(new Error("boom"));
+    const partial = await refundAppointmentDeposits("appt-1", "powod");
+    expect(partial).toMatchObject({ success: false, amount: 25, failedAmount: 25 });
   });
 
   it("forfeit z 2 płatnościami => najstarsza forfeited (warunkowo), druga zwrócona, depositPaid bez zmian", async () => {

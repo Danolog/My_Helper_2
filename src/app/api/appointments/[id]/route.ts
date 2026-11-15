@@ -10,7 +10,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { refundAppointmentDeposits, type RefundResult } from "@/lib/refund";
+import { refundAppointmentDeposits, type AppointmentDepositsRefund } from "@/lib/refund";
 import {
   buildSalonCancellationSms,
   cancelAppointmentInTx,
@@ -348,7 +348,7 @@ export async function DELETE(
     await expireCheckoutSessions(id, failedPayments);
 
     // RF1: odwołanie przez salon = pełny zwrot, niezależnie od reguły 24 h.
-    let refundResult: RefundResult | null = null;
+    let refundResult: AppointmentDepositsRefund | null = null;
     if (hasDeposit && depositPaid) {
       // Każda płatność `succeeded` osobno, od najstarszej (Ethan, #98).
       refundResult = await refundAppointmentDeposits(id, "Odwolanie wizyty przez salon - pelny zwrot zadatku");
@@ -451,6 +451,8 @@ export async function DELETE(
           processed: refundResult.refunded,
           refundId: refundResult.refundId,
           amount: refundResult.amount,
+          // Kwota, która nie wróciła (toast przy refundFailed — Leo, #98).
+          failedAmount: refundResult.failedAmount ?? null,
           message: refundResult.message,
         } : null,
       },

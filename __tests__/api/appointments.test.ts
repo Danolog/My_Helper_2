@@ -275,6 +275,7 @@ import { GET as listAppointments, POST as createAppointment } from "@/app/api/ap
 // Mocked tenant resolver — referenced directly so cross-tenant tests can
 // flip the resolved salon (simulate "the caller has no salon" / wrong tenant).
 import { getSalonContext } from "@/lib/salon-context";
+import { salonCancelToast } from "@/components/appointments/cancel-appointment-texts";
 const mockGetSalonContext = vi.mocked(getSalonContext);
 
 // Konteksty ról (Faza 3) — owner odtwarza dawne zachowanie getUserSalonId.
@@ -2145,6 +2146,38 @@ describe("DELETE /api/appointments/[id]", () => {
     const details = (body as any).cancellationDetails;
     expect(details).toEqual(expect.objectContaining({ depositRefunded: false, refundFailed: true, depositVariant: "online" }));
     expect(smsInserts()).toHaveLength(1);
+  });
+
+  // Leo (blokada #98): toast po nieudanym zwrocie pokazuje kwotę, która NIE
+  // wróciła — liczoną z odpowiedzi serwera (refund.failedAmount), nie sumę
+  // udanych zwrotów (`amount`, przy pełnej porażce 0).
+  it.each([
+    {
+      name: "pełna porażka 1 × 50",
+      refund: { success: false, refunded: false, amount: 0, failedAmount: 50, error: "stripe_refund_failed", paymentCount: 1 },
+      expected: "Zadatek 50.00 PLN nie wrócił",
+    },
+    {
+      name: "częściowa porażka 2 × 25 (jeden zwrot OK)",
+      refund: { success: false, refunded: false, refundId: "re_1", amount: 25, failedAmount: 25, error: "stripe_refund_failed", paymentCount: 2 },
+      expected: "Zadatek 25.00 PLN nie wrócił",
+    },
+  ])("RF3 + Leo: $name → odpowiedź niesie failedAmount, toast z tej odpowiedzi pokazuje kwotę niezwróconą", async ({ refund, expected }) => {
+    const appointment = makeAppointment({ depositAmount: "50.00", depositPaid: true });
+    queueSalonCancel({ appointment, paidMethods: ["stripe"] });
+    mockProcessAutomaticRefund.mockResolvedValueOnce({ ...refund, message: "x", results: [] });
+
+    const { status, body } = await callDelete();
+
+    expect(status).toBe(200);
+    // JSON z prawdziwej odpowiedzi trasy (przez serializację), nie ręczny obiekt
+    const details = JSON.parse(JSON.stringify((body as any).cancellationDetails));
+    expect(details.refundFailed).toBe(true);
+    expect(details.refund.failedAmount).toBe(refund.failedAmount);
+    const toast = salonCancelToast(details);
+    expect(toast.kind).toBe("error");
+    expect((toast as { description: string }).description).toContain(expected);
+    expect((toast as { description: string }).description).not.toContain("Zadatek 0.00 PLN");
   });
 
   it("RF2: zadatek wpłacony poza MyHelper (bez płatności Stripe) — wariant ręczny z telefonem salonu", async () => {

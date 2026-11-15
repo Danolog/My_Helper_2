@@ -191,6 +191,12 @@ export async function processAutomaticRefund(
 export interface AppointmentDepositsRefund extends RefundResult {
   /** Liczba płatności `succeeded` wizyty w chwili odczytu. */
   paymentCount: number;
+  /**
+   * Kwota, która NIE wróciła do klienta (suma płatności z nieudanym zwrotem).
+   * `amount` to suma udanych zwrotów — przy porażce toast musi pokazać tę
+   * (Leo, #98). Brak, gdy nie udało się nawet odczytać płatności.
+   */
+  failedAmount?: number;
   /** Płatność zatrzymana przez salon (najstarsza `succeeded`), jeśli forfeit. */
   forfeitedPaymentId?: string;
   results: Array<{ depositPaymentId: string } & RefundResult>;
@@ -266,6 +272,11 @@ export async function refundAppointmentDeposits(
   const allRefunded = results.length > 0 && results.every((r) => r.refunded);
   const anyFailed = results.some((r) => !r.success);
   const amount = results.reduce((sum, r) => sum + (r.refunded ? (r.amount ?? 0) : 0), 0);
+  const paymentAmount = new Map(toRefund.map((p) => [p.id, parseFloat(p.amount)]));
+  const failedAmount = results.reduce(
+    (sum, r) => sum + (r.success ? 0 : (paymentAmount.get(r.depositPaymentId) ?? 0)),
+    0
+  );
 
   if (allRefunded && !forfeitedPaymentId) {
     await db.update(appointments).set({ depositPaid: false }).where(eq(appointments.id, appointmentId));
@@ -276,6 +287,7 @@ export async function refundAppointmentDeposits(
     refunded: allRefunded,
     ...(results.find((r) => r.refundId)?.refundId ? { refundId: results.find((r) => r.refundId)!.refundId! } : {}),
     amount,
+    failedAmount,
     ...(anyFailed ? { error: results.find((r) => r.error)?.error ?? "refund_error" } : {}),
     message: anyFailed
       ? "Zwrot zadatku nie powiodl sie - wymagana reczna obsluga zwrotu"

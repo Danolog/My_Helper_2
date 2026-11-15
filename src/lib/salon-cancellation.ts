@@ -44,64 +44,62 @@ export type SalonCancelTxResult =
       failedPayments: Array<{ id: string; stripePaymentIntentId: string | null }>;
     };
 
-/** Wycofanie transakcji bez zapisów, gdy wizyta już była anulowana. */
-class AlreadyCancelled extends Error {}
-
 /**
  * Transakcja anulowania. `tx` to klient z kontekstem RLS salonu
  * (`forSalon(salonId).raw`), stąd jawne `eq(salonId)` w każdym warunku.
+ *
+ * Wynik `alreadyCancelled` / `notFound` NIE wycofuje transakcji: krok 1
+ * (`pending → failed`) zostaje zatwierdzony. Świadomie — anulowana wizyta
+ * nie powinna mieć płatności `pending`; jeśli klient mimo to zapłaci,
+ * webhook zapisze wpłatę i ją zwróci (#70). Dla obcej wizyty krok 1 nic
+ * nie zmienia (warunek `salonId`).
  */
 export async function cancelAppointmentInTx(
   tx: Tx,
   salonId: string,
   appointmentId: string
 ): Promise<SalonCancelTxResult> {
-  try {
-    const failedPayments = await tx
-      .update(depositPayments)
-      .set({ status: "failed" })
-      .where(
-        and(
-          eq(depositPayments.appointmentId, appointmentId),
-          eq(depositPayments.salonId, salonId),
-          eq(depositPayments.status, "pending")
-        )
+  const failedPayments = await tx
+    .update(depositPayments)
+    .set({ status: "failed" })
+    .where(
+      and(
+        eq(depositPayments.appointmentId, appointmentId),
+        eq(depositPayments.salonId, salonId),
+        eq(depositPayments.status, "pending")
       )
-      .returning({ id: depositPayments.id, stripePaymentIntentId: depositPayments.stripePaymentIntentId });
+    )
+    .returning({ id: depositPayments.id, stripePaymentIntentId: depositPayments.stripePaymentIntentId });
 
-    const [current] = await tx
-      .select()
-      .from(appointments)
-      .where(and(eq(appointments.id, appointmentId), eq(appointments.salonId, salonId)))
-      .for("update");
-    if (!current) return { notFound: true };
-    if (current.status === "cancelled") throw new AlreadyCancelled();
+  const [current] = await tx
+    .select()
+    .from(appointments)
+    .where(and(eq(appointments.id, appointmentId), eq(appointments.salonId, salonId)))
+    .for("update");
+  if (!current) return { notFound: true };
+  if (current.status === "cancelled") return { alreadyCancelled: true };
 
-    const paidMethods = await tx
-      .select({ paymentMethod: depositPayments.paymentMethod })
-      .from(depositPayments)
-      .where(
-        and(
-          eq(depositPayments.appointmentId, appointmentId),
-          eq(depositPayments.salonId, salonId),
-          eq(depositPayments.status, "succeeded")
-        )
-      );
+  const paidMethods = await tx
+    .select({ paymentMethod: depositPayments.paymentMethod })
+    .from(depositPayments)
+    .where(
+      and(
+        eq(depositPayments.appointmentId, appointmentId),
+        eq(depositPayments.salonId, salonId),
+        eq(depositPayments.status, "succeeded")
+      )
+    );
 
-    const [cancelled] = await tx
-      .update(appointments)
-      .set({ status: "cancelled", updatedAt: new Date() })
-      .where(and(eq(appointments.id, appointmentId), eq(appointments.salonId, salonId)))
-      .returning();
-    if (!cancelled) return { notFound: true };
+  const [cancelled] = await tx
+    .update(appointments)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(and(eq(appointments.id, appointmentId), eq(appointments.salonId, salonId)))
+    .returning();
+  if (!cancelled) return { notFound: true };
 
-    const variant = depositVariantFor(current.depositAmount, current.depositPaid, paidMethods);
+  const variant = depositVariantFor(current.depositAmount, current.depositPaid, paidMethods);
 
-    return { cancelled, depositPaid: current.depositPaid === true, variant, failedPayments };
-  } catch (error) {
-    if (error instanceof AlreadyCancelled) return { alreadyCancelled: true };
-    throw error;
-  }
+  return { cancelled, depositPaid: current.depositPaid === true, variant, failedPayments };
 }
 
 /**
