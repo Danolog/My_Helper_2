@@ -32,13 +32,11 @@ B='infra/gcp/bootstrap.sh --project=my-helper-2-488419 --region=europe-central2'
 1. `gcloud config list` — zalogowane konto sesji głównej z rolą owner; projekt
    NIE jest brany z konfiguracji (skrypt podaje `--project` w każdym wywołaniu).
 2. Budżet 300 PLN/mies. z progami 50/90/100% istnieje (stan dzisiejszy).
-3. **Koszt przed etapem `sql` (warunek Ethana):** sesja główna sprawdza w
-   kalkulatorze GCP konfigurację z sekcji 3.6. **> 200 PLN/mies. → stop i raport
-   do Olivera.** Szacunek Ethana: 50–60 PLN/mies. Szacunek Evy (z cennika z
-   pamięci, NIEZWERYFIKOWANY w kalkulatorze): db-f1-micro w europe-central2
-   ~50 PLN, SSD 10 GB ~8 PLN, kopie/PITR w granicach rozmiaru dysku ~0–5 PLN,
-   Artifact Registry (5 wersji dwóch obrazów, ~7–9 GB) ~4 PLN, Secret Manager
-   ~3 PLN, Scheduler (8 jobów) ~2 PLN → razem ~65–80 PLN/mies. bez ruchu.
+3. **Koszt przed etapem `sql` (warunek Ethana):** Oliver sprawdza w cenniku GCP
+   dla `europe-central2` konfigurację z sekcji 3.6 i wpisuje wynik do #121.
+   **> 200 PLN/mies. → stop i raport.** Szacunek Ethana: 50–60 PLN/mies.
+   (Eva nie ma wyliczenia ze stawkami z cennika — tylko szacunek bez źródła,
+   więc go tu nie podaje.)
 
 ## 2. Kolejność etapów i odczyt stanu po każdym
 
@@ -83,8 +81,10 @@ Zasobnik z uniform access, bez blokady dostępu publicznego, `allUsers:
 roles/storage.legacyObjectReader` — odczyt obiektu po znanej nazwie, **bez
 listowania** (#118 pkt 5; nie `objectViewer`).
 
-Przed ustawieniem `GCS_BUCKET` w buildzie produkcyjnym musi być zrobiony #118 pkt 4
-(zawężenie `remotePatterns` do `/<bucket>/**`) — stan: otwarte.
+#118 pkt 4 (zawężenie `remotePatterns`) — **spełniony** na `main`:
+`next.config.ts` dodaje wpis `storage.googleapis.com` tylko gdy przy budowie
+ustawiono `GCS_BUCKET`, z `pathname: /<GCS_BUCKET>/**`. Asercji w testach na ten
+wpis dziś nie ma — dopisuje ją K-1.
 Na start `vars.GCS_PUBLIC_BASE_URL` zostaje **pusta**: obrazy idą z
 `storage.googleapis.com/<bucket>` (Oliver 19:47, #133 pkt 1).
 
@@ -150,14 +150,20 @@ bazy zawierają `myhelper`; loginy: `myhelper_owner`, `postgres`; oba sekrety:
 `1 ENABLED`.
 
 ### 3.7 `run` (odstępstwo od listy etapów w zleceniu — uzasadnienie)
-Powłoki usługi `myhelper` i joba `myhelper-migrate` z obrazami-zaślepkami Google,
-żeby konto deploy dostało `roles/run.developer` **na tych dwóch zasobach**, a nie
-na projekcie. Usługa: `allUsers` → `run.invoker` (aplikacja publiczna).
-Zaślepki zastępuje pierwszy przebieg workflow.
+Powłoki usługi `myhelper` i joba `myhelper-migrate`, żeby konto deploy dostało
+`roles/run.developer` **na tych dwóch zasobach**, a nie na projekcie. Warunki
+(Oliver, przyjęte wstępnie; oceniają Ethan i Ryan):
+- obraz zastępczy: oficjalna próbka Google `us-docker.pkg.dev/cloudrun/container/hello`
+  (usługa i job; job zastępczy nigdy nie jest wykonywany);
+- zastępcza rewizja: `--min-instances=0 --max-instances=1`, konto runtime,
+  **bez sekretów i bez zmiennych środowiska**;
+- `allUsers` → `roles/run.invoker` na usłudze ustawia **raz** ten etap (sesja
+  główna, konto Darka). Konto deploy **nie** dostaje `setIamPolicy` ani ról
+  projektowych do zarządzania IAM; od K-1 `run-deploy.sh` nie podaje
+  `--allow-unauthenticated` (wdrożenie zachowuje istniejącą politykę).
 
-Do sprawdzenia przy pierwszym przebiegu (otwarte, K-1/Ryan): `run-deploy.sh`
-podaje `--allow-unauthenticated`, co wymaga `setIamPolicy` — `run.developer`
-tego nie ma; oraz czy odczyt operacji/wykonań joba wymaga dodatkowego uprawnienia.
+Zastępcze rewizje zastępuje pierwszy przebieg workflow. Do sprawdzenia przy
+pierwszym przebiegu: czy odczyt operacji/wykonań joba wymaga dodatkowego uprawnienia.
 
 ### 3.8 `wif` — NIE WYKONYWAĆ przed ostatecznym warunkiem Ryana
 Pula `github`, provider OIDC `github-actions`, `workloadIdentityUser` na koncie
@@ -177,7 +183,8 @@ assertion.run_attempt == '1'
 Otwarte u Ryana (przeliczenie po upublicznieniu repo): `actor_id`, wariant
 `sub=…:environment:production-gcp`, propozycja Evy: równość
 `assertion.job_workflow_ref` (w workflow wielokrotnego użytku `workflow_ref` jest
-wywołującego). Dodatkowe zawężenia dopisuje się do pliku — skrypt ich nie usuwa.
+wywołującego; Oliver popiera ją jako zamiennik prefiksu `workflow_ref`) —
+rozstrzyga Ryan przy recenzji. Dodatkowe zawężenia dopisuje się do pliku — skrypt ich nie usuwa.
 Wynik etapu: trzy wartości do D-6 (`GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA`,
 `GCP_RUNTIME_SA`) — wypisywane przez skrypt.
 
@@ -252,12 +259,13 @@ wszystkich 11):
 | upstash-redis-rest-token | limitowanie zapytań w pamięci instancji |
 | vapid-private-key | push wyłączony |
 | openrouter-api-key | czat AI nie działa (ostrzeżenie) |
-| google-client-secret | **moduł NIE wyłącza się sam**: przycisk Google jest zawsze widoczny, logowanie Google kończy się błędem — do naprawy przed betą (otwarte) |
+| google-client-secret | **moduł NIE wyłącza się sam**: przycisk Google jest zawsze widoczny (także bez `GOOGLE_CLIENT_ID`), logowanie Google kończy się błędem — P3 po K-1 |
 
 **Bloker pierwszego wdrożenia:** `run-deploy.sh` mapuje wszystkie 11 sekretów
 (`NAZWA=sekret:latest`). Cloud Run odrzuca rewizję, której sekret nie ma żadnej
-wersji. Do czasu K-1 (manifest `required` + pomijanie opcjonalnych sekretów bez
-wersji w `run-deploy.sh`) każdy z 11 sekretów musi mieć wersję przed D-7.
+wersji. K-1 (przed D-7): `required` w manifeście; `run-deploy.sh` mapuje
+wyłącznie sekrety z wersją, a sekret wymagany bez wersji przerywa wdrożenie
+**przed** `gcloud run deploy`. Żadnych wersji-zaślepek.
 Sprawdzenie, że moduł bez sekretu wyłącza się sam: po K-1, przebieg z pustym
 sekretem opcjonalnym → smoke zielony, w logach tylko ostrzeżenie modułu.
 
@@ -282,8 +290,15 @@ gh variable set ADMIN_EMAILS --env $E < "$HOME/secure/admin-emails"
 ```
 
 - `GCS_PUBLIC_BASE_URL` — **pusta** na start.
-- `STORAGE_DRIVER` / `GCS_BUCKET` — dziś obowiązuje zakaz ustawiania w każdym
-  środowisku. Ustawiane dopiero po zdjęciu zakazu przez Olivera **i** po #118 pkt 4.
+- `STORAGE_DRIVER=gcs` i `GCS_BUCKET=<zasobnik z D-3>` — na Cloud Run **od
+  pierwszego wdrożenia** (`required: true` w manifeście; Oliver). Warunki:
+  #118 pkt 4 (spełniony), #118 pkt 5 (`legacyObjectReader` w etapie `bucket`),
+  #132 na `main`. Na Vercelu obie zmienne nadal **nieustawione**.
+- `GOOGLE_CLIENT_ID` — **nie ustawiać** na Cloud Run, dopóki
+  `google-client-secret` nie ma wersji. Uwaga: przycisk logowania Google
+  (`src/components/auth/sign-in-button.tsx`) jest renderowany bezwarunkowo —
+  bez `GOOGLE_CLIENT_ID` nie znika, kliknięcie kończy się komunikatem błędu
+  (P3 po K-1).
 - `MYHELPER_APP_DB_ROLE` — puste = domyślnie `myhelper_app`.
 
 ## 7. D-7 — pierwszy przebieg (sesja główna)
@@ -418,9 +433,10 @@ pisze Ethan w planie 0.5 — ten runbook jej nie zawiera.
 
 - `wif`: ostateczny warunek (Ryan) — `actor_id`, wariant `environment`, `job_workflow_ref`.
 - Tryb migracji pierwszego przebiegu (Ryan, #121).
-- K-1: łączność Cloud SQL, puste sekrety opcjonalne, `--allow-unauthenticated`
-  vs `run.developer`, `GCS_PUBLIC_BASE_URL` jako build-arg (#133 pkt 1).
+- K-1 (po #132): łączność Cloud SQL przez gniazdo, `required` dla sekretów i
+  mapowanie tylko sekretów z wersją, bez `--allow-unauthenticated`, webhook
+  Stripe bez sekretu odrzuca każde żądanie, `GCS_PUBLIC_BASE_URL` jako build-arg
+  z jednego źródła (#133 pkt 1), asercja `remotePatterns` (#118 pkt 4).
 - K-2: zawężenie allowlisty e2e do naszej usługi. K-3: harmonogram wstrzymany.
-- #118 pkt 4 (`remotePatterns`) przed `GCS_BUCKET`.
-- Logowanie Google bez sekretu nie wyłącza się samo.
-- Koszt: weryfikacja w kalkulatorze przed `sql`.
+- Logowanie Google bez sekretu nie wyłącza się samo (P3 po K-1).
+- Koszt: weryfikacja w cenniku przez Olivera przed `sql`.
