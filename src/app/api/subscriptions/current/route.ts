@@ -9,6 +9,7 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { featuresFor } from "@/lib/plan-features";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
+import { getCurrentPlan } from "@/lib/subscription";
 
 /**
  * GET /api/subscriptions/current
@@ -22,7 +23,12 @@ import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
  * reactivation option).
  *
  * Response shape:
- *   { subscription: {...} | null, plan: {...} | null }
+ *   { subscription: {...} | null, plan: {...} | null, effectivePlanSlug }
+ *
+ * `plan` opisuje zapisany plan (karta planu). `effectivePlanSlug` to plan,
+ * który dziś obowiązuje: liczy go `getCurrentPlan` — ta sama funkcja co
+ * bramki serwerowe (np. trial po terminie albo `canceled` = "basic").
+ * UI decyduje o funkcjach Pro wyłącznie na podstawie `effectivePlanSlug`.
  */
 export async function GET() {
   try {
@@ -64,6 +70,7 @@ export async function GET() {
         success: true,
         subscription: null,
         plan: null,
+        effectivePlanSlug: (await getCurrentPlan(salonId)).slug,
       });
     }
 
@@ -86,6 +93,8 @@ export async function GET() {
         };
       }
     }
+
+    const effectivePlanSlug = (await getCurrentPlan(salonId)).slug;
 
     return NextResponse.json({
       success: true,
@@ -113,6 +122,7 @@ export async function GET() {
         isActive: row.plan.isActive,
       },
       scheduledPlan,
+      effectivePlanSlug,
     });
   } catch (error) {
     logger.error("[Subscriptions API] Error fetching current subscription", { error: error });
