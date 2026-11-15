@@ -24,12 +24,17 @@ import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
 export function validateBody<T extends z.ZodType>(
   schema: T,
   data: unknown
-): { success: false; error: string; details: Record<string, string> } | null {
+): ValidationErrorBody | null {
   const result = schema.safeParse(data);
   if (result.success) return null;
+  return toValidationError(result.error);
+}
 
+export type ValidationErrorBody = { success: false; error: string; details: Record<string, string> };
+
+function toValidationError(error: z.ZodError): ValidationErrorBody {
   const details: Record<string, string> = {};
-  for (const issue of result.error.issues) {
+  for (const issue of error.issues) {
     const path = issue.path.join(".") || "_root";
     // Only keep the first error per field
     if (!details[path]) {
@@ -42,6 +47,21 @@ export function validateBody<T extends z.ZodType>(
     error: "Validation failed",
     details,
   };
+}
+
+/**
+ * Jak validateBody, ale przy sukcesie zwraca SPARSOWANE dane (po transformacjach
+ * schematu: null -> undefined, normalizacja telefonu). Trasa, której schemat
+ * normalizuje wejście, musi czytać `data`, nie surowe body — inaczej
+ * normalizacja nie dochodzi do logiki i zapisu.
+ */
+export function parseBody<T extends z.ZodType>(
+  schema: T,
+  data: unknown
+): { ok: true; data: z.output<T> } | { ok: false; error: ValidationErrorBody } {
+  const result = schema.safeParse(data);
+  if (result.success) return { ok: true, data: result.data };
+  return { ok: false, error: toValidationError(result.error) };
 }
 
 // ==========================================
@@ -801,30 +821,54 @@ export const updateGalleryPhotoSchema = z
 // Payment & Subscription Schemas
 // ==========================================
 
+/**
+ * Pole opcjonalne tolerujące każdego klienta: null, "" i same spacje znaczą "brak pola"
+ * i wychodzą ze schematu jako undefined (dalsza logika nie widzi null).
+ * Formularz portalu wysyła clientId: null, variantId: null (usługa bez
+ * wariantu) i guestEmail: null (gość bez e-maila) — sam .optional()
+ * odrzucał je 400 "Validation failed" (P0 od a00d059).
+ */
+function absentAsUndefined<T extends z.ZodType>(schema: T) {
+  return z.preprocess(
+    (v) => (v === null || (typeof v === "string" && v.trim() === "") ? undefined : v),
+    schema.optional()
+  );
+}
+
+/**
+ * Telefon PL: spacje, myślniki i nawiasy zdejmowane PRZED regexem, wynik
+ * znormalizowany ("+48 123 456 789" -> "+48123456789", "123-456-789" ->
+ * "123456789") — taki trafia do bazy i do SMS.
+ */
+function normalizedPlPhone(message: string) {
+  return absentAsUndefined(
+    z.preprocess(
+      (v) => (typeof v === "string" ? v.replace(/[\s\-()]/g, "") : v),
+      z.string().regex(/^(\+48)?[0-9]{9}$/, message)
+    )
+  );
+}
+
 export const depositCreateSessionSchema = z.object({
   salonId: z.string().uuid("salonId musi byc poprawnym UUID"),
   employeeId: z.string().uuid("employeeId musi byc poprawnym UUID"),
-  serviceId: z.string().uuid("serviceId musi byc poprawnym UUID").optional(),
-  variantId: z.string().uuid("variantId musi byc poprawnym UUID").optional(),
-  clientId: z.string().uuid("clientId musi byc poprawnym UUID").optional(),
+  serviceId: absentAsUndefined(z.string().uuid("serviceId musi byc poprawnym UUID")),
+  variantId: absentAsUndefined(z.string().uuid("variantId musi byc poprawnym UUID")),
+  clientId: absentAsUndefined(z.string().uuid("clientId musi byc poprawnym UUID")),
   startTime: z.string().min(1, "startTime jest wymagane"),
   endTime: z.string().min(1, "endTime jest wymagane"),
   depositAmount: z.preprocess(
     (v) => (typeof v === "string" ? parseFloat(v) : v),
     z.number().positive("Kwota zadatku musi byc wieksza od 0")
   ),
-  paymentMethod: z.enum(["stripe", "blik"], { message: "paymentMethod musi byc 'stripe' lub 'blik'" }).optional(),
-  blikPhoneNumber: z
-    .string()
-    .regex(/^(\+48)?[0-9]{9}$/, "Nieprawidlowy numer telefonu BLIK (9 cyfr)")
-    .optional(),
-  guestName: z.string().min(2, "Imie i nazwisko musi miec min. 2 znaki").optional(),
-  guestPhone: z
-    .string()
-    .regex(/^(\+48)?[0-9]{9}$/, "Podaj prawidlowy numer telefonu (9 cyfr)")
-    .optional(),
-  guestEmail: z.string().email("Podaj prawidlowy adres email").optional(),
-  notes: z.string().optional(),
+  paymentMethod: absentAsUndefined(
+    z.enum(["stripe", "blik"], { message: "paymentMethod musi byc 'stripe' lub 'blik'" })
+  ),
+  blikPhoneNumber: normalizedPlPhone("Nieprawidlowy numer telefonu BLIK (9 cyfr)"),
+  guestName: absentAsUndefined(z.string().trim().min(2, "Imie i nazwisko musi miec min. 2 znaki")),
+  guestPhone: normalizedPlPhone("Podaj prawidlowy numer telefonu (9 cyfr)"),
+  guestEmail: absentAsUndefined(z.string().trim().email("Podaj prawidlowy adres email")),
+  notes: absentAsUndefined(z.string()),
 });
 
 export const depositConfirmSchema = z.object({

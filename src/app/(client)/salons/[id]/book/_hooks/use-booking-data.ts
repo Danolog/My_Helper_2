@@ -5,6 +5,7 @@ import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
 import { isPromotionTypeFrozen } from "@/lib/features";
+import { buildDepositBody } from "../_lib/deposit-body";
 import type {
   SalonDetail,
   AssignedEmployee,
@@ -526,25 +527,21 @@ export function useBookingData(): UseBookingDataReturn {
       setIsProcessingPayment(true);
       let redirectingToStripe = false;
       try {
-        const depositBody = {
+        const depositBody = buildDepositBody({
           salonId,
-          clientId: null,
           employeeId: selectedEmployeeId,
           serviceId: selectedServiceId,
-          variantId: selectedVariantId || null,
-          startTime: startTime.toISOString(),
-          endTime: endTime.toISOString(),
+          variantId: selectedVariantId,
+          startTime,
+          endTime,
           notes: notesText,
           depositAmount,
           paymentMethod: selectedPaymentMethod,
-          ...(!session
-            ? {
-                guestName: guestName.trim(),
-                guestPhone: guestPhone.trim(),
-                guestEmail: guestEmail.trim() || null,
-              }
-            : {}),
-        };
+          isLoggedIn: !!session,
+          guestName,
+          guestPhone,
+          guestEmail,
+        });
 
         // Step 1: Create deposit session (which also creates the appointment)
         const sessionRes = await mutationFetch("/api/deposits/create-session", {

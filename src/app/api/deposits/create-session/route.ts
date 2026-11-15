@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq, and, not, lt, gt } from "drizzle-orm";
-import { validateBody, depositCreateSessionSchema } from "@/lib/api-validation";
+import { parseBody, depositCreateSessionSchema } from "@/lib/api-validation";
 // ADR-001 sekcja 4: publiczna ścieżka rezerwacji gościa (brak sesji właściciela salonu) — świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
@@ -51,9 +51,12 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
-    const validationError = validateBody(depositCreateSessionSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
+    // P0: czytamy SPARSOWANE dane — schemat zamienia null/"" na undefined
+    // (front wysyła clientId/variantId/guestEmail: null) i normalizuje
+    // telefony. Surowe body omijało tę normalizację.
+    const parsed = parseBody(depositCreateSessionSchema, body);
+    if (!parsed.ok) {
+      return NextResponse.json(parsed.error, { status: 400 });
     }
     const {
       salonId,
@@ -70,19 +73,21 @@ export async function POST(request: Request) {
       guestName,
       guestPhone,
       guestEmail,
-    } = body;
+    } = parsed.data;
 
     const bookedByUserId = session?.user?.id || null;
 
-    // Guest validation: require name and phone when not logged in
+    // Guest validation: require name and phone when not logged in.
+    // Format (trim, min. 2 znaki, telefon PL po normalizacji) sprawdził już
+    // schemat — tu tylko obecność pól dla gościa.
     if (!session) {
-      if (!guestName?.trim() || guestName.trim().length < 2) {
+      if (!guestName) {
         return NextResponse.json(
           { success: false, error: "Imię i nazwisko jest wymagane (min. 2 znaki)" },
           { status: 400 }
         );
       }
-      if (!guestPhone?.trim() || !/^(\+48)?[0-9]{9}$/.test(guestPhone.trim().replace(/[\s\-()]/g, ""))) {
+      if (!guestPhone) {
         return NextResponse.json(
           { success: false, error: "Podaj prawidłowy numer telefonu (9 cyfr)" },
           { status: 400 }
@@ -128,10 +133,10 @@ export async function POST(request: Request) {
     const expected = await calculateExpectedDeposit({
       salonId,
       serviceId,
-      variantId: variantId || null,
+      variantId: variantId ?? null,
       startTime: new Date(startTime),
       sessionUser: session?.user ?? null,
-      guestEmail: guestEmail?.trim() || null,
+      guestEmail: guestEmail ?? null,
     });
 
     if (!expected.ok) {
@@ -151,7 +156,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const requestedAmount = parseFloat(depositAmount);
+    const requestedAmount = depositAmount;
     if (Math.abs(requestedAmount - expected.amount) > 0.01) {
       logger.warn("Deposit amount mismatch — request rejected", {
         salonId,
@@ -230,13 +235,13 @@ export async function POST(request: Request) {
           bookedByUserId,
           startTime: new Date(startTime),
           endTime: new Date(endTime),
-          notes: notes || null,
+          notes: notes ?? null,
           depositAmount: String(depositAmountValue),
           depositPaid: false,
           status: "scheduled",
-          guestName: guestName?.trim() || null,
-          guestPhone: guestPhone?.trim() || null,
-          guestEmail: guestEmail?.trim() || null,
+          guestName: guestName ?? null,
+          guestPhone: guestPhone ?? null,
+          guestEmail: guestEmail ?? null,
         })
         .returning();
 
@@ -271,7 +276,7 @@ export async function POST(request: Request) {
     const stripe = stripeConfigured ? getStripe() : null;
     if (stripe) {
       const origin = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-      const customerEmail = session?.user?.email || guestEmail?.trim() || undefined;
+      const customerEmail = session?.user?.email || guestEmail || undefined;
 
       try {
         const checkoutSession = await stripe.checkout.sessions.create({
