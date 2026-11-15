@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and, desc } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createPromoCodeSchema } from "@/lib/api-validation";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import { apiRateLimit } from "@/lib/rate-limit";
 import { requireSalonStaff } from "@/lib/salon-context";
@@ -137,7 +138,9 @@ export const POST = withApiHandler(
         .limit(1)
       );
 
-      if (!promotion) {
+      // Promocja zamrożonego typu nie istnieje dla panelu (B2.1, Ryan N1):
+      // ta sama odpowiedź co brak promocji — kod nie dawałby rabatu.
+      if (!promotion || isPromotionTypeFrozen(promotion.type)) {
         return NextResponse.json(
           { success: false, error: "Promotion not found or does not belong to this salon" },
           { status: 404 }
