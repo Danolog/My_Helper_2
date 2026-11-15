@@ -30,17 +30,13 @@ function blobStoreId(): string | null {
   return /^[A-Za-z0-9]+$/.test(storeId) ? storeId.toLowerCase() : null;
 }
 
-export function isOwnGalleryUploadUrl(url: string): boolean {
-  if (typeof url !== "string" || url.length === 0 || url.length > MAX_URL_LENGTH) {
-    return false;
-  }
-
+/**
+ * Wspólny rdzeń: adres w naszym store Blob (https, dokładny host store'u,
+ * bez portu/userinfo/query/fragmentu, w postaci kanonicznej) ze ścieżką
+ * pasującą do wzorca.
+ */
+function isOwnBlobUrl(url: string, pathRe: RegExp): boolean {
   const storeId = blobStoreId();
-
-  // Lokalny storage: tylko gdy upload faktycznie zapisuje na dysk.
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    return LOCAL_GALLERY_RE.test(url);
-  }
   if (!storeId) return false;
 
   let parsed: URL;
@@ -61,6 +57,39 @@ export function isOwnGalleryUploadUrl(url: string): boolean {
     // porównanie z surowym wejściem: URL normalizuje "..", więc wymagamy,
     // by adres był już w postaci kanonicznej
     parsed.href === url &&
-    BLOB_GALLERY_PATH_RE.test(parsed.pathname)
+    pathRe.test(parsed.pathname)
   );
+}
+
+function isSaneInput(url: unknown): url is string {
+  return typeof url === "string" && url.length > 0 && url.length <= MAX_URL_LENGTH;
+}
+
+export function isOwnGalleryUploadUrl(url: string): boolean {
+  if (!isSaneInput(url)) return false;
+
+  // Lokalny storage: tylko gdy upload faktycznie zapisuje na dysk.
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return LOCAL_GALLERY_RE.test(url);
+  }
+  return isOwnBlobUrl(url, BLOB_GALLERY_PATH_RE);
+}
+
+/**
+ * Czy adres to wynik NASZEGO POST /api/ai/image/enhance dla TEGO salonu?
+ *
+ * Enhance zapisuje `enhanced-<salonId>-<Date.now()>.jpg` w folderze
+ * "enhanced" — ale tylko z tokenem Blob; bez tokenu zwraca data URI, którego
+ * tu nie przyjmujemy. UI (photo-enhance-dialog) po akceptacji podmienia
+ * afterPhotoUrl na ten adres, więc ponowny enhance tego samego zdjęcia
+ * wysyła właśnie go. Wiązanie z salonId: salon nie wskaże wyniku innego.
+ */
+export function isOwnEnhancedUploadUrl(url: string, salonId: string): boolean {
+  if (!isSaneInput(url) || !process.env.BLOB_READ_WRITE_TOKEN) return false;
+  if (typeof salonId !== "string" || !new RegExp(`^${UUID}$`, "i").test(salonId)) return false;
+  const pathRe = new RegExp(
+    `^/enhanced/enhanced-${salonId}-\\d{13}(?:-[A-Za-z0-9]{1,64})?\\.jpg$`,
+    "i",
+  );
+  return isOwnBlobUrl(url, pathRe);
 }
