@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions, subscriptionPayments, subscriptionPlans } from "@/lib/schema";
+import { stripeSubscriptionPeriod, type StripeSubscriptionPeriodSource } from "@/lib/stripe-period";
 import type Stripe from "stripe";
 
 /**
@@ -33,15 +34,9 @@ export interface SubscriptionCheckoutSession {
   customer?: string | { id: string } | null;
 }
 
-/**
- * Okres rozliczeniowy: starsze wersje API Stripe trzymają go na subskrypcji,
- * nowsze (SDK 20) na pozycjach subskrypcji.
- */
-interface RawStripeSubscription {
+/** Subskrypcja Stripe: id + okres (`@/lib/stripe-period`). */
+interface RawStripeSubscription extends StripeSubscriptionPeriodSource {
   id: string;
-  current_period_start?: number;
-  current_period_end?: number;
-  items?: { data?: Array<{ current_period_start?: number; current_period_end?: number }> };
 }
 
 type SubscriptionRow = typeof salonSubscriptions.$inferSelect;
@@ -82,14 +77,6 @@ function isUniqueViolation(error: unknown): boolean {
     e = (e as { cause?: unknown }).cause;
   }
   return false;
-}
-
-function stripeSubscriptionPeriod(sub: RawStripeSubscription): { start: Date; end: Date } | null {
-  const item = sub.items?.data?.[0];
-  const start = sub.current_period_start ?? item?.current_period_start;
-  const end = sub.current_period_end ?? item?.current_period_end;
-  if (typeof start !== "number" || typeof end !== "number") return null;
-  return { start: new Date(start * 1000), end: new Date(end * 1000) };
 }
 
 function hasRealStripeSubscription(id: string | null): boolean {

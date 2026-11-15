@@ -14,6 +14,7 @@ import {
   subscriptionPlans,
 } from "@/lib/schema";
 import { getStripe, isStripeWebhookConfigured } from "@/lib/stripe";
+import { stripeInvoicePeriod, stripeSubscriptionPeriod } from "@/lib/stripe-period";
 import {
   confirmSubscriptionCheckout,
   type SubscriptionCheckoutSession,
@@ -34,6 +35,14 @@ interface RawInvoiceData {
   // Stripe v1 API: top-level subscription field
   subscription?: string | { id: string };
   payment_intent?: string | { id: string };
+  /** Pozycje faktury — okres opłacony (`stripeInvoicePeriod`). */
+  lines?: {
+    data?: Array<{
+      type?: string | null;
+      parent?: { type?: string | null } | null;
+      period?: { start?: number | null; end?: number | null } | null;
+    }>;
+  };
   // Stripe v2 API: nested parent structure
   parent?: {
     subscription_details?: {
@@ -69,9 +78,11 @@ interface RawSubscriptionData {
   status: string;
   canceled_at: number | null;
   cancel_at_period_end: boolean;
-  // May or may not exist depending on Stripe API version
+  // Starsze API: okres na subskrypcji; nowsze: na items.data[0] (stripe-period.ts)
   current_period_start?: number;
   current_period_end?: number;
+  items?: { data?: Array<{ current_period_start?: number; current_period_end?: number }> };
+  trial_end?: number | null;
 }
 
 /**
@@ -245,17 +256,14 @@ async function handleInvoicePaid(event: Stripe.Event) {
     return;
   }
 
-  // Calculate new period dates from the invoice
-  const periodStart = invoice.period_start
-    ? new Date(invoice.period_start * 1000)
-    : new Date();
-  const periodEnd = invoice.period_end
-    ? new Date(invoice.period_end * 1000)
-    : (() => {
-        const d = new Date();
-        d.setMonth(d.getMonth() + 1);
-        return d;
-      })();
+  // Okres opłacony: z pozycji subskrypcji na fakturze (invoice.period_* to
+  // okres poprzedni). Bez okresu ze Stripe nie zgadujemy — Stripe ponowi.
+  const period = stripeInvoicePeriod(invoice);
+  if (!period) {
+    throw new Error(`invoice.paid without billing period: ${invoice.id}`);
+  }
+  const periodStart = period.start;
+  const periodEnd = period.end;
 
   // Check for scheduled plan change (downgrade)
   let newPlanId = sub.planId;
@@ -396,13 +404,15 @@ async function handleSubscriptionUpdated(event: Stripe.Event) {
   else if (stripeSub.status === "canceled") status = "canceled";
   else if (stripeSub.status === "trialing") status = "trialing";
 
-  // current_period_start/end may not exist in newer Stripe API versions
-  const periodStart = stripeSub.current_period_start
-    ? new Date(stripeSub.current_period_start * 1000)
-    : sub.currentPeriodStart;
-  const periodEnd = stripeSub.current_period_end
-    ? new Date(stripeSub.current_period_end * 1000)
-    : sub.currentPeriodEnd;
+  // Okres z items.data[0] (nowsze API) albo z poziomu subskrypcji (starsze).
+  const period = stripeSubscriptionPeriod(stripeSub);
+  if (!period) {
+    logger.warn("customer.subscription.updated without billing period — keeping stored period", {
+      stripeSubscriptionId: stripeSub.id,
+    });
+  }
+  const periodStart = period?.start ?? sub.currentPeriodStart;
+  const periodEnd = period?.end ?? sub.currentPeriodEnd;
 
   await db
     .update(salonSubscriptions)
@@ -413,6 +423,10 @@ async function handleSubscriptionUpdated(event: Stripe.Event) {
       canceledAt: stripeSub.canceled_at
         ? new Date(stripeSub.canceled_at * 1000)
         : sub.canceledAt,
+      // Trial po stronie Stripe: koniec ze Stripe, nie z rejestracji.
+      ...(stripeSub.status === "trialing" && typeof stripeSub.trial_end === "number"
+        ? { trialEndsAt: new Date(stripeSub.trial_end * 1000) }
+        : {}),
     })
     .where(eq(salonSubscriptions.id, sub.id));
 
