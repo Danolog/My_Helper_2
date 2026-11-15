@@ -31,6 +31,8 @@ RUN pnpm install --frozen-lockfile
 
 # ---------------------------------------------------------------------------
 FROM deps AS builder
+# BUILD_STANDALONE=1 (niżej) włącza `output: "standalone"` w next.config.ts —
+# tylko tu; Vercel i CI budują bez niego (do C4).
 # Publiczne zmienne są wpiekane w bundel przy budowie (także po stronie
 # serwera) — obraz jest związany z adresem aplikacji. Zmiana domeny = nowa budowa.
 ARG NEXT_PUBLIC_APP_URL
@@ -39,7 +41,8 @@ ARG NEXT_PUBLIC_VAPID_PUBLIC_KEY
 ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL} \
     NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY} \
     NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY} \
-    NEXT_TELEMETRY_DISABLED=1
+    NEXT_TELEMETRY_DISABLED=1 \
+    BUILD_STANDALONE=1
 COPY . .
 # Wartości zastępcze tylko na czas tego polecenia (nie ENV): budowa nie łączy
 # się z bazą, ale import `src/lib/db.ts` wymaga niepustego adresu.
