@@ -26,7 +26,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { VoiceTextarea } from "@/components/ui/voice-textarea";
+import { Textarea } from "@/components/ui/textarea";
 import { mutationFetch } from "@/lib/api-client";
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 
@@ -428,11 +428,10 @@ export function CompleteAppointmentDialog({
 
             <div>
               <Label htmlFor="recipe">Receptura</Label>
-              <VoiceTextarea
+              <Textarea
                 id="recipe"
                 value={recipe}
                 onChange={(e) => setRecipe(e.target.value)}
-                onValueChange={setRecipe}
                 placeholder="np. Kolor 6/0 + 7/0 w proporcji 1:1, utleniacz 6%"
                 rows={2}
                 data-testid="treatment-recipe-input"
@@ -441,11 +440,10 @@ export function CompleteAppointmentDialog({
 
             <div>
               <Label htmlFor="techniques">Techniki</Label>
-              <VoiceTextarea
+              <Textarea
                 id="techniques"
                 value={techniques}
                 onChange={(e) => setTechniques(e.target.value)}
-                onValueChange={setTechniques}
                 placeholder="np. Baleyage, cieniowanie"
                 rows={2}
                 data-testid="treatment-techniques-input"
@@ -454,11 +452,10 @@ export function CompleteAppointmentDialog({
 
             <div>
               <Label htmlFor="treatment-notes">Notatki dodatkowe</Label>
-              <VoiceTextarea
+              <Textarea
                 id="treatment-notes"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                onValueChange={setNotes}
                 placeholder="np. Klientka preferuje cieplejsze odcienie, nastepna wizyta za 6 tygodni"
                 rows={2}
                 data-testid="treatment-notes-input"

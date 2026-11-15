@@ -5,7 +5,6 @@ import { DashboardBreadcrumbs } from "@/components/dashboard/dashboard-breadcrum
 import { DashboardSidebar, DashboardMobileHeader } from "@/components/dashboard/dashboard-sidebar";
 import { ModulesProvider } from "@/components/dashboard/modules-provider";
 import { RoleProvider } from "@/components/dashboard/role-provider";
-import { VoiceCommandButton } from "@/components/dashboard/voice-command-button";
 import { DEFAULT_MODULES } from "@/lib/features";
 import { getSalonContext } from "@/lib/salon-context";
 import { getSalonModules } from "@/lib/server/modules";
@@ -43,7 +42,6 @@ export default async function DashboardLayout({
           </div>
           <DashboardBottomNav />
           <CommandPalette />
-          <VoiceCommandButton />
         </div>
       </ModulesProvider>
     </RoleProvider>

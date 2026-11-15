@@ -4,7 +4,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { DrizzleQueryError } from "drizzle-orm";
-import { redactQueryParamsText, toSafeErrorMeta, type SafeErrorMeta } from "@/lib/safe-error";
+import { redactQueryParamsText, toErrorIdentity, toSafeErrorMeta, type SafeErrorMeta } from "@/lib/safe-error";
 
 const PII = ["Anna Nowak", "+48123456789", "anna@test.pl"];
 
@@ -51,5 +51,32 @@ describe("toSafeErrorMeta", () => {
     expect(toSafeErrorMeta("zwykły napis")).toBe("zwykły napis");
     expect(toSafeErrorMeta(42)).toBe(42);
     expect(toSafeErrorMeta(null)).toBeNull();
+  });
+});
+
+describe("toErrorIdentity (N1, Ryan #62 — catch webhooka Stripe)", () => {
+  it("DrizzleQueryError → tylko nazwa i kod z cause; bez message, stack, zapytania i parametrów", () => {
+    const identity = toErrorIdentity(drizzleError());
+    expect(identity).toEqual({ errorName: "DrizzleQueryError", errorCode: "23505" });
+    const serialized = JSON.stringify(identity);
+    for (const value of PII) expect(serialized).not.toContain(value);
+    expect(serialized).not.toContain("insert");
+  });
+
+  it("kod własny błędu (Postgres) i typ błędu Stripe", () => {
+    expect(toErrorIdentity(Object.assign(new Error("deadlock"), { code: "40P01" }))).toEqual({
+      errorName: "Error",
+      errorCode: "40P01",
+    });
+    expect(toErrorIdentity(Object.assign(new Error("x"), { type: "StripeAPIError" }))).toEqual({
+      errorName: "Error",
+      errorCode: "StripeAPIError",
+    });
+  });
+
+  it("błąd bez kodu i wartość nie-Error → bez treści", () => {
+    expect(toErrorIdentity(new TypeError("Anna Nowak"))).toEqual({ errorName: "TypeError" });
+    expect(toErrorIdentity("+48123456789")).toEqual({ errorName: "string" });
+    expect(toErrorIdentity(null)).toEqual({ errorName: "object" });
   });
 });

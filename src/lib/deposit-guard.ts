@@ -3,7 +3,7 @@
  *
  * Jedyną ścieżką rezerwacji z zadatkiem jest POST /api/deposits/create-session
  * (kwota liczona serwerowo, płatność Stripe). Każda inna trasa, która tworzy
- * wizytę dla kogoś spoza personelu salonu (/api/appointments, ai/voice/book,
+ * wizytę dla kogoś spoza personelu salonu (/api/appointments,
  * book-package, akceptacja terminu z listy oczekujących), pyta ten moduł, czy
  * może zapisać wizytę bez zadatku.
  *
