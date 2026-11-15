@@ -53,22 +53,88 @@ function chain(result: () => unknown[]) {
   return c;
 }
 
+// Kolejność operacji (T3b): `tx:start`, `lock_timeout`, `select:<tabela>`,
+// `insert:<tabela>`, `lock:salon:<id>`, `commit`/`rollback`.
+const opLog: string[] = [];
+const dbOutsideTx = { insert: vi.fn(), update: vi.fn() };
+let failInsert: { table: string; error: unknown } | null = null;
+
+function insertChain(table: { _table?: string }) {
+  mockInsert(table._table);
+  opLog.push(`insert:${table._table}`);
+  if (failInsert && failInsert.table === table._table) {
+    const { error } = failInsert;
+    failInsert = null;
+    const c: Record<string, unknown> = {};
+    for (const m of ["values", "returning"]) c[m] = (v: unknown) => (m === "values" && mockInsertValues(v), c);
+    c.then = (_res: unknown, rej: (e: unknown) => unknown) => rej(error);
+    return c;
+  }
+  return chain(() =>
+    table._table === "salons"
+      ? [{ id: SALON_A }]
+      : [{ id: crypto.randomUUID(), status: "trialing", trialEndsAt: new Date() }]
+  );
+}
+
+function selectChainLogged() {
+  const c = chain(() => []);
+  const from = c.from as (t: { _table?: string }) => unknown;
+  c.from = (t: { _table?: string }) => {
+    opLog.push(`select:${t._table}`);
+    return from(t);
+  };
+  return c;
+}
+
 vi.mock("@/lib/db", () => ({
   db: {
-    select: () => chain(() => []),
+    select: () => selectChainLogged(),
     update: (...args: unknown[]) => {
+      dbOutsideTx.update(...args);
       mockUpdate(...args);
       return chain(() => []);
     },
     insert: (table: { _table?: string }) => {
-      mockInsert(table._table);
-      return chain(() =>
-        table._table === "salons"
-          ? [{ id: SALON_A }]
-          : [{ id: crypto.randomUUID(), status: "trialing", trialEndsAt: new Date() }]
-      );
+      dbOutsideTx.insert(table._table);
+      return insertChain(table);
+    },
+    transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      opLog.push("tx:start");
+      const tx = {
+        select: () => selectChainLogged(),
+        insert: (table: { _table?: string }) => insertChain(table),
+        update: (...args: unknown[]) => {
+          mockUpdate(...args);
+          return chain(() => []);
+        },
+      };
+      try {
+        const r = await fn(tx);
+        opLog.push("commit");
+        return r;
+      } catch (e) {
+        opLog.push("rollback");
+        throw e;
+      }
     },
   },
+}));
+
+const { lockFailure } = vi.hoisted(() => ({ lockFailure: { next: null as { code: string } | null } }));
+vi.mock("@/lib/subscription-locks", () => ({
+  setSubscriptionLockTimeout: async () => {
+    opLog.push("lock_timeout");
+  },
+  lockSalonSubscriptions: async (_tx: unknown, salonId: string) => {
+    opLog.push(`lock:salon:${salonId}`);
+    if (lockFailure.next) {
+      const err = Object.assign(new Error("lock failure"), lockFailure.next);
+      lockFailure.next = null;
+      throw err;
+    }
+  },
+  isSubscriptionLockFailure: (e: unknown) => ["40P01", "55P03"].includes(String((e as { code?: unknown }).code)),
 }));
 
 vi.mock("@/lib/schema", () => {
@@ -110,6 +176,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   tableRows = {};
   selectedTables.length = 0;
+  opLog.length = 0;
+  failInsert = null;
+  lockFailure.next = null;
   mockRequireAuth.mockResolvedValue({ session: { user: USER_A }, user: USER_A });
 });
 
@@ -211,5 +280,92 @@ describe("POST /api/register-subscription — konto tylko z sesji", () => {
     );
     const { status } = await post({ planSlug: "pro" });
     expect(status).toBe(401);
+  });
+});
+
+describe("POST /api/register-subscription — T3b: jedna transakcja, blokada salonu, indeksy unikalne", () => {
+  it("salon i trial w JEDNEJ transakcji; blokada salonu przed odczytem jego wierszy", async () => {
+    tableRows = { subscriptionPlans: [PLAN_PRO] };
+
+    const { status } = await post({ planSlug: "pro" });
+
+    expect(status).toBe(200);
+    expect(opLog).toEqual([
+      "select:subscriptionPlans",
+      "tx:start",
+      "lock_timeout",
+      "select:salons",
+      "insert:salons",
+      `lock:salon:${SALON_A}`,
+      "select:salonSubscriptions",
+      "insert:salonSubscriptions",
+      "commit",
+    ]);
+    expect(dbOutsideTx.insert).not.toHaveBeenCalled();
+  });
+
+  it("istniejący salon bez subskrypcji (np. z POST /api/salons): blokada jego id, trial, bez drugiego salonu", async () => {
+    tableRows = { subscriptionPlans: [PLAN_PRO], salons: [{ id: SALON_B, ownerId: USER_A.id }] };
+
+    const { status } = await post({ planSlug: "pro" });
+
+    expect(status).toBe(200);
+    expect(mockInsert).not.toHaveBeenCalledWith("salons");
+    expect(opLog).toContain(`lock:salon:${SALON_B}`);
+    expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({ salonId: SALON_B, status: "trialing" }));
+  });
+
+  it("błąd zapisu subskrypcji → rollback całej transakcji (salon nie zostaje bez wiersza), 500", async () => {
+    tableRows = { subscriptionPlans: [PLAN_PRO] };
+    failInsert = { table: "salonSubscriptions", error: Object.assign(new Error("boom"), { code: "XX000" }) };
+
+    const { status } = await post({ planSlug: "pro" });
+
+    expect(status).toBe(500);
+    expect(opLog).toContain("insert:salons");
+    expect(opLog.at(-1)).toBe("rollback");
+    expect(dbOutsideTx.insert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["salons_owner_id_uq (równoległe utworzenie salonu)", "salons"],
+    ["salon_subscriptions_salon_current_uq (równoległy trial)", "salonSubscriptions"],
+  ])("23505 z %s → 409, rollback", async (_name, table) => {
+    tableRows = { subscriptionPlans: [PLAN_PRO] };
+    failInsert = { table, error: Object.assign(new Error("db"), { cause: { code: "23505" } }) };
+
+    const { status, body } = await post({ planSlug: "pro" });
+
+    expect(status).toBe(409);
+    expect(body.success).toBe(false);
+    expect(opLog.at(-1)).toBe("rollback");
+  });
+
+  it.each(["40P01", "55P03"])("%s przy blokadzie salonu → 503 LOCK_BUSY, rollback", async (code) => {
+    tableRows = { subscriptionPlans: [PLAN_PRO], salons: [{ id: SALON_A, ownerId: USER_A.id }] };
+    lockFailure.next = { code };
+
+    const { status, body } = await post({ planSlug: "pro" });
+
+    expect(status).toBe(503);
+    expect(body.code).toBe("LOCK_BUSY");
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(opLog.at(-1)).toBe("rollback");
+  });
+
+  it("tylko aktywny plan: zapytanie filtruje isActive = true; plan wycofany (brak w wyniku) → 404 bez transakcji", async () => {
+    tableRows = { subscriptionPlans: [] };
+
+    const { status } = await post({ planSlug: "pro" });
+
+    expect(status).toBe(404);
+    expect(mockEq).toHaveBeenCalledWith("subscriptionPlans.isActive", true);
+    expect(opLog).not.toContain("tx:start");
+  });
+
+  it("400 przy niepoprawnym body, bez zapytań", async () => {
+    const { status } = await post({ planSlug: 123 });
+    expect(status).toBe(400);
+    expect(opLog).toEqual([]);
   });
 });

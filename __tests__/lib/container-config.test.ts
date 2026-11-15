@@ -2,20 +2,23 @@
  * Strażnik G-C1 (brief C, zadanie 0.2): konfiguracja kontenera Cloud Run.
  *
  * Pilnuje, że:
- * - `next.config.ts` buduje serwer samodzielny (`output: "standalone"`) —
- *   bez tego etap `runner` nie ma czego skopiować;
+ * - `next.config.ts` buduje serwer samodzielny (`output: "standalone"`) tylko
+ *   przy `BUILD_STANDALONE=1`, a tę zmienną ustawia wyłącznie etap `builder`
+ *   w `Dockerfile` — Vercel (`vercel.json`) i CI (`.github/workflows/`) budują
+ *   bez zmian do C4 (werdykt Ethana na #108);
  * - etap `runner` w `Dockerfile` jest domyślnym celem i działa jako
  *   użytkownik inny niż root;
  * - żaden etap nie kopiuje plików `.env*` i nie deklaruje `ARG`/`ENV`
  *   o nazwie sekretu (sekrety przychodzą w czasie działania);
- * - `.dockerignore` wycina `.env*` z kontekstu budowy i nie ma wyjątku `!.env…`.
+ * - `.dockerignore` wycina pliki `.env*` na każdym poziomie katalogów (wpis
+ *   z prefiksem `**` — nie tylko w katalogu głównym) i nie ma wyjątku
+ *   `!.env…` (werdykt Ryana na #108).
  *
  * Test czyta pliki jako tekst — nie buduje obrazu.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { describe, it, expect } from "vitest";
-import nextConfig from "../../next.config";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 const ROOT = process.cwd();
 const read = (relPath: string) => readFileSync(join(ROOT, relPath), "utf8");
@@ -96,9 +99,29 @@ const dockerfile = read("Dockerfile");
 const stages = parseDockerfile(dockerfile);
 const runner = stages.find((s) => s.name === "runner");
 
-describe("G-C1: next.config.ts", () => {
-  it('buduje serwer samodzielny (output: "standalone")', () => {
-    expect(nextConfig.output).toBe("standalone");
+// Konfiguracja liczy się przy imporcie — każdy przypadek ładuje moduł od nowa.
+async function loadNextConfig(buildStandalone: string | undefined) {
+  vi.resetModules();
+  if (buildStandalone === undefined) vi.stubEnv("BUILD_STANDALONE", undefined);
+  else vi.stubEnv("BUILD_STANDALONE", buildStandalone);
+  return (await import("../../next.config")).default;
+}
+
+describe("G-C1: next.config.ts — standalone tylko z BUILD_STANDALONE=1", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('BUILD_STANDALONE=1 → output "standalone"', async () => {
+    expect((await loadNextConfig("1")).output).toBe("standalone");
+  });
+
+  it("bez zmiennej → output undefined (Vercel, CI)", async () => {
+    expect((await loadNextConfig(undefined)).output).toBeUndefined();
+  });
+
+  it('BUILD_STANDALONE=0 → output undefined', async () => {
+    expect((await loadNextConfig("0")).output).toBeUndefined();
   });
 });
 
@@ -106,6 +129,25 @@ describe("G-C1: Dockerfile", () => {
   it("ma etap runner i jest on ostatni (domyślny cel `docker build`)", () => {
     expect(runner, "brak etapu `AS runner`").toBeDefined();
     expect(stages.at(-1)?.name).toBe("runner");
+  });
+
+  it("etap builder ustawia BUILD_STANDALONE=1 (ENV albo w RUN z build:ci)", () => {
+    const builder = stages.find((s) => s.name === "builder");
+    expect(builder, "brak etapu `AS builder`").toBeDefined();
+    const viaEnv = builder!.instructions.some(
+      (i) => /^ENV\s/i.test(i) && /(^|\s)BUILD_STANDALONE=("?)1\2(\s|$)/.test(i),
+    );
+    const viaRun = builder!.instructions.some(
+      (i) => /^RUN\s/i.test(i) && /BUILD_STANDALONE=1\s[^&;|]*pnpm build:ci/.test(i),
+    );
+    expect(viaEnv || viaRun, "etap builder nie włącza standalone — runner nie miałby server.js").toBe(true);
+  });
+
+  it("BUILD_STANDALONE występuje w Dockerfile tylko w etapie builder", () => {
+    const elsewhere = stages
+      .filter((s) => s.name !== "builder")
+      .flatMap((s) => s.instructions.filter((i) => i.includes("BUILD_STANDALONE")).map((i) => `${s.name}: ${i}`));
+    expect(elsewhere).toEqual([]);
   });
 
   it("etap runner kończy się użytkownikiem innym niż root", () => {
@@ -154,14 +196,37 @@ describe("G-C1: Dockerfile", () => {
   });
 });
 
+describe("G-C1: Vercel i CI nie włączają standalone (do C4)", () => {
+  const workflowDir = ".github/workflows";
+  const files = [
+    "vercel.json",
+    ...readdirSync(join(ROOT, workflowDir))
+      .filter((f) => /\.ya?ml$/.test(f))
+      .map((f) => `${workflowDir}/${f}`),
+  ];
+
+  it("sprawdza vercel.json i co najmniej jeden workflow", () => {
+    expect(files.length).toBeGreaterThan(1);
+  });
+
+  it.each(files)("%s nie zawiera BUILD_STANDALONE", (file) => {
+    expect(read(file)).not.toContain("BUILD_STANDALONE");
+  });
+});
+
 describe("G-C1: .dockerignore", () => {
   const entries = read(".dockerignore")
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith("#"));
 
-  it("wycina .env* z kontekstu budowy", () => {
-    expect(entries).toContain(".env*");
+  it("wycina **/.env* z kontekstu budowy (także zagnieżdżone, nie tylko w katalogu głównym)", () => {
+    expect(entries).toContain("**/.env*");
+  });
+
+  it("wycina pliki instrukcji agentów i kopie zapasowe (**/CLAUDE*.md, **/*.bak)", () => {
+    expect(entries).toContain("**/CLAUDE*.md");
+    expect(entries).toContain("**/*.bak");
   });
 
   it("nie ma wyjątku przywracającego plik .env", () => {

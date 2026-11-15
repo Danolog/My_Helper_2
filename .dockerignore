@@ -1,6 +1,11 @@
-# Kontekst budowy obrazu (Dockerfile). Strażnik G-C1 pilnuje `.env*`:
-# plik z sekretem nie może trafić do żadnej warstwy obrazu.
-.env*
+# Kontekst budowy obrazu (Dockerfile). Strażnik G-C1 pilnuje `**/.env*`:
+# plik z sekretem nie może trafić do żadnej warstwy obrazu. Samo `.env*`
+# działa tylko w katalogu głównym — `**/` łapie też zagnieżdżone (np.
+# src/config/.env), a Next w trybie standalone sam kopiuje `.env*` do
+# .next/standalone, więc ten wpis jest jedyną barierą. Bez wyjątków `!`.
+**/.env*
+**/CLAUDE*.md
+**/*.bak
 .git
 node_modules
 .next

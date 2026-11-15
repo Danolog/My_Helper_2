@@ -8,8 +8,12 @@ const nextConfig: NextConfig = {
 
   // Samodzielny serwer (.next/standalone/server.js) z minimalnym node_modules —
   // to uruchamia obraz Dockera na Cloud Run (Dockerfile, etap `runner`).
-  // Strażnik: __tests__/lib/container-config.test.ts (G-C1).
-  output: "standalone",
+  // Do C4 standalone włącza WYŁĄCZNIE Dockerfile (BUILD_STANDALONE=1 w etapie
+  // `builder`); Vercel i CI budują bez zmian. Warunek znika w C4 razem z
+  // vercel.json. Strażnik: __tests__/lib/container-config.test.ts (G-C1).
+  // Rozwinięcie zamiast `output: … : undefined` — exactOptionalPropertyTypes
+  // nie pozwala przypisać jawnego undefined do pola opcjonalnego NextConfig.
+  ...(process.env.BUILD_STANDALONE === "1" ? { output: "standalone" as const } : {}),
 
   // Prevent bundling of native Node.js modules (sharp) — on Vercel and in the
   // standalone container alike. Without this, Next.js tries to bundle sharp but
