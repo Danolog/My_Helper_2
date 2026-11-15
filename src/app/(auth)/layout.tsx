@@ -16,12 +16,7 @@ export default function AuthLayout({
           aria-hidden="true"
           priority
         />
-        <div
-          className="absolute inset-0"
-          style={{
-            background: `linear-gradient(135deg, oklch(0.60 0.12 45 / 70%) 0%, oklch(0.35 0.08 45 / 80%) 100%)`,
-          }}
-        />
+        <div className="absolute inset-0 bg-[linear-gradient(135deg,oklch(0.60_0.12_45/70%)_0%,oklch(0.35_0.08_45/80%)_100%)]" />
         {/* Botanical decorations */}
         <svg
           className="absolute top-8 right-8 w-32 h-32 text-white/10"

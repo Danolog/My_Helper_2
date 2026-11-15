@@ -1,14 +1,22 @@
 import { NextResponse } from "next/server";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
-import { sendPushNotification } from "@/lib/push";
+import { NO_SUBSCRIPTIONS_ERROR, sendPushNotification } from "@/lib/push";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { resolveSalonContext } from "@/lib/salon-context";
 
 /**
  * POST /api/push/test
  *
  * Send a test push notification to the authenticated user.
  * Used for verifying push notification setup.
+ *
+ * Rekord `notifications` trafia do salonu użytkownika z sesji (właściciel lub
+ * aktywny pracownik — resolveSalonContext). Konto bez jednoznacznego salonu:
+ * push idzie, rekordu nie ma (salonu nie zgadujemy).
+ *
+ * Odpowiedź: tylko łączne `sent`/`failed` i ogólny komunikat — bez błędów per
+ * endpoint i bez treści wyjątków (żadnej wyroczni o hostach/portach).
  */
 export async function POST(request: Request) {
   // Rate limit: push notification testing is a sensitive operation
@@ -26,31 +34,30 @@ export async function POST(request: Request) {
   const { user } = authResult;
 
   try {
-    // We need a salonId for the notification record.
-    // For test notifications, use a placeholder or find the user's salon.
-    const { db } = await import("@/lib/db");
-    const { salons } = await import("@/lib/schema");
-    const allSalons = await db.select({ id: salons.id }).from(salons).limit(1);
-    const salonId = allSalons[0]?.id;
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "No salon found for notification record" },
-        { status: 400 }
-      );
-    }
+    const { ctx } = await resolveSalonContext(user.id);
 
     const result = await sendPushNotification(user.id, {
       title: "Test powiadomienia push",
       body: "To jest testowe powiadomienie push z MyHelper. Dzialasz! 🎉",
       tag: "test-notification",
       data: { type: "test", url: "/dashboard/notifications" },
-      salonId,
+      salonId: ctx?.salonId ?? null,
     });
 
     return NextResponse.json({
       success: result.success,
-      data: result,
+      data: {
+        sent: result.sent,
+        failed: result.failed,
+        ...(result.success
+          ? {}
+          : {
+              error:
+                result.error === NO_SUBSCRIPTIONS_ERROR
+                  ? "Brak zarejestrowanych urzadzen dla powiadomien push"
+                  : "Nie udalo sie wyslac powiadomienia testowego",
+            }),
+      },
     });
   } catch (error) {
     logger.error("[Push Test] Error", { error: error });

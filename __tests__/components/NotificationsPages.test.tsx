@@ -71,6 +71,10 @@ function mockFetch() {
         data: { smsReminders: true, pushReminders: true, paymentConfirmations: true },
       });
     }
+    // Salon konta z sesji (useSalonId, #40) — nie publiczny katalog.
+    if (url.includes("/api/salons/mine")) {
+      return json({ success: true, salon: { id: SALON_ID, ownerId: "user-1" } });
+    }
     if (url.includes("/api/salons")) {
       return json({ success: true, data: [{ id: SALON_ID, ownerId: "user-1" }] });
     }

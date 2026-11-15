@@ -1,13 +1,22 @@
 import { NextRequest } from "next/server";
 import { eq, and, isNull } from "drizzle-orm";
-import { validateBody, clientConsentsSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import {
+  validateBody,
+  clientConsentsSchema,
+  CONSENT_TYPES as VALID_CONSENT_TYPES,
+  type ConsentType,
+} from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
+import { requireSalonStaff } from "@/lib/salon-context";
 import { marketingConsents, clients } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-const VALID_CONSENT_TYPES = ["email", "sms", "phone"] as const;
-type ConsentType = (typeof VALID_CONSENT_TYPES)[number];
+import { isValidUuid } from "@/lib/validations";
+
+/**
+ * Kartoteka klientów jak w /api/clients/[id]: owner + receptionist, employee 403.
+ * Salon WYŁĄCZNIE z sesji; klient spoza salonu sesji => 404 (findOne w forSalon).
+ */
+const CLIENT_ROLES = ["receptionist"] as const;
 
 interface ConsentStatus {
   type: ConsentType;
@@ -25,15 +34,14 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-
-  const salonId = await getUserSalonId();
-  if (!salonId) {
-    return Response.json({ error: "Salon not found" }, { status: 404 });
-  }
+  const gate = await requireSalonStaff({ roles: CLIENT_ROLES });
+  if (gate.error) return gate.error;
+  const salonId = gate.ctx.salonId;
 
   const { id: clientId } = await params;
+  if (!isValidUuid(clientId)) {
+    return Response.json({ error: "Nieprawidlowy identyfikator klienta" }, { status: 400 });
+  }
 
   try {
     // Verify client exists in the caller's salon
@@ -99,23 +107,28 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-
-  const salonId = await getUserSalonId();
-  if (!salonId) {
-    return Response.json({ error: "Salon not found" }, { status: 404 });
-  }
+  const gate = await requireSalonStaff({ roles: CLIENT_ROLES });
+  if (gate.error) return gate.error;
+  const salonId = gate.ctx.salonId;
 
   const { id: clientId } = await params;
+  if (!isValidUuid(clientId)) {
+    return Response.json({ error: "Nieprawidlowy identyfikator klienta" }, { status: 400 });
+  }
 
   try {
-    const body = await request.json();
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "Nieprawidlowe body zadania" }, { status: 400 });
+    }
     const validationError = validateBody(clientConsentsSchema, body);
     if (validationError) {
       return Response.json(validationError, { status: 400 });
     }
-    const { consents } = body as { consents: Record<string, boolean> };
+    // Po walidacji .strict(): wyłącznie znane typy, wartości wyłącznie boolean.
+    const { consents } = clientConsentsSchema.parse(body);
 
     // Verify client exists in the caller's salon
     const client = await forSalon(salonId).findOne(clients, clientId);

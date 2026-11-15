@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { getSalonContext } from "@/lib/salon-context";
+import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
+
+/** Grant temporary_access otwierający raporty pracownikowi/recepcji. */
+export const REPORTS_FEATURE = "reports";
 
 export type ReportSalonResult =
   | { salonId: string; error?: undefined }
@@ -10,6 +13,10 @@ export type ReportSalonResult =
  * (UAT X-1). Parametr `salonId` musi zgadzac sie z salonem sesji — odczyt
  * cross-tenant zwraca 403. Wczesniej raporty ufaly parametrowi bez sprawdzenia,
  * wiec kazdy zalogowany uzytkownik mogl czytac finanse dowolnego salonu.
+ *
+ * Rola: raporty (przychod, wynagrodzenia i prowizje pracownikow) sa dla
+ * wlasciciela. Pracownik/recepcja tylko z aktywnym grantem "reports"
+ * (hasFeatureAccess) — inaczej 403. Wczesniej bramka sprawdzala tylko salon.
  */
 export async function requireReportSalon(
   request: Request,
@@ -38,6 +45,15 @@ export async function requireReportSalon(
     return {
       error: NextResponse.json(
         { success: false, error: "Brak dostepu do tego salonu" },
+        { status: 403 },
+      ),
+    };
+  }
+
+  if (!(await hasFeatureAccess(ctx, REPORTS_FEATURE))) {
+    return {
+      error: NextResponse.json(
+        { success: false, error: "Brak uprawnien do raportow" },
         { status: 403 },
       ),
     };

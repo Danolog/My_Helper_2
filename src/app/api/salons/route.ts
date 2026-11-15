@@ -141,9 +141,26 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    const { name, phone, email, address, industryType, ownerId } = body;
+    // Właściciel wyłącznie z sesji — `ownerId` z body jest ignorowany (inaczej
+    // salon na cudze konto albo bez właściciela).
+    const { name, phone, email, address, industryType } = body;
+    const ownerId = authResult.user.id;
 
-    logger.info(`[Salons API] Executing: INSERT INTO salons (name, phone, email, address, industry_type, owner_id)`);
+    // Jedno konto = jeden salon: salon-context i get-user-salon rozwiązują
+    // salon po ownerId z limit(1) bez ORDER BY — drugi salon robi kontekst
+    // właściciela niedeterministycznym.
+    const [existing] = await db
+      .select({ id: salons.id })
+      .from(salons)
+      .where(eq(salons.ownerId, ownerId))
+      .limit(1);
+    if (existing) {
+      return NextResponse.json(
+        { success: false, error: "To konto ma już salon" },
+        { status: 409 }
+      );
+    }
+
     const [newSalon] = await db
       .insert(salons)
       .values({
@@ -152,7 +169,7 @@ export async function POST(request: Request) {
         email: email || null,
         address: address || null,
         industryType: industryType || null,
-        ownerId: ownerId || null,
+        ownerId,
       })
       .returning();
 
@@ -171,46 +188,8 @@ export async function POST(request: Request) {
   }
 }
 
-// DELETE /api/salons?id=<uuid> - Delete a salon by ID
-export async function DELETE(request: Request) {
-  try {
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get("id");
-
-    if (!id) {
-      return NextResponse.json(
-        { success: false, error: "Salon ID is required" },
-        { status: 400 }
-      );
-    }
-
-    logger.info(`[Salons API] Executing: DELETE FROM salons WHERE id = '${id}'`);
-    const [deleted] = await db
-      .delete(salons)
-      .where(eq(salons.id, id))
-      .returning();
-
-    if (!deleted) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-
-    logger.info(`[Salons API] DELETE successful, removed salon: ${deleted.name}`);
-
-    return NextResponse.json({
-      success: true,
-      data: deleted,
-    });
-  } catch (error) {
-    logger.error("[Salons API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to delete salon" },
-      { status: 500 }
-    );
-  }
-}
+// DELETE /api/salons — świadomie brak (P0, Ryan): trasa bez wołającego w UI
+// kasowała dowolny salon po id dla każdego zalogowanego konta, a 26 FK do
+// salons.id ma ON DELETE CASCADE (klienci, wizyty, subskrypcje). Usunięcie
+// salonu wymaga osobnego przepływu (potwierdzenie, Stripe, RODO, audyt) —
+// do tego czasu Next.js odpowiada 405.

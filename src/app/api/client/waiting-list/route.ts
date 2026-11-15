@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { validateBody, clientWaitingListSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { verifiedClientMatchEmail } from "@/lib/client-match";
 // ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
@@ -19,7 +20,12 @@ export async function GET() {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const userEmail = authResult.user.email;
+    // Dopasowanie do rekordow klienta tylko po ZWERYFIKOWANYM e-mailu
+    // (src/lib/client-match.ts). Niezweryfikowany = brak wpisow, nie blad.
+    const userEmail = verifiedClientMatchEmail(authResult.user);
+    if (!userEmail) {
+      return NextResponse.json({ success: true, data: [], count: 0 });
+    }
 
     // Find all client records linked to this user's email across all salons
     const clientRecords = await db
@@ -41,11 +47,11 @@ export async function GET() {
     // in one query (previously one query per client record — N+1)
     const allEntries = await db
       .select({
+        // Bez wiersza klienta (imie, telefon, notatki) — portal go nie uzywa.
         entry: waitingList,
-        client: clients,
-        service: services,
-        employee: employees,
-        salon: salons,
+        service: { name: services.name },
+        employee: { firstName: employees.firstName, lastName: employees.lastName },
+        salon: { name: salons.name },
       })
       .from(waitingList)
       .innerJoin(clients, eq(waitingList.clientId, clients.id))
@@ -78,22 +84,18 @@ export async function GET() {
       }
     }
 
+    // Tylko pola renderowane przez portal (src/app/(client)/waiting-list/page.tsx)
     const formattedEntries = allEntries.map((row) => ({
       id: row.entry.id,
-      salonId: row.entry.salonId,
       salonName: row.salon?.name || "Nieznany salon",
-      serviceId: row.entry.serviceId,
       serviceName: row.service?.name || null,
-      preferredEmployeeId: row.entry.preferredEmployeeId,
       preferredEmployeeName: row.employee
         ? `${row.employee.firstName} ${row.employee.lastName}`
         : null,
-      preferredDate: row.entry.preferredDate,
       notifiedAt: row.entry.notifiedAt,
       accepted: row.entry.accepted,
       offeredStartTime: row.entry.offeredStartTime,
       offeredEndTime: row.entry.offeredEndTime,
-      offeredEmployeeId: row.entry.offeredEmployeeId,
       offeredEmployeeName: row.entry.offeredEmployeeId
         ? offeredEmployeeNames[row.entry.offeredEmployeeId] || null
         : null,
@@ -123,7 +125,18 @@ export async function POST(request: Request) {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
 
-    const userEmail = authResult.user.email;
+    // Zapis na liste podpina konto pod rekord klienta po e-mailu albo tworzy
+    // rekord z tym e-mailem — oba tylko dla zweryfikowanego e-maila.
+    const userEmail = verifiedClientMatchEmail(authResult.user);
+    if (!userEmail) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Potwierdz adres e-mail, aby dolaczyc do listy oczekujacych",
+        },
+        { status: 403 }
+      );
+    }
     const body = await request.json();
     const validationError = validateBody(clientWaitingListSchema, body);
     if (validationError) {

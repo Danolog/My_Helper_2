@@ -12,6 +12,7 @@ import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
 import { getSalonContext, type SalonContext } from "@/lib/salon-context";
+import { assertSalonRefs } from "@/lib/salon-refs";
 import { appointments, clients, employees, services, notifications, depositPayments, salons } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
@@ -139,6 +140,19 @@ export async function PUT(
 
     const { startTime, endTime, employeeId, clientId, serviceId, notes, status, depositAmount, depositPaid } = body;
 
+    // P1 (Ryan): pola zadatku zmienia tylko wlasciciel (reczne rozliczenie).
+    // Normalnie depositPaid ustawia potwierdzenie platnosci (webhook Stripe ->
+    // confirmDepositPayment), a kwote liczy /api/deposits/create-session.
+    // Zaden ekran panelu nie wysyla tych pol w PUT. Pracownik/recepcja,
+    // ktorzy "oplacali" zadatek recznie, wlaczali tez sciezke zwrotu przy
+    // anulacji (DELETE) — dlatego 403, nie ciche pominiecie.
+    if ((depositAmount !== undefined || depositPaid !== undefined) && ctx.role !== "owner") {
+      return NextResponse.json(
+        { success: false, error: "Tylko wlasciciel salonu moze zmieniac zadatek" },
+        { status: 403 }
+      );
+    }
+
     // Check if appointment exists in the caller's salon — cudza/nieistniejaca
     // wizyta = 404 (scoped findOne, kontekst RLS ustawiony).
     const existing = await forSalon(salonId).findOne(appointments, id);
@@ -149,6 +163,12 @@ export async function PUT(
         { status: 404 }
       );
     }
+
+    // P1 (Ryan): klient, pracownik i usluga z body musza nalezec do salonu
+    // z sesji — inaczej wizyta wskazywalaby cudzego klienta (dane w GET) lub
+    // blokowala kalendarz pracownika innego salonu. null = wyczyszczenie pola.
+    const refsError = await assertSalonRefs(salonId, { clientId, employeeId, serviceId });
+    if (refsError) return refsError;
 
     // If times or employee changed, check for conflicts
     const newStartTime = startTime ? new Date(startTime) : existing.startTime;

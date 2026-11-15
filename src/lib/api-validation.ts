@@ -5,6 +5,13 @@
  * Returns field-level error messages in Polish for consistency with the UI.
  */
 import { z } from "zod";
+import {
+  PUSH_ENDPOINT_MAX_LENGTH,
+  isValidP256dh,
+  isValidPushAuth,
+  isValidPushEndpoint,
+} from "@/lib/push-subscription";
+import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
 
 // ==========================================
 // Validation Helper
@@ -661,20 +668,37 @@ export const bookPackageSchema = z.object({
 // Client Sub-resource Schemas
 // ==========================================
 
-export const clientConsentsSchema = z.object({
-  marketingEmail: z.boolean().optional(),
-  marketingSms: z.boolean().optional(),
-  marketingPush: z.boolean().optional(),
-});
+// Zgody marketingowe RODO (P2, Ryan). Kontrakt = body z client-consents-card.tsx:
+// { consents: { email|sms|phone: boolean } } (UI wysyła jeden typ na żądanie).
+// Wartość wyłącznie boolean — bez koercji: "false" jako tekst to błąd, nie zgoda.
+// .strict() na obu poziomach: nieznany typ zgody albo pole spoza kontraktu => 400.
+export const CONSENT_TYPES = ["email", "sms", "phone"] as const;
+export type ConsentType = (typeof CONSENT_TYPES)[number];
+
+export const clientConsentsSchema = z
+  .object({
+    consents: z
+      .object({
+        email: z.boolean().optional(),
+        sms: z.boolean().optional(),
+        phone: z.boolean().optional(),
+      })
+      .strict()
+      .refine((c) => Object.keys(c).length > 0, {
+        message: "Podaj co najmniej jeden typ zgody",
+      }),
+  })
+  .strict();
 
 export const loyaltyRedeemSchema = z.object({
   tierId: requiredString("Nagroda"),
   pointsToRedeem: z.number().int().positive("Liczba punktow musi byc wieksza od 0"),
 });
 
+// Kontrakt = body z use-appointment-detail.ts: comment to trim() || null.
 export const clientReviewSchema = z.object({
   rating: z.number().int().min(1).max(5, "Ocena musi byc od 1 do 5"),
-  comment: z.string().max(2000).optional(),
+  comment: z.string().max(2000).nullable().optional(),
 });
 
 export const clientWaitingListSchema = z.object({
@@ -717,21 +741,61 @@ export const albumPhotosSchema = z.object({
   photoIds: z.array(z.string()).min(1, "Wymagane co najmniej jedno zdjecie"),
 });
 
-export const createGalleryPhotoSchema = z.object({
-  salonId: requiredString("Salon ID"),
-  employeeId: z.string().nullable().optional(),
-  imageUrl: requiredString("URL zdjecia"),
-  title: z.string().nullable().optional(),
-  description: z.string().nullable().optional(),
-  tags: z.array(z.string()).optional(),
-});
+// Id pracownika/uslugi: kolumny uuid w bazie (defaultRandom = v4), wiec smiec
+// dalby 500. Od #33 id z seeda tez sa v4 (00000000-0000-4000-8000-...), wiec
+// scisly z.uuid() (wersja + wariant RFC) — jak reszta schematow tras.
+const uuidId = z.uuid("Nieprawidlowy identyfikator");
+const optionalUuidId = uuidId.nullable().optional();
 
-export const updateGalleryPhotoSchema = z.object({
-  title: z.string().nullable().optional(),
-  description: z.string().nullable().optional(),
-  tags: z.array(z.string()).optional(),
-  employeeId: z.string().nullable().optional(),
-});
+// Adres zdjecia: wylacznie to, co zwrocil nasz upload galerii (lib/upload-url).
+const galleryUploadUrl = z
+  .string()
+  .refine(isOwnGalleryUploadUrl, "Adres zdjecia musi pochodzic z uploadu galerii")
+  .nullable()
+  .optional();
+
+// Kontrakt = body z src/components/gallery/photo-upload-dialog.tsx.
+export const createGalleryPhotoSchema = z
+  .object({
+    salonId: requiredString("Salon ID"),
+    employeeId: optionalUuidId,
+    serviceId: optionalUuidId,
+    beforePhotoUrl: galleryUploadUrl,
+    afterPhotoUrl: galleryUploadUrl,
+    description: z.string().max(2000).nullable().optional(),
+    productsUsed: z.string().max(1000).nullable().optional(),
+    techniques: z.string().max(1000).nullable().optional(),
+    duration: z.number().int().min(0).max(1440, "Czas trwania maksymalnie 1440 minut").nullable().optional(),
+  })
+  .refine((d) => Boolean(d.beforePhotoUrl || d.afterPhotoUrl), {
+    message: "Wymagane co najmniej jedno zdjecie (przed lub po)",
+    path: ["afterPhotoUrl"],
+  });
+
+// Kontrakt PATCH /api/gallery/[id] = body z src/components/gallery/
+// photo-edit-dialog.tsx (pola formularza) i photo-link-dialog.tsx (jedno z
+// beforePhotoUrl/afterPhotoUrl). .strict(): pole spoza kontraktu (salonId, id,
+// stare title/tags) to 400, nie ciche pominięcie. Adresy zdjęć — ta sama
+// allowlista co w POST (inaczej POST z dobrym adresem + PATCH z dowolnym
+// omijał ją). Przynależność employeeId/serviceId do salonu sprawdza trasa
+// (assertSalonRefs), bo schemat nie zna salonu sesji.
+export const updateGalleryPhotoSchema = z
+  .object({
+    description: z.string().max(2000).nullable().optional(),
+    techniques: z.string().max(1000).nullable().optional(),
+    productsUsed: z.string().max(1000).nullable().optional(),
+    employeeId: optionalUuidId,
+    serviceId: optionalUuidId,
+    duration: z.number().int().min(0).max(1440, "Czas trwania maksymalnie 1440 minut").nullable().optional(),
+    showProductsToClients: z.boolean().optional(),
+    beforePhotoUrl: galleryUploadUrl,
+    afterPhotoUrl: galleryUploadUrl,
+  })
+  .strict()
+  .refine((d) => Object.values(d).some((v) => v !== undefined), {
+    message: "Brak pol do aktualizacji",
+    path: ["_root"],
+  });
 
 // ==========================================
 // Payment & Subscription Schemas
@@ -768,11 +832,18 @@ export const depositConfirmSchema = z.object({
   sessionId: requiredString("ID sesji"),
 });
 
+// Kontrakt = body z UI: src/app/(site)/pricing/page.tsx oraz
+// src/app/dashboard/subscription/_hooks/use-subscription-data.ts → { planSlug }.
+// Salon wylacznie z sesji (getUserSalonId), wiec salonId nie jest czescia body.
+// Plany sprzedawane online = sloty cen Stripe (STRIPE_PRICE_BASIC/PRO); trasa
+// i tak sprawdza w bazie, czy plan jest aktywny.
+export const CHECKOUT_PLAN_SLUGS = ["basic", "pro"] as const;
+export type CheckoutPlanSlug = (typeof CHECKOUT_PLAN_SLUGS)[number];
+
 export const subscriptionCheckoutSchema = z.object({
-  salonId: requiredString("Salon ID"),
-  planId: requiredString("Plan"),
-  successUrl: z.string().url().optional(),
-  cancelUrl: z.string().url().optional(),
+  planSlug: z.enum(CHECKOUT_PLAN_SLUGS, {
+    message: "planSlug musi byc 'basic' lub 'pro'",
+  }),
 });
 
 export const subscriptionConfirmSchema = z.object({
@@ -890,26 +961,40 @@ export const clientWaitingListResponseSchema = z.object({
   accepted: z.boolean({ message: "Pole 'accepted' jest wymagane i musi byc wartoscia logiczna (true/false)" }),
 });
 
+// Konto bierze trasa z sesji. `email` zostaje opcjonalne tylko dla zgodnosci
+// ze starszymi klientami (UI go wysyla), trasa go IGNORUJE.
 export const registerSubscriptionSchema = z.object({
   planSlug: z.string().min(1, "planSlug is required"),
-  email: z.string().email("Wprowadz poprawny adres email"),
+  email: z.string().optional(),
 });
 
 export const sendInvoiceEmailSchema = z.object({
   email: z.string().email("Nieprawidlowy format adresu email").optional(),
 });
 
+// Endpoint: https + allowlista hostów usług push (lib/push-subscription.ts).
+// Bez niej web-push robił POST na dowolny host:port z bazy (SSRF, P1).
 export const pushSubscribeSchema = z.object({
-  endpoint: requiredString("Endpoint"),
+  endpoint: z
+    .string({ message: "Endpoint jest wymagane" })
+    .min(1, "Endpoint jest wymagane")
+    .max(PUSH_ENDPOINT_MAX_LENGTH, "Endpoint jest zbyt dlugi")
+    .refine(isValidPushEndpoint, "Nieobslugiwany adres uslugi push"),
   keys: z.object({
-    p256dh: requiredString("Klucz p256dh"),
-    auth: requiredString("Klucz auth"),
+    p256dh: requiredString("Klucz p256dh").refine(isValidP256dh, "Nieprawidlowy klucz p256dh"),
+    auth: requiredString("Klucz auth").refine(isValidPushAuth, "Nieprawidlowy klucz auth"),
   }),
   salonId: z.string().optional(),
 });
 
+// Bez allowlisty: usunięcie własnego wiersza jest nieszkodliwe (także starego,
+// nieważnego). Limit długości jak przy subscribe — inaczej długi endpoint
+// WNS/APNs dałoby się zapisać, ale nie wypisać.
 export const pushUnsubscribeSchema = z.object({
-  endpoint: requiredString("Endpoint"),
+  endpoint: z
+    .string({ message: "Endpoint jest wymagane" })
+    .min(1, "Endpoint jest wymagane")
+    .max(PUSH_ENDPOINT_MAX_LENGTH, "Endpoint jest zbyt dlugi"),
 });
 
 export const temporaryAccessSchema = z.object({
@@ -918,13 +1003,22 @@ export const temporaryAccessSchema = z.object({
   durationMinutes: z.number().int().positive().optional(),
 });
 
+// Kontrakt = body z block-time-dialog.tsx i use-schedule-data.ts. Salon
+// trasa bierze z sesji (getSalonContext), wiec salonId nie jest czescia body.
+const isoDateTime = (fieldName: string) =>
+  requiredString(fieldName).refine(
+    (v) => !Number.isNaN(Date.parse(v)),
+    `${fieldName}: nieprawidlowa data`
+  );
+
 export const createTimeBlockSchema = z.object({
-  salonId: requiredString("Salon ID"),
-  employeeId: requiredString("Pracownik"),
-  startTime: requiredString("Czas rozpoczecia"),
-  endTime: requiredString("Czas zakonczenia"),
-  reason: z.string().nullable().optional(),
-  isRecurring: z.boolean().optional(),
+  employeeId: uuidId,
+  startTime: isoDateTime("Czas rozpoczecia"),
+  endTime: isoDateTime("Czas zakonczenia"),
+  blockType: z.enum(["break", "vacation", "personal", "holiday", "other"], {
+    message: "Nieprawidlowy typ blokady",
+  }),
+  reason: z.string().max(500).nullable().optional(),
 });
 
 export const createWorkScheduleSchema = z.object({
