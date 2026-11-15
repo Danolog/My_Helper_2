@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { requirePlatformAdmin, isAuthError } from "@/lib/auth-middleware";
 
 type StatusLevel = "ok" | "warn" | "error";
 
@@ -33,7 +33,8 @@ interface DiagnosticsResponse {
 }
 
 export async function GET(req: Request) {
-  const authResult = await requireAuth("owner");
+  // Tylko admini platformy z ADMIN_EMAILS (nie user.role).
+  const authResult = await requirePlatformAdmin();
   if (isAuthError(authResult)) return authResult;
   const env = {
     POSTGRES_URL: Boolean(process.env.POSTGRES_URL),

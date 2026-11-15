@@ -4,6 +4,7 @@ import { withApiHandler } from "@/lib/api-handler";
 import { createPromoCodeSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import { apiRateLimit } from "@/lib/rate-limit";
+import { requireSalonStaff } from "@/lib/salon-context";
 import { promoCodes, promotions } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -18,7 +19,7 @@ function generatePromoCode(): string {
   return Array.from(bytes, (byte) => chars[byte % chars.length]).join("");
 }
 
-// GET /api/promo-codes - List promo codes with optional salonId filter
+// GET /api/promo-codes - List promo codes of the session salon
 export const GET = withApiHandler(
   {
     auth: "user",
@@ -27,14 +28,14 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId query parameter is required" },
-        { status: 400 }
-      );
-    }
+    // P0 (przeglad Ryana): salon z sesji, query salonId tylko porownywany;
+    // kody rabatowe jak promocje — wlasciciel albo grant "promotions".
+    const guard = await requireSalonStaff({
+      feature: "promotions",
+      requestedSalonId: searchParams.get("salonId"),
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
 
     const result = await forSalon(salonId).raw((tx) =>
       tx
@@ -78,7 +79,15 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create promo code",
   },
   async ({ body }) => {
-    const { salonId, code, promotionId, usageLimit, expiresAt } = body;
+    // P0 (przeglad Ryana): kod powstaje WYLACZNIE w salonie z sesji —
+    // body.salonId tylko porownywany (inny => 403, zero zapisu).
+    const guard = await requireSalonStaff({
+      feature: "promotions",
+      requestedSalonId: body.salonId,
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
+    const { code, promotionId, usageLimit, expiresAt } = body;
 
     // Generate code if not provided
     const promoCode = code

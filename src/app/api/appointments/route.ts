@@ -9,6 +9,7 @@ import { logger } from "@/lib/logger";
 import { checkPromotionApplicable, computePromoDiscount, type PromotionRejection } from "@/lib/promo-discount";
 import { strictRateLimit, apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getSalonContext } from "@/lib/salon-context";
+import { assertSalonRefs } from "@/lib/salon-refs";
 import { appointments, clients, employees, salons, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
 import { sendBookingConfirmationSms } from "@/lib/sms";
 import { forSalon } from "@/lib/server/repository";
@@ -148,10 +149,17 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { salonId, clientId, employeeId, serviceId, startTime, endTime, notes, depositAmount, bookedByUserId: bodyUserId, promoCodeId, guestName, guestPhone, guestEmail } = body;
+    const { salonId, clientId: bodyClientId, employeeId, serviceId, startTime, endTime, notes, depositAmount: bodyDepositAmount, bookedByUserId: bodyUserId, promoCodeId, guestName, guestPhone, guestEmail } = body;
 
-    // Use provided bookedByUserId, fall back to session user, or null for guests
-    const bookedByUserId: string | null = bodyUserId || session?.user?.id || null;
+    // bookedByUserId WYLACZNIE z sesji (null dla goscia). Wartosc z body jest
+    // ignorowana: pozwalala przypisac wizyte do cudzego konta (portal klienta,
+    // odwolanie, opinia, przypomnienia push). Zaden front jej nie wysyla.
+    const bookedByUserId: string | null = session?.user?.id || null;
+    if (bodyUserId && bodyUserId !== bookedByUserId) {
+      logger.warn("[Appointments API] Ignored client-supplied bookedByUserId", {
+        sessionUserId: bookedByUserId,
+      });
+    }
 
     // Server-side validation with Zod schema
     const validationError = validateBody(createAppointmentSchema, body);
@@ -162,6 +170,7 @@ export async function POST(request: Request) {
     // UAT X-1: personel salonu (owner/employee/recepcja) tworzy wizyty tylko
     // we wlasnym salonie. Gosc/klient portalu bez kontekstu salonu bookuje jak
     // dotad. Wczesniej salonId z body byl ufany bez sprawdzenia -> zapis cross-tenant.
+    let isStaff = false;
     if (session) {
       const staffCtx = await getSalonContext();
       if (staffCtx && salonId !== staffCtx.salonId) {
@@ -170,6 +179,27 @@ export async function POST(request: Request) {
           { status: 403 }
         );
       }
+      isStaff = !!staffCtx;
+    }
+
+    // P1 (Ryan): clientId wybiera WYLACZNIE personel salonu (panel). Gosc i
+    // klient portalu nie podpinaja rekordu klienta — gosc jest opisany przez
+    // guestName/guestPhone/guestEmail na wizycie (zaden front portalu nie
+    // wysyla clientId). Wczesniej dowolny clientId z body: dane klienta w GET
+    // wizyty, SMS z nazwa salonu na telefon obcej osoby.
+    // "none" to sentinel panelu (brak klienta).
+    const clientId: string | null =
+      isStaff && bodyClientId && bodyClientId !== "none" ? bodyClientId : null;
+    if (!isStaff && bodyClientId && bodyClientId !== "none") {
+      logger.warn("[Appointments API] Ignored client-supplied clientId (non-staff booking)", { salonId });
+    }
+
+    // P1 (Ryan): depositAmount z body jest ignorowany. Ta trasa nie tworzy
+    // platnosci zadatku — wizyta z zadatkiem powstaje w
+    // /api/deposits/create-session (kwota liczona serwerowo, deposit-calculation).
+    // Kwota z body tylko wylaczala SMS potwierdzenia i udawala zadatek bez platnosci.
+    if (bodyDepositAmount) {
+      logger.warn("[Appointments API] Ignored client-supplied depositAmount", { salonId });
     }
 
     // UAT X-2: walidacja formatu identyfikatorow — malformed UUID leci jako
@@ -186,8 +216,7 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    // "none" to sentinel gościa (brak klienta) — pomijamy walidację UUID
-    if (clientId && clientId !== "none" && !isValidUuid(clientId)) {
+    if (clientId && !isValidUuid(clientId)) {
       return NextResponse.json(
         { success: false, error: "Nieprawidlowy identyfikator klienta" },
         { status: 400 }
@@ -209,6 +238,12 @@ export async function POST(request: Request) {
         );
       }
     }
+
+    // P1 (Ryan): klient, pracownik i usluga musza nalezec do salonu wizyty —
+    // przed sprawdzeniem kolizji (obcy employeeId nie moze nawet sondowac
+    // kalendarza innego salonu). Jeden, niezdradzajacy komunikat 400.
+    const refsError = await assertSalonRefs(salonId, { clientId, employeeId, serviceId });
+    if (refsError) return refsError;
 
     // Check for overlapping appointments for this employee (only need id for existence check)
     const overlapping = await db.select({ id: appointments.id })
@@ -374,14 +409,14 @@ export async function POST(request: Request) {
       .insert(appointments)
       .values({
         salonId,
-        clientId: clientId && clientId !== "none" ? clientId : null,
+        clientId,
         employeeId,
         serviceId: serviceId || null,
         bookedByUserId,
         startTime: new Date(startTime),
         endTime: new Date(endTime),
         notes: notes || null,
-        depositAmount: depositAmount || null,
+        depositAmount: null,
         promoCodeId: validatedPromoCodeId,
         discountAmount: validatedDiscountAmount,
         guestName: guestName || null,
@@ -402,10 +437,10 @@ export async function POST(request: Request) {
 
     logger.info(`[Appointments API] Created appointment with id: ${newAppointment?.id}`);
 
-    // Potwierdzenie SMS dla rezerwacji bez zadatku — przy zadatku potwierdzenie
-    // wysyla confirmDepositPayment() po oplaceniu, wiec tu by sie zdublowalo.
+    // Potwierdzenie SMS — ta trasa tworzy wylacznie wizyty bez zadatku (zadatek:
+    // /api/deposits/create-session, SMS wysyla confirmDepositPayment() po oplaceniu).
     // Best-effort: blad wysylki nie moze wywrocic utworzonej rezerwacji.
-    if (newAppointment && !depositAmount) {
+    if (newAppointment) {
       try {
         const [details] = await db
           .select({

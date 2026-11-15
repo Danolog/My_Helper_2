@@ -3,6 +3,7 @@ import { eq, asc, sql } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createProductCategorySchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
+import { requireSalonStaff } from "@/lib/salon-context";
 import { productCategories, products } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -15,14 +16,16 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
-      );
-    }
+    // P2 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej ?salonId=<cudzy>
+    // listował kategorie magazynu dowolnego salonu. Query tylko porównywane
+    // (inny => 403), brak => salon sesji. Dostęp jak do /api/products:
+    // właściciel albo czasowy grant "products".
+    const guard = await requireSalonStaff({
+      feature: "products",
+      requestedSalonId: searchParams.get("salonId"),
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
 
     // Get categories with product counts using a left join
     const categories = await forSalon(salonId).raw((tx) =>
@@ -62,7 +65,17 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create product category",
   },
   async ({ body }) => {
-    const { salonId, name } = body;
+    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
+    // pozwalał każdemu zalogowanemu kontu dodać kategorię w cudzym salonie.
+    // body.salonId tylko porównywany (inny => 403); właściciel albo grant "products".
+    const guard = await requireSalonStaff({
+      feature: "products",
+      requestedSalonId: body.salonId,
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
+
+    const { name } = body;
 
     // Check for duplicate name within salon
     const existing = await forSalon(salonId).raw((tx) =>
