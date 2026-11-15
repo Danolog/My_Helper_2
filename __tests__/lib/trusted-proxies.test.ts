@@ -251,8 +251,31 @@ describe("selectClientIp", () => {
       expect(selectClientIp(`${LB}, ${GFE}`, trusted)).toBeNull();
     });
 
-    it("niepoprawny wpis między proxy a klientem traktuje jako adres klienta", () => {
-      expect(selectClientIp(`203.0.113.50, unknown, ${LB}`, trusted)).toBe("unknown");
+    it("niepoprawny wpis między proxy a klientem → null, jak Better Auth", () => {
+      expect(selectClientIp(`203.0.113.50, unknown, ${LB}`, trusted)).toBeNull();
+      expect(selectClientIp(`203.0.113.50, 203.0.113.51:443, ${LB}, ${GFE}`, trusted)).toBeNull();
+    });
+
+    it("niepoprawny wpis na lewo od klienta nie ma znaczenia (przejście kończy się na kliencie)", () => {
+      expect(selectClientIp(`garbage, 203.0.113.50, ${LB}`, trusted)).toBe("203.0.113.50");
+    });
+
+    it("niepoprawny wpis na miejscu zaufanego proxy → null", () => {
+      expect(selectClientIp(`203.0.113.50, ${LB}, not-an-ip`, trusted)).toBeNull();
+    });
+  });
+
+  describe("pusta lista: niepoprawny prawy wpis", () => {
+    it.each(["garbage", "unknown", "203.0.113.50:1234", "fe80::1%eth0", "203.0.113.050", "[2001:db8::1]"])(
+      "%s → null",
+      (hop) => {
+        expect(selectClientIp(hop, [])).toBeNull();
+        expect(selectClientIp(`203.0.113.50, ${hop}`, [])).toBeNull();
+      }
+    );
+
+    it("poprawny prawy wpis bez zmian", () => {
+      expect(selectClientIp("garbage, 203.0.113.50", [])).toBe("203.0.113.50");
     });
   });
 });
