@@ -91,6 +91,10 @@ const FORBIDDEN_REFERENCES: Array<[string, RegExp]> = [
   // Cena video:google_veo w COST_MAP to tylko dane historyczne (decyzja Olivera,
   // #114) — żaden kod nie może zapisać nowego użycia wideo.
   ["zapis nowego użycia wideo (type video / provider google_veo)", /\btype:\s*["'`]video["'`]|\bprovider:\s*["'`]google_veo["'`]/],
+  // Veo pod inną nazwą trasy albo przez re-eksport klienta Google (Ryan #114,
+  // V8/V9): metoda SDK i identyfikatory modeli wideo nie wracają do src.
+  ["wywołanie generateVideos (Veo)", /\bgenerateVideos\b/],
+  ["identyfikator modelu veo-*", /["'`]veo-/i],
   // B5
   ["trasa /api/appointments/[id]/fiscal-receipt", /\/fiscal-receipt(\/|["'`?]|$)/m],
   ["trasa /api/salons/[id]/fiscal-settings", /\/fiscal-settings(\/|["'`?]|$)/m],

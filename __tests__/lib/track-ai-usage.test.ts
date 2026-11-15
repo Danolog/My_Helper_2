@@ -55,6 +55,22 @@ describe("trackAIUsage", () => {
     );
   });
 
+  it("zapis wideo nie kompiluje się (B4/B5, Ryan #114 V1–V2) — wywołania tylko sprawdzane przez tsc", () => {
+    // Funkcja nie jest wołana: liczy się `pnpm typecheck`. Gdy ktoś poszerzy
+    // typ zapisu, dyrektywy @ts-expect-error staną się zbędne i tsc padnie.
+    const neverCalled = () => {
+      // @ts-expect-error — "video" nie jest typem zapisu
+      void trackAIUsage("s", "x", {}, { type: "video" });
+      const t: string = "vid" + "eo";
+      // @ts-expect-error — typ sklejany ze stringów to `string`, nie literał
+      void trackAIUsage("s", "x", {}, { type: t });
+      // @ts-expect-error — "google_veo" nie jest dostawcą zapisu
+      void trackAIUsage("s", "x", {}, { type: "image", provider: "google_veo" });
+    };
+    expect(typeof neverCalled).toBe("function");
+    expect(mockValues).not.toHaveBeenCalled();
+  });
+
   it("never throws when the insert fails", async () => {
     mockValues.mockRejectedValueOnce(new Error("db down"));
     await expect(trackAIUsage("salon-1", "chat")).resolves.toBeUndefined();

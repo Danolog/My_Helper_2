@@ -471,6 +471,16 @@ export function isParseError(result: unknown): result is Response {
 // ────────────────────────────────────────────────────────────
 
 /**
+ * Typy i dostawcy, pod którymi wolno ZAPISAĆ nowe użycie AI. Celowo bez
+ * `"video"` / `"google_veo"`: wideo usunięte w B4, a wiersze historyczne tylko
+ * się odczytuje (`COST_MAP` w usage-limits.ts zostaje kluczem `string`).
+ * Zawężenie typu łapie też wartości sklejane ze stringów i ze stałych
+ * (recenzja Ryana #114, V1/V2) — tego nie zobaczy skaner tekstu G6.
+ */
+export type TrackedAIUsageType = "text" | "image" | "banner";
+export type TrackedAIUsageProvider = "openrouter" | "google_imagen" | "sharp";
+
+/**
  * Track an AI text generation call for cost monitoring.
  * Non-blocking — errors are logged but never propagated to the caller.
  *
@@ -482,7 +492,7 @@ export async function trackAIUsage(
   salonId: string,
   feature: string,
   metadata?: Record<string, unknown>,
-  options?: { type?: string; provider?: string },
+  options?: { type?: TrackedAIUsageType; provider?: TrackedAIUsageProvider },
 ): Promise<void> {
   try {
     await db.insert(aiGeneratedMedia).values({
