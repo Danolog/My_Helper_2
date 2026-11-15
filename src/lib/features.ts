@@ -302,6 +302,8 @@ export const ROUTE_MODULE_MAP: ReadonlyArray<{ prefix: string; module: ModuleKey
   { prefix: "/dashboard/content-generator/social-posts", module: "socialPosts" },
   { prefix: "/dashboard/content-generator/scheduled", module: "socialPosts" },
   { prefix: "/dashboard/content-generator/testimonials", module: "videoGen" },
+  // B4: strona szablonów usunięta razem z social — otwarta karta wraca na pulpit.
+  { prefix: "/dashboard/content-generator/templates", module: "socialPosts" },
   { prefix: "/dashboard/ai-assistant/voice", module: "voiceAi" },
 ];
 
@@ -358,14 +360,10 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
     pattern: /^\/api\/ai\/image\/(generate|banner|service-illustration)(\/|$)/,
     module: "imageGen",
   },
-  // Moduły zamrożone wcześniej (kod kasowany w B3–B5). Wywołujący trasy
-  // głosowe (dyktowanie, czytanie na głos) i paragon wizyty są schowani
-  // w interfejsie przez useModuleEnabled("voiceAi") / ("fiscal").
-  { pattern: /^\/api\/ai\/voice(\/|$)/, module: "voiceAi" },
-  { pattern: /^\/api\/ai\/video(\/|$)/, module: "videoGen" },
-  { pattern: /^\/api\/scheduled-posts(\/|$)/, module: "socialPosts" },
-  { pattern: /^\/api\/ai\/content\/social-post(\/|$)/, module: "socialPosts" },
-  { pattern: /^\/api\/cron\/publish-scheduled-posts(\/|$)/, module: "socialPosts" },
+  // Moduły zamrożone wcześniej (kod kasowany w B3–B5). Paragon wizyty jest
+  // schowany w interfejsie przez useModuleEnabled("fiscal"). Głos (voiceAi,
+  // B3), wideo (videoGen) i publikacja postów (socialPosts, B4) usunięte —
+  // tras nie ma, wzorców też (strażnik: removed-features).
   { pattern: /^\/api\/salons\/[^/]+\/fiscal-settings(\/|$)/, module: "fiscal" },
   { pattern: /^\/api\/appointments\/[^/]+\/fiscal-receipt(\/|$)/, module: "fiscal" },
 ];

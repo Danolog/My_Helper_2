@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { mutationFetch } from "@/lib/api-client";
+import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 import { checkOutsideSchedule, type DaySchedule } from "@/lib/schedule-utils";
 
 interface Client {
@@ -629,6 +630,7 @@ export function NewAppointmentDialog({
             <Input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+              maxLength={APPOINTMENT_NOTES_MAX_LENGTH}
               placeholder="Dodatkowe uwagi (opcjonalnie)"
               data-testid="appointment-notes-input"
             />

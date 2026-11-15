@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq, and, not, or, lte, gte } from "drizzle-orm";
-import { validateBody, updateAppointmentSchema } from "@/lib/api-validation";
+import { parseBody, updateAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // `db` pozostaje dla efektow ubocznych anulacji (forfeit zadatku, notyfikacja,
 // nazwa salonu do waiting-list) — to NIE jest brama zasobu [id], ktora pilnuje
@@ -137,13 +137,15 @@ export async function PUT(
 
     const body = await request.json();
 
-    // Server-side validation with Zod schema
-    const validationError = validateBody(updateAppointmentSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
+    // Server-side validation with Zod schema. Zapis czyta SPARSOWANE dane
+    // (jak POST): preprocess schematu zamienia same spacje w notes na null —
+    // surowe body zapisałoby "   " bez zmian (Ryan, przegląd #90).
+    const parsed = parseBody(updateAppointmentSchema, body);
+    if (!parsed.ok) {
+      return NextResponse.json(parsed.error, { status: 400 });
     }
 
-    const { startTime, endTime, employeeId, clientId, serviceId, notes, status, depositAmount, depositPaid } = body;
+    const { startTime, endTime, employeeId, clientId, serviceId, notes, status, depositAmount, depositPaid } = parsed.data;
 
     // P1 (Ryan): pola zadatku zmienia tylko wlasciciel (reczne rozliczenie).
     // Normalnie depositPaid ustawia potwierdzenie platnosci (webhook Stripe ->
@@ -224,7 +226,9 @@ export async function PUT(
         return { conflicting: overlapping[0], updated: null as typeof appointments.$inferSelect | null };
       }
 
-      logger.info(`[Appointments API] Updating appointment ${id}`, { updateData });
+      // Tylko nazwy pól — wartości (notatka o kliencie, clientId, zadatek) nie
+      // trafiają do logów (hotfix P1, dane osobowe w logach).
+      logger.info(`[Appointments API] Updating appointment ${id}`, { fields: Object.keys(updateData) });
 
       const [updatedAppointment] = await tx
         .update(appointments)
@@ -425,7 +429,9 @@ export async function DELETE(
         salonName,
       });
 
-      logger.info(`[Appointments API] Waiting list notification result`, { waitingListResult });
+      // Tylko liczniki — wynik nie może zawierać danych klientów z listy oczekujących.
+      const { notified, smsCount, pushCount, errors } = waitingListResult;
+      logger.info(`[Appointments API] Waiting list notification result`, { notified, smsCount, pushCount, errors });
     } catch (waitingListError) {
       logger.error("[Appointments API] Failed to notify waiting list", { error: waitingListError });
       // Don't fail the cancellation if waiting list notification fails

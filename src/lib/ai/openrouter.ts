@@ -63,9 +63,9 @@ export type ProAIContext = {
 
 export type ProAIOptions = {
   /**
-   * Operation about to be performed. "video" / "image" / "banner" additionally
-   * enforce the per-unit monthly caps (AI_MONTHLY_VIDEO_LIMIT /
-   * AI_MONTHLY_IMAGE_LIMIT). Omit for plain text AI calls.
+   * Operation about to be performed. "image" / "banner" additionally
+   * enforce the per-unit monthly cap (AI_MONTHLY_IMAGE_LIMIT).
+   * Omit for plain text AI calls.
    */
   op?: AIOperation;
 };

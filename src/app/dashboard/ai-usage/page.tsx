@@ -55,6 +55,7 @@ const TYPE_LABELS: Record<
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
   image: { label: "Obrazy", icon: Image },
+  // Tylko dane historyczne: wideo usunięte w B4 — etykieta dla starych wierszy.
   video: { label: "Wideo", icon: Video },
   banner: { label: "Banery", icon: Image },
   text: { label: "Tekst AI", icon: Sparkles },
@@ -62,7 +63,7 @@ const TYPE_LABELS: Record<
 
 const PROVIDER_LABELS: Record<string, string> = {
   google_imagen: "Google Imagen",
-  google_veo: "Google Veo",
+  google_veo: "Google Veo", // tylko dane historyczne (B4)
   sharp: "Sharp (serwer)",
   openrouter: "OpenRouter (Claude)",
 };
@@ -425,12 +426,7 @@ function AIUsageContent() {
                       <span>Wglad w klienta: $0.004</span>
                       <span>Wyszukiwanie AI: $0.002</span>
                       <span>Powiadomienia AI: $0.001</span>
-                      <span>Komendy glosowe: $0.001</span>
-                      <span>TTS (ElevenLabs): $0.003</span>
-                      <span>STT (ElevenLabs): $0.002</span>
                       <span>Ulepszenie foto: $0 (serwer)</span>
-                      <span>Klipy wideo (Veo): $0.15</span>
-                      <span>Szablony testimoniali: $0.002</span>
                     </div>
                   </div>
                 </div>
