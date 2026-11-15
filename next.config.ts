@@ -36,6 +36,18 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "images.unsplash.com",
       },
+      // Zasobnik GCS (brief C, C2) — tylko gdy GCS_BUCKET jest ustawiony przy
+      // budowie (Dockerfile, build-arg). Wpis Vercel Blob wyżej zostaje do C4:
+      // stare adresy w bazie mają się ładować do końca kroku D.
+      ...(process.env.GCS_BUCKET
+        ? [
+            {
+              protocol: "https" as const,
+              hostname: "storage.googleapis.com",
+              pathname: `/${process.env.GCS_BUCKET}/**`,
+            },
+          ]
+        : []),
     ],
   },
 

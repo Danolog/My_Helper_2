@@ -4,6 +4,89 @@ import { join } from "path";
 import { put, del } from "@vercel/blob";
 
 /**
+ * Sterownik magazynu plików (brief C, sekcja 2 — zadanie 0.8).
+ *
+ * `STORAGE_DRIVER` = `gcs` | `vercel-blob` | `local`.
+ * - Brak zmiennej → zachowanie sprzed C2: `BLOB_READ_WRITE_TOKEN` → `vercel-blob`,
+ *   inaczej `local`. Produkcja na Vercelu nie wymaga więc żadnej zmiany
+ *   (strażnik G-C3 — drugi nośnik do progu C4, gdy znika `vercel-blob`).
+ * - `gcs` → Google Cloud Storage przez ADC (tożsamość konta serwisowego usługi
+ *   Cloud Run). Żadnych kluczy JSON ani zmiennej z poświadczeniem. Wymaga
+ *   `GCS_BUCKET`; opcjonalnie `GCS_PUBLIC_BASE_URL` (domyślnie
+ *   `https://storage.googleapis.com/<bucket>`).
+ * - `local` przy `NODE_ENV=production` → błąd (fail-closed): system plików
+ *   Cloud Run jest ulotny, a użytkownik `node` nie pisze do `/app/public`.
+ *   Ciche „udane" wgranie pliku, który znika, jest gorsze niż błąd.
+ * - Nieznana wartość (literówka) → błąd, nie cichy powrót do innego sterownika.
+ */
+export type StorageDriver = "gcs" | "vercel-blob" | "local";
+
+/** Podzbiór środowiska czytany przez sterownik (w testach — zwykły obiekt). */
+type StorageEnv = Readonly<Record<string, string | undefined>>;
+
+const STORAGE_DRIVERS: readonly StorageDriver[] = ["gcs", "vercel-blob", "local"];
+
+export function resolveStorageDriver(env: StorageEnv = process.env): StorageDriver {
+  const raw = env.STORAGE_DRIVER?.trim();
+  let driver: StorageDriver;
+  if (!raw) {
+    driver = env.BLOB_READ_WRITE_TOKEN ? "vercel-blob" : "local";
+  } else if ((STORAGE_DRIVERS as readonly string[]).includes(raw)) {
+    driver = raw as StorageDriver;
+  } else {
+    throw new Error(
+      `Unknown STORAGE_DRIVER "${raw}". Allowed: ${STORAGE_DRIVERS.join(", ")}`,
+    );
+  }
+
+  if (driver === "local" && env.NODE_ENV === "production") {
+    throw new Error(
+      "Local file storage is disabled in production. Set STORAGE_DRIVER=gcs (with GCS_BUCKET) or BLOB_READ_WRITE_TOKEN.",
+    );
+  }
+  return driver;
+}
+
+interface GcsTarget {
+  bucket: string;
+  /** Publiczny prefiks adresu, bez ukośnika na końcu. */
+  publicBase: string;
+}
+
+function gcsTarget(env: StorageEnv = process.env): GcsTarget {
+  const bucket = env.GCS_BUCKET?.trim();
+  if (!bucket) {
+    throw new Error("STORAGE_DRIVER=gcs requires GCS_BUCKET");
+  }
+  const base = env.GCS_PUBLIC_BASE_URL?.trim() || `https://storage.googleapis.com/${bucket}`;
+  return { bucket, publicBase: base.replace(/\/+$/, "") };
+}
+
+/** Koduje każdy segment ścieżki osobno (spacje, polskie znaki), zachowując `/`. */
+function encodeObjectPath(pathname: string): string {
+  return pathname.split("/").map(encodeURIComponent).join("/");
+}
+
+const CONTENT_TYPES: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+  ".csv": "text/csv",
+  ".json": "application/json",
+};
+
+async function gcsBucket(bucket: string) {
+  // Import leniwy: Vercel (vercel-blob/local) nie ładuje SDK Google w ogóle.
+  const { Storage } = await import("@google-cloud/storage");
+  return new Storage().bucket(bucket);
+}
+
+/**
  * Result from uploading a file to storage
  */
 export interface StorageResult {
@@ -120,7 +203,7 @@ export function validateFile(
 }
 
 /**
- * Uploads a file to storage (Vercel Blob or local filesystem)
+ * Uploads a file to storage (GCS, Vercel Blob or local filesystem — see resolveStorageDriver)
  *
  * @param buffer - File contents as a Buffer
  * @param filename - Name of the file (e.g., "image.png")
@@ -149,9 +232,25 @@ export async function upload(
     throw new Error(validation.error);
   }
 
-  const hasVercelBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  const driver = resolveStorageDriver();
 
-  if (hasVercelBlob) {
+  if (driver === "gcs") {
+    const { bucket, publicBase } = gcsTarget();
+    const pathname = folder ? `${folder}/${sanitizedFilename}` : sanitizedFilename;
+    const ext = sanitizedFilename.slice(sanitizedFilename.lastIndexOf(".")).toLowerCase();
+    const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream";
+    await (await gcsBucket(bucket)).file(pathname).save(buffer, {
+      resumable: false,
+      contentType,
+    });
+
+    return {
+      url: `${publicBase}/${encodeObjectPath(pathname)}`,
+      pathname,
+    };
+  }
+
+  if (driver === "vercel-blob") {
     // Use Vercel Blob storage
     const pathname = folder ? `${folder}/${sanitizedFilename}` : sanitizedFilename;
     const blob = await put(pathname, buffer, {
@@ -200,9 +299,21 @@ export async function upload(
  * ```
  */
 export async function deleteFile(url: string): Promise<void> {
-  const hasVercelBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  const driver = resolveStorageDriver();
 
-  if (hasVercelBlob) {
+  if (driver === "gcs") {
+    const { bucket, publicBase } = gcsTarget();
+    const prefix = `${publicBase}/`;
+    if (!url.startsWith(prefix)) {
+      // Nie kasujemy niczego spoza naszego zasobnika.
+      throw new Error("File URL is outside the configured GCS bucket");
+    }
+    const pathname = url.slice(prefix.length).split("/").map(decodeURIComponent).join("/");
+    await (await gcsBucket(bucket)).file(pathname).delete({ ignoreNotFound: true });
+    return;
+  }
+
+  if (driver === "vercel-blob") {
     // Delete from Vercel Blob
     await del(url);
   } else {
