@@ -252,8 +252,9 @@ pierwszym przebiegu: czy odczyt operacji/wykonań joba wymaga dodatkowego uprawn
 
 ### 3.8 `wif` — bramka wykonania
 **Sesja główna wykonuje `wif` dopiero, gdy spełnione jest jedno z dwóch:**
-- hook Ryana (ASK dla poleceń z dostępem do projektu) jest podpisany przez
-  Darka i zainstalowany, **albo**
+- hook `guard-deploy-subagent` (blokuje w subagentach scalanie, uruchamianie
+  workflow i zatwierdzanie wdrożeń; nie obejmuje gcloud) podpisany przez Darka
+  i zainstalowany, z próbą kontrolną (Ryan, 6900431761), **albo**
 - agenci pracują na koncie maszynowym (nie na koncie Darka).
 
 Pozostałe etapy na hook nie czekają.
@@ -561,9 +562,10 @@ pisze Ethan w planie 0.5 — ten runbook jej nie zawiera.
 
 ## 11. Punkty otwarte
 
-- `wif`: warunek ostateczny (sekcja 3.8); wykonanie czeka na bramkę (hook Ryana
-  podpisany i zainstalowany albo konto maszynowe).
-- K-1: musi być na `main` przed D-7 — łączność Cloud SQL przez gniazdo,
+- `wif`: warunek ostateczny (sekcja 3.8); wykonanie czeka na bramkę (hook
+  `guard-deploy-subagent` podpisany i zainstalowany z próbą kontrolną albo konto
+  maszynowe).
+- K-1 (#144): musi być na `main` przed D-7 — łączność Cloud SQL przez gniazdo,
   sekrety tylko z wersją, bez `--allow-unauthenticated`, `GCS_PUBLIC_BASE_URL`
   z jednego źródła.
 - K-2 (#135): zawężenie allowlisty e2e do naszej usługi. K-3 (#137): harmonogram wstrzymany.
