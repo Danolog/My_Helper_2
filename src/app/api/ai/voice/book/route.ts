@@ -5,6 +5,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
+import { depositGuardResponse } from "@/lib/deposit-guard";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import {
@@ -119,6 +120,25 @@ export async function POST(req: Request) {
     }
 
     const dayOfWeek = targetDate.getDay(); // 0=Sunday, 1=Monday, ...
+
+    // ------------------------------------------------------------------
+    // #63: usługa z zadatkiem nie powstaje z rozmowy telefonicznej bez
+    // wpłaty. BEZ wyjątku dla personelu: sesja należy do salonu, ale wizytę
+    // zamawia anonimowy rozmówca, a asystent nie pobiera zadatku i nikt nie
+    // decyduje o ręcznym rozliczeniu. Przed doborem terminu i kolizjami.
+    // Klient z require_deposit rozpoznawany jest po e-mailu sesji — rozmówca
+    // ma tylko telefon, więc tu działa flaga usługi (moduł voiceAi zamrożony).
+    // ------------------------------------------------------------------
+    const preferredStart = body.preferredTime
+      ? new Date(`${targetDateStr}T${body.preferredTime}:00`)
+      : targetDate;
+    const depositError = await depositGuardResponse({
+      salonId,
+      serviceId: service.id,
+      startTime: isNaN(preferredStart.getTime()) ? targetDate : preferredStart,
+      sessionUser: null,
+    });
+    if (depositError) return depositError;
 
     // ------------------------------------------------------------------
     // Step C: Resolve the employee (prefer one who works on the target day)

@@ -455,3 +455,40 @@ describe("calculateExpectedDeposit — ustawienia zadatku klienta (nadpisuja usl
     expect(result).toMatchObject({ ok: true, required: true, amount: 30 });
   });
 });
+
+describe("calculateExpectedDeposit — clientId (lista oczekujących, #63)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectQueue.length = 0;
+  });
+
+  it("clientId: ustawienia klienta czytane po id w salonie, bez sesji", async () => {
+    queueSelect(
+      [{ ...baseService, depositRequired: false }],
+      /* happy hours */ [],
+      [{ requireDeposit: true, depositType: "fixed", depositValue: "25" }]
+    );
+    const { eq } = await import("drizzle-orm");
+
+    const result = await calculateExpectedDeposit({ ...baseParams, clientId: "client-1" });
+
+    expect(result).toMatchObject({ ok: true, required: true, amount: 25 });
+    expect(mockDbSelect).toHaveBeenCalledTimes(3);
+    expect(eq).toHaveBeenCalledWith("clients.id", "client-1");
+    expect(eq).not.toHaveBeenCalledWith("clients.email", expect.anything());
+  });
+
+  it("clientId ma pierwszeństwo przed e-mailem sesji", async () => {
+    queueSelect([baseService], [], [{ requireDeposit: false, depositType: "percentage", depositValue: "0" }]);
+    const { eq } = await import("drizzle-orm");
+
+    await calculateExpectedDeposit({
+      ...baseParams,
+      clientId: "client-1",
+      sessionUser: { email: "ktos@example.com", emailVerified: true },
+    });
+
+    expect(eq).toHaveBeenCalledWith("clients.id", "client-1");
+    expect(eq).not.toHaveBeenCalledWith("clients.email", "ktos@example.com");
+  });
+});

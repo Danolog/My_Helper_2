@@ -302,6 +302,15 @@ describe("sendSms (real delivery via SMSAPI)", () => {
     );
   });
 
+  it("N2: błąd nieprawidłowego numeru zawiera numer zamaskowany, nie pełny", async () => {
+    const { logger } = await import("@/lib/logger");
+    const result = await sendSms({ to: "+49 151 234 5678", message: "Hello", salonId: "salon-1" });
+
+    expect(result.error).toContain("***678");
+    expect(result.error).not.toContain("151");
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain("151 234");
+  });
+
   it("should reject an invalid phone number before calling SMSAPI", async () => {
     const result = await sendSms({
       to: "12345",

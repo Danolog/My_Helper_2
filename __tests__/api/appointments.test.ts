@@ -220,6 +220,13 @@ vi.mock("@/lib/sms", () => ({
   sendBookingConfirmationSms: (...args: unknown[]) => mockSendBookingSms(...args),
 }));
 
+// #63: strażnik zadatku testowany w appointments-deposit-guard.test.ts;
+// tu domyślnie "można zapisać bez zadatku" (null).
+const mockDepositGuard = vi.fn(async (..._args: unknown[]): Promise<Response | null> => null);
+vi.mock("@/lib/deposit-guard", () => ({
+  depositGuardResponse: (...args: unknown[]) => mockDepositGuard(...args),
+}));
+
 function salonRefRejection() {
   return new Response(
     JSON.stringify({ success: false, error: "Nieprawidlowe dane dla tego salonu" }),
@@ -990,6 +997,7 @@ describe("POST /api/appointments", () => {
       body: {
         salonId: TEST_IDS.SALON_UUID,
         employeeId: TEST_IDS.EMPLOYEE_UUID,
+        serviceId: TEST_IDS.SERVICE_UUID, // #63: rezerwacja spoza personelu wskazuje usługę
         startTime: "2026-04-01T10:00:00Z",
         endTime: "2026-04-01T11:00:00Z",
         guestName: "Jan Kowalski",
@@ -1129,6 +1137,7 @@ describe("POST /api/appointments", () => {
           body: {
             salonId: TEST_IDS.SALON_UUID,
             employeeId: TEST_IDS.EMPLOYEE_UUID,
+            serviceId: TEST_IDS.SERVICE_UUID, // #63: rezerwacja spoza personelu wskazuje usługę
             startTime: "2026-04-01T10:00:00Z",
             endTime: "2026-04-01T11:00:00Z",
             guestName: "Jan Kowalski",
@@ -1627,7 +1636,7 @@ describe("POST /api/appointments — referencje z body nalezace do salonu (P1)",
     });
     expect(mockSendBookingSms).toHaveBeenCalledTimes(1);
     const sms = mockSendBookingSms.mock.calls[0]![0] as Record<string, unknown>;
-    expect(sms.clientPhone).toBe("123456789");
+    expect(sms.clientPhone).toBe("+48123456789"); // #64 pkt 4: zapis i SMS w E.164
     expect(sms).not.toHaveProperty("clientId");
   });
 

@@ -56,7 +56,14 @@ export async function POST(request: Request) {
     // telefony. Surowe body omijało tę normalizację.
     const parsed = parseBody(depositCreateSessionSchema, body);
     if (!parsed.ok) {
-      return NextResponse.json(parsed.error, { status: 400 });
+      // Quinn: front pokazuje `error` w toaście — zamiast ogólnego
+      // "Validation failed" pierwszy konkretny komunikat (np. za krótkie
+      // imię). `details` bez zmian, `code` dla klientów maszynowych.
+      const firstMessage = Object.values(parsed.error.details)[0];
+      return NextResponse.json(
+        { ...parsed.error, error: firstMessage ?? parsed.error.error, code: "VALIDATION_FAILED" },
+        { status: 400 }
+      );
     }
     const {
       salonId,
