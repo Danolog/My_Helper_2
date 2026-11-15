@@ -2806,3 +2806,51 @@ describe("POST /api/appointments — przedział pusty (#165)", () => {
     expect(mockDbSelect).not.toHaveBeenCalled();
   });
 });
+
+describe("PUT /api/appointments/[id] — przeniesienie na innego pracownika (#165, B1 Quinn)", () => {
+  // Edytowana wizyta: pracownik E1 (TEST_IDS.EMPLOYEE_UUID), 14–15.
+  // Kolizja ma być liczona u NOWEGO pracownika, nie u zapisanego.
+  const E2 = "bbbbbbbb-0000-4000-8000-000000000002";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+  });
+
+  async function moveToE2(rows: Record<string, unknown>[]) {
+    const self = makeAppointment({
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      startTime: new Date(at165("14:00")),
+      endTime: new Date(at165("15:00")),
+    });
+    queueSelects(chainMock([self]), filteringChain([self, ...rows]));
+    mockDbUpdate.mockReturnValue(
+      chainMock([{ ...self, employeeId: E2, startTime: new Date(at165("10:30")), endTime: new Date(at165("11:30")) }])
+    );
+    const response = await updateAppointment(
+      createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+        method: "PUT",
+        body: { employeeId: E2, startTime: at165("10:30"), endTime: at165("11:30") },
+      }),
+      createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+    );
+    return parseResponse(response);
+  }
+
+  it("nowy pracownik zajęty w tym terminie → 409, bez zapisu", async () => {
+    const { status, body } = await moveToE2([existing10to11({ employeeId: E2 })]);
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("nowy pracownik wolny, a stary ma w tym terminie inną wizytę → 200", async () => {
+    const { status } = await moveToE2([existing10to11({ employeeId: TEST_IDS.EMPLOYEE_UUID })]);
+    expect(status).toBe(200);
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+  });
+});
