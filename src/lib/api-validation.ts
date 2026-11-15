@@ -587,21 +587,6 @@ export const reviewModerateSchema = z.object({
   }),
 });
 
-// ==========================================
-// Salon Schemas
-// ==========================================
-
-export const createSalonSchema = z.object({
-  name: requiredString("Nazwa salonu"),
-  phone: z.string().nullable().optional(),
-  email: emailField,
-  address: z.string().nullable().optional(),
-  industryType: z.enum(["hair_salon", "beauty_salon", "nails", "barbershop", "spa", "medical"], {
-    message: "Nieprawidlowy typ branzy",
-  }).nullable().optional(),
-  ownerId: z.string().nullable().optional(),
-});
-
 export const birthdaySettingsSchema = z.object({
   enabled: z.boolean().optional(),
   giftType: z.enum(["discount", "product"]).optional(),
