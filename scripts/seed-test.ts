@@ -212,7 +212,7 @@ async function seed() {
     .values({
       id: SALON_ID,
       name: "Beauty Studio Demo",
-      phone: "+48 123 456 789",
+      phone: "+48 000 600 704", // numer testowy (src/lib/test-phone.ts)
       email: "demo@beautystudio.pl",
       address: "ul. Przykladowa 123, Warszawa",
       industryType: "beauty_salon",
@@ -221,7 +221,7 @@ async function seed() {
     })
     .onConflictDoUpdate({
       target: salons.id,
-      set: { name: "Beauty Studio Demo", ownerId: OWNER_USER_ID, settingsJson: seedModules },
+      set: { name: "Beauty Studio Demo", phone: "+48 000 600 704", ownerId: OWNER_USER_ID, settingsJson: seedModules },
     });
 
   console.log("[seed-test] Created salon: Beauty Studio Demo");
@@ -311,9 +311,11 @@ async function seed() {
   console.log("[seed-test] Created 3 services");
 
   // 6. Create test clients
+  // Telefony z TEST_PHONE_NUMBERS (#75): E2E tworzące wizytę wołają SMS
+  // potwierdzenia — na numer testowy sendSms nic nie wysyła.
   const clientData = [
-    { id: "00000000-0000-4000-8000-c10000000001", firstName: "Maria", lastName: "Kaczmarek", phone: "+48 111 222 333" },
-    { id: "00000000-0000-4000-8000-c10000000002", firstName: "Joanna", lastName: "Lewandowska", phone: "+48 444 555 666" },
+    { id: "00000000-0000-4000-8000-c10000000001", firstName: "Maria", lastName: "Kaczmarek", phone: "+48 000 600 701" },
+    { id: "00000000-0000-4000-8000-c10000000002", firstName: "Joanna", lastName: "Lewandowska", phone: "+48 000 600 702" },
   ];
 
   for (const c of clientData) {
@@ -328,7 +330,8 @@ async function seed() {
       })
       .onConflictDoUpdate({
         target: clients.id,
-        set: { firstName: c.firstName, lastName: c.lastName },
+        // phone w set: reseed istniejącej bazy podmienia stare numery na testowe
+        set: { firstName: c.firstName, lastName: c.lastName, phone: c.phone },
       });
   }
 

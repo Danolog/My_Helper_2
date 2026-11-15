@@ -8,7 +8,7 @@ const NEW_EMPLOYEE = {
   firstName: 'Anna',
   lastName: 'Kowalska',
   email: 'anna.kowalska@test.com',
-  phone: '500100200',
+  phone: '000600705', // TEST_PHONE_NUMBERS (src/lib/test-phone.ts)
   role: 'employee',
 };
 

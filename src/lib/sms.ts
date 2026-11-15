@@ -15,6 +15,12 @@ export interface SmsResult {
   success: boolean;
   notificationId?: string | undefined;
   error?: string | undefined;
+  /**
+   * Wysyłka świadomie pominięta (numer testowy) — nie błąd do ponawiania.
+   * Wołający, który oznacza "wysłane" (przypomnienia), traktuje to jako
+   * obsłużone, inaczej każdy przebieg brałby tę wizytę od nowa (#75).
+   */
+  skipped?: "test_phone" | undefined;
 }
 
 /**
@@ -77,10 +83,11 @@ async function sendViaSmsapi(
   }
 
   if (data?.error !== undefined && data.error !== null) {
-    const detail = data.message
-      ? `${data.error} - ${data.message}`
-      : String(data.error);
-    throw new Error(`SMSAPI error: ${detail}`);
+    // Tylko kod błędu (#75, Ryan): `message` dostawcy bywa echem danych
+    // wejściowych (numer, treść) i trafiałby do logów bez redakcji.
+    // Kod przepuszczamy tylko, gdy jest liczbą — inaczej to też tekst dostawcy.
+    const code = /^\d{1,6}$/.test(String(data.error)) ? String(data.error) : "unknown";
+    throw new Error(`SMSAPI error: code ${code}`);
   }
 
   if (!response.ok) {
@@ -163,7 +170,7 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
       to: maskPhoneNumber(normalizedTo),
       salonId: msg.salonId,
     });
-    return { success: false, error: SMS_TEST_PHONE_ERROR };
+    return { success: false, error: SMS_TEST_PHONE_ERROR, skipped: "test_phone" };
   }
 
   const token = process.env.SMSAPI_TOKEN;

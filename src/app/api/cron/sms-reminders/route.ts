@@ -100,10 +100,12 @@ export async function POST(request: Request) {
         );
     }
 
+    // #75 (Ryan): bez imienia i nazwiska klienta w logach i w odpowiedzi crona
+    // (dane osobowe) — identyfikuje appointmentId.
     const results: Array<{
       appointmentId: string;
-      clientName: string;
       success: boolean;
+      skipped?: boolean | undefined;
       error?: string | undefined;
     }> = [];
 
@@ -115,11 +117,9 @@ export async function POST(request: Request) {
       if (!appt.clientPhone) {
         logger.debug("Skipping SMS reminder - client has no phone number", {
           appointmentId: appt.appointmentId,
-          clientName,
         });
         results.push({
           appointmentId: appt.appointmentId,
-          clientName,
           success: false,
           error: "No phone number",
         });
@@ -141,14 +141,14 @@ export async function POST(request: Request) {
 
         logger.info("SMS reminder sent", {
           appointmentId: appt.appointmentId,
-          clientName,
           success: smsResult.success,
+          ...(smsResult.skipped ? { skipped: smsResult.skipped } : {}),
         });
 
         results.push({
           appointmentId: appt.appointmentId,
-          clientName,
           success: smsResult.success,
+          ...(smsResult.skipped ? { skipped: true } : {}),
           error: smsResult.error,
         });
       } catch (error) {
@@ -158,7 +158,6 @@ export async function POST(request: Request) {
         });
         results.push({
           appointmentId: appt.appointmentId,
-          clientName,
           success: false,
           error: error instanceof Error ? error.message : "Unknown error",
         });
@@ -166,10 +165,12 @@ export async function POST(request: Request) {
     }
 
     const sent = results.filter((r) => r.success).length;
-    const failed = results.filter((r) => !r.success).length;
+    const skipped = results.filter((r) => r.skipped).length;
+    const failed = results.filter((r) => !r.success && !r.skipped).length;
 
     logger.info("SMS reminders cron completed", {
       sent,
+      skipped,
       failed,
       total: upcomingAppointments.length,
     });
@@ -179,6 +180,7 @@ export async function POST(request: Request) {
       data: {
         processed: upcomingAppointments.length,
         sent,
+        skipped,
         failed,
         results,
         window: {
