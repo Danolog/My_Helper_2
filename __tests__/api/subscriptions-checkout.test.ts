@@ -12,9 +12,10 @@
  * po zweryfikowanej płatności (payment_status === "paid").
  * Stripe niedostępny → 503, błąd Stripe → 502, w obu przypadkach zero zapisów.
  *
- * Uwaga: obecny schemat wejścia (`subscriptionCheckoutSchema`) wymaga
- * `salonId` + `planId`, a trasa czyta `planSlug` — rozjazd kontraktu naprawia
- * osobny commit (PR #32). Testy wysyłają oba, żeby przejść walidację.
+ * Kontrakt wejścia (PR #32 d) = body z UI: `{ planSlug }` z
+ * src/app/(site)/pricing/page.tsx i
+ * src/app/dashboard/subscription/_hooks/use-subscription-data.ts.
+ * Salon wyłącznie z sesji — `salonId` w body nie jest częścią kontraktu.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "@/app/api/subscriptions/checkout/route";
@@ -149,12 +150,17 @@ function subscriptionRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function checkoutRequest(planSlug: string) {
+function rawCheckoutRequest(body: unknown) {
   return new Request("http://localhost:3000/api/subscriptions/checkout", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ planSlug, salonId: "salon-1", planId: `plan-${planSlug}` }),
+    body: JSON.stringify(body),
   });
+}
+
+// Dokładnie to, co wysyła UI (pricing + zmiana planu w panelu).
+function checkoutRequest(planSlug: string) {
+  return rawCheckoutRequest({ planSlug });
 }
 
 function stripeClient() {
@@ -348,6 +354,75 @@ describe("POST /api/subscriptions/checkout", () => {
 
       expect(res.status).toBe(429);
       expect(res.headers.get("Retry-After")).toBe("30");
+      expectNoWrites();
+    });
+  });
+
+  describe("(d) kontrakt wejścia z UI", () => {
+    it("body z UI { planSlug } przechodzi walidację (nie 400)", async () => {
+      mockGetStripe.mockReturnValue(stripeClient());
+      selectQueue.push([PLAN_PRO], []);
+
+      const res = await POST(checkoutRequest("pro"));
+
+      expect(res.status).toBe(200);
+      expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
+      expectNoWrites();
+    });
+
+    it("zmiana planu z panelu { planSlug: 'basic' } przechodzi walidację", async () => {
+      selectQueue.push([PLAN_BASIC], [subscriptionRow({ planId: PLAN_PRO.id })]);
+
+      const res = await POST(checkoutRequest("basic"));
+      const body = await res.json();
+
+      // Bez Stripe: 503 z #36, a nie 400 ze schematu.
+      expect(res.status).toBe(503);
+      expect(body.code).toBe("STRIPE_UNAVAILABLE");
+      expectNoWrites();
+    });
+
+    it("salonId z body jest ignorowany — metadata sesji Stripe z salonu z sesji", async () => {
+      mockGetStripe.mockReturnValue(stripeClient());
+      selectQueue.push([PLAN_PRO], []);
+
+      const res = await POST(rawCheckoutRequest({ planSlug: "pro", salonId: "cudzy-salon" }));
+
+      expect(res.status).toBe(200);
+      const params = mockSessionsCreate.mock.calls[0]![0];
+      expect(params.metadata.salonId).toBe("salon-1");
+      expectNoWrites();
+    });
+
+    it("400 bez planSlug, z polem planSlug w details, bez zapytania do bazy", async () => {
+      selectQueue.push([PLAN_PRO], []);
+
+      const res = await POST(rawCheckoutRequest({}));
+      const body = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(body.details.planSlug).toBeDefined();
+      expect(selectQueue).toHaveLength(2);
+      expectNoWrites();
+    });
+
+    it.each([["enterprise"], ["PRO"], [""], [123], [null]])(
+      "400 przy planSlug = %j",
+      async (planSlug) => {
+        const res = await POST(rawCheckoutRequest({ planSlug }));
+        const body = await res.json();
+
+        expect(res.status).toBe(400);
+        expect(body.details.planSlug).toBeDefined();
+        expect(mockSessionsCreate).not.toHaveBeenCalled();
+        expectNoWrites();
+      },
+    );
+
+    it("400 przy body niebędącym obiektem", async () => {
+      const res = await POST(rawCheckoutRequest(["pro"]));
+
+      expect(res.status).toBe(400);
       expectNoWrites();
     });
   });

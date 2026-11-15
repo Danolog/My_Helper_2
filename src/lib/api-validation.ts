@@ -719,13 +719,11 @@ export const albumPhotosSchema = z.object({
   photoIds: z.array(z.string()).min(1, "Wymagane co najmniej jedno zdjecie"),
 });
 
-// Id pracownika/uslugi: kolumny uuid w bazie, wiec smiec dalby 500. Celowo
-// luzny format UUID (dowolny wariant), nie z.uuid() — id z seeda
-// ("00000000-0000-0000-0000-...") nie sa v4, a UI wysyla je 1:1.
-const uuidLikeId = z
-  .string()
-  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, "Nieprawidlowy identyfikator");
-const optionalUuidLikeId = uuidLikeId.nullable().optional();
+// Id pracownika/uslugi: kolumny uuid w bazie (defaultRandom = v4), wiec smiec
+// dalby 500. Od #33 id z seeda tez sa v4 (00000000-0000-4000-8000-...), wiec
+// scisly z.uuid() (wersja + wariant RFC) — jak reszta schematow tras.
+const uuidId = z.uuid("Nieprawidlowy identyfikator");
+const optionalUuidId = uuidId.nullable().optional();
 
 // Adres zdjecia: wylacznie to, co zwrocil nasz upload galerii (lib/upload-url).
 const galleryUploadUrl = z
@@ -738,8 +736,8 @@ const galleryUploadUrl = z
 export const createGalleryPhotoSchema = z
   .object({
     salonId: requiredString("Salon ID"),
-    employeeId: optionalUuidLikeId,
-    serviceId: optionalUuidLikeId,
+    employeeId: optionalUuidId,
+    serviceId: optionalUuidId,
     beforePhotoUrl: galleryUploadUrl,
     afterPhotoUrl: galleryUploadUrl,
     description: z.string().max(2000).nullable().optional(),
@@ -794,11 +792,18 @@ export const depositConfirmSchema = z.object({
   sessionId: requiredString("ID sesji"),
 });
 
+// Kontrakt = body z UI: src/app/(site)/pricing/page.tsx oraz
+// src/app/dashboard/subscription/_hooks/use-subscription-data.ts → { planSlug }.
+// Salon wylacznie z sesji (getUserSalonId), wiec salonId nie jest czescia body.
+// Plany sprzedawane online = sloty cen Stripe (STRIPE_PRICE_BASIC/PRO); trasa
+// i tak sprawdza w bazie, czy plan jest aktywny.
+export const CHECKOUT_PLAN_SLUGS = ["basic", "pro"] as const;
+export type CheckoutPlanSlug = (typeof CHECKOUT_PLAN_SLUGS)[number];
+
 export const subscriptionCheckoutSchema = z.object({
-  salonId: requiredString("Salon ID"),
-  planId: requiredString("Plan"),
-  successUrl: z.string().url().optional(),
-  cancelUrl: z.string().url().optional(),
+  planSlug: z.enum(CHECKOUT_PLAN_SLUGS, {
+    message: "planSlug musi byc 'basic' lub 'pro'",
+  }),
 });
 
 export const subscriptionConfirmSchema = z.object({
@@ -955,7 +960,7 @@ const isoDateTime = (fieldName: string) =>
   );
 
 export const createTimeBlockSchema = z.object({
-  employeeId: uuidLikeId,
+  employeeId: uuidId,
   startTime: isoDateTime("Czas rozpoczecia"),
   endTime: isoDateTime("Czas zakonczenia"),
   blockType: z.enum(["break", "vacation", "personal", "holiday", "other"], {
