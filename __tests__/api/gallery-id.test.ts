@@ -69,7 +69,14 @@ vi.mock("@/lib/auth-middleware", () => ({
   isAuthError: vi.fn().mockReturnValue(false),
 }));
 
-// Tenant resolver — flip per test to simulate "no salon" / wrong tenant.
+// PATCH/DELETE: kontekst salonu (salons.ownerId / employees.userId) — rola
+// z ctx.role, nigdy z user.role. Flip per test.
+const mockGetSalonContext = vi.fn();
+vi.mock("@/lib/salon-context", () => ({
+  getSalonContext: (...args: unknown[]) => mockGetSalonContext(...args),
+}));
+
+// GET nadal używa getUserSalonId.
 vi.mock("@/lib/get-user-salon", () => ({
   getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
   getUserSalon: vi.fn().mockResolvedValue({ id: TEST_IDS.SALON_UUID }),
@@ -149,15 +156,30 @@ import {
   PATCH as patchPhoto,
   DELETE as deletePhoto,
 } from "@/app/api/gallery/[id]/route";
-import { getUserSalonId } from "@/lib/get-user-salon";
-const mockGetUserSalonId = vi.mocked(getUserSalonId);
 
 const PHOTO_UUID = TEST_IDS.VALID_UUID;
 
-// A salon-A owner session: role "owner" must NOT bypass salon scoping.
+// Właściciel salonu A rozpoznany po salons.ownerId (ctx.role "owner") — konto
+// BEZ user.role, jak 30/31 właścicieli na produkcji.
 function ownerSession() {
-  return { user: { id: "owner-salon-a", role: "owner" } };
+  return { user: { id: "owner-salon-a" } };
 }
+const ownerCtx = {
+  salonId: TEST_IDS.SALON_UUID,
+  role: "owner",
+  employeeId: null,
+  userId: "owner-salon-a",
+};
+// Pracownik salonu A z user.role="owner" na koncie — rola konta nic nie daje.
+function staffSession() {
+  return { user: { id: "staff-a", role: "owner" } };
+}
+const staffCtx = {
+  salonId: TEST_IDS.SALON_UUID,
+  role: "employee",
+  employeeId: "emp-staff-a",
+  userId: "staff-a",
+};
 
 // =======================================================
 // P0-A · Tenant isolation regression (IDOR) — gallery/[id]
@@ -165,7 +187,7 @@ function ownerSession() {
 describe("P0-A tenant isolation — /api/gallery/[id] PATCH", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
+    mockGetSalonContext.mockResolvedValue(ownerCtx);
     mockGetSession.mockResolvedValue(ownerSession());
   });
 
@@ -182,13 +204,13 @@ describe("P0-A tenant isolation — /api/gallery/[id] PATCH", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(mockGetUserSalonId).toHaveBeenCalled();
+    expect(mockGetSalonContext).toHaveBeenCalled();
     // Mutation must never run on a foreign record.
     expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
   it("returns 404 (not 403) when the caller has no salon and never queries", async () => {
-    mockGetUserSalonId.mockResolvedValue(null);
+    mockGetSalonContext.mockResolvedValue(null);
 
     const request = createMockRequest(`http://localhost:3000/api/gallery/${PHOTO_UUID}`, {
       method: "PATCH",
@@ -233,7 +255,7 @@ describe("P0-A tenant isolation — /api/gallery/[id] PATCH", () => {
 describe("P0-A tenant isolation — /api/gallery/[id] DELETE", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
+    mockGetSalonContext.mockResolvedValue(ownerCtx);
     mockGetSession.mockResolvedValue(ownerSession());
   });
 
@@ -248,14 +270,14 @@ describe("P0-A tenant isolation — /api/gallery/[id] DELETE", () => {
 
     expect(status).toBe(404);
     expect(body.success).toBe(false);
-    expect(mockGetUserSalonId).toHaveBeenCalled();
+    expect(mockGetSalonContext).toHaveBeenCalled();
     // Neither the row delete nor the disk unlink may run on a foreign record.
     expect(mockDbDelete).not.toHaveBeenCalled();
     expect(mockUnlink).not.toHaveBeenCalled();
   });
 
   it("returns 404 (not 403) when the caller has no salon and never queries", async () => {
-    mockGetUserSalonId.mockResolvedValue(null);
+    mockGetSalonContext.mockResolvedValue(null);
 
     const request = createMockRequest(`http://localhost:3000/api/gallery/${PHOTO_UUID}`, {
       method: "DELETE",
@@ -290,5 +312,109 @@ describe("P0-A tenant isolation — /api/gallery/[id] DELETE", () => {
     expect(status).toBe(200);
     expect(body.success).toBe(true);
     expect(mockDbDelete).toHaveBeenCalled();
+  });
+});
+
+// =======================================================
+// Rola z kontekstu salonu (ctx.role), nie z user.role
+// =======================================================
+describe("gallery/[id] — uprawnienia z ctx.role, nie z user.role", () => {
+  const foreignEmployeePhoto = {
+    id: PHOTO_UUID,
+    salonId: TEST_IDS.SALON_UUID,
+    employeeId: "emp-someone-else",
+    beforePhotoUrl: null,
+    afterPhotoUrl: null,
+  };
+  const ownStaffPhoto = { ...foreignEmployeePhoto, employeeId: "emp-staff-a" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("PATCH: właściciel bez user.role edytuje zdjęcie innego pracownika swojego salonu", async () => {
+    mockGetSession.mockResolvedValue(ownerSession());
+    mockGetSalonContext.mockResolvedValue(ownerCtx);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([foreignEmployeePhoto]))
+      .mockReturnValueOnce(chainMock([foreignEmployeePhoto]));
+    mockDbUpdate.mockReturnValue(chainMock([foreignEmployeePhoto]));
+
+    const response = await patchPhoto(
+      createMockRequest(`http://localhost:3000/api/gallery/${PHOTO_UUID}`, {
+        method: "PATCH",
+        body: { description: "owner edit" },
+      }),
+      createRouteParams(PHOTO_UUID)
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockDbUpdate).toHaveBeenCalled();
+  });
+
+  it("DELETE: właściciel bez user.role usuwa zdjęcie innego pracownika swojego salonu", async () => {
+    mockGetSession.mockResolvedValue(ownerSession());
+    mockGetSalonContext.mockResolvedValue(ownerCtx);
+    mockDbSelect.mockReturnValue(chainMock([foreignEmployeePhoto]));
+    mockDbDelete.mockReturnValue(chainMock([]));
+
+    const response = await deletePhoto(
+      createMockRequest(`http://localhost:3000/api/gallery/${PHOTO_UUID}`, { method: "DELETE" }),
+      createRouteParams(PHOTO_UUID)
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockDbDelete).toHaveBeenCalled();
+  });
+
+  it("PATCH: pracownik z user.role='owner' NIE edytuje cudzego zdjęcia (403)", async () => {
+    mockGetSession.mockResolvedValue(staffSession());
+    mockGetSalonContext.mockResolvedValue(staffCtx);
+    mockDbSelect.mockReturnValue(chainMock([foreignEmployeePhoto]));
+
+    const response = await patchPhoto(
+      createMockRequest(`http://localhost:3000/api/gallery/${PHOTO_UUID}`, {
+        method: "PATCH",
+        body: { description: "x" },
+      }),
+      createRouteParams(PHOTO_UUID)
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("DELETE: pracownik z user.role='owner' NIE usuwa cudzego zdjęcia (403, bez unlink)", async () => {
+    mockGetSession.mockResolvedValue(staffSession());
+    mockGetSalonContext.mockResolvedValue(staffCtx);
+    mockDbSelect.mockReturnValue(chainMock([foreignEmployeePhoto]));
+
+    const response = await deletePhoto(
+      createMockRequest(`http://localhost:3000/api/gallery/${PHOTO_UUID}`, { method: "DELETE" }),
+      createRouteParams(PHOTO_UUID)
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockDbDelete).not.toHaveBeenCalled();
+    expect(mockUnlink).not.toHaveBeenCalled();
+  });
+
+  it("PATCH: pracownik edytuje własne zdjęcie", async () => {
+    mockGetSession.mockResolvedValue(staffSession());
+    mockGetSalonContext.mockResolvedValue(staffCtx);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([ownStaffPhoto]))
+      .mockReturnValueOnce(chainMock([ownStaffPhoto]));
+    mockDbUpdate.mockReturnValue(chainMock([ownStaffPhoto]));
+
+    const response = await patchPhoto(
+      createMockRequest(`http://localhost:3000/api/gallery/${PHOTO_UUID}`, {
+        method: "PATCH",
+        body: { description: "own edit" },
+      }),
+      createRouteParams(PHOTO_UUID)
+    );
+
+    expect(response.status).toBe(200);
   });
 });
