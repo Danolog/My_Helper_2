@@ -31,6 +31,8 @@ export function useSubscription(): SubscriptionState {
   const [error, setError] = useState<string | null>(null);
   const [isTrialing, setIsTrialing] = useState(false);
   const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
+  // Plan efektywny z serwera (getCurrentPlan); `plan` to zapisany plan.
+  const [effectivePlanSlug, setEffectivePlanSlug] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchPlan() {
@@ -38,6 +40,7 @@ export function useSubscription(): SubscriptionState {
         const res = await fetch("/api/subscriptions/current", { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
+        setEffectivePlanSlug(typeof data.effectivePlanSlug === "string" ? data.effectivePlanSlug : null);
         if (data.plan) {
           setPlan({
             slug: data.plan.slug,
@@ -76,8 +79,9 @@ export function useSubscription(): SubscriptionState {
     plan,
     loading,
     error,
-    isProPlan: plan?.slug === "pro",
-    isBasicPlan: plan?.slug !== "pro",
+    // Tylko plan efektywny; brak pola albo inna wartosc = Basic (fail-closed).
+    isProPlan: effectivePlanSlug === "pro",
+    isBasicPlan: effectivePlanSlug !== "pro",
     isTrialing,
     trialEndsAt,
     trialDaysRemaining,

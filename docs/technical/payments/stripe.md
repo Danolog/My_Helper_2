@@ -37,6 +37,8 @@ STRIPE_PRICE_PRO=price_...
 | `/api/subscriptions/payments` | GET | Payment history |
 | `/api/subscriptions/portal` | POST | Open Stripe Customer Portal |
 
+`/api/subscriptions/current`: the UI decides on Pro features only from `effectivePlanSlug` (computed by `getCurrentPlan`, the same function as the server-side Pro gates), while `plan` describes the stored plan for the plan card.
+
 ## Webhook Events
 
 Handle these Stripe events:
