@@ -67,9 +67,11 @@ export async function GET(
     const hasDeposit = appointment.depositAmount && parseFloat(appointment.depositAmount) > 0;
     const depositPaid = appointment.depositPaid;
 
+    // refund-fix RF1: odwołanie przez salon zwraca zadatek w całości,
+    // niezależnie od reguły 24 h ("forfeit" zostaje w typie dla zgodności UI).
     let depositAction: "refund" | "forfeit" | "none" = "none";
     if (hasDeposit && depositPaid) {
-      depositAction = isMoreThan24h ? "refund" : "forfeit";
+      depositAction = "refund";
     }
 
     return NextResponse.json({

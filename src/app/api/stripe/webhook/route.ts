@@ -425,9 +425,9 @@ async function handleCheckoutSessionCompleted(event: Stripe.Event, stripe: Strip
   );
 
   if (!result.success) {
-    // not_found: broken reference; not_pending: e.g. a late async success
-    // after the cleanup cron cancelled the appointment — money was taken,
-    // manual refund needed.
+    // not_found: broken reference; not_pending: payment already refunded
+    // (terminal) — money taken again, manual handling. A late payment after
+    // cancellation (pending/failed) is confirmed and refunded (#70).
     logger.error("Deposit confirmation via webhook failed — manual attention required", {
       depositPaymentId,
       sessionId: checkoutSession.id,
@@ -441,6 +441,8 @@ async function handleCheckoutSessionCompleted(event: Stripe.Event, stripe: Strip
     sessionId: checkoutSession.id,
     paymentIntentId,
     alreadyConfirmed: result.alreadyConfirmed,
+    // #70: wpłata za wizytę już nieaktywną — zapisana i zwrócona (albo manual refund w logu error)
+    inactiveAppointment: result.inactiveAppointment ?? null,
   });
 }
 

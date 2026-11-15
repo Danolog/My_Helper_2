@@ -1,6 +1,7 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { processAutomaticRefund } from "@/lib/refund";
 import {
   appointments,
   depositPayments,
@@ -20,6 +21,16 @@ export interface ConfirmDepositOptions {
   paymentIntentId?: string | undefined;
 }
 
+/**
+ * Wpłata zadatku dla wizyty, której salon już nie oczekuje (#70): płatność
+ * zapisana jako `succeeded`, wizyta bez zmian, potem automatyczny zwrot.
+ */
+export interface InactiveAppointmentDeposit {
+  appointmentStatus: string;
+  refunded: boolean;
+  refundId?: string | undefined;
+}
+
 export interface ConfirmDepositResult {
   success: boolean;
   alreadyConfirmed: boolean;
@@ -33,9 +44,26 @@ export interface ConfirmDepositResult {
    *   appointment was already cancelled. Requires manual handling (refund).
    */
   error?: "not_found" | "not_pending";
+  /** Wizyta nie była `scheduled`/`confirmed` w chwili wpłaty (#70). */
+  inactiveAppointment?: InactiveAppointmentDeposit | undefined;
 }
 
+/** Wpłata może zmienić tylko wizytę z tych stanów (#70 pkt 3). */
+const PAYABLE_APPOINTMENT_STATUSES = new Set(["scheduled", "confirmed"]);
 /**
+ * Stany płatności, z których wpłata przechodzi w `succeeded`. `failed`
+ * ustawia anulowanie wizyty (DELETE, cron, `checkout.session.expired`)
+ * PRZED wpłatą — jeśli Stripe mimo to pobrał pieniądze (otwarta sesja),
+ * księga musi to pokazać, a wizyta dostaje zwrot. `refunded` jest końcowe.
+ */
+const CONFIRMABLE_PAYMENT_STATUSES = ["pending", "failed"] as const;
+
+/**
+ * #70 — wizyta anulowana (albo zakończona) przed wpłatą: płatność zostaje
+ * `succeeded`, wizyta NIE zmienia statusu ani `depositPaid`, bez SMS
+ * „potwierdzono wizytę”, potem automatyczny zwrot. Nieudany zwrot =
+ * `logger.error` „manual refund” (płatność zostaje `succeeded`).
+ *
  * Confirm a deposit payment: transactionally mark the payment "succeeded"
  * (storing the Stripe payment_intent id for future refunds) and the
  * appointment as confirmed with depositPaid=true, then send the SMS
@@ -48,9 +76,13 @@ export interface ConfirmDepositResult {
  *   access is fine here per ADR-001 — system path, no salon scoping)
  * - /api/deposits/confirm (dev-only simulator)
  *
- * Idempotent & race-safe: the UPDATE is guarded by `status = 'pending'`.
- * A second confirmation (duplicate webhook delivery) is a no-op, and a
- * "refunded"/"failed" payment is NEVER flipped back to succeeded.
+ * Idempotent & race-safe: the UPDATE is guarded by `status IN ('pending',
+ * 'failed')`. A second confirmation (duplicate webhook delivery) is a no-op,
+ * and a "refunded" payment is NEVER flipped back to succeeded.
+ *
+ * Kolejność blokad jak w DELETE wizyty, cronie i `checkout.session.expired`:
+ * najpierw wiersz płatności (UPDATE), potem wiersz wizyty (`FOR UPDATE`) —
+ * decyzja o wizycie zapada na stanie po blokadzie, bez zakleszczeń.
  */
 export async function confirmDepositPayment(
   depositPaymentId: string,
@@ -80,8 +112,8 @@ export async function confirmDepositPayment(
     };
   }
 
-  if (payment.status !== "pending") {
-    // failed / refunded — terminal states, never resurrected here.
+  if (!(CONFIRMABLE_PAYMENT_STATUSES as readonly string[]).includes(payment.status)) {
+    // refunded — terminal state, never resurrected here.
     logger.warn("[Deposit] Confirmation attempted on non-pending payment", {
       depositPaymentId,
       status: payment.status,
@@ -95,9 +127,9 @@ export async function confirmDepositPayment(
     };
   }
 
-  // Update deposit payment and appointment atomically. The `status =
-  // 'pending'` guard makes this idempotent under concurrent deliveries:
-  // whoever loses the race gets zero rows back and no-ops.
+  // Update deposit payment and appointment atomically. The status guard
+  // makes this idempotent under concurrent deliveries: whoever loses the
+  // race gets zero rows back and no-ops.
   const txResult = await db.transaction(async (tx) => {
     const [updatedPayment] = await tx
       .update(depositPayments)
@@ -111,21 +143,39 @@ export async function confirmDepositPayment(
       .where(
         and(
           eq(depositPayments.id, depositPaymentId),
-          eq(depositPayments.status, "pending")
+          inArray(depositPayments.status, [...CONFIRMABLE_PAYMENT_STATUSES])
         )
       )
       .returning();
 
     if (!updatedPayment) return null;
 
+    // Stan wizyty PO blokadzie płatności — anulowanie (DELETE / cron)
+    // czeka na nas albo już się zatwierdziło i to widzimy.
+    const [current] = await tx
+      .select({ id: appointments.id, status: appointments.status })
+      .from(appointments)
+      .where(eq(appointments.id, payment.appointmentId))
+      .for("update");
+
+    if (!current || !PAYABLE_APPOINTMENT_STATUSES.has(current.status)) {
+      return { updatedPayment, inactiveStatus: current?.status ?? "missing" };
+    }
+
     const [updatedAppointment] = await tx
       .update(appointments)
       .set({
         depositPaid: true,
+        // `confirmed` (potwierdzona ręcznie przed wpłatą) zostaje `confirmed`.
         status: "confirmed",
         updatedAt: new Date(),
       })
-      .where(eq(appointments.id, payment.appointmentId))
+      .where(
+        and(
+          eq(appointments.id, payment.appointmentId),
+          inArray(appointments.status, [...PAYABLE_APPOINTMENT_STATUSES])
+        )
+      )
       .returning();
 
     return { updatedPayment, updatedAppointment };
@@ -134,6 +184,10 @@ export async function confirmDepositPayment(
   if (!txResult) {
     // Lost the race against a concurrent confirmation — already done.
     return { success: true, alreadyConfirmed: true, smsSent: false };
+  }
+
+  if ("inactiveStatus" in txResult) {
+    return refundDepositForInactiveAppointment(payment, txResult.updatedPayment, txResult.inactiveStatus);
   }
 
   const { updatedPayment, updatedAppointment } = txResult;
@@ -218,5 +272,44 @@ export async function confirmDepositPayment(
     smsSent,
     depositPayment: updatedPayment,
     appointment: updatedAppointment,
+  };
+}
+
+async function refundDepositForInactiveAppointment(
+  payment: typeof depositPayments.$inferSelect,
+  updatedPayment: typeof depositPayments.$inferSelect,
+  appointmentStatus: string
+): Promise<ConfirmDepositResult> {
+  const context = {
+    depositPaymentId: payment.id,
+    appointmentId: payment.appointmentId,
+    salonId: payment.salonId,
+    appointmentStatus,
+  };
+  logger.warn("[Deposit] Deposit paid for an appointment that is no longer active — refunding", context);
+
+  const refund = await processAutomaticRefund(
+    payment.appointmentId,
+    "Wplata zadatku po anulowaniu wizyty - automatyczny zwrot"
+  );
+  if (!refund.refunded) {
+    logger.error("Deposit paid for cancelled appointment — manual refund", {
+      ...context,
+      refundMessage: refund.message,
+    });
+  } else {
+    logger.info("[Deposit] Late deposit refunded automatically", { ...context, refundId: refund.refundId });
+  }
+
+  return {
+    success: true,
+    alreadyConfirmed: false,
+    smsSent: false,
+    depositPayment: updatedPayment,
+    inactiveAppointment: {
+      appointmentStatus,
+      refunded: refund.refunded,
+      refundId: refund.refundId,
+    },
   };
 }

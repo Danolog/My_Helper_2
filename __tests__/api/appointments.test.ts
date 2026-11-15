@@ -6,7 +6,7 @@
  * - POST /api/appointments (create with validation, overlap check, time block check)
  * - GET /api/appointments/[id] (single appointment)
  * - PUT /api/appointments/[id] (reschedule with overlap check)
- * - DELETE /api/appointments/[id] (cancel with deposit rules)
+ * - DELETE /api/appointments/[id] (odwołanie przez salon: pełny zwrot, jeden SMS — refund-fix, #70)
  */
 import { eq } from "drizzle-orm";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -90,6 +90,11 @@ const mockProcessAutomaticRefund = vi.fn().mockResolvedValue({
   message: "Mock refund",
 });
 const mockCreateRefundNotification = vi.fn().mockResolvedValue(undefined);
+
+const mockSessionsExpire = vi.fn().mockResolvedValue({ status: "expired" });
+vi.mock("@/lib/stripe", () => ({
+  getStripe: () => ({ checkout: { sessions: { expire: (...args: unknown[]) => mockSessionsExpire(...args) } } }),
+}));
 
 vi.mock("@/lib/refund", () => ({
   processAutomaticRefund: (...args: unknown[]) => mockProcessAutomaticRefund(...args),
@@ -244,7 +249,7 @@ function chainMock(result: unknown[] = []) {
     "select", "from", "where", "leftJoin", "innerJoin",
     "limit", "orderBy", "groupBy", "as",
     "insert", "values", "update", "set", "delete",
-    "returning", "execute",
+    "returning", "execute", "for",
   ];
   for (const method of methods) {
     chain[method] = vi.fn().mockReturnValue(chain);
@@ -2028,254 +2033,223 @@ describe("PUT /api/appointments/[id] — referencje i zadatek (P1)", () => {
 describe("DELETE /api/appointments/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // niezużyte kolejki mockReturnValueOnce z poprzedniego testu nie mogą przeciekać
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+    mockDbInsert.mockReset();
+    mockProcessAutomaticRefund.mockResolvedValue({ success: true, refunded: false, message: "Mock refund" });
+    mockSessionsExpire.mockResolvedValue({ status: "expired" });
   });
 
-  it("should return 200 when cancelling successfully", async () => {
-    const appointment = makeAppointment({
-      startTime: new Date(Date.now() + 48 * 60 * 60 * 1000), // 48h from now
-      endTime: new Date(Date.now() + 49 * 60 * 60 * 1000),
-    });
-    const client = makeClient();
-    const employee = makeEmployee();
-    const service = makeService();
-
-    const cancelled = { ...appointment, status: "cancelled" };
-
-    // Select: fetch appointment with joins
-    mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, client, employee, service }]));
-    // Update: set status to cancelled
-    mockDbUpdate.mockReturnValueOnce(chainMock([cancelled]));
-    // Select: get salon name for waiting list
-    mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, name: "Test Salon" }]));
-
-    const request = createMockRequest(
-      `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`
+  /**
+   * Kolejność zapytań trasy (refund-fix): odczyt wizyty z joinami →
+   * transakcja [płatność pending→failed, wizyta FOR UPDATE, płatności
+   * succeeded, wizyta→cancelled] → nazwa i telefon salonu → (SMS).
+   */
+  function queueSalonCancel(opts: {
+    appointment: ReturnType<typeof makeAppointment>;
+    client?: ReturnType<typeof makeClient> | null;
+    failedPayments?: Array<{ id: string; stripePaymentIntentId: string | null }>;
+    paidMethods?: string[];
+    current?: Record<string, unknown>;
+  }) {
+    const { appointment } = opts;
+    const client = opts.client === undefined ? makeClient() : opts.client;
+    mockDbSelect.mockReturnValueOnce(
+      chainMock([{ appointment, client, employee: makeEmployee(), service: makeService() }])
     );
-    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
-    const response = await deleteAppointment(request, params);
-    const { status, body } = await parseResponse(response);
+    mockDbUpdate.mockReturnValueOnce(chainMock(opts.failedPayments ?? []));
+    mockDbSelect.mockReturnValueOnce(chainMock([opts.current ?? appointment]));
+    mockDbSelect.mockReturnValueOnce(chainMock((opts.paidMethods ?? []).map((paymentMethod) => ({ paymentMethod }))));
+    mockDbUpdate.mockReturnValueOnce(chainMock([{ ...appointment, status: "cancelled" }]));
+    mockDbSelect.mockReturnValueOnce(chainMock([{ name: "Salon Łódź", phone: "+48 600 100 200" }]));
+    mockDbInsert.mockReturnValue(chainMock([]));
+  }
+
+  async function callDelete(query = "") {
+    const request = createMockRequest(
+      `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}${query}`
+    );
+    const response = await deleteAppointment(request, createRouteParams(TEST_IDS.APPOINTMENT_UUID));
+    return parseResponse(response);
+  }
+
+  const smsInserts = () =>
+    mockDbInsert.mock.results.flatMap((r) =>
+      (r.value as { values: ReturnType<typeof vi.fn> }).values.mock.calls.map((c) => c[0] as Record<string, unknown>)
+    );
+
+  it("200: odwołanie bez zadatku — bez zwrotu, bez SMS bez notifyClient", async () => {
+    queueSalonCancel({ appointment: makeAppointment({ startTime: new Date(Date.now() + 48 * 3600e3) }) });
+
+    const { status, body } = await callDelete();
 
     expect(status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.message).toContain("cancelled");
-    expect(body.cancellationDetails).toBeDefined();
+    const details = (body as any).cancellationDetails;
+    expect(details).toEqual(expect.objectContaining({
+      hasDeposit: false, depositRefunded: false, depositForfeited: false, depositVariant: "none",
+      refundFailed: false, clientNotified: false, refund: null,
+    }));
+    expect(mockProcessAutomaticRefund).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
   });
 
-  it("should return 404 when appointment not found for deletion", async () => {
-    mockDbSelect.mockReturnValue(chainMock([]));
-
-    const request = createMockRequest(
-      `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`
-    );
-    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
-    const response = await deleteAppointment(request, params);
-    const { status, body } = await parseResponse(response);
-
-    expect(status).toBe(404);
-    expect(body.success).toBe(false);
-    expect(body.error).toContain("not found");
-  });
-
-  it("should return 400 when appointment is already cancelled", async () => {
-    const appointment = makeAppointment({ status: "cancelled" });
-    const client = makeClient();
-    const employee = makeEmployee();
-    const service = makeService();
-
-    mockDbSelect.mockReturnValue(chainMock([{ appointment, client, employee, service }]));
-
-    const request = createMockRequest(
-      `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`
-    );
-    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
-    const response = await deleteAppointment(request, params);
-    const { status, body } = await parseResponse(response);
-
-    expect(status).toBe(400);
-    expect(body.success).toBe(false);
-    expect(body.error).toContain("anulowana");
-  });
-
-  it("should handle deposit forfeiture for late cancellation (< 24h)", async () => {
+  it("RF1: wizyta za 2 h, zadatek online — salon zwraca 100% (bez reguły 24 h), jeden SMS ze zwrotem", async () => {
     const appointment = makeAppointment({
-      startTime: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2h from now
-      endTime: new Date(Date.now() + 3 * 60 * 60 * 1000),
+      startTime: new Date("2026-11-17T09:00:00Z"),
       depositAmount: "50.00",
       depositPaid: true,
     });
-    const client = makeClient();
-    const employee = makeEmployee();
-    const service = makeService();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-17T07:00:00Z"));
+    try {
+      queueSalonCancel({ appointment, paidMethods: ["stripe"] });
+      mockProcessAutomaticRefund.mockResolvedValueOnce({
+        success: true, refunded: true, refundId: "re_1", amount: 50, message: "ok",
+      });
 
-    const cancelled = { ...appointment, status: "cancelled" };
+      const { status, body } = await callDelete();
 
-    mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, client, employee, service }]));
-    mockDbUpdate
-      .mockReturnValueOnce(chainMock([cancelled]))  // cancel the appointment
-      .mockReturnValueOnce(chainMock([]));           // mark deposit as forfeited
-    mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, name: "Test Salon" }]));
-
-    const request = createMockRequest(
-      `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`
-    );
-    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
-    const response = await deleteAppointment(request, params);
-    const { status, body } = await parseResponse(response);
-
-    expect(status).toBe(200);
-    expect(body.success).toBe(true);
-    expect((body as any).cancellationDetails.depositForfeited).toBe(true);
-    expect((body as any).cancellationDetails.depositRefunded).toBe(false);
+      expect(status).toBe(200);
+      const details = (body as any).cancellationDetails;
+      expect(details.isMoreThan24h).toBe(false);
+      expect(details).toEqual(expect.objectContaining({
+        depositRefunded: true, depositForfeited: false, depositVariant: "online", refundFailed: false, clientNotified: true,
+      }));
+      expect(mockProcessAutomaticRefund).toHaveBeenCalledWith(TEST_IDS.APPOINTMENT_UUID, expect.stringContaining("pelny zwrot"));
+      // RF2: dokładnie jeden SMS, dosłowny tekst §6, GSM-7, bez linku
+      const sms = smsInserts();
+      expect(sms).toHaveLength(1);
+      expect(sms[0]).toEqual(expect.objectContaining({ type: "sms", clientId: TEST_IDS.CLIENT_UUID }));
+      expect(sms[0]!.message).toBe(
+        "Salon Lodz: Twoja wizyta Strzyzenie 17 listopada 2026 zostala odwolana przez salon. Zadatek 50.00 PLN wroci w calosci w ciagu 5-10 dni roboczych."
+      );
+      expect(mockCreateRefundNotification).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("should process deposit refund when cancellation is >24h before appointment and deposit is paid", async () => {
-    const appointment = makeAppointment({
-      startTime: new Date(Date.now() + 48 * 60 * 60 * 1000), // 48h from now
-      endTime: new Date(Date.now() + 49 * 60 * 60 * 1000),
-      depositAmount: "100.00",
-      depositPaid: true,
-    });
-    const client = makeClient();
-    const employee = makeEmployee();
-    const service = makeService();
-
-    const cancelled = { ...appointment, status: "cancelled" };
-
-    // Override processAutomaticRefund to return a successful refund
+  it("RF3 (backend): zwrot się nie udał → 200 z refundFailed, logger.error z appointmentId", async () => {
+    const appointment = makeAppointment({ depositAmount: "50.00", depositPaid: true });
+    queueSalonCancel({ appointment, paidMethods: ["stripe"] });
     mockProcessAutomaticRefund.mockResolvedValueOnce({
-      success: true,
-      refunded: true,
-      refundId: "ref-1",
-      amount: 100,
-      message: "Refunded",
+      success: false, refunded: false, message: "Zwrot Stripe nie powiodl sie",
     });
 
-    // Select: fetch appointment with joins
-    mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, client, employee, service }]));
-    // Update: set status to cancelled
-    mockDbUpdate.mockReturnValueOnce(chainMock([cancelled]));
-    // Select: get salon name for waiting list
-    mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, name: "Test Salon" }]));
-
-    const request = createMockRequest(
-      `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`
-    );
-    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
-    const response = await deleteAppointment(request, params);
-    const { status, body } = await parseResponse(response);
+    const { status, body } = await callDelete("?notifyClient=true");
 
     expect(status).toBe(200);
-    expect(body.success).toBe(true);
     const details = (body as any).cancellationDetails;
-    expect(details.depositRefunded).toBe(true);
-    expect(details.depositForfeited).toBe(false);
-    expect(details.isMoreThan24h).toBe(true);
-    expect(details.hasDeposit).toBe(true);
-    expect(details.depositPaid).toBe(true);
-    expect(details.refund).toBeDefined();
-    expect(details.refund.processed).toBe(true);
-    expect(details.refund.refundId).toBe("ref-1");
-    expect(details.refund.amount).toBe(100);
-    // Verify processAutomaticRefund was called
-    expect(mockProcessAutomaticRefund).toHaveBeenCalledWith(
-      TEST_IDS.APPOINTMENT_UUID,
-      expect.stringContaining("24h")
-    );
-    // Verify createRefundNotification was called for client
-    expect(mockCreateRefundNotification).toHaveBeenCalled();
+    expect(details).toEqual(expect.objectContaining({ depositRefunded: false, refundFailed: true, depositVariant: "online" }));
+    expect(smsInserts()).toHaveLength(1);
   });
 
-  it("should skip deposit logic when appointment has no deposit at all", async () => {
-    const appointment = makeAppointment({
-      startTime: new Date(Date.now() + 48 * 60 * 60 * 1000), // 48h from now
-      endTime: new Date(Date.now() + 49 * 60 * 60 * 1000),
-      depositAmount: null,
-      depositPaid: false,
-    });
-    const client = makeClient();
-    const employee = makeEmployee();
-    const service = makeService();
+  it("RF2: zadatek wpłacony poza MyHelper (bez płatności Stripe) — wariant ręczny z telefonem salonu", async () => {
+    const appointment = makeAppointment({ startTime: new Date("2026-11-17T09:00:00Z"), depositAmount: "30.00", depositPaid: true });
+    queueSalonCancel({ appointment, paidMethods: [] });
 
-    const cancelled = { ...appointment, status: "cancelled" };
+    const { body } = await callDelete("?notifyClient=true");
 
-    // Select: fetch appointment with joins
-    mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, client, employee, service }]));
-    // Update: set status to cancelled
-    mockDbUpdate.mockReturnValueOnce(chainMock([cancelled]));
-    // Select: get salon name for waiting list
-    mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, name: "Test Salon" }]));
-
-    const request = createMockRequest(
-      `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`
-    );
-    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
-    const response = await deleteAppointment(request, params);
-    const { status, body } = await parseResponse(response);
-
-    expect(status).toBe(200);
-    expect(body.success).toBe(true);
-    const details = (body as any).cancellationDetails;
-    expect(details.hasDeposit).toBe(false);
-    expect(details.depositRefunded).toBe(false);
-    expect(details.depositForfeited).toBe(false);
-    expect(details.refund).toBeNull();
-    // processAutomaticRefund should NOT have been called
-    expect(mockProcessAutomaticRefund).not.toHaveBeenCalled();
+    expect((body as any).cancellationDetails.depositVariant).toBe("manual");
+    expect(smsInserts().map((s) => s.message)).toEqual([
+      "Salon Lodz: Twoja wizyta Strzyzenie 17 listopada 2026 zostala odwolana przez salon. W sprawie zwrotu zadatku 30.00 PLN skontaktuj sie z salonem: +48 600 100 200.",
+    ]);
   });
 
-  it("should create notification when notifyClient=true query param is set", async () => {
-    const appointment = makeAppointment({
-      startTime: new Date(Date.now() + 48 * 60 * 60 * 1000), // 48h from now
-      endTime: new Date(Date.now() + 49 * 60 * 60 * 1000),
-    });
-    const client = makeClient();
-    const employee = makeEmployee();
-    const service = makeService();
+  it("RF2: bez zadatku z notifyClient — jeden SMS „nowy termin”, bez linku /book", async () => {
+    queueSalonCancel({ appointment: makeAppointment({ startTime: new Date("2026-11-17T09:00:00Z") }) });
 
-    const cancelled = { ...appointment, status: "cancelled" };
+    const { body } = await callDelete("?notifyClient=true");
 
-    // Select: fetch appointment with joins
-    mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, client, employee, service }]));
-    // Update: set status to cancelled
-    mockDbUpdate.mockReturnValueOnce(chainMock([cancelled]));
-    // Insert: notification record
-    mockDbInsert.mockReturnValueOnce(chainMock([]));
-    // Select: get salon name for waiting list
-    mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, name: "Test Salon" }]));
-
-    const request = createMockRequest(
-      `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}?notifyClient=true`
-    );
-    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
-    const response = await deleteAppointment(request, params);
-    const { status, body } = await parseResponse(response);
-
-    expect(status).toBe(200);
-    expect(body.success).toBe(true);
     expect((body as any).cancellationDetails.clientNotified).toBe(true);
-    // Verify db.insert was called for the notification
-    expect(mockDbInsert).toHaveBeenCalled();
+    const messages = smsInserts().map((s) => s.message as string);
+    expect(messages).toEqual([
+      "Salon Lodz: Twoja wizyta Strzyzenie 17 listopada 2026 zostala odwolana przez salon. W sprawie nowego terminu skontaktuj sie z salonem: +48 600 100 200.",
+    ]);
+    expect(messages[0]).not.toContain("/book");
   });
 
-  it("should return 500 when database throws during deletion", async () => {
-    // Select: simulate database error when fetching the appointment
+  it("#70 pkt 1: płatność pending → failed w transakcji, potem expire sesji cs_", async () => {
+    const appointment = makeAppointment({ depositAmount: "50.00", depositPaid: false });
+    queueSalonCancel({ appointment, failedPayments: [{ id: "dp-1", stripePaymentIntentId: "cs_test_1" }] });
+
+    const { status, body } = await callDelete();
+
+    expect(status).toBe(200);
+    // pierwszy update w transakcji = płatność → failed
+    const firstSet = (mockDbUpdate.mock.results[0]!.value as { set: ReturnType<typeof vi.fn> }).set;
+    expect(firstSet).toHaveBeenCalledWith({ status: "failed" });
+    expect(mockSessionsExpire).toHaveBeenCalledWith("cs_test_1");
+    expect(mockProcessAutomaticRefund).not.toHaveBeenCalled();
+    expect((body as any).cancellationDetails.depositVariant).toBe("none");
+  });
+
+  it("#70 pkt 1: bez prawdziwej sesji (symulacja) expire nie jest wołane; błąd expire → nadal 200", async () => {
+    const appointment = makeAppointment({ depositAmount: "50.00" });
+    queueSalonCancel({ appointment, failedPayments: [{ id: "dp-1", stripePaymentIntentId: null }] });
+    expect((await callDelete()).status).toBe(200);
+    expect(mockSessionsExpire).not.toHaveBeenCalled();
+
+    queueSalonCancel({ appointment, failedPayments: [{ id: "dp-2", stripePaymentIntentId: "cs_done" }] });
+    mockSessionsExpire.mockRejectedValueOnce(new Error("Only Checkout Sessions with a status of open can be expired"));
+    const { status } = await callDelete();
+    expect(status).toBe(200);
+    expect(mockSessionsExpire).toHaveBeenCalledWith("cs_done");
+  });
+
+  it("decyzja na stanie po blokadzie: webhook potwierdził wpłatę w międzyczasie → zwrot 100%", async () => {
+    const appointment = makeAppointment({ depositAmount: "50.00", depositPaid: false });
+    queueSalonCancel({
+      appointment,
+      current: { ...appointment, status: "confirmed", depositPaid: true },
+      paidMethods: ["stripe"],
+    });
+    mockProcessAutomaticRefund.mockResolvedValueOnce({ success: true, refunded: true, refundId: "re_2", amount: 50, message: "ok" });
+
+    const { body } = await callDelete();
+
+    expect(mockProcessAutomaticRefund).toHaveBeenCalledTimes(1);
+    expect((body as any).cancellationDetails).toEqual(expect.objectContaining({ depositPaid: true, depositRefunded: true }));
+  });
+
+  it("404 gdy wizyty nie ma", async () => {
+    mockDbSelect.mockReturnValue(chainMock([]));
+    const { status, body } = await callDelete();
+    expect(status).toBe(404);
+    expect(body.error).toContain("not found");
+  });
+
+  it("400 gdy już anulowana (odczyt przed transakcją)", async () => {
+    mockDbSelect.mockReturnValue(
+      chainMock([{ appointment: makeAppointment({ status: "cancelled" }), client: makeClient(), employee: null, service: null }])
+    );
+    const { status, body } = await callDelete();
+    expect(status).toBe(400);
+    expect(body.error).toContain("anulowana");
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("400 gdy anulowano równolegle (stan po blokadzie) — bez zwrotu i SMS", async () => {
+    const appointment = makeAppointment({ depositAmount: "50.00", depositPaid: true });
+    queueSalonCancel({ appointment, current: { ...appointment, status: "cancelled" } });
+    const { status } = await callDelete("?notifyClient=true");
+    expect(status).toBe(400);
+    expect(mockProcessAutomaticRefund).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("500 gdy baza rzuca", async () => {
     const errorChain: Record<string, unknown> = {};
-    const methods = ["select", "from", "where", "leftJoin", "limit"];
-    for (const method of methods) {
+    for (const method of ["select", "from", "where", "leftJoin", "limit"]) {
       (errorChain as Record<string, ReturnType<typeof vi.fn>>)[method] = vi.fn().mockReturnValue(errorChain);
     }
     errorChain.then = (_: unknown, reject: (err: Error) => void) => reject(new Error("DB delete failure"));
     mockDbSelect.mockReturnValue(errorChain);
-
-    const request = createMockRequest(
-      `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`
-    );
-    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
-    const response = await deleteAppointment(request, params);
-    const { status, body } = await parseResponse(response);
-
+    const { status, body } = await callDelete();
     expect(status).toBe(500);
-    expect(body.success).toBe(false);
     expect(body.error).toContain("Failed to cancel appointment");
   });
 });

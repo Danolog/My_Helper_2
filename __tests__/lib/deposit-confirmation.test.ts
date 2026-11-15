@@ -3,9 +3,13 @@
  * i dev-symulatora). Kontrakt:
  *   - not_found: brak rekordu platnosci,
  *   - succeeded: idempotentny no-op (alreadyConfirmed, ZERO update'ow),
- *   - failed/refunded: stany terminalne => not_pending, NIGDY nie wskrzeszane,
- *   - pending: transakcyjny update platnosci (guard status='pending')
- *     + potwierdzenie wizyty; paymentIntentId zapisywany tylko gdy podany,
+ *   - refunded: stan terminalny => not_pending, NIGDY nie wskrzeszany,
+ *   - pending/failed: transakcyjny update platnosci (guard status IN
+ *     ('pending','failed')), potem wizyta FOR UPDATE; paymentIntentId
+ *     zapisywany tylko gdy podany,
+ *   - #70: wizyta nie scheduled/confirmed (np. cancelled) => platnosc
+ *     succeeded, wizyta NIETYKANA, bez SMS, automatyczny zwrot; nieudany
+ *     zwrot => logger.error „manual refund”,
  *   - przegrany wyscig (guard zwraca 0 wierszy) => alreadyConfirmed,
  *   - SMS do klienta/goscia jest non-blocking: brak telefonu / blad SMS
  *     nie psuje potwierdzenia (smsSent=false, success=true).
@@ -20,6 +24,9 @@ const {
   mockTxSet,
   mockTransaction,
   mockSendSms,
+  txSelectQueue,
+  mockTxFor,
+  mockRefund,
 } = vi.hoisted(() => {
   // db.select().from().where() — kolejne wyniki z kolejki (FIFO)
   const selectQueue: unknown[][] = [];
@@ -38,12 +45,22 @@ const {
   const mockTxSet = vi.fn((..._args: unknown[]) => ({ where: mockTxWhere }));
   const mockTxUpdate = vi.fn(() => ({ set: mockTxSet }));
 
+  // tx.select().from().where().for("update") — stan wizyty po blokadzie
+  const txSelectQueue: unknown[][] = [];
+  const mockTxFor = vi.fn(() =>
+    Promise.resolve(
+      txSelectQueue.length > 0 ? txSelectQueue.shift()! : [{ id: "appt-1", status: "scheduled" }]
+    )
+  );
+  const mockTxSelect = vi.fn(() => ({ from: () => ({ where: () => ({ for: mockTxFor }) }) }));
+
   const mockTransaction = vi.fn(
-    (fn: (tx: { update: typeof mockTxUpdate }) => unknown) =>
-      fn({ update: mockTxUpdate })
+    (fn: (tx: { update: typeof mockTxUpdate; select: typeof mockTxSelect }) => unknown) =>
+      fn({ update: mockTxUpdate, select: mockTxSelect })
   );
 
   const mockSendSms = vi.fn();
+  const mockRefund = vi.fn();
 
   return {
     selectQueue,
@@ -54,6 +71,9 @@ const {
     mockTxReturning,
     mockTransaction,
     mockSendSms,
+    txSelectQueue,
+    mockTxFor,
+    mockRefund,
   };
 });
 
@@ -72,6 +92,11 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  inArray: vi.fn((...args: unknown[]) => ({ type: "inArray", args })),
+}));
+
+vi.mock("@/lib/refund", () => ({
+  processAutomaticRefund: (...args: unknown[]) => mockRefund(...args),
 }));
 
 vi.mock("@/lib/schema", () => ({
@@ -80,7 +105,7 @@ vi.mock("@/lib/schema", () => ({
     status: "depositPayments.status",
     appointmentId: "depositPayments.appointmentId",
   },
-  appointments: { id: "appointments.id" },
+  appointments: { id: "appointments.id", status: "appointments.status" },
   clients: { id: "clients.id" },
   services: { id: "services.id" },
   employees: { id: "employees.id" },
@@ -91,6 +116,7 @@ vi.mock("@/lib/sms", () => ({
 }));
 
 import { confirmDepositPayment } from "@/lib/deposit-confirmation";
+import { logger } from "@/lib/logger";
 
 function queueSelect(...results: unknown[][]) {
   selectQueue.push(...results);
@@ -125,7 +151,9 @@ describe("confirmDepositPayment", () => {
     vi.clearAllMocks();
     selectQueue.length = 0;
     txReturningQueue.length = 0;
+    txSelectQueue.length = 0;
     mockSendSms.mockResolvedValue({ success: true });
+    mockRefund.mockResolvedValue({ success: true, refunded: true, refundId: "re_1", amount: 50, message: "ok" });
   });
 
   it("zwraca not_found, gdy platnosc nie istnieje", async () => {
@@ -157,7 +185,7 @@ describe("confirmDepositPayment", () => {
     expect(mockSendSms).not.toHaveBeenCalled();
   });
 
-  it.each(["failed", "refunded"])(
+  it.each(["refunded"])(
     "status %s => not_pending, platnosc NIGDY nie jest wskrzeszana",
     async (status) => {
       const payment = { ...pendingPayment, status };
@@ -218,6 +246,75 @@ describe("confirmDepositPayment", () => {
         salonId: "salon-1",
       })
     );
+  });
+
+  it.each(["cancelled", "completed", "no_show"])(
+    "#70: wizyta %s + pozna wplata => platnosc succeeded, wizyta nietykana, bez SMS, automatyczny zwrot",
+    async (status) => {
+      queueSelect([pendingPayment]);
+      txSelectQueue.push([{ id: "appt-1", status }]);
+      txReturningQueue.push([updatedPayment]);
+
+      const result = await confirmDepositPayment("dp-1", { paymentIntentId: "pi_late" });
+
+      expect(result).toEqual({
+        success: true,
+        alreadyConfirmed: false,
+        smsSent: false,
+        depositPayment: updatedPayment,
+        inactiveAppointment: { appointmentStatus: status, refunded: true, refundId: "re_1" },
+      });
+      // tylko update platnosci (succeeded + pi_), wizyta bez zapisu
+      expect(mockTxUpdate).toHaveBeenCalledTimes(1);
+      expect(mockTxSet.mock.calls[0]![0]).toMatchObject({ status: "succeeded", stripePaymentIntentId: "pi_late" });
+      expect(mockTxFor).toHaveBeenCalledWith("update");
+      expect(mockRefund).toHaveBeenCalledWith("appt-1", expect.stringContaining("po anulowaniu"));
+      expect(mockSendSms).not.toHaveBeenCalled();
+      expect(logger.error).not.toHaveBeenCalled();
+    }
+  );
+
+  it("#70: platnosc failed (anulowanie przed wplata) + wplata => succeeded i zwrot, nie not_pending", async () => {
+    queueSelect([{ ...pendingPayment, status: "failed" }]);
+    txSelectQueue.push([{ id: "appt-1", status: "cancelled" }]);
+    txReturningQueue.push([updatedPayment]);
+
+    const result = await confirmDepositPayment("dp-1", { paymentIntentId: "pi_late" });
+
+    expect(result.success).toBe(true);
+    expect(result.inactiveAppointment?.refunded).toBe(true);
+    expect(mockRefund).toHaveBeenCalledTimes(1);
+  });
+
+  it("#70: nieudany zwrot => logger.error 'manual refund' z id, platnosc zostaje succeeded, wizyta nietykana", async () => {
+    queueSelect([pendingPayment]);
+    txSelectQueue.push([{ id: "appt-1", status: "cancelled" }]);
+    txReturningQueue.push([updatedPayment]);
+    mockRefund.mockResolvedValueOnce({ success: false, refunded: false, message: "Zwrot Stripe nie powiodl sie" });
+
+    const result = await confirmDepositPayment("dp-1", { paymentIntentId: "pi_late" });
+
+    expect(result.success).toBe(true);
+    expect(result.inactiveAppointment).toEqual({ appointmentStatus: "cancelled", refunded: false, refundId: undefined });
+    expect(mockTxUpdate).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      "Deposit paid for cancelled appointment — manual refund",
+      expect.objectContaining({ depositPaymentId: "dp-1", appointmentId: "appt-1", salonId: "salon-1" })
+    );
+    expect(mockSendSms).not.toHaveBeenCalled();
+  });
+
+  it("wizyta confirmed (potwierdzona recznie przed wplata) => depositPaid, zostaje confirmed, bez zwrotu", async () => {
+    queueSelect([pendingPayment], [], [{ firstName: "Ewa", lastName: "Nowak" }], []);
+    txSelectQueue.push([{ id: "appt-1", status: "confirmed" }]);
+    txReturningQueue.push([updatedPayment], [{ ...confirmedAppointment, clientId: null, guestPhone: "+48600700800" }]);
+
+    const result = await confirmDepositPayment("dp-1");
+
+    expect(result.success).toBe(true);
+    expect(result.inactiveAppointment).toBeUndefined();
+    expect(mockTxSet.mock.calls[1]![0]).toMatchObject({ depositPaid: true, status: "confirmed" });
+    expect(mockRefund).not.toHaveBeenCalled();
   });
 
   it("bez paymentIntentId nie nadpisuje stripePaymentIntentId (zostaje istniejaca referencja)", async () => {
