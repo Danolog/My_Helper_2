@@ -1,6 +1,10 @@
 /**
  * P0 · /api/salons — mutacje korzenia najemcy (tabela `salons`).
  *
+ * POST (#86): tworzył salon bez wiersza subskrypcji (niezmiennik Ethana §3),
+ * nikt go nie wołał — zdjęty. Salon powstaje tylko przez
+ * POST /api/register-subscription. Test: 405 i żaden salon nie powstaje.
+ *
  * DELETE: przed poprawką każde zalogowane konto (także klient) usuwało dowolny
  * salon po id, a 26 FK do salons.id ma ON DELETE CASCADE (klienci, wizyty,
  * subskrypcje). Trasa nie ma wołającego w UI — zdjęta. Test sprawdza zachowanie
@@ -43,7 +47,6 @@ vi.mock("@/lib/schema", () => {
   return { salons: table("salons"), services: table("services"), reviews: table("reviews") };
 });
 
-let nextId = 1;
 vi.mock("@/lib/db", () => ({
   db: {
     delete: () => ({
@@ -58,7 +61,7 @@ vi.mock("@/lib/db", () => ({
     insert: () => ({
       values: (v: Row) => ({
         returning: async () => {
-          const row = { id: `new-salon-${nextId++}`, ...v };
+          const row = { id: "new-salon", ...v };
           store.salons.push(row);
           return [row];
         },
@@ -123,7 +126,6 @@ async function callDelete(id?: string): Promise<number> {
 const salonIds = () => store.salons.map((s) => s.id).sort();
 
 beforeEach(() => {
-  nextId = 1;
   sessionUserId = null;
   store.salons = [
     { id: SALON_A, name: "Salon A", ownerId: OWNER_A },
@@ -171,69 +173,36 @@ describe("DELETE /api/salons — trasa zdjęta, żaden salon nie znika", () => {
 });
 
 // -------------------------------------------------------
-// POST
+// POST (#86)
 // -------------------------------------------------------
 
-async function callPost(body: Row): Promise<{ status: number; body: Row }> {
-  const res = await route.POST(
-    createMockRequest("http://localhost/api/salons", { method: "POST", body }),
-  );
-  return { status: res.status, body: (await res.json()) as Row };
+/** Odpowiednik routera Next.js: metoda bez eksportu => 405. */
+async function callPost(body: Row): Promise<number> {
+  const handler = (route as Record<string, unknown>).POST as
+    | ((req: Request) => Promise<Response>)
+    | undefined;
+  if (!handler) return 405;
+  const res = await handler(createMockRequest("http://localhost/api/salons", { method: "POST", body }));
+  return res.status;
 }
 
-const salonsOf = (ownerId: string) => store.salons.filter((s) => s.ownerId === ownerId);
-
-describe("POST /api/salons — właściciel wyłącznie z sesji", () => {
-  it("body z cudzym ownerId — salon należy do konta z sesji, nie do ofiary", async () => {
-    sessionUserId = CLIENT;
-    const { status, body } = await callPost({ name: "Nowy", ownerId: OWNER_B });
-    expect(status).toBe(201);
-    expect((body.data as Row).ownerId).toBe(CLIENT);
-    expect(salonsOf(CLIENT)).toHaveLength(1);
-    expect(salonsOf(OWNER_B)).toHaveLength(1); // tylko pierwotny Salon B
+describe("POST /api/salons — trasa zdjęta, salon bez subskrypcji nie powstaje (#86)", () => {
+  it.each([
+    ["konto bez salonu", CLIENT, { name: "Pierwszy" }],
+    ["konto, które ma już salon", OWNER_A, { name: "Drugi salon A" }],
+    ["cudzy ownerId w body", CLIENT, { name: "Nowy", ownerId: OWNER_B }],
+    ["brak sesji", null, { name: "Nowy" }],
+  ] as const)("%s — 405, nic nie powstaje", async (_label, user, body) => {
+    sessionUserId = user;
+    expect(await callPost({ ...body })).toBe(405);
+    expect(salonIds()).toEqual([SALON_A, SALON_B]);
   });
 
-  it("body z ownerId: null — salon nie zostaje bez właściciela", async () => {
-    sessionUserId = CLIENT;
-    const { status, body } = await callPost({ name: "Nowy", ownerId: null });
-    expect(status).toBe(201);
-    expect((body.data as Row).ownerId).toBe(CLIENT);
+  it("moduł nie eksportuje POST", () => {
+    expect((route as Record<string, unknown>).POST).toBeUndefined();
   });
 
-  it("body bez ownerId — właściciel z sesji", async () => {
-    sessionUserId = CLIENT;
-    const { status, body } = await callPost({ name: "Nowy" });
-    expect(status).toBe(201);
-    expect((body.data as Row).ownerId).toBe(CLIENT);
-  });
-
-  it("brak sesji — 401, nic nie powstaje", async () => {
-    const { status } = await callPost({ name: "Nowy", ownerId: OWNER_B });
-    expect(status).toBe(401);
-    expect(store.salons).toHaveLength(2);
-  });
-
-  it("brak nazwy — 400, nic nie powstaje", async () => {
-    sessionUserId = CLIENT;
-    const { status } = await callPost({ ownerId: CLIENT });
-    expect(status).toBe(400);
-    expect(store.salons).toHaveLength(2);
-  });
-});
-
-describe("POST /api/salons — jedno konto, jeden salon", () => {
-  // salon-context / get-user-salon szukają salonu po ownerId z limit(1) bez
-  // ORDER BY — drugi salon tego samego konta robi kontekst niedeterministycznym.
-  it("konto, które ma już salon — 409, drugi salon nie powstaje", async () => {
-    sessionUserId = OWNER_A;
-    const { status } = await callPost({ name: "Drugi salon A" });
-    expect(status).toBe(409);
-    expect(salonsOf(OWNER_A)).toHaveLength(1);
-  });
-
-  it("konto bez salonu tworzy pierwszy — 201", async () => {
-    sessionUserId = CLIENT;
-    expect((await callPost({ name: "Pierwszy" })).status).toBe(201);
-    expect(salonsOf(CLIENT)).toHaveLength(1);
+  it("GET (publiczny katalog) zostaje", () => {
+    expect(typeof route.GET).toBe("function");
   });
 });

@@ -6,6 +6,7 @@ import Stripe from "stripe";
 import { db } from "@/lib/db";
 import { confirmDepositPayment } from "@/lib/deposit-confirmation";
 import { logger } from "@/lib/logger";
+import { toErrorIdentity } from "@/lib/safe-error";
 import {
   appointments,
   depositPayments,
@@ -123,6 +124,7 @@ function getPaymentIntentIdFromInvoice(invoice: RawInvoiceData, fallback: string
  * The webhook secret is used to verify the event signature.
  */
 export async function POST(request: Request) {
+  let received: { eventId: string; eventType: string } | undefined;
   try {
     const body = await request.text();
     const stripe = getStripe();
@@ -163,6 +165,7 @@ export async function POST(request: Request) {
       );
     }
 
+    received = { eventId: event.id, eventType: event.type };
     logger.info("Stripe webhook event received", { eventType: event.type, eventId: event.id });
 
     switch (event.type) {
@@ -197,7 +200,10 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ received: true });
   } catch (error) {
-    logger.error("Stripe webhook processing failed", { error });
+    // N1 (Ryan, #62): ten catch obsługuje też zadatki (dane gości w
+    // parametrach zapytań) — w logu tylko nazwa i kod błędu oraz id
+    // zdarzenia (pełne zdarzenie jest w panelu Stripe), bez message/stack.
+    logger.error("Stripe webhook processing failed", { ...toErrorIdentity(error), ...received });
     return NextResponse.json(
       { error: "Webhook processing failed" },
       { status: 500 }
@@ -421,13 +427,17 @@ async function handleCheckoutSessionCompleted(event: Stripe.Event, stripe: Strip
 
   const result = await confirmDepositPayment(
     depositPaymentId,
-    paymentIntentId ? { paymentIntentId } : {}
+    {
+      ...(paymentIntentId ? { paymentIntentId } : {}),
+      // "paid" (sprawdzone wyżej) pozwala zapisać wpłatę płatności `failed` (#70).
+      stripePaymentStatus: checkoutSession.payment_status,
+    }
   );
 
   if (!result.success) {
-    // not_found: broken reference; not_pending: e.g. a late async success
-    // after the cleanup cron cancelled the appointment — money was taken,
-    // manual refund needed.
+    // not_found: broken reference; not_pending: payment already refunded
+    // (terminal) — money taken again, manual handling. A late payment after
+    // cancellation (pending/failed) is confirmed and refunded (#70).
     logger.error("Deposit confirmation via webhook failed — manual attention required", {
       depositPaymentId,
       sessionId: checkoutSession.id,
@@ -441,6 +451,8 @@ async function handleCheckoutSessionCompleted(event: Stripe.Event, stripe: Strip
     sessionId: checkoutSession.id,
     paymentIntentId,
     alreadyConfirmed: result.alreadyConfirmed,
+    // #70: wpłata za wizytę już nieaktywną — zapisana i zwrócona (albo manual refund w logu error)
+    inactiveAppointment: result.inactiveAppointment ?? null,
   });
 }
 

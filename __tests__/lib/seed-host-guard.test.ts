@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import postgres from "postgres";
 import {
   checkSeedClientOptions,
@@ -10,7 +10,9 @@ import {
   SEED_ALLOWED_HOSTS,
   SEED_SERVER_PROBE_SQL,
   type AmbiguousPart,
+  type SeedProbeClient,
   type SeedRejectCode,
+  verifySeedServerIdentities,
 } from "../../scripts/seed-host-guard";
 
 /**
@@ -412,7 +414,8 @@ describe("kontekst komunikatów (harness: INTEGRATION_POSTGRES_URL zamiast seed/
     const src = readFileSync(join(process.cwd(), "__tests__/pg/pg-harness.ts"), "utf8");
     expect(src).toMatch(/checkSeedTarget\([^)]*HARNESS_GUARD_CONTEXT\)/);
     expect(src).toMatch(/checkSeedClientOptions\(client\.options, HARNESS_GUARD_CONTEXT\)/);
-    expect(src).toMatch(/checkSeedServerIdentity\(identity, HARNESS_GUARD_CONTEXT\)/);
+    // N1 (Ryan): etap 3 obejmuje OBIE pule, nie tylko appClient.
+    expect(src).toMatch(/verifySeedServerIdentities\(\[appClient, observer\], HARNESS_GUARD_CONTEXT\)/);
   });
 });
 
@@ -443,5 +446,94 @@ describe("seed-test.ts używa guardu przed połączeniem", () => {
     expect(checkAt).toBeGreaterThan(probeAt);
     expect(firstWrite).toBeGreaterThan(checkAt);
     expect(body.slice(checkAt, firstWrite)).toContain("process.exit(1)");
+  });
+});
+
+// -------------------------------------------------------
+// P3 po #72 (Ryan): dwa kody bez asercji kodu + sprzątanie pul przy etapie 3
+// -------------------------------------------------------
+
+describe("kody invalid_url i client_no_host", () => {
+  it.each([
+    `postgresql://u:${SECRET}@localhost:99999/pos_dev`,
+    `postgresql://u:${SECRET}@localhost:x/pos_dev`,
+    `postgresql://u:${SECRET}@local host/pos_dev`,
+  ])("URL przechodzi cięcie authority, ale nie new URL → invalid_url, bez echa hasła (%#)", (url) => {
+    const result = checkSeedTarget(url);
+    expectReject(result, "invalid_url");
+    expect(reasonOf(result)).not.toContain(SECRET);
+  });
+
+  it.each([{ host: [] }, { host: undefined }, {}])("klient bez hosta → client_no_host (%j)", (options) => {
+    expectReject(checkSeedClientOptions(options), "client_no_host");
+  });
+});
+
+describe("verifySeedServerIdentities: etap 3 na wszystkich pulach (harness)", () => {
+  const LOCAL = { database: "pos_dev", neon_settings: 0 };
+
+  function fakeClient(probe: () => Promise<readonly unknown[]>) {
+    const client = {
+      unsafe: vi.fn((_sql: string) => probe()),
+      end: vi.fn(async (_opts?: { timeout?: number }) => undefined),
+    };
+    return client satisfies SeedProbeClient;
+  }
+
+  it("sonda idzie do KAŻDEJ puli, tym samym zapytaniem; pule zostają otwarte", async () => {
+    const app = fakeClient(async () => [LOCAL]);
+    const observer = fakeClient(async () => [LOCAL]);
+    const result = await verifySeedServerIdentities([app, observer]);
+    expect(result).toEqual({ ok: true, databases: ["pos_dev", "pos_dev"] });
+    expect(app.unsafe).toHaveBeenCalledWith(SEED_SERVER_PROBE_SQL);
+    expect(observer.unsafe).toHaveBeenCalledWith(SEED_SERVER_PROBE_SQL);
+    expect(app.end).not.toHaveBeenCalled();
+    expect(observer.end).not.toHaveBeenCalled();
+  });
+
+  it("druga pula (observer) trafia na Neona → odmowa i OBIE pule zamknięte", async () => {
+    const app = fakeClient(async () => [LOCAL]);
+    const observer = fakeClient(async () => [{ database: "pos_dev", neon_settings: 3 }]);
+    const result = await verifySeedServerIdentities([app, observer]);
+    expectReject(result, "neon");
+    expect(app.end).toHaveBeenCalledWith({ timeout: 0 });
+    expect(observer.end).toHaveBeenCalledWith({ timeout: 0 });
+  });
+
+  it("pusta odpowiedź sondy → server_unknown (fail closed) i pule zamknięte", async () => {
+    const app = fakeClient(async () => []);
+    const observer = fakeClient(async () => [LOCAL]);
+    expectReject(await verifySeedServerIdentities([app, observer]), "server_unknown");
+    expect(observer.unsafe).not.toHaveBeenCalled();
+    expect(app.end).toHaveBeenCalled();
+    expect(observer.end).toHaveBeenCalled();
+  });
+
+  it("sonda rzuca (timeout połączenia) → OBIE pule zamknięte, oryginalny błąd leci dalej", async () => {
+    const boom = new Error("connect_timeout");
+    const app = fakeClient(async () => {
+      throw boom;
+    });
+    const observer = fakeClient(async () => [LOCAL]);
+    await expect(verifySeedServerIdentities([app, observer])).rejects.toBe(boom);
+    expect(app.end).toHaveBeenCalledWith({ timeout: 0 });
+    expect(observer.end).toHaveBeenCalledWith({ timeout: 0 });
+  });
+
+  it("błąd przy zamykaniu puli nie zasłania przyczyny odmowy", async () => {
+    const app = fakeClient(async () => [{ database: "postgres", neon_settings: 0 }]);
+    app.end.mockRejectedValueOnce(new Error("end failed"));
+    const observer = fakeClient(async () => [LOCAL]);
+    expectReject(await verifySeedServerIdentities([app, observer]), "database_not_allowed");
+    expect(observer.end).toHaveBeenCalled();
+  });
+
+  it("kontekst harnessu trafia do komunikatu odmowy", async () => {
+    const app = fakeClient(async () => [{ database: "postgres", neon_settings: 0 }]);
+    const result = await verifySeedServerIdentities([app], {
+      subject: "test integracyjny",
+      varName: "INTEGRATION_POSTGRES_URL",
+    });
+    expect(reasonOf(result)).toContain("test integracyjny");
   });
 });

@@ -17,12 +17,50 @@ async function navigateToCalendar(page: Page) {
   ).toBeVisible({ timeout: 30000 });
 }
 
+const SEED_CLIENT_ID = '00000000-0000-4000-8000-c10000000001'; // Maria Kaczmarek
+const SEED_SERVICE_ID = '00000000-0000-4000-8000-5e0000000001'; // Strzyzenie damskie, 60 min
+const SCHEDULED_EMPLOYEE_ID = '00000000-0000-4000-8000-e00000000003'; // Ewa Zadatkowa, grafik 08:00-20:00
+const APPOINTMENT_TIME = '19:00';
+
+function tomorrowInWarsaw(): string {
+  const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw' }).format(d); // YYYY-MM-DD
+}
+
+/**
+ * Radix Select: otwiera trigger po data-testid i wybiera opcje po nazwie.
+ * Portal z opcjami bywa poza viewportem CI (klik nie dochodzi) — fokus + Enter.
+ */
+async function selectOption(page: Page, triggerTestId: string, name: RegExp) {
+  await page.getByTestId(triggerTestId).click();
+  const option = page.getByRole('option', { name });
+  await expect(option, `opcja ${name} w ${triggerTestId} (dane z seeda)`).toHaveCount(1, { timeout: 10000 });
+  await option.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('listbox')).toBeHidden();
+}
+
 // ---------------------------------------------------------------------------
 // Flow 4: Appointment System (P0)
 // ---------------------------------------------------------------------------
 
 test.describe('Flow 4: Appointment System', () => {
   // Auth handled by storageState — no login needed
+  test.use({ timezoneId: 'Europe/Warsaw' });
+
+  // Sprzatanie: wizyty utworzone w tescie sa anulowane (DELETE = status
+  // "cancelled"; termin wraca do puli, kolizje pomijaja anulowane).
+  let createdAppointmentIds: string[] = [];
+  test.afterEach(async ({ page }) => {
+    const ids = createdAppointmentIds;
+    createdAppointmentIds = [];
+    if (ids.length === 0) return;
+    const token = (await page.context().cookies()).find((c) => c.name === 'csrf-token')?.value ?? '';
+    for (const id of ids) {
+      const res = await page.request.delete(`/api/appointments/${id}`, { headers: { 'x-csrf-token': decodeURIComponent(token) } });
+      expect(res.status(), `sprzatanie: anulowanie wizyty ${id}: ${await res.text()}`).toBe(200);
+    }
+  });
 
   // ── Happy path ──────────────────────────────────────────────────────────
 
@@ -52,36 +90,61 @@ test.describe('Flow 4: Appointment System', () => {
     });
 
     test('should create a new appointment', { tag: '@full' }, async ({ page }) => {
+      // Realny zapis z dialogu (#105 cz. 1). Poprzednia wersja byla w warunkach
+      // `if (await x.isVisible())`, ktore nie czekaja: gdy dialog jeszcze sie nie
+      // otworzyl, test konczyl sie zielono bez zadnej akcji, a gdy zdazyl —
+      // klikal zawsze zablokowany przycisk (nie ustawial pracownika ani godziny).
+      //
+      // Dane z seeda: klientka Maria Kaczmarek, usluga "Strzyzenie damskie"
+      // (60 min, bez zadatku), Ewa Zadatkowa (grafik 7 dni 08:00-20:00).
+      // Jutro 19:00-20:00 — w grafiku i poza pierwszym wolnym terminem, ktory
+      // bierze spec zadatku (tests/client-portal/) dla tej samej pracowniczki.
       await navigateToCalendar(page);
-      const newBtn = page.getByTestId('new-appointment-btn');
-      if (!(await newBtn.isVisible())) return;
-      await newBtn.click();
+      await page.getByTestId('new-appointment-btn').click();
 
-      // Fill appointment form — select client, service, employee
-      // These selectors depend on the actual dialog implementation
-      const dialog = page.locator('[role="dialog"]');
-      if (await dialog.isVisible()) {
-        // Select first available client
-        const clientSelect = dialog.locator('select, [role="combobox"]').first();
-        if (await clientSelect.isVisible()) {
-          await clientSelect.click();
-          await page.getByRole('option').first().click();
-        }
+      const dialog = page.getByTestId('new-appointment-dialog');
+      await expect(dialog).toBeVisible({ timeout: 10000 });
 
-        // Select service
-        const serviceSelect = dialog.locator('select, [role="combobox"]').nth(1);
-        if (await serviceSelect.isVisible()) {
-          await serviceSelect.click();
-          await page.getByRole('option').first().click();
-        }
+      await selectOption(page, 'client-select', /^Maria Kaczmarek/);
+      await selectOption(page, 'service-select', /^Strzyzenie damskie - /);
+      await selectOption(page, 'employee-select', /Ewa Zadatkowa/);
 
-        // Confirm/save
-        const saveBtn = dialog.getByRole('button', { name: /zapisz|potwierd[zź]|utw[oó]rz|dodaj/i });
-        if (await saveBtn.isVisible()) {
-          await saveBtn.click();
-          await page.waitForLoadState('domcontentloaded');
-        }
-      }
+      const date = tomorrowInWarsaw();
+      await dialog.getByTestId('appointment-date-input').fill(date);
+      await dialog.getByTestId('appointment-time-input').fill(APPOINTMENT_TIME);
+
+      const saveBtn = dialog.getByTestId('save-appointment-btn');
+      await expect(saveBtn).toBeEnabled({ timeout: 10000 });
+
+      const responsePromise = page.waitForResponse(
+        (res) => res.request().method() === 'POST' && new URL(res.url()).pathname === '/api/appointments',
+        { timeout: 15000 }
+      );
+      await saveBtn.click();
+      const res = await responsePromise;
+      const body = await res.text();
+      const json = JSON.parse(body) as { data?: { id?: string } };
+      if (json.data?.id) createdAppointmentIds.push(json.data.id);
+      expect(res.status(), `POST /api/appointments: ${body}`).toBe(201);
+      const appointmentId = json.data!.id!;
+
+      await expect(dialog).toBeHidden({ timeout: 10000 });
+
+      // Zapis w bazie z danymi z formularza
+      const expectedStart = await page.evaluate((local) => new Date(local).toISOString(), `${date}T${APPOINTMENT_TIME}:00`);
+      const getRes = await page.request.get(`/api/appointments/${appointmentId}`);
+      expect(getRes.status()).toBe(200);
+      const saved = (await getRes.json()).data as {
+        clientId: string; serviceId: string; employeeId: string; startTime: string; endTime: string; status: string;
+      };
+      expect(saved).toMatchObject({
+        clientId: SEED_CLIENT_ID,
+        serviceId: SEED_SERVICE_ID,
+        employeeId: SCHEDULED_EMPLOYEE_ID,
+        status: 'scheduled',
+      });
+      expect(new Date(saved.startTime).toISOString()).toBe(expectedStart);
+      expect(new Date(saved.endTime).getTime() - new Date(saved.startTime).getTime()).toBe(60 * 60000);
     });
 
     test('should filter calendar by employee', { tag: '@full' }, async ({ page }) => {

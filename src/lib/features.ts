@@ -358,10 +358,9 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
     pattern: /^\/api\/ai\/image\/(generate|banner|service-illustration)(\/|$)/,
     module: "imageGen",
   },
-  // Moduły zamrożone wcześniej (kod kasowany w B3–B5). Wywołujący trasy
-  // głosowe (dyktowanie, czytanie na głos) i paragon wizyty są schowani
-  // w interfejsie przez useModuleEnabled("voiceAi") / ("fiscal").
-  { pattern: /^\/api\/ai\/voice(\/|$)/, module: "voiceAi" },
+  // Moduły zamrożone wcześniej (kod kasowany w B3–B5). Paragon wizyty jest
+  // schowany w interfejsie przez useModuleEnabled("fiscal"). Głos (voiceAi)
+  // usunięty w B3 — tras nie ma, wzorca też (strażnik: removed-features).
   { pattern: /^\/api\/ai\/video(\/|$)/, module: "videoGen" },
   { pattern: /^\/api\/scheduled-posts(\/|$)/, module: "socialPosts" },
   { pattern: /^\/api\/ai\/content\/social-post(\/|$)/, module: "socialPosts" },

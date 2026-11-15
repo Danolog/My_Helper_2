@@ -65,7 +65,8 @@ const API_DIR_NAMES: Record<string, RegExp | null> = {
   pushNotifications: /\/push(\/|-|$)/,
   // Moduły zamrożone wcześniej (kod kasowany w B3–B5) — trasy też są
   // blokowane: płatne generowanie mowy i wideo nie może być osiągalne.
-  voiceAi: /\/ai\/voice(\/|$)/,
+  // B3: kod głosu usunięty — tras /api/ai/voice nie ma (removed-features.test.ts).
+  voiceAi: null,
   videoGen: /\/ai\/video(\/|$)/,
   fiscal: /fiscal/,
   socialPosts: /scheduled-posts|social-post/,
@@ -156,12 +157,6 @@ describe("frozenModuleForApiPath", () => {
     ["/api/push/test", "pushNotifications"],
     ["/api/cron/push-reminders", "pushNotifications"],
     ["/api/cron/push-reminders-24h", "pushNotifications"],
-    ["/api/ai/voice/incoming", "voiceAi"],
-    ["/api/ai/voice/twilio/webhook", "voiceAi"],
-    ["/api/ai/voice/config", "voiceAi"],
-    ["/api/ai/voice/stt", "voiceAi"],
-    ["/api/ai/voice/tts", "voiceAi"],
-    ["/api/ai/voice/interpret-command", "voiceAi"],
     ["/api/appointments/abc/fiscal-receipt", "fiscal"],
     ["/api/ai/video/generate", "videoGen"],
     ["/api/ai/video/status/abc", "videoGen"],
