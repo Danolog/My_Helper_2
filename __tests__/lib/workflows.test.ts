@@ -380,9 +380,13 @@ case "$*" in
     case "$st" in
       "") echo "ERROR: (gcloud.secrets.versions.describe) NOT_FOUND: Secret Version [latest] not found" >&2; exit 1 ;;
       DENIED) echo "ERROR: (gcloud.secrets.versions.describe) PERMISSION_DENIED: denied" >&2; exit 1 ;;
+      EMPTY) echo "" ;;
       *) echo "$st" ;;
     esac ;;
   *"run services describe"*) echo "https://sha-1234567---myhelper-843777043748.europe-central2.run.app" ;;
+  *" run deploy "*)
+    f=$(printf '%s\n' "$@" | sed -n 's/^--env-vars-file=//p')
+    [ -n "$f" ] && sed 's/^/ENVFILE /' "$f" >> "$FAKE_LOG" ;;
 esac
 exit 0
 `,
@@ -412,9 +416,14 @@ exit 0
         ...extra,
       },
     });
-    const calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
+    const lines = readFileSync(log, "utf8").split("\n").filter(Boolean);
+    const calls = lines.filter((c) => !c.startsWith("ENVFILE "));
+    const envFile = lines.filter((c) => c.startsWith("ENVFILE ")).map((c) => c.slice("ENVFILE ".length));
     const run = calls.find((c) => c.includes(" run deploy "));
-    return { ...r, calls, run };
+    const described = calls
+      .filter((c) => c.includes("secrets versions describe latest"))
+      .map((c) => c.split(" ").find((a) => a.startsWith("--secret="))!.slice("--secret=".length));
+    return { ...r, calls, run, envFile, described };
   };
   const REQUIRED = "postgres-url=ENABLED,better-auth-secret=ENABLED";
   const secretsArg = (run: string) => run.split(" ").find((a) => a.startsWith("--set-secrets="))!.slice("--set-secrets=".length).split(",");
@@ -455,6 +464,63 @@ exit 0
     expect(r.run).toContain("--set-cloudsql-instances=my-helper-2-488419:europe-central2:myhelper-pg");
     expect(r.run).not.toMatch(/allow-unauthenticated/);
     expect(r.stdout).toContain("tag_url=https://sha-1234567---myhelper-843777043748.europe-central2.run.app");
+  });
+
+  // Ryan (#144): mapowane są tylko klasy secret (→ --set-secrets) i var
+  // (→ --env-vars-file); vercel-only, build, image, platform, ci-only nigdy.
+  it("tylko klasy secret i var trafiają do usługi; describe dokładnie dla sekretów z manifestu", () => {
+    const manifest = JSON.parse(read("infra/gcp/env-manifest.json")) as { variables: Record<string, { class: string; secretName?: string }> };
+    const secretNames = Object.values(manifest.variables).filter((v) => v.class === "secret").map((v) => v.secretName!).sort();
+    const others = Object.entries(manifest.variables).filter(([, v]) => v.class !== "secret" && v.class !== "var").map(([k]) => k);
+    const extra = Object.fromEntries(others.map((k) => [k, "x"]));
+    const r = deploy(REQUIRED, { ...extra, ADMIN_EMAILS: "a@example.test", NODE_ENV: "test" });
+    expect(r.status, r.stderr).toBe(0);
+    expect([...r.described].sort()).toEqual(secretNames);
+    const envNames = r.envFile.map((l) => l.split(":")[0]);
+    expect(envNames).toContain("ADMIN_EMAILS");
+    for (const k of others) {
+      expect(envNames).not.toContain(k);
+      expect(r.run).not.toContain(`${k}=`);
+    }
+  });
+
+  it("vercel-only / build z nazwą sekretu w manifeście nie są mapowane (manifest testowy)", () => {
+    const m = join(dir, "manifest-classes.json");
+    writeFileSync(m, JSON.stringify({ variables: {
+      A_SECRET: { class: "secret", secretName: "a-secret", required: true },
+      VO_KEY: { class: "vercel-only", secretName: "vo-secret", required: true },
+      B_KEY: { class: "build", secretName: "b-secret" },
+      V_VAR: { class: "var" },
+      VO_VAR: { class: "vercel-only" },
+    } }));
+    const r = deploy("a-secret=ENABLED,vo-secret=ENABLED,b-secret=ENABLED", { MANIFEST: m, V_VAR: "v", VO_VAR: "w" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.described).toEqual(["a-secret"]);
+    expect(secretsArg(r.run!)).toEqual(["A_SECRET=a-secret:latest"]);
+    expect(r.envFile).toEqual(['V_VAR: "v"']);
+  });
+
+  // Leo (#151 pkt 2): strażnik „no secrets to map” — osiągalny tylko bez
+  // wymaganych sekretów w manifeście.
+  it("żaden sekret do zmapowania → kod 2 przed gcloud run deploy", () => {
+    const m = join(dir, "manifest-none.json");
+    writeFileSync(m, JSON.stringify({ variables: { OPT_SECRET: { class: "secret", secretName: "opt-secret" } } }));
+    const r = deploy("", { MANIFEST: m });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/error: no secrets to map/);
+    expect(r.run).toBeUndefined();
+  });
+
+  // Ethan (#144): pusty `state` z describe (kod 0) nie jest ENABLED.
+  it("pusty stan wersji: wymagany → kod 2 przed deployem; opcjonalny → pominięty", () => {
+    const req = deploy("postgres-url=EMPTY,better-auth-secret=ENABLED");
+    expect(req.status).toBe(2);
+    expect(req.stderr).toMatch(/required secrets without an enabled version: postgres-url/);
+    expect(req.run).toBeUndefined();
+    const opt = deploy(`${REQUIRED},cron-secret=EMPTY`);
+    expect(opt.status, opt.stderr).toBe(0);
+    expect(opt.stdout).toMatch(/skip: optional secret cron-secret has no enabled version \(\)/);
+    expect(secretsArg(opt.run!).join(",")).not.toContain("cron-secret");
   });
 
   it("brak SQL_INSTANCE → kod 2 przed pierwszym gcloud", () => {
