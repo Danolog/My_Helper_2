@@ -17,11 +17,14 @@
  * src/app/dashboard/subscription/_hooks/use-subscription-data.ts.
  * Salon wyłącznie z sesji — `salonId` w body nie jest częścią kontraktu.
  */
+import type { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "@/app/api/subscriptions/checkout/route";
 
 const {
   selectQueue,
+  selectWheres,
   mockUpdate,
   mockInsert,
   mockTransaction,
@@ -35,6 +38,8 @@ const {
 } = vi.hoisted(() => ({
   // Kolejne `db.select()` / `tx.select()` zdejmują wyniki z kolejki (FIFO).
   selectQueue: [] as unknown[][],
+  // Argumenty `.where(...)` kolejnych SELECT-ów (filtr renderowany przez PgDialect).
+  selectWheres: [] as unknown[],
   mockUpdate: vi.fn(),
   mockInsert: vi.fn(),
   mockTransaction: vi.fn(),
@@ -50,9 +55,13 @@ const {
 vi.mock("@/lib/db", () => {
   const selectChain = () => {
     const builder: Record<string, unknown> = {};
-    for (const method of ["from", "innerJoin", "where", "orderBy", "limit"]) {
+    for (const method of ["from", "innerJoin", "orderBy", "limit"]) {
       builder[method] = () => builder;
     }
+    builder.where = (cond: unknown) => {
+      selectWheres.push(cond);
+      return builder;
+    };
     builder.then = (
       resolve: (value: unknown[]) => unknown,
       reject: (reason: unknown) => unknown,
@@ -176,6 +185,7 @@ function expectNoWrites() {
 describe("POST /api/subscriptions/checkout", () => {
   beforeEach(() => {
     selectQueue.length = 0;
+    selectWheres.length = 0;
     mockUpdate.mockReset();
     mockInsert.mockReset();
     mockTransaction.mockReset();
@@ -243,6 +253,74 @@ describe("POST /api/subscriptions/checkout", () => {
 
       expect(res.status).toBe(409);
       expectNoWrites();
+    });
+  });
+
+  // T3b: ten sam predykat konfliktu co confirm (`isCurrentPaidStripeRow`) —
+  // klient dowiaduje się o konflikcie PRZED pobraniem pieniędzy.
+  describe("(e) predykat konfliktu jak w confirm: trialing z prawdziwą subskrypcją Stripe", () => {
+    it("trial prowadzony przez Stripe (prawdziwe id), inny plan: 409 PLAN_CHANGE_UNSUPPORTED, bez sesji Stripe", async () => {
+      mockGetStripe.mockReturnValue(stripeClient());
+      selectQueue.push(
+        [PLAN_PRO],
+        [subscriptionRow({ status: "trialing", stripeSubscriptionId: "sub_1RealTrial" })]
+      );
+
+      const res = await POST(checkoutRequest("pro"));
+      const body = await res.json();
+
+      expect(res.status).toBe(409);
+      expect(body.code).toBe("PLAN_CHANGE_UNSUPPORTED");
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
+      expectNoWrites();
+    });
+
+    it("trial prowadzony przez Stripe, ten sam plan: 409, bez sesji Stripe", async () => {
+      mockGetStripe.mockReturnValue(stripeClient());
+      selectQueue.push(
+        [PLAN_BASIC],
+        [subscriptionRow({ status: "trialing", stripeSubscriptionId: "sub_1RealTrial" })]
+      );
+
+      const res = await POST(checkoutRequest("basic"));
+
+      expect(res.status).toBe(409);
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
+      expectNoWrites();
+    });
+
+    it("nasz trial z rejestracji (stripeSubscriptionId = null), ten sam plan: sesja Checkout (trial → płatny)", async () => {
+      mockGetStripe.mockReturnValue(stripeClient());
+      selectQueue.push([PLAN_BASIC], [subscriptionRow({ status: "trialing", stripeSubscriptionId: null })]);
+
+      const res = await POST(checkoutRequest("basic"));
+
+      expect(res.status).toBe(200);
+      expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
+      expectNoWrites();
+    });
+
+    it("zapytanie o istniejące wiersze obejmuje trialing i active (nie tylko active)", async () => {
+      mockGetStripe.mockReturnValue(stripeClient());
+      selectQueue.push([PLAN_PRO], []);
+
+      await POST(checkoutRequest("pro"));
+
+      // drugi SELECT = wiersze subskrypcji salonu
+      const { params } = new PgDialect().sqlToQuery(selectWheres[1] as SQL);
+      expect(params).toEqual(expect.arrayContaining(["salon-1", "trialing", "active"]));
+    });
+
+    it("wiersz canceled z prawdziwym id (historia) nie blokuje nowego Checkoutu", async () => {
+      mockGetStripe.mockReturnValue(stripeClient());
+      // Zapytanie filtruje trialing/active; gdyby atrapa zwróciła historię,
+      // trasa i tak jej nie liczy.
+      selectQueue.push([PLAN_PRO], [subscriptionRow({ status: "canceled", stripeSubscriptionId: "sub_old" })]);
+
+      const res = await POST(checkoutRequest("pro"));
+
+      expect(res.status).toBe(200);
+      expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
     });
   });
 

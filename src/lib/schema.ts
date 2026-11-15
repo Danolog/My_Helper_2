@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { pgTable, text, timestamp, boolean, index, uniqueIndex, uuid, jsonb, integer, numeric } from "drizzle-orm/pg-core";
 
 // IMPORTANT! ID fields should ALWAYS use UUID types, EXCEPT the BetterAuth tables.
@@ -102,7 +103,10 @@ export const salons = pgTable(
       .notNull(),
   },
   (table) => [
-    index("salons_owner_id_idx").on(table.ownerId),
+    // Jedno konto = jeden salon (T3b): salon-context i get-user-salon szukaja
+    // salonu po ownerId z limit(1). NULL-e (salony bez wlasciciela) sie nie
+    // zderzaja. Zastapil nieunikalny salons_owner_id_idx.
+    uniqueIndex("salons_owner_id_uq").on(table.ownerId),
   ]
 );
 
@@ -952,6 +956,11 @@ export const salonSubscriptions = pgTable(
     index("salon_subscriptions_salon_id_idx").on(table.salonId),
     index("salon_subscriptions_plan_id_idx").on(table.planId),
     index("salon_subscriptions_status_idx").on(table.status),
+    // Co najwyzej jeden biezacy wiersz (trialing/active) na salon (T3b).
+    // Historia (canceled, past_due) moze miec wiele wierszy.
+    uniqueIndex("salon_subscriptions_salon_current_uq")
+      .on(table.salonId)
+      .where(sql`${table.status} in ('trialing', 'active')`),
   ]
 );
 
