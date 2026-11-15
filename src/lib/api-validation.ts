@@ -973,66 +973,6 @@ export const validatePromoCodeSchema = z.object({
 });
 
 // ==========================================
-// Voice AI Schemas
-// ==========================================
-
-export const voiceBookSchema = z.object({
-  serviceId: z.string().min(1, "serviceId is required"),
-  employeeId: z.string().optional(),
-  preferredDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Format daty: YYYY-MM-DD").optional(),
-  preferredTime: z.string().regex(/^\d{2}:\d{2}$/, "Format czasu: HH:MM").optional(),
-  callerPhone: z.string().min(1, "callerPhone is required"),
-  callerName: z.string().max(100).optional(),
-  notes: z.string().max(500).optional(),
-});
-
-export const voiceCancelSchema = z.object({
-  appointmentId: z.string().optional(),
-  callerPhone: z.string().min(1, "callerPhone is required"),
-  callerName: z.string().max(100).optional(),
-  notes: z.string().max(500).optional(),
-});
-
-export const voiceRescheduleSchema = z.object({
-  appointmentId: z.string().optional(),
-  callerPhone: z.string().min(1, "callerPhone is required"),
-  callerName: z.string().max(100).optional(),
-  preferredDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Format daty: YYYY-MM-DD").optional(),
-  preferredTime: z.string().regex(/^\d{2}:\d{2}$/, "Format czasu: HH:MM").optional(),
-  notes: z.string().max(500).optional(),
-});
-
-export const voiceMessageSchema = z.object({
-  callerPhone: z.string().min(1, "callerPhone is required"),
-  callerName: z.string().max(100).optional(),
-  message: z.string().min(1, "message is required").max(2000),
-  conversationId: z.string().optional(),
-});
-
-export const voiceIncomingSchema = z.object({
-  callerMessage: z.string().min(1, "callerMessage is required"),
-  callerPhone: z.string().optional(),
-});
-
-export const voiceConfigSchema = z.object({
-  enabled: z.boolean(),
-  greeting: z.string().max(500).optional(),
-  businessHoursOnly: z.boolean().optional(),
-  language: z.enum(["pl", "en"]).optional(),
-  voiceStyle: z.enum(["professional", "friendly", "warm"]).optional(),
-  maxCallDuration: z.number().min(60).max(600).optional(),
-  transferToHumanEnabled: z.boolean().optional(),
-  transferPhoneNumber: z.string().max(20).optional(),
-  capabilities: z.object({
-    bookAppointments: z.boolean().optional(),
-    checkAvailability: z.boolean().optional(),
-    cancelAppointments: z.boolean().optional(),
-    rescheduleAppointments: z.boolean().optional(),
-    answerFaq: z.boolean().optional(),
-  }).optional(),
-});
-
-// ==========================================
 // Subscription Schemas (additional)
 // ==========================================
 

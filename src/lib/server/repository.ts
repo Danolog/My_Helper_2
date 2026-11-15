@@ -27,7 +27,7 @@
  * Na sterowniku postgres-js cała transakcja `db.transaction(...)` biegnie na
  * jednym połączeniu, więc obie instrukcje `SET LOCAL` obowiązują resztę transakcji.
  *
- * ŚCIEŻKI SYSTEMOWE (webhooki Stripe/Twilio, crony, seed, migracje) NIE przechodzą
+ * ŚCIEŻKI SYSTEMOWE (webhooki Stripe, crony, seed, migracje) NIE przechodzą
  * przez ten wrapper — używają surowego `db` (rola owner, świadomy bypass RLS),
  * bo nie mają zalogowanego właściciela salonu. To celowe (ADR sekcja 4): owner
  * wykonuje je z kontekstem wyznaczanym z danych (np. salon z subskrypcji), nie z

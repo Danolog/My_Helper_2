@@ -43,13 +43,12 @@ export default defineConfig({
         'src/lib/schema.ts',             // deklaracje tabel Drizzle (dane, nie logika)
         'src/lib/auth.ts',               // konfiguracja Better Auth (adapter)
         'src/lib/auth-client.ts',        // klient Better Auth (adapter)
-        // Wrappery zewnetrznych API (OpenRouter/ElevenLabs/Imagen/Veo) oraz
+        // Wrappery zewnetrznych API (OpenRouter/Imagen/Veo) oraz
         // logika analityczna wyniesiona z tras w Fazie 3 (src/lib/ai/business,
         // search) — pokrywana przez testy tras/E2E, ta sama zasada co route.ts.
         // Wyjatek: usage-limits.ts ma pelne testy jednostkowe, ale zostaje
         // w wylaczeniu katalogowym dla prostoty (testy i tak biegna).
         'src/lib/ai/**',
-        'src/lib/twilio.ts',             // wrapper Twilio (zew. API)
         'src/lib/pdf-export.ts',         // generator PDF (binarny output, E2E)
         'src/lib/api-client.ts',         // klient fetch po stronie przegladarki
         // Orkiestrator powiadomien listy rezerwowej: DB + fan-out push/sms/email

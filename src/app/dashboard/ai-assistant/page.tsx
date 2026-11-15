@@ -8,7 +8,6 @@ import {
   Brain,
   Lightbulb,
   MessageSquare,
-  Mic,
   PenTool,
   TrendingUp,
   type LucideIcon,
@@ -72,15 +71,6 @@ const AI_TILES: AiTile[] = [
     description: "Monitoruj wykorzystanie funkcji AI i limity planu",
     href: "/dashboard/ai-usage",
     cta: "Zobacz zuzycie",
-  },
-  {
-    icon: Mic,
-    title: "Asystent glosowy",
-    description:
-      "Automatyczne odbieranie polaczen i umawianie wizyt przez telefon",
-    href: "/dashboard/ai-assistant/voice",
-    cta: "Konfiguruj",
-    module: "voiceAi",
   },
 ];
 
