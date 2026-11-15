@@ -56,6 +56,20 @@ if (pos[0] === "secrets") {
 }
 const verb = pos[2], name = verb === "create" || verb === "update" ? pos[4] : pos[3];
 const file = path.join(process.env.FAKE_JOBS, name + ".json");
+// Odrzucenie serii zmian (pomiar Olivera): pierwsze FAKE_ABORTED_TIMES wywołań
+// czasownika FAKE_ABORTED_VERB → ABORTED. Na stderr także treść pliku flag —
+// najgorszy przypadek: skrypt nie może jej przepuścić na wyjście.
+const counter = path.join(process.env.FAKE_JOBS, ".aborted");
+if (process.env.FAKE_ABORTED_VERB === verb) {
+  const k = Number(fs.existsSync(counter) ? fs.readFileSync(counter, "utf8") : "0");
+  const max = process.env.FAKE_ABORTED_TIMES === "inf" ? Infinity : Number(process.env.FAKE_ABORTED_TIMES || 0);
+  if (k < max) {
+    fs.writeFileSync(counter, String(k + 1));
+    process.stderr.write("ERROR: (gcloud.scheduler.jobs." + verb + ") ABORTED: sync mutate calls cannot be queued\\n" + (ffText || ""));
+    process.exit(1);
+  }
+}
+if (process.env.FAKE_FAIL_VERB === verb) { process.stderr.write("ERROR: PERMISSION_DENIED\\n" + (ffText || "")); process.exit(1); }
 const job = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
 const save = (j) => fs.writeFileSync(file, JSON.stringify(j));
 // Jak prawdziwy gcloud: create/update http bez --format=none wypisują zasób zadania
@@ -98,6 +112,9 @@ if (verb === "describe") {
 `,
 );
 chmodSync(join(BIN, "gcloud"), 0o755);
+// Fałszywy sleep: zapisuje odstęp, nie czeka (odstępy ponawiania bez minut czekania).
+writeFileSync(join(BIN, "sleep"), '#!/bin/sh\n[ -n "$FAKE_SLEEP_LOG" ] && echo "$1" >> "$FAKE_SLEEP_LOG"\nexit 0\n');
+chmodSync(join(BIN, "sleep"), 0o755);
 
 let n = 0;
 function world() {
@@ -105,6 +122,7 @@ function world() {
   mkdirSync(jobs);
   const log = join(DIR, `log-${n++}`);
   writeFileSync(log, "");
+  const sleepLog = join(DIR, `sleep-${n++}`);
   const run = (args: string[], extra: Record<string, string> = {}) => {
     const r = spawnSync("bash", [SCRIPT, ...args], {
       encoding: "utf8",
@@ -117,6 +135,7 @@ function world() {
         FAKE_JOBS: jobs,
         FAKE_LOG: log,
         FAKE_TOKEN: TOKEN,
+        FAKE_SLEEP_LOG: sleepLog,
         ...extra,
       },
     });
@@ -129,9 +148,10 @@ function world() {
       .map((l) => JSON.parse(l) as { a: string[]; env: string | null; ff: string | null });
   const calls = () => entries().map((e) => e.a);
   const state = (name: string) => JSON.parse(readFileSync(join(jobs, `${name}.json`), "utf8")) as Record<string, string>;
-  const count = () => readdirSync(jobs).length;
+  const count = () => readdirSync(jobs).filter((f) => !f.startsWith(".")).length;
   const seed = (name: string, j: Record<string, string>) => writeFileSync(join(jobs, `${name}.json`), JSON.stringify(j));
-  return { run, calls, entries, state, count, seed, jobs };
+  const sleeps = () => (existsSync(sleepLog) ? readFileSync(sleepLog, "utf8").split("\n").filter(Boolean).map(Number) : []);
+  return { run, calls, entries, state, count, seed, jobs, sleeps };
 }
 
 const verbOf = (c: string[]) => c.filter((x) => !x.startsWith("--")).slice(2, 4).join(" ");
@@ -320,6 +340,7 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     for (const r of [first, second, resume]) {
       expect(r.status, r.stderr).toBe(0);
       expect(r.stdout + r.stderr).not.toContain(TOKEN);
+      expect(r.stdout.split("\n").filter((l) => l.includes("Authorization"))).toEqual([]);
     }
     const entries = w.entries();
     const writes = entries.filter((e) => /^(create|update) http$/.test(verbOf(e.a)));
@@ -338,6 +359,56 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain(TOKEN);
+  });
+
+  // Oliver (pomiar): Scheduler odrzuca szybkie serie zmian kodem ABORTED.
+  it("ABORTED dwa razy, potem sukces → ponowienie z odstępami 10, 20 s; wynik jak bez błędu", () => {
+    const w = world();
+    const r = w.run([], { FAKE_ABORTED_VERB: "update", FAKE_ABORTED_TIMES: "2" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(w.sleeps()).toEqual([10, 20]);
+    expect(r.stderr).toContain(`retry: ${TABLE[0]!.name}: ABORTED`);
+    for (const job of TABLE) expect(w.state(job.name)).toMatchObject({ state: "PAUSED", schedule: job.schedule });
+    expect(r.stdout + r.stderr).not.toContain(TOKEN);
+  });
+
+  it("ABORTED przy create: każda próba z nagłówkiem w pliku flag (strumień tworzony od nowa)", () => {
+    const w = world();
+    const r = w.run([], { FAKE_ABORTED_VERB: "create", FAKE_ABORTED_TIMES: "1" });
+    expect(r.status, r.stderr).toBe(0);
+    const creates = w.entries().filter((e) => verbOf(e.a) === "create http" && nameOf(e.a) === TABLE[0]!.name);
+    expect(creates).toHaveLength(2);
+    for (const e of creates) expect(e.ff).toBe(`--headers:\n  Authorization: "Bearer ${TOKEN}"\n`);
+    expect(r.stdout + r.stderr).not.toContain(TOKEN);
+  });
+
+  it("ABORTED bez końca → kod ≠ 0 z nazwą zadania po 10, 20, 40, 60, 60 s; dalej nic; ponowny przebieg kończy pracę", () => {
+    const w = world();
+    const r = w.run([], { FAKE_ABORTED_VERB: "pause", FAKE_ABORTED_TIMES: "inf" });
+    const name = TABLE[0]!.name;
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(`error: ${name}: Scheduler still rejects changes (ABORTED)`);
+    expect(w.sleeps()).toEqual([10, 20, 40, 60, 60]);
+    expect(w.sleeps().reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(200);
+    expect(w.calls().filter((c) => verbOf(c).startsWith("pause"))).toHaveLength(6);
+    expect(w.calls().some((c) => verbOf(c).startsWith("update"))).toBe(false);
+    expect(w.count()).toBe(1);
+    expect(r.stdout + r.stderr).not.toContain(TOKEN);
+    // Idempotentnie: przerwany przebieg (zadanie ENABLED z harmonogramem zaparkowanym) da się puścić jeszcze raz.
+    const again = w.run([]);
+    expect(again.status, again.stderr).toBe(0);
+    for (const job of TABLE) expect(w.state(job.name)).toMatchObject({ state: "PAUSED", schedule: job.schedule });
+  });
+
+  it("inny błąd niż ABORTED → bez ponawiania, kod 1, nagłówek ze stderr gcloud nie trafia na wyjście", () => {
+    const w = world();
+    const r = w.run([], { FAKE_FAIL_VERB: "create" });
+    expect(r.status).toBe(1);
+    expect(w.sleeps()).toEqual([]);
+    expect(w.calls().filter((c) => verbOf(c) === "create http")).toHaveLength(1);
+    expect(r.stderr).toContain(`failed for ${TABLE[0]!.name}`);
+    expect(r.stderr).toContain("PERMISSION_DENIED");
+    expect(r.stdout + r.stderr).not.toContain(TOKEN);
   });
 
   it("token z sekretu nigdy w argumentach gcloud ani na wyjściu", () => {

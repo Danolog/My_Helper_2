@@ -148,8 +148,44 @@ fi
 
 # Plik flag z nagłówkiem autoryzacji, czytany przez gcloud ze strumienia.
 # Wartość sekretu nie pojawia się w argumentach procesu ani na wyjściu.
+# $1 = create | update: nazwa flagi nagłówka powstaje tylko tutaj, w pliku flag.
 auth_flags() {
-  printf '%s:\n  Authorization: "Bearer %s"\n' "$1" "$TOKEN"
+  local flag="headers"
+  [[ "$1" == "update" ]] && flag="update-headers"
+  printf '%s:\n  Authorization: "Bearer %s"\n' "--$flag" "$TOKEN"
+}
+
+# Zmiany zadania (create/update/pause/resume) przez gc_mutate: Scheduler
+# odrzuca szybkie serie zmian tego samego zadania kodem ABORTED („sync mutate
+# calls cannot be queued”, potwierdzone pomiarem). Tylko ten kod jest ponawiany,
+# z rosnącym odstępem (RETRY_DELAYS, łącznie ok. 3 min); po wyczerpaniu prób
+# i przy każdym innym błędzie → kod 1 z nazwą zadania. Plik flag z nagłówkiem
+# ($2 = create | update; "-" = bez nagłówka) jest tworzony od nowa przy każdej próbie (strumień czyta się
+# raz). stdout polecenia odrzucany (i tak --format=none / format none); ze
+# stderr na wyjście trafiają tylko linie bez nagłówka autoryzacji.
+RETRY_DELAYS=(10 20 40 60 60)
+gc_mutate() {
+  local name="$1" flags="$2" err attempt=0
+  shift 2
+  while :; do
+    if [[ "$flags" == "-" ]]; then
+      err="$("${GC[@]}" "$@" 2>&1 >/dev/null)" && return 0
+    else
+      err="$("${GC[@]}" "$@" --flags-file=<(auth_flags "$flags") 2>&1 >/dev/null)" && return 0
+    fi
+    if [[ "$err" != *ABORTED* ]]; then
+      printf '%s\n' "$err" | grep -viE 'authorization|bearer' >&2 || true
+      echo "error: $1 $2 $3 failed for $name — stop" >&2
+      exit 1
+    fi
+    if (( attempt >= ${#RETRY_DELAYS[@]} )); then
+      echo "error: $name: Scheduler still rejects changes (ABORTED) after ${#RETRY_DELAYS[@]} retries — stop; rerun later" >&2
+      exit 1
+    fi
+    echo "retry: $name: ABORTED (concurrent change), waiting ${RETRY_DELAYS[$attempt]}s" >&2
+    sleep "${RETRY_DELAYS[$attempt]}"
+    attempt=$((attempt + 1))
+  done
 }
 
 job_exists() {
@@ -169,7 +205,7 @@ pause_if_enabled() {
   local name="$1" got
   got="$(job_state "$name" || true)"
   if [[ "$got" == "ENABLED" ]]; then
-    "${GC[@]}" scheduler jobs pause "$name" --location="$REGION"
+    gc_mutate "$name" - scheduler jobs pause "$name" --location="$REGION"
   fi
   require_state "$name" PAUSED
 }
@@ -220,7 +256,7 @@ for entry in "${JOBS[@]}"; do
     # Wznowienie tylko ze stanu PAUSED (API: resume na ENABLED = FAILED_PRECONDITION).
     got="$(job_state "$name" || true)"
     if [[ "$got" == "PAUSED" ]]; then
-      "${GC[@]}" scheduler jobs resume "$name" --location="$REGION"
+      gc_mutate "$name" - scheduler jobs resume "$name" --location="$REGION"
       require_state "$name" ENABLED
       echo "resumed $name"
     elif [[ "$got" == "ENABLED" ]]; then
@@ -256,14 +292,14 @@ for entry in "${JOBS[@]}"; do
     if [[ "$state" == "PAUSED" || "$current_schedule" == "$PARKED_SCHEDULE" ]]; then
       pause_if_enabled "$name"
     fi
-    "${GC[@]}" scheduler jobs update http "$name" "${common[@]}" --schedule="$schedule" \
-      --format=none --flags-file=<(auth_flags --update-headers)
+    gc_mutate "$name" update scheduler jobs update http "$name" "${common[@]}" \
+      --schedule="$schedule" --format=none
     echo "updated $name"
   else
-    "${GC[@]}" scheduler jobs create http "$name" "${common[@]}" --schedule="$PARKED_SCHEDULE" \
-      --format=none --flags-file=<(auth_flags --headers)
+    gc_mutate "$name" create scheduler jobs create http "$name" "${common[@]}" \
+      --schedule="$PARKED_SCHEDULE" --format=none
     pause_if_enabled "$name"
-    "${GC[@]}" scheduler jobs update http "$name" --location="$REGION" --schedule="$schedule" --format=none
+    gc_mutate "$name" - scheduler jobs update http "$name" --location="$REGION" --schedule="$schedule" --format=none
     require_state "$name" PAUSED
     echo "created $name (PAUSED)"
   fi
