@@ -2672,3 +2672,60 @@ describe("POST /api/appointments — kolizja półotwarta (#165)", () => {
     expect(body.error).toContain("przerwa");
   });
 });
+
+describe("PUT /api/appointments/[id] — kolizja półotwarta (#165)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+  });
+
+  async function put(start: string, end: string, rows: Record<string, unknown>[]) {
+    // edytowana wizyta: 14–15, ten sam pracownik
+    const self = makeAppointment({
+      startTime: new Date(at165("14:00")),
+      endTime: new Date(at165("15:00")),
+    });
+    queueSelects(chainMock([self]), filteringChain([self, ...rows]));
+    mockDbUpdate.mockReturnValue(chainMock([{ ...self, startTime: new Date(start), endTime: new Date(end) }]));
+    const response = await updateAppointment(
+      createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+        method: "PUT",
+        body: { startTime: start, endTime: end },
+      }),
+      createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+    );
+    return parseResponse(response);
+  }
+
+  it("przeciągnięcie na styk (11–12 po 10–11) → 200", async () => {
+    const { status } = await put(at165("11:00"), at165("12:00"), [existing10to11()]);
+    expect(status).toBe(200);
+  });
+
+  it("nakładanie o 1 minutę → 409 z dotychczasowym komunikatem", async () => {
+    const { status, body } = await put(at165("10:59"), at165("12:00"), [existing10to11()]);
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+  });
+
+  it("wizyta nie koliduje sama ze sobą (przesunięcie o 30 min w obrębie własnego terminu) → 200", async () => {
+    const { status } = await put(at165("14:30"), at165("15:30"), []);
+    expect(status).toBe(200);
+  });
+
+  it("anulowana wizyta w docelowym terminie nie koliduje → 200", async () => {
+    const { status } = await put(at165("10:00"), at165("11:00"), [existing10to11({ status: "cancelled" })]);
+    expect(status).toBe(200);
+  });
+
+  it("wizyta innego salonu nie jest brana pod uwagę (filtr salonu) → 200", async () => {
+    const { status } = await put(at165("10:00"), at165("11:00"), [
+      existing10to11({ salonId: "cccccccc-0000-4000-8000-000000000003" }),
+    ]);
+    expect(status).toBe(200);
+  });
+});

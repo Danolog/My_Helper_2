@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { eq, and, not, or, lte, gte } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { parseBody, updateAppointmentSchema } from "@/lib/api-validation";
+import { appointmentConflictWhere } from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // `db` pozostaje dla efektow ubocznych anulacji (forfeit zadatku, notyfikacja,
 // nazwa salonu do waiting-list) — to NIE jest brama zasobu [id], ktora pilnuje
@@ -200,26 +201,14 @@ export async function PUT(
       const overlapping = await tx.select({ id: appointments.id })
         .from(appointments)
         .where(
-          and(
-            eq(appointments.salonId, salonId),
-            eq(appointments.employeeId, newEmployeeId),
-            not(eq(appointments.id, id)),
-            not(eq(appointments.status, "cancelled")),
-            or(
-              and(
-                lte(appointments.startTime, newStartTime),
-                gte(appointments.endTime, newStartTime)
-              ),
-              and(
-                lte(appointments.startTime, newEndTime),
-                gte(appointments.endTime, newEndTime)
-              ),
-              and(
-                gte(appointments.startTime, newStartTime),
-                lte(appointments.endTime, newEndTime)
-              )
-            )
-          )
+          // Półotwarte [start, end) (#165); wizyta nie koliduje sama ze sobą.
+          appointmentConflictWhere({
+            salonId,
+            employeeId: newEmployeeId,
+            start: newStartTime,
+            end: newEndTime,
+            excludeId: id,
+          })
         );
 
       if (overlapping.length > 0) {
