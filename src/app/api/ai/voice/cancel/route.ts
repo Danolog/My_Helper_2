@@ -7,7 +7,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
+import { refundAppointmentDeposits, createRefundNotification } from "@/lib/refund";
 import {
   appointments,
   clients,
@@ -16,7 +16,6 @@ import {
   aiConversations,
   salons,
   notifications,
-  depositPayments,
 } from "@/lib/schema";
 import { sendSms } from "@/lib/sms";
 import { isProPlan } from "@/lib/subscription";
@@ -244,7 +243,7 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------------
     let refundResult = null;
     if (depositRefunded) {
-      refundResult = await processAutomaticRefund(
+      refundResult = await refundAppointmentDeposits(
         appointmentRow.id,
         "Anulacja wizyty przez asystenta glosowego AI - wiecej niz 24h przed terminem"
       );
@@ -267,17 +266,23 @@ export async function POST(req: Request) {
 
     // Mark deposit as forfeited if late cancellation (<24h)
     if (depositForfeited) {
+      // Zatrzymana tylko najstarsza płatność `succeeded`; kolejne wracają
+      // do klienta (Ethan, #98).
       try {
-        await db
-          .update(depositPayments)
-          .set({
-            status: "forfeited",
-            refundReason: "Anulacja wizyty przez AI mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
-          })
-          .where(eq(depositPayments.appointmentId, appointmentRow.id));
-        logger.info(`[Voice AI Cancel] Deposit marked as forfeited for appointment ${appointmentRow.id}`);
+        const forfeitResult = await refundAppointmentDeposits(
+          appointmentRow.id,
+          "Dodatkowa wplata zadatku - zwrot przy anulacji ponizej 24h",
+          { forfeitReason: "Anulacja wizyty przez AI mniej niz 24h przed terminem - zadatek zatrzymany przez salon" }
+        );
+        logger.info(`[Voice AI Cancel] Deposit forfeited for appointment ${appointmentRow.id}`, {
+          forfeitedPaymentId: forfeitResult.forfeitedPaymentId ?? null,
+          extraRefunds: forfeitResult.results.length,
+        });
       } catch (forfeitError) {
-        logger.error("[Voice AI Cancel] Failed to mark deposit as forfeited", { error: forfeitError });
+        logger.error("[Voice AI Cancel] Failed to mark deposit as forfeited", {
+          appointmentId: appointmentRow.id,
+          errorName: forfeitError instanceof Error ? forfeitError.name : typeof forfeitError,
+        });
       }
     }
 

@@ -45,22 +45,25 @@ import { getStripe, isStripeConfigured } from "@/lib/stripe";
  */
 /**
  * Symulacja płatności (bez klucza Stripe) jest opt-in, nie opt-out:
+ * - Na Vercelu (`VERCEL=1`, ustawiane przez platformę) → NIGDY, niezależnie
+ *   od NODE_ENV i flagi. Ta bramka stoi PIERWSZA (#84, Ryan): dziś Next
+ *   wpisuje NODE_ENV=production w build, ale kolejność nie może na tym polegać.
+ *   Ustawiona tam flaga jest logowana jako błąd konfiguracji (druga bramka, Ethan).
  * - `NODE_ENV=development` (lokalny `pnpm dev`) → dozwolona;
- * - `ALLOW_PAYMENT_SIMULATION=1` → dozwolona, ale TYLKO poza Vercelem.
- *   Flaga jest ustawiana wyłącznie w krokach E2E workflow CI (serwer
- *   `pnpm start`, NODE_ENV=production) — nie w `.env*` ani w Vercelu.
- *   Na Vercelu (`VERCEL=1`, ustawiane przez platformę) flaga jest
- *   ignorowana i logowana jako błąd konfiguracji (druga bramka, Ethan).
+ * - `ALLOW_PAYMENT_SIMULATION=1` → dozwolona. Flaga jest ustawiana wyłącznie
+ *   w krokach E2E workflow CI (serwer `pnpm start`, NODE_ENV=production) —
+ *   nie w `.env*` ani w Vercelu.
  * Wszystko inne (production, test, preview, brak NODE_ENV) → 503.
  */
 function isPaymentSimulationAllowed(): boolean {
-  if (process.env.NODE_ENV === "development") return true;
-  if (process.env.ALLOW_PAYMENT_SIMULATION !== "1") return false;
   if (process.env.VERCEL === "1") {
-    logger.error("[Deposits API] ALLOW_PAYMENT_SIMULATION=1 ignored on Vercel — remove the flag from this deployment");
+    if (process.env.ALLOW_PAYMENT_SIMULATION === "1") {
+      logger.error("[Deposits API] ALLOW_PAYMENT_SIMULATION=1 ignored on Vercel — remove the flag from this deployment");
+    }
     return false;
   }
-  return true;
+  if (process.env.NODE_ENV === "development") return true;
+  return process.env.ALLOW_PAYMENT_SIMULATION === "1";
 }
 
 export async function POST(request: Request) {
