@@ -13,7 +13,7 @@ import {
 } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 import { frozenModuleResponse } from "@/lib/server/frozen-guard";
-import { upload } from "@/lib/storage";
+import { resolveStorageDriver, upload } from "@/lib/storage";
 
 // ────────────────────────────────────────────────────────────
 // Request validation
@@ -101,10 +101,11 @@ export async function POST(req: Request) {
 
     // Persist the generated image — or return a data URI in local dev
     const filename = `ai-image-${salonId}-${Date.now()}.png`;
-    const hasVercelBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+    // Trwały magazyn (gcs/vercel-blob) — decyzja sterownika, nie tokenu (C2b)
+    const persistent = resolveStorageDriver() !== "local";
 
     let imageUrl: string;
-    if (hasVercelBlob) {
+    if (persistent) {
       const stored = await upload(result.imageData, filename, "ai-images");
       imageUrl = stored.url;
     } else {
