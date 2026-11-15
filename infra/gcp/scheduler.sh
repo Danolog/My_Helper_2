@@ -4,9 +4,18 @@
 # NIE URUCHAMIAĆ w kroku C. Włączenie harmonogramu = prawdziwe SMS-y i push do
 # klientów salonów (krok D, decyzja Darka).
 #
-# Użycie:
-#   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh          # create/update
-#   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --check  # tylko porównanie (kod ≠ 0 przy dryfie)
+# Użycie (kolejność obowiązkowa, runbook kroku D, D-8):
+#   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh           # 1. create/update — WSZYSTKO WSTRZYMANE
+#   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --check   # 2. porównanie (dryf stanu ENABLED → PAUSED jest tu oczekiwany)
+#   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --resume  # 3. włączenie zadań ENABLED (decyzja Darka)
+#   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --check   # 4. pełna zgodność z tabelą (kod 0)
+#
+# Wstrzymanie przy tworzeniu (#121 j): `gcloud scheduler jobs create http` nie
+# ma opcji tworzenia wstrzymanego zadania. Nowe zadanie powstaje więc z
+# harmonogramem „zaparkowanym” (29 lutego, najbliżej 2028 — nie wystrzeli),
+# od razu jest wstrzymywane, stan jest odczytywany (`describe` = PAUSED,
+# inaczej stop z kodem 1), a dopiero potem dostaje właściwy harmonogram.
+# Tryb domyślny nigdy nie wznawia zadań; robi to tylko --resume.
 #
 # Zasady:
 # - każde wywołanie gcloud z jawnym --project (nigdy domyślny projekt gcloud);
@@ -18,10 +27,15 @@
 set -euo pipefail
 
 MODE="apply"
-if [[ "${1:-}" == "--check" ]]; then
+if [[ $# -gt 1 ]]; then
+  echo "usage: $0 [--check|--resume]" >&2
+  exit 2
+elif [[ "${1:-}" == "--check" ]]; then
   MODE="check"
+elif [[ "${1:-}" == "--resume" ]]; then
+  MODE="resume"
 elif [[ $# -gt 0 ]]; then
-  echo "usage: $0 [--check]" >&2
+  echo "usage: $0 [--check|--resume]" >&2
   exit 2
 fi
 
@@ -40,6 +54,8 @@ fi
 BASE_URL="${BASE_URL%/}"
 
 TIME_ZONE="Europe/Warsaw"
+# Harmonogram zaparkowany dla świeżo tworzonego zadania (29 lutego).
+PARKED_SCHEDULE="0 0 29 2 *"
 SECRET_NAME="cron-secret"
 
 # nazwa|ścieżka|harmonogram (Europe/Warsaw)|stan (ENABLED|PAUSED)
@@ -69,6 +85,20 @@ job_exists() {
   "${GC[@]}" scheduler jobs describe "$1" --location="$REGION" --format='value(name)' >/dev/null 2>&1
 }
 
+job_state() {
+  "${GC[@]}" scheduler jobs describe "$1" --location="$REGION" --format='value(state)'
+}
+
+# Obowiązkowy odczyt stanu: inny niż oczekiwany → stop (kod 1), bez dalszych zadań.
+require_state() {
+  local name="$1" want="$2" got
+  got="$(job_state "$name" || true)"
+  if [[ "$got" != "$want" ]]; then
+    echo "error: $name state is [$got], expected [$want] — stop" >&2
+    exit 1
+  fi
+}
+
 drift=0
 for entry in "${JOBS[@]}"; do
   IFS='|' read -r name path schedule state <<<"$entry"
@@ -92,9 +122,24 @@ for entry in "${JOBS[@]}"; do
     continue
   fi
 
+  if [[ "$MODE" == "resume" ]]; then
+    if ! job_exists "$name"; then
+      echo "error: $name missing — run without flags first" >&2
+      exit 1
+    fi
+    if [[ "$state" == "ENABLED" ]]; then
+      "${GC[@]}" scheduler jobs resume "$name" --location="$REGION"
+      require_state "$name" ENABLED
+      echo "resumed $name"
+    else
+      require_state "$name" PAUSED
+      echo "kept    $name (PAUSED)"
+    fi
+    continue
+  fi
+
   common=(
     --location="$REGION"
-    --schedule="$schedule"
     --time-zone="$TIME_ZONE"
     --uri="$uri"
     --http-method=GET
@@ -104,19 +149,23 @@ for entry in "${JOBS[@]}"; do
     --max-backoff=120s
   )
   if job_exists "$name"; then
-    "${GC[@]}" scheduler jobs update http "$name" "${common[@]}" \
+    # Istniejące zadanie: stan bez zmian, poza wymuszeniem PAUSED z tabeli.
+    if [[ "$state" == "PAUSED" ]]; then
+      "${GC[@]}" scheduler jobs pause "$name" --location="$REGION"
+      require_state "$name" PAUSED
+    fi
+    "${GC[@]}" scheduler jobs update http "$name" "${common[@]}" --schedule="$schedule" \
       --flags-file=<(auth_flags --update-headers)
+    echo "updated $name"
   else
-    "${GC[@]}" scheduler jobs create http "$name" "${common[@]}" \
+    "${GC[@]}" scheduler jobs create http "$name" "${common[@]}" --schedule="$PARKED_SCHEDULE" \
       --flags-file=<(auth_flags --headers)
-  fi
-
-  if [[ "$state" == "PAUSED" ]]; then
     "${GC[@]}" scheduler jobs pause "$name" --location="$REGION"
-  else
-    "${GC[@]}" scheduler jobs resume "$name" --location="$REGION"
+    require_state "$name" PAUSED
+    "${GC[@]}" scheduler jobs update http "$name" --location="$REGION" --schedule="$schedule"
+    require_state "$name" PAUSED
+    echo "created $name (PAUSED)"
   fi
-  echo "applied $name ($state)"
 done
 
 exit "$drift"
