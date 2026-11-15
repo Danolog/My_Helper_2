@@ -582,3 +582,60 @@ describe("createPromotionSchema", () => {
     expect(result).toBeNull();
   });
 });
+
+// #66 (P3 Ryana z #67): daty ISO 8601 i limit uwag — jak w create-session.
+describe("createAppointmentSchema — daty ISO i limit uwag (#66)", () => {
+  const base = {
+    salonId: "salon-123",
+    employeeId: "emp-456",
+    startTime: "2026-12-01T10:00:00.000Z",
+    endTime: "2026-12-01T11:00:00.000Z",
+  };
+  const parse = (extra: Record<string, unknown>) => createAppointmentSchema.safeParse({ ...base, ...extra });
+
+  it.each([
+    "2026-12-01T10:00:00.000Z", // toISOString() — portal i panel
+    "2026-12-01T10:00:00Z",
+    "2026-12-01T10:00:00+01:00",
+    "2026-12-01T10:00",
+  ])("przyjmuje ISO %s", (startTime) => {
+    expect(parse({ startTime }).success).toBe(true);
+  });
+
+  it.each([
+    "jutro o 10", // Date.parse: rok 2010 — przechodziło przed #66
+    "December 1, 2026 10:00",
+    "2026-12-01", // sama data, bez godziny
+    "01.12.2026 10:00",
+    "2026-13-45T10:00:00Z", // kształt ISO, ale nie data
+  ])("odrzuca nie-ISO %s (startTime i endTime)", (value) => {
+    const start = parse({ startTime: value });
+    const end = parse({ endTime: value });
+    expect(start.success).toBe(false);
+    expect(end.success).toBe(false);
+    expect(start.error!.issues[0]!.path).toEqual(["startTime"]);
+    expect(start.error!.issues[0]!.message).toMatch(/nieprawidłowy format daty/);
+  });
+
+  it("brak startTime → 'jest wymagane'", () => {
+    const r = parse({ startTime: undefined });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.message).toMatch(/jest wymagane/);
+  });
+
+  it("uwagi: 1000 znaków przechodzi, 1001 nie", () => {
+    expect(parse({ notes: "a".repeat(1000) }).success).toBe(true);
+    const r = parse({ notes: "a".repeat(1001) });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.path).toEqual(["notes"]);
+    expect(r.error!.issues[0]!.message).toBe("Uwagi mogą mieć maks. 1000 znaków");
+  });
+
+  it("uwagi: null, '' i same spacje = brak uwag (undefined)", () => {
+    for (const notes of [null, "", "   "]) {
+      const r = parse({ notes });
+      expect(r.success).toBe(true);
+      expect(r.data!.notes).toBeUndefined();
+    }
+  });
+});

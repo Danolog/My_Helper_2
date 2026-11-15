@@ -13,6 +13,10 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 
+/** #66: zakres flagi klienta „Wymagaj zadatku” (tekst: Sophia, PO). */
+export const CLIENT_DEPOSIT_SCOPE_NOTE =
+  "Działa, gdy klient rezerwuje online po zalogowaniu na swoje konto. Nie obejmuje rezerwacji bez logowania (jako gość).";
+
 interface ClientDepositCardProps {
   formRequireDeposit: boolean;
   formDepositType: string;
@@ -49,6 +53,14 @@ export function ClientDepositCard({
             <Label className="text-sm font-medium">Wymagaj zadatku</Label>
             <p className="text-xs text-muted-foreground mt-0.5">
               Wlacz, aby ten klient musial placic zadatek przy rezerwacji
+            </p>
+            {/* #66 (decyzja Sophii): flaga klienta działa tylko dla zalogowanych —
+                rezerwacji gościa nie da się bezpiecznie dopasować do klienta. */}
+            <p
+              className="text-xs text-muted-foreground mt-0.5"
+              data-testid="require-deposit-scope-note"
+            >
+              {CLIENT_DEPOSIT_SCOPE_NOTE}
             </p>
           </div>
           <Select
