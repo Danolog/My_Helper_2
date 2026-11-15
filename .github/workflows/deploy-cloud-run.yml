@@ -57,6 +57,9 @@ jobs:
       RUNTIME_SA: ${{ vars.GCP_RUNTIME_SA }}
       SQL_INSTANCE: ${{ vars.SQL_INSTANCE }}
       GCS_BUCKET: ${{ vars.GCS_BUCKET }}
+      # Jedno źródło dla build-argu (next.config.ts sprawdza host przy budowie)
+      # i zmiennej usługi (run-deploy.sh czyta je z otoczenia) — K-1, #133 pkt 1.
+      GCS_PUBLIC_BASE_URL: ${{ vars.GCS_PUBLIC_BASE_URL }}
       NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${{ vars.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}
@@ -109,6 +112,7 @@ jobs:
             --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY \
             --build-arg NEXT_PUBLIC_VAPID_PUBLIC_KEY \
             --build-arg GCS_BUCKET \
+            --build-arg GCS_PUBLIC_BASE_URL \
             -t "$RUNNER_IMAGE" .
 
       - name: Build migrator image (linux/amd64)
@@ -159,7 +163,6 @@ jobs:
           # Zmienne usługi (klasa `var` w infra/gcp/env-manifest.json) — z vars.*
           BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL }}
           STORAGE_DRIVER: ${{ vars.STORAGE_DRIVER }}
-          GCS_PUBLIC_BASE_URL: ${{ vars.GCS_PUBLIC_BASE_URL }}
           BLOB_STORE_ID: ${{ vars.BLOB_STORE_ID }}
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
           STRIPE_PRICE_BASIC: ${{ vars.STRIPE_PRICE_BASIC }}

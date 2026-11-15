@@ -22,9 +22,10 @@
  * na jobie e2e; allowlista bez https albo poluzowana do dowolnego hosta.
  */
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
 const read = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -33,8 +34,9 @@ const E2E = read(".github/workflows/e2e-production.yml");
 const RUN_DEPLOY = read("infra/gcp/run-deploy.sh");
 const RUN_MIGRATE = read("infra/gcp/run-migrate.sh");
 const MANIFEST = JSON.parse(read("infra/gcp/env-manifest.json")) as {
-  variables: Record<string, { class: string; secretName?: string }>;
+  variables: Record<string, { class: string; secretName?: string; required?: boolean }>;
 };
+const DOCKERFILE = read("Dockerfile");
 
 /** Klucze najwyższego poziomu w bloku `on:` (wcięcie 2 spacje). */
 function triggers(yaml: string): string[] {
@@ -133,6 +135,7 @@ describe("G-C6: deploy-cloud-run.yml", () => {
       "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
       "NEXT_PUBLIC_VAPID_PUBLIC_KEY",
       "GCS_BUCKET",
+      "GCS_PUBLIC_BASE_URL",
     ]) {
       expect(runner).toContain(`--build-arg ${arg}`);
     }
@@ -186,6 +189,22 @@ describe("G-C6: deploy-cloud-run.yml", () => {
   });
 });
 
+describe("G-C6: GCS_PUBLIC_BASE_URL — jedno źródło dla budowy i usługi (K-1, #133 pkt 1)", () => {
+  it("vars.GCS_PUBLIC_BASE_URL dokładnie raz, w env joba deploy (widzi je build i run-deploy.sh)", () => {
+    const c = code(DEPLOY);
+    expect(c.match(/vars\.GCS_PUBLIC_BASE_URL/g)).toHaveLength(1);
+    expect(c).toMatch(/\n {4}env:\n(?: {6}.*\n)*? {6}GCS_PUBLIC_BASE_URL: \$\{\{ vars\.GCS_PUBLIC_BASE_URL \}\}\n/);
+    // żaden krok nie nadpisuje jej własną wartością
+    expect(c.match(/^\s+GCS_PUBLIC_BASE_URL:/gm)).toHaveLength(1);
+  });
+
+  it("Dockerfile: ARG GCS_PUBLIC_BASE_URL przekazany do ENV etapu builder (next.config.ts)", () => {
+    const builder = DOCKERFILE.slice(DOCKERFILE.indexOf(" AS builder"), DOCKERFILE.indexOf(" AS prod-deps"));
+    expect(builder).toMatch(/^ARG GCS_PUBLIC_BASE_URL$/m);
+    expect(builder).toContain("GCS_PUBLIC_BASE_URL=${GCS_PUBLIC_BASE_URL}");
+  });
+});
+
 describe("G-C6: skrypty wdrożenia", () => {
   it("run-deploy.sh: sekrety i zmienne tylko z manifestu (secret/var), --env-vars-file, bez --update-env-vars", () => {
     expect(RUN_DEPLOY).toContain('e.class === "secret"');
@@ -211,6 +230,26 @@ describe("G-C6: skrypty wdrożenia", () => {
     const lines = code(text).split("\n");
     expect(lines.filter((l) => /\bgcloud\b/.test(l) && !l.startsWith("GC=("))).toEqual([]);
     expect(text.indexOf("missing required env")).toBeLessThan(text.search(/"\$\{GC\[@\]\}"/));
+  });
+
+  it("run-deploy.sh: bez --allow-unauthenticated (zachowuje istniejącą politykę IAM; K-1)", () => {
+    expect(code(RUN_DEPLOY)).not.toMatch(/--(no-)?allow-unauthenticated/);
+    expect(code(RUN_DEPLOY)).not.toMatch(/add-iam-policy-binding|set-iam-policy/);
+  });
+
+  it.each([
+    ["run-deploy.sh", RUN_DEPLOY],
+    ["run-migrate.sh", RUN_MIGRATE],
+  ])("%s: Cloud SQL przez konektor — --set-cloudsql-instances z PROJECT_ID:REGION:SQL_INSTANCE (K-1)", (_n, text) => {
+    expect(text).toContain('CLOUDSQL_INSTANCE="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}"');
+    expect(code(text)).toContain('--set-cloudsql-instances="$CLOUDSQL_INSTANCE"');
+    expect(code(text)).not.toContain("--add-cloudsql-instances");
+  });
+
+  it("manifest: każdy sekret ma jawne required; wymagane dokładnie postgres-url i better-auth-secret", () => {
+    const secrets = Object.values(MANIFEST.variables).filter((e) => e.class === "secret");
+    for (const e of secrets) expect(typeof e.required, e.secretName).toBe("boolean");
+    expect(secrets.filter((e) => e.required).map((e) => e.secretName).sort()).toEqual(["better-auth-secret", "postgres-url"]);
   });
 
   it("run-migrate.sh: kopia zapasowa przed migracją, POSTGRES_URL z sekretu z manifestu", () => {
@@ -296,5 +335,103 @@ describe("G-C6: e2e-production.yml", () => {
     expect(E2E).toContain(
       "github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'",
     );
+  });
+});
+
+describe("G-C6: run-deploy.sh — tylko sekrety z wersją (K-1, wykonane z fałszywym gcloud)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "g-c6-deploy-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(
+    join(dir, "gcloud"),
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_LOG"
+case "$*" in
+  *"secrets versions describe latest"*)
+    sec=$(printf '%s\\n' "$@" | sed -n 's/^--secret=//p')
+    st=$(printf '%s\\n' "$FAKE_SECRETS" | tr ',' '\\n' | sed -n "s/^$sec=//p")
+    case "$st" in
+      "") echo "ERROR: (gcloud.secrets.versions.describe) NOT_FOUND: Secret Version [latest] not found" >&2; exit 1 ;;
+      DENIED) echo "ERROR: (gcloud.secrets.versions.describe) PERMISSION_DENIED: denied" >&2; exit 1 ;;
+      *) echo "$st" ;;
+    esac ;;
+  *"run services describe"*) echo "https://sha-1234567---myhelper-843777043748.europe-central2.run.app" ;;
+esac
+exit 0
+`,
+  );
+  chmodSync(join(dir, "gcloud"), 0o755);
+  let n = 0;
+  const deploy = (secrets: string, extra: Record<string, string> = {}) => {
+    const log = join(dir, `log-${n++}`);
+    writeFileSync(log, "");
+    const r = spawnSync("bash", [join(ROOT, "infra/gcp/run-deploy.sh"), "deploy"], {
+      encoding: "utf8",
+      env: {
+        NODE_ENV: "test",
+        PATH: `${dir}:${process.env.PATH}`,
+        FAKE_LOG: log,
+        FAKE_SECRETS: secrets,
+        PROJECT_ID: "my-helper-2-488419",
+        REGION: "europe-central2",
+        SERVICE: "myhelper",
+        IMAGE: "europe-central2-docker.pkg.dev/my-helper-2-488419/myhelper/myhelper:abc",
+        RUNTIME_SA: "myhelper-runtime@my-helper-2-488419.iam.gserviceaccount.com",
+        REVISION_TAG: "sha-1234567",
+        SQL_INSTANCE: "myhelper-pg",
+        BETTER_AUTH_URL: "https://example.test",
+        STORAGE_DRIVER: "gcs",
+        GCS_BUCKET: "mh-media",
+        ...extra,
+      },
+    });
+    const calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
+    const run = calls.find((c) => c.includes(" run deploy "));
+    return { ...r, calls, run };
+  };
+  const REQUIRED = "postgres-url=ENABLED,better-auth-secret=ENABLED";
+  const secretsArg = (run: string) => run.split(" ").find((a) => a.startsWith("--set-secrets="))!.slice("--set-secrets=".length).split(",");
+
+  it("wymagane z wersją, opcjonalne bez → deploy tylko z wymaganymi; opcjonalne pominięte z komunikatem", () => {
+    const r = deploy(REQUIRED);
+    expect(r.status, r.stderr).toBe(0);
+    expect(secretsArg(r.run!).sort()).toEqual(["BETTER_AUTH_SECRET=better-auth-secret:latest", "POSTGRES_URL=postgres-url:latest"]);
+    expect(r.stdout).toMatch(/skip: optional secret stripe-webhook-secret has no enabled version/);
+  });
+
+  it("opcjonalny z wersją ENABLED jest mapowany; DISABLED nie", () => {
+    const r = deploy(`${REQUIRED},stripe-secret-key=ENABLED,resend-api-key=DISABLED`);
+    expect(r.status, r.stderr).toBe(0);
+    expect(secretsArg(r.run!)).toContain("STRIPE_SECRET_KEY=stripe-secret-key:latest");
+    expect(secretsArg(r.run!).join(",")).not.toContain("resend-api-key");
+  });
+
+  it.each([
+    ["brak wersji", "better-auth-secret=ENABLED"],
+    ["wersja wyłączona", "postgres-url=DISABLED,better-auth-secret=ENABLED"],
+  ])("wymagany sekret: %s → kod 2 PRZED gcloud run deploy", (_l, secrets) => {
+    const r = deploy(secrets);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/required secrets without an enabled version: postgres-url/);
+    expect(r.run).toBeUndefined();
+  });
+
+  it("błąd odczytu inny niż brak wersji (np. uprawnienia) → kod 2, bez cichego pominięcia", () => {
+    const r = deploy(`${REQUIRED},smsapi-token=DENIED`);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/cannot read version metadata of secret smsapi-token/);
+    expect(r.run).toBeUndefined();
+  });
+
+  it("deploy: --set-cloudsql-instances z nazwą połączenia, bez --allow-unauthenticated", () => {
+    const r = deploy(REQUIRED);
+    expect(r.run).toContain("--set-cloudsql-instances=my-helper-2-488419:europe-central2:myhelper-pg");
+    expect(r.run).not.toMatch(/allow-unauthenticated/);
+    expect(r.stdout).toContain("tag_url=https://sha-1234567---myhelper-843777043748.europe-central2.run.app");
+  });
+
+  it("brak SQL_INSTANCE → kod 2 przed pierwszym gcloud", () => {
+    const r = deploy(REQUIRED, { SQL_INSTANCE: "" });
+    expect(r.status).toBe(2);
+    expect(r.calls).toEqual([]);
   });
 });
