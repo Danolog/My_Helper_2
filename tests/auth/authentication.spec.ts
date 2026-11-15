@@ -140,7 +140,7 @@ test.describe('Flow 1: Authentication', () => {
       await expect(page.locator('#name')).toBeVisible({ timeout: 10000 });
     });
 
-    test('should login with valid credentials and redirect to dashboard', { tag: '@smoke' }, async ({ page }) => {
+    test('should login with valid credentials and redirect to dashboard', { tag: ['@smoke', '@csp'] }, async ({ page }) => {
       await page.goto('/login');
       await fillLoginForm(page, SEEDED_OWNER.email, SEEDED_OWNER.password);
       // Click submit button (hydration already confirmed by fillLoginForm)
