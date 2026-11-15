@@ -1,0 +1,31 @@
+# Kontekst budowy obrazu (Dockerfile). Strażnik G-C1 pilnuje `**/.env*`:
+# plik z sekretem nie może trafić do żadnej warstwy obrazu. Samo `.env*`
+# działa tylko w katalogu głównym — `**/` łapie też zagnieżdżone (np.
+# src/config/.env), a Next w trybie standalone sam kopiuje `.env*` do
+# .next/standalone, więc ten wpis jest jedyną barierą. Bez wyjątków `!`.
+**/.env*
+**/CLAUDE*.md
+**/*.bak
+.git
+node_modules
+.next
+memory
+.claude
+.remember
+.playwright-mcp
+.vercel
+.github
+.cursor
+.vscode
+.autoforge
+.mcp.json
+coverage
+playwright-report
+test-results*
+tests
+__tests__
+docs
+scratchpad
+*.png
+tsconfig.tsbuildinfo
+public/uploads
