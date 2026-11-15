@@ -20,10 +20,14 @@ import type Stripe from "stripe";
  * anulowaną subskrypcję. Dlatego pod blokadą stripe_sub czytamy BIEŻĄCY stan
  * ze Stripe i zapisujemy jego, a nie payload zdarzenia.
  *
- * Reguła lokalna: `canceled` jest końcowe — żaden handler go nie nadpisuje
- * (anulowanej subskrypcji w Stripe też nie da się wznowić, a lokalne
- * `canceled` z `subscriptions/cancel` przy `cancel_at_period_end` nie może
- * wrócić do `active` przez późne zdarzenie).
+ * Reguła lokalna (T3b, zawężona przez Ethana, przegląd #62 §2b): lokalne
+ * `canceled` jest końcowe, gdy Stripe to potwierdza — `canceled` /
+ * `incomplete_expired` ALBO `cancel_at_period_end === true` (anulowanie
+ * z panelu: Stripe ma jeszcze `active` do końca okresu). Wtedy żaden handler
+ * go nie nadpisuje. Lokalne `canceled` przy subskrypcji, która w Stripe dalej
+ * się odnawia (`cancel_at_period_end` ≠ true), to dryf albo wznowienie
+ * w panelu Stripe: `logger.error` „manual handling” i zapis stanu ze Stripe —
+ * inaczej salon płaci i nie ma planu.
  */
 
 export type SubscriptionRow = typeof salonSubscriptions.$inferSelect;
@@ -32,6 +36,7 @@ export interface StripeSubscriptionState extends StripeSubscriptionPeriodSource 
   id: string;
   status?: string | null;
   canceled_at?: number | null;
+  cancel_at_period_end?: boolean | null;
   trial_end?: number | null;
 }
 
@@ -51,6 +56,17 @@ const STRIPE_TO_LOCAL_STATUS: Record<string, string> = {
 };
 
 export const FINAL_LOCAL_STATUS = "canceled";
+
+/** Stany Stripe, w których subskrypcja się skończyła (nie da się jej wznowić). */
+const STRIPE_ENDED_STATUSES = new Set(["canceled", "incomplete_expired"]);
+
+/**
+ * Lokalne `canceled` potwierdzone przez Stripe: subskrypcja zakończona albo
+ * ustawiona na koniec okresu. Tylko wtedy `canceled` jest końcowe.
+ */
+export function isLocalCancelConfirmedByStripe(stripeSub: StripeSubscriptionState): boolean {
+  return STRIPE_ENDED_STATUSES.has(stripeSub.status ?? "") || stripeSub.cancel_at_period_end === true;
+}
 
 export type LockedRowResult<T> = { found: false } | { found: true; value: T };
 
@@ -95,13 +111,23 @@ export type SubscriptionStateUpdate = Partial<
 
 /**
  * Wartości do zapisania z bieżącego stanu Stripe albo `null`, gdy wiersz jest
- * już `canceled` (stan końcowy — nic go nie nadpisuje).
+ * `canceled`, a Stripe to potwierdza (stan końcowy — nic go nie nadpisuje).
  */
 export function subscriptionStateFromStripe(
   row: SubscriptionRow,
   stripeSub: StripeSubscriptionState
 ): SubscriptionStateUpdate | null {
-  if (row.status === FINAL_LOCAL_STATUS) return null;
+  if (row.status === FINAL_LOCAL_STATUS) {
+    if (isLocalCancelConfirmedByStripe(stripeSub)) return null;
+    // Dryf (np. dawne anulowanie lokalne mimo błędu Stripe) albo wznowienie
+    // w panelu Stripe: Stripe dalej pobiera opłaty — stan ze Stripe wygrywa.
+    logger.error("Local subscription canceled but Stripe still renews it — syncing Stripe state, manual handling", {
+      subscriptionId: row.id,
+      stripeSubscriptionId: stripeSub.id,
+      stripeStatus: stripeSub.status ?? null,
+      cancelAtPeriodEnd: stripeSub.cancel_at_period_end ?? null,
+    });
+  }
 
   const stripeStatus = stripeSub.status ?? "";
   const mapped = STRIPE_TO_LOCAL_STATUS[stripeStatus];
@@ -127,7 +153,7 @@ export function subscriptionStateFromStripe(
       ? new Date(stripeSub.canceled_at * 1000)
       : status === FINAL_LOCAL_STATUS
         ? (row.canceledAt ?? new Date())
-        : row.canceledAt;
+        : null; // Stripe nie zgłasza anulowania — także po dryfie z lokalnego canceled
 
   return {
     status,
