@@ -12,7 +12,8 @@ export default defineConfig({
     // Testy integracyjne maja wlasna konfiguracje (vitest.integration.config.ts)
     // i wymagaja REALNEJ lokalnej bazy + env spoza repo (setup-real-db.ts).
     // Domyslny `pnpm test` (CI, happy-dom, mocki) ich nie laduje.
-    exclude: ['node_modules/**', 'dist/**', '.next/**', '__tests__/integration/**'],
+    // `__tests__/pg/**` — prawdziwy Postgres z INTEGRATION_POSTGRES_URL (vitest.pg.config.ts).
+    exclude: ['node_modules/**', 'dist/**', '.next/**', '__tests__/integration/**', '__tests__/pg/**'],
     // Limity czasu: w CI (GitHub Actions ustawia CI=true) dokladnie domyslne
     // Vitest (5000/10000 ms) — bramka bez zmian. Lokalnie dluzsze, bo pod
     // obciazeniem maszyny (load avg 15-70 na 8 rdzeniach) workery sa glodzone
