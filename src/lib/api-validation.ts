@@ -266,8 +266,30 @@ function normalizedPlPhone(message: string) {
  * czyta w strefie serwera (UTC na Vercelu), więc "10:00" z Polski byłoby
  * zapisane godzinę lub dwie później (Ethan, przegląd #71). Wszyscy nadawcy
  * wysyłają toISOString(), czyli `Z`.
+ *
+ * Godzina 00–23, minuty i sekundy 00–59 w samym regexie: Date.parse przyjmuje
+ * "T24:00" jako północ następnego dnia. Dzień kalendarza sprawdza
+ * isRealCalendarDate (#95).
  */
-const ISO_DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+const ISO_DATE_TIME_RE =
+  /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * Date.parse nie odrzuca nieistniejącego dnia, tylko go przewija:
+ * "2026-02-30" => 2 marca, "2026-04-31" => 1 maja (#95). Dzień, miesiąc i rok
+ * z napisu muszą przetrwać złożenie daty w UTC. Strefa nie ma tu znaczenia:
+ * sprawdzamy kalendarzową część napisu, nie chwilę po przeliczeniu offsetu.
+ */
+function isRealCalendarDate(year: number, month: number, day: number): boolean {
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
+}
+
+function isIsoDateTime(v: string): boolean {
+  const m = ISO_DATE_TIME_RE.exec(v);
+  if (!m || Number.isNaN(Date.parse(v))) return false;
+  return isRealCalendarDate(Number(m[1]), Number(m[2]), Number(m[3]));
+}
 
 const NOTES_TOO_LONG = `Uwagi mogą mieć maks. ${APPOINTMENT_NOTES_MAX_LENGTH} znaków`;
 
@@ -276,7 +298,7 @@ function isoDateString(field: string) {
     .string({ message: `${field} jest wymagane` })
     .min(1, `${field} jest wymagane`)
     .refine(
-      (v) => ISO_DATE_TIME_RE.test(v) && !Number.isNaN(Date.parse(v)),
+      (v) => isIsoDateTime(v),
       `${field}: nieprawidłowy format daty`
     );
 }
@@ -371,14 +393,11 @@ export const createPromotionSchema = z.object({
  * All fields are optional; only provided fields are applied.
  */
 export const updateAppointmentSchema = z.object({
-  startTime: z.string().refine(
-    (val) => !isNaN(new Date(val).getTime()),
-    { message: "Nieprawidlowy format daty rozpoczecia" }
-  ).optional(),
-  endTime: z.string().refine(
-    (val) => !isNaN(new Date(val).getTime()),
-    { message: "Nieprawidlowy format daty zakonczenia" }
-  ).optional(),
+  // #95: ta sama reguła co POST i create-session — ISO ze strefą. Luźne
+  // new Date() czytało "2026-04-01T10:00" w strefie serwera (UTC na Vercelu),
+  // więc przesunięcie wizyty zapisywało godzinę lub dwie później.
+  startTime: isoDateString("Czas rozpoczecia").optional(),
+  endTime: isoDateString("Czas zakonczenia").optional(),
   employeeId: z.string().optional(),
   clientId: z.string().nullable().optional(),
   serviceId: z.string().nullable().optional(),

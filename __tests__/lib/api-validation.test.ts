@@ -724,3 +724,98 @@ describe("dialogi wizyt — maxLength notatek (follow-up #71)", () => {
     expect(src).toMatch(/import \{ APPOINTMENT_NOTES_MAX_LENGTH \} from "@\/lib\/appointment-limits"/);
   });
 });
+
+// #95: PUT /api/appointments/[id] — daty jak w POST (ISO ze strefą).
+describe("updateAppointmentSchema — startTime/endTime ze strefą (#95)", () => {
+  const parse = (body: Record<string, unknown>) => updateAppointmentSchema.safeParse(body);
+
+  it.each(["2026-04-01T10:00:00Z", "2026-04-01T10:00:00.000Z", "2026-04-01T10:00+02:00", "2026-04-01T10:00:00-05:30"])(
+    "%s przechodzi",
+    (v) => {
+      expect(parse({ startTime: v, endTime: v }).success).toBe(true);
+    }
+  );
+
+  it.each([
+    ["bez strefy", "2026-04-01T10:00:00"],
+    ["bez strefy, bez sekund", "2026-04-01T10:00"],
+    ["sama data", "2026-04-01"],
+    ["tekst daty", "April 1, 2026 10:00"],
+    ["pusty", ""],
+    ["niemożliwa godzina", "2026-04-01T25:00:00Z"],
+  ])("startTime %s => błąd na polu startTime", (_name, v) => {
+    const r = parse({ startTime: v });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.path).toEqual(["startTime"]);
+  });
+
+  it("endTime bez strefy => błąd na polu endTime, komunikat jak w POST", () => {
+    const r = parse({ startTime: "2026-04-01T10:00:00Z", endTime: "2026-04-01T11:00:00" });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.path).toEqual(["endTime"]);
+    expect(r.error!.issues[0]!.message).toBe("Czas zakonczenia: nieprawidłowy format daty");
+  });
+
+  it("brak dat (np. zmiana samych notatek) przechodzi", () => {
+    expect(parse({ notes: "x" }).success).toBe(true);
+  });
+});
+
+// #95: nieistniejący dzień i godzina 24 — Date.parse je przewija zamiast odrzucić.
+// Ten sam isoDateString w POST, create-session i PUT, więc test na każdym schemacie.
+describe("isoDateString — nieistniejące daty (#95)", () => {
+  const post = {
+    salonId: "salon-123",
+    employeeId: "emp-456",
+    startTime: "2026-12-01T10:00:00.000Z",
+    endTime: "2026-12-01T11:00:00.000Z",
+  };
+  const session = {
+    salonId: "11111111-1111-4111-8111-111111111111",
+    employeeId: "22222222-2222-4222-8222-222222222222",
+    startTime: "2026-12-01T10:00:00.000Z",
+    endTime: "2026-12-01T11:00:00.000Z",
+    depositAmount: 30,
+  };
+  const schemas = [
+    ["POST", (b: Record<string, unknown>) => createAppointmentSchema.safeParse({ ...post, ...b })],
+    ["create-session", (b: Record<string, unknown>) => depositCreateSessionSchema.safeParse({ ...session, ...b })],
+    ["PUT", (b: Record<string, unknown>) => updateAppointmentSchema.safeParse(b)],
+  ] as const;
+
+  const impossible = [
+    "2026-02-30T10:00:00Z", // Date.parse => 2 marca
+    "2026-04-31T10:00:00.000Z", // => 1 maja
+    "2026-13-01T10:00:00Z",
+    "2026-00-10T10:00:00Z",
+    "2026-04-00T10:00:00Z",
+    "2027-02-29T10:00:00Z", // 2027 nie jest przestępny
+    "2026-04-01T24:00:00Z", // Date.parse => północ 2 kwietnia
+    "2026-04-01T23:60:00Z",
+    "2026-04-01T23:59:60Z",
+  ];
+
+  for (const [name, parse] of schemas) {
+    it.each(impossible)(`${name}: %s => błąd na startTime i endTime`, (value) => {
+      for (const field of ["startTime", "endTime"]) {
+        const r = parse({ [field]: value });
+        expect(r.success).toBe(false);
+        expect(r.error!.issues[0]!.path).toEqual([field]);
+        expect(r.error!.issues[0]!.message).toMatch(/nieprawidłowy format daty/);
+      }
+    });
+
+    it.each([
+      "2028-02-29T10:00:00Z", // przestępny
+      "2026-04-30T23:59:59.999Z",
+      "2026-12-31T00:00:00Z",
+      // Dzień w napisie istnieje, choć w UTC to już inny dzień — offset nie myli kontroli.
+      "2026-03-01T00:30:00+02:00",
+      "2026-02-28T23:30:00-05:00",
+    ])(`${name}: %s przechodzi jako startTime i jako endTime`, (value) => {
+      // Druga data poza zakresem przypadków, żeby nie złapać refine end > start.
+      expect(parse({ startTime: value, endTime: "2030-01-01T00:00:00Z" }).success).toBe(true);
+      expect(parse({ startTime: "2020-01-01T00:00:00Z", endTime: value }).success).toBe(true);
+    });
+  }
+});
