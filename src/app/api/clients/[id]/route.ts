@@ -56,7 +56,7 @@ export const GET = withApiHandler(
       );
     }
 
-    logger.info(`[Clients API] Found client: ${client.firstName} ${client.lastName}`);
+    logger.info(`[Clients API] Found client: ${client.id}`);
 
     return NextResponse.json({
       success: true,
@@ -123,7 +123,8 @@ export const PUT = withApiHandler(
     if (depositType !== undefined) updateData.depositType = depositType;
     if (depositValue !== undefined) updateData.depositValue = depositValue;
 
-    logger.info(`[Clients API] Updating client ${id}`, { updateData });
+    // Tylko nazwy pól — wartości (imię, telefon, e-mail, notatki) nie trafiają do logów.
+    logger.info(`[Clients API] Updating client ${id}`, { fields: Object.keys(updateData) });
 
     const updated = await forSalon(salonId).updateOwned(clients, id, updateData);
 
@@ -244,7 +245,7 @@ export async function DELETE(
     });
 
     if (!isPasswordValid) {
-      logger.info(`[Clients API] Password verification failed for user ${session.user.email} when attempting to delete client ${id}`);
+      logger.info(`[Clients API] Password verification failed for user ${session.user.id} when attempting to delete client ${id}`);
       return NextResponse.json(
         { success: false, error: "Nieprawidlowe haslo" },
         { status: 403 }
@@ -261,7 +262,7 @@ export async function DELETE(
       );
     }
 
-    logger.info(`[Clients API] Deleted client: ${deleted.firstName} ${deleted.lastName} (${deleted.id}) by user ${session.user.email} after password verification`);
+    logger.info(`[Clients API] Deleted client: ${deleted.id} by user ${session.user.id} after password verification`);
 
     return NextResponse.json({
       success: true,

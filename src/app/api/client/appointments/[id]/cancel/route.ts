@@ -286,7 +286,9 @@ export async function POST(
         salonName,
       });
 
-      logger.info(`[Client Cancel API] Waiting list notification result`, { waitingListResult });
+      // Tylko liczniki — wynik nie może zawierać danych klientów z listy oczekujących.
+      const { notified, smsCount, pushCount, errors } = waitingListResult;
+      logger.info(`[Client Cancel API] Waiting list notification result`, { notified, smsCount, pushCount, errors });
     } catch (waitingListError) {
       logger.error("[Client Cancel API] Failed to notify waiting list", { error: waitingListError });
       // Don't fail the cancellation if waiting list notification fails
