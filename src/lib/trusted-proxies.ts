@@ -133,6 +133,39 @@ function parseIp(value: string): ParsedIp | null {
   return bytes ? unmapIPv4(bytes) : null;
 }
 
+/**
+ * Prefiks, do którego przycinamy IPv6 w kluczu limitu. Musi być równy
+ * `advanced.ipAddress.ipv6Subnet` Better Auth (nieustawione → domyślne 64,
+ * `@better-auth/core` utils/ip.mjs: `options.ipv6Subnet ?? 64`).
+ * /64 to najmniejsza podsieć, jaką zwykle dostaje jeden klient — bez
+ * przycięcia klient rotuje adresy w swoim /64 i dostaje nowy kubełek.
+ */
+export const IPV6_RATE_LIMIT_SUBNET = 64;
+
+/**
+ * Klucz limitu z adresu klienta, w tym samym zapisie co Better Auth 1.7.25
+ * (`normalizeIP` z `ipv6Subnet: 64`):
+ *  - IPv4 bez zmian (`203.0.113.50`),
+ *  - IPv4-mapped `::ffff:a.b.c.d` → `a.b.c.d`,
+ *  - IPv6 → pełny zapis 8 grup po 4 cyfry hex, małe litery, bity poza /64
+ *    wyzerowane, bez sufiksu (np. `2001:db8:1:2::abcd` →
+ *    `2001:0db8:0001:0002:0000:0000:0000:0000`).
+ * Wartość niebędąca poprawnym IP wraca bez zmian (jak dotąd).
+ */
+export function normalizeClientIp(ip: string): string {
+  const bytes = parseIp(ip);
+  if (!bytes) return ip;
+  if (bytes.length === 4) return Array.from(bytes).join(".");
+  const keepBytes = IPV6_RATE_LIMIT_SUBNET / 8;
+  const groups: string[] = [];
+  for (let i = 0; i < 16; i += 2) {
+    const hi = i < keepBytes ? (bytes[i] ?? 0) : 0;
+    const lo = i + 1 < keepBytes ? (bytes[i + 1] ?? 0) : 0;
+    groups.push(((hi << 8) | lo).toString(16).padStart(4, "0"));
+  }
+  return groups.join(":");
+}
+
 function parseCidr(value: string): ParsedCidr | null {
   const slash = value.indexOf("/");
   if (slash !== value.lastIndexOf("/")) return null;
@@ -384,6 +417,7 @@ export function resolveClientIp(headers: Headers): string | null {
   warnOnForwardedChain(hops, realIp);
 
   // Jak Better Auth: niepoprawny x-real-ip jest pomijany i decyduje XFF.
-  if (isVercel() && realIp && parseIp(realIp)) return realIp;
-  return xff ? selectClientIpFromEnv(xff) : null;
+  if (isVercel() && realIp && parseIp(realIp)) return normalizeClientIp(realIp);
+  const fromForwarded = xff ? selectClientIpFromEnv(xff) : null;
+  return fromForwarded === null ? null : normalizeClientIp(fromForwarded);
 }
