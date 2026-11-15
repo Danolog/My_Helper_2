@@ -3,7 +3,8 @@
  * Creates test users (owner + client) with salon data needed for E2E tests.
  *
  * Usage: pnpm db:seed:test
- * Requires: POSTGRES_URL env var
+ * Requires: POSTGRES_URL env var pointing at a host from SEED_ALLOWED_HOSTS
+ * (see ./seed-host-guard.ts). Neon and VERCEL_ENV=preview/production are refused.
  */
 
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -21,12 +22,15 @@ import {
   clients,
   subscriptionPlans,
 } from "../src/lib/schema";
+import { checkSeedTarget } from "./seed-host-guard";
 
 const connectionString = process.env.POSTGRES_URL;
-if (!connectionString) {
-  console.error("POSTGRES_URL is required");
+const target = checkSeedTarget(connectionString, { VERCEL_ENV: process.env.VERCEL_ENV });
+if (!target.ok || !connectionString) {
+  console.error(`[seed-test] Odmowa: ${target.ok ? "POSTGRES_URL jest wymagany" : target.reason}`);
   process.exit(1);
 }
+console.log(`[seed-test] Host docelowy: ${target.host}`);
 
 const sql = postgres(connectionString);
 const db = drizzle(sql);
