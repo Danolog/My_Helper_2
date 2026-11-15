@@ -1,6 +1,9 @@
+import { createElement, type ReactNode } from "react";
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useNotificationSettings } from "@/app/dashboard/settings/notifications/_hooks/use-notification-settings";
+import { ModulesProvider } from "@/components/dashboard/modules-provider";
+import { DEFAULT_MODULES } from "@/lib/features";
 
 // P2: hook ustawień powiadomień brał salon z publicznego katalogu GET /api/salons.
 // Katalog nie zwraca ownerId, więc find(ownerId === userId) zawsze dawał null
@@ -54,6 +57,13 @@ const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
   return new Response(JSON.stringify({ success: false }), { status: 200 });
 });
 
+// clientMarketing włączony, żeby sprawdzić, że WSZYSTKIE trasy ustawień idą na salon konta.
+const thawed = ({ children }: { children: ReactNode }) =>
+  createElement(ModulesProvider, {
+    modules: { ...DEFAULT_MODULES, clientMarketing: true },
+    children,
+  });
+
 const urls = () => mockFetch.mock.calls.map(([u]) => String(u));
 
 describe("useNotificationSettings — salon konta", () => {
@@ -64,7 +74,7 @@ describe("useNotificationSettings — salon konta", () => {
   });
 
   it("ładuje ustawienia salonu z /api/salons/mine, nie pierwszego z katalogu", async () => {
-    const { result } = renderHook(() => useNotificationSettings());
+    const { result } = renderHook(() => useNotificationSettings(), { wrapper: thawed });
 
     await waitFor(() =>
       expect(urls()).toContain(`/api/salons/${OWN_SALON}/notification-type-settings`),
