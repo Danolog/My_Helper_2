@@ -14,6 +14,8 @@
  * in the codebase that should have eslint-disable for no-console).
  */
 
+import { toSafeErrorMeta } from "@/lib/safe-error";
+
 type LogLevel = "debug" | "info" | "warn" | "error";
 
 interface LogContext {
@@ -22,20 +24,8 @@ interface LogContext {
 
 const isProduction = process.env.NODE_ENV === "production";
 
-/**
- * Serialize an error object into a plain object suitable for structured logging.
- * Captures message, name, and stack trace without losing information.
- */
-function serializeError(value: unknown): unknown {
-  if (value instanceof Error) {
-    return {
-      message: value.message,
-      name: value.name,
-      stack: value.stack,
-    };
-  }
-  return value;
-}
+/** N3: redakcja parametrów zapytania i `detail` — wspólny helper `@/lib/safe-error`. */
+const serializeError = toSafeErrorMeta;
 
 /**
  * Format and output a log entry.

@@ -84,6 +84,57 @@ describe("logger — produkcja (JSON structured)", () => {
     expect(entry.error).toMatchObject({ message: "boom", name: "Error" });
     expect(typeof entry.error.stack).toBe("string");
   });
+
+  // N3 (Ryan): DrizzleQueryError niesie parametry zapytania (dane gościa)
+  // w message i w pierwszej linii stack.
+  it("N3: DrizzleQueryError — parametry wycięte z message i stack, zapytanie i kod błędu zostają", async () => {
+    const { DrizzleQueryError } = await import("drizzle-orm");
+    const logger = await importLoggerWithEnv("production");
+    const err = new DrizzleQueryError(
+      'insert into "appointments" ("guest_name", "guest_phone") values ($1, $2)',
+      ["Anna Nowak", "+48123456789", "anna@test.pl"],
+      Object.assign(new Error("dup"), { code: "23505", detail: "Key (guest_email)=(anna@test.pl)" })
+    );
+    logger.error("Padlo", { error: err });
+
+    const raw = errorSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("Anna");
+    expect(raw).not.toContain("123456789");
+    expect(raw).not.toContain("anna@test.pl");
+    const entry = JSON.parse(raw);
+    expect(entry.error.message).toBe(
+      'Failed query: insert into "appointments" ("guest_name", "guest_phone") values ($1, $2)\nparams: [redacted]'
+    );
+    expect(entry.error.stack).toMatch(/params: \[redacted\]\n\s+at /); // ramki zachowane
+    expect(entry.error.causeCode).toBe("23505");
+  });
+
+  it("N3: parametr z '\\n    at ' nie skraca wycięcia", async () => {
+    const { DrizzleQueryError } = await import("drizzle-orm");
+    const logger = await importLoggerWithEnv("production");
+    logger.error("Padlo", {
+      error: new DrizzleQueryError("select $1", ["x\n    at sekret@poczta.pl"]),
+    });
+    expect(errorSpy.mock.calls[0]![0] as string).not.toContain("sekret@poczta.pl");
+  });
+
+  it("N3: zalogowany napis error.message z parametrami też jest redagowany", async () => {
+    const { DrizzleQueryError } = await import("drizzle-orm");
+    const logger = await importLoggerWithEnv("production");
+    const err = new DrizzleQueryError("insert into x values ($1)", ["anna@test.pl"]);
+    logger.error("Padlo", { error: err.message });
+    const raw = errorSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("anna@test.pl");
+    expect(raw).toContain("params: [redacted]");
+  });
+
+  it("zwykły Error bez parametrów — bez zmian", async () => {
+    const logger = await importLoggerWithEnv("production");
+    const err = new Error("boom");
+    logger.error("Padlo", { error: err });
+    const entry = JSON.parse(errorSpy.mock.calls[0]![0] as string);
+    expect(entry.error).toEqual({ message: "boom", name: "Error", stack: err.stack });
+  });
 });
 
 describe("logger — development (format czytelny)", () => {

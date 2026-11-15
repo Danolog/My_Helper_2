@@ -155,6 +155,28 @@ describe("calculateExpectedDeposit — walidacja usluga/wariant", () => {
     });
     expect(result).toEqual({ ok: false, error: "variant_not_found" });
   });
+
+  // #69: usługa wyłączona = jak usunięta (portal z nieaktualnej pamięci podręcznej)
+  it("zwraca service_not_found, gdy usluga jest wylaczona (isActive=false), bez dalszych zapytan", async () => {
+    queueSelect([{ ...baseService, isActive: false }]);
+
+    const result = await calculateExpectedDeposit(baseParams);
+    expect(result).toEqual({ ok: false, error: "service_not_found" });
+  });
+
+  it("wariant wylaczonej uslugi tez daje service_not_found", async () => {
+    queueSelect([{ ...baseService, isActive: false }], [{ id: "var-1", priceModifier: "0" }]);
+
+    const result = await calculateExpectedDeposit({ ...baseParams, variantId: "var-1" });
+    expect(result).toEqual({ ok: false, error: "service_not_found" });
+  });
+
+  it("usluga aktywna (isActive=true) liczona normalnie", async () => {
+    queueSelect([{ ...baseService, isActive: true }], []);
+
+    const result = await calculateExpectedDeposit(baseParams);
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe("calculateExpectedDeposit — zadatek procentowy uslugi", () => {
@@ -453,5 +475,42 @@ describe("calculateExpectedDeposit — ustawienia zadatku klienta (nadpisuja usl
       sessionUser: { email: "nieznany@example.com", emailVerified: true },
     });
     expect(result).toMatchObject({ ok: true, required: true, amount: 30 });
+  });
+});
+
+describe("calculateExpectedDeposit — clientId (lista oczekujących, #63)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectQueue.length = 0;
+  });
+
+  it("clientId: ustawienia klienta czytane po id w salonie, bez sesji", async () => {
+    queueSelect(
+      [{ ...baseService, depositRequired: false }],
+      /* happy hours */ [],
+      [{ requireDeposit: true, depositType: "fixed", depositValue: "25" }]
+    );
+    const { eq } = await import("drizzle-orm");
+
+    const result = await calculateExpectedDeposit({ ...baseParams, clientId: "client-1" });
+
+    expect(result).toMatchObject({ ok: true, required: true, amount: 25 });
+    expect(mockDbSelect).toHaveBeenCalledTimes(3);
+    expect(eq).toHaveBeenCalledWith("clients.id", "client-1");
+    expect(eq).not.toHaveBeenCalledWith("clients.email", expect.anything());
+  });
+
+  it("clientId ma pierwszeństwo przed e-mailem sesji", async () => {
+    queueSelect([baseService], [], [{ requireDeposit: false, depositType: "percentage", depositValue: "0" }]);
+    const { eq } = await import("drizzle-orm");
+
+    await calculateExpectedDeposit({
+      ...baseParams,
+      clientId: "client-1",
+      sessionUser: { email: "ktos@example.com", emailVerified: true },
+    });
+
+    expect(eq).toHaveBeenCalledWith("clients.id", "client-1");
+    expect(eq).not.toHaveBeenCalledWith("clients.email", "ktos@example.com");
   });
 });

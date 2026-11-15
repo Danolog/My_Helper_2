@@ -49,3 +49,20 @@ export function buildDepositBody(input: DepositBodyInput) {
       : {}),
   };
 }
+
+/**
+ * #67: serwer (depositDecision) uznał, że zadatku nie da się pobrać — kwota
+ * ≤ 0 przy `required` albo brak wymogu (front miał nieaktualne ustawienia).
+ * Portal wtedy NIE kończy błędem, tylko rezerwuje zwykłą ścieżką
+ * (/api/appointments), która przy tej samej decyzji przyjmuje wizytę.
+ */
+export const DEPOSIT_NOT_APPLICABLE_CODE = "DEPOSIT_NOT_APPLICABLE";
+
+export function isDepositNotApplicable(status: number, json: unknown): boolean {
+  return (
+    status === 400 &&
+    typeof json === "object" &&
+    json !== null &&
+    (json as { code?: unknown }).code === DEPOSIT_NOT_APPLICABLE_CODE
+  );
+}
