@@ -43,6 +43,9 @@ function getDb(): Db {
 
 export const db: Db = new Proxy({} as Db, {
   get(_target, prop) {
+    // `db` nie jest obietnicą: `await`/`Promise.resolve(db)` i zwrot z funkcji
+    // async sprawdzają `.then` — to nie może otwierać połączenia ani rzucać.
+    if (prop === "then") return undefined;
     const real = getDb();
     const value: unknown = Reflect.get(real, prop, real);
     return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(real) : value;

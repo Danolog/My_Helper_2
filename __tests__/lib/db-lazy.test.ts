@@ -47,6 +47,14 @@ describe("db — leniwe połączenie", () => {
     expect(postgresMock).not.toHaveBeenCalled();
   });
 
+  it("db nie jest thenable: await/zwrot z async nie otwiera połączenia ani nie rzuca", async () => {
+    vi.stubEnv("POSTGRES_URL", "");
+    const db = await loadDb();
+    expect((db as unknown as { then?: unknown }).then).toBeUndefined();
+    await expect(Promise.resolve(db)).resolves.toBe(db);
+    expect(postgresMock).not.toHaveBeenCalled();
+  });
+
   it("z POSTGRES_URL tworzy klienta raz, przy pierwszym użyciu, z tą samą konfiguracją", async () => {
     vi.stubEnv("POSTGRES_URL", "postgresql://u:p@127.0.0.1:5432/x");
     vi.stubEnv("DB_POOL_MAX", "7");
