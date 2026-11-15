@@ -241,6 +241,13 @@ describe("G-D1: sekrety i konta", () => {
     expect(acc.every((c) => c.includes("serviceAccount:myhelper-runtime@"))).toBe(true);
   });
 
+  it("sa: deploy czyta tylko metadane wersji (viewer) osobno na każdym sekrecie, nigdy secretAccessor", () => {
+    const r = bootstrap([...base("sa"), "--apply"]);
+    const deploy = r.calls.filter((c) => c.includes("serviceAccount:myhelper-deploy@") && c.includes("secrets add-iam-policy-binding"));
+    expect(deploy.map((c) => c.split(" ")[4]).sort()).toEqual(SECRET_NAMES);
+    for (const c of deploy) expect(c).toContain("--role=roles/secretmanager.viewer");
+  });
+
   it("sa: deploy ma actAs tylko na koncie runtime i AR writer tylko na repo", () => {
     const r = bootstrap([...base("sa"), "--apply"]);
     const actAs = r.calls.filter((c) => c.includes("roles/iam.serviceAccountUser"));
@@ -354,9 +361,9 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
     expect(d.flags + d.stdin).toBe("");
   });
 
-  it("cloudsql.client dla runtime i deploy, z warunkiem na instancję", () => {
+  it("cloudsql.client tylko dla runtime (usługa i job migracji), z warunkiem na instancję; deploy bez", () => {
     const client = r.calls.filter((c) => c.includes("roles/cloudsql.client"));
-    expect(client.map((c) => c.match(/serviceAccount:([a-z-]+)@/)![1])).toEqual(["myhelper-runtime", "myhelper-deploy"]);
+    expect(client.map((c) => c.match(/serviceAccount:([a-z-]+)@/)![1])).toEqual(["myhelper-runtime"]);
   });
 
   it("idempotencja: istniejąca instancja, baza i wersje sekretów — nic nie jest tworzone ani zmieniane", () => {

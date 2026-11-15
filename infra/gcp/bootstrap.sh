@@ -241,6 +241,12 @@ stage_sa() {
     run secrets add-iam-policy-binding "$name" \
       --member="serviceAccount:$RUNTIME_SA" --role=roles/secretmanager.secretAccessor
   done
+  # Deploy: odczyt METADANYCH wersji każdego sekretu (bez wartości) —
+  # run-deploy.sh mapuje tylko sekrety z wersją ENABLED (K-1).
+  for name in "${SECRET_NAMES[@]}"; do
+    run secrets add-iam-policy-binding "$name" \
+      --member="serviceAccount:$DEPLOY_SA" --role=roles/secretmanager.viewer
+  done
   # Runtime: zapis/odczyt/usuwanie obiektów w jednym zasobniku (bez zmiany IAM).
   run storage buckets add-iam-policy-binding "gs://$BUCKET" \
     --member="serviceAccount:$RUNTIME_SA" --role=roles/storage.objectUser
@@ -339,12 +345,12 @@ stage_sql() {
   db_password "$DB_USER" "$DB_URL_SECRET" url
   db_password postgres "$DB_ADMIN_SECRET" raw
   local cond="expression=resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"${SQL_RESOURCE}\",title=only-${SQL_INSTANCE}"
-  # Usługa i job migracji (konto runtime) oraz konto deploy: Cloud SQL Client
-  # tylko na tej instancji.
+  # Usługa i job migracji działają jako konto runtime — tylko ono łączy się
+  # z bazą: Cloud SQL Client wyłącznie na tej instancji. Konto deploy NIE
+  # dostaje cloudsql.client (Oliver, recenzja #134): po jego stronie nic nie
+  # łączy się z bazą (kopia na żądanie to Admin API — rola niżej).
   run projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:$RUNTIME_SA" --role=roles/cloudsql.client --condition="$cond"
-  run projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:$DEPLOY_SA" --role=roles/cloudsql.client --condition="$cond"
   # Deploy: kopia na żądanie przed migracją (run-migrate.sh).
   local role="projects/${PROJECT_ID}/roles/myhelperSqlBackup"
   if ! exists iam roles describe myhelperSqlBackup; then

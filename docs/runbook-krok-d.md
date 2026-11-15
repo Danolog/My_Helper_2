@@ -107,7 +107,9 @@ replikacja tylko w `europe-central2`. Żadnych wartości.
   z 11 sekretów, `roles/storage.objectUser` na zasobniku (aplikacja zapisuje,
   czyta metadane i usuwa).
 - `myhelper-deploy` (GitHub Actions przez WIF): `artifactregistry.writer` na jednym
-  repo, `iam.serviceAccountUser` wyłącznie na koncie runtime.
+  repo, `iam.serviceAccountUser` wyłącznie na koncie runtime,
+  `secretmanager.viewer` osobno na każdym z 11 sekretów — tylko metadane wersji,
+  bez dostępu do wartości (`run-deploy.sh` mapuje wyłącznie sekrety z wersją, K-1).
 - Zero ról na poziomie projektu w tym etapie.
 
 ### 3.6 `sql` (decyzja Ethana, #121 komentarz 6899299212)
@@ -130,9 +132,13 @@ Tworzy:
 - losowe hasło wbudowanego `postgres` w osobnym sekrecie
   `postgres-admin-password` — spoza manifestu, bez dostępu runtime, niepodpięty
   do usługi ani joba; tylko do dostępu administracyjnego (sekcja 9);
-- `roles/cloudsql.client` dla runtime i deploy oraz własną rolę
-  `myhelperSqlBackup` (kopia na żądanie przed migracją) dla deploy — wszystkie
-  z warunkiem IAM na tę jedną instancję.
+- `roles/cloudsql.client` wyłącznie dla runtime oraz własną rolę
+  `myhelperSqlBackup` (kopia na żądanie przed migracją, Admin API) dla deploy —
+  obie z warunkiem IAM na tę jedną instancję (Cloud SQL nie ma polityk IAM na
+  instancji, więc wiązanie projektowe z warunkiem; Oliver). Z bazą łączy się
+  tylko konto runtime: usługa i job migracji `myhelper-migrate` działają jako
+  `myhelper-runtime` (`run-migrate.sh`: `--service-account="$RUNTIME_SA"`).
+  Po stronie deploy nic nie łączy się z bazą, więc deploy nie ma `cloudsql.client`.
 
 Hasła: generowane w pamięci procesu, do gcloud tylko przez `--flags-file`
 ze strumienia (`sql users create|set-password`) i `--data-file=-`
