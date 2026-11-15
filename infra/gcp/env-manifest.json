@@ -112,6 +112,10 @@
     "NEXT_PUBLIC_VAPID_PUBLIC_KEY": {
       "class": "build"
     },
+    "NEXT_RUNTIME": {
+      "class": "platform",
+      "note": "Ustawia Next.js (nodejs/edge); src/instrumentation.ts uruchamia strażnika sekretów tylko dla nodejs (K-1 W1)."
+    },
     "NODE_ENV": {
       "class": "platform"
     },

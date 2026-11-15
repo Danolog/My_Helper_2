@@ -1,7 +1,7 @@
 // @vitest-environment node
 /**
  * Strażnik startu „sekret produkcyjny ≠ wartość testowa z repo”
- * (src/lib/secret-guard.mjs + src/instrumentation.ts; K-1, #144 W1).
+ * (infra/runtime/secret-guard.mjs + src/instrumentation.ts; K-1, #144 W1).
  *
  * Wartości w tym pliku są losowane w czasie testu albo brane z literałów
  * już obecnych w repozytorium (przez extractSecretLiterals) — test nie
@@ -26,9 +26,9 @@ import {
   forbiddenSecretHits,
   secretGuardActive,
   sha256Hex,
-} from "../../src/lib/secret-guard.mjs";
+} from "../../infra/runtime/secret-guard.mjs";
 
-const GUARD_URL = pathToFileURL(join(REPO_ROOT, "src/lib/secret-guard.mjs")).href;
+const GUARD_URL = pathToFileURL(join(REPO_ROOT, "infra/runtime/secret-guard.mjs")).href;
 const literals = extractSecretLiterals();
 
 /** Wartość testowa jawna w repo: BETTER_AUTH_SECRET z quality-gate.yml. */
