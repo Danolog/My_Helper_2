@@ -11,10 +11,10 @@
  *   serwer nie zawiera rabatu happy hours (baza nie jest o nie pytana),
  *   a kod rabatowy powiązany z promocją zamrożoną jest nieważny.
  *
- * Typy brane są z rejestru — test iteruje po `FROZEN_PROMOTION_TYPES`, więc
- * zdjęcie typu z listy (np. „package”) czerwieni sprawdzenie dokładnego
- * zbioru, a dopisanie nowego typu do schematu bez decyzji — sprawdzenie
- * typów dozwolonych.
+ * Lista typów zamrożonych jest tu wpisana świadomie (`FROZEN`, decyzja
+ * Darka + aneks B2), a nie brana z rejestru: zdjęcie typu z
+ * `FROZEN_PROMOTION_TYPES` (np. „package”) ma zaczerwienić zachowanie —
+ * POST 400, GET bez wiersza, kod nieważny — a nie tylko porównanie list.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GET as getOne, PUT } from "@/app/api/promotions/[id]/route";
@@ -39,6 +39,9 @@ vi.mock("@/lib/auth-middleware", () => ({
 vi.mock("@/lib/get-user-salon", () => ({
   getUserSalonId: vi.fn().mockResolvedValue("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
 }));
+
+/** Decyzja: zamrożone typy promocji (brief B sekcja 4, aneks B2). */
+const FROZEN = ["happy_hours", "package", "buy2get1", "first_visit"] as const;
 
 const ALL_SCHEMA_TYPES = ["percentage", "fixed", "package", "buy2get1", "happy_hours", "first_visit"];
 
@@ -92,9 +95,7 @@ beforeEach(() => m.reset());
 
 describe("rejestr typów zamrożonych", () => {
   it("zamrożone są dokładnie: happy hours, pakiet, 2+1, pierwsza wizyta", () => {
-    expect([...FROZEN_PROMOTION_TYPES].sort()).toEqual(
-      ["buy2get1", "first_visit", "happy_hours", "package"]
-    );
+    expect([...FROZEN_PROMOTION_TYPES].sort()).toEqual([...FROZEN].sort());
   });
 
   it("dozwolone zostają tylko rabat procentowy i kwotowy", () => {
@@ -110,7 +111,7 @@ describe("rejestr typów zamrożonych", () => {
 });
 
 describe("POST /api/promotions — typ zamrożony", () => {
-  it.each(FROZEN_PROMOTION_TYPES)("%s → 400 PROMOTION_TYPE_DISABLED, bez zapisu", async (type) => {
+  it.each(FROZEN)("%s → 400 PROMOTION_TYPE_DISABLED, bez zapisu", async (type) => {
     m.asOwnerOf(SALON_A);
     m.txRows.push([row("p-new", type)]);
 
@@ -138,7 +139,7 @@ describe("GET /api/promotions — typy zamrożone nie są zwracane", () => {
     m.asOwnerOf(SALON_A);
     m.txRows.push([
       row("p-pct", "percentage"),
-      ...FROZEN_PROMOTION_TYPES.map((t) => row(`p-${t}`, t)),
+      ...FROZEN.map((t) => row(`p-${t}`, t)),
       row("p-fix", "fixed"),
     ]);
 
@@ -152,7 +153,7 @@ describe("GET /api/promotions — typy zamrożone nie są zwracane", () => {
 });
 
 describe("GET/PUT /api/promotions/[id] — promocja zamrożona nie istnieje dla panelu", () => {
-  it.each(FROZEN_PROMOTION_TYPES)("GET promocji %s → 404", async (type) => {
+  it.each(FROZEN)("GET promocji %s → 404", async (type) => {
     m.txRows.push([row("p-1", type)]);
     const res = await getOne(new Request("http://localhost/api/promotions/p-1"), {
       params: Promise.resolve({ id: "p-1" }),
@@ -168,7 +169,7 @@ describe("GET/PUT /api/promotions/[id] — promocja zamrożona nie istnieje dla 
     expect(res.status).toBe(200);
   });
 
-  it.each(FROZEN_PROMOTION_TYPES)("PUT zmiana typu na %s → 400, bez odczytu i zapisu", async (type) => {
+  it.each(FROZEN)("PUT zmiana typu na %s → 400, bez odczytu i zapisu", async (type) => {
     m.txRows.push([row("p-1", "percentage")], [row("p-1", type)]);
     const res = await update("p-1", { type });
     expect(res.status).toBe(400);
@@ -177,7 +178,7 @@ describe("GET/PUT /api/promotions/[id] — promocja zamrożona nie istnieje dla 
     expect(m.txRows).toHaveLength(2);
   });
 
-  it.each(FROZEN_PROMOTION_TYPES)(
+  it.each(FROZEN)(
     "PUT promocji %s (włączenie albo zmiana typu na dozwolony) → 404, bez zapisu",
     async (type) => {
       m.txRows.push([row("p-1", type)], [row("p-1", "percentage")]);
@@ -264,7 +265,7 @@ describe("POST /api/promo-codes/validate — kod powiązany z promocją zamrożo
     );
   }
 
-  it.each(FROZEN_PROMOTION_TYPES)("promocja %s → kod nieważny, bez rabatu", async (type) => {
+  it.each(FROZEN)("promocja %s → kod nieważny, bez rabatu", async (type) => {
     m.txRows.push([{ promoCode, promotion: row("p-1", type) }]);
     const res = await validate();
     const body = await res.json();
