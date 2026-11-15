@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createServiceCategorySchema } from "@/lib/api-validation";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { requireSalonStaff } from "@/lib/salon-context";
 import { serviceCategories } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import { isValidUuid } from "@/lib/validations";
 import type { z } from "zod";
 
 // GET /api/service-categories - List service categories for a salon
@@ -18,15 +18,22 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
-    // "lista bez zawężenia" była wyciekiem cross-salon).
-    const salonId = searchParams.get("salonId") || (await getUserSalonId());
-    if (!salonId) {
+    // #94 (jak #82 w /api/services): salon WYŁĄCZNIE z sesji. Wcześniej salonId
+    // z query szedł prosto do forSalon(), więc każde zalogowane konto czytało
+    // kategorie dowolnego salonu. salonId z query jest tylko porównywany
+    // (inny => 403). Role: domyślne requireSalonStaff (właściciel, recepcja,
+    // pracownik), bo lista kategorii jest częścią podglądu usług.
+    const requestedSalonId = searchParams.get("salonId")?.trim() || null;
+    if (requestedSalonId !== null && !isValidUuid(requestedSalonId)) {
       return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
+        { success: false, error: "Invalid salon ID format" },
+        { status: 400 }
       );
     }
+
+    const guard = await requireSalonStaff({ requestedSalonId });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
 
     logger.info("[ServiceCategories API] GET with params", { salonId });
 
