@@ -405,20 +405,25 @@ W obu przypadkach: treść niezałatanej, wykorzystywalnej podatności w naszym
 kodzie nie trafia do publicznych opisów ani komentarzy — prywatny szkic
 Security Advisory przez Olivera.
 
-## 8. D-8 — harmonogram (sesja główna)
+## 8. D-8 — harmonogram (sesja główna, po K-3 #137)
 
-Warunek (#121 j): job Scheduler powstaje wstrzymany albo obowiązkowy odczyt
-`describe` = `PAUSED` przed włączeniem. Dzisiejszy `infra/gcp/scheduler.sh`
-tworzy joby od razu w stanie docelowym — **D-8 czeka na K-3** (tworzenie →
-pauza → `describe --format='value(state)'` = `PAUSED`, inaczej stop). Po K-3:
+Warunek (#121 j): zadanie Scheduler powstaje wstrzymane, a jego stan jest
+odczytywany (`describe` = `PAUSED`, inaczej stop). Od K-3 `infra/gcp/scheduler.sh`
+tworzy zadanie z harmonogramem zaparkowanym (29 lutego), od razu je wstrzymuje,
+odczytuje stan i dopiero wtedy ustawia właściwy harmonogram. Tryb domyślny
+nigdy nie wznawia. Kolejność obowiązkowa:
 
 ```bash
-PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh
-PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --check
+S='PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://…'
+env $S infra/gcp/scheduler.sh            # 1. utworzenie/aktualizacja — wszystko PAUSED
+env $S infra/gcp/scheduler.sh --check    # 2. dryf ENABLED→PAUSED oczekiwany, innego dryfu brak
+env $S infra/gcp/scheduler.sh --resume   # 3. dopiero po decyzji Darka
+env $S infra/gcp/scheduler.sh --check    # 4. kod 0
 gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-central2 --format='value(name,state)'
 ```
 
 Włączenie harmonogramu = prawdziwe SMS-y i push do klientów salonów — decyzja Darka.
+Zadania `mh-notify-*` zostają `PAUSED` także po `--resume`.
 
 ## 8a. Znane zachowanie przyjęte świadomie
 
@@ -453,6 +458,6 @@ pisze Ethan w planie 0.5 — ten runbook jej nie zawiera.
   mapowanie tylko sekretów z wersją, bez `--allow-unauthenticated`, webhook
   Stripe bez sekretu odrzuca każde żądanie, `GCS_PUBLIC_BASE_URL` jako build-arg
   z jednego źródła (#133 pkt 1), asercja `remotePatterns` (#118 pkt 4).
-- K-2: zawężenie allowlisty e2e do naszej usługi. K-3: harmonogram wstrzymany.
+- K-2 (#135): zawężenie allowlisty e2e do naszej usługi. K-3 (#137): harmonogram wstrzymany.
 - Logowanie Google bez sekretu nie wyłącza się samo (P3 po K-1).
 - Koszt IP instancji: potwierdzić odczytem kosztów po 24 h (sekcja 1 pkt 3).
