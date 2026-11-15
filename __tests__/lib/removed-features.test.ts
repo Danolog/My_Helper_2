@@ -131,12 +131,38 @@ const REMOVED_ENV_PREFIXES = ["TWILIO_", "ELEVENLABS_"];
 /** Hosty usuniętych dostawców — nie mogą wrócić do CSP. */
 const REMOVED_PROVIDER_HOSTS = /twilio|elevenlabs/i;
 
+/**
+ * Pliki kodu skanowane przez G6: TS i JS we wszystkich wariantach modułów
+ * (.ts/.tsx/.mts/.cts/.js/.jsx/.mjs/.cjs). Wcześniejszy filtr `.ts|.tsx`
+ * przepuszczał trasę `route.js` z Veo albo odczytem `fiscalReceipts`
+ * (recenzja Ryana #117, J1–J3).
+ */
+const CODE_FILE = /\.(m|c)?[jt]sx?$/;
+
+/** Pliki JS w src — projekt jest w TS, więc JS jest wyłącznie obejściem typów. */
+const JS_FILE = /\.(m|c)?jsx?$/;
+
+/**
+ * Obejścia zawężenia typów przy zapisie użycia AI (Ryan #117, T1–T3):
+ * rzutowanie `as any` / `as never` / `as unknown` w argumentach wywołania
+ * `trackAIUsage(...)` albo dyrektywa `@ts-*` tuż nad wywołaniem. Zapis
+ * i tak zatrzyma allowlista w czasie wykonania; reguła robi z obejścia
+ * czerwony test, zanim kod trafi do recenzji.
+ */
+const TRACK_USAGE_CAST = /trackAIUsage\s*\([^;]*?\bas\s+(any|never|unknown)\b/;
+const TRACK_USAGE_TS_DIRECTIVE =
+  /@ts-(ignore|nocheck|expect-error)\b[^\n]*\n(\s*(\/\/|\/\*|\*)[^\n]*\n)*[^\n]*\btrackAIUsage\s*\(/;
+const TRACK_USAGE_TYPE_BYPASS: Array<[string, RegExp]> = [
+  ["rzutowanie w argumentach trackAIUsage", TRACK_USAGE_CAST],
+  ["dyrektywa @ts-* nad wywołaniem trackAIUsage", TRACK_USAGE_TS_DIRECTIVE],
+];
+
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) out.push(...sourceFiles(full));
-    else if (/\.(ts|tsx)$/.test(name)) out.push(full);
+    else if (CODE_FILE.test(name)) out.push(full);
   }
   return out;
 }
@@ -158,6 +184,49 @@ function directives(csp: string): Map<string, string[]> {
 describe("G6 — usunięte funkcje nie wracają (B3: głos, B4: wideo i social, B5: fiskalizacja)", () => {
   it("kontrola: skaner widzi kod src (test nie jest pusty)", () => {
     expect(SRC_FILES.length).toBeGreaterThan(500);
+  });
+
+  it("w src nie ma plików .js/.jsx/.mjs/.cjs (omijają tsc i zawężenie typów, Ryan #117 J1–J3)", () => {
+    const hits = SRC_FILES.filter((f) => JS_FILE.test(f.path)).map((f) => f.path);
+    expect(hits).toEqual([]);
+  });
+
+  it.each(TRACK_USAGE_TYPE_BYPASS)("w src nie ma obejścia typu zapisu użycia AI: %s", (_label, pattern) => {
+    const hits = SRC_FILES.filter((f) => pattern.test(f.text)).map((f) => f.path);
+    expect(hits).toEqual([]);
+  });
+
+  it("kontrola: reguły obejścia łapią as any / as never / as unknown / @ts-ignore, a nie zwykłe wywołanie", () => {
+    const cast = TRACK_USAGE_CAST;
+    const directive = TRACK_USAGE_TS_DIRECTIVE;
+    for (const sample of [
+      `void trackAIUsage(s, "x", {}, { type: ("vid" + "eo") as any });`,
+      `trackAIUsage(s, "x", {}, {\n  type: t as never,\n});`,
+      `trackAIUsage(s, "x", {}, { provider: p as unknown as "sharp" });`,
+    ]) {
+      expect(cast.test(sample), sample).toBe(true);
+    }
+    for (const sample of [
+      `// @ts-ignore\n  trackAIUsage(s, "x", {}, { type: t });`,
+      `/* @ts-expect-error */\nvoid trackAIUsage(s, "x");`,
+      `// @ts-ignore\n// powód\nconst r = trackAIUsage(s, "x");`,
+    ]) {
+      expect(directive.test(sample), sample).toBe(true);
+    }
+    const plain = `void trackAIUsage(salonId, "banner", { style }, { type: "banner", provider: "google_imagen" });\nconst x = y as Record<string, unknown>;`;
+    expect(cast.test(plain)).toBe(false);
+    expect(directive.test(plain)).toBe(false);
+  });
+
+  it("kontrola: filtr skanera obejmuje każde rozszerzenie TS/JS, a nie inne pliki", () => {
+    for (const name of ["a.ts", "a.tsx", "a.mts", "a.cts", "a.js", "a.jsx", "a.mjs", "a.cjs"]) {
+      expect(CODE_FILE.test(name), name).toBe(true);
+    }
+    for (const name of ["a.json", "a.css", "a.md", "a.d.ts.bak", "a.tsbuildinfo"]) {
+      expect(CODE_FILE.test(name), name).toBe(false);
+    }
+    expect(["a.js", "a.jsx", "a.mjs", "a.cjs"].every((n) => JS_FILE.test(n))).toBe(true);
+    expect(["a.ts", "a.tsx", "a.mts", "a.cts"].some((n) => JS_FILE.test(n))).toBe(false);
   });
 
   it.each(REMOVED_PATHS)("ścieżka %s nie istnieje", (path) => {

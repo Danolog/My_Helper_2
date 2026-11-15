@@ -17,7 +17,12 @@ vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-import { trackAIUsage } from "@/lib/ai/openrouter";
+import {
+  trackAIUsage,
+  TRACKED_AI_USAGE_PROVIDERS,
+  TRACKED_AI_USAGE_TYPES,
+} from "@/lib/ai/openrouter";
+import { logger } from "@/lib/logger";
 
 describe("trackAIUsage", () => {
   beforeEach(() => {
@@ -69,6 +74,55 @@ describe("trackAIUsage", () => {
     };
     expect(typeof neverCalled).toBe("function");
     expect(mockValues).not.toHaveBeenCalled();
+  });
+
+  describe("allowlista w czasie wykonania (Ryan #117, T1–T3, J2)", () => {
+    // Wartości dochodzą tu tak, jak przez `as any` / `as never` /
+    // `// @ts-ignore` albo z pliku .js/.mjs — typ ich nie zatrzymuje.
+    const cast = <T>(v: unknown) => v as T;
+
+    it.each([
+      ["typ wideo", { type: cast<"text">("vid" + "eo") }],
+      ["dostawca Veo", { type: cast<"text">("image"), provider: cast<"openrouter">("google_" + "veo") }],
+      ["typ wideo i dostawca Veo", { type: cast<"text">("video"), provider: cast<"openrouter">("google_veo") }],
+      ["pusty typ", { type: cast<"text">("") }],
+      ["typ nie-string", { type: cast<"text">({ toString: () => "text" }) }],
+      ["wielkie litery", { type: cast<"text">("TEXT") }],
+    ])("%s → odrzucenie i brak zapisu", async (_label, options) => {
+      await expect(trackAIUsage("salon-1", "x", {}, options)).rejects.toThrow(
+        /outside the allowlist/,
+      );
+      expect(mockInsert).not.toHaveBeenCalled();
+      expect(mockValues).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith(
+        "[AI] Rejected usage record outside the allowlist",
+        expect.objectContaining({ feature: "x" }),
+      );
+    });
+
+    it("każda para z allowlisty zapisuje się jak dotąd", async () => {
+      for (const type of TRACKED_AI_USAGE_TYPES) {
+        for (const provider of TRACKED_AI_USAGE_PROVIDERS) {
+          mockValues.mockClear();
+          await expect(
+            trackAIUsage("salon-1", "f", {}, { type, provider }),
+          ).resolves.toBeUndefined();
+          expect(mockValues).toHaveBeenCalledWith(
+            expect.objectContaining({ type, provider }),
+          );
+        }
+      }
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it("allowlista nie zawiera wideo ani Veo", () => {
+      expect([...TRACKED_AI_USAGE_TYPES]).toEqual(["text", "image", "banner"]);
+      expect([...TRACKED_AI_USAGE_PROVIDERS]).toEqual([
+        "openrouter",
+        "google_imagen",
+        "sharp",
+      ]);
+    });
   });
 
   it("never throws when the insert fails", async () => {
