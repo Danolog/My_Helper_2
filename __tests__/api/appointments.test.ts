@@ -89,7 +89,6 @@ const mockProcessAutomaticRefund = vi.fn().mockResolvedValue({
   refunded: false,
   message: "Mock refund",
 });
-const mockCreateRefundNotification = vi.fn().mockResolvedValue(undefined);
 
 const mockSessionsExpire = vi.fn().mockResolvedValue({ status: "expired" });
 vi.mock("@/lib/stripe", () => ({
@@ -98,7 +97,6 @@ vi.mock("@/lib/stripe", () => ({
 
 vi.mock("@/lib/refund", () => ({
   refundAppointmentDeposits: (...args: unknown[]) => mockProcessAutomaticRefund(...args),
-  createRefundNotification: (...args: unknown[]) => mockCreateRefundNotification(...args),
 }));
 
 // Mock waiting list (used in DELETE)
@@ -2127,7 +2125,6 @@ describe("DELETE /api/appointments/[id]", () => {
       expect(sms[0]!.message).toBe(
         "Salon Lodz: Twoja wizyta Strzyzenie 17 listopada 2026 zostala odwolana przez salon. Zadatek 50.00 PLN wroci w calosci w ciagu 5-10 dni roboczych."
       );
-      expect(mockCreateRefundNotification).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

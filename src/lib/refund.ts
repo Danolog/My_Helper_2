@@ -1,7 +1,7 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { depositPayments, appointments, notifications } from "@/lib/schema";
+import { depositPayments, appointments } from "@/lib/schema";
 import { getStripe } from "@/lib/stripe";
 
 export interface RefundResult {
@@ -300,45 +300,4 @@ export async function refundAppointmentDeposits(
     ...(forfeitedPaymentId ? { forfeitedPaymentId } : {}),
     results,
   };
-}
-
-/**
- * Create a notification about the refund for the client.
- */
-export async function createRefundNotification(
-  salonId: string,
-  clientId: string,
-  amount: number,
-  clientName: string,
-  serviceName: string,
-  appointmentDate: Date
-): Promise<void> {
-  try {
-    const formattedDate = appointmentDate.toLocaleDateString("pl-PL", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    const bookingLink = `${appUrl}/salons/${salonId}/book`;
-
-    const message = `Szanowny/a ${clientName}, informujemy o zwrocie zadatku ${amount.toFixed(2)} PLN za anulowana wizyte "${serviceName}" zaplanowana na ${formattedDate}. Zwrot zostanie przetworzony w ciagu 5-10 dni roboczych. Zarezerwuj nowy termin: ${bookingLink}`;
-
-    await db.insert(notifications).values({
-      salonId,
-      clientId,
-      type: "sms",
-      message,
-      status: "pending",
-    });
-
-    logger.info("Refund notification created", { clientId });
-  } catch (error) {
-    logger.error("Failed to create refund notification", { error, clientId });
-    // Don't throw - notification failure shouldn't break the refund
-  }
 }

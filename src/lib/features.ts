@@ -113,7 +113,7 @@ export const MODULES: readonly ModuleDef[] = [
   // --- wyłączone globalnie (na później) ---
   {
     key: "voiceAi",
-    label: "Asystent głosowy (Twilio)",
+    label: "Asystent głosowy",
     description: "Przyjmowanie rezerwacji telefonicznych przez AI.",
     defaultEnabled: false,
     hardOff: true,
