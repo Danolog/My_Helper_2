@@ -30,7 +30,9 @@ vi.mock("@/lib/logger", () => ({
   },
 }));
 
+import { logger } from "@/lib/logger";
 import {
+  maskEmailAddress,
   sendEmail,
   sendVerificationEmail,
   sendPasswordResetEmail,
@@ -219,5 +221,31 @@ describe("renderEmailLayout", () => {
     expect(html).toContain("<!DOCTYPE html>");
     expect(html).toContain("Tytuł");
     expect(html).toContain("<p>Body</p>");
+  });
+});
+
+describe("logi e-maila bez pełnego adresu (hotfix P1)", () => {
+  it("maskEmailAddress: pierwszy znak + domena; brak @ → ***", () => {
+    expect(maskEmailAddress("klient@example.com")).toBe("k***@example.com");
+    expect(maskEmailAddress("a@b@c.pl")).toBe("a***@c.pl");
+    expect(maskEmailAddress("nie-email")).toBe("***");
+    expect(maskEmailAddress("@x.pl")).toBe("***");
+  });
+
+  it.each([
+    ["symulacja", "", undefined],
+    ["Resend", "re_test_key", { ok: true, json: async () => ({ id: "e-1" }) }],
+    ["błąd Resend", "re_test_key", { ok: false, status: 500, json: async () => ({ message: "x" }) }],
+  ])("%s: żaden log nie zawiera adresu klienta", async (_label, key, response) => {
+    vi.stubEnv("RESEND_API_KEY", key);
+    if (response) mockFetch.mockResolvedValue(response);
+    await sendEmail({ to: "anna.kowalska@example.com", subject: "Temat", html: "<p>x</p>" });
+    await sendEmail({ to: "anna.kowalska-bez-domeny", subject: "Temat", html: "<p>x</p>" });
+
+    const logged = JSON.stringify(
+      [logger.info, logger.warn, logger.error, logger.debug].flatMap((fn) => vi.mocked(fn).mock.calls)
+    );
+    expect(logged).not.toContain("anna.kowalska");
+    expect(logged.length).toBeGreaterThan(2);
   });
 });

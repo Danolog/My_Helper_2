@@ -181,7 +181,7 @@ export const PUT = withApiHandler(
     );
 
     logger.info(`[WaitingList API] PUT: Updated entry ${id} in salon ${salon.id}`,
-      updateData);
+      { fields: Object.keys(updateData) });
 
     return NextResponse.json({
       success: true,

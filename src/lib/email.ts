@@ -12,6 +12,16 @@ export interface EmailMessage {
   clientId?: string | undefined;
 }
 
+/**
+ * Adres e-mail do logu: pierwszy znak lokalnej części + domena
+ * („a***@example.com”). Pełny adres nie trafia do logów (hotfix P1).
+ */
+export function maskEmailAddress(address: string): string {
+  const at = address.lastIndexOf("@");
+  if (at <= 0) return "***";
+  return `${address[0]}***${address.slice(at)}`;
+}
+
 export interface EmailResult {
   success: boolean;
   notificationId?: string | undefined;
@@ -73,7 +83,7 @@ async function sendViaResend(apiKey: string, msg: EmailMessage): Promise<void> {
     throw new Error(`Resend error: ${detail}`);
   }
 
-  logger.info("Email sent via Resend", { to: msg.to, messageId: data?.id });
+  logger.info("Email sent via Resend", { to: maskEmailAddress(msg.to), messageId: data?.id });
 }
 
 /**
@@ -126,7 +136,7 @@ async function saveFailedNotification(msg: EmailMessage): Promise<void> {
  */
 export async function sendEmail(msg: EmailMessage): Promise<EmailResult> {
   if (!EMAIL_REGEX.test(msg.to)) {
-    logger.warn("Invalid email address", { to: msg.to, salonId: msg.salonId });
+    logger.warn("Invalid email address", { to: maskEmailAddress(msg.to), salonId: msg.salonId });
     await saveFailedNotification(msg);
     return {
       success: false,
@@ -143,7 +153,7 @@ export async function sendEmail(msg: EmailMessage): Promise<EmailResult> {
     } else {
       // Simulation mode - log instead of sending (no email provider configured)
       logger.info("Email notification (simulated - no RESEND_API_KEY)", {
-        to: msg.to,
+        to: maskEmailAddress(msg.to),
         subject: msg.subject,
       });
     }
@@ -155,7 +165,7 @@ export async function sendEmail(msg: EmailMessage): Promise<EmailResult> {
       notificationId,
     };
   } catch (error) {
-    logger.error("Failed to send email", { error, to: msg.to });
+    logger.error("Failed to send email", { error, to: maskEmailAddress(msg.to) });
 
     await saveFailedNotification(msg);
 
