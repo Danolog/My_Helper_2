@@ -19,7 +19,9 @@
  * usunąć krok is-ancestor; environment → production; cancel-in-progress →
  * true; base_url → vars.NEXT_PUBLIC_APP_URL; BASE_URL z sekretu w workflow_call;
  * id-token: write z powrotem na poziomie workflow; `permissions: write-all`
- * na jobie e2e; allowlista bez https albo poluzowana do dowolnego hosta.
+ * na jobie e2e; allowlista bez https albo poluzowana do dowolnego hosta;
+ * (#121 h) allowlista z powrotem na dowolny *.run.app, tag opcjonalny,
+ * tag z kropką, ścieżka dopuszczona.
  */
 import { spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
@@ -251,7 +253,7 @@ describe("G-C6: e2e-production.yml", () => {
   });
 
   const guardStep = () => {
-    const at = E2E.indexOf("Cloud Run mode must target a *.run.app URL");
+    const at = E2E.indexOf("Cloud Run mode must target our tagged Cloud Run URL");
     expect(at).toBeGreaterThan(0);
     return { at, step: E2E.slice(at, E2E.indexOf("\n\n", at)) };
   };
@@ -262,25 +264,42 @@ describe("G-C6: e2e-production.yml", () => {
     expect(step).toContain("if: github.event_name != 'deployment_status'");
     expect(step).toContain('"$BASE_URL" != https://*');
     expect(step).toContain('"$BASE_URL" == *vercel.app*');
-    expect(step).toContain("\\.run\\.app(/.*)?$");
+    // #121 (h): sufiks naszej usługi (usługa, numer projektu, region), bez ścieżki.
+    expect(step).toContain("---myhelper-843777043748\\.europe-central2\\.run\\.app/?$");
     expect(step).toContain("exit 1");
   });
 
   it.each([
-    ["https://myhelper-abc123-lm.a.run.app", 0],
-    ["https://sha-99fe315---myhelper-abc123-lm.a.run.app", 0],
-    ["https://myhelper-abc123-lm.a.run.app/", 0],
+    ["https://sha-99fe315---myhelper-843777043748.europe-central2.run.app", 0],
+    ["https://sha-99fe315---myhelper-843777043748.europe-central2.run.app/", 0],
     ["", 1],
-    ["http://myhelper-abc123-lm.a.run.app", 1],
+    ["http://sha-99fe315---myhelper-843777043748.europe-central2.run.app", 1],
+    // cudze lub inne usługi Cloud Run (#121 h)
+    ["https://myhelper-abc123-lm.a.run.app", 1],
+    ["https://sha-99fe315---myhelper-abc123-lm.a.run.app", 1],
+    ["https://sha-99fe315---evil-843777043748.europe-central2.run.app", 1],
+    ["https://sha-99fe315---myhelper-111111111111.europe-central2.run.app", 1],
+    ["https://sha-99fe315---myhelper-843777043748.europe-west1.run.app", 1],
+    ["https://sha-99fe315---myhelper-843777043748-europe-central2.run.app", 1],
+    ["https://x.sha-99fe315---myhelper-843777043748.europe-central2.run.app", 1],
+    // adres usługi bez taga (e2e idzie wyłącznie na tag_url)
+    ["https://myhelper-843777043748.europe-central2.run.app", 1],
+    ["https://---myhelper-843777043748.europe-central2.run.app", 1],
+    // ścieżka, userinfo, port, doklejony host
+    ["https://sha-99fe315---myhelper-843777043748.europe-central2.run.app/x", 1],
+    ["https://sha-99fe315---myhelper-843777043748.europe-central2.run.app.evil.com", 1],
+    ["https://sha-99fe315---myhelper-843777043748.europe-central2.run.app@evil.com", 1],
+    ["https://evil.com@sha-99fe315---myhelper-843777043748.europe-central2.run.app", 1],
+    ["https://sha-99fe315---myhelper-843777043748.europe-central2.run.app:8443", 1],
     ["https://myhelper.vercel.app", 1],
     ["https://my-helper-2.vercel.app.run.app.evil.com", 1],
     ["https://myhelper.pl", 1],
-    ["https://myhelper.run.app.evil.com", 1],
     ["https://evil.com/x.run.app", 1],
-    ["https://x.run.app@evil.com", 1],
-    ["https://evil.com@x.run.app", 1],
-    ["https://x.run.app:8443", 1],
     ["https://run.app", 1],
+    // #121 (f): kropka na początku i podwójna kropka w hoście
+    ["https://.x.run.app", 1],
+    ["https://a..run.app", 1],
+    ["https://SHA-99FE315---myhelper-843777043748.europe-central2.run.app", 1],
   ])("allowlista (wykonana w bash): %j → exit %i", (url, exit) => {
     const { step } = guardStep();
     const script = step
