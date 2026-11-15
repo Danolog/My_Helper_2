@@ -6,11 +6,18 @@
  *    odczyt stanu = PAUSED → dopiero wtedy właściwy harmonogram;
  *  - tryb domyślny nigdy nie wznawia; po nim wszystko jest PAUSED;
  *  - pauza, która nie zadziałała → stop z kodem 1, kolejne zadania nie powstają;
- *  - --resume wznawia tylko zadania ENABLED z tabeli, wymaga istnienia zadań;
+ *  - --resume tylko z jawnymi nazwami zadań ENABLED z tabeli (W-3), wymaga
+ *    istnienia zadań; nazwa nieznana albo PAUSED → kod 2 przed gcloud;
  *  - --check: dryf przed --resume, zgodność po nim;
- *  - token z sekretu nigdy w argumentach.
- * Mutacje (wynik w PR): create z właściwym harmonogramem; bez pause po create;
- * bez odczytu stanu; resume w trybie domyślnym; --resume wznawia zadania PAUSED.
+ *  - fałszywy gcloud odrzuca pause na nie-ENABLED i resume na nie-PAUSED jak
+ *    API (FAILED_PRECONDITION) — ponowne przebiegi muszą to omijać (Ethan 2);
+ *  - zadanie ENABLED z harmonogramem zaparkowanym = nowe (Ethan 1);
+ *  - token: odczyt raz, przed pierwszą zmianą; błąd/pusty → stop (W-1);
+ *    wywołania z nagłówkiem bez lokalnego logu gcloud (B-1); update niesie
+ *    nagłówek (rotacja); token nigdy w argumentach ani na wyjściu;
+ *  - BASE_URL wyłącznie główny adres usługi (#143 pkt 1);
+ *  - bez zadań mh-notify-* (Oliver, do R3-C).
+ * Mutacje (wynik w PR): scratchpad/eva/k3b-mut.py.
  */
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -25,6 +32,8 @@ const TABLE = [...SOURCE.match(/^JOBS=\(\n([\s\S]*?)^\)/m)![1]!.matchAll(/^\s*"(
   (m) => ({ name: m[1]!, path: m[2]!, schedule: m[3]!, state: m[4]! }),
 );
 const TOKEN = "fake-cron-token-do-not-leak";
+const SERVICE_URL = "https://myhelper-843777043748.europe-central2.run.app";
+const NAMES = TABLE.filter((j) => j.state === "ENABLED").map((j) => j.name);
 
 const DIR = mkdtempSync(join(tmpdir(), "g-c5b-"));
 afterAll(() => rmSync(DIR, { recursive: true, force: true }));
@@ -36,10 +45,15 @@ writeFileSync(
   `#!/usr/bin/env node
 const fs = require("node:fs"), path = require("node:path");
 const a = process.argv.slice(2);
-fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify(a) + "\\n");
 const flag = (k) => { const f = a.find((x) => x.startsWith("--" + k + "=")); return f && f.slice(k.length + 3); };
+const ffPath = flag("flags-file");
+const ffText = ffPath ? fs.readFileSync(ffPath, "utf8") : null;
+fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ a, env: process.env.CLOUDSDK_CORE_DISABLE_FILE_LOGGING ?? null, ff: ffText }) + "\\n");
 const pos = a.filter((x) => !x.startsWith("--"));
-if (pos[0] === "secrets") { process.stdout.write(process.env.FAKE_TOKEN); process.exit(0); }
+if (pos[0] === "secrets") {
+  if (process.env.FAKE_SECRET_FAIL) { process.stderr.write("ERROR: PERMISSION_DENIED\\n"); process.exit(1); }
+  process.stdout.write(process.env.FAKE_TOKEN); process.exit(0);
+}
 const verb = pos[2], name = verb === "create" || verb === "update" ? pos[4] : pos[3];
 const file = path.join(process.env.FAKE_JOBS, name + ".json");
 const job = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
@@ -49,11 +63,12 @@ if (verb === "describe") {
   const fmt = flag("format");
   if (fmt === "value(name)") console.log(name);
   else if (fmt === "value(state)") console.log(job.state);
+  else if (fmt === "value(schedule)") console.log(job.schedule);
   else console.log([job.schedule, job.timeZone, job.uri, job.method, job.state].join("\\t"));
 } else if (verb === "create") {
   if (job) process.exit(1);
-  const ff = fs.readFileSync(flag("flags-file"), "utf8");
-  if (!ff.includes("Authorization")) process.exit(3);
+  if (!ffText || !ffText.includes("Authorization")) process.exit(3);
+  if (!flag("schedule")) process.exit(4);
   save({ schedule: flag("schedule"), timeZone: flag("time-zone"), uri: flag("uri"), method: flag("http-method"), state: "ENABLED" });
 } else if (verb === "update") {
   if (!job) process.exit(1);
@@ -61,12 +76,14 @@ if (verb === "describe") {
   save(job);
 } else if (verb === "pause") {
   if (!job) process.exit(1);
+  if (job.state !== "ENABLED") { process.stderr.write("ERROR: FAILED_PRECONDITION: job is not ENABLED\\n"); process.exit(1); }
   if (!process.env.FAKE_PAUSE_NOOP) job.state = "PAUSED";
   save(job);
 } else if (verb === "resume") {
   if (!job) process.exit(1);
+  if (job.state !== "PAUSED") { process.stderr.write("ERROR: FAILED_PRECONDITION: job is not PAUSED\\n"); process.exit(1); }
   job.state = "ENABLED"; save(job);
-}
+} else process.exit(9);
 `,
 );
 chmodSync(join(BIN, "gcloud"), 0o755);
@@ -85,7 +102,7 @@ function world() {
         PATH: `${BIN}:${process.env.PATH}`,
         PROJECT_ID: "my-helper-2-488419",
         REGION: "europe-central2",
-        BASE_URL: "https://sha-1234567---myhelper-843777043748.europe-central2.run.app",
+        BASE_URL: SERVICE_URL,
         FAKE_JOBS: jobs,
         FAKE_LOG: log,
         FAKE_TOKEN: TOKEN,
@@ -94,15 +111,16 @@ function world() {
     });
     return { ...r, log: readFileSync(log, "utf8") };
   };
-  const calls = () =>
+  const entries = () =>
     readFileSync(log, "utf8")
       .split("\n")
       .filter(Boolean)
-      .map((l) => JSON.parse(l) as string[]);
+      .map((l) => JSON.parse(l) as { a: string[]; env: string | null; ff: string | null });
+  const calls = () => entries().map((e) => e.a);
   const state = (name: string) => JSON.parse(readFileSync(join(jobs, `${name}.json`), "utf8")) as Record<string, string>;
   const count = () => readdirSync(jobs).length;
   const seed = (name: string, j: Record<string, string>) => writeFileSync(join(jobs, `${name}.json`), JSON.stringify(j));
-  return { run, calls, state, count, seed, jobs };
+  return { run, calls, entries, state, count, seed, jobs };
 }
 
 const verbOf = (c: string[]) => c.filter((x) => !x.startsWith("--")).slice(2, 4).join(" ");
@@ -112,9 +130,14 @@ const nameOf = (c: string[]) => {
 };
 
 describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
-  it("tabela zadań wczytana (8), notifications PAUSED", () => {
-    expect(TABLE).toHaveLength(8);
-    expect(TABLE.filter((j) => j.state === "PAUSED").map((j) => j.path).every((p) => p.startsWith("/api/notifications/"))).toBe(true);
+  it("tabela: 5 zadań systemowych /api/cron/*, bez mh-notify-* (Oliver: do R3-C)", () => {
+    expect(TABLE.map((j) => j.name).sort()).toEqual(
+      ["mh-cleanup-pending-deposits", "mh-cleanup-temporary-access", "mh-push-reminders", "mh-push-reminders-24h", "mh-sms-reminders"],
+    );
+    expect(TABLE.every((j) => j.path.startsWith("/api/cron/"))).toBe(true);
+    expect(SOURCE.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n")).not.toMatch(/mh-notify-|\/api\/notifications\//);
+    // Każde przyszłe zadanie z wiadomościami do klientów musi być PAUSED (W-2).
+    for (const j of TABLE.filter((x) => x.path.startsWith("/api/notifications/"))) expect(j.state, j.name).toBe("PAUSED");
   });
 
   it("świeży projekt: create zaparkowany → pause → odczyt PAUSED → właściwy harmonogram; nic nie wznowione", () => {
@@ -126,9 +149,9 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     for (const job of TABLE) {
       const mine = calls.filter((c) => nameOf(c) === job.name && !c.includes("--format=value(name)"));
       const seq = mine.map((c) => (c.includes("--format=value(state)") ? "state" : verbOf(c).split(" ")[0]));
-      expect(seq, job.name).toEqual(["create", "pause", "state", "update", "state"]);
+      expect(seq, job.name).toEqual(["create", "state", "pause", "state", "update", "state"]);
       expect(mine[0]).toContain("--schedule=0 0 29 2 *");
-      expect(mine[3]).toContain(`--schedule=${job.schedule}`);
+      expect(mine[4]).toContain(`--schedule=${job.schedule}`);
       expect(w.state(job.name)).toMatchObject({ state: "PAUSED", schedule: job.schedule, timeZone: "Europe/Warsaw", method: "GET" });
     }
   });
@@ -152,43 +175,195 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     for (const job of TABLE) expect(w.state(job.name).state).toBe("PAUSED");
   });
 
-  it("istniejące włączone zadanie, które w tabeli jest PAUSED → wstrzymane", () => {
+  it("istniejące włączone zadanie, które w tabeli jest PAUSED → wstrzymane (kopia z dopisanym zadaniem)", () => {
+    const copy = join(DIR, "scheduler-paused-row-apply.sh");
+    writeFileSync(copy, SOURCE.replace(/^\)$/m, '  "mh-future|/api/cron/sms-reminders|0 6 * * *|PAUSED"\n)'));
     const w = world();
-    const job = TABLE.find((j) => j.state === "PAUSED")!;
-    w.seed(job.name, { schedule: job.schedule, timeZone: "Europe/Warsaw", uri: "x", method: "GET", state: "ENABLED" });
-    expect(w.run([]).status).toBe(0);
-    expect(w.state(job.name).state).toBe("PAUSED");
+    w.seed("mh-future", { schedule: "0 6 * * *", timeZone: "Europe/Warsaw", uri: "x", method: "GET", state: "ENABLED" });
+    const r = spawnSync("bash", [copy], {
+      encoding: "utf8",
+      env: { PATH: `${BIN}:${process.env.PATH}`, PROJECT_ID: "p-123456", REGION: "europe-central2", BASE_URL: SERVICE_URL, FAKE_JOBS: w.jobs, FAKE_LOG: join(DIR, `log-${n++}`), FAKE_TOKEN: TOKEN },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(w.state("mh-future").state).toBe("PAUSED");
   });
 
-  it("--check: dryf przed --resume; --resume wznawia tylko ENABLED; potem --check = 0", () => {
+  it("--check: dryf przed --resume; --resume wszystkich nazw; potem --check = 0", () => {
     const w = world();
     expect(w.run([]).status).toBe(0);
     const pre = w.run(["--check"]);
     expect(pre.status).toBe(1);
     expect(pre.stdout).toMatch(/DRIFT mh-sms-reminders/);
-    const res = w.run(["--resume"]);
+    const res = w.run(["--resume", ...NAMES]);
     expect(res.status, res.stderr).toBe(0);
     for (const job of TABLE) expect(w.state(job.name).state, job.name).toBe(job.state);
     const post = w.run(["--check"]);
     expect(post.status, post.stdout).toBe(0);
   });
 
+  it("--resume jednej nazwy: wznowione tylko to zadanie, reszta PAUSED", () => {
+    const w = world();
+    expect(w.run([]).status).toBe(0);
+    const r = w.run(["--resume", "mh-cleanup-temporary-access"]);
+    expect(r.status, r.stderr).toBe(0);
+    for (const job of TABLE) expect(w.state(job.name).state, job.name).toBe(job.name === "mh-cleanup-temporary-access" ? "ENABLED" : "PAUSED");
+  });
+
+  it.each([
+    ["bez nazw", ["--resume"]],
+    ["nazwa nieznana", ["--resume", "mh-sms-reminder"]],
+    ["nazwa poprawna + nieznana", ["--resume", "mh-sms-reminders", "mh-notify-birthday"]],
+    ["opcja zamiast nazwy", ["--resume", "--all"]],
+  ])("--resume %s → kod 2 przed gcloud, nic nie wznowione", (_l, args) => {
+    const w = world();
+    expect(w.run([]).status).toBe(0);
+    const before = w.calls().length;
+    const r = w.run(args);
+    expect(r.status).toBe(2);
+    expect(w.calls().slice(before)).toEqual([]);
+    for (const job of TABLE) expect(w.state(job.name).state).toBe("PAUSED");
+  });
+
+  it("--resume nazwy, która w tabeli jest PAUSED → kod 2 przed gcloud (kopia z dopisanym zadaniem)", () => {
+    const copy = join(DIR, "scheduler-paused-row.sh");
+    writeFileSync(copy, SOURCE.replace(/^\)$/m, '  "mh-future|/api/cron/sms-reminders|0 6 * * *|PAUSED"\n)'));
+    const w = world();
+    const r = spawnSync("bash", [copy, "--resume", "mh-future"], {
+      encoding: "utf8",
+      env: { PATH: `${BIN}:${process.env.PATH}`, PROJECT_ID: "p-123456", REGION: "europe-central2", BASE_URL: SERVICE_URL, FAKE_JOBS: w.jobs, FAKE_LOG: join(DIR, `log-${n++}`), FAKE_TOKEN: TOKEN },
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/PAUSED in the table/);
+  });
+
+  it("ponowne --resume: bez wywołania resume na ENABLED (API by odrzuciło), kod 0", () => {
+    const w = world();
+    expect(w.run([]).status).toBe(0);
+    expect(w.run(["--resume", ...NAMES]).status).toBe(0);
+    const before = w.calls().length;
+    const again = w.run(["--resume", ...NAMES]);
+    expect(again.status, again.stderr).toBe(0);
+    expect(w.calls().slice(before).some((c) => verbOf(c).startsWith("resume"))).toBe(false);
+  });
+
+  it("ponowny przebieg po --resume: zadania ENABLED zostają ENABLED, bez pause", () => {
+    const w = world();
+    expect(w.run([]).status).toBe(0);
+    expect(w.run(["--resume", ...NAMES]).status).toBe(0);
+    const before = w.calls().length;
+    const r = w.run([]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(w.calls().slice(before).some((c) => verbOf(c).startsWith("pause"))).toBe(false);
+    for (const job of TABLE) expect(w.state(job.name).state).toBe("ENABLED");
+  });
+
+  it("Ethan 1: istniejące zadanie ENABLED z harmonogramem zaparkowanym (przerwany przebieg) → pauza przed właściwym harmonogramem", () => {
+    const w = world();
+    const job = TABLE[0]!;
+    w.seed(job.name, { schedule: "0 0 29 2 *", timeZone: "Europe/Warsaw", uri: SERVICE_URL + job.path, method: "GET", state: "ENABLED" });
+    const r = w.run([]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(w.state(job.name)).toMatchObject({ state: "PAUSED", schedule: job.schedule });
+    const mine = w.calls().filter((c) => nameOf(c) === job.name && /^(pause|update)/.test(verbOf(c)));
+    expect(mine.map((c) => verbOf(c).split(" ")[0])).toEqual(["pause", "update"]);
+  });
+
+  it("Ethan 1: istniejące zadanie PAUSED z harmonogramem zaparkowanym → bez pause (API by odrzuciło), właściwy harmonogram", () => {
+    const w = world();
+    const job = TABLE[0]!;
+    w.seed(job.name, { schedule: "0 0 29 2 *", timeZone: "Europe/Warsaw", uri: SERVICE_URL + job.path, method: "GET", state: "PAUSED" });
+    const r = w.run([]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(w.state(job.name)).toMatchObject({ state: "PAUSED", schedule: job.schedule });
+  });
+
   it("--resume bez utworzonych zadań → błąd, nic nie wznowione", () => {
     const w = world();
-    const r = w.run(["--resume"]);
+    const r = w.run(["--resume", ...NAMES]);
     expect(r.status).toBe(1);
     expect(w.calls().some((c) => verbOf(c).startsWith("resume"))).toBe(false);
     expect(w.count()).toBe(0);
   });
 
-  it("token z sekretu nigdy w argumentach gcloud", () => {
+  it("token z sekretu nigdy w argumentach gcloud ani na wyjściu", () => {
     const w = world();
-    w.run([]);
+    const r = w.run([]);
     expect(w.calls().length).toBeGreaterThan(0);
     expect(JSON.stringify(w.calls())).not.toContain(TOKEN);
+    expect(r.stdout + r.stderr).not.toContain(TOKEN);
   });
 
-  it.each([["--bogus"], ["--check", "--resume"]])("nieznany tryb %j → kod 2 przed gcloud", (...args) => {
+  it("B-1: create i update z nagłówkiem bez lokalnego logu gcloud; update niesie nagłówek (rotacja)", () => {
+    const w = world();
+    expect(w.run([]).status).toBe(0);
+    expect(w.run([]).status).toBe(0);
+    const withFlags = w.entries().filter((e) => e.ff !== null);
+    const creates = withFlags.filter((e) => verbOf(e.a) === "create http");
+    const updates = withFlags.filter((e) => verbOf(e.a) === "update http");
+    expect(creates).toHaveLength(TABLE.length);
+    expect(updates).toHaveLength(TABLE.length);
+    for (const e of creates) expect(e.ff).toBe(`--headers:\n  Authorization: "Bearer ${TOKEN}"\n`);
+    for (const e of updates) expect(e.ff).toBe(`--update-headers:\n  Authorization: "Bearer ${TOKEN}"\n`);
+    for (const e of withFlags) expect(e.env, verbOf(e.a)).toBe("1");
+    // Ponowny przebieg: każde update istniejącego zadania ma nagłówek.
+    const allUpdates = w.entries().filter((e) => verbOf(e.a) === "update http" && !e.a.includes(`--schedule=0 0 29 2 *`));
+    const second = allUpdates.slice(-TABLE.length);
+    for (const e of second) expect(e.ff, nameOf(e.a)).not.toBeNull();
+  });
+
+  it("W-1: token czytany raz, przed pierwszą zmianą; --check i --resume go nie czytają", () => {
+    const w = world();
+    expect(w.run([]).status).toBe(0);
+    const calls = w.calls();
+    const secrets = calls.map((c, i) => [c, i] as const).filter(([c]) => c[0] === "secrets" || c.includes("secrets"));
+    expect(secrets).toHaveLength(1);
+    expect(secrets[0]![1]).toBe(0);
+    expect(secrets[0]![0]).not.toEqual(expect.arrayContaining([expect.stringMatching(/^--format/)]));
+    const before = calls.length;
+    w.run(["--check"]);
+    w.run(["--resume", ...NAMES]);
+    expect(w.calls().slice(before).some((c) => c.includes("secrets"))).toBe(false);
+  });
+
+  it.each([
+    ["błąd odczytu", { FAKE_SECRET_FAIL: "1" }, /cannot read secret/],
+    ["pusty token", { FAKE_TOKEN: "" }, /is empty/],
+    ["znak spoza zbioru", { FAKE_TOKEN: 'abc"def' }, /outside/],
+    ["nowa linia", { FAKE_TOKEN: "abc\ndef" }, /outside/],
+  ])("W-1: %s → stop przed pierwszą zmianą w Scheduler, wartość niewypisana", (_l, extra, msg) => {
+    const w = world();
+    const r = w.run([], extra as Record<string, string>);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(msg);
+    expect(w.calls().filter((c) => c[0] !== "secrets" && !c.includes("secrets"))).toEqual([]);
+    expect(w.count()).toBe(0);
+    expect(r.stdout + r.stderr).not.toContain("def");
+  });
+
+  it.each([
+    ["adres taga", "https://sha-1234567---myhelper-843777043748.europe-central2.run.app"],
+    ["inny host", "https://example.com"],
+    ["http", "http://myhelper-843777043748.europe-central2.run.app"],
+    ["sufiks hosta", "https://myhelper-843777043748.europe-central2.run.app.example.com"],
+    ["dane logowania w adresie", "https://x@myhelper-843777043748.europe-central2.run.app"],
+    ["ścieżka", "https://myhelper-843777043748.europe-central2.run.app/api"],
+    ["port", "https://myhelper-843777043748.europe-central2.run.app:8443"],
+    ["inna usługa", "https://myhelperx-843777043748.europe-central2.run.app"],
+  ])("BASE_URL %s → kod 2 przed gcloud (#143 pkt 1)", (_l, url) => {
+    const w = world();
+    const r = w.run([], { BASE_URL: url });
+    expect(r.status).toBe(2);
+    expect(w.calls()).toEqual([]);
+  });
+
+  it("BASE_URL z końcowym ukośnikiem = główny adres usługi", () => {
+    const w = world();
+    const r = w.run([], { BASE_URL: SERVICE_URL + "/" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(w.state(TABLE[0]!.name).uri).toBe(SERVICE_URL + TABLE[0]!.path);
+  });
+
+  it.each([["--bogus"], ["--check", "--resume"], ["--check", "mh-sms-reminders"]])("nieznany tryb %j → kod 2 przed gcloud", (...args) => {
     const w = world();
     expect(w.run(args).status).toBe(2);
     expect(w.calls()).toEqual([]);

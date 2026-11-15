@@ -7,8 +7,16 @@
 # Użycie (kolejność obowiązkowa, runbook kroku D, D-8):
 #   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh           # 1. create/update — WSZYSTKO WSTRZYMANE
 #   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --check   # 2. porównanie (dryf stanu ENABLED → PAUSED jest tu oczekiwany)
-#   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --resume  # 3. włączenie zadań ENABLED (decyzja Darka)
+#   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --resume NAZWA…  # 3. włączenie WYMIENIONYCH zadań (decyzja Darka)
 #   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --check   # 4. pełna zgodność z tabelą (kod 0)
+#
+# --resume wymaga jawnych nazw zadań (W-3, Ryan): włączenie = prawdziwe SMS-y
+# i push, więc decyzja jest widoczna w poleceniu. Bez nazw, nazwa nieznana albo
+# zadanie, które w tabeli jest PAUSED → błąd (kod 2) przed pierwszym gcloud.
+#
+# BASE_URL: wyłącznie główny adres naszej usługi Cloud Run (#143 pkt 1) —
+# nagłówek z CRON_SECRET idzie na ten host co 5 minut. Inny host (także adres
+# taga) = błąd przed pierwszym gcloud. Własna domena = świadoma zmiana tej listy.
 #
 # Wstrzymanie przy tworzeniu (#121 j): `gcloud scheduler jobs create http` nie
 # ma opcji tworzenia wstrzymanego zadania. Nowe zadanie powstaje więc z
@@ -22,21 +30,38 @@
 # - brak PROJECT_ID / REGION / BASE_URL → błąd przed pierwszym wywołaniem gcloud;
 # - nagłówek z CRON_SECRET idzie przez --flags-file ze strumienia, nie jako
 #   argument polecenia (nie trafia do tablicy procesów ani historii powłoki);
-# - idempotentnie: istnieje → update, nie istnieje → create.
-# Strażnik: __tests__/lib/scheduler-config.test.ts (G-C5).
+#   wywołania z nagłówkiem idą z CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 (gcloud
+#   zapisuje rozwinięte flagi do ~/.config/gcloud/logs — B-1, Ryan 6900239072);
+# - token jest czytany RAZ przed pierwszą zmianą; błąd odczytu albo pusty
+#   token → stop (W-1), nigdy zadanie z pustym nagłówkiem;
+# - pause tylko dla stanu ENABLED, resume tylko dla PAUSED (API odrzuca inne
+#   przejścia: FAILED_PRECONDITION);
+# - istniejące zadanie ENABLED z harmonogramem zaparkowanym (przerwany przebieg
+#   między create a pause) jest traktowane jak nowe: najpierw pauza (Ethan);
+# - idempotentnie: istnieje → update (z nagłówkiem — rotacja cron-secret),
+#   nie istnieje → create.
+# Strażnicy: __tests__/lib/scheduler-config.test.ts (G-C5), scheduler-paused.test.ts (G-C5b).
 set -euo pipefail
 
+usage() {
+  echo "usage: $0 [--check | --resume JOB_NAME...]" >&2
+  exit 2
+}
+
 MODE="apply"
-if [[ $# -gt 1 ]]; then
-  echo "usage: $0 [--check|--resume]" >&2
-  exit 2
-elif [[ "${1:-}" == "--check" ]]; then
+RESUME_NAMES=()
+if [[ $# -eq 0 ]]; then
+  :
+elif [[ "$1" == "--check" ]]; then
+  [[ $# -eq 1 ]] || usage
   MODE="check"
-elif [[ "${1:-}" == "--resume" ]]; then
+elif [[ "$1" == "--resume" ]]; then
+  shift
+  [[ $# -gt 0 ]] || { echo "error: --resume requires explicit job names" >&2; usage; }
   MODE="resume"
-elif [[ $# -gt 0 ]]; then
-  echo "usage: $0 [--check|--resume]" >&2
-  exit 2
+  RESUME_NAMES=("$@")
+else
+  usage
 fi
 
 missing=()
@@ -47,11 +72,14 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   echo "error: missing required env: ${missing[*]}" >&2
   exit 2
 fi
-if [[ "$BASE_URL" != https://* ]]; then
-  echo "error: BASE_URL must start with https://" >&2
+# Jedyny dopuszczony adres: główny URL usługi myhelper (projekt 843777043748,
+# europe-central2). Bez ścieżki, bez portu, bez adresu taga.
+ALLOWED_BASE_URL="https://myhelper-843777043748.europe-central2.run.app"
+BASE_URL="${BASE_URL%/}"
+if [[ "$BASE_URL" != "$ALLOWED_BASE_URL" ]]; then
+  echo "error: BASE_URL must be $ALLOWED_BASE_URL" >&2
   exit 2
 fi
-BASE_URL="${BASE_URL%/}"
 
 TIME_ZONE="Europe/Warsaw"
 # Harmonogram zaparkowany dla świeżo tworzonego zadania (29 lutego).
@@ -65,20 +93,58 @@ JOBS=(
   "mh-push-reminders-24h|/api/cron/push-reminders-24h|13,43 * * * *|ENABLED"
   "mh-cleanup-pending-deposits|/api/cron/cleanup-pending-deposits|*/15 * * * *|ENABLED"
   "mh-cleanup-temporary-access|/api/cron/cleanup-temporary-access|7 * * * *|ENABLED"
-  # Wiadomości do klientów salonów — wstrzymane do decyzji produktowej (brief C, „Do Darka" 8).
-  "mh-notify-birthday|/api/notifications/birthday|0 6 * * *|PAUSED"
-  "mh-notify-low-stock|/api/notifications/low-stock|0 6 * * *|PAUSED"
-  "mh-notify-we-miss-you|/api/notifications/we-miss-you|0 6 * * *|PAUSED"
 )
+# Zadań mh-notify-* (birthday, low-stock, we-miss-you) NIE tworzymy (Oliver):
+# trasy /api/notifications/* działają na jeden salon (wymagają salonId) i nic
+# nie zrobią z harmonogramu. Wracają z R3-C razem z systemową trasą po
+# wszystkich salonach. Tabela może zawierać stan PAUSED dla przyszłych zadań.
+
+# Walidacja --resume przed pierwszym gcloud: każda nazwa w tabeli i ENABLED.
+if [[ "$MODE" == "resume" ]]; then
+  for want in "${RESUME_NAMES[@]}"; do
+    found=""
+    for entry in "${JOBS[@]}"; do
+      IFS='|' read -r name _ _ state <<<"$entry"
+      [[ "$name" == "$want" ]] && found="$state"
+    done
+    if [[ -z "$found" ]]; then
+      echo "error: --resume: unknown job [$want]" >&2
+      exit 2
+    fi
+    if [[ "$found" != "ENABLED" ]]; then
+      echo "error: --resume: job [$want] is PAUSED in the table — not resumable" >&2
+      exit 2
+    fi
+  done
+fi
 
 GC=(gcloud --project="$PROJECT_ID" --quiet)
+
+# Token CRON_SECRET: odczyt RAZ, przed pierwszą zmianą w Scheduler (tylko tryb
+# domyślny). Domyślny format `secrets versions access` nie trafia do logu
+# gcloud — bez własnego --format. Błąd odczytu, pusty token albo znaki spoza
+# bezpiecznego zbioru (nagłówek w YAML) → stop bez wypisywania wartości.
+TOKEN=""
+if [[ "$MODE" == "apply" ]]; then
+  if ! TOKEN="$("${GC[@]}" secrets versions access latest --secret="$SECRET_NAME")"; then
+    echo "error: cannot read secret $SECRET_NAME — stop, nothing changed" >&2
+    exit 1
+  fi
+  if [[ -z "$TOKEN" ]]; then
+    echo "error: secret $SECRET_NAME is empty — stop, nothing changed" >&2
+    exit 1
+  fi
+  if ! [[ "$TOKEN" =~ ^[A-Za-z0-9._~+/=-]+$ ]]; then
+    TOKEN=""
+    echo "error: secret $SECRET_NAME has characters outside [A-Za-z0-9._~+/=-] — stop, nothing changed" >&2
+    exit 1
+  fi
+fi
 
 # Plik flag z nagłówkiem autoryzacji, czytany przez gcloud ze strumienia.
 # Wartość sekretu nie pojawia się w argumentach procesu ani na wyjściu.
 auth_flags() {
-  local flag="$1" token
-  token="$("${GC[@]}" secrets versions access latest --secret="$SECRET_NAME")"
-  printf '%s:\n  Authorization: "Bearer %s"\n' "$flag" "$token"
+  printf '%s:\n  Authorization: "Bearer %s"\n' "$1" "$TOKEN"
 }
 
 job_exists() {
@@ -87,6 +153,20 @@ job_exists() {
 
 job_state() {
   "${GC[@]}" scheduler jobs describe "$1" --location="$REGION" --format='value(state)'
+}
+
+job_schedule() {
+  "${GC[@]}" scheduler jobs describe "$1" --location="$REGION" --format='value(schedule)'
+}
+
+# Pauza tylko ze stanu ENABLED (API: pause na PAUSED = FAILED_PRECONDITION).
+pause_if_enabled() {
+  local name="$1" got
+  got="$(job_state "$name" || true)"
+  if [[ "$got" == "ENABLED" ]]; then
+    "${GC[@]}" scheduler jobs pause "$name" --location="$REGION"
+  fi
+  require_state "$name" PAUSED
 }
 
 # Obowiązkowy odczyt stanu: inny niż oczekiwany → stop (kod 1), bez dalszych zadań.
@@ -123,17 +203,26 @@ for entry in "${JOBS[@]}"; do
   fi
 
   if [[ "$MODE" == "resume" ]]; then
+    selected=0
+    for want in "${RESUME_NAMES[@]}"; do [[ "$want" == "$name" ]] && selected=1; done
+    if [[ "$selected" == 0 ]]; then
+      continue
+    fi
     if ! job_exists "$name"; then
       echo "error: $name missing — run without flags first" >&2
       exit 1
     fi
-    if [[ "$state" == "ENABLED" ]]; then
+    # Wznowienie tylko ze stanu PAUSED (API: resume na ENABLED = FAILED_PRECONDITION).
+    got="$(job_state "$name" || true)"
+    if [[ "$got" == "PAUSED" ]]; then
       "${GC[@]}" scheduler jobs resume "$name" --location="$REGION"
       require_state "$name" ENABLED
       echo "resumed $name"
+    elif [[ "$got" == "ENABLED" ]]; then
+      echo "already $name (ENABLED)"
     else
-      require_state "$name" PAUSED
-      echo "kept    $name (PAUSED)"
+      echo "error: $name state is [$got], cannot resume — stop" >&2
+      exit 1
     fi
     continue
   fi
@@ -149,19 +238,19 @@ for entry in "${JOBS[@]}"; do
     --max-backoff=120s
   )
   if job_exists "$name"; then
-    # Istniejące zadanie: stan bez zmian, poza wymuszeniem PAUSED z tabeli.
-    if [[ "$state" == "PAUSED" ]]; then
-      "${GC[@]}" scheduler jobs pause "$name" --location="$REGION"
-      require_state "$name" PAUSED
+    # Istniejące zadanie: stan bez zmian, poza wymuszeniem PAUSED z tabeli
+    # i zadaniem z harmonogramem zaparkowanym (przerwany przebieg między create
+    # a pause) — to traktujemy jak nowe: najpierw pauza (Ethan, #137).
+    if [[ "$state" == "PAUSED" || "$(job_schedule "$name" || true)" == "$PARKED_SCHEDULE" ]]; then
+      pause_if_enabled "$name"
     fi
-    "${GC[@]}" scheduler jobs update http "$name" "${common[@]}" --schedule="$schedule" \
+    CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" scheduler jobs update http "$name" "${common[@]}" --schedule="$schedule" \
       --flags-file=<(auth_flags --update-headers)
     echo "updated $name"
   else
-    "${GC[@]}" scheduler jobs create http "$name" "${common[@]}" --schedule="$PARKED_SCHEDULE" \
+    CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" scheduler jobs create http "$name" "${common[@]}" --schedule="$PARKED_SCHEDULE" \
       --flags-file=<(auth_flags --headers)
-    "${GC[@]}" scheduler jobs pause "$name" --location="$REGION"
-    require_state "$name" PAUSED
+    pause_if_enabled "$name"
     "${GC[@]}" scheduler jobs update http "$name" --location="$REGION" --schedule="$schedule"
     require_state "$name" PAUSED
     echo "created $name (PAUSED)"
