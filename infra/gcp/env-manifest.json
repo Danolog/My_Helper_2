@@ -1,0 +1,196 @@
+{
+  "$comment": "Jedyny pełny spis zmiennych środowiskowych (brief C §6). Czyta go infra/gcp/run-deploy.sh i strażnik G-C4 (__tests__/lib/env-manifest.test.ts). Wartości nigdy tu nie trafiają — sekrety są w Secret Manager pod secretName.",
+  "variables": {
+    "ADMIN_EMAILS": {
+      "class": "var",
+      "required": false
+    },
+    "AI_MONTHLY_BUDGET_USD": {
+      "class": "var",
+      "required": false
+    },
+    "AI_MONTHLY_IMAGE_LIMIT": {
+      "class": "var",
+      "required": false
+    },
+    "AI_MONTHLY_VIDEO_LIMIT": {
+      "class": "removed-after-b"
+    },
+    "ALLOW_PAYMENT_SIMULATION": {
+      "class": "ci-only",
+      "note": "Tylko serwer E2E w CI. Nigdy na hostingu (bramka lib/hosting ignoruje ją na Vercelu i Cloud Run)."
+    },
+    "BETTER_AUTH_SECRET": {
+      "class": "secret",
+      "secretName": "better-auth-secret"
+    },
+    "BETTER_AUTH_URL": {
+      "class": "var",
+      "required": true
+    },
+    "BLOB_READ_WRITE_TOKEN": {
+      "class": "vercel-only"
+    },
+    "BLOB_STORE_ID": {
+      "class": "var",
+      "required": false,
+      "note": "Niesekretny identyfikator store'u Vercel Blob (jest w każdym publicznym adresie); przyjmowanie starych adresów Blob na Cloud Run (C2b). Usunięcie w C4."
+    },
+    "BUILD_STANDALONE": {
+      "class": "image",
+      "note": "Ustawiane w Dockerfile (builder); włącza output: standalone."
+    },
+    "COMPANY_ADDRESS": {
+      "class": "var",
+      "required": false
+    },
+    "COMPANY_NAME": {
+      "class": "var",
+      "required": false
+    },
+    "COMPANY_NIP": {
+      "class": "var",
+      "required": false
+    },
+    "COMPANY_POSTAL_CITY": {
+      "class": "var",
+      "required": false
+    },
+    "CRON_SECRET": {
+      "class": "secret",
+      "secretName": "cron-secret"
+    },
+    "DB_POOL_MAX": {
+      "class": "var",
+      "required": false
+    },
+    "ELEVENLABS_API_KEY": {
+      "class": "removed-after-b"
+    },
+    "EMAIL_FROM": {
+      "class": "var",
+      "required": false
+    },
+    "GCS_BUCKET": {
+      "class": "var",
+      "required": true
+    },
+    "GCS_PUBLIC_BASE_URL": {
+      "class": "var",
+      "required": false
+    },
+    "GOOGLE_AI_API_KEY": {
+      "class": "vercel-only"
+    },
+    "GOOGLE_CLIENT_ID": {
+      "class": "var",
+      "required": false
+    },
+    "GOOGLE_CLIENT_SECRET": {
+      "class": "secret",
+      "secretName": "google-client-secret"
+    },
+    "HOSTNAME": {
+      "class": "platform"
+    },
+    "K_SERVICE": {
+      "class": "platform"
+    },
+    "MYHELPER_APP_DB_ROLE": {
+      "class": "var",
+      "required": false
+    },
+    "NEXT_PUBLIC_APP_URL": {
+      "class": "build"
+    },
+    "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY": {
+      "class": "build"
+    },
+    "NEXT_PUBLIC_VAPID_PUBLIC_KEY": {
+      "class": "build"
+    },
+    "NODE_ENV": {
+      "class": "platform"
+    },
+    "OPENROUTER_API_KEY": {
+      "class": "secret",
+      "secretName": "openrouter-api-key"
+    },
+    "OPENROUTER_MODEL": {
+      "class": "var",
+      "required": false
+    },
+    "PORT": {
+      "class": "platform"
+    },
+    "POSTGRES_URL": {
+      "class": "secret",
+      "secretName": "postgres-url"
+    },
+    "RESEND_API_KEY": {
+      "class": "secret",
+      "secretName": "resend-api-key"
+    },
+    "SMSAPI_SENDER": {
+      "class": "var",
+      "required": false
+    },
+    "SMSAPI_TOKEN": {
+      "class": "secret",
+      "secretName": "smsapi-token"
+    },
+    "STORAGE_DRIVER": {
+      "class": "var",
+      "required": true
+    },
+    "STRIPE_PRICE_BASIC": {
+      "class": "var",
+      "required": false
+    },
+    "STRIPE_PRICE_PRO": {
+      "class": "var",
+      "required": false
+    },
+    "STRIPE_SECRET_KEY": {
+      "class": "secret",
+      "secretName": "stripe-secret-key"
+    },
+    "STRIPE_WEBHOOK_SECRET": {
+      "class": "secret",
+      "secretName": "stripe-webhook-secret"
+    },
+    "TRUSTED_PROXIES": {
+      "class": "var",
+      "required": false
+    },
+    "TWILIO_ACCOUNT_SID": {
+      "class": "removed-after-b"
+    },
+    "TWILIO_AUTH_TOKEN": {
+      "class": "removed-after-b"
+    },
+    "TWILIO_PHONE_NUMBER": {
+      "class": "removed-after-b"
+    },
+    "UPSTASH_REDIS_REST_TOKEN": {
+      "class": "secret",
+      "secretName": "upstash-redis-rest-token"
+    },
+    "UPSTASH_REDIS_REST_URL": {
+      "class": "var",
+      "required": false
+    },
+    "VAPID_PRIVATE_KEY": {
+      "class": "secret",
+      "secretName": "vapid-private-key"
+    },
+    "VAPID_SUBJECT": {
+      "class": "var",
+      "required": false
+    },
+    "VERCEL": {
+      "class": "platform",
+      "note": "Ustawiane przez Vercel; na Cloud Run nieobecne (bramka hostingu: lib/hosting)."
+    }
+  }
+}
