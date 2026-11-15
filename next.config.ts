@@ -1,4 +1,22 @@
+import { gcsPublicTarget } from "./src/lib/gcs-config";
 import type { NextConfig } from "next";
+
+/**
+ * Zasobnik GCS dla `images.remotePatterns` (brief C, C2; #116 pkt 2).
+ * Wpis zna tylko host `storage.googleapis.com` i ścieżkę `/<bucket>/**`.
+ * `GCS_PUBLIC_BASE_URL` z innym hostem dałby adresy uploadów, których
+ * `next/image` nie przepuści — obrazy przestałyby się wyświetlać bez błędu.
+ * Do czasu wsparcia własnego hosta budowa się przerywa. Niepoprawny
+ * `GCS_BUCKET`/`GCS_PUBLIC_BASE_URL` też przerywa budowę (lib/gcs-config).
+ * Komunikat nie zawiera wartości zmiennej.
+ */
+const GCS_IMAGE_HOST = "storage.googleapis.com";
+const gcsImageTarget = gcsPublicTarget(process.env);
+if (gcsImageTarget && gcsImageTarget.host !== GCS_IMAGE_HOST) {
+  throw new Error(
+    `GCS_PUBLIC_BASE_URL: host other than ${GCS_IMAGE_HOST} is not supported by images.remotePatterns yet (#116)`,
+  );
+}
 
 const nextConfig: NextConfig = {
   // TypeScript errors are checked during build
@@ -43,12 +61,12 @@ const nextConfig: NextConfig = {
       // Zasobnik GCS (brief C, C2) — tylko gdy GCS_BUCKET jest ustawiony przy
       // budowie (Dockerfile, build-arg). Wpis Vercel Blob wyżej zostaje do C4:
       // stare adresy w bazie mają się ładować do końca kroku D.
-      ...(process.env.GCS_BUCKET
+      ...(gcsImageTarget
         ? [
             {
               protocol: "https" as const,
-              hostname: "storage.googleapis.com",
-              pathname: `/${process.env.GCS_BUCKET}/**`,
+              hostname: GCS_IMAGE_HOST,
+              pathname: `/${gcsImageTarget.bucket}/**`,
             },
           ]
         : []),
