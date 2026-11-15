@@ -15,7 +15,7 @@ import {
 } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 import { frozenModuleResponse } from "@/lib/server/frozen-guard";
-import { upload } from "@/lib/storage";
+import { resolveStorageDriver, upload } from "@/lib/storage";
 
 // ────────────────────────────────────────────────────────────
 // Request validation
@@ -206,10 +206,11 @@ export async function POST(req: Request) {
 
     // ── Step 6: Upload to storage (or return data URI in local dev) ──
     const filename = `banner-${salonId}-${Date.now()}.jpg`;
-    const hasVercelBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+    // Trwały magazyn (gcs/vercel-blob) — decyzja sterownika, nie tokenu (C2b)
+    const persistent = resolveStorageDriver() !== "local";
 
     let bannerUrl: string;
-    if (hasVercelBlob) {
+    if (persistent) {
       const stored = await upload(banner, filename, "banners");
       bannerUrl = stored.url;
     } else {

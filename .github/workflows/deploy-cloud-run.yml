@@ -1,0 +1,214 @@
+# Wdrożenie na Cloud Run (brief C §5, zadanie 0.9).
+#
+# Do PR C4 wyzwalany WYŁĄCZNIE ręcznie (workflow_dispatch) — strażnik G-C6
+# (__tests__/lib/workflows.test.ts). Wyzwalacz `push: main` dochodzi w C4.
+#
+# Logowanie do GCP przez Workload Identity Federation (krótki token OIDC),
+# bez kluczy JSON. Wszystkie identyfikatory GCP to zmienne repo (`vars.*`),
+# nie sekrety; sekrety aplikacji żyją w Secret Manager i trafiają do usługi
+# po nazwie (infra/gcp/run-deploy.sh + infra/gcp/env-manifest.json).
+# Akcje przypięte do pełnego skrótu commita (łańcuch dostaw).
+#
+# Co wdraża: WYŁĄCZNIE commit swojego przebiegu (github.sha) uruchomionego
+# z gałęzi main — bez wejścia `ref`; job ma warunek refs/heads/main, a krok
+# „merge-base --is-ancestor" przed budową potwierdza, że commit jest na
+# origin/main. Wdrożenie innej (starszej) wersji = rollback rewizją Cloud Run
+# decyzją Darka, nie tym workflow. Wymaganych recenzentów środowiska ustawia
+# Darek w ustawieniach repo (krok D). Nazwa środowiska jest TYLKO w jednej
+# linii `environment:` niżej (+ stała w G-C6) — celowo inna niż „Production"
+# Vercela (nazwy środowisk GitHuba nie rozróżniają wielkości liter, a
+# e2e-production.yml reaguje na deployment_status środowiska Production).
+name: Deploy to Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: "Kopia Cloud SQL + migracja (Job myhelper-migrate) przed nową wersją usługi"
+        type: boolean
+        default: false
+
+# Na poziomie workflow tylko odczyt; `id-token: write` (token OIDC dla WIF)
+# wyłącznie na jobie deploy — job e2e (pnpm install + Playwright) go nie widzi.
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build, verify, deploy
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write
+      contents: read
+    environment: production-gcp
+    runs-on: ubuntu-24.04 # amd64 — Cloud Run wymaga linux/amd64
+    timeout-minutes: 45
+    outputs:
+      tag_url: ${{ steps.deploy.outputs.tag_url }}
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      AR_REPO: ${{ vars.AR_REPO }}
+      SERVICE: ${{ vars.CLOUD_RUN_SERVICE }}
+      RUNTIME_SA: ${{ vars.GCP_RUNTIME_SA }}
+      SQL_INSTANCE: ${{ vars.SQL_INSTANCE }}
+      GCS_BUCKET: ${{ vars.GCS_BUCKET }}
+      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${{ vars.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}
+    steps:
+      - name: Check required repository variables
+        env:
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_DEPLOY_SA: ${{ vars.GCP_DEPLOY_SA }}
+        run: |
+          missing=()
+          for v in GCP_WIF_PROVIDER GCP_DEPLOY_SA PROJECT_ID REGION AR_REPO SERVICE RUNTIME_SA SQL_INSTANCE GCS_BUCKET NEXT_PUBLIC_APP_URL NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY NEXT_PUBLIC_VAPID_PUBLIC_KEY; do
+            if [[ -z "${!v:-}" ]]; then missing+=("$v"); fi
+          done
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Missing repository variables: ${missing[*]}"
+            exit 1
+          fi
+
+      # Bez `ref:` — checkout commita przebiegu (github.sha); pełna historia
+      # na potrzeby sprawdzenia przodka niżej.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Commit must be on origin/main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_SHA is not on origin/main — refusing to deploy"
+            exit 1
+          fi
+
+      - name: Resolve image names
+        id: img
+        run: |
+          sha="$(git rev-parse HEAD)"
+          base="${REGION}-docker.pkg.dev/${PROJECT_ID}/${AR_REPO}/myhelper"
+          {
+            echo "sha=$sha"
+            echo "runner=${base}:${sha}"
+            echo "migrator=${base}-migrator:${sha}"
+            echo "tag=sha-${sha:0:7}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build runner image (linux/amd64)
+        env:
+          RUNNER_IMAGE: ${{ steps.img.outputs.runner }}
+        run: |
+          docker build --platform linux/amd64 --target runner \
+            --build-arg NEXT_PUBLIC_APP_URL \
+            --build-arg NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY \
+            --build-arg NEXT_PUBLIC_VAPID_PUBLIC_KEY \
+            --build-arg GCS_BUCKET \
+            -t "$RUNNER_IMAGE" .
+
+      - name: Build migrator image (linux/amd64)
+        env:
+          MIGRATOR_IMAGE: ${{ steps.img.outputs.migrator }}
+        run: docker build --platform linux/amd64 --target migrator -t "$MIGRATOR_IMAGE" .
+
+      - name: Verify built images (user, Env, history, .env files)
+        env:
+          RUNNER_IMAGE: ${{ steps.img.outputs.runner }}
+          MIGRATOR_IMAGE: ${{ steps.img.outputs.migrator }}
+        run: |
+          infra/gcp/verify-image.sh "$RUNNER_IMAGE"
+          infra/gcp/verify-image.sh "$MIGRATOR_IMAGE"
+
+      - name: Smoke test standalone server from the image
+        env:
+          RUNNER_IMAGE: ${{ steps.img.outputs.runner }}
+        run: infra/gcp/smoke-container.sh "$RUNNER_IMAGE"
+
+      - uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@77e7a554d41e2ee56fc945c52dfd3f33d12def9a # v2.1.4
+
+      - name: Push images to Artifact Registry
+        env:
+          RUNNER_IMAGE: ${{ steps.img.outputs.runner }}
+          MIGRATOR_IMAGE: ${{ steps.img.outputs.migrator }}
+        run: |
+          gcloud --project="$PROJECT_ID" --quiet auth configure-docker "${REGION}-docker.pkg.dev"
+          docker push "$RUNNER_IMAGE"
+          docker push "$MIGRATOR_IMAGE"
+
+      - name: Backup + migrate (Cloud Run Job)
+        if: ${{ inputs.run_migrations }}
+        env:
+          MIGRATOR_IMAGE: ${{ steps.img.outputs.migrator }}
+        run: infra/gcp/run-migrate.sh
+
+      - name: Deploy new revision without traffic
+        id: deploy
+        env:
+          IMAGE: ${{ steps.img.outputs.runner }}
+          REVISION_TAG: ${{ steps.img.outputs.tag }}
+          # Zmienne usługi (klasa `var` w infra/gcp/env-manifest.json) — z vars.*
+          BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL }}
+          STORAGE_DRIVER: ${{ vars.STORAGE_DRIVER }}
+          GCS_PUBLIC_BASE_URL: ${{ vars.GCS_PUBLIC_BASE_URL }}
+          BLOB_STORE_ID: ${{ vars.BLOB_STORE_ID }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          STRIPE_PRICE_BASIC: ${{ vars.STRIPE_PRICE_BASIC }}
+          STRIPE_PRICE_PRO: ${{ vars.STRIPE_PRICE_PRO }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          SMSAPI_SENDER: ${{ vars.SMSAPI_SENDER }}
+          VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
+          UPSTASH_REDIS_REST_URL: ${{ vars.UPSTASH_REDIS_REST_URL }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
+          DB_POOL_MAX: ${{ vars.DB_POOL_MAX }}
+          MYHELPER_APP_DB_ROLE: ${{ vars.MYHELPER_APP_DB_ROLE }}
+          COMPANY_NAME: ${{ vars.COMPANY_NAME }}
+          COMPANY_ADDRESS: ${{ vars.COMPANY_ADDRESS }}
+          COMPANY_POSTAL_CITY: ${{ vars.COMPANY_POSTAL_CITY }}
+          COMPANY_NIP: ${{ vars.COMPANY_NIP }}
+          AI_MONTHLY_BUDGET_USD: ${{ vars.AI_MONTHLY_BUDGET_USD }}
+          AI_MONTHLY_IMAGE_LIMIT: ${{ vars.AI_MONTHLY_IMAGE_LIMIT }}
+          ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
+          TRUSTED_PROXIES: ${{ vars.TRUSTED_PROXIES }}
+        run: |
+          out="$(infra/gcp/run-deploy.sh deploy)"
+          echo "$out"
+          grep '^tag_url=' <<<"$out" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the new revision (/api/health = 200)
+        env:
+          TAG_URL: ${{ steps.deploy.outputs.tag_url }}
+        run: |
+          for i in $(seq 1 12); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "${TAG_URL}/api/health" || true)"
+            if [[ "$code" == "200" ]]; then echo "ok: $code"; exit 0; fi
+            echo "attempt $i: $code"; sleep 5
+          done
+          echo "::error::New revision /api/health did not return 200"
+          exit 1
+
+      - name: Promote revision to 100% traffic
+        env:
+          REVISION_TAG: ${{ steps.img.outputs.tag }}
+        run: infra/gcp/run-deploy.sh promote
+
+  e2e:
+    name: Production E2E on Cloud Run
+    needs: deploy
+    permissions:
+      contents: read
+    uses: ./.github/workflows/e2e-production.yml
+    # URL Cloud Run (tag nowej rewizji, po promocji kieruje na nią), NIE
+    # domena aplikacji — do przełączenia DNS ta wskazuje Vercela. Bez
+    # `secrets: inherit`: w trybie workflow_call e2e nie używa żadnego sekretu.
+    with:
+      base_url: ${{ needs.deploy.outputs.tag_url }}

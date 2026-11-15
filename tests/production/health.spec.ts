@@ -2,7 +2,9 @@ import { test, expect } from '@playwright/test';
 
 /**
  * Production health checks — read-only tests only.
- * These run against the live Vercel deployment after each deploy.
+ * These run against the live deployment after each deploy: Vercel
+ * (deployment_status, until C4) or Cloud Run (deploy-cloud-run.yml →
+ * e2e-production.yml with base_url). BASE_URL selects the target.
  * They NEVER create users, modify data, or send emails.
  */
 

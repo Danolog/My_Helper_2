@@ -668,6 +668,7 @@ describe("bez klucza Stripe: symulacja tylko po jawnym opt-in", () => {
     vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "");
     vi.stubEnv("VERCEL", "");
     vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("K_SERVICE", "");
     mockGetOptionalSession.mockResolvedValue(null);
   });
   afterEach(() => {
@@ -742,6 +743,27 @@ describe("bez klucza Stripe: symulacja tylko po jawnym opt-in", () => {
     vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
     await expectRefused();
     expect(JSON.stringify(errorSpy.mock.calls)).toContain("ALLOW_PAYMENT_SIMULATION=1 ignored on Vercel");
+  });
+
+  it("#106: Cloud Run (K_SERVICE) + NODE_ENV=development, bez flagi → 503 (bramka hostingu przed development)", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("K_SERVICE", "myhelper");
+    await expectRefused();
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("ALLOW_PAYMENT_SIMULATION");
+  });
+
+  it("#106: Cloud Run (K_SERVICE) + ALLOW_PAYMENT_SIMULATION=1 → flaga zignorowana, 503 + błąd w logu", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("K_SERVICE", "myhelper");
+    vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
+    await expectRefused();
+    expect(JSON.stringify(errorSpy.mock.calls)).toContain("ALLOW_PAYMENT_SIMULATION=1 ignored on Cloud Run");
+  });
+
+  it.each(["", "   "])("#106: K_SERVICE=%j (pusty) nie blokuje: NODE_ENV=development → symulacja", async (kService) => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("K_SERVICE", kService);
+    await expectSimulated();
   });
 
   it.each(["0", "", "true"])("VERCEL=%j (nie \"1\") nie blokuje: NODE_ENV=development → symulacja", async (vercel) => {

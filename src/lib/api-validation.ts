@@ -13,7 +13,7 @@ import {
 } from "@/lib/push-subscription";
 import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 import { normalizePolishPhoneNumber } from "@/lib/phone";
-import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
+import { isOwnUploadUrl } from "@/lib/upload-url";
 
 // ==========================================
 // Validation Helper
@@ -816,7 +816,7 @@ const optionalUuidId = uuidId.nullable().optional();
 // Adres zdjecia: wylacznie to, co zwrocil nasz upload galerii (lib/upload-url).
 const galleryUploadUrl = z
   .string()
-  .refine(isOwnGalleryUploadUrl, "Adres zdjecia musi pochodzic z uploadu galerii")
+  .refine((url) => isOwnUploadUrl(url, { folder: "gallery" }).ok, "Adres zdjecia musi pochodzic z uploadu galerii")
   .nullable()
   .optional();
 

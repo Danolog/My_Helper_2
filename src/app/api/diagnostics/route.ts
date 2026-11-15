@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requirePlatformAdmin, isAuthError } from "@/lib/auth-middleware";
+import { resolveStorageDriver } from "@/lib/storage";
 
 type StatusLevel = "ok" | "warn" | "error";
 
@@ -124,7 +125,13 @@ export async function GET(req: Request) {
   const aiConfigured = env.OPENROUTER_API_KEY; // We avoid live-calling the AI provider here
 
   // Storage configuration check
-  const storageConfigured = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  // Sterownik magazynu (C2b): gcs/vercel-blob = trwały; local lub błąd konfiguracji = nie
+  let storageConfigured: boolean;
+  try {
+    storageConfigured = resolveStorageDriver() !== "local";
+  } catch {
+    storageConfigured = false;
+  }
   const storageType: "local" | "remote" = storageConfigured ? "remote" : "local";
 
   const overallStatus: StatusLevel = (() => {

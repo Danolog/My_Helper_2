@@ -1884,6 +1884,36 @@ describe("PUT /api/appointments/[id]", () => {
     expect(body.message).toContain("rescheduled");
   });
 
+  // Ryan (hotfix P1, dane osobowe w logach): PUT logował cały updateData —
+  // z wolnym tekstem notatki o kliencie — do logów produkcyjnych.
+  it("PII: log aktualizacji wizyty nie zawiera treści notatki, tylko nazwy pól", async () => {
+    const PII_NOTE = "Anna Kowalska, tel. 600123456, alergia na lateks";
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {})
+    );
+    try {
+      mockDbSelect
+        .mockReturnValueOnce(chainMock([makeAppointment()]))
+        .mockReturnValueOnce(chainMock([]));
+      mockDbUpdate.mockReturnValue(chainMock([makeAppointment({ notes: PII_NOTE })]));
+
+      const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+        method: "PUT",
+        body: { notes: PII_NOTE },
+      });
+      const response = await updateAppointment(request, createRouteParams(TEST_IDS.APPOINTMENT_UUID));
+      expect(response.status).toBe(200);
+
+      const logged = spies.flatMap((s) => s.mock.calls).map((args) => JSON.stringify(args)).join("\n");
+      expect(logged).toContain("Updating appointment");
+      expect(logged).toContain("notes");
+      expect(logged).not.toContain("Kowalska");
+      expect(logged).not.toContain("600123456");
+    } finally {
+      spies.forEach((s) => s.mockRestore());
+    }
+  });
+
   // Ryan (przegląd #90): zapis czyta sparsowane dane, nie surowe body —
   // preprocess schematu zamienia same spacje na null.
   it.each([

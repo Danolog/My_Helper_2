@@ -21,6 +21,7 @@ import {
   MODULE_DISABLED_MESSAGE,
   frozenModuleForPath,
 } from "@/lib/features";
+import { gcsPublicTarget } from "@/lib/gcs-config";
 import { isAmbiguousPath } from "@/lib/path-normalize";
 
 // ============================================================
@@ -113,6 +114,22 @@ async function ensureCsrfCookies(
 export const SONNER_STYLE_HASH = "sha256-CIxDM5jnsGiKqXs2v7NKCY5MzdR9gu6TtiMJrDw29AY=";
 export const EMPTY_STYLE_HASH = "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=";
 
+/**
+ * Źródło obrazów GCS w img-src (C2b): przy `GCS_BUCKET` dokładnie nasz
+ * zasobnik (`https://storage.googleapis.com/<bucket>/` albo prefiks
+ * z `GCS_PUBLIC_BASE_URL`), bez niego host jak w C2. Niepoprawna konfiguracja
+ * GCS → brak źródła GCS (fail-closed; upload i tak wtedy rzuca).
+ */
+function gcsImgSource(): string {
+  let target: ReturnType<typeof gcsPublicTarget>;
+  try {
+    target = gcsPublicTarget();
+  } catch {
+    return "";
+  }
+  return target ? ` ${target.publicBase}/` : " storage.googleapis.com";
+}
+
 export function buildCsp(nonce: string): string {
   // Dev: React DevTools wymaga eval(), a next-devtools wstrzykuje inline
   // style bez nonce — bez tych zluzowan konsola tonie w ~20 bledach CSP
@@ -133,10 +150,15 @@ export function buildCsp(nonce: string): string {
 
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${scriptExtra} storage.googleapis.com`,
+    // Bez hostów: 'strict-dynamic' i tak je ignoruje w przeglądarkach CSP3,
+    // a w starszych host storage.googleapis.com dopuszczałby skrypt z dowolnego
+    // zasobnika GCS (Ryan, P3). Workbox z tego hosta ładuje tylko /sw.js przez
+    // importScripts — worker ma politykę z własnej odpowiedzi, a /sw.js jest
+    // poza matcherem proxy (config niżej), więc ta polityka go nie dotyczy.
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${scriptExtra}`,
     styleSrc,
     "font-src 'self' fonts.gstatic.com",
-    "img-src 'self' data: blob: lh3.googleusercontent.com avatars.githubusercontent.com *.public.blob.vercel-storage.com images.unsplash.com",
+    `img-src 'self' data: blob: lh3.googleusercontent.com avatars.githubusercontent.com *.public.blob.vercel-storage.com${gcsImgSource()} images.unsplash.com`,
     "connect-src 'self' *.googleapis.com accounts.google.com",
     "form-action 'self' accounts.google.com",
     "worker-src 'self'",

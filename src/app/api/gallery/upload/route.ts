@@ -86,8 +86,8 @@ export async function POST(request: Request) {
       .resize({ width: 400, withoutEnlargement: true })
       .toBuffer();
 
-    // Storage layer: Vercel Blob when BLOB_READ_WRITE_TOKEN is set, local
-    // filesystem otherwise (dev). Writing straight to public/uploads would
+    // Storage layer: driver from lib/storage.resolveStorageDriver (GCS, Vercel
+    // Blob, or local filesystem in dev only). Writing straight to public/uploads would
     // 404 on Vercel — the runtime filesystem is ephemeral and per-instance.
     const maxConfig = { maxSize };
     const [fileResult, thumbResult] = await Promise.all([

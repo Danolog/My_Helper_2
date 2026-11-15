@@ -4,7 +4,7 @@ import { and, eq, inArray, ne, or } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 import { galleryPhotos } from "@/lib/schema";
 import type { forSalon } from "@/lib/server/repository";
-import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
+import { isOwnUploadUrl } from "@/lib/upload-url";
 
 /**
  * Kasowanie plików zdjęcia galerii (DELETE /api/gallery/[id]).
@@ -15,7 +15,7 @@ import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
  * (miniatura: public/uploads/gallery/thumbs/ pod tą samą nazwą). Wszystko
  * inne jest pomijane — bez unlink.
  *
- * Vercel Blob NIE jest kasowany (jak na main). Ścieżka `gallery/<uuid>.<ext>`
+ * Vercel Blob ani GCS NIE są kasowane (jak na main). Ścieżka `gallery/<uuid>.<ext>`
  * nie wiąże pliku z salonem, a adresy są publiczne (/api/salons/[id]/gallery),
  * więc del() pozwalałby salonowi A skasować plik salonu B przypięty do
  * własnego wpisu (blokada Ryana/Leo na #45, B1). Kasowanie Blob wraca razem
@@ -80,12 +80,15 @@ export async function deleteGalleryFiles(
       continue;
     }
 
-    if (process.env.BLOB_READ_WRITE_TOKEN && isOwnGalleryUploadUrl(url)) {
-      // Plik zostaje w Blob (osierocony) — pathname do późniejszego
-      // sprzątnięcia (RODO art. 17), bez hosta i tokenu.
-      logger.warn("[Gallery files] Blob file kept — orphaned until tenant-bound delete", {
+    const own = isOwnUploadUrl(url, { folder: "gallery" });
+    if (own.ok && own.origin !== "local") {
+      // Plik zostaje w Blob/GCS (osierocony) — nazwa obiektu do późniejszego
+      // sprzątnięcia (RODO art. 17), bez hosta i tokenu. Bez deleteFile:
+      // `gallery/<uuid>` nie wiąże pliku z salonem (salon A skasowałby plik B).
+      logger.warn("[Gallery files] Remote file kept — orphaned until tenant-bound delete", {
         photoId,
-        pathname: new URL(url).pathname,
+        storage: own.origin,
+        objectName: own.objectName,
       });
       continue;
     }

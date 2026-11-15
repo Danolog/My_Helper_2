@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildCsp, EMPTY_STYLE_HASH, SONNER_STYLE_HASH } from "@/proxy";
+import { buildCsp, config as proxyConfig, EMPTY_STYLE_HASH, SONNER_STYLE_HASH } from "@/proxy";
 
 const NONCE = "testnonce0123456789abcdef";
 
@@ -75,10 +75,19 @@ describe("buildCsp — produkcja", () => {
     expect(csp).not.toContain("'unsafe-eval'");
   });
 
-  it("script-src bez zmian", () => {
-    expect(d.get("script-src")).toBe(
-      `'self' 'nonce-${NONCE}' 'strict-dynamic' storage.googleapis.com`,
+  it("script-src: self, nonce, strict-dynamic — bez hostów (C3, ustalenie Ryana P3)", () => {
+    expect(d.get("script-src")).toBe(`'self' 'nonce-${NONCE}' 'strict-dynamic'`);
+  });
+
+  it("/sw.js (importScripts Workbox z storage.googleapis.com) zostaje poza matcherem proxy", () => {
+    // Gdyby proxy objęło /sw.js, worker dostałby tę CSP bez hosta Workboxa
+    // i importScripts by padło — tak długo, jak sw.js ładuje Workbox z CDN.
+    expect(readFileSync(join(process.cwd(), "public", "sw.js"), "utf8")).toContain(
+      "https://storage.googleapis.com/workbox-cdn/",
     );
+    const matcher = new RegExp(`^${proxyConfig.matcher[0]!}$`);
+    expect(matcher.test("/sw.js")).toBe(false);
+    expect(matcher.test("/dashboard")).toBe(true);
   });
 
   it("pozostale dyrektywy bez zmian", () => {
@@ -86,6 +95,50 @@ describe("buildCsp — produkcja", () => {
     expect(d.get("font-src")).toBe("'self' fonts.gstatic.com");
     expect(d.get("frame-ancestors")).toBe("'none'");
     expect(d.get("worker-src")).toBe("'self'");
+  });
+
+  it("img-src: zasobnik GCS (C2) obok Vercel Blob — stare adresy ładują się do C4", () => {
+    const img = (d.get("img-src") ?? "").split(" ");
+    expect(img).toContain("storage.googleapis.com");
+    expect(img).toContain("*.public.blob.vercel-storage.com");
+  });
+});
+
+describe("buildCsp — img-src zawężony do naszego zasobnika (C2b)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const img = () => (directives(buildCsp(NONCE)).get("img-src") ?? "").split(" ");
+
+  it("przy GCS_BUCKET: dokładnie https://storage.googleapis.com/<bucket>/, bez hosta ogólnego", () => {
+    vi.stubEnv("GCS_BUCKET", "mh-media");
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "");
+    expect(img()).toContain("https://storage.googleapis.com/mh-media/");
+    expect(img()).not.toContain("storage.googleapis.com");
+    expect(img()).toContain("*.public.blob.vercel-storage.com");
+  });
+
+  it("przy GCS_PUBLIC_BASE_URL: prefiks własnego hosta", () => {
+    vi.stubEnv("GCS_BUCKET", "mh-media");
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "https://media.example.pl/mh-media");
+    expect(img()).toContain("https://media.example.pl/mh-media/");
+    expect(img().some((s) => s.includes("storage.googleapis.com"))).toBe(false);
+  });
+
+  it("niepoprawna konfiguracja GCS: brak źródła GCS (fail-closed)", () => {
+    vi.stubEnv("GCS_BUCKET", "mh-media");
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "http://media.example.pl/mh-media");
+    expect(img().some((s) => s.includes("storage.googleapis.com") || s.includes("media.example.pl"))).toBe(false);
+  });
+
+  it("connect-src i reszta polityki bez zmian (kontrakt G6 z B4)", () => {
+    const base = directives(buildCsp(NONCE));
+    vi.stubEnv("GCS_BUCKET", "mh-media");
+    const narrowed = directives(buildCsp(NONCE));
+    for (const [name, value] of base) {
+      if (name !== "img-src") expect(narrowed.get(name), name).toBe(value);
+    }
   });
 });
 
@@ -101,7 +154,7 @@ describe("buildCsp — development bez zmian", () => {
     expect(d.has("style-src-elem")).toBe(false);
     expect(d.has("style-src-attr")).toBe(false);
     expect(d.get("script-src")).toBe(
-      `'self' 'nonce-${NONCE}' 'strict-dynamic' 'unsafe-eval' storage.googleapis.com`,
+      `'self' 'nonce-${NONCE}' 'strict-dynamic' 'unsafe-eval'`,
     );
   });
 });

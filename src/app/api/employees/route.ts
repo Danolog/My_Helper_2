@@ -148,7 +148,7 @@ export const POST = withApiHandler(
     // Get next available color if not provided
     const employeeColor = color || await getNextAvailableColor(salonId);
 
-    logger.info(`[Employees API] Creating employee: ${firstName} ${lastName} with color ${employeeColor}`);
+    logger.info(`[Employees API] Creating employee in salon ${salonId} with color ${employeeColor}`);
     const [newEmployee] = await forSalon(salonId).raw((tx) =>
       tx
       .insert(employees)

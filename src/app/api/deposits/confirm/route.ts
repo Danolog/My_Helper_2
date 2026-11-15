@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { depositConfirmSchema } from "@/lib/api-validation";
 import { confirmDepositPayment } from "@/lib/deposit-confirmation";
+import { hostingPlatform } from "@/lib/hosting";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 /**
@@ -11,7 +12,10 @@ import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
  * (`/api/stripe/webhook`), never this open endpoint — confirming a payment
  * by record id alone, without a verified Stripe signature, would let anyone
  * mark a deposit "paid" without paying (P0-D). Therefore this route is
- * disabled when NODE_ENV === "production".
+ * disabled on any hosting platform — Vercel (`VERCEL=1`) or Cloud Run
+ * (`K_SERVICE`), checked FIRST, regardless of NODE_ENV (#106) — and
+ * whenever NODE_ENV === "production". It only answers on a local
+ * `pnpm dev` (or in unit tests).
  *
  * Rate limiting (strictRateLimit) additionally throttles abuse in dev.
  *
@@ -20,8 +24,10 @@ import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
  */
 export async function POST(request: Request) {
   try {
-    // Hard production guard: confirmation in prod only via signed Stripe webhook.
-    if (process.env.NODE_ENV === "production") {
+    // Hard guard: on hosting (Vercel / Cloud Run) and in production the
+    // confirmation goes only through the signed Stripe webhook. The hosting
+    // gate comes first and does not depend on NODE_ENV (#106).
+    if (hostingPlatform() !== null || process.env.NODE_ENV === "production") {
       return NextResponse.json(
         { success: false, error: "Not found" },
         { status: 404 }
