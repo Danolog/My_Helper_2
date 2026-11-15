@@ -1423,6 +1423,20 @@ describe("POST /api/appointments — rabat liczony przez serwer (P1)", () => {
     expect(insertedValues(insertChain).discountAmount).toBeNull();
   });
 
+  it.each(["happy_hours", "package", "buy2get1", "first_visit"])(
+    "odrzuca kod powiazany z promocja typu zamrozonego %s (B2), bez zapisu",
+    async (type) => {
+      arrangeBooking(promoRow({ promotion: { type } }));
+
+      const response = await createAppointment(bookingRequest({ promoCodeId: PROMO_CODE_UUID }));
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(body.error).toBe("Promocja powiazana z kodem jest obecnie niedostepna");
+      expect(mockDbInsert).not.toHaveBeenCalled();
+    }
+  );
+
   it("odrzuca kod, gdy powiazana promocja jest nieaktywna", async () => {
     arrangeBooking(promoRow({ promotion: { isActive: false } }));
 

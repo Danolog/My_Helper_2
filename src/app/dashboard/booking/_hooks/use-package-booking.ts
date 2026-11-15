@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import type {
   Employee,
   PackageInfo,
@@ -29,7 +30,9 @@ export function usePackageBooking({ salonId, selectedClientId }: UsePackageBooki
   // --- Data fetching ---
 
   const fetchPackages = useCallback(async (signal: AbortSignal | null = null) => {
-    if (!salonId) return;
+    // Pakiety sa zamrozone (FROZEN_PROMOTION_TYPES): bez listy pakietow
+    // przelacznik trybu "Pakiet uslug" sie nie pokazuje.
+    if (!salonId || isPromotionTypeFrozen("package")) return;
     try {
       const res = await fetch(`/api/promotions/check-package?salonId=${salonId}`, { signal });
       if (!res.ok) return;

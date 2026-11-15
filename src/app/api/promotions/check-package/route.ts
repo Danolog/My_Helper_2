@@ -5,6 +5,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { promotions, services } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 
 /**
  * GET /api/promotions/check-package
@@ -14,6 +15,10 @@ import { promotions, services } from "@/lib/schema";
  *   salonId - ID of the salon
  */
 export async function GET(request: Request) {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("complexPromotions");
+  if (frozen) return frozen;
+
   try {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");

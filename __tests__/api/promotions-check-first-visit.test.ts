@@ -13,6 +13,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GET as route } from "@/app/api/promotions/check-first-visit/route";
 import { createMockRequest } from "./helpers";
 
+/**
+ * Moduł `complexPromotions` jest zamrożony (B2) i trasa odpowiada 404 zanim
+ * cokolwiek sprawdzi. Testy logiki poniżej omijają tę bramkę
+ * (`guardState.bypass`), żeby zachowanie było pilnowane także na wypadek
+ * odmrożenia; test „zamrożona” sprawdza bramkę prawdziwą.
+ */
+const { guardState } = vi.hoisted(() => ({ guardState: { bypass: true } }));
+vi.mock("@/lib/server/frozen-guard", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/server/frozen-guard")>();
+  return {
+    frozenModuleResponse: (module: Parameters<typeof real.frozenModuleResponse>[0]) =>
+      guardState.bypass ? null : real.frozenModuleResponse(module),
+  };
+});
+
 const SALON = "11111111-1111-1111-1111-111111111111";
 const SERVICE = "22222222-2222-2222-2222-222222222222";
 
@@ -70,7 +85,30 @@ beforeEach(() => {
   selectQueue.length = 0;
 });
 
-describe("GET /api/promotions/check-first-visit", () => {
+describe("GET /api/promotions/check-first-visit — zamrożona (B2)", () => {
+  it("404 MODULE_DISABLED identycznie dla klienta i osoby nieznanej, bez bazy", async () => {
+    guardState.bypass = false;
+    try {
+      selectQueue.push([activePromo], [{ id: "client-1" }], [{ count: 3 }], [{ count: 0 }]);
+      const known = await ask("stala.klientka@example.com");
+      const unknown = await ask("ktos.obcy@example.com");
+
+      expect(known.status).toBe(404);
+      expect(unknown.status).toBe(404);
+      expect(known.text).toBe(unknown.text);
+      expect(JSON.parse(known.text)).toEqual({
+        success: false,
+        code: "MODULE_DISABLED",
+        error: "Ta funkcja jest obecnie niedostępna.",
+      });
+      expect(mockDbSelect).not.toHaveBeenCalled();
+    } finally {
+      guardState.bypass = true;
+    }
+  });
+});
+
+describe("GET /api/promotions/check-first-visit (po odmrożeniu modułu)", () => {
   it("klient z wizytami i nieznany e-mail dostają odpowiedź identyczną bajt w bajt", async () => {
     // Baza „zna” pierwszego: aktywna promocja, kartoteka klienta, 3 wizyty.
     selectQueue.push([activePromo], [{ id: "client-1" }], [{ count: 3 }], [{ count: 0 }]);

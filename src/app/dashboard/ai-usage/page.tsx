@@ -305,7 +305,7 @@ function AIUsageContent() {
                   <BarChart3 className="h-10 w-10 mx-auto mb-3 opacity-30" />
                   <p>Brak danych o zuzyciu w wybranym okresie.</p>
                   <p className="text-xs mt-1">
-                    Korzystaj z funkcji AI (tekst, obrazy, banery), aby zobaczyć statystyki.
+                    Korzystaj z funkcji AI, aby zobaczyć statystyki.
                   </p>
                 </CardContent>
               </Card>
@@ -428,10 +428,7 @@ function AIUsageContent() {
                       <span>Komendy glosowe: $0.001</span>
                       <span>TTS (ElevenLabs): $0.003</span>
                       <span>STT (ElevenLabs): $0.002</span>
-                      <span>Grafika (Imagen): $0.01</span>
                       <span>Ulepszenie foto: $0 (serwer)</span>
-                      <span>Banery: $0.01</span>
-                      <span>Ilustracje uslug: $0.01</span>
                       <span>Klipy wideo (Veo): $0.15</span>
                       <span>Szablony testimoniali: $0.002</span>
                     </div>
@@ -454,9 +451,9 @@ export default function AIUsagePage() {
   return (
     <ProPlanGate
       featureName="Koszty AI"
-      featureDescription="Monitoruj zuzycie funkcji AI w Twoim salonie i sledz szacowane koszty generowania mediow."
+      featureDescription="Monitoruj zuzycie funkcji AI w Twoim salonie i sledz szacowane koszty."
       proBenefits={[
-        "Podgląd kosztów generowania obrazów i banerów",
+        "Podgląd kosztów funkcji AI w wybranym okresie",
         "Prognoza miesieczna na podstawie biezacego zuzycia",
         "Szczegolowy rozklad zuzycia wg typu i dostawcy",
         "Cennik referencyjny wszystkich funkcji AI",

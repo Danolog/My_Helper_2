@@ -5,10 +5,15 @@ import { eq, and, not, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { promotions, appointments, services } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 
 // GET /api/promotions/check - Check if a client qualifies for any buy2get1 promotion
 // Query params: salonId, clientId, serviceId
 export async function GET(request: Request) {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("complexPromotions");
+  if (frozen) return frozen;
+
   try {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");

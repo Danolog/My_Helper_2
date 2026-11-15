@@ -365,6 +365,7 @@ export async function POST(request: Request) {
         const rejection = checkPromotionApplicable(promoCode.promotion, serviceId ?? "", now);
         if (rejection) {
           const messages: Record<PromotionRejection, string> = {
+            type_frozen: "Promocja powiazana z kodem jest obecnie niedostepna",
             inactive: "Promocja powiazana z kodem jest nieaktywna",
             not_started: "Promocja powiazana z kodem jeszcze sie nie rozpoczela",
             ended: "Promocja powiazana z kodem juz sie zakonczyla",

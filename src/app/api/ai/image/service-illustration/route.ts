@@ -9,6 +9,7 @@ import {
   getSalonContext,
 } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 import { upload } from "@/lib/storage";
 
 // ────────────────────────────────────────────────────────────
@@ -28,6 +29,10 @@ const requestSchema = z.object({
 // ────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("imageGen");
+  if (frozen) return frozen;
+
   // Auth + Pro plan check (+ monthly image unit limit)
   const proResult = await requireProAI({ op: "image" });
   if (isProAIError(proResult)) return proResult;

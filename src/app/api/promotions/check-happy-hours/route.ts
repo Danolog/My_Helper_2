@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { promotions } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 
 /**
  * GET /api/promotions/check-happy-hours
@@ -16,6 +17,10 @@ import { promotions } from "@/lib/schema";
  *   time - Booking start time (HH:MM)
  */
 export async function GET(request: Request) {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("complexPromotions");
+  if (frozen) return frozen;
+
   try {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");

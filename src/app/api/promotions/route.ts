@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { eq, desc } from "drizzle-orm";
 import { validateBody, createPromotionSchema } from "@/lib/api-validation";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { requireSalonStaff } from "@/lib/salon-context";
 import { promotions } from "@/lib/schema";
+import { frozenPromotionTypeResponse } from "@/lib/server/frozen-guard";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/promotions - List promotions of the session salon
 export async function GET(request: Request) {
@@ -35,13 +37,16 @@ export async function GET(request: Request) {
     };
 
     // forSalon: RLS + jawny eq(salonId), obowiązek raw().
-    const result = await forSalon(salonId).raw((tx) =>
+    const rows = await forSalon(salonId).raw((tx) =>
       tx
         .select(promotionColumns)
         .from(promotions)
         .where(eq(promotions.salonId, salonId))
         .orderBy(desc(promotions.createdAt))
     );
+    // Promocje typów zamrożonych (FROZEN_PROMOTION_TYPES) zostają w bazie,
+    // ale panel ich nie dostaje — nie da się ich podejrzeć ani włączyć.
+    const result = rows.filter((promo) => !isPromotionTypeFrozen(promo.type));
 
     return NextResponse.json({
       success: true,
@@ -87,6 +92,10 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
     const { name, type, value, startDate, endDate, conditionsJson, isActive } = body;
+
+    // Typ zamrożony (happy hours, pakiet, 2+1, pierwsza wizyta) → 400, bez zapisu.
+    const frozenType = frozenPromotionTypeResponse(type);
+    if (frozenType) return frozenType;
 
     // Validate percentage value (0-100)
     if (type === "percentage") {

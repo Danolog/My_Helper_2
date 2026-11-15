@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import type {
   SalonDetail,
   AssignedEmployee,
@@ -103,8 +104,9 @@ export function useBookingData(): UseBookingDataReturn {
       : 0;
 
   // Rabat pierwszej wizyty nie jest juz sprawdzany po stronie klienta:
-  // wymagal wyslania e-maila w URL (dane osobowe w logach zadan), a trasa
-  // check-first-visit zawsze zwraca eligible:false (decyzja PO, aneks B2).
+  // wymagal wyslania e-maila w URL (dane osobowe w logach zadan), a typ
+  // first_visit jest zamrozony (FROZEN_PROMOTION_TYPES; trasa
+  // check-first-visit odpowiada 404, aneks B2).
   // Pola zostaja w kontrakcie hooka jako stale, zeby nie ruszac UI.
   const firstVisitPromo: FirstVisitPromo | null = null;
   const firstVisitDiscountAmount = 0;
@@ -329,9 +331,16 @@ export function useBookingData(): UseBookingDataReturn {
     return undefined;
   }, [selectedEmployeeId, selectedDate, effectiveDuration, fetchAvailableSlots]);
 
-  // Check happy hours promotion when time slot is selected
+  // Check happy hours promotion when time slot is selected. Happy hours sa
+  // zamrozone (FROZEN_PROMOTION_TYPES) — bez zapytania, cena pelna; zadatek
+  // liczony przez serwer tez nie daje rabatu (src/lib/deposit-calculation.ts).
   useEffect(() => {
-    if (!selectedDate || !selectedTimeSlot || !salonId) {
+    if (
+      isPromotionTypeFrozen("happy_hours") ||
+      !selectedDate ||
+      !selectedTimeSlot ||
+      !salonId
+    ) {
       setHappyHoursPromo(null);
       return;
     }

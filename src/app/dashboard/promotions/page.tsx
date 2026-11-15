@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Lock, Plus, Ticket } from "lucide-react";
 import { ModuleGate } from "@/components/dashboard/module-gate";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { ProPlanGate } from "@/components/subscription/pro-plan-gate";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -42,6 +43,8 @@ function PromotionsPageInner() {
   } = usePromotionsData();
 
   const form = usePromotionForm();
+  // Generowanie grafik (imageGen) jest zamrożone — sekcja banera znika.
+  const imageGenEnabled = useModuleEnabled("imageGen");
 
   const handleSaveAndRefresh = () => {
     form.handleSave(salonId, () => {
@@ -108,20 +111,24 @@ function PromotionsPageInner() {
         onToggleActive={handleToggleActive}
       />
 
-      {/* AI Banner Generator (Pro plan only) */}
-      <Separator className="my-8" />
-      <ProPlanGate
-        featureName="Generator banerow AI"
-        featureDescription="Tworzenie profesjonalnych banerow promocyjnych z pomoca AI — tlo generowane przez Imagen, tekst nakladany automatycznie."
-        proBenefits={[
-          "Generowanie tla baneru za pomoca AI (Google Imagen)",
-          "Automatyczna nakladka tekstu na obraz",
-          "Formaty: Instagram, Facebook Post, Facebook Cover",
-          "Rozne style: nowoczesny, vintage, luksusowy i wiecej",
-        ]}
-      >
-        <BannerGenerator />
-      </ProPlanGate>
+      {/* AI Banner Generator (Pro plan only; imageGen zamrożone w B2) */}
+      {imageGenEnabled && (
+        <>
+          <Separator className="my-8" />
+          <ProPlanGate
+            featureName="Generator banerow AI"
+            featureDescription="Tworzenie profesjonalnych banerow promocyjnych z pomoca AI — tlo generowane przez Imagen, tekst nakladany automatycznie."
+            proBenefits={[
+              "Generowanie tla baneru za pomoca AI (Google Imagen)",
+              "Automatyczna nakladka tekstu na obraz",
+              "Formaty: Instagram, Facebook Post, Facebook Cover",
+              "Rozne style: nowoczesny, vintage, luksusowy i wiecej",
+            ]}
+          >
+            <BannerGenerator />
+          </ProPlanGate>
+        </>
+      )}
 
       {/* Create/Edit Dialog */}
       <PromotionDialog
