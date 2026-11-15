@@ -125,6 +125,8 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
 
     // Kwota z rabatem happy hours: odrzucona przed zapisem.
     const tampered = await postCreateSession(page, HAPPY_HOURS_DEPOSIT, localStart);
+    // Gdyby serwer jednak przyjal kwote (regresja), wizyta powstala — sprzatamy ja tez.
+    if (tampered.json.data?.appointmentId) createdAppointmentIds.push(tampered.json.data.appointmentId);
     expect(tampered.status, `kwota z rabatem happy hours powinna byc odrzucona: ${JSON.stringify(tampered.json)}`).toBe(400);
     expect(String(tampered.json.error)).toMatch(/nieprawidlowa kwota zadatku/i);
 
