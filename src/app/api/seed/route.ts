@@ -23,7 +23,7 @@ export async function POST() {
     const salonResult = await db
       .insert(salons)
       .values({
-        id: "00000000-0000-0000-0000-000000000001",
+        id: "00000000-0000-4000-8000-000000000001",
         name: "Beauty Studio Demo",
         phone: "+48 123 456 789",
         email: "demo@beautystudio.pl",
