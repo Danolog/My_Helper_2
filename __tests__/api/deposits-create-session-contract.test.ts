@@ -729,6 +729,27 @@ describe("bez klucza Stripe: symulacja tylko po jawnym opt-in", () => {
     expect(JSON.stringify(errorSpy.mock.calls)).toContain("ALLOW_PAYMENT_SIMULATION=1 ignored on Vercel");
   });
 
+  it("#84: VERCEL=1 + NODE_ENV=development, bez flagi → 503 (bramka Vercela przed development), bez błędu o fladze", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL", "1");
+    await expectRefused();
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("ALLOW_PAYMENT_SIMULATION");
+  });
+
+  it("#84: VERCEL=1 + NODE_ENV=development + flaga → 503 i błąd o zignorowanej fladze", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
+    await expectRefused();
+    expect(JSON.stringify(errorSpy.mock.calls)).toContain("ALLOW_PAYMENT_SIMULATION=1 ignored on Vercel");
+  });
+
+  it.each(["0", "", "true"])("VERCEL=%j (nie \"1\") nie blokuje: NODE_ENV=development → symulacja", async (vercel) => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VERCEL", vercel);
+    await expectSimulated();
+  });
+
   it.each(["production", "preview", "development"])(
     "VERCEL_ENV=%s nie decyduje: NODE_ENV=production bez flagi → 503",
     async (vercelEnv) => {

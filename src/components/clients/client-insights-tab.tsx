@@ -18,7 +18,6 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ReadAloudButton } from "@/components/ui/read-aloud-button";
 import { useSubscription } from "@/hooks/use-subscription";
 import { mutationFetch } from "@/lib/api-client";
 
@@ -173,7 +172,6 @@ export function ClientInsightsTab({ clientId }: ClientInsightsTabProps) {
               <Sparkles className="h-5 w-5 text-primary" />
               Podsumowanie
             </CardTitle>
-            <ReadAloudButton text={insights!.summary} />
           </div>
         </CardHeader>
         <CardContent>
