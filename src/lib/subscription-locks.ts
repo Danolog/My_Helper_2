@@ -93,6 +93,24 @@ export function withStripeSubscriptionLock<T>(
   });
 }
 
+/**
+ * Transakcja z limitem czekania i TYLKO blokadą salonu — dla tras, które
+ * zmieniają wiersz salonu bez wywołania Stripe (downgrade,
+ * expiration-warning, register-subscription). Webhook i confirm biorą tę
+ * samą blokadę salonu przed zapisem, więc odczyt „active” i zapis nie
+ * przeplatają się z nimi. Reguła kolejności zachowana (brak stripe_sub).
+ */
+export function withSalonSubscriptionLock<T>(
+  salonId: string,
+  fn: (tx: SubscriptionTx) => Promise<T>
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    await setSubscriptionLockTimeout(tx);
+    await lockSalonSubscriptions(tx, salonId);
+    return fn(tx);
+  });
+}
+
 /** Bieżący stan subskrypcji ze Stripe, z limitem czasu na odczyt pod blokadą. */
 export function retrieveStripeSubscriptionLocked(
   stripe: Stripe,

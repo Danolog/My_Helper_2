@@ -34,10 +34,9 @@ import postgres from "postgres";
 import * as schema from "@/lib/schema";
 import {
   checkSeedClientOptions,
-  checkSeedServerIdentity,
   checkSeedTarget,
-  SEED_SERVER_PROBE_SQL,
   type SeedGuardContext,
+  verifySeedServerIdentities,
 } from "../../scripts/seed-host-guard";
 
 export const INTEGRATION_URL = process.env.INTEGRATION_POSTGRES_URL?.trim() || undefined;
@@ -77,14 +76,9 @@ export async function createIntegrationDb() {
 
   // Etap 3 na obu pulach: obie trafiają pod ten sam adres, ale sprawdzamy każdą,
   // z której test faktycznie korzysta. Pierwsze zapytania w ogóle; zapisów jeszcze nie ma.
-  for (const client of [appClient, observer]) {
-    const [identity] = await client.unsafe(SEED_SERVER_PROBE_SQL);
-    const server = checkSeedServerIdentity(identity, HARNESS_GUARD_CONTEXT);
-    if (!server.ok) {
-      await Promise.all([appClient.end({ timeout: 0 }), observer.end({ timeout: 0 })]);
-      throw new Error(`[pg-harness] Odmowa: ${server.reason}`);
-    }
-  }
+  // Odmowa albo błąd sondy zamyka obie pule (verifySeedServerIdentities).
+  const server = await verifySeedServerIdentities([appClient, observer], HARNESS_GUARD_CONTEXT);
+  if (!server.ok) throw new Error(`[pg-harness] Odmowa: ${server.reason}`);
 
   return { db: drizzle(appClient, { schema }), observer, end };
 }

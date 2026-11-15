@@ -12,6 +12,7 @@ import {
   subscriptionPlans,
   notifications,
 } from "@/lib/schema";
+import { isSubscriptionLockFailure, withSalonSubscriptionLock } from "@/lib/subscription-locks";
 
 const DEFAULT_WARNING_DAYS = 7;
 
@@ -171,25 +172,68 @@ export async function POST(request: Request) {
       // No body or invalid JSON - use defaults
     }
 
-    // Find active subscriptions near expiry
-    const [activeSub] = await db
-      .select({
-        subscription: salonSubscriptions,
-        plan: subscriptionPlans,
-      })
-      .from(salonSubscriptions)
-      .innerJoin(
-        subscriptionPlans,
-        eq(salonSubscriptions.planId, subscriptionPlans.id)
-      )
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          eq(salonSubscriptions.status, "active")
-        )
-      );
+    const now = new Date();
 
-    if (!activeSub) {
+    // T3b: odczyt „active” i ewentualny zapis symulacji pod blokadą salonu
+    // (jak confirm i webhook) — zapis okresu nie przeplata się z webhookiem,
+    // który w tym czasie zapisuje okres ze Stripe.
+    let locked;
+    try {
+      locked = await withSalonSubscriptionLock(salonId, async (tx) => {
+        // Find active subscriptions near expiry
+        const [activeSub] = await tx
+          .select({
+            subscription: salonSubscriptions,
+            plan: subscriptionPlans,
+          })
+          .from(salonSubscriptions)
+          .innerJoin(
+            subscriptionPlans,
+            eq(salonSubscriptions.planId, subscriptionPlans.id)
+          )
+          .where(
+            and(
+              eq(salonSubscriptions.salonId, salonId),
+              eq(salonSubscriptions.status, "active")
+            )
+          );
+        if (!activeSub) return null;
+
+        // If simulating, temporarily set the period end to simulate near-expiry
+        let periodEnd = activeSub.subscription.currentPeriodEnd
+          ? new Date(activeSub.subscription.currentPeriodEnd)
+          : null;
+
+        if (simulate && periodEnd) {
+          // Set period end to 3 days from now for simulation
+          const simulatedEnd = new Date(now);
+          simulatedEnd.setDate(simulatedEnd.getDate() + 3);
+
+          // Actually update the database to move period end closer
+          await tx
+            .update(salonSubscriptions)
+            .set({
+              currentPeriodEnd: simulatedEnd,
+            })
+            .where(eq(salonSubscriptions.id, activeSub.subscription.id));
+
+          periodEnd = simulatedEnd;
+
+          logger.info(`[Subscription Warning] SIMULATION: Period end moved to ${simulatedEnd.toISOString()} (${3} days from now)`);
+        }
+        return { activeSub, periodEnd };
+      });
+    } catch (error) {
+      if (isSubscriptionLockFailure(error)) {
+        return NextResponse.json(
+          { success: false, code: "LOCK_BUSY", error: "Subskrypcja jest właśnie aktualizowana. Spróbuj ponownie za chwilę." },
+          { status: 503 }
+        );
+      }
+      throw error;
+    }
+
+    if (!locked) {
       return NextResponse.json({
         success: true,
         warnings: [],
@@ -197,32 +241,8 @@ export async function POST(request: Request) {
       });
     }
 
-    const { subscription: sub, plan } = activeSub;
-    const now = new Date();
-
-    // If simulating, temporarily set the period end to simulate near-expiry
-    let effectivePeriodEnd = sub.currentPeriodEnd
-      ? new Date(sub.currentPeriodEnd)
-      : null;
-
-    if (simulate && effectivePeriodEnd) {
-      // Set period end to 3 days from now for simulation
-      const simulatedEnd = new Date(now);
-      simulatedEnd.setDate(simulatedEnd.getDate() + 3);
-
-      // Actually update the database to move period end closer
-      await db
-        .update(salonSubscriptions)
-        .set({
-          currentPeriodEnd: simulatedEnd,
-        })
-        .where(eq(salonSubscriptions.id, sub.id));
-
-      effectivePeriodEnd = simulatedEnd;
-
-       
-      logger.info(`[Subscription Warning] SIMULATION: Period end moved to ${simulatedEnd.toISOString()} (${3} days from now)`);
-    }
+    const { subscription: sub, plan } = locked.activeSub;
+    const effectivePeriodEnd = locked.periodEnd;
 
     if (!effectivePeriodEnd) {
       return NextResponse.json({
@@ -294,7 +314,7 @@ export async function POST(request: Request) {
 
     const pushNotification = pushResults[0];
 
-     
+
     logger.info(`[Subscription Warning] Warning sent for subscription ${sub.id}. ` +
         `Plan: ${plan.name}, Days remaining: ${daysRemaining}, ` +
         `Renewal amount: ${plan.priceMonthly} PLN`);

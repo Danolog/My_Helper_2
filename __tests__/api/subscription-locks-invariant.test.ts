@@ -42,6 +42,8 @@ function balanced(text: string, open: number): string {
 interface SubscriptionWrite {
   file: string;
   payload: string;
+  /** Odbiorca wywołania: identyfikator przed `.insert(`/`.update(` (np. `tx`, `db`). */
+  receiver: string;
 }
 
 function subscriptionWrites(): SubscriptionWrite[] {
@@ -54,7 +56,8 @@ function subscriptionWrites(): SubscriptionWrite[] {
       const call = /^\s*\.(values|set)\(/.exec(rest);
       if (!call) throw new Error(`${relative(ROOT, path)}: write without .values/.set`);
       const open = m.index + m[0].length + call[0].length - 1;
-      writes.push({ file: relative(ROOT, path), payload: balanced(text, open) });
+      const receiver = /([A-Za-z_$][\w$]*)\s*$/.exec(text.slice(0, m.index))?.[1] ?? "";
+      writes.push({ file: relative(ROOT, path), payload: balanced(text, open), receiver });
     }
   }
   return writes;
@@ -110,5 +113,37 @@ describe("niezmiennik: stripeSubscriptionId zapisuje tylko confirm pod blokadą 
     expect(lockStripe).toBeLessThan(read);
     expect(read).toBeLessThan(lockSalon);
     expect(lockSalon).toBeLessThan(Math.min(insert, update));
+  });
+});
+
+/**
+ * T3b (Ethan, pr62-shape §1 „ten sam wyścig”): KAŻDY zapis salon_subscriptions
+ * idzie przez transakcję (`tx`), a plik bierze blokadę salonu — bez wyjątków
+ * dla cancel, downgrade, expiration-warning i register-subscription.
+ */
+describe("niezmiennik T3b: zapisy salon_subscriptions tylko w transakcji z blokadą", () => {
+  const writes = subscriptionWrites();
+  const LOCK_HELPERS = ["lockSalonSubscriptions(", "withSalonSubscriptionLock(", "withLockedStripeSubscriptionRow("];
+
+  it("żaden zapis nie idzie przez `db` poza transakcją", () => {
+    const outside = writes.filter((w) => w.receiver !== "tx").map((w) => `${w.file} (${w.receiver})`);
+    expect(outside).toEqual([]);
+  });
+
+  it("każdy plik z zapisem bierze blokadę salonu (bezpośrednio albo przez helper)", () => {
+    const files = [...new Set(writes.map((w) => w.file))];
+    expect(files).toEqual(
+      expect.arrayContaining([
+        "src/app/api/register-subscription/route.ts",
+        "src/app/api/subscriptions/cancel/route.ts",
+        "src/app/api/subscriptions/downgrade/route.ts",
+        "src/app/api/subscriptions/expiration-warning/route.ts",
+      ])
+    );
+    const unlocked = files.filter((file) => {
+      const text = readFileSync(join(ROOT, file), "utf8");
+      return !LOCK_HELPERS.some((h) => text.includes(h));
+    });
+    expect(unlocked).toEqual([]);
   });
 });
