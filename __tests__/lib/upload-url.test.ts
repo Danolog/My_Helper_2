@@ -7,7 +7,7 @@
  * Wszystko inne (obce hosty, http, adresy metadanych, traversal) -> false.
  */
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
+import { isOwnEnhancedUploadUrl, isOwnGalleryUploadUrl } from "@/lib/upload-url";
 
 const ID = "3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b";
 const TOKEN = "vercel_blob_rw_AbC123xyz_secretpart";
@@ -74,5 +74,33 @@ describe("isOwnGalleryUploadUrl — Vercel Blob (token ustawiony)", () => {
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw");
     expect(isOwnGalleryUploadUrl(`https://${BLOB_HOST}/gallery/${ID}.jpg`)).toBe(false);
     expect(isOwnGalleryUploadUrl(`https://.public.blob.vercel-storage.com/gallery/${ID}.jpg`)).toBe(false);
+  });
+});
+
+describe("isOwnEnhancedUploadUrl — wynik enhance własnego salonu (tylko Blob)", () => {
+  const SALON = "7d1e2f3a-4b5c-4d6e-8f70-1a2b3c4d5e6f";
+  const OTHER = "0a0b0c0d-1e1f-4a2b-9c3d-4e5f6a7b8c9d";
+  const ok = `https://${BLOB_HOST}/enhanced/enhanced-${SALON}-1700000000000.jpg`;
+
+  it("przyjmuje enhanced/enhanced-<salonId>-<ms>.jpg naszego store'u", () => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", TOKEN);
+    expect(isOwnEnhancedUploadUrl(ok, SALON)).toBe(true);
+  });
+
+  it.each([
+    [`https://${BLOB_HOST}/enhanced/enhanced-${OTHER}-1700000000000.jpg`, SALON, "cudzy salon"],
+    [`https://${BLOB_HOST}/enhanced/enhanced-${SALON}-1700000000000.png`, SALON, "nie jpg"],
+    [`https://${BLOB_HOST}/gallery/enhanced-${SALON}-1700000000000.jpg`, SALON, "inny folder"],
+    [`https://other123.public.blob.vercel-storage.com/enhanced/enhanced-${SALON}-1700000000000.jpg`, SALON, "cudzy store"],
+    [`${ok}?x=1`, SALON, "query"],
+    [ok, ".*", "salonId nie-uuid (regex injection)"],
+  ])("odrzuca %s (%s / %s)", (url, salonId) => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", TOKEN);
+    expect(isOwnEnhancedUploadUrl(url, salonId)).toBe(false);
+  });
+
+  it("bez tokenu Blob (lokalnie enhance zwraca data URI) -> zawsze false", () => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+    expect(isOwnEnhancedUploadUrl(ok, SALON)).toBe(false);
   });
 });
