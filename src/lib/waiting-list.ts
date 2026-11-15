@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { eq, and, isNull, or, not } from "drizzle-orm";
+import { appointmentConflictWhere } from "@/lib/appointment-overlap";
 import { db } from "@/lib/db";
 import {
   checkBookingWithoutDeposit,
@@ -303,34 +304,27 @@ export async function acceptEarlierSlot(
     };
   }
 
-  // 6. Check slot availability (no overlapping non-cancelled appointments)
+  // 6. Termin musi być nadal wolny (#165): ta sama definicja kolizji co przy
+  // zapisie wizyty, półotwarta [start, end). Przenoszona wizyta klienta nie
+  // koliduje sama ze sobą. Przy kolizji nic nie zapisujemy — wpis zostaje
+  // nierozstrzygnięty (accepted = null).
   if (employeeId) {
     const overlapping = await db
       .select({ id: appointments.id })
       .from(appointments)
       .where(
-        and(
-          eq(appointments.employeeId, employeeId),
-          eq(appointments.salonId, entry.salonId),
-          not(eq(appointments.status, "cancelled"))
-        )
-      );
+        appointmentConflictWhere({
+          salonId: entry.salonId,
+          employeeId,
+          start: offeredStart,
+          end: offeredEnd,
+          excludeId: entry.existingAppointmentId,
+        })
+      )
+      .limit(1);
 
-    const hasConflict = overlapping.some((appt) => {
-      // skip the client's existing appointment (it will be moved)
-      if (
-        entry.existingAppointmentId &&
-        appt.id === entry.existingAppointmentId
-      ) {
-        return false;
-      }
-      return true;
-    });
-
-    // A more thorough time-overlap check would be needed for production.
-    // For MVP we trust the slot was freed by a cancellation.
-    if (hasConflict) {
-      // We don't actually block – the cancellation freed it, trust it.
+    if (overlapping.length > 0) {
+      return { success: false, message: "Termin jest juz zajety" };
     }
   }
 
