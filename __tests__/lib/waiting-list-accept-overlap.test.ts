@@ -163,6 +163,20 @@ describe("acceptEarlierSlot — kolizja półotwarta (#165)", () => {
     expect((await acceptEarlierSlot("wl-1", "tok")).success).toBe(true);
   });
 
+  it.each([
+    ["pusty (koniec = początek)", START],
+    ["odwrócony (koniec przed początkiem)", new Date(START.getTime() - 30 * MIN)],
+  ])("proponowany termin %s → odmowa, bez zapytania o kolizje i bez zapisu", async (_n, end) => {
+    h.select.mockReturnValueOnce(createChainMock([entry({ offeredEndTime: end })]));
+
+    const res = await acceptEarlierSlot("wl-1", "tok");
+
+    expect(res).toEqual({ success: false, message: "Nieprawidlowy proponowany termin" });
+    expect(h.select).toHaveBeenCalledTimes(1); // tylko wpis
+    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
   it("kolizja sprawdzana przed zadatkiem: zajęty termin → odmowa kolizji, zadatek nie liczony", async () => {
     h.calc.mockResolvedValue({ ok: true, required: true, amount: 40, serviceName: "X" });
     h.select

@@ -296,6 +296,12 @@ export async function acceptEarlierSlot(
   const offeredEnd = new Date(entry.offeredEndTime);
   const employeeId = entry.offeredEmployeeId || entry.preferredEmployeeId;
 
+  // Przedział pusty/odwrócony nie trafiłby w warunek kolizji (#165) — odmowa,
+  // nic nie zapisane, wpis bez zmian.
+  if (!(offeredEnd.getTime() > offeredStart.getTime())) {
+    return { success: false, message: "Nieprawidlowy proponowany termin" };
+  }
+
   // 5. Check that the offered slot is still in the future
   if (offeredStart <= new Date()) {
     return {
