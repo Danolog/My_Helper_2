@@ -166,11 +166,14 @@ export async function calculateExpectedDeposit(params: {
       basePrice: services.basePrice,
       depositRequired: services.depositRequired,
       depositPercentage: services.depositPercentage,
+      isActive: services.isActive,
     })
     .from(services)
     .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)));
 
-  if (!service) return { ok: false, error: "service_not_found" };
+  // #69: usługa wyłączona (isActive=false) jest dla rezerwacji jak usunięta —
+  // portal z nieaktualnej pamięci podręcznej nie zarezerwuje jej ani wariantu.
+  if (!service || service.isActive === false) return { ok: false, error: "service_not_found" };
 
   // 2. Variant price modifier
   let priceModifier = 0;

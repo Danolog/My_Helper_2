@@ -1576,6 +1576,7 @@ describe("POST /api/appointments — referencje z body nalezace do salonu (P1)",
       clientId: TEST_IDS.CLIENT_UUID,
       employeeId: TEST_IDS.EMPLOYEE_UUID,
       serviceId: TEST_IDS.SERVICE_UUID,
+      variantId: null,
     });
   });
 
@@ -1633,6 +1634,7 @@ describe("POST /api/appointments — referencje z body nalezace do salonu (P1)",
       clientId: null,
       employeeId: TEST_IDS.EMPLOYEE_UUID,
       serviceId: TEST_IDS.SERVICE_UUID,
+      variantId: null,
     });
     expect(mockSendBookingSms).toHaveBeenCalledTimes(1);
     const sms = mockSendBookingSms.mock.calls[0]![0] as Record<string, unknown>;

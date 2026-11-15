@@ -118,6 +118,16 @@ describe("logger — produkcja (JSON structured)", () => {
     expect(errorSpy.mock.calls[0]![0] as string).not.toContain("sekret@poczta.pl");
   });
 
+  it("N3: zalogowany napis error.message z parametrami też jest redagowany", async () => {
+    const { DrizzleQueryError } = await import("drizzle-orm");
+    const logger = await importLoggerWithEnv("production");
+    const err = new DrizzleQueryError("insert into x values ($1)", ["anna@test.pl"]);
+    logger.error("Padlo", { error: err.message });
+    const raw = errorSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("anna@test.pl");
+    expect(raw).toContain("params: [redacted]");
+  });
+
   it("zwykły Error bez parametrów — bez zmian", async () => {
     const logger = await importLoggerWithEnv("production");
     const err = new Error("boom");

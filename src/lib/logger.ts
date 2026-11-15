@@ -14,6 +14,8 @@
  * in the codebase that should have eslint-disable for no-console).
  */
 
+import { toSafeErrorMeta } from "@/lib/safe-error";
+
 type LogLevel = "debug" | "info" | "warn" | "error";
 
 interface LogContext {
@@ -22,53 +24,8 @@ interface LogContext {
 
 const isProduction = process.env.NODE_ENV === "production";
 
-/**
- * N3 (Ryan): DrizzleQueryError ma w `message` (a przez to w pierwszej linii
- * `stack`) parametry zapytania — "Failed query: insert ...\nparams: Anna,
- * +48123456789,anna@x.pl". To dane osobowe gościa w logach Vercela. Tekst
- * zapytania zostaje (same placeholdery $1, $2), parametry nie.
- */
-const PARAMS_MARKER = "\nparams: ";
-
-/**
- * message/stack bez parametrów zapytania. Wszystko od znacznika "params:"
- * do końca message jest wycinane; stack składany z bezpiecznego message
- * i ramek z oryginału (bez wyrażenia regularnego — wartość parametru może
- * zawierać "\n    at ..." i nie może skrócić wycięcia).
- */
-function redactQueryParams(error: Error): { message: string; stack: string | undefined } {
-  const idx = error.message.indexOf(PARAMS_MARKER);
-  if (idx === -1) return { message: error.message, stack: error.stack };
-
-  const message = `${error.message.slice(0, idx)}${PARAMS_MARKER}[redacted]`;
-  const head = `${error.name}: ${error.message}`;
-  const frames = error.stack?.startsWith(head) ? error.stack.slice(head.length) : "";
-  return { message, stack: `${error.name}: ${message}${frames}` };
-}
-
-/**
- * Serialize an error object into a plain object suitable for structured logging.
- * Captures message, name, and stack trace — without query parameters (N3).
- * Kod błędu bazy z `cause` (np. "23505") zostaje do diagnozy; `detail`
- * Postgresa nie, bo zawiera wartości ("Key (email)=(...)").
- */
-function serializeError(value: unknown): unknown {
-  if (value instanceof Error) {
-    const cause = (value as { cause?: unknown }).cause;
-    const causeCode =
-      cause && typeof cause === "object" && "code" in cause
-        ? String((cause as { code: unknown }).code)
-        : undefined;
-    const { message, stack } = redactQueryParams(value);
-    return {
-      message,
-      name: value.name,
-      stack,
-      ...(causeCode ? { causeCode } : {}),
-    };
-  }
-  return value;
-}
+/** N3: redakcja parametrów zapytania i `detail` — wspólny helper `@/lib/safe-error`. */
+const serializeError = toSafeErrorMeta;
 
 /**
  * Format and output a log entry.

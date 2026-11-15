@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { logger } from "@/lib/logger";
-import { clients, employees, serviceCategories, services } from "@/lib/schema";
+import { clients, employees, serviceCategories, services, serviceVariants } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
 
@@ -25,6 +25,11 @@ export interface SalonRefs {
   employeeId?: string | null | undefined;
   serviceId?: string | null | undefined;
   categoryId?: string | null | undefined;
+  /**
+   * Wariant usługi (#67): musi należeć do `serviceId` z tych samych refs,
+   * a ta usługa — do salonu. Wariant bez usługi = odmowa.
+   */
+  variantId?: string | null | undefined;
 }
 
 /** Jedyny komunikat błędu — celowo niezdradzający, który ref i dlaczego. */
@@ -52,9 +57,11 @@ export async function assertSalonRefs(
     .map((key) => [key, refs[key]] as const)
     .filter((entry): entry is readonly [RefKey, string] => typeof entry[1] === "string" && entry[1] !== "");
 
-  if (provided.length === 0) return null;
+  const variantId = typeof refs.variantId === "string" && refs.variantId !== "" ? refs.variantId : null;
 
-  const reject = (key: RefKey, reason: "format" | "not_in_salon") => {
+  if (provided.length === 0 && !variantId) return null;
+
+  const reject = (key: RefKey | "variantId", reason: "format" | "not_in_salon") => {
     logger.warn("[salon-refs] Rejected reference outside the salon", { salonId, ref: key, reason });
     return NextResponse.json({ success: false, error: SALON_REF_ERROR }, { status: 400 });
   };
@@ -63,6 +70,9 @@ export async function assertSalonRefs(
   for (const [key, id] of provided) {
     if (!isValidUuid(id)) return reject(key, "format");
   }
+  if (variantId && !isValidUuid(variantId)) return reject("variantId", "format");
+  const serviceId = typeof refs.serviceId === "string" && refs.serviceId !== "" ? refs.serviceId : null;
+  if (variantId && !serviceId) return reject("variantId", "not_in_salon");
 
   const missing = await forSalon(salonId).raw(async (tx) => {
     for (const [key, id] of provided) {
@@ -73,6 +83,21 @@ export async function assertSalonRefs(
         .where(and(eq(table.id, id), eq(table.salonId, salonId)))
         .limit(1);
       if (rows.length === 0) return key;
+    }
+    if (variantId && serviceId) {
+      const rows = await tx
+        .select({ id: serviceVariants.id })
+        .from(serviceVariants)
+        .innerJoin(services, eq(services.id, serviceVariants.serviceId))
+        .where(
+          and(
+            eq(serviceVariants.id, variantId),
+            eq(serviceVariants.serviceId, serviceId),
+            eq(services.salonId, salonId)
+          )
+        )
+        .limit(1);
+      if (rows.length === 0) return "variantId" as const;
     }
     return null;
   });

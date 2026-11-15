@@ -166,6 +166,17 @@ export async function POST(request: Request) {
     }
     const { salonId, clientId: bodyClientId, employeeId, serviceId, variantId, startTime, endTime, notes, depositAmount: bodyDepositAmount, bookedByUserId: bodyUserId, promoCodeId, guestName, guestPhone, guestEmail } = parsed.data;
 
+    // #67: JEDEN znormalizowany obiekt rezerwacji — z niego czyta strażnik
+    // zadatku (wycena: usługa + wariant + termin) i z niego idzie zapis. Wycena
+    // i zapis nie mogą się rozjechać (np. wariant wyceniony, ale nie zapisany).
+    const booking = {
+      salonId,
+      serviceId: serviceId ?? null,
+      variantId: variantId ?? null,
+      startTime: new Date(startTime),
+      endTime: new Date(endTime),
+    };
+
     // bookedByUserId WYLACZNIE z sesji (null dla goscia). Wartosc z body jest
     // ignorowana: pozwalala przypisac wizyte do cudzego konta (portal klienta,
     // odwolanie, opinia, przypomnienia push). Zaden front jej nie wysyla.
@@ -255,7 +266,13 @@ export async function POST(request: Request) {
     // P1 (Ryan): klient, pracownik i usluga musza nalezec do salonu wizyty —
     // przed sprawdzeniem kolizji (obcy employeeId nie moze nawet sondowac
     // kalendarza innego salonu). Jeden, niezdradzajacy komunikat 400.
-    const refsError = await assertSalonRefs(salonId, { clientId, employeeId, serviceId: serviceId ?? null });
+    // Wariant (#67): należy do tej usługi, a usługa do salonu — inaczej 400.
+    const refsError = await assertSalonRefs(salonId, {
+      clientId,
+      employeeId,
+      serviceId: booking.serviceId,
+      variantId: booking.variantId,
+    });
     if (refsError) return refsError;
 
     // #63: usługa z deposit_required / klient z require_deposit nie powstaje
@@ -265,17 +282,17 @@ export async function POST(request: Request) {
     if (!isStaff) {
       // Zadatek wynika z usługi — bez usługi nie da się go sprawdzić, więc
       // rezerwacja spoza personelu musi ją wskazać (portal zawsze wysyła).
-      if (!serviceId) {
+      if (!booking.serviceId) {
         return NextResponse.json(
           { success: false, error: "Wybierz usługę" },
           { status: 400 }
         );
       }
       const depositError = await depositGuardResponse({
-        salonId,
-        serviceId,
-        variantId: variantId ?? null,
-        startTime: new Date(startTime),
+        salonId: booking.salonId,
+        serviceId: booking.serviceId,
+        variantId: booking.variantId,
+        startTime: booking.startTime,
         sessionUser: session?.user ?? null,
       });
       if (depositError) return depositError;
@@ -445,13 +462,14 @@ export async function POST(request: Request) {
     const [newAppointment] = await db
       .insert(appointments)
       .values({
-        salonId,
+        salonId: booking.salonId,
         clientId,
         employeeId,
-        serviceId: serviceId || null,
+        serviceId: booking.serviceId,
+        variantId: booking.variantId,
         bookedByUserId,
-        startTime: new Date(startTime),
-        endTime: new Date(endTime),
+        startTime: booking.startTime,
+        endTime: booking.endTime,
         notes: notes || null,
         depositAmount: null,
         promoCodeId: validatedPromoCodeId,

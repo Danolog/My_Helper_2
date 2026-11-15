@@ -155,6 +155,28 @@ describe("calculateExpectedDeposit — walidacja usluga/wariant", () => {
     });
     expect(result).toEqual({ ok: false, error: "variant_not_found" });
   });
+
+  // #69: usługa wyłączona = jak usunięta (portal z nieaktualnej pamięci podręcznej)
+  it("zwraca service_not_found, gdy usluga jest wylaczona (isActive=false), bez dalszych zapytan", async () => {
+    queueSelect([{ ...baseService, isActive: false }]);
+
+    const result = await calculateExpectedDeposit(baseParams);
+    expect(result).toEqual({ ok: false, error: "service_not_found" });
+  });
+
+  it("wariant wylaczonej uslugi tez daje service_not_found", async () => {
+    queueSelect([{ ...baseService, isActive: false }], [{ id: "var-1", priceModifier: "0" }]);
+
+    const result = await calculateExpectedDeposit({ ...baseParams, variantId: "var-1" });
+    expect(result).toEqual({ ok: false, error: "service_not_found" });
+  });
+
+  it("usluga aktywna (isActive=true) liczona normalnie", async () => {
+    queueSelect([{ ...baseService, isActive: true }], []);
+
+    const result = await calculateExpectedDeposit(baseParams);
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe("calculateExpectedDeposit — zadatek procentowy uslugi", () => {

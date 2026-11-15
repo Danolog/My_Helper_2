@@ -543,3 +543,161 @@ describe("N3: log ogólnego catch bez danych gościa", () => {
     expect(logged).not.toContain("anna@test.pl");
   });
 });
+
+// -------------------------------------------------------
+// #67: jedna reguła zadatku (depositDecision) — trzy gałęzie
+// -------------------------------------------------------
+
+describe("#67: depositDecision w create-session", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it("deposit (required, kwota > 0) → 201, kwota z serwera", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(201);
+  });
+
+  it("none: required z kwotą 0 → 400 DEPOSIT_NOT_APPLICABLE + warn bez danych osobowych, nic nie zapisane", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockResolvedValue({ ok: true, required: true, amount: 0, serviceName: "Strzyzenie" });
+
+    const res = await post(buildDepositBody(formState({ ...GUEST, guestEmail: "anna@test.pl" }) /* front z nieaktualną kwotą 50 */));
+    const { status, body: json } = await parseResponse<{ code: string }>(res);
+
+    expect(status).toBe(400);
+    expect(json.code).toBe("DEPOSIT_NOT_APPLICABLE");
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    const warned = JSON.stringify(warnSpy.mock.calls);
+    expect(warned).toContain("amount is <= 0");
+    expect(warned).not.toContain("Anna");
+    expect(warned).not.toContain("123456789");
+    expect(warned).not.toContain("anna@test.pl");
+  });
+
+  it("none: wymóg niezgłoszony → 400 DEPOSIT_NOT_APPLICABLE (portal wraca do zwykłej rezerwacji)", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockResolvedValue({ ok: true, required: false, amount: 0, serviceName: "Strzyzenie" });
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(400);
+    expect(((await parseResponse<{ code: string }>(res)).body).code).toBe("DEPOSIT_NOT_APPLICABLE");
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("error: kwota NaN → 503, nic nie zapisane (bez cichego 'none')", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockResolvedValue({ ok: true, required: true, amount: Number.NaN, serviceName: "Strzyzenie" });
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toBe("5");
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("error: wyjątek wyliczenia → 503 (nie ogólne 500), nic nie zapisane", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockRejectedValue(new Error("db down"));
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(503);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+});
+
+// -------------------------------------------------------
+// #69: usunięta / wyłączona usługa z nieaktualnej strony portalu
+// -------------------------------------------------------
+
+describe("#69: usługa usunięta lub wyłączona", () => {
+  it("usługa wyłączona albo usunięta (wyliczenie: service_not_found) → 404, nic nie zapisane", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockResolvedValue({ ok: false, error: "service_not_found" });
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(404);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("wariant usunięty → 404, nic nie zapisane", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    mockCalcDeposit.mockResolvedValue({ ok: false, error: "variant_not_found" });
+    const res = await post(buildDepositBody(formState({ ...GUEST, variantId: VARIANT_UUID })));
+    expect(res.status).toBe(404);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("usługa spoza salonu / usunięta (salon-refs) → 400, bez wyliczenia i zapisu", async () => {
+    mockGetOptionalSession.mockResolvedValue(null);
+    const { NextResponse } = await import("next/server");
+    mockAssertSalonRefs.mockResolvedValue(
+      NextResponse.json({ success: false, error: "Nieprawidlowe dane dla tego salonu" }, { status: 400 })
+    );
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(400);
+    expect(mockCalcDeposit).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+});
+
+// -------------------------------------------------------
+// Ethan (#61) / #69: wdrożenie bez klucza Stripe nie symuluje płatności
+// -------------------------------------------------------
+
+describe("bez klucza Stripe: symulacja tylko poza wdrożeniem Vercela", () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    errorSpy.mockRestore();
+  });
+
+  it.each(["production", "preview"])("VERCEL_ENV=%s bez klucza → 503 STRIPE_UNAVAILABLE, nic nie zapisane", async (env) => {
+    vi.stubEnv("VERCEL_ENV", env);
+    mockGetOptionalSession.mockResolvedValue(null);
+    const res = await post(buildDepositBody(formState(GUEST)));
+    const { status, body: json } = await parseResponse<{ code: string }>(res);
+    expect(status).toBe(503);
+    expect(json.code).toBe("STRIPE_UNAVAILABLE");
+    expect(mockCalcDeposit).not.toHaveBeenCalled();
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("dev bez klucza → symulacja jak dotąd (201, simulated: true)", async () => {
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("NODE_ENV", "development");
+    mockGetOptionalSession.mockResolvedValue(null);
+    const res = await post(buildDepositBody(formState(GUEST)));
+    const { status, body: json } = await parseResponse<{ data: { simulated: boolean } }>(res);
+    expect(status).toBe(201);
+    expect(json.data.simulated).toBe(true);
+  });
+
+  it("serwer E2E w CI (NODE_ENV=production, poza Vercelem) bez klucza → symulacja (testy @full portalu)", async () => {
+    vi.stubEnv("VERCEL_ENV", "");
+    vi.stubEnv("NODE_ENV", "production");
+    mockGetOptionalSession.mockResolvedValue(null);
+    const res = await post(buildDepositBody(formState(GUEST)));
+    expect(res.status).toBe(201);
+  });
+});
+
+describe("#67: kod DEPOSIT_NOT_APPLICABLE wspólny dla serwera i portalu", () => {
+  it("front (deposit-body) i serwer (deposit-guard) używają tej samej wartości", async () => {
+    const server = await import("@/lib/deposit-guard");
+    const front = await import("@/app/(client)/salons/[id]/book/_lib/deposit-body");
+    expect(front.DEPOSIT_NOT_APPLICABLE_CODE).toBe(server.DEPOSIT_NOT_APPLICABLE_CODE);
+    expect(front.isDepositNotApplicable(400, { code: server.DEPOSIT_NOT_APPLICABLE_CODE })).toBe(true);
+    expect(front.isDepositNotApplicable(409, { code: server.DEPOSIT_NOT_APPLICABLE_CODE })).toBe(false);
+    expect(front.isDepositNotApplicable(400, { code: "VALIDATION_FAILED" })).toBe(false);
+    expect(front.isDepositNotApplicable(400, null)).toBe(false);
+  });
+});

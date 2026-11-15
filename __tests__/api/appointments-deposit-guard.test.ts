@@ -276,3 +276,119 @@ describe("pozostałe kody", () => {
     expect(res.status).toBe(500);
   });
 });
+
+describe("#67: wycena i zapis z jednego obiektu (wariant)", () => {
+  it("gość z wariantem: wyceniony wariant = zapisany wariant (i ten sam termin)", async () => {
+    h.session.mockResolvedValue(null);
+    const res = await post(body({ ...GUEST, variantId: VARIANT }));
+
+    expect(res.status).toBe(201);
+    const calcArgs = h.calc.mock.calls[0]![0] as { variantId: string; startTime: Date };
+    expect(calcArgs.variantId).toBe(VARIANT);
+    expect(inserted().variantId).toBe(VARIANT);
+    expect((inserted().startTime as Date).getTime()).toBe(calcArgs.startTime.getTime());
+  });
+
+  it("bez wariantu: wycena i zapis z variantId null", async () => {
+    h.session.mockResolvedValue(null);
+    await post(body(GUEST));
+    expect((h.calc.mock.calls[0]![0] as { variantId: unknown }).variantId).toBeNull();
+    expect(inserted().variantId).toBeNull();
+  });
+
+  it("wariant sprawdzany w salonie razem z usługą (także dla personelu)", async () => {
+    h.session.mockResolvedValue(STAFF);
+    h.salonCtx.mockResolvedValue({ salonId: SALON, role: "owner" });
+    const res = await post(body({ variantId: VARIANT }));
+
+    expect(res.status).toBe(201);
+    expect(h.refs).toHaveBeenCalledWith(SALON, expect.objectContaining({ serviceId: SERVICE, variantId: VARIANT }));
+    expect(inserted().variantId).toBe(VARIANT);
+  });
+
+  it("wariant innej usługi / innego salonu (salon-refs) → 400, bez wyceny i zapisu", async () => {
+    h.session.mockResolvedValue(null);
+    const { NextResponse } = await import("next/server");
+    h.refs.mockResolvedValue(
+      NextResponse.json({ success: false, error: "Nieprawidlowe dane dla tego salonu" }, { status: 400 })
+    );
+    const res = await post(body({ ...GUEST, variantId: VARIANT }));
+
+    expect(res.status).toBe(400);
+    expect(h.calc).not.toHaveBeenCalled();
+    expect(h.insert).not.toHaveBeenCalled();
+  });
+});
+
+describe("#67: depositDecision w /api/appointments — trzy gałęzie", () => {
+  it("none: wariant zerujący kwotę przy required, gość → 201 bez zadatku + warn bez danych osobowych", async () => {
+    const { logger } = await import("@/lib/logger");
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    h.session.mockResolvedValue(null);
+    h.calc.mockResolvedValue({ ...REQUIRED, amount: 0 });
+
+    const res = await post(body({ ...GUEST, variantId: VARIANT, guestEmail: "jan@test.pl" }));
+
+    expect(res.status).toBe(201);
+    expect(inserted()).toMatchObject({ variantId: VARIANT, depositAmount: null });
+    const call = warn.mock.calls.find(([msg]) => /amount is <= 0/.test(String(msg)));
+    expect(call).toBeDefined();
+    const logged = JSON.stringify(call);
+    expect(logged).toContain(VARIANT);
+    expect(logged).not.toContain("Jan");
+    expect(logged).not.toContain("123456789");
+    expect(logged).not.toContain("jan@test.pl");
+    warn.mockRestore();
+  });
+
+  it("none: ten sam wariant dla personelu tego salonu → 201 (bez wyceny)", async () => {
+    h.session.mockResolvedValue(STAFF);
+    h.salonCtx.mockResolvedValue({ salonId: SALON, role: "owner" });
+    h.calc.mockResolvedValue({ ...REQUIRED, amount: 0 });
+    const res = await post(body({ variantId: VARIANT }));
+    expect(res.status).toBe(201);
+    expect(h.calc).not.toHaveBeenCalled();
+  });
+
+  it("none: kwota ujemna przy required → 201 (kwota ≤ 0 = brak zadatku)", async () => {
+    h.session.mockResolvedValue(null);
+    h.calc.mockResolvedValue({ ...REQUIRED, amount: -10 });
+    const res = await post(body(GUEST));
+    expect(res.status).toBe(201);
+  });
+
+  it("error: kwota NaN → 503, bez kolizji i zapisu", async () => {
+    h.session.mockResolvedValue(null);
+    h.calc.mockResolvedValue({ ...REQUIRED, amount: Number.NaN });
+    const res = await post(body(GUEST));
+    expect(res.status).toBe(503);
+    expect(h.select).not.toHaveBeenCalled();
+    expect(h.insert).not.toHaveBeenCalled();
+  });
+
+  it("error: NaN także bez required (wycena zepsuta) → 503", async () => {
+    h.session.mockResolvedValue(null);
+    h.calc.mockResolvedValue({ ...NOT_REQUIRED, amount: Number.NaN });
+    const res = await post(body(GUEST));
+    expect(res.status).toBe(503);
+    expect(h.insert).not.toHaveBeenCalled();
+  });
+});
+
+describe("#69: usługa usunięta lub wyłączona (portal z nieaktualnej pamięci podręcznej)", () => {
+  it("usługa wyłączona/usunięta (wyliczenie: service_not_found) → 404, nic nie zapisane", async () => {
+    h.session.mockResolvedValue(null);
+    h.calc.mockResolvedValue({ ok: false, error: "service_not_found" });
+    const res = await post(body(GUEST));
+    expect(res.status).toBe(404);
+    expect(h.insert).not.toHaveBeenCalled();
+  });
+
+  it("wariant usunięty → 404, nic nie zapisane", async () => {
+    h.session.mockResolvedValue(null);
+    h.calc.mockResolvedValue({ ok: false, error: "variant_not_found" });
+    const res = await post(body({ ...GUEST, variantId: VARIANT }));
+    expect(res.status).toBe(404);
+    expect(h.insert).not.toHaveBeenCalled();
+  });
+});
