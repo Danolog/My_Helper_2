@@ -1,6 +1,7 @@
 {
   "//": [
-    "pnpm.overrides axios@<1.20.0 i follow-redirects@<1.16.2: drzewo twilio (twilio>axios>follow-redirects). Usunąć po B3 (usunięcie twilio). #68"
+    "pnpm.overrides axios@<1.20.0 i follow-redirects@<1.16.2: drzewo twilio (twilio>axios>follow-redirects). Usunąć po B3 (usunięcie twilio). #68",
+    "pnpm.overrides zod@>=4.0.0 <4.6.6: runtime @vercel/blob>@vercel/oidc>@vercel/cli-config>zod (ładowane przy imporcie @vercel/blob). Usunąć, gdy @vercel/blob przejdzie na @vercel/cli-config z zod >=4.6.6. #68"
   ],
   "name": "myhelper",
   "version": "1.1.2",
@@ -108,6 +109,7 @@
       "@types/react-dom": "19.2.3",
       "axios@<1.20.0": "^1.20.0",
       "follow-redirects@<1.16.2": "^1.16.2",
+      "zod@>=4.0.0 <4.6.6": "^4.6.6",
       "protobufjs": ">=7.5.5",
       "path-to-regexp": ">=8.4.2",
       "hono": ">=4.12.25",
