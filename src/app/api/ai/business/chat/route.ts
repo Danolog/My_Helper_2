@@ -1,55 +1,54 @@
 import { UIMessage } from "ai";
 import { z } from "zod";
 import { streamBusinessChat } from "@/lib/ai/business/chat";
-import { trackAIUsage } from "@/lib/ai/openrouter";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
-import { isProPlan } from "@/lib/subscription";
-// Zod schema for message validation
+import { isProAIError, requireProAI, trackAIUsage } from "@/lib/ai/openrouter";
+// Limity wejścia
+const MAX_PART_TEXT = 10_000;
+const MAX_PARTS = 20;
+const MAX_CONTENT = 10_000;
+const MAX_MESSAGES = 100;
+/** Górna granica tekstu w jednym zapytaniu (suma wszystkich wiadomości). */
+const MAX_TOTAL_CHARS = 60_000;
+
 const messagePartSchema = z.object({
-  type: z.string(),
-  text: z.string().max(10000, "Message text too long").optional(),
+  type: z.string().max(64),
+  text: z.string().max(MAX_PART_TEXT, "Message text too long").optional(),
 });
 
 const messageSchema = z.object({
-  id: z.string().optional(),
+  id: z.string().max(128).optional(),
   role: z.enum(["user", "assistant", "system"]),
-  parts: z.array(messagePartSchema).optional(),
-  content: z.union([z.string(), z.array(messagePartSchema)]).optional(),
+  parts: z.array(messagePartSchema).max(MAX_PARTS).optional(),
+  content: z
+    .union([
+      z.string().max(MAX_CONTENT),
+      z.array(messagePartSchema).max(MAX_PARTS),
+    ])
+    .optional(),
 });
 
 const chatRequestSchema = z.object({
-  messages: z.array(messageSchema).max(100, "Too many messages"),
+  messages: z.array(messageSchema).max(MAX_MESSAGES, "Too many messages"),
 });
 
+type ChatMessage = z.infer<typeof messageSchema>;
+
+function totalChars(messages: ChatMessage[]): number {
+  let n = 0;
+  for (const m of messages) {
+    for (const p of m.parts ?? []) n += p.text?.length ?? 0;
+    if (typeof m.content === "string") n += m.content.length;
+    else if (Array.isArray(m.content)) {
+      for (const p of m.content) n += p.text?.length ?? 0;
+    }
+  }
+  return n;
+}
+
 export async function POST(req: Request) {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-
-  // Verify authentication and resolve salon
-  const salonId = await getUserSalonId();
-  if (!salonId) {
-    return new Response(JSON.stringify({ error: "Salon not found" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  // Check Pro plan requirement
-  const hasPro = await isProPlan();
-  if (!hasPro) {
-    return new Response(
-      JSON.stringify({
-        error:
-          "Funkcje AI sa dostepne tylko w Planie Pro. Przejdz na Plan Pro, aby korzystac z asystenta AI.",
-        code: "PLAN_UPGRADE_REQUIRED",
-      }),
-      {
-        status: 403,
-        headers: { "Content-Type": "application/json" },
-      },
-    );
-  }
+  const gate = await requireProAI({ op: "text" });
+  if (isProAIError(gate)) return gate;
+  const { salonId } = gate;
 
   // Parse and validate request body
   let body: unknown;
@@ -73,6 +72,17 @@ export async function POST(req: Request) {
         status: 400,
         headers: { "Content-Type": "application/json" },
       },
+    );
+  }
+
+  // Limit łączny — przed wywołaniem modelu i przed zapisem zużycia
+  if (totalChars(parsed.data.messages) > MAX_TOTAL_CHARS) {
+    return Response.json(
+      {
+        error: "Rozmowa jest zbyt dluga. Rozpocznij nowa rozmowe.",
+        code: "INPUT_TOO_LONG",
+      },
+      { status: 400 },
     );
   }
 
