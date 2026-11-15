@@ -87,6 +87,12 @@ describe("buildCsp — produkcja", () => {
     expect(d.get("frame-ancestors")).toBe("'none'");
     expect(d.get("worker-src")).toBe("'self'");
   });
+
+  it("img-src: zasobnik GCS (C2) obok Vercel Blob — stare adresy ładują się do C4", () => {
+    const img = (d.get("img-src") ?? "").split(" ");
+    expect(img).toContain("storage.googleapis.com");
+    expect(img).toContain("*.public.blob.vercel-storage.com");
+  });
 });
 
 describe("buildCsp — development bez zmian", () => {
