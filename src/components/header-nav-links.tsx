@@ -11,8 +11,8 @@ export function HeaderNavLinks() {
   if (isPending || salonLoading) return null;
 
   if (session) {
-    const role = (session.user as { role?: string }).role;
-    const isOwner = role === "admin" || role === "owner" || !!salonId;
+    // Linki panelu tylko dla konta z salonem (salons.ownerId), nie po user.role.
+    const isOwner = !!salonId;
 
     if (isOwner) {
       return (
