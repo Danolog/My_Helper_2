@@ -124,18 +124,32 @@ test.describe('Flow 3: Services & Categories', () => {
     });
 
     test('should delete a service with confirmation', { tag: '@full' }, async ({ page }) => {
+      // Usuwamy usluge zalozona przez ten test, nie "pierwsza z listy": lista
+      // nie ma ORDER BY, a usuwanie pierwszej zjadalo kolejno uslugi z seeda,
+      // od ktorych zaleza inne testy (np. zadatek w tests/client-portal/).
       await navigateToServices(page);
+      const salonId = '00000000-0000-4000-8000-000000000001';
+      const token = (await page.context().cookies()).find((c) => c.name === 'csrf-token')?.value ?? '';
+      const name = `E2E do usuniecia ${Date.now()}`;
+      const createRes = await page.request.post('/api/services', {
+        headers: { 'x-csrf-token': decodeURIComponent(token) },
+        data: { salonId, name, basePrice: 10, baseDuration: 15 },
+      });
+      expect(createRes.status(), `zalozenie uslugi do usuniecia: ${await createRes.text()}`).toBe(201);
+      const serviceId: string = (await createRes.json()).data.id;
 
-      const deleteBtn = page.locator('[data-testid^="delete-service-"]').first();
-      if (await deleteBtn.isVisible()) {
-        await deleteBtn.click();
-        // Confirmation dialog
-        await expect(
-          page.getByTestId('confirm-delete-service-btn')
-        ).toBeVisible({ timeout: 3000 });
-        await page.getByTestId('confirm-delete-service-btn').click();
-        await page.waitForLoadState('domcontentloaded');
-      }
+      await navigateToServices(page);
+      await page.getByTestId(`delete-service-${serviceId}`).click();
+      await expect(page.getByTestId('confirm-delete-service-btn')).toBeVisible({ timeout: 3000 });
+      await page.getByTestId('confirm-delete-service-btn').click();
+
+      await expect
+        .poll(async () => {
+          const res = await page.request.get(`/api/services?salonId=${salonId}`);
+          const json = (await res.json()) as { data?: Array<{ id: string }> };
+          return (json.data ?? []).some((svc) => svc.id === serviceId);
+        }, { message: 'usunieta usluga nadal na liscie', timeout: 10000 })
+        .toBe(false);
     });
 
     test('should cancel service deletion', { tag: '@full' }, async ({ page }) => {
@@ -153,21 +167,32 @@ test.describe('Flow 3: Services & Categories', () => {
     });
 
     test('should delete a category with confirmation', { tag: '@full' }, async ({ page }) => {
+      // Jak przy usludze: usuwamy kategorie zalozona przez ten test (bez uslug),
+      // nie "pierwsza z listy" — ta mogla byc kategoria z seeda.
+      await navigateToServices(page);
+      const salonId = '00000000-0000-4000-8000-000000000001';
+      const token = (await page.context().cookies()).find((c) => c.name === 'csrf-token')?.value ?? '';
+      const name = `E2E kategoria do usuniecia ${Date.now()}`;
+      const createRes = await page.request.post('/api/service-categories', {
+        headers: { 'x-csrf-token': decodeURIComponent(token) },
+        data: { salonId, name },
+      });
+      expect(createRes.status(), `zalozenie kategorii do usuniecia: ${await createRes.text()}`).toBe(201);
+      const categoryId: string = (await createRes.json()).data.id;
+
       await navigateToServices(page);
       await page.getByTestId('tab-categories').click();
-      await page.waitForLoadState('domcontentloaded');
+      await page.getByTestId(`delete-category-${categoryId}`).click();
+      await expect(page.getByTestId('confirm-delete-category-btn')).toBeVisible({ timeout: 3000 });
+      await page.getByTestId('confirm-delete-category-btn').click();
 
-      const deleteBtn = page.locator('[data-testid^="delete-category-"]').first();
-      await deleteBtn.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
-      if (await deleteBtn.isVisible()) {
-        await deleteBtn.click();
-        const confirmBtn = page.getByTestId('confirm-delete-category-btn');
-        await confirmBtn.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
-        if (await confirmBtn.isVisible()) {
-          await confirmBtn.click();
-          await page.waitForLoadState('domcontentloaded');
-        }
-      }
+      await expect
+        .poll(async () => {
+          const res = await page.request.get(`/api/service-categories?salonId=${salonId}`);
+          const json = (await res.json()) as { data?: Array<{ id: string }> };
+          return (json.data ?? []).some((cat) => cat.id === categoryId);
+        }, { message: 'usunieta kategoria nadal na liscie', timeout: 10000 })
+        .toBe(false);
     });
   });
 
