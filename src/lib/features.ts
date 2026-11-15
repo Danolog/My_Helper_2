@@ -217,6 +217,22 @@ export const FROZEN_MODULES_NOTICE: string | null =
  * (`/api/promo-codes` → 404), nie trafia do rekomendacji AI i nie daje
  * rabatu — ani w zadatku liczonym przez serwer, ani przez kod rabatowy.
  * Wiersze w bazie zostają.
+ *
+ * PROCEDURA ODMROŻENIA (przegląd Leo N3, B2.1):
+ * 1. Zanim zdejmiesz `hardOff` z `complexPromotions`: promocje tych typów,
+ *    które były aktywne przed zamrożeniem, wrócą do życia ze swoimi starymi
+ *    datami i warunkami (`is_active`, `start_date`, `end_date` się nie
+ *    zmieniły) — naliczą rabat w portalu, zadatku i przez powiązane kody.
+ *    Trzeba je najpierw wyłączyć (`is_active = false`) albo przejrzeć
+ *    z każdym salonem.
+ * 2. To zmiana danych na produkcji — wymaga słowa Darka, przed wdrożeniem.
+ * 3. Dopiero potem zdjęcie `hardOff` w jednym miejscu (ten plik). Typy,
+ *    trasy `check-*`, `book-package` i zadatek odmrażają się razem — pilnuje
+ *    `__tests__/lib/frozen-promotions-unfreeze.test.ts`.
+ * 4. Zdjęcie jednego typu z tej listy NIE odmraża go w całości: trasy
+ *    `check-*` i `book-package` są bramkowane całym modułem
+ *    (`API_MODULE_PATTERNS`, `frozenModuleResponse`). Odmrożenie pojedynczego
+ *    typu to osobna zmiana tych bramek — z tym samym krokiem 1 i 2.
  */
 export const FROZEN_PROMOTION_TYPES = ["happy_hours", "package", "buy2get1", "first_visit"] as const;
 
