@@ -14,7 +14,7 @@ import {
   subscriptionPayments,
   subscriptionPlans,
 } from "@/lib/schema";
-import { getStripe, isStripeWebhookConfigured } from "@/lib/stripe";
+import { getStripe, getStripeWebhookSecret } from "@/lib/stripe";
 import {
   confirmSubscriptionCheckout,
   type SubscriptionCheckoutSession,
@@ -133,7 +133,8 @@ export async function POST(request: Request) {
 
     // Webhook signature verification is MANDATORY. There is no dev fallback —
     // an unsigned event could fake payments / activate plans (P0-C).
-    if (!isStripeWebhookConfigured() || !stripe) {
+    const webhookSecret = getStripeWebhookSecret();
+    if (!webhookSecret || !stripe) {
       logger.error("Stripe webhook rejected: secret or client not configured");
       return NextResponse.json(
         { error: "Webhook not configured" },
@@ -153,7 +154,7 @@ export async function POST(request: Request) {
       event = stripe.webhooks.constructEvent(
         body,
         signature,
-        process.env.STRIPE_WEBHOOK_SECRET!
+        webhookSecret
       );
     } catch (err) {
       logger.error("Stripe webhook signature verification failed", {

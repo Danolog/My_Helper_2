@@ -22,7 +22,8 @@
     },
     "BETTER_AUTH_SECRET": {
       "class": "secret",
-      "secretName": "better-auth-secret"
+      "secretName": "better-auth-secret",
+      "required": true
     },
     "BETTER_AUTH_URL": {
       "class": "var",
@@ -58,7 +59,8 @@
     },
     "CRON_SECRET": {
       "class": "secret",
-      "secretName": "cron-secret"
+      "secretName": "cron-secret",
+      "required": false
     },
     "DB_POOL_MAX": {
       "class": "var",
@@ -88,7 +90,8 @@
     },
     "GOOGLE_CLIENT_SECRET": {
       "class": "secret",
-      "secretName": "google-client-secret"
+      "secretName": "google-client-secret",
+      "required": false
     },
     "HOSTNAME": {
       "class": "platform"
@@ -109,12 +112,16 @@
     "NEXT_PUBLIC_VAPID_PUBLIC_KEY": {
       "class": "build"
     },
+    "NEXT_RUNTIME": {
+      "class": "platform",
+      "note": "Ustawia Next.js (nodejs/edge); src/instrumentation.ts uruchamia strażnika sekretów tylko dla nodejs (K-1 W1)."
+    },
     "NODE_ENV": {
       "class": "platform"
     },
     "OPENROUTER_API_KEY": {
-      "class": "secret",
-      "secretName": "openrouter-api-key"
+      "class": "vercel-only",
+      "note": "Poza Secret Manager i Cloud Run: klucz skasowany u dostawcy 14.11; AI wraca przez Vertex w kroku F kontem serwisowym, bez klucza (Oliver 20:36)."
     },
     "OPENROUTER_MODEL": {
       "class": "var",
@@ -125,11 +132,13 @@
     },
     "POSTGRES_URL": {
       "class": "secret",
-      "secretName": "postgres-url"
+      "secretName": "postgres-url",
+      "required": true
     },
     "RESEND_API_KEY": {
       "class": "secret",
-      "secretName": "resend-api-key"
+      "secretName": "resend-api-key",
+      "required": false
     },
     "SMSAPI_SENDER": {
       "class": "var",
@@ -137,7 +146,8 @@
     },
     "SMSAPI_TOKEN": {
       "class": "secret",
-      "secretName": "smsapi-token"
+      "secretName": "smsapi-token",
+      "required": false
     },
     "STORAGE_DRIVER": {
       "class": "var",
@@ -153,11 +163,13 @@
     },
     "STRIPE_SECRET_KEY": {
       "class": "secret",
-      "secretName": "stripe-secret-key"
+      "secretName": "stripe-secret-key",
+      "required": false
     },
     "STRIPE_WEBHOOK_SECRET": {
       "class": "secret",
-      "secretName": "stripe-webhook-secret"
+      "secretName": "stripe-webhook-secret",
+      "required": false
     },
     "TRUSTED_PROXIES": {
       "class": "var",
@@ -174,7 +186,8 @@
     },
     "UPSTASH_REDIS_REST_TOKEN": {
       "class": "secret",
-      "secretName": "upstash-redis-rest-token"
+      "secretName": "upstash-redis-rest-token",
+      "required": false
     },
     "UPSTASH_REDIS_REST_URL": {
       "class": "var",
@@ -182,7 +195,8 @@
     },
     "VAPID_PRIVATE_KEY": {
       "class": "secret",
-      "secretName": "vapid-private-key"
+      "secretName": "vapid-private-key",
+      "required": false
     },
     "VAPID_SUBJECT": {
       "class": "var",
