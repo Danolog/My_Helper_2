@@ -49,8 +49,6 @@ JOBS=(
   "mh-push-reminders-24h|/api/cron/push-reminders-24h|13,43 * * * *|ENABLED"
   "mh-cleanup-pending-deposits|/api/cron/cleanup-pending-deposits|*/15 * * * *|ENABLED"
   "mh-cleanup-temporary-access|/api/cron/cleanup-temporary-access|7 * * * *|ENABLED"
-  # Moduł zamrożony (krok B usuwa trasę) — zadanie istnieje, ale wstrzymane.
-  "mh-publish-scheduled-posts|/api/cron/publish-scheduled-posts|*/15 * * * *|PAUSED"
   # Wiadomości do klientów salonów — wstrzymane do decyzji produktowej (brief C, „Do Darka" 8).
   "mh-notify-birthday|/api/notifications/birthday|0 6 * * *|PAUSED"
   "mh-notify-low-stock|/api/notifications/low-stock|0 6 * * *|PAUSED"

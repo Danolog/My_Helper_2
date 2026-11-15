@@ -288,7 +288,7 @@ describe("G-C6: e2e-production.yml", () => {
       .slice(step.split("\n").findIndex((l) => l.trim() === "run: |") + 1)
       .map((l) => l.replace(/^ {10}/, ""))
       .join("\n");
-    const r = spawnSync("bash", ["-c", script], { env: { BASE_URL: url }, encoding: "utf8" });
+    const r = spawnSync("bash", ["-c", script], { env: { NODE_ENV: "test", BASE_URL: url }, encoding: "utf8" });
     expect(r.status, r.stderr).toBe(exit);
   });
 
