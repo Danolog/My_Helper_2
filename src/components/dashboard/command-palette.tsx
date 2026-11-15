@@ -42,7 +42,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useModules } from "@/components/dashboard/modules-provider";
+import { useModuleEnabled, useModules } from "@/components/dashboard/modules-provider";
 import { useSalonRole } from "@/components/dashboard/role-provider";
 import {
   CommandDialog,
@@ -55,7 +55,7 @@ import {
 } from "@/components/ui/command";
 import { useAISearch } from "@/hooks/use-ai-search";
 import { useVoiceInput } from "@/hooks/use-voice-input";
-import { BASIC_REPORT_SLUGS, moduleForRoute } from "@/lib/features";
+import { BASIC_REPORT_SLUGS, isRouteEnabledForModules } from "@/lib/features";
 import { isRouteAllowedForRole } from "@/lib/role-access";
 import { cn } from "@/lib/utils";
 
@@ -106,7 +106,7 @@ const SETTINGS_PAGES: CommandPage[] = [
   { label: "Ustawienia", href: "/dashboard/settings", icon: Settings },
   { label: "Dane salonu", href: "/dashboard/settings/salon", icon: Building2 },
   { label: "Platnosci Stripe", href: "/dashboard/settings/payments", icon: CreditCard },
-  { label: "Powiadomienia (ustawienia)", href: "/dashboard/settings/notifications", icon: Bell, keywords: ["urodziny"] },
+  { label: "Powiadomienia (ustawienia)", href: "/dashboard/settings/notifications", icon: Bell, keywords: ["sms", "przypomnienia"] },
   { label: "Program lojalnosciowy", href: "/dashboard/settings/loyalty", icon: Gift, keywords: ["punkty", "nagrody"] },
   { label: "Drukarka fiskalna", href: "/dashboard/settings/fiscal", icon: Printer, keywords: ["kasa", "paragon"] },
 ];
@@ -133,11 +133,13 @@ export function CommandPalette() {
   const router = useRouter();
   const modules = useModules();
   const role = useSalonRole();
+  // Dyktowanie wyszukiwania wola trase STT modulu voiceAi — przy module
+  // wylaczonym albo zamrozonym mikrofonu nie pokazujemy.
+  const voiceEnabled = useModuleEnabled("voiceAi");
 
   const isPageVisible = (page: CommandPage) => {
     if (!isRouteAllowedForRole(page.href, role)) return false;
-    const moduleKey = moduleForRoute(page.href);
-    return moduleKey === null || modules[moduleKey];
+    return isRouteEnabledForModules(page.href, modules);
   };
   const visibleNavPages = NAV_PAGES.filter(isPageVisible);
   const visibleReportPages = REPORT_PAGES.filter((page) => {
@@ -363,7 +365,7 @@ export function CommandPalette() {
           <span className="text-xs">⌘</span>K
         </kbd>
         <span>aby otworzyc</span>
-        {voiceSupported && (
+        {voiceEnabled && voiceSupported && (
           <button
             type="button"
             className={cn(

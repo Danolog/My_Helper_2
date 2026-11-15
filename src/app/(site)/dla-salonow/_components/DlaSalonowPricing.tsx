@@ -19,34 +19,24 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { PLANS, TRIAL_DAYS } from "@/lib/constants";
+import { PLAN_SUMMARY, planHighlights } from "@/lib/plan-features";
 
+// Listy funkcji i opisy planów pochodzą z src/lib/plan-features.ts — tu nie
+// wpisujemy własnych pozycji (pilnuje PlanFeaturesSingleSource.test.tsx).
 const PLANS_PREVIEW = {
   basic: {
     name: PLANS.basic.name,
     price: PLANS.basic.priceMonthly,
-    description:
-      "Pelne zarzadzanie salonem bez narzedzi AI. Idealny na start.",
-    features: [
-      "Kalendarz pracownikow i grafiki",
-      "Rezerwacje online",
-      "Kartoteka klientow",
-      "Raporty i statystyki",
-      "Powiadomienia SMS i email",
-    ],
+    description: PLAN_SUMMARY.basic,
+    features: planHighlights("basic", 5),
   },
   pro: {
     name: PLANS.pro.name,
     price: PLANS.pro.priceMonthly,
-    description:
-      "Pełna funkcjonalność z asystentem AI biznesowym i content marketingowym.",
-    features: [
-      "Wszystko z planu Basic",
-      "Asystent biznesowy AI",
-      "Generowanie tresci marketingowych",
-      "Proaktywne sugestie i analizy",
-    ],
+    description: PLAN_SUMMARY.pro,
+    features: planHighlights("pro", 4),
   },
-} as const;
+};
 
 export function DlaSalonowPricing() {
   return (
@@ -104,7 +94,7 @@ export function DlaSalonowPricing() {
                       <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
                         <Check className="h-3.5 w-3.5 text-primary" />
                       </div>
-                      <span className="text-base font-light">{feature}</span>
+                      <span className="text-base font-light" data-testid="plan-feature-basic">{feature}</span>
                     </div>
                   ))}
                 </div>
@@ -157,7 +147,7 @@ export function DlaSalonowPricing() {
                       <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
                         <Check className="h-3.5 w-3.5 text-primary" />
                       </div>
-                      <span className="text-base font-light">{feature}</span>
+                      <span className="text-base font-light" data-testid="plan-feature-pro">{feature}</span>
                     </div>
                   ))}
                 </div>

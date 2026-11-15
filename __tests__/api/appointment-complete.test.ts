@@ -118,6 +118,23 @@ vi.mock("@/lib/salon-context", () => ({
   hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
 }));
 
+// Lojalność jest zamrożona w rejestrze modułów (hardOff w src/lib/features.ts,
+// krok B1). Kod naliczania punktów zostaje w repo i czeka na odmrożenie —
+// jego testy też zostają: `loyaltyThaw.on = true` symuluje moduł odmrożony.
+// Domyślnie false, czyli obowiązuje prawdziwy rejestr (test blokady niżej).
+const loyaltyThaw = vi.hoisted(() => ({ on: false }));
+
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    resolveModules: (settingsJson: unknown) => {
+      const state = actual.resolveModules(settingsJson);
+      return loyaltyThaw.on ? { ...state, loyalty: true } : state;
+    },
+  };
+});
+
 // -------------------------------------------------------
 // Chain builder
 // -------------------------------------------------------
@@ -150,6 +167,7 @@ import { POST as completeAppointment } from "@/app/api/appointments/[id]/complet
 describe("POST /api/appointments/[id]/complete", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    loyaltyThaw.on = false;
   });
 
   it("should return 200 when completing an appointment successfully", async () => {
@@ -692,6 +710,7 @@ describe("POST /api/appointments/[id]/complete", () => {
   });
 
   it("should create loyalty record and award points when loyalty is enabled and no existing record", async () => {
+    loyaltyThaw.on = true;
     const appointment = makeAppointment({ status: "scheduled" });
     const service = makeService({ basePrice: "200.00", name: "Masaz" });
     const treatment = { id: "treatment-1", appointmentId: TEST_IDS.APPOINTMENT_UUID };
@@ -766,6 +785,7 @@ describe("POST /api/appointments/[id]/complete", () => {
   });
 
   it("should update existing loyalty record and award points when loyalty is enabled", async () => {
+    loyaltyThaw.on = true;
     const appointment = makeAppointment({ status: "scheduled" });
     const service = makeService({ basePrice: "100.00", name: "Koloryzacja" });
     const treatment = { id: "treatment-1", appointmentId: TEST_IDS.APPOINTMENT_UUID };
@@ -845,6 +865,7 @@ describe("POST /api/appointments/[id]/complete", () => {
   });
 
   it("should not award loyalty points when loyalty is disabled", async () => {
+    loyaltyThaw.on = true;
     const appointment = makeAppointment({ status: "scheduled" });
     const service = makeService({ basePrice: "200.00" });
     const treatment = { id: "treatment-1", appointmentId: TEST_IDS.APPOINTMENT_UUID };
@@ -902,7 +923,87 @@ describe("POST /api/appointments/[id]/complete", () => {
     expect(mockDbInsert).toHaveBeenCalledTimes(2); // treatment + commission only
   });
 
+  it("nie nalicza punktów, gdy moduł lojalności jest zamrożony — mimo programu włączonego w ustawieniach salonu", async () => {
+    // Prawdziwy rejestr (loyaltyThaw.on = false). Salon ma program włączony
+    // w OBU miejscach zapisu sprzed zamrożenia, a klient ma już saldo 50 pkt.
+    const appointment = makeAppointment({ status: "scheduled" });
+    const service = makeService({ basePrice: "100.00", name: "Koloryzacja" });
+    const treatment = { id: "treatment-1", appointmentId: TEST_IDS.APPOINTMENT_UUID };
+    const updatedAppointment = { ...appointment, status: "completed" };
+    const commission = { id: "comm-1", amount: "50.00", percentage: "50.00" };
+
+    const loyaltySettings = {
+      enabled: true,
+      pointsPerCurrencyUnit: 1,
+      currencyUnit: 1,
+      pointsExpiryDays: null,
+      rewardTiers: [],
+    };
+    const existingLoyaltyRecord = {
+      id: "loyalty-1",
+      clientId: TEST_IDS.CLIENT_UUID,
+      salonId: TEST_IDS.SALON_UUID,
+      points: 50,
+    };
+    const loyaltyTransaction = { id: "lt-1", loyaltyId: "loyalty-1", pointsChange: 100 };
+
+    // 1. Fetch appointment with service
+    mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service }]));
+    // 2. Check for existing treatment record (none)
+    mockDbSelect.mockReturnValueOnce(chainMock([]));
+    // 3. Insert new treatment record
+    mockDbInsert.mockReturnValueOnce(chainMock([treatment]));
+    // 4. Update appointment status to completed
+    mockDbUpdate.mockReturnValueOnce(chainMock([updatedAppointment]));
+    // 5. Get employee's commission rate
+    mockDbSelect.mockReturnValueOnce(chainMock([{ commissionRate: "50.00" }]));
+    // 6. Check for employee-specific pricing (none)
+    mockDbSelect.mockReturnValueOnce(chainMock([]));
+    // 7. Check for existing commission (none)
+    mockDbSelect.mockReturnValueOnce(chainMock([]));
+    // 8. Insert new commission record
+    mockDbInsert.mockReturnValueOnce(chainMock([commission]));
+    // 9. Get linked products for service (none)
+    mockDbSelect.mockReturnValueOnce(chainMock([]));
+    // 10. Loyalty: fetch salon settings -> program włączony w obu zapisach
+    mockDbSelect.mockReturnValueOnce(chainMock([{
+      id: TEST_IDS.SALON_UUID,
+      settingsJson: { loyalty: loyaltySettings, modules: { loyalty: true } },
+    }]));
+    // Odpowiedzi bazy dla ścieżki naliczania — gdyby blokada nie zadziałała,
+    // punkty zostałyby naliczone i test by to pokazał (data.loyalty != null).
+    mockDbSelect.mockReturnValueOnce(chainMock([]));
+    mockDbSelect.mockReturnValueOnce(chainMock([existingLoyaltyRecord]));
+    mockDbUpdate.mockReturnValueOnce(chainMock([]));
+    mockDbInsert.mockReturnValueOnce(chainMock([loyaltyTransaction]));
+
+    const request = createMockRequest(
+      `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`,
+      {
+        method: "POST",
+        body: {},
+      }
+    );
+    const params = createRouteParams(TEST_IDS.APPOINTMENT_UUID);
+    const response = await completeAppointment(request, params);
+    const { status, body } = await parseResponse(response);
+
+    // Wizyta zamyka się normalnie...
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+    // ...ale punktów nie ma: brak wyniku, brak zapisu salda i transakcji.
+    expect((body as any).data.loyalty).toBeNull();
+    expect(mockDbInsert).toHaveBeenCalledTimes(2); // treatment + commission
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1); // tylko status wizyty
+
+    // Nieużyte odpowiedzi z kolejki nie mogą przeciec do następnego testu.
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    mockDbUpdate.mockReset();
+  });
+
   it("should reduce price for loyalty points when appointment has discountAmount", async () => {
+    loyaltyThaw.on = true;
     const appointment = makeAppointment({ status: "scheduled", discountAmount: "50.00" });
     const service = makeService({ basePrice: "200.00", name: "Premium" });
     const treatment = { id: "treatment-1", appointmentId: TEST_IDS.APPOINTMENT_UUID };

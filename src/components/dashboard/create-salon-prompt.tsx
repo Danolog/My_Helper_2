@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { mutationFetch } from "@/lib/api-client";
 import { PLANS, TRIAL_DAYS } from "@/lib/constants";
+import { planHighlights } from "@/lib/plan-features";
 
 interface CreateSalonPromptProps {
   session: { user: { name?: string | null; email: string } };
@@ -18,28 +19,20 @@ export function CreateSalonPrompt({ session, onCreated }: CreateSalonPromptProps
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState("");
 
+  // Listy funkcji pochodza z src/lib/plan-features.ts — tu nie wpisujemy
+  // wlasnych pozycji (pilnuje PlanFeaturesSingleSource.test.tsx).
   const plans = [
     {
       slug: PLANS.basic.slug,
       name: PLANS.basic.name,
       price: PLANS.basic.priceLabel,
-      features: [
-        "Zarzadzanie wizytami",
-        "Kalendarz pracownikow",
-        "Baza klientow",
-        "Raporty podstawowe",
-      ],
+      features: planHighlights("basic", 4),
     },
     {
       slug: PLANS.pro.slug,
       name: PLANS.pro.name,
       price: PLANS.pro.priceLabel,
-      features: [
-        "Wszystko z Basic",
-        "Asystent AI",
-        "Zaawansowane raporty",
-        "Marketing i newsletter",
-      ],
+      features: planHighlights("pro", 4),
     },
   ];
 
