@@ -372,14 +372,56 @@ describe("webhook — zdarzenie tylko jako sygnał: stan bieżący ze Stripe, ca
     ["invoice.paid", INVOICE_PAID, [[PLAN_PRO]]],
     ["invoice.payment_failed", { id: "in_3", subscription: "sub_1", payment_intent: "pi_3" }, [[PLAN_PRO]]],
   ] as const)(
-    "lokalne canceled (np. subscriptions/cancel), Stripe nadal active → %s nie wskrzesza",
+    "lokalne canceled (subscriptions/cancel), Stripe active z cancel_at_period_end=true → %s nie wskrzesza",
     async (type, object, extra) => {
-      retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "active" });
+      retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "active", cancel_at_period_end: true });
       f.selects.push([{ ...LOCAL, status: "canceled" }], ...(extra as unknown as unknown[][]));
       expect((await deliver(object as unknown as Record<string, unknown>, type)).status).toBe(200);
       expect(subWrites()).toEqual([]);
+      expect(logger.error).not.toHaveBeenCalled();
     }
   );
+
+  // Bliźniak: lokalne canceled bez potwierdzenia w Stripe (dryf — np. dawne
+  // anulowanie mimo błędu Stripe — albo wznowienie w panelu Stripe). Stripe
+  // dalej pobiera opłaty, więc stan ze Stripe wygrywa + manual handling
+  // (Ethan, przegląd #62 §2b, reguła 2).
+  it.each([
+    ["customer.subscription.updated", { id: "sub_1", status: "active" }, []],
+    ["invoice.paid", INVOICE_PAID, [[PLAN_PRO]]],
+    ["invoice.payment_failed", { id: "in_3", subscription: "sub_1", payment_intent: "pi_3" }, [[PLAN_PRO]]],
+  ] as const)(
+    "lokalne canceled, Stripe active z cancel_at_period_end=false → %s zapisuje stan ze Stripe + logger.error",
+    async (type, object, extra) => {
+      retrieveSubscription.mockResolvedValue({
+        ...STRIPE_SUB,
+        status: "active",
+        cancel_at_period_end: false,
+        canceled_at: null,
+      });
+      f.selects.push(
+        [{ ...LOCAL, status: "canceled", canceledAt: new Date(PERIOD_START * 1000) }],
+        ...(extra as unknown as unknown[][])
+      );
+      expect((await deliver(object as unknown as Record<string, unknown>, type)).status).toBe(200);
+      expect(subWrites().map((w) => [w.values.status, w.values.canceledAt])).toEqual([["active", null]]);
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining("manual handling"),
+        expect.objectContaining({ stripeSubscriptionId: "sub_1", stripeStatus: "active", cancelAtPeriodEnd: false })
+      );
+    }
+  );
+
+  it.each([
+    ["canceled", { status: "canceled", canceled_at: PERIOD_START, cancel_at_period_end: false }],
+    ["incomplete_expired", { status: "incomplete_expired", cancel_at_period_end: false }],
+  ] as const)("lokalne canceled, Stripe %s → końcowe, bez zapisu i bez logger.error", async (_name, stripe) => {
+    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, ...stripe });
+    f.selects.push([{ ...LOCAL, status: "canceled" }]);
+    expect((await deliver({ id: "sub_1" }, "customer.subscription.updated")).status).toBe(200);
+    expect(subWrites()).toEqual([]);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
 
   it("późne invoice.payment_failed po invoice.paid: Stripe mówi active → bez fałszywego past_due", async () => {
     retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "active" });
