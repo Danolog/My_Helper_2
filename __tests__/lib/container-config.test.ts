@@ -39,8 +39,12 @@ const SECRET_NAMES = [
   "BLOB_READ_WRITE_TOKEN",
   "GOOGLE_AI_API_KEY",
 ];
-// Nazwy wyglądające na sekret, nawet spoza listy. NEXT_PUBLIC_* są jawne z definicji.
-const SECRET_LIKE = /(SECRET|TOKEN|PASSWORD|PRIVATE|API_KEY)/;
+// Nazwy wyglądające na sekret, nawet spoza listy; porównanie bez wielkości liter
+// (Ryan, #110 P3). NEXT_PUBLIC_* trafiają do przeglądarki, więc z definicji nie
+// mogą być sekretem — nazwa z SECRET/TOKEN/PASSWORD/PRIVATE to błąd, nie wyjątek.
+const SECRET_LIKE = /(SECRET|TOKEN|PASSWORD|PRIVATE|API_KEY)/i;
+const PUBLIC_SECRET_LIKE = /(SECRET|TOKEN|PASSWORD|PRIVATE)/i;
+const ROOT_USERS = ["root", "0", "0:0", "root:root", "root:0", "0:root"];
 
 interface DockerStage {
   name: string;
@@ -86,8 +90,14 @@ function declaredNames(instr: string): string[] {
 }
 
 function isSecretName(name: string): boolean {
-  if (name.startsWith("NEXT_PUBLIC_")) return false;
-  return SECRET_NAMES.includes(name) || SECRET_LIKE.test(name);
+  const upper = name.toUpperCase();
+  if (upper.startsWith("NEXT_PUBLIC_")) return PUBLIC_SECRET_LIKE.test(upper);
+  return SECRET_NAMES.includes(upper) || SECRET_LIKE.test(upper);
+}
+
+function isRootOrDynamicUser(user: string): boolean {
+  // `USER ${ARG}` — wartość znana dopiero przy budowie; może być root.
+  return user.includes("$") || ROOT_USERS.includes(user.toLowerCase());
 }
 
 function lastUser(stage: DockerStage): string | undefined {
@@ -150,10 +160,10 @@ describe("G-C1: Dockerfile", () => {
     expect(elsewhere).toEqual([]);
   });
 
-  it("etap runner kończy się użytkownikiem innym niż root", () => {
+  it("etap runner kończy się stałym użytkownikiem innym niż root", () => {
     const user = lastUser(runner!);
     expect(user, "etap runner bez instrukcji USER — kontener działałby jako root").toBeDefined();
-    expect(["root", "0", "0:0", "root:root"]).not.toContain(user);
+    expect(isRootOrDynamicUser(user!), `USER ${user}`).toBe(false);
   });
 
   it("etap migrator też nie działa jako root", () => {
@@ -161,7 +171,35 @@ describe("G-C1: Dockerfile", () => {
     expect(migrator).toBeDefined();
     const user = lastUser(migrator!);
     expect(user).toBeDefined();
-    expect(["root", "0", "0:0", "root:root"]).not.toContain(user);
+    expect(isRootOrDynamicUser(user!), `USER ${user}`).toBe(false);
+  });
+
+  it("runner kopiuje wyłącznie z etapu builder (żadnego COPY/ADD z kontekstu budowy)", () => {
+    const fromContext = runner!.instructions.filter(
+      (i) => /^(COPY|ADD)\s/i.test(i) && !/--from=builder(\s|$)/i.test(i),
+    );
+    expect(fromContext).toEqual([]);
+  });
+
+  it("pliki aplikacji w runner należą do root (bez --chown); zapisywalny tylko .next/cache", () => {
+    const chowned = runner!.instructions.filter((i) => /^(COPY|ADD)\s/i.test(i) && /--chown/i.test(i));
+    expect(chowned).toEqual([]);
+    const chownRuns = runner!.instructions.filter((i) => /^RUN\s/i.test(i) && /chown/.test(i));
+    expect(chownRuns).toEqual(["RUN mkdir -p .next/cache && chown node:node .next/cache"]);
+  });
+
+  it("runner nie tworzy plików .env* poleceniem RUN", () => {
+    expect(runner!.instructions.filter((i) => /^RUN\s/i.test(i) && /\.env/i.test(i))).toEqual([]);
+  });
+
+  it("migrator ma tylko zależności produkcyjne i nie uruchamia drizzle-kit", () => {
+    const prodDeps = stages.find((s) => s.name === "prod-deps");
+    expect(prodDeps, "brak etapu `AS prod-deps`").toBeDefined();
+    expect(prodDeps!.instructions).toContain("RUN pnpm install --frozen-lockfile --prod");
+    const migrator = stages.find((s) => s.name === "migrator")!;
+    const nodeModules = migrator.instructions.filter((i) => /^COPY\s.*node_modules/i.test(i));
+    expect(nodeModules).toEqual(["COPY --from=prod-deps /app/node_modules ./node_modules"]);
+    expect(migrator.instructions.join("\n")).not.toMatch(/drizzle-kit|db:migrate/);
   });
 
   it("żaden etap nie kopiuje plików .env*", () => {
@@ -183,16 +221,11 @@ describe("G-C1: Dockerfile", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("wartości zastępcze do budowy żyją tylko w RUN etapu builder", () => {
-    const withPlaceholders = stages.flatMap((s) =>
-      s.instructions
-        .filter((i) => /POSTGRES_URL=|BETTER_AUTH_SECRET=/.test(i))
-        .map((i) => ({ stage: s.name, isRun: /^RUN\s/i.test(i) })),
+  it("budowa nie dostaje żadnej wartości POSTGRES_URL ani BETTER_AUTH_SECRET (leniwe db, C3)", () => {
+    const withValues = stages.flatMap((s) =>
+      s.instructions.filter((i) => /POSTGRES_URL=|BETTER_AUTH_SECRET=/i.test(i)).map((i) => `${s.name}: ${i}`),
     );
-    expect(withPlaceholders.length).toBeGreaterThan(0);
-    for (const p of withPlaceholders) {
-      expect(p).toEqual({ stage: "builder", isRun: true });
-    }
+    expect(withValues).toEqual([]);
   });
 });
 
@@ -261,11 +294,24 @@ describe("parser Dockerfile (samokontrola strażnika)", () => {
     expect(parsed[1]!.instructions.flatMap(declaredNames)).toEqual(["CRON_SECRET"]);
   });
 
-  it("rozpoznaje sekrety, ale nie NEXT_PUBLIC_*", () => {
+  it("rozpoznaje sekrety, także małymi literami i udające NEXT_PUBLIC_*", () => {
     expect(isSecretName("STRIPE_SECRET_KEY")).toBe(true);
+    expect(isSecretName("stripe_secret_key")).toBe(true);
     expect(isSecretName("POSTGRES_URL")).toBe(true);
+    expect(isSecretName("postgres_url")).toBe(true);
     expect(isSecretName("SOME_API_KEY")).toBe(true);
+    expect(isSecretName("NEXT_PUBLIC_STRIPE_SECRET_KEY")).toBe(true);
+    expect(isSecretName("next_public_api_token")).toBe(true);
     expect(isSecretName("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY")).toBe(false);
+    expect(isSecretName("NEXT_PUBLIC_VAPID_PUBLIC_KEY")).toBe(false);
     expect(isSecretName("NODE_ENV")).toBe(false);
+  });
+
+  it("USER ze zmienną albo root (dowolna wielkość liter) jest odrzucany", () => {
+    expect(isRootOrDynamicUser("${APP_USER}")).toBe(true);
+    expect(isRootOrDynamicUser("$UID")).toBe(true);
+    expect(isRootOrDynamicUser("ROOT")).toBe(true);
+    expect(isRootOrDynamicUser("0:0")).toBe(true);
+    expect(isRootOrDynamicUser("node")).toBe(false);
   });
 });

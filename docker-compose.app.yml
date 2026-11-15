@@ -7,7 +7,9 @@
 #   docker compose -f docker-compose.yml -f docker-compose.app.yml up -d app
 #   curl -i http://localhost:8080/api/health
 #
-# Uwaga: `migrate` wykonuje `pnpm db:migrate` na bazie pos_dev z docker-compose.yml.
+# Uwaga: `migrate` (infra/db/migrate.mjs) migruje bazę pos_dev z docker-compose.yml,
+# a docker-compose.yml publikuje 5432 na hoście — nie uruchamiać obok innej
+# lokalnej bazy na 5432. Aplikacja słucha tylko na 127.0.0.1.
 services:
   migrate:
     build:
@@ -26,7 +28,7 @@ services:
       args:
         NEXT_PUBLIC_APP_URL: http://localhost:8080
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       POSTGRES_URL: postgresql://dev_user:dev_password@postgres:5432/pos_dev
       BETTER_AUTH_URL: http://localhost:8080
