@@ -20,6 +20,10 @@
  *   przekierowanie na `/dashboard`;
  * - `POST /api/appointments/[id]/complete` — punkty lojalnościowe naliczane
  *   tylko, gdy `resolveModules(...).loyalty`;
+ * - trasy modułów zamrożonych same pytają `isModuleFrozen()` (druga linia
+ *   obrony, gdyby proxy zostało ominięte) — `src/lib/server/frozen-guard.ts`;
+ * - promocje — typy z `FROZEN_PROMOTION_TYPES` nie są tworzone, zwracane ani
+ *   naliczane (`/api/promotions`, `promo-discount.ts`, `deposit-calculation.ts`);
  * - interfejs — `useModuleEnabled()` / `<ModuleGate>` / `moduleForRoute()`.
  * Pilnuje tego `__tests__/lib/frozen-modules.test.ts`.
  */
@@ -40,7 +44,9 @@ export type ModuleKey =
   | "socialPosts"
   | "clientMarketing"
   | "aiNotifications"
-  | "pushNotifications";
+  | "pushNotifications"
+  | "complexPromotions"
+  | "imageGen";
 
 export interface ModuleDef {
   key: ModuleKey;
@@ -65,8 +71,8 @@ export const MODULES: readonly ModuleDef[] = [
   },
   {
     key: "promotions",
-    label: "Promocje i pakiety",
-    description: "Happy hours, promocje pierwszej wizyty, pakiety usług i kody promocyjne.",
+    label: "Rabaty i kody rabatowe",
+    description: "Rabat procentowy lub kwotowy oraz kody rabatowe.",
     defaultEnabled: false,
   },
   {
@@ -158,6 +164,27 @@ export const MODULES: readonly ModuleDef[] = [
     defaultEnabled: false,
     hardOff: true,
   },
+  {
+    // Promocje złożone w module „promotions”: happy hours, pakiety usług,
+    // 2+1 i pierwsza wizyta. Moduł promocji zostaje przełączalny (proste
+    // rabaty i kody), więc zamrożenie żyje tu: trasy sprawdzające i rezerwacja
+    // pakietu (`API_MODULE_PATTERNS`) oraz typy (`FROZEN_PROMOTION_TYPES`).
+    key: "complexPromotions",
+    label: "Promocje złożone",
+    description: "Happy hours, pakiety usług, 2+1 i rabat na pierwszą wizytę.",
+    defaultEnabled: false,
+    hardOff: true,
+  },
+  {
+    // Generowanie obrazów modelem: baner promocji, grafika do posta,
+    // ilustracja usługi. Poprawianie zdjęć galerii (`/api/ai/image/enhance`,
+    // biblioteka sharp, bez modelu i kosztu) NIE należy do modułu.
+    key: "imageGen",
+    label: "Generowanie grafik (AI)",
+    description: "Banery promocji, grafiki do postów i ilustracje usług generowane przez AI.",
+    defaultEnabled: false,
+    hardOff: true,
+  },
 ] as const;
 
 /** Moduły z przełącznikiem w Ustawienia → Moduły. */
@@ -179,6 +206,22 @@ export function isModuleFrozen(key: ModuleKey): boolean {
  */
 export const FROZEN_MODULES_NOTICE: string | null =
   "Faktury i program lojalnościowy są obecnie niedostępne. Wystawione faktury i punkty klientów pozostają zapisane na koncie salonu.";
+
+/**
+ * Typy promocji zamrożone razem z modułem `complexPromotions`. Promocja
+ * takiego typu nie może powstać (`POST`/`PUT /api/promotions` → 400), nie jest
+ * zwracana (`GET`) i nie daje rabatu — ani w zadatku liczonym przez serwer,
+ * ani przez kod rabatowy z nią powiązany. Wiersze w bazie zostają.
+ */
+export const FROZEN_PROMOTION_TYPES = ["happy_hours", "package", "buy2get1", "first_visit"] as const;
+
+/** Czy typ promocji jest zamrożony (`FROZEN_PROMOTION_TYPES`). */
+export function isPromotionTypeFrozen(type: unknown): boolean {
+  return (
+    typeof type === "string" &&
+    (FROZEN_PROMOTION_TYPES as readonly string[]).includes(type)
+  );
+}
 
 /** Kod błędu i komunikat dla zamrożonej funkcji (odpowiedź proxy i bramka strony). */
 export const MODULE_DISABLED_CODE = "MODULE_DISABLED";
@@ -276,6 +319,19 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
   { pattern: /^\/api\/ai\/notifications(\/|$)/, module: "aiNotifications" },
   { pattern: /^\/api\/push(\/|$)/, module: "pushNotifications" },
   { pattern: /^\/api\/cron\/push-reminders(-24h)?(\/|$)/, module: "pushNotifications" },
+  // Promocje złożone: sprawdzanie 2+1, happy hours, pakietów, pierwszej
+  // wizyty i rezerwacja pakietu. Lista i edycja promocji (`/api/promotions`,
+  // `/api/promotions/[id]`) zostają — filtrują typy zamrożone same.
+  {
+    pattern: /^\/api\/promotions\/check(-happy-hours|-package|-first-visit)?(\/|$)/,
+    module: "complexPromotions",
+  },
+  { pattern: /^\/api\/appointments\/book-package(\/|$)/, module: "complexPromotions" },
+  // Generowanie obrazów modelem. `/api/ai/image/enhance` (galeria) zostaje.
+  {
+    pattern: /^\/api\/ai\/image\/(generate|banner|service-illustration)(\/|$)/,
+    module: "imageGen",
+  },
   // Moduły zamrożone wcześniej (kod kasowany w B3–B5). Wywołujący trasy
   // głosowe (dyktowanie, czytanie na głos) i paragon wizyty są schowani
   // w interfejsie przez useModuleEnabled("voiceAi") / ("fiscal").

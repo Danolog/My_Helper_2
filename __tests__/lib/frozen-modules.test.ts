@@ -69,6 +69,11 @@ const API_DIR_NAMES: Record<string, RegExp | null> = {
   videoGen: /\/ai\/video(\/|$)/,
   fiscal: /fiscal/,
   socialPosts: /scheduled-posts|social-post/,
+  // Promocje złożone: trasy sprawdzające (2+1, happy hours, pakiet, pierwsza
+  // wizyta) i rezerwacja pakietu. Lista i edycja promocji zostają.
+  complexPromotions: /^\/api\/promotions\/check|\/book-package(\/|$)/,
+  // Generowanie obrazów — każda trasa pod /api/ai/image poza enhance (galeria).
+  imageGen: /^\/api\/ai\/image\/(?!enhance(\/|$))/,
 };
 
 const FROZEN_KEYS = MODULES.filter((m) => m.hardOff).map((m) => m.key);
@@ -78,7 +83,9 @@ describe("rejestr modułów zamrożonych", () => {
     expect([...FROZEN_KEYS].sort()).toEqual([
       "aiNotifications",
       "clientMarketing",
+      "complexPromotions",
       "fiscal",
+      "imageGen",
       "invoices",
       "loyalty",
       "newsletters",
@@ -164,6 +171,14 @@ describe("frozenModuleForApiPath", () => {
     ["/api/cron/publish-scheduled-posts", "socialPosts"],
     ["/api/salons/abc/fiscal-settings", "fiscal"],
     ["/api/salons/abc/fiscal-settings/test-print", "fiscal"],
+    ["/api/promotions/check", "complexPromotions"],
+    ["/api/promotions/check-happy-hours", "complexPromotions"],
+    ["/api/promotions/check-package", "complexPromotions"],
+    ["/api/promotions/check-first-visit", "complexPromotions"],
+    ["/api/appointments/book-package", "complexPromotions"],
+    ["/api/ai/image/generate", "imageGen"],
+    ["/api/ai/image/banner", "imageGen"],
+    ["/api/ai/image/service-illustration", "imageGen"],
   ])("%s → %s", (path, module) => {
     expect(frozenModuleForApiPath(path)).toBe(module);
   });
@@ -202,6 +217,14 @@ describe("frozenModuleForApiPath", () => {
     "/api/appointments/abc",
     "/api/appointments/abc/complete",
     "/api/ai/image/enhance",
+    "/api/ai/image/enhance/",
+    "/api/promotions",
+    "/api/promotions/abc",
+    "/api/promotions/checkout",
+    "/api/promo-codes",
+    "/api/promo-codes/validate",
+    "/api/appointments/book-packagex",
+    "/api/ai/image/generatex",
     "/api/ai/content/service-description",
     "/api/ai/clients/insights",
     "/api/invoicesx",
@@ -294,6 +317,7 @@ describe("frozenModuleForPage", () => {
     // Moduły przełączalne nie są egzekwowane w proxy (wymaga odczytu bazy).
     "/dashboard/products",
     "/dashboard/promotions",
+    "/dashboard/promo-codes",
     "/dashboard/waiting-list",
   ])("strona rdzenia albo modułu przełączalnego przechodzi: %s", (path) => {
     expect(frozenModuleForPage(path)).toBeNull();

@@ -102,6 +102,16 @@ describe("proxy: trasy API modułów zamrożonych", () => {
     expect(FROZEN_ROUTES).toContain("/api/notifications/birthday");
     expect(FROZEN_ROUTES).toContain("/api/notifications/we-miss-you");
     expect(FROZEN_ROUTES).toContain("/api/ai/notifications/personalize");
+    // B2: promocje złożone i generowanie obrazów
+    expect(FROZEN_ROUTES).toContain("/api/promotions/check");
+    expect(FROZEN_ROUTES).toContain("/api/promotions/check-first-visit");
+    expect(FROZEN_ROUTES).toContain("/api/promotions/check-happy-hours");
+    expect(FROZEN_ROUTES).toContain("/api/promotions/check-package");
+    expect(FROZEN_ROUTES).toContain("/api/appointments/book-package");
+    expect(FROZEN_ROUTES).toContain("/api/ai/image/generate");
+    expect(FROZEN_ROUTES).toContain("/api/ai/image/banner");
+    expect(FROZEN_ROUTES).toContain("/api/ai/image/service-illustration");
+    expect(FROZEN_ROUTES).not.toContain("/api/ai/image/enhance");
   });
 
   describe.each(FROZEN_ROUTES)("%s", (route) => {
@@ -131,8 +141,23 @@ describe("proxy: trasy API modułów zamrożonych", () => {
     "/API/Invoices",
     "/Api/invoices/abc",
     "/api/notifications/birthday?salonId=abc",
+    "/api/promotions/check-first-visit?salonId=abc&email=a%40b.pl",
+    "/api/promotions/check-first-visit/",
+    "/api/ai/image/banner/",
+    "/API/AI/Image/Generate",
+    "/api/ai/image/service-illustration?serviceId=abc",
   ])("wariant zapisu ścieżki %s → 404", async (path) => {
     const response = await proxy(request(path, "GET", SESSION));
+    expect(response.status).toBe(404);
+    expect((await response.json()).code).toBe(MODULE_DISABLED_CODE);
+  });
+
+  it.each([
+    "/api/promotions/check-first-visit?salonId=abc&email=a%40b.pl",
+    "/api/promotions/check-happy-hours?salonId=abc&date=2026-11-20&time=10:00",
+    "/api/promotions/check-package?salonId=abc",
+  ])("publiczna trasa promocji złożonej bez sesji %s → 404 (portal klienta)", async (path) => {
+    const response = await proxy(request(path, "GET"));
     expect(response.status).toBe(404);
     expect((await response.json()).code).toBe(MODULE_DISABLED_CODE);
   });
@@ -270,6 +295,10 @@ describe("proxy: trasy sąsiednie przechodzą", () => {
     "/api/salons/x1/modules",
     "/api/appointments/x1/complete",
     "/api/ai/image/enhance",
+    "/api/promotions",
+    "/api/promotions/x1",
+    "/api/promo-codes",
+    "/api/promo-codes/validate",
     "/api/subscription-plans",
   ];
 
