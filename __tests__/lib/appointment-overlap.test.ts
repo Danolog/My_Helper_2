@@ -120,8 +120,9 @@ describe("przedział pusty lub odwrócony (obrona w głębi)", () => {
     expect(() => assertValidRange(at("10:00"), new Date(at("10:00").getTime() + 1))).not.toThrow();
   });
 
-  it("rangesOverlap: przedział pusty nie koliduje z niczym (bez wyjątku — sloty)", () => {
-    expect(rangesOverlap(600, 600, 0, 1440)).toBe(false);
-    expect(rangesOverlap(0, 1440, 600, 600)).toBe(false);
+  it("rangesOverlap bez wyjątku: przedział pusty na krawędzi nie koliduje, wewnątrz — koliduje (ostrożnie)", () => {
+    expect(rangesOverlap(0, 0, 0, 30)).toBe(false);
+    expect(rangesOverlap(1440, 1440, 1410, 1440)).toBe(false);
+    expect(rangesOverlap(0, 1440, 600, 600)).toBe(true);
   });
 });

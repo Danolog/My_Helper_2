@@ -22,8 +22,9 @@ const toMs = (v: Instant): number => (typeof v === "number" ? v : v.getTime());
 
 /**
  * Kolizja dwóch przedziałów półotwartych `[aStart, aEnd)` i `[bStart, bEnd)`.
- * Przedział pusty lub odwrócony (`end <= start`) nie koliduje z niczym — tu
- * celowo bez wyjątku: available-slots przycina blokady do dnia i bywa `[0, 0)`.
+ * Celowo bez wyjątku przy `end <= start`: available-slots przycina blokady do
+ * dnia i bywa `[0, 0)` — taki przedział na krawędzi dnia nie koliduje, a pusty
+ * przedział wewnątrz innego wzór uznaje za kolizję (ostrożnie: slot zablokowany).
  * Termin, który ma zostać ZAPISANY, sprawdzają `overlapsRange` /
  * `appointmentConflictWhere`, które przedział pusty odrzucają.
  */
