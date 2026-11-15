@@ -14,6 +14,10 @@ import {
   subscriptionPlans,
 } from "@/lib/schema";
 import { getStripe, isStripeWebhookConfigured } from "@/lib/stripe";
+import {
+  confirmSubscriptionCheckout,
+  type SubscriptionCheckoutSession,
+} from "@/lib/subscription-confirmation";
 
 /**
  * Raw invoice data from Stripe webhook events.
@@ -51,6 +55,10 @@ interface RawCheckoutSessionData {
    * `completed` with "unpaid" first. */
   payment_status?: string;
   metadata?: Record<string, string> | null;
+  /** "payment" (zadatek) | "subscription" (plan salonu). */
+  mode?: string | null;
+  subscription?: string | { id: string } | null;
+  customer?: string | { id: string } | null;
 }
 
 /**
@@ -184,7 +192,7 @@ export async function POST(request: Request) {
       // Delayed-notification methods (P24, sometimes BLIK) complete the
       // session first and report the payment result asynchronously.
       case "checkout.session.async_payment_succeeded":
-        await handleCheckoutSessionCompleted(event);
+        await handleCheckoutSessionCompleted(event, stripe);
         break;
 
       case "checkout.session.expired":
@@ -452,11 +460,15 @@ async function handleSubscriptionDeleted(event: Stripe.Event) {
  * can arrive with payment_status "unpaid" — in that case we do NOT confirm
  * and wait for `async_payment_succeeded` (or `async_payment_failed`).
  */
-async function handleCheckoutSessionCompleted(event: Stripe.Event) {
+async function handleCheckoutSessionCompleted(event: Stripe.Event, stripe: Stripe) {
   const checkoutSession = event.data.object as unknown as RawCheckoutSessionData;
 
+  if (checkoutSession.metadata?.kind !== "deposit" && checkoutSession.mode === "subscription") {
+    await handleSubscriptionCheckoutCompleted(event, stripe, checkoutSession);
+    return;
+  }
+
   if (checkoutSession.metadata?.kind !== "deposit") {
-    // Subscription checkouts are confirmed by their own flow — ignore here.
     logger.debug("Checkout session event without deposit metadata, skipping", {
       eventType: event.type,
       sessionId: checkoutSession.id,
@@ -520,6 +532,58 @@ async function handleCheckoutSessionCompleted(event: Stripe.Event) {
     sessionId: checkoutSession.id,
     paymentIntentId,
     alreadyConfirmed: result.alreadyConfirmed,
+  });
+}
+
+/**
+ * Subscription Checkout (mode "subscription") completed — the same
+ * confirmSubscriptionCheckout() as /api/subscriptions/confirm (T3), so the
+ * plan is granted even when the user never returns to the success page, and
+ * whichever comes second gets alreadyConfirmed instead of a duplicate.
+ *
+ * Salon from the signed event's metadata (no user session here).
+ * - unpaid (async method): wait for async_payment_succeeded,
+ * - Stripe error (502): throw → 500 → Stripe retries the event,
+ * - invalid data / conflict (400/404/409): logged for manual handling, 200
+ *   (a retry would not change the outcome).
+ */
+async function handleSubscriptionCheckoutCompleted(
+  event: Stripe.Event,
+  stripe: Stripe,
+  checkoutSession: RawCheckoutSessionData
+) {
+  if (checkoutSession.payment_status !== "paid") {
+    logger.info("Subscription checkout completed but not paid yet — waiting", {
+      eventType: event.type,
+      sessionId: checkoutSession.id,
+    });
+    return;
+  }
+
+  const result = await confirmSubscriptionCheckout(
+    stripe,
+    checkoutSession as SubscriptionCheckoutSession
+  );
+
+  if (result.ok) {
+    logger.info("Subscription checkout confirmed via webhook", {
+      eventId: event.id,
+      sessionId: checkoutSession.id,
+      alreadyConfirmed: result.alreadyConfirmed,
+      subscriptionId: result.subscription?.id,
+    });
+    return;
+  }
+
+  if (result.status === 502) {
+    throw new Error(`Subscription checkout confirmation failed: ${result.code}`);
+  }
+
+  logger.error("Subscription checkout NOT confirmed via webhook — manual handling", {
+    eventId: event.id,
+    sessionId: checkoutSession.id,
+    code: result.code,
+    status: result.status,
   });
 }
 

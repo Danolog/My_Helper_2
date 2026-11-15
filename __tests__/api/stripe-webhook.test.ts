@@ -277,7 +277,7 @@ describe("Stripe webhook — deposit checkout completion", () => {
     expect(mockConfirmDeposit).toHaveBeenCalledWith(DEPOSIT_PAYMENT_ID, {});
   });
 
-  it("ignores checkout sessions without deposit metadata (e.g. subscriptions)", async () => {
+  it("ignores checkout sessions without deposit metadata and without mode \"subscription\" (subscriptions: stripe-webhook-subscription.test.ts)", async () => {
     const request = signedEvent({
       id: "evt_3",
       type: "checkout.session.completed",
