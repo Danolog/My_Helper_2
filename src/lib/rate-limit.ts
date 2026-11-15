@@ -22,7 +22,7 @@
  */
 
 import { logger } from "@/lib/logger";
-import { selectClientIpFromEnv } from "@/lib/trusted-proxies";
+import { resolveClientIp } from "@/lib/trusted-proxies";
 
 interface RateLimitConfig {
   /** Time window in milliseconds */
@@ -282,22 +282,19 @@ export const aiRateLimit = createRateLimit({
 /**
  * Extract the client IP address from request headers.
  *
- * X-Forwarded-For: the leftmost entry is written by the client and can be
- * spoofed, so it is NOT used. We take the first entry from the right that is
- * not one of our trusted proxies (env TRUSTED_PROXIES, shared with Better
- * Auth's `advanced.ipAddress.trustedProxies` — see src/lib/trusted-proxies.ts).
+ * Logic lives in src/lib/trusted-proxies.ts (`resolveClientIp`) and is shared
+ * with Better Auth's `advanced.ipAddress` (same headers, same trusted proxies):
  *
- * - Local and Vercel (TRUSTED_PROXIES empty): Vercel overwrites
- *   X-Forwarded-For with the single client IP, and a single value is
- *   returned unchanged — same as before.
- * - Behind a load balancer (e.g. GCP): `<client>, <LB>` → `<client>` once
- *   the LB address is listed in TRUSTED_PROXIES.
+ * - Vercel (VERCEL=1): `x-real-ip` set by Vercel Proxy, X-Forwarded-For only
+ *   as a fallback.
+ * - Elsewhere (local, GCP): X-Forwarded-For, first entry from the right that
+ *   is not a trusted proxy (env TRUSTED_PROXIES). The leftmost entry is
+ *   client-written and spoofable, so it is never preferred. `x-real-ip` is
+ *   NOT used — a client can set it.
  *
- * Falls back to x-real-ip only when X-Forwarded-For is absent or empty, then
- * to "unknown" (a shared bucket for requests without an identifiable IP).
+ * Falls back to "unknown" (a shared bucket for requests without an
+ * identifiable IP).
  */
 export function getClientIp(request: Request): string {
-  const forwardedFor = request.headers.get("x-forwarded-for");
-  const fromForwarded = forwardedFor ? selectClientIpFromEnv(forwardedFor) : null;
-  return fromForwarded ?? request.headers.get("x-real-ip") ?? "unknown";
+  return resolveClientIp(request.headers) ?? "unknown";
 }

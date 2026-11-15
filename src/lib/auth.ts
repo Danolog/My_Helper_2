@@ -3,7 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { db } from "./db"
 import { logger } from "./logger"
 import { isEmailConfigured, sendPasswordResetEmail, sendVerificationEmail } from "./email"
-import { getTrustedProxies } from "./trusted-proxies"
+import { getAuthIpAddressOptions } from "./trusted-proxies"
 
 /**
  * Kontekst logu dla zdarzeń „wysłano link resetu hasła / weryfikacji e-mail".
@@ -25,18 +25,21 @@ function authLinkLogContext(
 }
 
 /**
- * Zaufane proxy dla limitu żądań Better Auth — to samo źródło (env
- * TRUSTED_PROXIES) co getClientIp w src/lib/rate-limit.ts.
+ * Źródło adresu IP dla limitu żądań Better Auth — te same nagłówki i te same
+ * zaufane proxy (env TRUSTED_PROXIES) co getClientIp w src/lib/rate-limit.ts
+ * (patrz src/lib/trusted-proxies.ts, getAuthIpAddressOptions):
  *
- * Pusta lista → `trustedProxies` nieustawione: Better Auth przyjmuje tylko
- * jednowartościowy X-Forwarded-For (lokalnie i Vercel — bez zmian). Za LB
- * (GCP) łańcuch `<klient>, <LB>` bez tej listy daje null, czyli JEDEN wspólny
- * kubełek limitu dla wszystkich (3 próby logowania / 10 s = globalny DoS).
+ * - `trustedProxies` tylko przy niepustej liście. Pusta → Better Auth przyjmuje
+ *   tylko jednowartościowy nagłówek. Za LB (GCP) łańcuch `<klient>, <LB>` bez
+ *   listy daje null, czyli JEDEN wspólny kubełek (3 próby logowania / 10 s).
+ * - `ipAddressHeaders: ["x-real-ip", "x-forwarded-for"]` tylko na Vercelu
+ *   (VERCEL=1): `x-real-ip` ustawia Vercel Proxy. Poza Vercelem domyślnie
+ *   tylko X-Forwarded-For.
  *
  * `advanced.trustedProxyHeaders` zostaje celowo WYŁĄCZONE (przegląd Ryana
  * #17, b2): nie mamy dowodu, że LB nadpisuje X-Forwarded-Host od klienta.
  */
-const trustedProxies = getTrustedProxies()
+const ipAddressOptions = getAuthIpAddressOptions()
 
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
@@ -51,9 +54,7 @@ export const auth = betterAuth({
       : []),
   ],
   advanced: {
-    ipAddress: {
-      ...(trustedProxies.length > 0 ? { trustedProxies } : {}),
-    },
+    ipAddress: ipAddressOptions,
   },
   session: {
     /**

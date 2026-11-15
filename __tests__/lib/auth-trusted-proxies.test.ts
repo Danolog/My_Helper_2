@@ -3,7 +3,7 @@
  * źródło co getClientIp (TRUSTED_PROXIES przez getTrustedProxies), a
  * advanced.trustedProxyHeaders zostaje wyłączone (przegląd Ryana #17, b2).
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 
 vi.mock("better-auth", () => ({
   betterAuth: (options: unknown) => ({ options }),
@@ -33,10 +33,17 @@ async function loadAuthOptions(): Promise<AdvancedOptions> {
 }
 
 const original = process.env.TRUSTED_PROXIES;
+const originalVercel = process.env.VERCEL;
+
+beforeEach(() => {
+  delete process.env.VERCEL;
+});
 
 afterEach(() => {
   if (original === undefined) delete process.env.TRUSTED_PROXIES;
   else process.env.TRUSTED_PROXIES = original;
+  if (originalVercel === undefined) delete process.env.VERCEL;
+  else process.env.VERCEL = originalVercel;
 });
 
 describe("auth: advanced.ipAddress.trustedProxies", () => {
@@ -56,6 +63,38 @@ describe("auth: advanced.ipAddress.trustedProxies", () => {
   it("advanced.trustedProxyHeaders pozostaje wyłączone", async () => {
     process.env.TRUSTED_PROXIES = "34.120.10.5";
     const options = await loadAuthOptions();
+    expect(options.advanced?.trustedProxyHeaders).not.toBe(true);
+  });
+});
+
+describe("auth: advanced.ipAddress.ipAddressHeaders (Vercel)", () => {
+  it("VERCEL=1: x-real-ip przed x-forwarded-for — ta sama kolejność co getClientIp", async () => {
+    process.env.VERCEL = "1";
+    delete process.env.TRUSTED_PROXIES;
+    const options = await loadAuthOptions();
+    expect(options.advanced?.ipAddress?.ipAddressHeaders).toEqual(["x-real-ip", "x-forwarded-for"]);
+  });
+
+  it("poza Vercelem: ipAddressHeaders nieustawione (domyślnie tylko x-forwarded-for)", async () => {
+    delete process.env.TRUSTED_PROXIES;
+    const options = await loadAuthOptions();
+    expect(options.advanced?.ipAddress?.ipAddressHeaders).toBeUndefined();
+  });
+
+  it("VERCEL inne niż '1': ipAddressHeaders nieustawione", async () => {
+    process.env.VERCEL = "true";
+    const options = await loadAuthOptions();
+    expect(options.advanced?.ipAddress?.ipAddressHeaders).toBeUndefined();
+  });
+
+  it("VERCEL=1 z TRUSTED_PROXIES: oba ustawione naraz, trustedProxyHeaders wyłączone", async () => {
+    process.env.VERCEL = "1";
+    process.env.TRUSTED_PROXIES = "34.120.10.5";
+    const options = await loadAuthOptions();
+    expect(options.advanced?.ipAddress).toEqual({
+      trustedProxies: ["34.120.10.5"],
+      ipAddressHeaders: ["x-real-ip", "x-forwarded-for"],
+    });
     expect(options.advanced?.trustedProxyHeaders).not.toBe(true);
   });
 });

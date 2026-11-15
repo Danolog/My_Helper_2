@@ -15,16 +15,27 @@
  * Format TRUSTED_PROXIES: CSV adresów IP lub zakresów CIDR (IPv4/IPv6),
  * np. "34.120.10.5,35.191.0.0/16". Domyślnie pusta.
  *
+ * Vercel (`process.env.VERCEL === "1"`): adres klienta bierzemy najpierw
+ * z `x-real-ip`, który ustawia Vercel Proxy (`@vercel/functions`:
+ * IP_HEADER_NAME = "x-real-ip"), a X-Forwarded-For jest tylko zapasem.
+ * Better Auth dostaje tę samą kolejność (`ipAddressHeaders`). Dzięki temu
+ * nie zależymy od niezmierzonego założenia, że Vercel nadpisuje XFF jedną
+ * wartością. Poza Vercelem `x-real-ip` NIE jest używany — tam klient może
+ * wpisać go sam (np. LB GCP go nie ustawia).
+ *
  * Odrzucane z ostrzeżeniem w logu:
  *  - wpisy niepoprawne (nie IP / nie CIDR, port, strefa IPv6),
  *  - zakresy zbyt szerokie. Reguła minimalnego prefiksu:
  *      IPv4 publiczny  ≥ /16,   IPv4 prywatny/specjalny ≥ /24,
- *      IPv6 publiczny  ≥ /32,   IPv6 ULA (fc00::/7)     ≥ /64.
+ *      IPv6 publiczny  ≥ /32,   IPv6 ULA/link-local     ≥ /64.
  *    Obejmuje to wprost 0.0.0.0/0, ::/0, 10.0.0.0/8, 172.16.0.0/12,
  *    192.168.0.0/16, a także ich szerokie podzbiory (np. 10.0.0.0/9).
  *    Szeroki zakres prywatny obejmuje też klientów w tej samej sieci
  *    (VPC, Cloud NAT, inne usługi) — każdy z nich mógłby wtedy podać
  *    dowolny adres w XFF i wybrać sobie kubełek limitu.
+ *  - zakresy IPv4-mapped z prefiksem (`::ffff:a.b.c.d/N`): Better Auth
+ *    porównuje je inaczej niż my, więc obie warstwy widziałyby różne listy.
+ *    Należy podać zakres IPv4 wprost (a.b.c.d/N).
  */
 
 import { logger } from "@/lib/logger";
@@ -169,9 +180,16 @@ const IPV4_PRIVATE_OR_SPECIAL: ParsedCidr[] = [
   "100.64.0.0/10", // CGNAT
   "127.0.0.0/8",
   "169.254.0.0/16",
+  "0.0.0.0/8", // "ta sieć"
+  "198.18.0.0/15", // RFC 2544 (testy; fixture E2E)
+  "224.0.0.0/4", // multicast
+  "240.0.0.0/4", // zarezerwowane
 ].map((c) => parseCidr(c) as ParsedCidr);
 
-const IPV6_ULA = parseCidr("fc00::/7") as ParsedCidr;
+/** IPv6 ULA i link-local — minimum /64, jak sieć lokalna. */
+const IPV6_LOCAL: ParsedCidr[] = ["fc00::/7", "fe80::/10"].map(
+  (c) => parseCidr(c) as ParsedCidr
+);
 
 const MIN_PREFIX = {
   v4Public: 16,
@@ -187,7 +205,7 @@ function isTooBroad(net: ParsedCidr): boolean {
     return isPrivate && net.prefix < MIN_PREFIX.v4Private;
   }
   if (net.prefix < MIN_PREFIX.v6Public) return true;
-  return matchesCidr(net.bytes, IPV6_ULA) && net.prefix < MIN_PREFIX.v6Ula;
+  return IPV6_LOCAL.some((p) => matchesCidr(net.bytes, p)) && net.prefix < MIN_PREFIX.v6Ula;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +229,13 @@ export function parseTrustedProxies(raw: string | undefined): string[] {
         entry,
         reason: "invalid",
       });
+      continue;
+    }
+    if (entry.includes("/") && net.bytes.length === 4 && entry.includes(":")) {
+      logger.warn(
+        "[TrustedProxies] Ignoring IPv4-mapped CIDR in TRUSTED_PROXIES — write the IPv4 range directly (a.b.c.d/N)",
+        { entry, reason: "ipv4_mapped_cidr" }
+      );
       continue;
     }
     if (isTooBroad(net)) {
@@ -255,7 +280,8 @@ export function isTrustedProxy(ip: string, trusted: readonly string[]): boolean 
 /**
  * Wybiera adres klienta z wartości X-Forwarded-For: pierwszy od prawej wpis,
  * który nie jest zaufanym proxy. Gdy wszystkie wpisy to zaufane proxy
- * (żądanie z wnętrza infrastruktury) — lewy wpis. Pusty nagłówek → null.
+ * (żądanie z wnętrza infrastruktury) — null, jak Better Auth (wywołujący
+ * przechodzi do zapasu / "unknown"). Pusty nagłówek → null.
  *
  * Wpis niebędący poprawnym IP nie może być zaufanym proxy, więc jest
  * traktowany jak adres klienta (zwracany bez zmian, jak dotąd).
@@ -270,11 +296,94 @@ export function selectClientIp(xff: string, trusted: readonly string[]): string 
     const hop = hops[i] as string;
     if (!isTrustedProxy(hop, trusted)) return hop;
   }
-  return hops[0] as string;
+  return null;
 }
 
 /** Wariant dla getClientIp: lista z env. */
 export function selectClientIpFromEnv(xff: string): string | null {
   const { list } = load();
   return selectClientIp(xff, list);
+}
+
+// ---------------------------------------------------------------------------
+// Adres klienta z nagłówków żądania (getClientIp) + konfiguracja Better Auth
+// ---------------------------------------------------------------------------
+
+/** Vercel ustawia VERCEL=1 w środowisku funkcji (build i runtime). */
+export function isVercel(): boolean {
+  return process.env.VERCEL === "1";
+}
+
+/**
+ * Kolejność nagłówków IP — ta sama dla getClientIp i Better Auth
+ * (`advanced.ipAddress.ipAddressHeaders`). Poza Vercelem: tylko XFF
+ * (domyślne Better Auth), więc zwracamy undefined.
+ */
+export const VERCEL_IP_HEADERS = ["x-real-ip", "x-forwarded-for"] as const;
+
+/** `advanced.ipAddress` dla Better Auth — z tych samych źródeł co getClientIp. */
+export function getAuthIpAddressOptions(): {
+  trustedProxies?: string[];
+  ipAddressHeaders?: string[];
+} {
+  const trustedProxies = getTrustedProxies();
+  return {
+    ...(trustedProxies.length > 0 ? { trustedProxies } : {}),
+    ...(isVercel() ? { ipAddressHeaders: [...VERCEL_IP_HEADERS] } : {}),
+  };
+}
+
+let forwardedChainWarned = false;
+
+/** Tylko dla testów: pozwala ponownie sprawdzić jednorazowe ostrzeżenie. */
+export function resetForwardedChainWarningForTests(): void {
+  forwardedChainWarned = false;
+}
+
+/**
+ * Jednorazowo (na proces) ostrzega, gdy XFF przychodzi jako łańcuch, a lista
+ * zaufanych proxy jest pusta. Poza Vercelem to błąd konfiguracji (za LB
+ * wszyscy wpadają do jednego kubełka); na Vercelu to pomiar „hops", czy
+ * platforma rzeczywiście nadpisuje XFF jedną wartością. Bez adresów IP
+ * w logu — tylko liczba hopów i porównania z x-real-ip.
+ */
+function warnOnForwardedChain(hops: string[], realIp: string | null): void {
+  if (forwardedChainWarned || hops.length < 2) return;
+  if (load().list.length > 0) return;
+  forwardedChainWarned = true;
+  logger.warn(
+    "[TrustedProxies] X-Forwarded-For has multiple hops but TRUSTED_PROXIES is empty — behind a load balancer all clients share one rate-limit bucket",
+    {
+      hops: hops.length,
+      vercel: isVercel(),
+      xRealIpPresent: realIp !== null,
+      xRealIpEqualsRightmost: realIp !== null && realIp === hops[hops.length - 1],
+      xRealIpEqualsLeftmost: realIp !== null && realIp === hops[0],
+    }
+  );
+}
+
+/**
+ * Adres klienta z nagłówków żądania albo null.
+ *
+ * - Vercel: `x-real-ip` (Vercel Proxy), potem XFF od prawej jako zapas.
+ * - Poza Vercelem: wyłącznie XFF od prawej z pominięciem zaufanych proxy;
+ *   `x-real-ip` jest ignorowany (klient może go podrobić).
+ */
+export function resolveClientIp(headers: Headers): string | null {
+  const xff = headers.get("x-forwarded-for");
+  const realIpRaw = headers.get("x-real-ip")?.trim();
+  const realIp = realIpRaw ? realIpRaw : null;
+
+  const hops = xff
+    ? xff
+        .split(",")
+        .map((h) => h.trim())
+        .filter(Boolean)
+    : [];
+  warnOnForwardedChain(hops, realIp);
+
+  // Jak Better Auth: niepoprawny x-real-ip jest pomijany i decyduje XFF.
+  if (isVercel() && realIp && parseIp(realIp)) return realIp;
+  return xff ? selectClientIpFromEnv(xff) : null;
 }
