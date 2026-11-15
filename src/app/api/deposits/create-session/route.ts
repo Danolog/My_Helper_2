@@ -7,7 +7,9 @@ import { db } from "@/lib/db";
 import { calculateExpectedDeposit } from "@/lib/deposit-calculation";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
-import { timeBlocks, clients } from "@/lib/schema";
+import { getSalonContext } from "@/lib/salon-context";
+import { assertSalonRefs } from "@/lib/salon-refs";
+import { timeBlocks } from "@/lib/schema";
 import { appointments, depositPayments } from "@/lib/schema";
 import { getOptionalSession } from "@/lib/session";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
@@ -55,7 +57,7 @@ export async function POST(request: Request) {
     }
     const {
       salonId,
-      clientId,
+      clientId: bodyClientId,
       employeeId,
       serviceId,
       variantId,
@@ -101,20 +103,23 @@ export async function POST(request: Request) {
       );
     }
 
-    // clientId (if provided) must belong to this salon — otherwise anyone
-    // could attach an arbitrary client record to the appointment.
-    if (clientId) {
-      const [clientRow] = await db
-        .select({ id: clients.id })
-        .from(clients)
-        .where(and(eq(clients.id, clientId), eq(clients.salonId, salonId)));
-      if (!clientRow) {
-        return NextResponse.json(
-          { success: false, error: "Nieprawidlowy klient dla tego salonu" },
-          { status: 400 }
-        );
-      }
+    // P1 (Ryan), wzorzec z #39: clientId wybiera WYLACZNIE personel TEGO
+    // salonu. Gosc i klient portalu (jedyny front tej trasy) nie podpinaja
+    // rekordu klienta — gosc jest opisany przez guestName/guestPhone/guestEmail.
+    // Wczesniej wystarczylo znac id klienta salonu, by podpiac jego kartoteke.
+    const staffCtx = session ? await getSalonContext() : null;
+    const isSalonStaff = staffCtx?.salonId === salonId;
+    const clientId: string | null = isSalonStaff && bodyClientId ? bodyClientId : null;
+    if (!isSalonStaff && bodyClientId) {
+      logger.warn("[Deposits API] Ignored client-supplied clientId (non-staff booking)", { salonId });
     }
+
+    // P1 (Ryan): klient, pracownik i usluga musza nalezec do salonu — PRZED
+    // sprawdzeniem kolizji i zapisem. Bez tego obcy employeeId dostawal wizyte
+    // "scheduled", ktora blokowala jego termin w innym salonie przez czas
+    // zycia sesji Checkout. Jeden, niezdradzajacy komunikat 400.
+    const refsError = await assertSalonRefs(salonId, { clientId, employeeId, serviceId });
+    if (refsError) return refsError;
 
     // SECURITY: recompute the deposit amount on the server from salon/service
     // /client settings + promotions. The body amount is only compared to

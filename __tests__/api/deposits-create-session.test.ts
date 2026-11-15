@@ -74,6 +74,18 @@ vi.mock("@/lib/deposit-calculation", () => ({
   calculateExpectedDeposit: (...a: unknown[]) => mockCalcDeposit(...a),
 }));
 
+// Kontekst salonu: domyślna sesja to klient portalu (nie personel).
+vi.mock("@/lib/salon-context", () => ({
+  getSalonContext: vi.fn().mockResolvedValue(null),
+}));
+
+// Przynależność refów do salonu testowana w deposits-create-session-refs.test.ts
+// (prawdziwy assertSalonRefs); tu tylko spy, domyślnie "wszystko z salonu".
+const mockAssertSalonRefs = vi.fn();
+vi.mock("@/lib/salon-refs", () => ({
+  assertSalonRefs: (...a: unknown[]) => mockAssertSalonRefs(...a),
+}));
+
 const mockGetStripe = vi.fn();
 const mockIsStripeConfigured = vi.fn();
 
@@ -133,6 +145,7 @@ function primeHappyPathDb() {
 }
 
 function primeExpectedDeposit(amount = 50) {
+  mockAssertSalonRefs.mockResolvedValue(null);
   mockCalcDeposit.mockResolvedValue({
     ok: true,
     required: true,
@@ -256,18 +269,19 @@ describe("POST /api/deposits/create-session — Stripe configured", () => {
     expect(mockDbInsert).not.toHaveBeenCalled();
   });
 
-  it("rejects a clientId that does not belong to the salon", async () => {
-    mockDbSelect.mockReset();
-    mockDbSelect.mockReturnValueOnce(createChainMock([])); // client lookup -> none
-
+  // P1 (Ryan): klient portalu nie podpina rekordu klienta — clientId z body
+  // jest ignorowany (null do assertSalonRefs i do wizyty).
+  it("ignores a clientId sent by a portal client (non-staff)", async () => {
     const response = await createSession(
       makeRequest({ ...validBody, clientId: CLIENT_UUID })
     );
-    const { status, body } = await parseResponse<{ error: string }>(response);
 
-    expect(status).toBe(400);
-    expect(body.error).toContain("klient");
-    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(response.status).toBe(201);
+    expect(mockAssertSalonRefs).toHaveBeenCalledWith(SALON_UUID, {
+      clientId: null,
+      employeeId: EMPLOYEE_UUID,
+      serviceId: SERVICE_UUID,
+    });
   });
 
   it("returns 502 and deletes the appointment when Checkout creation fails", async () => {
