@@ -29,7 +29,7 @@ const EMPLOYEE_ID = '00000000-0000-4000-8000-e00000000003';
 const FULL_PRICE_DEPOSIT = 60; // 30% z 200 PLN
 const HAPPY_HOURS_DEPOSIT = 30; // 30% z 100 PLN (200 PLN - 50%) — kwota, ktorej NIE wolno przyjac
 
-type CreateSessionJson = { success: boolean; data?: { simulated?: boolean; paymentUrl?: string; appointmentId?: string }; error?: string; details?: unknown };
+type CreateSessionJson = { success: boolean; data?: { simulated?: boolean; paymentUrl?: string; appointmentId?: string; amount?: number }; error?: string; details?: unknown };
 
 function tomorrowInWarsaw(): string {
   const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -138,16 +138,10 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
     expect(frozenCalls, 'portal nie pyta tras zamrozonych').toEqual([]);
   });
 
-  // ZNANY BLAD (zgloszony w PR): formularz portalu wysyla clientId: null,
-  // variantId: null, guestEmail: null (use-booking-data.ts), a
-  // depositCreateSessionSchema ma .optional(), ktore odrzuca null -> 400
-  // "Validation failed" dla KAZDEJ rezerwacji z zadatkiem. Do tego placeholder
-  // telefonu "+48 123 456 789" ma spacje, ktorych regex nie przyjmuje.
-  // test.fail: test opisuje poprawne zachowanie i dzis pada. Po naprawie zacznie
-  // przechodzic, Playwright zglosi "expected to fail" jako blad — wtedy zdejmij test.fail.
+  // Prawdziwe body formularza gościa: clientId/variantId/guestEmail = null
+  // i telefon w formacie placeholdera (ze spacjami). Do #65 trasa odrzucała je
+  // 400 "Validation failed" — kazda rezerwacja z zadatkiem z portalu.
   test('guest submits the booking form with a deposit and create-session accepts it', { tag: '@full' }, async ({ page }) => {
-    test.fail(true, 'Znany blad walidacji create-session (null w body formularza, telefon ze spacjami) — zgloszony w PR');
-
     let sentBody: Record<string, unknown> | null = null;
     let created: { status: number; json: CreateSessionJson } | null = null;
     await page.route('**/api/deposits/create-session', async (route) => {
@@ -165,8 +159,18 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
     await page.getByTestId('book-appointment-btn').click();
 
     await expect.poll(() => created, { timeout: 15000 }).not.toBeNull();
-    expect(sentBody, 'formularz wyslal kwote zadatku').toMatchObject({ depositAmount: FULL_PRICE_DEPOSIT, serviceId: SERVICE_ID });
+    // Test ma sens tylko na prawdziwym ksztalcie body (null + telefon ze spacjami).
+    expect(sentBody, 'formularz wyslal body w ksztalcie, ktory psul walidacje').toMatchObject({
+      depositAmount: FULL_PRICE_DEPOSIT,
+      serviceId: SERVICE_ID,
+      clientId: null,
+      variantId: null,
+      guestEmail: null,
+      guestPhone: '+48 500 600 700',
+    });
     expect(created!.status, `create-session: ${JSON.stringify(created!.json)}`).toBe(201);
-    expect(created!.json.data?.simulated).toBe(true);
+    expect(created!.json.success).toBe(true);
+    expect(created!.json.data?.simulated, 'serwer poszedl sciezka Stripe — uruchom go bez STRIPE_SECRET_KEY').toBe(true);
+    expect(created!.json.data?.amount).toBe(FULL_PRICE_DEPOSIT);
   });
 });
