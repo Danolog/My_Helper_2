@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { validateBody, updatePromoCodeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { promoCodes, promotions } from "@/lib/schema";
@@ -153,7 +154,15 @@ export async function PUT(
             .limit(1)
         );
 
-        if (!promotion) {
+        // Promocja zamrożonego typu nie istnieje dla panelu (B2.1, Ryan N1):
+        // nowego powiązania nie ma — 404 jak brak promocji. Wyjątek: kod już
+        // z nią powiązany (formularz edycji odsyła promotionId zawsze) — bez
+        // tego właściciel nie zmieniłby limitu ani daty takiego kodu.
+        const frozenNewLink =
+          promotion != null &&
+          isPromotionTypeFrozen(promotion.type) &&
+          promotionId !== existing.promotionId;
+        if (!promotion || frozenNewLink) {
           return NextResponse.json(
             { success: false, error: "Promotion not found or does not belong to this salon" },
             { status: 404 }

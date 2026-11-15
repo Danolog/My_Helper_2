@@ -190,13 +190,15 @@ export const MODULES: readonly ModuleDef[] = [
 /** Moduły z przełącznikiem w Ustawienia → Moduły. */
 export const TOGGLEABLE_MODULES: readonly ModuleDef[] = MODULES.filter((m) => !m.hardOff);
 
-const FROZEN_MODULE_KEYS: ReadonlySet<ModuleKey> = new Set(
-  MODULES.filter((m) => m.hardOff).map((m) => m.key)
-);
-
-/** Czy moduł jest zamrożony (`hardOff`) — wyłączony globalnie, bez przełącznika. */
+/**
+ * Czy moduł jest zamrożony (`hardOff`) — wyłączony globalnie, bez przełącznika.
+ * Czyta flagę z `MODULES` przy każdym wywołaniu (bez kopii policzonej przy
+ * starcie): jedna zmiana w rejestrze zmienia odpowiedź wszystkich
+ * egzekutorów naraz — proxy, bramek w trasach, typów promocji
+ * (`isPromotionTypeFrozen`). Pilnuje `frozen-promotions-unfreeze.test.ts`.
+ */
 export function isModuleFrozen(key: ModuleKey): boolean {
-  return FROZEN_MODULE_KEYS.has(key);
+  return MODULES.some((m) => m.key === key && m.hardOff === true);
 }
 
 /**
@@ -208,16 +210,40 @@ export const FROZEN_MODULES_NOTICE: string | null =
   "Faktury i program lojalnościowy są obecnie niedostępne. Wystawione faktury i punkty klientów pozostają zapisane na koncie salonu.";
 
 /**
- * Typy promocji zamrożone razem z modułem `complexPromotions`. Promocja
- * takiego typu nie może powstać (`POST`/`PUT /api/promotions` → 400), nie jest
- * zwracana (`GET`) i nie daje rabatu — ani w zadatku liczonym przez serwer,
- * ani przez kod rabatowy z nią powiązany. Wiersze w bazie zostają.
+ * Typy promocji należące do modułu `complexPromotions` — zamrożone, dopóki
+ * moduł ma `hardOff`. Promocja takiego typu nie istnieje dla panelu ani dla
+ * modelu AI: nie może powstać (`POST`/`PUT /api/promotions` → 400), nie jest
+ * zwracana (`GET`), kod rabatowy nie może się z nią powiązać
+ * (`/api/promo-codes` → 404), nie trafia do rekomendacji AI i nie daje
+ * rabatu — ani w zadatku liczonym przez serwer, ani przez kod rabatowy.
+ * Wiersze w bazie zostają.
+ *
+ * PROCEDURA ODMROŻENIA (przegląd Leo N3, B2.1):
+ * 1. Zanim zdejmiesz `hardOff` z `complexPromotions`: promocje tych typów,
+ *    które były aktywne przed zamrożeniem, wrócą do życia ze swoimi starymi
+ *    datami i warunkami (`is_active`, `start_date`, `end_date` się nie
+ *    zmieniły) — naliczą rabat w portalu, zadatku i przez powiązane kody.
+ *    Trzeba je najpierw wyłączyć (`is_active = false`) albo przejrzeć
+ *    z każdym salonem.
+ * 2. To zmiana danych na produkcji — wymaga słowa Darka, przed wdrożeniem.
+ * 3. Dopiero potem zdjęcie `hardOff` w jednym miejscu (ten plik). Typy,
+ *    trasy `check-*`, `book-package` i zadatek odmrażają się razem — pilnuje
+ *    `__tests__/lib/frozen-promotions-unfreeze.test.ts`.
+ * 4. Zdjęcie jednego typu z tej listy NIE odmraża go w całości: trasy
+ *    `check-*` i `book-package` są bramkowane całym modułem
+ *    (`API_MODULE_PATTERNS`, `frozenModuleResponse`). Odmrożenie pojedynczego
+ *    typu to osobna zmiana tych bramek — z tym samym krokiem 1 i 2.
  */
 export const FROZEN_PROMOTION_TYPES = ["happy_hours", "package", "buy2get1", "first_visit"] as const;
 
-/** Czy typ promocji jest zamrożony (`FROZEN_PROMOTION_TYPES`). */
+/**
+ * Czy typ promocji jest zamrożony: należy do `FROZEN_PROMOTION_TYPES`
+ * I moduł `complexPromotions` jest zamrożony. Jeden nośnik reguły — zdjęcie
+ * `hardOff` z modułu odmraża typy bez drugiej zmiany.
+ */
 export function isPromotionTypeFrozen(type: unknown): boolean {
   return (
+    isModuleFrozen("complexPromotions") &&
     typeof type === "string" &&
     (FROZEN_PROMOTION_TYPES as readonly string[]).includes(type)
   );

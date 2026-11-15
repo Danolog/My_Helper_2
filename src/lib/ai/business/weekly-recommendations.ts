@@ -6,7 +6,8 @@
  * wraz z podsumowaniem i rozbiciem dziennym.
  */
 
-import { eq, and, gte, lte, sql, count, desc, asc } from "drizzle-orm";
+import { eq, and, gte, lte, sql, count, desc, asc, notInArray } from "drizzle-orm";
+import { FROZEN_PROMOTION_TYPES, isPromotionTypeFrozen } from "@/lib/features";
 import {
   appointments,
   clients,
@@ -106,6 +107,9 @@ async function fetchWeeklyData(
   boundaries: WeeklyDateBoundaries
 ) {
   const { now, weekStart, weekEnd, thirtyDaysAgo, prevWeekStart } = boundaries;
+  // Zamrożone typy promocji nie istnieją dla modelu (B2.1): odfiltrowane już
+  // w SQL, żeby nie zajmowały miejsc w limit(5).
+  const frozenPromotionTypes = FROZEN_PROMOTION_TYPES.filter(isPromotionTypeFrozen);
 
   const [
     weekAppointments,
@@ -325,6 +329,7 @@ async function fetchWeeklyData(
       .select({
         id: promotions.id,
         name: promotions.name,
+        type: promotions.type,
         startDate: promotions.startDate,
         endDate: promotions.endDate,
       })
@@ -333,6 +338,9 @@ async function fetchWeeklyData(
         and(
           eq(promotions.salonId, salonId),
           eq(promotions.isActive, true),
+          frozenPromotionTypes.length > 0
+            ? notInArray(promotions.type, [...frozenPromotionTypes])
+            : undefined,
           sql`(${promotions.startDate} IS NULL OR ${promotions.startDate} <= ${weekEnd.toISOString()})`,
           sql`(${promotions.endDate} IS NULL OR ${promotions.endDate} >= ${weekStart.toISOString()})`
         )
@@ -377,7 +385,8 @@ async function fetchWeeklyData(
     recentRevenue,
     prevPeriodRevenue,
     topServicesLast30,
-    activePromotions,
+    // Druga linia obrony, gdyby filtr SQL się rozjechał z rejestrem.
+    activePromotions: activePromotions.filter((p) => !isPromotionTypeFrozen(p.type)),
     totalClients,
     inactiveClients,
   };
