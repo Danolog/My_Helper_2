@@ -1,5 +1,8 @@
 import nextConfig from "eslint-config-next/core-web-vitals";
 
+const D1_MESSAGE =
+  "Parametry zapytania i `detail` Postgresa zawierają dane osobowe; loguj `error` przez `logger` (redakcja w `safe-error.ts`)";
+
 const config = [
   {
     ignores: [
@@ -89,6 +92,31 @@ const config = [
             "Trasy API nie importują surowego `db`. Użyj forSalon(salonId) z @/lib/server/repository — to wymusza izolację salonu. Wyjątki (webhooki/cron/seed) deklarują kontekst jawnie (patrz ADR-001 sekcja 4).",
         }],
       }],
+    },
+  },
+  {
+    // D1 (Ryan, #64/#67): parametry zapytania (`params`) i `detail` błędu
+    // Postgresa niosą dane osobowe (imię, telefon, e-mail z INSERT-a). Nie
+    // wyciągamy ich ręcznie z obiektu błędu — `logger` redaguje błąd
+    // centralnie (safe-error.ts). `routeCtx.params` (parametry trasy) nie
+    // pasuje do selektorów: obiekt nie nazywa się jak błąd.
+    files: ["src/**/*.ts", "src/**/*.tsx"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "MemberExpression[property.name=/^(params|detail)$/][object.name=/^(e|err|error|cause|dbError)$/]",
+          message: D1_MESSAGE,
+        },
+        {
+          selector: "MemberExpression[property.name=/^(params|detail)$/][object.property.name='cause']",
+          message: D1_MESSAGE,
+        },
+        {
+          selector: "VariableDeclarator[init.name=/^(e|err|error)$/] > ObjectPattern > Property[key.name=/^(params|detail)$/]",
+          message: D1_MESSAGE,
+        },
+      ],
     },
   },
 ];
