@@ -30,7 +30,6 @@ vi.mock("@/lib/logger", () => ({
   },
 }));
 
-import { logger } from "@/lib/logger";
 import {
   maskEmailAddress,
   sendEmail,
@@ -39,6 +38,7 @@ import {
   isEmailConfigured,
   renderEmailLayout,
 } from "@/lib/email";
+import { logger } from "@/lib/logger";
 
 const mockFetch = vi.fn();
 
