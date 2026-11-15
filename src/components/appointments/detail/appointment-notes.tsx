@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ReadAloudButton } from "@/components/ui/read-aloud-button";
 import { Textarea } from "@/components/ui/textarea";
 import { mutationFetch } from "@/lib/api-client";
 import type { AppointmentDetail } from "./types";
@@ -170,7 +169,6 @@ export function AppointmentNotes({
                     <Badge variant="secondary" className="text-xs">Pro</Badge>
                   </div>
                   <div className="flex items-center gap-1">
-                    <ReadAloudButton text={aiSummary.fullSummary} />
                     <Button
                       variant="ghost"
                       size="sm"

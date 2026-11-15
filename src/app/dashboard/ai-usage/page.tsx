@@ -425,9 +425,6 @@ function AIUsageContent() {
                       <span>Wglad w klienta: $0.004</span>
                       <span>Wyszukiwanie AI: $0.002</span>
                       <span>Powiadomienia AI: $0.001</span>
-                      <span>Komendy glosowe: $0.001</span>
-                      <span>TTS (ElevenLabs): $0.003</span>
-                      <span>STT (ElevenLabs): $0.002</span>
                       <span>Ulepszenie foto: $0 (serwer)</span>
                       <span>Klipy wideo (Veo): $0.15</span>
                       <span>Szablony testimoniali: $0.002</span>

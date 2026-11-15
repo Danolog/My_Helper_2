@@ -122,15 +122,3 @@ describe("VoiceCommandButton (pływający mikrofon w panelu)", () => {
     expect(source).not.toMatch(/addEventListener|keydown|onKeyDown|useHotkeys/);
   });
 });
-
-describe("paleta poleceń — dyktowanie wyszukiwania", () => {
-  it("mikrofon jest pokazywany tylko przy module głosu włączonym", () => {
-    const source = readFileSync(
-      join(process.cwd(), "src/components/dashboard/command-palette.tsx"),
-      "utf8"
-    );
-    expect(source).toMatch(/useModuleEnabled\("voiceAi"\)/);
-    expect(source).toMatch(/\{voiceEnabled && voiceSupported && \(/);
-    expect(source).not.toMatch(/\{voiceSupported && \(/);
-  });
-});
