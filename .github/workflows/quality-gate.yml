@@ -119,8 +119,13 @@ jobs:
 
       - name: Run smoke tests
         run: pnpm exec playwright test --grep @smoke --workers=4 --retries=1
+        # #69: serwer E2E (`pnpm start` z playwright webServer, NODE_ENV=production,
+        # bez klucza Stripe) symuluje płatność zadatku tylko z tą flagą. Flaga
+        # żyje WYŁĄCZNIE w krokach E2E — nie w .env*, nie w Vercelu (tam
+        # VERCEL=1 i handler ją ignoruje z błędem w logu).
         env:
           PLAYWRIGHT_TIMEOUT: 15000
+          ALLOW_PAYMENT_SIMULATION: "1"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -188,6 +193,12 @@ jobs:
 
       - name: Run full E2E tests
         run: pnpm exec playwright test --grep @full --workers=2 --retries=1
+        # #69: serwer E2E (`pnpm start` z playwright webServer, NODE_ENV=production,
+        # bez klucza Stripe) symuluje płatność zadatku tylko z tą flagą. Flaga
+        # żyje WYŁĄCZNIE w krokach E2E — nie w .env*, nie w Vercelu (tam
+        # VERCEL=1 i handler ją ignoruje z błędem w logu).
+        env:
+          ALLOW_PAYMENT_SIMULATION: "1"
 
       - uses: actions/upload-artifact@v4
         if: always()

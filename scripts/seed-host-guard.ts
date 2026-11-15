@@ -283,3 +283,38 @@ export function checkSeedServerIdentity(row: unknown, context?: SeedGuardContext
 
   return { ok: true, database };
 }
+
+/** Minimalny kształt klienta postgres.js potrzebny do etapu 3 (pozwala testować bez bazy). */
+export interface SeedProbeClient {
+  unsafe(query: string): PromiseLike<readonly unknown[]>;
+  end(options?: { timeout?: number }): PromiseLike<unknown>;
+}
+
+/**
+ * Etap 3 na KAŻDEJ podanej puli, po kolei, przed pierwszym zapisem. Przy odmowie
+ * albo błędzie sondy (timeout, zerwane połączenie) zamyka wszystkie pule
+ * (`timeout: 0`) i dopiero wtedy zwraca odmowę albo rzuca dalej oryginalny błąd.
+ * Błąd zamykania nie zasłania przyczyny.
+ */
+export async function verifySeedServerIdentities(
+  clients: readonly SeedProbeClient[],
+  context?: SeedGuardContext,
+): Promise<{ ok: true; databases: string[] } | SeedReject> {
+  const closeAll = () => Promise.allSettled(clients.map((c) => c.end({ timeout: 0 })));
+  const databases: string[] = [];
+  try {
+    for (const client of clients) {
+      const rows = await client.unsafe(SEED_SERVER_PROBE_SQL);
+      const server = checkSeedServerIdentity(rows[0], context);
+      if (!server.ok) {
+        await closeAll();
+        return server;
+      }
+      databases.push(server.database);
+    }
+  } catch (error) {
+    await closeAll();
+    throw error;
+  }
+  return { ok: true, databases };
+}
