@@ -4,7 +4,7 @@ import { withApiHandler } from "@/lib/api-handler";
 import { createProductSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import { apiRateLimit } from "@/lib/rate-limit";
-import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
+import { requireSalonStaff } from "@/lib/salon-context";
 import { products, notifications } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -76,27 +76,16 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    // Faza 3 (role): magazyn tylko owner, chyba że czasowy grant "products";
-    // nie-owner zawsze w zakresie WŁASNEGO salonu (query salonId ignorowane).
-    const ctx = await getSalonContext();
-    if (!ctx) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-    if (ctx.role !== "owner" && !(await hasFeatureAccess(ctx, "products"))) {
-      return NextResponse.json(
-        { success: false, error: "Brak uprawnien" },
-        { status: 403 }
-      );
-    }
-    // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
-    // "lista bez zawężenia" była wyciekiem cross-salon).
-    const salonId =
-      ctx.role === "owner"
-        ? searchParams.get("salonId") || ctx.salonId
-        : ctx.salonId;
+    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji. Wcześniej właściciel był
+    // zwolniony z kontroli (`ctx.role === "owner" ? ?salonId : ...`) — owner
+    // salonu A listował magazyn salonu B. Query tylko porównywane (inne => 403),
+    // brak => salon sesji. Dostęp: właściciel albo czasowy grant "products".
+    const guard = await requireSalonStaff({
+      feature: "products",
+      requestedSalonId: searchParams.get("salonId"),
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
 
     // Select only the columns needed by the inventory UI
     const productColumns = {
@@ -142,26 +131,18 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create product",
   },
   async ({ body }) => {
-    const { salonId, name, category, quantity, minQuantity, unit, pricePerUnit } = body;
+    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji. Wcześniej warunek
+    // `ctx.role !== "owner" && ...` zwalniał każdego właściciela z porównania
+    // salonu — owner salonu A dodawał produkt do salonu B (forSalon(body.salonId)).
+    // body.salonId tylko porównywany (inny => 403); właściciel albo grant "products".
+    const guard = await requireSalonStaff({
+      feature: "products",
+      requestedSalonId: body.salonId,
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
 
-    // Faza 3 (role): dodawanie produktów tylko owner, chyba że czasowy grant
-    // "products"; nie-owner wyłącznie do WŁASNEGO salonu.
-    const ctx = await getSalonContext();
-    if (!ctx) {
-      return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
-      );
-    }
-    if (
-      ctx.role !== "owner" &&
-      (!(await hasFeatureAccess(ctx, "products")) || salonId !== ctx.salonId)
-    ) {
-      return NextResponse.json(
-        { success: false, error: "Brak uprawnien" },
-        { status: 403 }
-      );
-    }
+    const { name, category, quantity, minQuantity, unit, pricePerUnit } = body;
 
     const [newProduct] = await forSalon(salonId).raw((tx) =>
       tx

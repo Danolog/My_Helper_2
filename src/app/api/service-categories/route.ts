@@ -4,6 +4,7 @@ import { withApiHandler } from "@/lib/api-handler";
 import { createServiceCategorySchema } from "@/lib/api-validation";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { requireSalonStaff } from "@/lib/salon-context";
 import { serviceCategories } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -64,7 +65,15 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create service category",
   },
   async ({ body }) => {
-    const { salonId, name, sortOrder } = body;
+    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
+    // pozwalał każdemu zalogowanemu kontu dodać kategorię w cudzym salonie.
+    // body.salonId tylko porównywany (inny => 403). Tylko właściciel — jak
+    // PUT/DELETE /api/service-categories/[id].
+    const guard = await requireSalonStaff({ roles: [], requestedSalonId: body.salonId });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
+
+    const { name, sortOrder } = body;
 
     logger.info(`[ServiceCategories API] Creating category: ${name}`);
     const [newCategory] = await forSalon(salonId).raw((tx) =>

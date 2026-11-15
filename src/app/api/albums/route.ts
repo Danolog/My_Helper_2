@@ -3,9 +3,13 @@ import { eq, desc, sql } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createAlbumSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
+import { requireSalonStaff } from "@/lib/salon-context";
 import { albums, photoAlbums } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
+/** Dostęp do albumów = dostęp do galerii: owner, employee; receptionist z grantem. */
+const GALLERY_ACCESS = { roles: ["employee"], feature: "gallery-manage" } as const;
+
 // GET /api/albums - List albums for a salon
 export const GET = withApiHandler(
   {
@@ -15,14 +19,17 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
-      );
-    }
+    // P2 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej ?salonId=<cudzy>
+    // listował albumy galerii dowolnego salonu. Query tylko porównywane (inne =>
+    // 403), brak => salon sesji. Role jak w galerii (POST /api/gallery,
+    // ROUTE_ROLE_MAP /dashboard/gallery): właściciel i pracownik, recepcja z
+    // grantem "gallery-manage".
+    const guard = await requireSalonStaff({
+      ...GALLERY_ACCESS,
+      requestedSalonId: searchParams.get("salonId"),
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
 
     // Get albums with photo count
     const albumsList = await forSalon(salonId).raw((tx) =>
@@ -66,7 +73,17 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create album",
   },
   async ({ body }) => {
-    const { salonId, name, category } = body;
+    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
+    // pozwalał każdemu zalogowanemu kontu założyć album w cudzym salonie.
+    // body.salonId tylko porównywany (inny => 403).
+    const guard = await requireSalonStaff({
+      ...GALLERY_ACCESS,
+      requestedSalonId: body.salonId,
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
+
+    const { name, category } = body;
 
     const [newAlbum] = await forSalon(salonId).raw((tx) =>
       tx
