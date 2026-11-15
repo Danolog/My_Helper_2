@@ -124,18 +124,32 @@ test.describe('Flow 3: Services & Categories', () => {
     });
 
     test('should delete a service with confirmation', { tag: '@full' }, async ({ page }) => {
+      // Usuwamy usluge zalozona przez ten test, nie "pierwsza z listy": lista
+      // nie ma ORDER BY, a usuwanie pierwszej zjadalo kolejno uslugi z seeda,
+      // od ktorych zaleza inne testy (np. zadatek w tests/client-portal/).
       await navigateToServices(page);
+      const salonId = '00000000-0000-4000-8000-000000000001';
+      const token = (await page.context().cookies()).find((c) => c.name === 'csrf-token')?.value ?? '';
+      const name = `E2E do usuniecia ${Date.now()}`;
+      const createRes = await page.request.post('/api/services', {
+        headers: { 'x-csrf-token': decodeURIComponent(token) },
+        data: { salonId, name, basePrice: 10, baseDuration: 15 },
+      });
+      expect(createRes.status(), `zalozenie uslugi do usuniecia: ${await createRes.text()}`).toBe(201);
+      const serviceId: string = (await createRes.json()).data.id;
 
-      const deleteBtn = page.locator('[data-testid^="delete-service-"]').first();
-      if (await deleteBtn.isVisible()) {
-        await deleteBtn.click();
-        // Confirmation dialog
-        await expect(
-          page.getByTestId('confirm-delete-service-btn')
-        ).toBeVisible({ timeout: 3000 });
-        await page.getByTestId('confirm-delete-service-btn').click();
-        await page.waitForLoadState('domcontentloaded');
-      }
+      await navigateToServices(page);
+      await page.getByTestId(`delete-service-${serviceId}`).click();
+      await expect(page.getByTestId('confirm-delete-service-btn')).toBeVisible({ timeout: 3000 });
+      await page.getByTestId('confirm-delete-service-btn').click();
+
+      await expect
+        .poll(async () => {
+          const res = await page.request.get(`/api/services?salonId=${salonId}`);
+          const json = (await res.json()) as { data?: Array<{ id: string }> };
+          return (json.data ?? []).some((svc) => svc.id === serviceId);
+        }, { message: 'usunieta usluga nadal na liscie', timeout: 10000 })
+        .toBe(false);
     });
 
     test('should cancel service deletion', { tag: '@full' }, async ({ page }) => {
