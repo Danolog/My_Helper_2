@@ -3,6 +3,7 @@ import {
   MODULE_DISABLED_CODE,
   MODULE_DISABLED_MESSAGE,
   isModuleFrozen,
+  isPromotionTypeFrozen,
   type ModuleKey,
 } from "@/lib/features";
 
@@ -22,5 +23,24 @@ export function frozenModuleResponse(module: ModuleKey): NextResponse | null {
   return NextResponse.json(
     { success: false, code: MODULE_DISABLED_CODE, error: MODULE_DISABLED_MESSAGE },
     { status: 404 }
+  );
+}
+
+/** Kod błędu dla próby utworzenia albo zmiany promocji na typ zamrożony. */
+export const PROMOTION_TYPE_DISABLED_CODE = "PROMOTION_TYPE_DISABLED";
+
+/**
+ * 400 dla typu promocji zamrożonego (`FROZEN_PROMOTION_TYPES` w rejestrze).
+ * `POST`/`PUT /api/promotions` wołają to po walidacji schematu, przed zapisem.
+ */
+export function frozenPromotionTypeResponse(type: unknown): NextResponse | null {
+  if (!isPromotionTypeFrozen(type)) return null;
+  return NextResponse.json(
+    {
+      success: false,
+      code: PROMOTION_TYPE_DISABLED_CODE,
+      error: "Ten typ promocji jest obecnie niedostępny. Dostępne: rabat procentowy i kwotowy.",
+    },
+    { status: 400 }
   );
 }

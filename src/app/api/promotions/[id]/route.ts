@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { validateBody, updatePromotionSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { promotions } from "@/lib/schema";
+import { frozenPromotionTypeResponse } from "@/lib/server/frozen-guard";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/promotions/:id - Get a single promotion
 export async function GET(
@@ -26,7 +28,8 @@ export async function GET(
 
     const promotion = await forSalon(salonId).findOne(promotions, id);
 
-    if (!promotion) {
+    // Promocja typu zamrożonego jest dla panelu niewidoczna (jak w GET listy).
+    if (!promotion || isPromotionTypeFrozen(promotion.type)) {
       return NextResponse.json(
         { success: false, error: "Promotion not found" },
         { status: 404 }
@@ -74,10 +77,16 @@ export async function PUT(
 
     const { name, type, value, startDate, endDate, conditionsJson, isActive } = body;
 
+    // Zmiana na typ zamrożony → 400, bez zapisu.
+    const frozenType = frozenPromotionTypeResponse(type);
+    if (frozenType) return frozenType;
+
     // Check promotion exists in the caller's salon
     const existing = await forSalon(salonId).findOne(promotions, id);
 
-    if (!existing) {
+    // Promocji typu zamrożonego nie da się edytować ani włączyć (także zmianą
+    // typu na dozwolony) — dla panelu nie istnieje.
+    if (!existing || isPromotionTypeFrozen(existing.type)) {
       return NextResponse.json(
         { success: false, error: "Promotion not found" },
         { status: 404 }
