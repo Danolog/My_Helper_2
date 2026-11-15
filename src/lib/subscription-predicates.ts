@@ -31,3 +31,16 @@ export function hasRealStripeSubscription(stripeSubscriptionId: string | null | 
 export function isCurrentPaidStripeRow(row: { status: string; stripeSubscriptionId: string | null }): boolean {
   return isCurrentLocalStatus(row.status) && hasRealStripeSubscription(row.stripeSubscriptionId);
 }
+
+/**
+ * Naruszenie indeksu unikalnego (23505), także opakowane przez Drizzle
+ * w `cause` — np. `salons_owner_id_uq` albo `salon_subscriptions_salon_current_uq`
+ * przy równoległej rejestracji.
+ */
+export function isUniqueViolation(error: unknown): boolean {
+  for (let e: unknown = error, depth = 0; e && depth < 3; depth++) {
+    if ((e as { code?: unknown }).code === "23505") return true;
+    e = (e as { cause?: unknown }).cause;
+  }
+  return false;
+}

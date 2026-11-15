@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { salons, services, reviews } from "@/lib/schema";
+import { isUniqueViolation } from "@/lib/subscription-predicates";
 
 // Revalidate salon list every 60 seconds (ISR)
 export const revalidate = 60;
@@ -161,17 +162,31 @@ export async function POST(request: Request) {
       );
     }
 
-    const [newSalon] = await db
-      .insert(salons)
-      .values({
-        name,
-        phone: phone || null,
-        email: email || null,
-        address: address || null,
-        industryType: industryType || null,
-        ownerId,
-      })
-      .returning();
+    let newSalon: typeof salons.$inferSelect | undefined;
+    try {
+      [newSalon] = await db
+        .insert(salons)
+        .values({
+          name,
+          phone: phone || null,
+          email: email || null,
+          address: address || null,
+          industryType: industryType || null,
+          ownerId,
+        })
+        .returning();
+    } catch (error) {
+      // Równoległe żądanie tego samego konta zdążyło pierwsze — indeks
+      // salons_owner_id_uq (T3b) pilnuje „jedno konto = jeden salon” także
+      // przy wyścigu, którego SELECT wyżej nie widzi.
+      if (isUniqueViolation(error)) {
+        return NextResponse.json(
+          { success: false, error: "To konto ma już salon" },
+          { status: 409 }
+        );
+      }
+      throw error;
+    }
 
     logger.info(`[Salons API] INSERT successful, created salon with id: ${newSalon?.id}`);
 

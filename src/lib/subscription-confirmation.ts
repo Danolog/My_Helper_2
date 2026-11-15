@@ -13,6 +13,7 @@ import {
 import {
   isCurrentLocalStatus,
   isCurrentPaidStripeRow,
+  isUniqueViolation,
 } from "@/lib/subscription-predicates";
 import type Stripe from "stripe";
 
@@ -99,14 +100,6 @@ function fail(
   error: string
 ): ConfirmSubscriptionResult {
   return { ok: false, status, code, error };
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  for (let e: unknown = error, depth = 0; e && depth < 3; depth++) {
-    if ((e as { code?: unknown }).code === "23505") return true;
-    e = (e as { cause?: unknown }).cause;
-  }
-  return false;
 }
 
 async function findConfirmed(sessionId: string, salonId: string) {
