@@ -136,7 +136,7 @@ export function buildCsp(nonce: string): string {
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${scriptExtra} storage.googleapis.com`,
     styleSrc,
     "font-src 'self' fonts.gstatic.com",
-    "img-src 'self' data: blob: lh3.googleusercontent.com avatars.githubusercontent.com *.public.blob.vercel-storage.com images.unsplash.com",
+    "img-src 'self' data: blob: lh3.googleusercontent.com avatars.githubusercontent.com *.public.blob.vercel-storage.com storage.googleapis.com images.unsplash.com",
     "connect-src 'self' *.googleapis.com accounts.google.com",
     "form-action 'self' accounts.google.com",
     "worker-src 'self'",
