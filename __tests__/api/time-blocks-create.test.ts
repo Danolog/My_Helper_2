@@ -135,8 +135,8 @@ describe("POST /api/time-blocks — kontrakt z UI", () => {
     expect(status).toBe(201);
   });
 
-  it("201 dla id pracownika z seeda (nie v4) — format id nie jest tu zawężany do v4", async () => {
-    const { status } = await post(uiBreakBody({ employeeId: "00000000-0000-0000-0000-e00000000001" }));
+  it("201 dla id pracownika z seeda (UUID v4 po #33)", async () => {
+    const { status } = await post(uiBreakBody({ employeeId: "00000000-0000-4000-8000-000000000201" }));
     expect(status).toBe(201);
   });
 
@@ -150,6 +150,8 @@ describe("POST /api/time-blocks — kontrakt z UI", () => {
     ["brak blockType", { blockType: undefined }],
     ["niepoprawna data", { startTime: "jutro" }],
     ["id pracownika to nie UUID", { employeeId: "abc" }],
+    ["id pracownika w starym formacie seeda (wersja 0)", { employeeId: "00000000-0000-0000-0000-e00000000001" }],
+    ["id pracownika z niepoprawnym wariantem", { employeeId: "11111111-1111-4111-1111-111111111111" }],
     ["brak pracownika", { employeeId: undefined }],
   ])("400 — %s, bez zapisu", async (_label, overrides) => {
     const { status } = await post(uiBreakBody(overrides));

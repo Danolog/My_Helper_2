@@ -213,6 +213,28 @@ describe("POST /api/gallery — kontrakt z UI", () => {
     expect(status).toBe(400);
     expect(mockTxInsert).not.toHaveBeenCalled();
   });
+
+  it("201 dla id pracownika i usługi z seeda (UUID v4 po #33)", async () => {
+    const { status } = await post(
+      uiBody({
+        employeeId: "00000000-0000-4000-8000-000000000201",
+        serviceId: "00000000-0000-4000-8000-000000000301",
+      })
+    );
+    expect(status).toBe(201);
+  });
+
+  it.each([
+    ["employeeId: nie UUID", { employeeId: "abc" }],
+    ["employeeId: stary format seeda (wersja 0)", { employeeId: "00000000-0000-0000-0000-000000000001" }],
+    ["serviceId: niepoprawny wariant", { serviceId: "11111111-1111-4111-1111-111111111111" }],
+    ["serviceId: pusty napis", { serviceId: "" }],
+  ])("400 — %s, bez zapytania do bazy i zapisu", async (_label, overrides) => {
+    const { status } = await post(uiBody(overrides));
+    expect(status).toBe(400);
+    expect(mockTxSelect).not.toHaveBeenCalled();
+    expect(mockTxInsert).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/gallery — obcy salon", () => {
