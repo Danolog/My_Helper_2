@@ -94,19 +94,28 @@ export async function cancelAppointmentInTx(
       .returning();
     if (!cancelled) return { notFound: true };
 
-    const hasDeposit = !!current.depositAmount && parseFloat(current.depositAmount) > 0;
-    const variant: CancellationDepositVariant =
-      hasDeposit && current.depositPaid
-        ? paidMethods.some((p) => p.paymentMethod === "stripe")
-          ? "online"
-          : "manual"
-        : "none";
+    const variant = depositVariantFor(current.depositAmount, current.depositPaid, paidMethods);
 
     return { cancelled, depositPaid: current.depositPaid === true, variant, failedPayments };
   } catch (error) {
     if (error instanceof AlreadyCancelled) return { alreadyCancelled: true };
     throw error;
   }
+}
+
+/**
+ * Wariant zadatku wizyty: opłacony online (płatność Stripe `succeeded`),
+ * opłacony poza MyHelper (`depositPaid` bez płatności Stripe) albo brak.
+ * Wspólny dla DELETE (SMS, odpowiedź) i `cancel-info` (okno potwierdzenia).
+ */
+export function depositVariantFor(
+  depositAmount: string | null,
+  depositPaid: boolean | null,
+  succeededPayments: Array<{ paymentMethod: string }>
+): CancellationDepositVariant {
+  const hasDeposit = !!depositAmount && parseFloat(depositAmount) > 0;
+  if (!hasDeposit || !depositPaid) return "none";
+  return succeededPayments.some((p) => p.paymentMethod === "stripe") ? "online" : "manual";
 }
 
 /** Prawdziwa sesja Checkout (nie dawna symulacja, nie `pi_`). */
