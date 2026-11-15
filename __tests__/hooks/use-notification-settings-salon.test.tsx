@@ -73,6 +73,9 @@ describe("useNotificationSettings — salon konta", () => {
     global.fetch = mockFetch as unknown as typeof fetch;
   });
 
+  // Limit testu (15 s) > suma limitów obu waitFor (2 × 5 s): pod obciążeniem
+  // pierwszy pada waitFor z czytelną asercją, a nie ogólny timeout testu
+  // (domyślny testTimeout Vitest = 5000 ms = limit jednego waitFor).
   it("ładuje ustawienia salonu z /api/salons/mine, nie pierwszego z katalogu", async () => {
     const { result } = renderHook(() => useNotificationSettings(), { wrapper: thawed });
 
@@ -92,7 +95,7 @@ describe("useNotificationSettings — salon konta", () => {
       pushReminders: true,
       paymentConfirmations: false,
     });
-  });
+  }, 15_000);
 
   it("konto bez salonu: kończy ładowanie, nie pyta o ustawienia", async () => {
     mineMode = "none";
