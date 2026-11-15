@@ -1,0 +1,142 @@
+import { eq } from "drizzle-orm";
+import { logger } from "@/lib/logger";
+import { salonSubscriptions } from "@/lib/schema";
+import { stripeSubscriptionPeriod, type StripeSubscriptionPeriodSource } from "@/lib/stripe-period";
+import {
+  lockSalonSubscriptions,
+  retrieveStripeSubscriptionLocked,
+  withStripeSubscriptionLock,
+  type SubscriptionTx,
+} from "@/lib/subscription-locks";
+import type Stripe from "stripe";
+
+/**
+ * Webhooki zmieniające stan subskrypcji (`customer.subscription.updated`,
+ * `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`)
+ * traktują zdarzenie TYLKO jako sygnał (T3, kolejność zdarzeń — Ethan,
+ * `scratchpad/ethan/pr62-shape.md` §1). Stripe nie gwarantuje kolejności
+ * dostarczenia: blokada usuwa przeplot, ale nie przywraca kolejności, więc
+ * późne `invoice.paid` albo `updated: active` po `deleted` wskrzesiłoby
+ * anulowaną subskrypcję. Dlatego pod blokadą stripe_sub czytamy BIEŻĄCY stan
+ * ze Stripe i zapisujemy jego, a nie payload zdarzenia.
+ *
+ * Reguła lokalna: `canceled` jest końcowe — żaden handler go nie nadpisuje
+ * (anulowanej subskrypcji w Stripe też nie da się wznowić, a lokalne
+ * `canceled` z `subscriptions/cancel` przy `cancel_at_period_end` nie może
+ * wrócić do `active` przez późne zdarzenie).
+ */
+
+export type SubscriptionRow = typeof salonSubscriptions.$inferSelect;
+
+export interface StripeSubscriptionState extends StripeSubscriptionPeriodSource {
+  id: string;
+  status?: string | null;
+  canceled_at?: number | null;
+  trial_end?: number | null;
+}
+
+/**
+ * Stan Stripe → stan lokalny (`salon_subscriptions.status`: active, trialing,
+ * past_due, canceled). `unpaid` (wyczerpane ponowienia, bez anulowania) →
+ * past_due; `incomplete_expired` (końcowe w Stripe) → canceled. `incomplete`
+ * i `paused` nie mają odpowiednika: zostaje zapisany stan + warn.
+ */
+const STRIPE_TO_LOCAL_STATUS: Record<string, string> = {
+  active: "active",
+  trialing: "trialing",
+  past_due: "past_due",
+  unpaid: "past_due",
+  canceled: "canceled",
+  incomplete_expired: "canceled",
+};
+
+export const FINAL_LOCAL_STATUS = "canceled";
+
+export type LockedRowResult<T> = { found: false } | { found: true; value: T };
+
+/**
+ * Transakcja: lock_timeout → blokada stripe_sub → odczyt wiersza → bieżący
+ * stan ze Stripe → blokada salonu → `fn`.
+ *
+ * Brak wiersza pod blokadą → `{ found: false }`: wołający oddaje 2xx + warn.
+ * Bezpieczne, bo jedyna ścieżka zapisująca `stripeSubscriptionId`
+ * (`subscription-confirmation.ts`) czyta Stripe na świeżo pod tą samą blokadą
+ * — utracone zdarzenie nie gubi stanu (test niezmiennika:
+ * `__tests__/api/subscription-locks-invariant.test.ts`).
+ *
+ * Błąd Stripe, `lock_timeout` (55P03) i zakleszczenie (40P01) są rzucane
+ * dalej → webhook 500 → Stripe ponawia. Nigdy 2xx.
+ */
+export function withLockedStripeSubscriptionRow<T>(
+  stripe: Stripe,
+  stripeSubscriptionId: string,
+  fn: (tx: SubscriptionTx, row: SubscriptionRow, stripeSub: StripeSubscriptionState) => Promise<T>
+): Promise<LockedRowResult<T>> {
+  return withStripeSubscriptionLock(stripeSubscriptionId, async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(salonSubscriptions)
+      .where(eq(salonSubscriptions.stripeSubscriptionId, stripeSubscriptionId));
+    if (!row) return { found: false } as const;
+
+    const stripeSub = (await retrieveStripeSubscriptionLocked(
+      stripe,
+      stripeSubscriptionId
+    )) as unknown as StripeSubscriptionState;
+
+    await lockSalonSubscriptions(tx, row.salonId);
+    return { found: true, value: await fn(tx, row, stripeSub) } as const;
+  });
+}
+
+export type SubscriptionStateUpdate = Partial<
+  Pick<SubscriptionRow, "status" | "currentPeriodStart" | "currentPeriodEnd" | "canceledAt" | "trialEndsAt">
+>;
+
+/**
+ * Wartości do zapisania z bieżącego stanu Stripe albo `null`, gdy wiersz jest
+ * już `canceled` (stan końcowy — nic go nie nadpisuje).
+ */
+export function subscriptionStateFromStripe(
+  row: SubscriptionRow,
+  stripeSub: StripeSubscriptionState
+): SubscriptionStateUpdate | null {
+  if (row.status === FINAL_LOCAL_STATUS) return null;
+
+  const stripeStatus = stripeSub.status ?? "";
+  const mapped = STRIPE_TO_LOCAL_STATUS[stripeStatus];
+  if (!mapped) {
+    logger.warn("Stripe subscription status without local equivalent — keeping stored status", {
+      stripeSubscriptionId: stripeSub.id,
+      stripeStatus,
+      localStatus: row.status,
+    });
+  }
+  const status = mapped ?? row.status;
+
+  // Okres z items.data[0] (nowsze API) albo z poziomu subskrypcji (starsze).
+  const period = stripeSubscriptionPeriod(stripeSub);
+  if (!period) {
+    logger.warn("Stripe subscription without billing period — keeping stored period", {
+      stripeSubscriptionId: stripeSub.id,
+    });
+  }
+
+  const canceledAt =
+    typeof stripeSub.canceled_at === "number"
+      ? new Date(stripeSub.canceled_at * 1000)
+      : status === FINAL_LOCAL_STATUS
+        ? (row.canceledAt ?? new Date())
+        : row.canceledAt;
+
+  return {
+    status,
+    currentPeriodStart: period?.start ?? row.currentPeriodStart,
+    currentPeriodEnd: period?.end ?? row.currentPeriodEnd,
+    canceledAt,
+    // Trial po stronie Stripe: koniec ze Stripe, nie z rejestracji.
+    ...(status === "trialing" && typeof stripeSub.trial_end === "number"
+      ? { trialEndsAt: new Date(stripeSub.trial_end * 1000) }
+      : {}),
+  };
+}

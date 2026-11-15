@@ -14,6 +14,11 @@ import {
   subscriptionPlans,
 } from "@/lib/schema";
 import { getStripe, isStripeWebhookConfigured } from "@/lib/stripe";
+import {
+  confirmSubscriptionCheckout,
+  type SubscriptionCheckoutSession,
+} from "@/lib/subscription-confirmation";
+import { subscriptionStateFromStripe, withLockedStripeSubscriptionRow } from "@/lib/subscription-sync";
 
 /**
  * Raw invoice data from Stripe webhook events.
@@ -25,8 +30,6 @@ interface RawInvoiceData {
   id: string;
   amount_paid: number;
   billing_reason: string | null;
-  period_start: number;
-  period_end: number;
   // Stripe v1 API: top-level subscription field
   subscription?: string | { id: string };
   payment_intent?: string | { id: string };
@@ -51,19 +54,18 @@ interface RawCheckoutSessionData {
    * `completed` with "unpaid" first. */
   payment_status?: string;
   metadata?: Record<string, string> | null;
+  /** "payment" (zadatek) | "subscription" (plan salonu). */
+  mode?: string | null;
+  subscription?: string | { id: string } | null;
+  customer?: string | { id: string } | null;
 }
 
 /**
- * Raw subscription data from Stripe webhook events.
+ * Raw subscription data from Stripe webhook events. Only the id is used: the
+ * state is read fresh from Stripe under the lock (subscription-sync.ts).
  */
 interface RawSubscriptionData {
   id: string;
-  status: string;
-  canceled_at: number | null;
-  cancel_at_period_end: boolean;
-  // May or may not exist depending on Stripe API version
-  current_period_start?: number;
-  current_period_end?: number;
 }
 
 /**
@@ -102,10 +104,10 @@ function getPaymentIntentIdFromInvoice(invoice: RawInvoiceData, fallback: string
  * POST /api/stripe/webhook
  *
  * Stripe webhook endpoint that handles subscription lifecycle events:
- * - invoice.paid: Automatic subscription renewal (monthly billing continues)
- * - invoice.payment_failed: Mark subscription as past_due
- * - customer.subscription.updated: Sync subscription state
- * - customer.subscription.deleted: Mark subscription as canceled
+ * - invoice.paid: renewal payment recorded, state synced from Stripe
+ * - invoice.payment_failed: failed payment recorded, state synced from Stripe
+ * - customer.subscription.updated / deleted: state synced from Stripe
+ *   (the event is only a signal — see src/lib/subscription-sync.ts)
  *
  * And deposit (zadatek) Checkout events (metadata.kind === "deposit"):
  * - checkout.session.completed (payment_status "paid") /
@@ -165,26 +167,23 @@ export async function POST(request: Request) {
 
     switch (event.type) {
       case "invoice.paid":
-        await handleInvoicePaid(event);
+        await handleInvoicePaid(event, stripe);
         break;
 
       case "invoice.payment_failed":
-        await handleInvoicePaymentFailed(event);
+        await handleInvoicePaymentFailed(event, stripe);
         break;
 
       case "customer.subscription.updated":
-        await handleSubscriptionUpdated(event);
-        break;
-
       case "customer.subscription.deleted":
-        await handleSubscriptionDeleted(event);
+        await handleSubscriptionChanged(event, stripe);
         break;
 
       case "checkout.session.completed":
       // Delayed-notification methods (P24, sometimes BLIK) complete the
       // session first and report the payment result asynchronously.
       case "checkout.session.async_payment_succeeded":
-        await handleCheckoutSessionCompleted(event);
+        await handleCheckoutSessionCompleted(event, stripe);
         break;
 
       case "checkout.session.expired":
@@ -206,12 +205,22 @@ export async function POST(request: Request) {
   }
 }
 
+/** Brak wiersza pod blokadą: 2xx + warn z id zdarzenia (patrz withLockedStripeSubscriptionRow). */
+function logNoLocalSubscription(event: Stripe.Event, stripeSubscriptionId: string) {
+  logger.warn("No local subscription for Stripe ID under lock — event acknowledged", {
+    eventId: event.id,
+    eventType: event.type,
+    stripeSubscriptionId,
+  });
+}
+
 /**
- * Handle invoice.paid event - this is the main renewal handler.
- * When Stripe successfully charges the customer for a recurring subscription,
- * it sends this event. We update the subscription period dates and record the payment.
+ * Handle invoice.paid — renewal. The event is only a signal (T3): under the
+ * stripe_sub lock the CURRENT state and period are read from Stripe, never
+ * a hard-coded "active" (a late invoice.paid after deleted must not revive
+ * a canceled subscription). The payment is always recorded (idempotent).
  */
-async function handleInvoicePaid(event: Stripe.Event) {
+async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
   const invoice = event.data.object as unknown as RawInvoiceData;
   const stripeSubscriptionId = getSubscriptionIdFromInvoice(invoice);
 
@@ -226,69 +235,31 @@ async function handleInvoicePaid(event: Stripe.Event) {
     return;
   }
 
-  // Find the subscription in our database
-  const [sub] = await db
-    .select()
-    .from(salonSubscriptions)
-    .where(eq(salonSubscriptions.stripeSubscriptionId, stripeSubscriptionId));
+  const paymentIntentId = getPaymentIntentIdFromInvoice(invoice, `stripe_pi_${event.id}`);
 
-  if (!sub) {
-    logger.error("No subscription found for Stripe ID", { stripeSubscriptionId });
-    return;
-  }
+  const result = await withLockedStripeSubscriptionRow(stripe, stripeSubscriptionId, async (tx, sub, stripeSub) => {
+    const state = subscriptionStateFromStripe(sub, stripeSub);
 
-  // Calculate new period dates from the invoice
-  const periodStart = invoice.period_start
-    ? new Date(invoice.period_start * 1000)
-    : new Date();
-  const periodEnd = invoice.period_end
-    ? new Date(invoice.period_end * 1000)
-    : (() => {
-        const d = new Date();
-        d.setMonth(d.getMonth() + 1);
-        return d;
-      })();
-
-  // Check for scheduled plan change (downgrade)
-  let newPlanId = sub.planId;
-  if (sub.scheduledPlanId && sub.scheduledChangeAt) {
-    const changeAt = new Date(sub.scheduledChangeAt);
-    if (changeAt <= new Date()) {
+    // Scheduled plan change (downgrade) — only on a live subscription.
+    let newPlanId = sub.planId;
+    if (state && sub.scheduledPlanId && sub.scheduledChangeAt && new Date(sub.scheduledChangeAt) <= new Date()) {
       newPlanId = sub.scheduledPlanId;
       logger.info("Applying scheduled plan change", { subscriptionId: sub.id });
     }
-  }
 
-  // Get the plan to determine the payment amount
-  const [plan] = await db
-    .select()
-    .from(subscriptionPlans)
-    .where(eq(subscriptionPlans.id, newPlanId));
+    const [plan] = await tx.select().from(subscriptionPlans).where(eq(subscriptionPlans.id, newPlanId));
+    const amount = plan ? plan.priceMonthly : (invoice.amount_paid / 100).toFixed(2);
 
-  const amount = plan
-    ? plan.priceMonthly
-    : (invoice.amount_paid / 100).toFixed(2);
-
-  // Record the renewal payment and update the subscription atomically
-  const paymentIntentId = getPaymentIntentIdFromInvoice(
-    invoice,
-    `stripe_pi_${event.id}`
-  );
-
-  await db.transaction(async (tx) => {
-    await tx
-      .update(salonSubscriptions)
-      .set({
-        status: "active",
-        currentPeriodStart: periodStart,
-        currentPeriodEnd: periodEnd,
-        planId: newPlanId,
-        // Clear scheduled changes if applied
-        ...(newPlanId !== sub.planId
-          ? { scheduledPlanId: null, scheduledChangeAt: null }
-          : {}),
-      })
-      .where(eq(salonSubscriptions.id, sub.id));
+    if (state) {
+      await tx
+        .update(salonSubscriptions)
+        .set({
+          ...state,
+          planId: newPlanId,
+          ...(newPlanId !== sub.planId ? { scheduledPlanId: null, scheduledChangeAt: null } : {}),
+        })
+        .where(eq(salonSubscriptions.id, sub.id));
+    }
 
     // Stripe retry tego samego eventu nie może zdublować historii płatności
     await tx
@@ -303,50 +274,37 @@ async function handleInvoicePaid(event: Stripe.Event) {
         paidAt: new Date(),
       })
       .onConflictDoNothing({ target: subscriptionPayments.stripePaymentIntentId });
+
+    return { subscriptionId: sub.id, status: state?.status ?? sub.status, final: !state };
   });
 
-  logger.info("Subscription renewed", {
-    subscriptionId: sub.id,
-    periodStart: periodStart.toISOString(),
-    periodEnd: periodEnd.toISOString(),
-  });
+  if (!result.found) {
+    logNoLocalSubscription(event, stripeSubscriptionId);
+    return;
+  }
+  logger.info("Subscription invoice paid", { eventId: event.id, ...result.value });
 }
 
 /**
- * Handle invoice.payment_failed - mark subscription as past_due.
+ * Handle invoice.payment_failed — record the failed attempt; the status comes
+ * from Stripe (a late payment_failed after a later invoice.paid must not
+ * give a false past_due).
  */
-async function handleInvoicePaymentFailed(event: Stripe.Event) {
+async function handleInvoicePaymentFailed(event: Stripe.Event, stripe: Stripe) {
   const invoice = event.data.object as unknown as RawInvoiceData;
   const stripeSubscriptionId = getSubscriptionIdFromInvoice(invoice);
 
   if (!stripeSubscriptionId) return;
 
-  const [sub] = await db
-    .select()
-    .from(salonSubscriptions)
-    .where(eq(salonSubscriptions.stripeSubscriptionId, stripeSubscriptionId));
+  const paymentIntentId = getPaymentIntentIdFromInvoice(invoice, `stripe_pi_failed_${event.id}`);
 
-  if (!sub) {
-    logger.error("No subscription found for Stripe ID (payment failed)", { stripeSubscriptionId });
-    return;
-  }
+  const result = await withLockedStripeSubscriptionRow(stripe, stripeSubscriptionId, async (tx, sub, stripeSub) => {
+    const state = subscriptionStateFromStripe(sub, stripeSub);
+    const [plan] = await tx.select().from(subscriptionPlans).where(eq(subscriptionPlans.id, sub.planId));
 
-  // Record the failed payment attempt
-  const [plan] = await db
-    .select()
-    .from(subscriptionPlans)
-    .where(eq(subscriptionPlans.id, sub.planId));
-
-  const paymentIntentId = getPaymentIntentIdFromInvoice(
-    invoice,
-    `stripe_pi_failed_${event.id}`
-  );
-
-  await db.transaction(async (tx) => {
-    await tx
-      .update(salonSubscriptions)
-      .set({ status: "past_due" })
-      .where(eq(salonSubscriptions.id, sub.id));
+    if (state) {
+      await tx.update(salonSubscriptions).set(state).where(eq(salonSubscriptions.id, sub.id));
+    }
 
     await tx
       .insert(subscriptionPayments)
@@ -360,82 +318,41 @@ async function handleInvoicePaymentFailed(event: Stripe.Event) {
         paidAt: null,
       })
       .onConflictDoNothing({ target: subscriptionPayments.stripePaymentIntentId });
+
+    return { subscriptionId: sub.id, status: state?.status ?? sub.status, final: !state };
   });
 
-  logger.warn("Payment failed, subscription set to past_due", { subscriptionId: sub.id });
+  if (!result.found) {
+    logNoLocalSubscription(event, stripeSubscriptionId);
+    return;
+  }
+  logger.warn("Subscription payment failed", { eventId: event.id, ...result.value });
 }
 
 /**
- * Handle customer.subscription.updated - sync subscription state.
+ * customer.subscription.updated / customer.subscription.deleted — sync the
+ * CURRENT Stripe state (not the event payload) under the stripe_sub lock.
  */
-async function handleSubscriptionUpdated(event: Stripe.Event) {
-  const stripeSub = event.data.object as unknown as RawSubscriptionData;
+async function handleSubscriptionChanged(event: Stripe.Event, stripe: Stripe) {
+  const stripeSubscriptionId = (event.data.object as unknown as RawSubscriptionData).id;
 
-  const [sub] = await db
-    .select()
-    .from(salonSubscriptions)
-    .where(eq(salonSubscriptions.stripeSubscriptionId, stripeSub.id));
+  const result = await withLockedStripeSubscriptionRow(stripe, stripeSubscriptionId, async (tx, sub, stripeSub) => {
+    const state = subscriptionStateFromStripe(sub, stripeSub);
+    if (state) {
+      await tx.update(salonSubscriptions).set(state).where(eq(salonSubscriptions.id, sub.id));
+    }
+    return { subscriptionId: sub.id, status: state?.status ?? sub.status, final: !state };
+  });
 
-  if (!sub) {
-    logger.debug("No local subscription found for Stripe ID (updated)", { stripeSubscriptionId: stripeSub.id });
+  if (!result.found) {
+    logNoLocalSubscription(event, stripeSubscriptionId);
     return;
   }
-
-  // Map Stripe status to our status
-  let status = sub.status;
-  if (stripeSub.status === "active") status = "active";
-  else if (stripeSub.status === "past_due") status = "past_due";
-  else if (stripeSub.status === "canceled") status = "canceled";
-  else if (stripeSub.status === "trialing") status = "trialing";
-
-  // current_period_start/end may not exist in newer Stripe API versions
-  const periodStart = stripeSub.current_period_start
-    ? new Date(stripeSub.current_period_start * 1000)
-    : sub.currentPeriodStart;
-  const periodEnd = stripeSub.current_period_end
-    ? new Date(stripeSub.current_period_end * 1000)
-    : sub.currentPeriodEnd;
-
-  await db
-    .update(salonSubscriptions)
-    .set({
-      status,
-      currentPeriodStart: periodStart,
-      currentPeriodEnd: periodEnd,
-      canceledAt: stripeSub.canceled_at
-        ? new Date(stripeSub.canceled_at * 1000)
-        : sub.canceledAt,
-    })
-    .where(eq(salonSubscriptions.id, sub.id));
-
-  logger.info("Subscription updated", { subscriptionId: sub.id, status });
-}
-
-/**
- * Handle customer.subscription.deleted - mark as canceled.
- */
-async function handleSubscriptionDeleted(event: Stripe.Event) {
-  const stripeSub = event.data.object as unknown as RawSubscriptionData;
-
-  const [sub] = await db
-    .select()
-    .from(salonSubscriptions)
-    .where(eq(salonSubscriptions.stripeSubscriptionId, stripeSub.id));
-
-  if (!sub) {
-    logger.debug("No local subscription found for Stripe ID (deleted)", { stripeSubscriptionId: stripeSub.id });
-    return;
-  }
-
-  await db
-    .update(salonSubscriptions)
-    .set({
-      status: "canceled",
-      canceledAt: new Date(),
-    })
-    .where(eq(salonSubscriptions.id, sub.id));
-
-  logger.info("Subscription deleted/canceled via Stripe", { subscriptionId: sub.id });
+  logger.info("Subscription synced from Stripe", {
+    eventId: event.id,
+    eventType: event.type,
+    ...result.value,
+  });
 }
 
 /**
@@ -452,11 +369,15 @@ async function handleSubscriptionDeleted(event: Stripe.Event) {
  * can arrive with payment_status "unpaid" — in that case we do NOT confirm
  * and wait for `async_payment_succeeded` (or `async_payment_failed`).
  */
-async function handleCheckoutSessionCompleted(event: Stripe.Event) {
+async function handleCheckoutSessionCompleted(event: Stripe.Event, stripe: Stripe) {
   const checkoutSession = event.data.object as unknown as RawCheckoutSessionData;
 
+  if (checkoutSession.metadata?.kind !== "deposit" && checkoutSession.mode === "subscription") {
+    await handleSubscriptionCheckoutCompleted(event, stripe, checkoutSession);
+    return;
+  }
+
   if (checkoutSession.metadata?.kind !== "deposit") {
-    // Subscription checkouts are confirmed by their own flow — ignore here.
     logger.debug("Checkout session event without deposit metadata, skipping", {
       eventType: event.type,
       sessionId: checkoutSession.id,
@@ -520,6 +441,58 @@ async function handleCheckoutSessionCompleted(event: Stripe.Event) {
     sessionId: checkoutSession.id,
     paymentIntentId,
     alreadyConfirmed: result.alreadyConfirmed,
+  });
+}
+
+/**
+ * Subscription Checkout (mode "subscription") completed — the same
+ * confirmSubscriptionCheckout() as /api/subscriptions/confirm (T3), so the
+ * plan is granted even when the user never returns to the success page, and
+ * whichever comes second gets alreadyConfirmed instead of a duplicate.
+ *
+ * Salon from the signed event's metadata (no user session here).
+ * - unpaid (async method): wait for async_payment_succeeded,
+ * - Stripe error / lock busy (502/503): throw → 500 → Stripe retries,
+ * - invalid data / conflict (400/404/409): logged for manual handling, 200
+ *   (a retry would not change the outcome).
+ */
+async function handleSubscriptionCheckoutCompleted(
+  event: Stripe.Event,
+  stripe: Stripe,
+  checkoutSession: RawCheckoutSessionData
+) {
+  if (checkoutSession.payment_status !== "paid") {
+    logger.info("Subscription checkout completed but not paid yet — waiting", {
+      eventType: event.type,
+      sessionId: checkoutSession.id,
+    });
+    return;
+  }
+
+  const result = await confirmSubscriptionCheckout(
+    stripe,
+    checkoutSession as SubscriptionCheckoutSession
+  );
+
+  if (result.ok) {
+    logger.info("Subscription checkout confirmed via webhook", {
+      eventId: event.id,
+      sessionId: checkoutSession.id,
+      alreadyConfirmed: result.alreadyConfirmed,
+      subscriptionId: result.subscription?.id,
+    });
+    return;
+  }
+
+  if (result.status === 502 || result.status === 503) {
+    throw new Error(`Subscription checkout confirmation failed: ${result.code}`);
+  }
+
+  logger.error("Subscription checkout NOT confirmed via webhook — manual handling", {
+    eventId: event.id,
+    sessionId: checkoutSession.id,
+    code: result.code,
+    status: result.status,
   });
 }
 

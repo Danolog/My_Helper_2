@@ -8,6 +8,7 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions } from "@/lib/schema";
 import { getStripe } from "@/lib/stripe";
+import { stripeSubscriptionPeriod } from "@/lib/stripe-period";
 
 /**
  * POST /api/subscriptions/cancel
@@ -73,9 +74,7 @@ export async function POST() {
           logger.info("Stripe subscription set to cancel at period end", {
             stripeSubscriptionId: activeSub.stripeSubscriptionId,
             cancelAtPeriodEnd: canceledStripeSub.cancel_at_period_end,
-            currentPeriodEnd: canceledStripeSub.items.data[0]?.current_period_end
-              ? new Date(canceledStripeSub.items.data[0].current_period_end * 1000).toISOString()
-              : null,
+            currentPeriodEnd: stripeSubscriptionPeriod(canceledStripeSub)?.end.toISOString() ?? null,
           });
         } catch (err) {
           stripeError = err instanceof Error ? err.message : "Stripe cancellation failed";
