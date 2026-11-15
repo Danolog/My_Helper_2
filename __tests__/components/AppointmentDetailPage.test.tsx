@@ -42,7 +42,6 @@ vi.mock("@/components/appointments/detail", () => ({
   AppointmentTreatment: () => null,
   AppointmentCommission: () => null,
   AppointmentInvoiceCard: () => <div data-testid="stub-invoice-card" />,
-  AppointmentFiscalReceiptCard: () => null,
   AppointmentMaterials: () => null,
 }));
 
@@ -104,7 +103,7 @@ describe("AppointmentDetailPage — faktury zamrożone", () => {
     expect(screen.queryByTestId("stub-invoice-card")).not.toBeInTheDocument();
   });
 
-  it("fiskalizacja zamrożona: zakończona wizyta renderuje się bez pytania o paragon i bez błędów", async () => {
+  it("fiskalizacja usunięta (B5): zakończona wizyta renderuje się bez pytania o paragon i bez błędów", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     renderPage();
 
@@ -117,12 +116,15 @@ describe("AppointmentDetailPage — faktury zamrożone", () => {
     consoleError.mockRestore();
   });
 
-  it("kontrola: przy module fiskalizacji włączonym strona pyta o paragon", async () => {
+  it("fiskalizacja usunięta (B5): nawet flaga fiscal w stanie modułów nie przywraca pytania o paragon", async () => {
     renderPage({ ...DEFAULT_MODULES, fiscal: true });
 
     await waitFor(() => {
-      expect(fetchedUrls()).toContain("/api/appointments/appt-1/fiscal-receipt");
+      expect(screen.getByTestId("stub-header")).toBeInTheDocument();
     });
+
+    expect(fetchedUrls()).toContain("/api/appointments/appt-1");
+    expect(fetchedUrls().filter((u) => u.includes("fiscal"))).toEqual([]);
   });
 
   it("kontrola: przy module faktur włączonym strona pobiera fakturę i pokazuje kartę", async () => {

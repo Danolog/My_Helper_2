@@ -45,7 +45,6 @@ const LABELS: Record<string, string> = {
   finance: "Prowizje",
   reviews: "Opinie",
   "waiting-list": "Lista oczekujacych",
-  fiscal: "Ustawienia fiskalne",
 };
 
 function isUuid(segment: string) {

@@ -69,7 +69,8 @@ const API_DIR_NAMES: Record<string, RegExp | null> = {
   voiceAi: null,
   // B4: wideo usunięte — tras /api/ai/video nie ma (removed-features.test.ts).
   videoGen: null,
-  fiscal: /fiscal/,
+  // B5: fiskalizacja usunięta — tras nie ma (removed-features.test.ts).
+  fiscal: null,
   // B4: publikacja postów usunięta — tras nie ma (removed-features.test.ts).
   socialPosts: null,
   // Promocje złożone: trasy sprawdzające (2+1, happy hours, pakiet, pierwsza
@@ -159,9 +160,6 @@ describe("frozenModuleForApiPath", () => {
     ["/api/push/test", "pushNotifications"],
     ["/api/cron/push-reminders", "pushNotifications"],
     ["/api/cron/push-reminders-24h", "pushNotifications"],
-    ["/api/appointments/abc/fiscal-receipt", "fiscal"],
-    ["/api/salons/abc/fiscal-settings", "fiscal"],
-    ["/api/salons/abc/fiscal-settings/test-print", "fiscal"],
     ["/api/promotions/check", "complexPromotions"],
     ["/api/promotions/check-happy-hours", "complexPromotions"],
     ["/api/promotions/check-package", "complexPromotions"],
@@ -296,6 +294,7 @@ describe("frozenModuleForPage", () => {
     ["/dashboard/content-generator/scheduled", "socialPosts"],
     ["/dashboard/content-generator/templates", "socialPosts"],
     ["/dashboard/content-generator/testimonials", "videoGen"],
+    // B5: strona usunięta — otwarta karta dostaje przekierowanie, nie 404.
     ["/dashboard/settings/fiscal", "fiscal"],
     ["/Dashboard/Invoices", "invoices"],
     ["/dashboard//invoices", "invoices"],

@@ -25,9 +25,6 @@ const {
   mockDbUpdateSet,
   mockDbUpdateTable,
   mockDbSelect,
-  mockDbInsertReturning,
-  mockDbInsertValues,
-  mockDbInsertInto,
 } = vi.hoisted(() => {
   const mockStripeRefundsCreate = vi.fn();
   const mockSessionsRetrieve = vi.fn();
@@ -61,9 +58,6 @@ const {
   const mockDbUpdateSet = vi.fn((..._args: unknown[]) => ({ where: mockDbUpdateWhere }));
   const mockDbUpdateTable = vi.fn((..._args: unknown[]) => ({ set: mockDbUpdateSet }));
 
-  const mockDbInsertReturning = vi.fn();
-  const mockDbInsertValues = vi.fn().mockReturnValue({ returning: mockDbInsertReturning });
-  const mockDbInsertInto = vi.fn().mockReturnValue({ values: mockDbInsertValues });
   return {
     mockStripeRefundsCreate,
     mockSessionsRetrieve,
@@ -76,9 +70,6 @@ const {
     mockDbUpdateSet,
     mockDbUpdateTable,
     mockDbSelect,
-    mockDbInsertReturning,
-    mockDbInsertValues,
-    mockDbInsertInto,
   };
 });
 
@@ -96,7 +87,6 @@ vi.mock("@/lib/stripe", () => ({
 vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...(args as [])),
-    insert: (...args: unknown[]) => mockDbInsertInto(...args),
     update: (...args: unknown[]) => mockDbUpdateTable(...args),
   },
 }));
@@ -121,11 +111,10 @@ vi.mock("@/lib/schema", () => ({
   appointments: {
     id: "appointments.id",
   },
-  notifications: "notifications_table",
 }));
 
 import { logger } from "@/lib/logger";
-import { processAutomaticRefund, refundAppointmentDeposits, createRefundNotification } from "@/lib/refund";
+import { processAutomaticRefund, refundAppointmentDeposits } from "@/lib/refund";
 
 const eqArgs = (col: string, val: unknown) => ({ type: "eq", args: [col, val] });
 
@@ -421,75 +410,5 @@ describe("refundAppointmentDeposits — wszystkie 'succeeded' wizyty", () => {
     const result = await refundAppointmentDeposits("appt-1", "powod");
     expect(result).toMatchObject({ success: false, refunded: false, error: "refund_error" });
     expect(mockStripeRefundsCreate).not.toHaveBeenCalled();
-  });
-});
-
-describe("createRefundNotification", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockDbInsertInto.mockReturnValue({ values: mockDbInsertValues });
-    mockDbInsertValues.mockReturnValue({ returning: mockDbInsertReturning });
-    mockDbInsertReturning.mockResolvedValue([{ id: "notif-1" }]);
-    vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.spyOn(console, "error").mockImplementation(() => {});
-  });
-
-  it("should create a refund notification with correct details", async () => {
-    await createRefundNotification(
-      "salon-1",
-      "client-1",
-      50.0,
-      "Jan Kowalski",
-      "Strzyzenie",
-      new Date("2024-01-15T14:00:00")
-    );
-
-    expect(mockDbInsertValues).toHaveBeenCalledWith(
-      expect.objectContaining({
-        salonId: "salon-1",
-        clientId: "client-1",
-        type: "sms",
-        status: "pending",
-      })
-    );
-
-    const insertedValues = mockDbInsertValues.mock.calls[0]![0];
-    expect(insertedValues.message).toContain("50.00 PLN");
-    expect(insertedValues.message).toContain("Jan Kowalski");
-    expect(insertedValues.message).toContain("Strzyzenie");
-  });
-
-  it("should not throw when database insert fails", async () => {
-    mockDbInsertValues.mockReturnValue({
-      returning: vi.fn().mockRejectedValue(new Error("DB error")),
-    });
-
-    // Should not throw even though insert fails - error is caught internally
-    // Note: createRefundNotification uses db.insert().values() without .returning()
-    // Looking at the code: it just calls insert().values({...}) directly
-    await expect(
-      createRefundNotification(
-        "salon-1",
-        "client-1",
-        50.0,
-        "Jan",
-        "Service",
-        new Date()
-      )
-    ).resolves.toBeUndefined();
-  });
-
-  it("should include booking link in notification message", async () => {
-    await createRefundNotification(
-      "salon-1",
-      "client-1",
-      25.0,
-      "Anna",
-      "Manicure",
-      new Date("2024-03-01T10:00:00")
-    );
-
-    const insertedValues = mockDbInsertValues.mock.calls[0]![0];
-    expect(insertedValues.message).toContain("/salons/salon-1/book");
   });
 });

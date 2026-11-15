@@ -27,7 +27,6 @@ import {
   CalendarRange,
   CalendarDays,
   Gift,
-  Printer,
   Star,
   Clock,
   Ticket,
@@ -104,7 +103,6 @@ const SETTINGS_PAGES: CommandPage[] = [
   { label: "Platnosci Stripe", href: "/dashboard/settings/payments", icon: CreditCard },
   { label: "Powiadomienia (ustawienia)", href: "/dashboard/settings/notifications", icon: Bell, keywords: ["sms", "przypomnienia"] },
   { label: "Program lojalnosciowy", href: "/dashboard/settings/loyalty", icon: Gift, keywords: ["punkty", "nagrody"] },
-  { label: "Drukarka fiskalna", href: "/dashboard/settings/fiscal", icon: Printer, keywords: ["kasa", "paragon"] },
 ];
 
 const AI_PAGES: CommandPage[] = [

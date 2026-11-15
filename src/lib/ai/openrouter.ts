@@ -471,8 +471,32 @@ export function isParseError(result: unknown): result is Response {
 // ────────────────────────────────────────────────────────────
 
 /**
+ * Typy i dostawcy, pod którymi wolno ZAPISAĆ nowe użycie AI. Celowo bez
+ * `"video"` / `"google_veo"`: wideo usunięte w B4, a wiersze historyczne tylko
+ * się odczytuje (`COST_MAP` w usage-limits.ts zostaje kluczem `string`).
+ * Zawężenie typu łapie wartości sklejane ze stringów i ze stałych
+ * (recenzja Ryana #114, V1/V2) — tego nie zobaczy skaner tekstu G6.
+ * Rzutowania (`as any`, `as never`, `// @ts-ignore`) i pliki JS omijają typ,
+ * dlatego `trackAIUsage` sprawdza te same listy także w czasie wykonania
+ * (recenzja Ryana #117, T1–T3, J2).
+ */
+export const TRACKED_AI_USAGE_TYPES = ["text", "image", "banner"] as const;
+export const TRACKED_AI_USAGE_PROVIDERS = [
+  "openrouter",
+  "google_imagen",
+  "sharp",
+] as const;
+export type TrackedAIUsageType = (typeof TRACKED_AI_USAGE_TYPES)[number];
+export type TrackedAIUsageProvider = (typeof TRACKED_AI_USAGE_PROVIDERS)[number];
+
+/**
  * Track an AI text generation call for cost monitoring.
- * Non-blocking — errors are logged but never propagated to the caller.
+ * Non-blocking — database errors are logged but never propagated to the caller.
+ * A `type`/`provider` outside the allowlists above is a programming error:
+ * nothing is written, one `logger.error` is emitted and the promise still
+ * resolves. Callers use `void trackAIUsage(...)`, so a rejection would be
+ * unhandled — Node ends the process on those by default, and we do not rely
+ * on the Next.js handler to catch it (decyzja Olivera, #117).
  *
  * @param salonId  - Salon that initiated the AI call
  * @param feature  - Feature identifier for grouping (e.g. "auto_summary", "search")
@@ -482,13 +506,27 @@ export async function trackAIUsage(
   salonId: string,
   feature: string,
   metadata?: Record<string, unknown>,
-  options?: { type?: string; provider?: string },
+  options?: { type?: TrackedAIUsageType; provider?: TrackedAIUsageProvider },
 ): Promise<void> {
+  const type: unknown = options?.type ?? "text";
+  const provider: unknown = options?.provider ?? "openrouter";
+  if (
+    !(TRACKED_AI_USAGE_TYPES as readonly unknown[]).includes(type) ||
+    !(TRACKED_AI_USAGE_PROVIDERS as readonly unknown[]).includes(provider)
+  ) {
+    // Tylko odrzucone wartości i salon — bez feature/metadata (treść żądania).
+    logger.error("[AI] Rejected usage record outside the allowlist", {
+      salonId,
+      type: String(type).slice(0, 64),
+      provider: String(provider).slice(0, 64),
+    });
+    return;
+  }
   try {
     await db.insert(aiGeneratedMedia).values({
       salonId,
-      type: options?.type ?? "text",
-      provider: options?.provider ?? "openrouter",
+      type: type as TrackedAIUsageType,
+      provider: provider as TrackedAIUsageProvider,
       prompt: feature,
       status: "completed",
       metadata: { feature, ...metadata },
