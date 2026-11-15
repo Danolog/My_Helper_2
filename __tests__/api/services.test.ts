@@ -142,9 +142,9 @@ import { GET as listServices, POST as createService } from "@/app/api/services/r
 
 // Mocked tenant resolver — flip it to simulate "no salon" / wrong tenant.
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { getSalonContext } from "@/lib/salon-context";
+import { requireSalonStaff } from "@/lib/salon-context";
 const mockGetUserSalonId = vi.mocked(getUserSalonId);
-const mockGetSalonContext = vi.mocked(getSalonContext);
+const mockRequireSalonStaff = vi.mocked(requireSalonStaff);
 
 // -------------------------------------------------------
 // Tests
@@ -610,11 +610,14 @@ describe("Faza 3 role — GET /api/services", () => {
   });
 
   it("employee czyta listę usług swojego salonu (200, salon z kontekstu)", async () => {
-    mockGetSalonContext.mockResolvedValueOnce({
-      salonId: TEST_IDS.SALON_UUID,
-      role: "employee",
-      employeeId: TEST_IDS.EMPLOYEE_UUID,
-      userId: "user-emp",
+    // #73: GET listy przeszedł z getSalonContext na requireSalonStaff (salon z sesji).
+    mockRequireSalonStaff.mockResolvedValueOnce({
+      ctx: {
+        salonId: TEST_IDS.SALON_UUID,
+        role: "employee",
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        userId: "user-emp",
+      },
     });
     mockDbSelect.mockReturnValue(chainMock([{ service: makeService(), category: null }]));
 
