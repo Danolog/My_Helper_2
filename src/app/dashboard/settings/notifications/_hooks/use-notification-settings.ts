@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
-import { useSession } from "@/lib/auth-client";
+import { useSalonId } from "@/hooks/use-salon-id";
 import {
   DEFAULT_BIRTHDAY_SETTINGS,
   DEFAULT_WE_MISS_YOU_SETTINGS,
@@ -49,8 +49,9 @@ interface UseNotificationSettingsReturn {
 }
 
 export function useNotificationSettings(): UseNotificationSettingsReturn {
-  const { data: session } = useSession();
-  const [salonId, setSalonId] = useState<string | null>(null);
+  // Salon zalogowanego konta (/api/salons/mine), NIE pierwszy salon z
+  // publicznego katalogu GET /api/salons (nie zwraca ownerId) — API wymusza salon z sesji.
+  const { salonId, loading: salonLoading } = useSalonId();
   const [loading, setLoading] = useState(true);
 
   // Birthday settings state
@@ -75,35 +76,10 @@ export function useNotificationSettings(): UseNotificationSettingsReturn {
   const [channelsSavedSuccessfully, setChannelsSavedSuccessfully] =
     useState(false);
 
-  // Fetch salon ID - prefer salon owned by current user
+  // Konto bez salonu (lub blad /api/salons/mine): nie zostawiaj wiecznego spinnera
   useEffect(() => {
-    const controller = new AbortController();
-    async function fetchSalonId() {
-      try {
-        const res = await fetch("/api/salons", { signal: controller.signal });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.success && data.data.length > 0) {
-          const userId = session?.user?.id;
-          const userSalon = userId
-            ? data.data.find(
-                (s: { ownerId: string | null }) => s.ownerId === userId,
-              )
-            : null;
-          setSalonId(userSalon ? userSalon.id : data.data[0].id);
-        } else {
-          setLoading(false);
-        }
-      } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") return;
-        setLoading(false);
-      }
-    }
-    if (session?.user) {
-      fetchSalonId();
-    }
-    return () => controller.abort();
-  }, [session]);
+    if (!salonLoading && !salonId) setLoading(false);
+  }, [salonLoading, salonId]);
 
   // Fetch all notification settings when salonId is available
   const fetchSettings = useCallback(
