@@ -426,8 +426,6 @@ function AIUsageContent() {
                       <span>Wyszukiwanie AI: $0.002</span>
                       <span>Powiadomienia AI: $0.001</span>
                       <span>Ulepszenie foto: $0 (serwer)</span>
-                      <span>Klipy wideo (Veo): $0.15</span>
-                      <span>Szablony testimoniali: $0.002</span>
                     </div>
                   </div>
                 </div>
