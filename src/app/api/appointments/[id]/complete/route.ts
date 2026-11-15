@@ -8,6 +8,7 @@ import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 // owner_id) — czeka na akcesor forOwner; brama zasobu [id] idzie przez forSalon.
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
+import { resolveModules } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import { getSalonContext } from "@/lib/salon-context";
 import {
@@ -398,7 +399,9 @@ export async function POST(
         }
       }
 
-      // 5. Award loyalty points if loyalty program is enabled
+      // 5. Award loyalty points if the loyalty module is on (registry in
+      // src/lib/features.ts — frozen modules are always off) AND the salon
+      // enabled the program in its loyalty settings.
       let loyaltyResult: {
         pointsAwarded: number;
         totalPoints: number;
@@ -419,7 +422,7 @@ export async function POST(
             const settings = salon.settingsJson as Record<string, unknown> | null;
             const loyaltySettings = settings?.loyalty as LoyaltySettings | undefined;
 
-            if (loyaltySettings?.enabled) {
+            if (resolveModules(settings).loyalty && loyaltySettings?.enabled) {
               // Calculate effective price for points
               let priceForPoints = parseFloat(service.basePrice);
 

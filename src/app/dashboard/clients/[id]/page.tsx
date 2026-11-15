@@ -22,6 +22,7 @@ import {
   parseCommaSeparated,
   serializeCommaSeparated,
 } from "@/components/clients/utils";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
@@ -34,6 +35,9 @@ export default function ClientProfilePage() {
   const clientId = params.id as string;
   const { data: session, isPending } = useSession();
   const { salonId, loading: salonLoading } = useSalonId();
+  // Lojalnosc to modul z rejestru (src/lib/features.ts) — wylaczony albo
+  // zamrozony chowa zakladke punktow.
+  const loyaltyEnabled = useModuleEnabled("loyalty");
 
   const [client, setClient] = useState<ClientData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -300,10 +304,12 @@ export default function ClientProfilePage() {
             <History className="h-4 w-4 mr-1" />
             Historia wizyt
           </TabsTrigger>
-          <TabsTrigger value="loyalty" data-testid="tab-loyalty">
-            <Award className="h-4 w-4 mr-1" />
-            Punkty lojalnosciowe
-          </TabsTrigger>
+          {loyaltyEnabled && (
+            <TabsTrigger value="loyalty" data-testid="tab-loyalty">
+              <Award className="h-4 w-4 mr-1" />
+              Punkty lojalnosciowe
+            </TabsTrigger>
+          )}
           <TabsTrigger value="ai-insights" data-testid="tab-ai-insights">
             <Brain className="h-4 w-4 mr-1" />
             AI Insights
@@ -353,11 +359,13 @@ export default function ClientProfilePage() {
         </TabsContent>
 
         {/* Loyalty Points Tab */}
-        <TabsContent value="loyalty">
-          {activatedTabs.has("loyalty") && salonId && (
-            <ClientLoyaltyTab clientId={clientId} salonId={salonId} />
-          )}
-        </TabsContent>
+        {loyaltyEnabled && (
+          <TabsContent value="loyalty">
+            {activatedTabs.has("loyalty") && salonId && (
+              <ClientLoyaltyTab clientId={clientId} salonId={salonId} />
+            )}
+          </TabsContent>
+        )}
 
         {/* AI Insights Tab */}
         <TabsContent value="ai-insights">

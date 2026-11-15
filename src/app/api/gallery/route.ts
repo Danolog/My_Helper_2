@@ -2,12 +2,16 @@ import { NextResponse } from "next/server";
 import { eq, desc, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createGalleryPhotoSchema } from "@/lib/api-validation";
+import { hasGalleryUrlConflict } from "@/lib/gallery-files";
 import { logger } from "@/lib/logger";
 import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-import type { z } from "zod";
-// GET /api/gallery - List gallery photos
+import { isValidUuid } from "@/lib/validations";
+// GET /api/gallery - List gallery photos (panel salonu)
+// Salon WYŁĄCZNIE z sesji. salonId z query (wysyła go dashboard) jest tylko
+// porównywany z salonem sesji: inny = 403. Publiczna galeria salonu to
+// GET /api/salons/[id]/gallery (ukrywa productsUsed wg showProductsToClients).
 export const GET = withApiHandler(
   {
     auth: "user",
@@ -16,13 +20,29 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const requestedSalonId = searchParams.get("salonId");
     const employeeId = searchParams.get("employeeId");
     const serviceId = searchParams.get("serviceId");
 
-    if (!salonId) {
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+    if (requestedSalonId && requestedSalonId !== ctx.salonId) {
+      return NextResponse.json(
+        { success: false, error: "Brak dostepu do tego salonu" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
+
+    // Filtry trafiają do kolumn uuid — śmieć dałby 500 z Postgresa.
+    if ((employeeId && !isValidUuid(employeeId)) || (serviceId && !isValidUuid(serviceId))) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidlowy filtr" },
         { status: 400 }
       );
     }
@@ -49,6 +69,7 @@ export const GET = withApiHandler(
         productsUsed: galleryPhotos.productsUsed,
         techniques: galleryPhotos.techniques,
         duration: galleryPhotos.duration,
+        showProductsToClients: galleryPhotos.showProductsToClients,
         createdAt: galleryPhotos.createdAt,
         employeeFirstName: employees.firstName,
         employeeLastName: employees.lastName,
@@ -75,24 +96,15 @@ export const GET = withApiHandler(
 export const POST = withApiHandler(
   {
     auth: "user",
-    schema: createGalleryPhotoSchema as z.ZodType<{
-      salonId: string;
-      employeeId?: string | null;
-      serviceId?: string | null;
-      beforePhotoUrl?: string | null;
-      afterPhotoUrl?: string | null;
-      description?: string | null;
-      productsUsed?: string | null;
-      techniques?: string | null;
-      duration?: string | null;
-    }>,
+    schema: createGalleryPhotoSchema,
     logLabel: "[Gallery API] POST",
     errorMessage: "Failed to create gallery photo",
   },
   async ({ body }) => {
     // Faza 3 (role): zdjęcia dodaje owner i employee (spec); receptionist
-    // tylko z czasowym grantem "gallery-manage". Nie-owner wyłącznie do
-    // WŁASNEGO salonu (salonId z body musi zgadzać się z sesją).
+    // tylko z czasowym grantem "gallery-manage". KAŻDA rola (także owner)
+    // wyłącznie do WŁASNEGO salonu: salonId z body musi zgadzać się z sesją,
+    // zapis idzie przez forSalon(ctx.salonId).
     const ctx = await getSalonContext();
     if (!ctx) {
       return NextResponse.json(
@@ -103,7 +115,7 @@ export const POST = withApiHandler(
     if (
       (ctx.role === "receptionist" &&
         !(await hasFeatureAccess(ctx, "gallery-manage"))) ||
-      (ctx.role !== "owner" && body.salonId !== ctx.salonId)
+      body.salonId !== ctx.salonId
     ) {
       return NextResponse.json(
         { success: false, error: "Brak uprawnien" },
@@ -111,8 +123,8 @@ export const POST = withApiHandler(
       );
     }
 
+    const salonId = ctx.salonId;
     const {
-      salonId,
       employeeId,
       serviceId,
       beforePhotoUrl,
@@ -123,22 +135,55 @@ export const POST = withApiHandler(
       duration,
     } = body;
 
-    const [newPhoto] = await forSalon(salonId).raw((tx) =>
-      tx
-      .insert(galleryPhotos)
-      .values({
-        salonId,
-        employeeId: employeeId || null,
-        serviceId: serviceId || null,
-        beforePhotoUrl: beforePhotoUrl || null,
-        afterPhotoUrl: afterPhotoUrl || null,
-        description: description || null,
-        productsUsed: productsUsed || null,
-        techniques: techniques || null,
-        duration: duration ? parseInt(duration, 10) : null,
-      })
-      .returning()
-    );
+    const result = await forSalon(salonId).raw(async (tx) => {
+      // Pracownik i usługa muszą należeć do tego salonu — inaczej wpis
+      // galerii wskazywałby rekord innego salonu.
+      if (employeeId) {
+        const [emp] = await tx
+          .select({ id: employees.id })
+          .from(employees)
+          .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
+          .limit(1);
+        if (!emp) return { error: "Pracownik nie nalezy do salonu" } as const;
+      }
+      if (serviceId) {
+        const [svc] = await tx
+          .select({ id: services.id })
+          .from(services)
+          .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
+          .limit(1);
+        if (!svc) return { error: "Usluga nie nalezy do salonu" } as const;
+      }
+      // Plik przypięty już do innego wpisu tego salonu — DELETE jednego
+      // kasowałby zdjęcie drugiego (kontekst salonu, RLS).
+      if (await hasGalleryUrlConflict(tx, salonId, [beforePhotoUrl, afterPhotoUrl])) {
+        return { error: "Ten plik zdjecia jest juz uzyty w innym wpisie galerii" } as const;
+      }
+
+      const [photo] = await tx
+        .insert(galleryPhotos)
+        .values({
+          salonId,
+          employeeId: employeeId || null,
+          serviceId: serviceId || null,
+          beforePhotoUrl: beforePhotoUrl || null,
+          afterPhotoUrl: afterPhotoUrl || null,
+          description: description || null,
+          productsUsed: productsUsed || null,
+          techniques: techniques || null,
+          duration: duration ?? null,
+        })
+        .returning();
+      return { photo } as const;
+    });
+
+    if ("error" in result) {
+      return NextResponse.json(
+        { success: false, error: result.error },
+        { status: 400 }
+      );
+    }
+    const newPhoto = result.photo;
 
     logger.info(`[Gallery API] Created photo: ${newPhoto?.id}`);
 

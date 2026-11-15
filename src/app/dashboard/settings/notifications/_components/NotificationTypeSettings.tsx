@@ -1,6 +1,7 @@
 "use client";
 
 import { Bell, CreditCard, Smartphone, Save, CheckCircle } from "lucide-react";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import type { NotificationChannelSettings } from "../_types";
@@ -22,6 +23,10 @@ export function NotificationTypeSettings({
   onChannelChange,
   onSave,
 }: NotificationTypeSettingsProps) {
+  // Push to modul pushNotifications z rejestru (src/lib/features.ts) —
+  // wylaczony albo zamrozony chowa przelacznik.
+  const pushEnabled = useModuleEnabled("pushNotifications");
+
   return (
     <div
       className="mb-6 border rounded-lg p-6 bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800"
@@ -56,23 +61,25 @@ export function NotificationTypeSettings({
           />
         </div>
         {/* Push Reminders */}
-        <div className="flex items-center justify-between p-4 bg-white dark:bg-gray-900 rounded-lg border">
-          <div className="flex items-center gap-3">
-            <Bell className="w-5 h-5 text-blue-600" />
-            <div>
-              <div className="font-medium">Powiadomienia Push</div>
-              <div className="text-sm text-muted-foreground">
-                Wysylaj push 1h i 24h przed wizyta
+        {pushEnabled && (
+          <div className="flex items-center justify-between p-4 bg-white dark:bg-gray-900 rounded-lg border">
+            <div className="flex items-center gap-3">
+              <Bell className="w-5 h-5 text-blue-600" />
+              <div>
+                <div className="font-medium">Powiadomienia Push</div>
+                <div className="text-sm text-muted-foreground">
+                  Wysylaj push 1h i 24h przed wizyta
+                </div>
               </div>
             </div>
+            <Switch
+              checked={channelSettings.pushReminders}
+              onCheckedChange={(checked) =>
+                onChannelChange((prev) => ({ ...prev, pushReminders: checked }))
+              }
+            />
           </div>
-          <Switch
-            checked={channelSettings.pushReminders}
-            onCheckedChange={(checked) =>
-              onChannelChange((prev) => ({ ...prev, pushReminders: checked }))
-            }
-          />
-        </div>
+        )}
         {/* Payment Confirmations */}
         <div className="flex items-center justify-between p-4 bg-white dark:bg-gray-900 rounded-lg border">
           <div className="flex items-center gap-3">

@@ -11,8 +11,6 @@ import {
   Users,
   BarChart3,
   Bot,
-  MessageSquare,
-  Megaphone,
   Star,
   ArrowRight,
   Sparkles,
@@ -31,6 +29,7 @@ import {
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
 import { TRIAL_DAYS } from "@/lib/constants";
+import { PLAN_SUMMARY, planComparison } from "@/lib/plan-features";
 
 type Plan = {
   id: string;
@@ -42,64 +41,11 @@ type Plan = {
 };
 
 /**
- * Comparison table features.
- * Each row: category label, feature name, available in Basic, available in Pro.
+ * Comparison table — wiersze pochodza z src/lib/plan-features.ts
+ * (planComparison). Tu nie wpisujemy wlasnych pozycji; pilnuje tego
+ * __tests__/components/PlanFeaturesSingleSource.test.tsx.
  */
-const COMPARISON_FEATURES = [
-  {
-    category: "Zarzadzanie salonem",
-    features: [
-      { name: "Kalendarz pracownikow", basic: true, pro: true },
-      { name: "Grafiki i zmianowka", basic: true, pro: true },
-      { name: "Kartoteka klientow", basic: true, pro: true },
-      { name: "Zarzadzanie uslugami i wariantami", basic: true, pro: true },
-      { name: "Galeria zdjec salonu", basic: true, pro: true },
-    ],
-  },
-  {
-    category: "Rezerwacje i platnosci",
-    features: [
-      { name: "System rezerwacji online", basic: true, pro: true },
-      { name: "Portal klienta z rezerwacja", basic: true, pro: true },
-      { name: "Zadatki za wizyty (ustalane przez salon)", basic: true, pro: true },
-      { name: "Powiadomienia SMS i email", basic: true, pro: true },
-      { name: "System opinii i ocen", basic: true, pro: true },
-    ],
-  },
-  {
-    category: "Magazyn i finanse",
-    features: [
-      { name: "Magazyn produktow", basic: true, pro: true },
-      { name: "Raporty i statystyki", basic: true, pro: true },
-      { name: "Faktury", basic: true, pro: true },
-      { name: "Promocje i program lojalnosciowy", basic: true, pro: true },
-    ],
-  },
-  {
-    category: "Asystent AI",
-    features: [
-      { name: "Asystent biznesowy (analiza danych)", basic: false, pro: true },
-      { name: "Asystent content (generowanie tresci)", basic: false, pro: true },
-      { name: "Rekomendacje AI na dashboardzie", basic: false, pro: true },
-      { name: "Analiza trendow i konkurencji", basic: false, pro: true },
-    ],
-  },
-  {
-    category: "Marketing AI",
-    features: [
-      { name: "Generowanie opisow uslug", basic: false, pro: true },
-      { name: "Tworzenie newsletterow", basic: false, pro: true },
-      { name: "Proaktywne sugestie biznesowe", basic: false, pro: true },
-    ],
-  },
-  {
-    category: "Wsparcie",
-    features: [
-      { name: "Wsparcie email", basic: true, pro: true },
-      { name: "Priorytetowe wsparcie techniczne", basic: false, pro: true },
-    ],
-  },
-];
+const COMPARISON_FEATURES = planComparison();
 
 function FeatureAvailability({ available }: { available: boolean }) {
   if (available) {
@@ -250,7 +196,7 @@ export default function PricingPage() {
                   <CardTitle className="text-2xl">{basicPlan.name}</CardTitle>
                 </div>
                 <CardDescription className="text-base">
-                  Pelne zarzadzanie salonem bez narzedzi AI. Idealny na start.
+                  {PLAN_SUMMARY.basic}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col">
@@ -322,8 +268,7 @@ export default function PricingPage() {
                   <CardTitle className="text-2xl">{proPlan.name}</CardTitle>
                 </div>
                 <CardDescription className="text-base">
-                  Pełna funkcjonalność z asystentem AI biznesowym i content
-                  marketingowym.
+                  {PLAN_SUMMARY.pro}
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col">
@@ -455,25 +400,12 @@ export default function PricingPage() {
                           colSpan={3}
                           className="px-6 py-3 font-semibold text-sm flex items-center gap-2"
                         >
-                          {category.category === "Asystent AI" && (
+                          {category.features.some((f) => !f.basic) ? (
                             <Bot className="h-4 w-4 text-primary" />
-                          )}
-                          {category.category === "Marketing AI" && (
-                            <Megaphone className="h-4 w-4 text-primary" />
-                          )}
-                          {category.category === "Rezerwacje i platnosci" && (
-                            <Calendar className="h-4 w-4 text-primary" />
-                          )}
-                          {category.category === "Zarzadzanie salonem" && (
+                          ) : (
                             <Users className="h-4 w-4 text-primary" />
                           )}
-                          {category.category === "Magazyn i finanse" && (
-                            <BarChart3 className="h-4 w-4 text-primary" />
-                          )}
-                          {category.category === "Wsparcie" && (
-                            <MessageSquare className="h-4 w-4 text-primary" />
-                          )}
-                          {category.category}
+                          <span data-testid="comparison-category">{category.category}</span>
                         </td>
                       </tr>
                       {category.features.map((feature) => (
@@ -481,7 +413,7 @@ export default function PricingPage() {
                           key={`feat-${feature.name}`}
                           className="border-t hover:bg-muted/20 transition-colors"
                         >
-                          <td className="px-6 py-3 text-sm">{feature.name}</td>
+                          <td className="px-6 py-3 text-sm" data-testid="comparison-feature">{feature.name}</td>
                           <td className="px-6 py-3">
                             <FeatureAvailability available={feature.basic} />
                           </td>

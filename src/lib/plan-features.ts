@@ -1,6 +1,14 @@
 /**
  * Listy funkcji planów Basic i Pro — jedno źródło prawdy w repo.
  *
+ * Wszystko, co interfejs pokazuje o zawartości planów, wynika z
+ * `PLAN_FEATURES`: pełne listy (`featuresFor`), skróty na kartach planów
+ * (`planHighlights`), tabela porównania w cenniku (`planComparison`), lista
+ * „co stracisz” przy obniżeniu planu (`proOnlyFeatures`) i jednozdaniowe
+ * opisy planów (`PLAN_SUMMARY`). Żaden komponent nie ma własnej listy —
+ * pilnują tego `__tests__/components/PlanFeaturesSingleSource.test.tsx`
+ * i `__tests__/lib/marketing-truth.test.ts`.
+ *
  * Obie trasy, które oddają listy do interfejsu, biorą je stąd przez
  * `featuresFor()`, niezależnie od zawartości `features_json` w bazie:
  * - `GET /api/subscription-plans` (cennik, rejestracja, zmiana planu),
@@ -13,10 +21,11 @@
  * ale dla planów Basic i Pro nikt jej nie czyta.
  *
  * Zasada (plan wejścia na rynek, B9): na liście jest tylko to, co produkt
- * faktycznie robi. Moduły `hardOff` z `src/lib/features.ts` (asystent
- * głosowy, wideo, fiskalizacja, publikacja postów social) i płatność
- * zadatków online (decyzja D1) nie mogą tu wrócić — pilnuje tego
- * `__tests__/lib/marketing-truth.test.ts`.
+ * faktycznie robi. Moduły zamrożone (`hardOff` w `src/lib/features.ts` —
+ * m.in. lojalność, newslettery, faktury, asystent głosowy, wideo,
+ * fiskalizacja, posty social) i płatność zadatków online (decyzja D1) nie
+ * mogą tu wrócić — pilnuje tego `__tests__/lib/marketing-truth.test.ts`,
+ * który listę modułów zamrożonych bierze z rejestru.
  */
 export const PLAN_FEATURES = {
   basic: [
@@ -32,17 +41,16 @@ export const PLAN_FEATURES = {
     "Raporty podstawowe",
     "Zadatki za wizyty (ustalane przez salon)",
     "Galeria zdjęć salonu",
-    "Promocje i program lojalnościowy",
+    "Promocje i kody rabatowe",
   ],
   pro: [
-    // Ten wiersz jest filtrowany w dialogu upgrade'u (plan-actions.tsx) — nie zmieniaj brzmienia.
+    // Ten wiersz jest filtrowany w dialogach zmiany planu (PRO_INCLUDES_BASIC) — nie zmieniaj brzmienia.
     "Wszystko z planu Basic",
     "Asystent AI biznesowy (analiza danych)",
-    "Asystent AI content (generowanie treści)",
     "Rekomendacje AI na dashboardzie",
     "Analiza trendów i konkurencji",
     "Generowanie opisów usług",
-    "Tworzenie i wysyłka newsletterów",
+    "Generowanie odpowiedzi na opinie",
     "Proaktywne sugestie biznesowe",
     "Priorytetowe wsparcie techniczne",
   ],
@@ -62,4 +70,51 @@ export function featuresFor(slug: string, stored: unknown): string[] {
     return [...PLAN_FEATURES[slug as keyof typeof PLAN_FEATURES]];
   }
   return Array.isArray(stored) ? (stored as string[]) : [];
+}
+
+type PlanSlug = keyof typeof PLAN_FEATURES;
+
+/** Wiersz planu Pro „Wszystko z planu Basic” — pomijany tam, gdzie pokazujemy samą różnicę planów. */
+export const PRO_INCLUDES_BASIC: string = PLAN_FEATURES.pro[0];
+
+/** Jednozdaniowe opisy planów (karty planów na stronie sprzedażowej i w cenniku). */
+export const PLAN_SUMMARY = {
+  basic: "Pełne zarządzanie salonem bez narzędzi AI. Idealny na start.",
+  pro: "Wszystko z planu Basic oraz asystent AI: analiza danych salonu, rekomendacje i opisy usług.",
+} as const satisfies Record<PlanSlug, string>;
+
+/**
+ * Skrót listy funkcji planu — pierwsze `count` pozycji. Listy w
+ * `PLAN_FEATURES` są ułożone od najważniejszych, więc skrót nie wymaga
+ * osobnej, ręcznie utrzymywanej listy.
+ */
+export function planHighlights(slug: PlanSlug, count: number): string[] {
+  return PLAN_FEATURES[slug].slice(0, Math.max(0, count));
+}
+
+/** Funkcje dostępne tylko w planie Pro (bez wiersza „Wszystko z planu Basic”). */
+export function proOnlyFeatures(): string[] {
+  return PLAN_FEATURES.pro.filter((feature) => feature !== PRO_INCLUDES_BASIC);
+}
+
+export interface PlanComparisonCategory {
+  category: string;
+  features: Array<{ name: string; basic: boolean; pro: boolean }>;
+}
+
+/**
+ * Tabela porównania planów: pozycje Basic są w obu planach, pozycje Pro
+ * (poza „Wszystko z planu Basic”) tylko w Pro.
+ */
+export function planComparison(): PlanComparisonCategory[] {
+  return [
+    {
+      category: "W planie Basic i Pro",
+      features: PLAN_FEATURES.basic.map((name) => ({ name, basic: true, pro: true })),
+    },
+    {
+      category: "Tylko w planie Pro",
+      features: proOnlyFeatures().map((name) => ({ name, basic: false, pro: true })),
+    },
+  ];
 }

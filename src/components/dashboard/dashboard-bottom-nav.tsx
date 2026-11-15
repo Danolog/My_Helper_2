@@ -20,7 +20,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { moduleForRoute } from "@/lib/features";
+import { isRouteEnabledForModules } from "@/lib/features";
 import { isRouteAllowedForRole } from "@/lib/role-access";
 import { cn } from "@/lib/utils";
 
@@ -73,8 +73,7 @@ export function DashboardBottomNav() {
   const role = useSalonRole();
   const visibleItems = BOTTOM_NAV_ITEMS.filter((item) => {
     if (!isRouteAllowedForRole(item.href, role)) return false;
-    const moduleKey = moduleForRoute(item.href);
-    return moduleKey === null || modules[moduleKey];
+    return isRouteEnabledForModules(item.href, modules);
   });
 
   return (

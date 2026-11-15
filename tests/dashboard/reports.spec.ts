@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -193,12 +193,13 @@ test.describe('Flow 8: Reports & Finance', () => {
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
-    test('should display invoices page', { tag: '@full' }, async ({ page }) => {
+    // Faktury są zamrożone (hardOff w src/lib/features.ts) — proxy
+    // przekierowuje stronę modułu na pulpit zamiast ją pokazywać.
+    test('should redirect frozen invoices page to dashboard', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/invoices');
       await page.waitForLoadState('domcontentloaded');
-      await expect(
-        page.getByText(/faktur|invoice|paragon|receipt/i).first()
-      ).toBeVisible({ timeout: 5000 });
+      await expect(page).toHaveURL(/\/dashboard\/?(\?.*)?$/);
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
   });
 });

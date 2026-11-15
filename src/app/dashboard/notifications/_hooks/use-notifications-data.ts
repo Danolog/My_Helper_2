@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
+import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
 import type { Notification, BirthdayClient, InactiveClient } from "../_types";
 
@@ -42,10 +44,15 @@ interface UseNotificationsDataReturn {
 }
 
 export function useNotificationsData(): UseNotificationsDataReturn {
+  // Urodziny i "tesknimy" to modul clientMarketing z rejestru
+  // (src/lib/features.ts) — wylaczony albo zamrozony: nie pytamy jego tras.
+  const clientMarketingEnabled = useModuleEnabled("clientMarketing");
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [salonId, setSalonId] = useState<string | null>(null);
+  // Salon zalogowanego konta (/api/salons/mine), NIE pierwszy salon z
+  // publicznego katalogu GET /api/salons — API wymusza salon z sesji.
+  const { salonId, loading: salonLoading } = useSalonId();
   const [typeFilter, setTypeFilter] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [total, setTotal] = useState(0);
@@ -69,29 +76,10 @@ export function useNotificationsData(): UseNotificationsDataReturn {
   const [inactiveDays, setInactiveDays] = useState(30);
   const [weMissYouEnabled, setWeMissYouEnabled] = useState(false);
 
-  // Fetch salon ID first
+  // Konto bez salonu: nie zostawiaj wiecznego spinnera
   useEffect(() => {
-    const controller = new AbortController();
-    async function fetchSalonId() {
-      try {
-        const res = await fetch("/api/salons", { signal: controller.signal });
-        const data = await res.json();
-        if (!controller.signal.aborted) {
-          if (data.success && data.data.length > 0) {
-            setSalonId(data.data[0].id);
-          }
-        }
-      } catch (err) {
-        if (err instanceof Error && err.name === "AbortError") return;
-        if (!controller.signal.aborted) {
-          setError("Nie mozna zaladowac salonu");
-          setLoading(false);
-        }
-      }
-    }
-    fetchSalonId();
-    return () => controller.abort();
-  }, []);
+    if (!salonLoading && !salonId) setLoading(false);
+  }, [salonLoading, salonId]);
 
   const fetchNotifications = useCallback(async () => {
     if (!salonId) return;
@@ -155,10 +143,10 @@ export function useNotificationsData(): UseNotificationsDataReturn {
 
   // Auto-check birthdays when salonId is available
   useEffect(() => {
-    if (salonId && !birthdayChecked) {
+    if (clientMarketingEnabled && salonId && !birthdayChecked) {
       checkBirthdayClients();
     }
-  }, [salonId, birthdayChecked, checkBirthdayClients]);
+  }, [clientMarketingEnabled, salonId, birthdayChecked, checkBirthdayClients]);
 
   // Send birthday notifications
   const sendBirthdayNotifications = async () => {
@@ -223,10 +211,10 @@ export function useNotificationsData(): UseNotificationsDataReturn {
 
   // Auto-check inactive clients when salonId is available
   useEffect(() => {
-    if (salonId && !inactiveChecked) {
+    if (clientMarketingEnabled && salonId && !inactiveChecked) {
       checkInactiveClients();
     }
-  }, [salonId, inactiveChecked, checkInactiveClients]);
+  }, [clientMarketingEnabled, salonId, inactiveChecked, checkInactiveClients]);
 
   // Send "We miss you" notifications
   const sendWeMissYouNotifications = async () => {

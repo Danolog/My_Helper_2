@@ -2,6 +2,7 @@ import sharp, { type Sharp } from "sharp";
 import { z } from "zod";
 import { requireProAI, isProAIError } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
+import { loadOwnUploadImage } from "@/lib/own-upload-image";
 import { upload } from "@/lib/storage";
 
 /**
@@ -11,7 +12,9 @@ import { upload } from "@/lib/storage";
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 
 const requestSchema = z.object({
-  imageUrl: z.string().url("Nieprawidlowy URL obrazu"),
+  // Format sprawdza allowlista w loadOwnUploadImage (lokalnie adres jest
+  // względny: /uploads/gallery/..., wiec nie z.url()).
+  imageUrl: z.string().min(1, "Nieprawidlowy URL obrazu").max(500, "Nieprawidlowy URL obrazu"),
   preset: z
     .enum(["auto", "brighten", "sharpen", "warm", "cool", "vibrant", "bw"])
     .default("auto"),
@@ -94,25 +97,26 @@ export async function POST(req: Request) {
   const { imageUrl, preset } = parsed.data;
 
   try {
-    // Fetch the original image from storage
-    const imageResponse = await fetch(imageUrl);
-    if (!imageResponse.ok) {
-      return Response.json(
-        { error: "Nie udalo sie pobrac obrazu" },
-        { status: 400 },
-      );
+    // SSRF: obraz wylacznie z naszego storage (galeria / enhanced tego
+    // salonu) — nigdy fetch po dowolnym adresie z zadania.
+    const loaded = await loadOwnUploadImage(imageUrl, salonId, {
+      maxBytes: MAX_IMAGE_SIZE_BYTES,
+    });
+    if (!loaded.ok) {
+      const error =
+        loaded.reason === "not_allowed"
+          ? "Adres obrazu musi pochodzic z galerii salonu"
+          : loaded.reason === "too_large"
+            ? "Obraz jest zbyt duzy. Maksymalny rozmiar to 10 MB."
+            : loaded.reason === "not_image"
+              ? "Plik nie jest obslugiwanym obrazem"
+              : "Nie udalo sie pobrac obrazu";
+      if (loaded.reason === "not_allowed") {
+        logger.warn("[AI Image] Enhance: rejected image source", { salonId });
+      }
+      return Response.json({ error }, { status: 400 });
     }
-
-    const arrayBuffer = await imageResponse.arrayBuffer();
-    const imageBuffer = Buffer.from(arrayBuffer);
-
-    // Guard against oversized images to protect server memory
-    if (imageBuffer.length > MAX_IMAGE_SIZE_BYTES) {
-      return Response.json(
-        { error: "Obraz jest zbyt duzy. Maksymalny rozmiar to 10 MB." },
-        { status: 400 },
-      );
-    }
+    const imageBuffer = loaded.buffer;
 
     // Read original metadata before enhancement (for the response)
     const metadata = await sharp(imageBuffer).metadata();

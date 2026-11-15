@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
-import { subscriptionPlans, salonSubscriptions, subscriptionPayments } from "@/lib/schema";
+import { subscriptionPlans, salonSubscriptions } from "@/lib/schema";
 import { getStripe, isStripePricesConfigured } from "@/lib/stripe";
 
 /**
@@ -21,102 +21,34 @@ function getStripePriceId(slug: string): string | undefined {
 }
 
 /**
- * Creates a simulated subscription directly in the database.
- * Used as a fallback when Stripe is not configured or when
- * the Stripe API call fails (e.g., invalid/test keys in dev mode).
- *
- * If the salon already has a trialing subscription, it upgrades it
- * to "active" status instead of creating a duplicate.
+ * Lokalny wiersz subskrypcji bez prawdziwej subskrypcji w Stripe
+ * (null albo identyfikator z dawnej symulacji `sim_*`).
  */
-async function createSimulatedSubscription(
-  planId: string,
-  priceMonthly: string,
-  _salonId: string,
-): Promise<{ subscriptionId: string }> {
-  const now = new Date();
-  const periodEnd = new Date(now);
-  periodEnd.setMonth(periodEnd.getMonth() + 1);
+function hasRealStripeSubscription(stripeSubscriptionId: string | null): boolean {
+  return !!stripeSubscriptionId && !stripeSubscriptionId.startsWith("sim_");
+}
 
-  // Check if there is an existing trialing or canceled subscription to reactivate
-  const { inArray } = await import("drizzle-orm");
-  const existingReusable = await db
-    .select()
-    .from(salonSubscriptions)
-    .where(
-      and(
-        eq(salonSubscriptions.salonId, _salonId),
-        inArray(salonSubscriptions.status, ["trialing", "canceled"]),
-      ),
-    );
-
-  return await db.transaction(async (tx) => {
-    let subscription;
-
-    if (existingReusable.length > 0 && existingReusable[0]) {
-      // Reactivate existing subscription (trialing or canceled)
-      const [updated] = await tx
-        .update(salonSubscriptions)
-        .set({
-          planId,
-          stripeSubscriptionId: `sim_sub_${Date.now()}`,
-          stripeCustomerId: `sim_cus_${Date.now()}`,
-          status: "active",
-          currentPeriodStart: now,
-          currentPeriodEnd: periodEnd,
-          trialEndsAt: null,
-          canceledAt: null,
-        })
-        .where(eq(salonSubscriptions.id, existingReusable[0].id))
-        .returning();
-
-      subscription = updated;
-      logger.info("Reactivated subscription to active", {
-        previousStatus: existingReusable[0].status,
-        subscriptionId: existingReusable[0].id,
-      });
-    } else {
-      // Create new active subscription
-      const [created] = await tx
-        .insert(salonSubscriptions)
-        .values({
-          salonId: _salonId,
-          planId,
-          stripeSubscriptionId: `sim_sub_${Date.now()}`,
-          stripeCustomerId: `sim_cus_${Date.now()}`,
-          status: "active",
-          currentPeriodStart: now,
-          currentPeriodEnd: periodEnd,
-        })
-        .returning();
-
-      subscription = created;
-    }
-
-    if (!subscription) {
-      throw new Error("Failed to create simulated subscription record");
-    }
-
-    // Record the simulated payment
-    await tx.insert(subscriptionPayments).values({
-      subscriptionId: subscription.id,
-      salonId: _salonId,
-      amount: priceMonthly,
-      currency: "PLN",
-      stripePaymentIntentId: `sim_pi_${Date.now()}`,
-      status: "succeeded",
-      paidAt: now,
-    });
-
-    return { subscriptionId: subscription.id };
-  });
+function stripeUnavailableResponse() {
+  return NextResponse.json(
+    {
+      success: false,
+      code: "STRIPE_UNAVAILABLE",
+      error:
+        "Płatności online są chwilowo niedostępne. Plan nie został zmieniony — spróbuj ponownie później.",
+    },
+    { status: 503 },
+  );
 }
 
 /**
  * POST /api/subscriptions/checkout
  *
- * Creates a Stripe Checkout Session for a subscription plan, or falls
- * back to a simulated (dev-mode) subscription when Stripe is
- * unavailable or misconfigured.
+ * Creates a Stripe Checkout Session for a subscription plan.
+ *
+ * This endpoint NEVER writes a subscription or a payment. The subscription
+ * is created/updated only by /api/subscriptions/confirm after Stripe reports
+ * the Checkout Session as paid. Stripe not configured → 503, Stripe error
+ * → 502; in both cases nothing is granted.
  *
  * Request body: { planSlug: "basic" | "pro" }
  * Response:     { url: string }
@@ -151,14 +83,9 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    const { planSlug } = body as { planSlug: string };
-
-    if (planSlug !== "basic" && planSlug !== "pro") {
-      return NextResponse.json(
-        { success: false, error: "planSlug must be 'basic' or 'pro'" },
-        { status: 400 },
-      );
-    }
+    // salonId z body (jesli ktos go wysle) jest odrzucany przez schemat —
+    // salon wylacznie z sesji (wyzej).
+    const { planSlug } = subscriptionCheckoutSchema.parse(body);
 
     // Look up the plan in the database
     const [plan] = await db
@@ -200,130 +127,112 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
-      // Different plan → upgrade: update the existing subscription's planId
-      // and record a new payment for the upgrade atomically
-      const now = new Date();
-      const periodEnd = new Date(now);
-      periodEnd.setMonth(periodEnd.getMonth() + 1);
+      // Zmiana planu opłaconej subskrypcji Stripe wymaga
+      // stripe.subscriptions.update (proracja + synchronizacja planId z
+      // webhooka) — do decyzji architektonicznej. Nowy Checkout założyłby
+      // drugą subskrypcję w Stripe (podwójne obciążenie), więc odmawiamy.
+      if (hasRealStripeSubscription(existingSub.stripeSubscriptionId)) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: "PLAN_CHANGE_UNSUPPORTED",
+            error:
+              "Zmiana planu opłaconej subskrypcji nie jest jeszcze dostępna online. Skontaktuj się z obsługą.",
+          },
+          { status: 409 },
+        );
+      }
+      // Subskrypcja bez prawdziwego Stripe: nowy plan tylko przez Checkout,
+      // planId zmienia /api/subscriptions/confirm po opłaceniu.
+    }
 
-      await db.transaction(async (tx) => {
-        await tx
-          .update(salonSubscriptions)
-          .set({
-            planId: plan.id,
-            currentPeriodStart: now,
-            currentPeriodEnd: periodEnd,
-          })
-          .where(eq(salonSubscriptions.id, existingSub.id));
+    // Attempt to create a real Stripe Checkout Session
+    const stripe = getStripe();
+    if (!stripe) {
+      logger.warn("Subscription checkout refused: Stripe not configured", {
+        planSlug: plan.slug,
+      });
+      return stripeUnavailableResponse();
+    }
 
-        await tx.insert(subscriptionPayments).values({
-          subscriptionId: existingSub.id,
+    try {
+      // Determine the price: use configured Stripe price ID or create ad-hoc
+      let lineItem: {
+        price?: string;
+        price_data?: {
+          currency: string;
+          product_data: { name: string; description: string };
+          unit_amount: number;
+          recurring: { interval: "month" };
+        };
+        quantity: number;
+      };
+
+      const configuredPriceId = isStripePricesConfigured()
+        ? getStripePriceId(planSlug)
+        : undefined;
+
+      if (configuredPriceId) {
+        lineItem = { price: configuredPriceId, quantity: 1 };
+      } else {
+        // Ad-hoc price from the plan's monthly price
+        const unitAmount = Math.round(parseFloat(plan.priceMonthly) * 100);
+        lineItem = {
+          price_data: {
+            currency: "pln",
+            product_data: {
+              name: `MyHelper ${plan.name}`,
+              description: `Subskrypcja miesięczna planu ${plan.name}`,
+            },
+            unit_amount: unitAmount,
+            recurring: { interval: "month" },
+          },
+          quantity: 1,
+        };
+      }
+
+      const origin =
+        process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+      const checkoutSession = await stripe.checkout.sessions.create({
+        mode: "subscription",
+        payment_method_types: ["card"],
+        line_items: [lineItem],
+        success_url: `${origin}/dashboard/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/pricing`,
+        customer_email: user.email,
+        metadata: {
           salonId: salonId,
-          amount: plan.priceMonthly,
-          currency: "PLN",
-          stripePaymentIntentId: `sim_upgrade_pi_${Date.now()}`,
-          status: "succeeded",
-          paidAt: now,
-        });
+          planId: plan.id,
+          planSlug: plan.slug,
+          userId: user.id,
+        },
       });
 
-      logger.info("Subscription upgraded", {
-        subscriptionId: existingSub.id,
+      logger.info("Stripe Checkout session created", {
+        sessionId: checkoutSession.id,
         planSlug: plan.slug,
       });
 
       return NextResponse.json({
         success: true,
-        url: `/dashboard/subscription?upgraded=true`,
+        url: checkoutSession.url,
       });
+    } catch (stripeError) {
+      logger.error("Stripe Checkout creation failed", {
+        error: stripeError instanceof Error ? stripeError.message : stripeError,
+        planSlug: plan.slug,
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          code: "STRIPE_ERROR",
+          error:
+            "Nie udało się połączyć z systemem płatności. Plan nie został zmieniony — spróbuj ponownie później.",
+        },
+        { status: 502 },
+      );
     }
-
-    // Attempt to create a real Stripe Checkout Session
-    const stripe = getStripe();
-
-    if (stripe) {
-      try {
-        // Determine the price: use configured Stripe price ID or create ad-hoc
-        let lineItem: {
-          price?: string;
-          price_data?: {
-            currency: string;
-            product_data: { name: string; description: string };
-            unit_amount: number;
-            recurring: { interval: "month" };
-          };
-          quantity: number;
-        };
-
-        const configuredPriceId = isStripePricesConfigured()
-          ? getStripePriceId(planSlug)
-          : undefined;
-
-        if (configuredPriceId) {
-          lineItem = { price: configuredPriceId, quantity: 1 };
-        } else {
-          // Ad-hoc price from the plan's monthly price
-          const unitAmount = Math.round(parseFloat(plan.priceMonthly) * 100);
-          lineItem = {
-            price_data: {
-              currency: "pln",
-              product_data: {
-                name: `MyHelper ${plan.name}`,
-                description: `Subskrypcja miesięczna planu ${plan.name}`,
-              },
-              unit_amount: unitAmount,
-              recurring: { interval: "month" },
-            },
-            quantity: 1,
-          };
-        }
-
-        const origin =
-          process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-
-        const checkoutSession = await stripe.checkout.sessions.create({
-          mode: "subscription",
-          payment_method_types: ["card"],
-          line_items: [lineItem],
-          success_url: `${origin}/dashboard/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${origin}/pricing`,
-          customer_email: user.email,
-          metadata: {
-            salonId: salonId,
-            planId: plan.id,
-            planSlug: plan.slug,
-            userId: user.id,
-          },
-        });
-
-        logger.info("Stripe Checkout session created", {
-          sessionId: checkoutSession.id,
-          planSlug: plan.slug,
-        });
-
-        return NextResponse.json({
-          success: true,
-          url: checkoutSession.url,
-        });
-      } catch (stripeError) {
-        // Stripe call failed -- fall through to dev-mode simulation
-        logger.warn("Stripe Checkout creation failed, using dev fallback", {
-          error: stripeError instanceof Error ? stripeError.message : stripeError,
-        });
-      }
-    }
-
-    // Dev-mode fallback: create a simulated subscription directly in DB
-    logger.info("Creating simulated subscription (dev fallback)", {
-      planSlug: plan.slug,
-    });
-
-    await createSimulatedSubscription(plan.id, plan.priceMonthly, salonId);
-
-    return NextResponse.json({
-      success: true,
-      url: "/dashboard/subscription?activated=true",
-    });
   } catch (error) {
     logger.error("Subscription checkout error", { error });
     return NextResponse.json(

@@ -51,16 +51,16 @@ describe("getSalonModules", () => {
 
   it("zwraca stan modulow z settingsJson salonu (reszta wg domyslnych)", async () => {
     mockTxLimit.mockResolvedValue([
-      { settingsJson: { modules: { products: true, promotions: true } } },
+      { settingsJson: { modules: { products: true, promotions: true, loyalty: true } } },
     ]);
 
     const state = await getSalonModules("salon-1");
     expect(state.products).toBe(true);
     expect(state.promotions).toBe(true);
-    expect(state.loyalty).toBe(false);
-    expect(state.invoices).toBe(false);
+    expect(state.waitingList).toBe(false);
+    expect(state.reportsAdvanced).toBe(false);
     // hardOff pozostaje false niezaleznie od zapisu
-    expect(state.voiceAi).toBe(false);
+    expect(state.loyalty).toBe(false);
     expect(mockForSalon).toHaveBeenCalledWith("salon-1");
   });
 

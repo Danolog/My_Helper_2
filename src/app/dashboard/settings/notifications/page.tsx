@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ArrowLeft, Settings, MessageSquare } from "lucide-react";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { Button } from "@/components/ui/button";
 import { BirthdaySettings } from "./_components/BirthdaySettings";
 import { NotificationTypeSettings } from "./_components/NotificationTypeSettings";
@@ -27,6 +28,9 @@ export default function NotificationSettingsPage() {
     setChannelSettings,
     handleSaveChannels,
   } = useNotificationSettings();
+  // Urodziny i "tesknimy" to modul clientMarketing z rejestru
+  // (src/lib/features.ts) — wylaczony albo zamrozony chowa ich ustawienia.
+  const clientMarketingEnabled = useModuleEnabled("clientMarketing");
 
   if (loading) {
     return (
@@ -64,22 +68,26 @@ export default function NotificationSettingsPage() {
       />
 
       {/* Birthday Gift Configuration Section */}
-      <BirthdaySettings
-        settings={birthdaySettings}
-        saving={savingBirthday}
-        savedSuccessfully={birthdaySavedSuccessfully}
-        onUpdateSetting={updateBirthdaySetting}
-        onSave={handleSaveBirthday}
-      />
+      {clientMarketingEnabled && (
+        <BirthdaySettings
+          settings={birthdaySettings}
+          saving={savingBirthday}
+          savedSuccessfully={birthdaySavedSuccessfully}
+          onUpdateSetting={updateBirthdaySetting}
+          onSave={handleSaveBirthday}
+        />
+      )}
 
       {/* We Miss You Re-engagement Configuration Section */}
-      <WeMissYouSettings
-        settings={weMissYouSettings}
-        saving={savingWeMissYou}
-        savedSuccessfully={weMissYouSavedSuccessfully}
-        onUpdateSetting={updateWeMissYouSetting}
-        onSave={handleSaveWeMissYou}
-      />
+      {clientMarketingEnabled && (
+        <WeMissYouSettings
+          settings={weMissYouSettings}
+          saving={savingWeMissYou}
+          savedSuccessfully={weMissYouSavedSuccessfully}
+          onUpdateSetting={updateWeMissYouSetting}
+          onSave={handleSaveWeMissYou}
+        />
+      )}
 
       {/* Link to notifications page */}
       <div className="mt-6 p-4 border rounded-lg">
@@ -87,8 +95,9 @@ export default function NotificationSettingsPage() {
           <div>
             <div className="font-medium">Powiadomienia</div>
             <div className="text-sm text-muted-foreground">
-              Przejdz do strony powiadomien, aby wyslac lub sprawdzic
-              powiadomienia urodzinowe i re-engagement
+              {clientMarketingEnabled
+                ? "Przejdz do strony powiadomien, aby wyslac lub sprawdzic powiadomienia urodzinowe i re-engagement"
+                : "Przejdź do strony powiadomień, aby sprawdzić wysłane powiadomienia"}
             </div>
           </div>
           <Button variant="outline" asChild>

@@ -3,7 +3,7 @@
  * z request body; calculateExpectedDeposit odtwarza ja po stronie serwera
  * (lustro logiki frontendu use-booking-data):
  *   - cena = basePrice + variant.priceModifier,
- *   - najlepszy JEDEN rabat (happy hours vs pierwsza wizyta, bez stackowania),
+ *   - rabat happy hours (promocja pierwszej wizyty jest zamrozona — nienaliczana),
  *   - ustawienia zadatku klienta (fixed/percentage) nadpisuja ustawienia uslugi,
  *   - procent uslugi liczony z Math.ceil (zaokraglenie W GORE — na korzysc salonu).
  *
@@ -275,18 +275,79 @@ describe("calculateExpectedDeposit — rabat happy hours (Europe/Warsaw)", () =>
   });
 });
 
-describe("calculateExpectedDeposit — rabat pierwszej wizyty", () => {
+describe("calculateExpectedDeposit — promocja pierwszej wizyty jest zamrozona", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     selectQueue.length = 0;
   });
 
-  it("stosuje rabat dla goscia bez zadnych wizyt (0 w clients i 0 w portalu)", async () => {
+  // Promocja pierwszej wizyty nie jest naliczana (decyzja produktowa; trasa
+  // /api/promotions/check-first-visit odpowiada kazdemu „nie przysluguje”).
+  // Zadatek liczony na serwerze musi sie zgadzac z cena w portalu, wiec tu tez
+  // jej nie ma — i baza nie jest o nia pytana. Wpisy „pulapki” w kolejce to
+  // odpowiedzi, ktore dalyby rabat, gdyby kod znow pytal o pierwsza wizyte.
+  const firstVisitTrap = [
+    /* first_visit promocje */ [firstVisitPromo("15")],
+    /* clientRecords po emailu */ [],
+    /* portalCount */ [{ count: 0 }],
+  ];
+
+  it("gosc bez zadnych wizyt przy aktywnej promocji => zadatek bez rabatu", async () => {
+    queueSelect([baseService], /* happy hours */ [], ...firstVisitTrap);
+
+    const result = await calculateExpectedDeposit({
+      ...baseParams,
+      guestEmail: "nowy@example.com",
+    });
+
+    // 100 bez rabatu; ceil(100 * 30%) = 30 (z rabatem 15% byloby 26)
+    expect(result).toMatchObject({ ok: true, amount: 30 });
+    // tylko usluga + happy hours — zadnego zapytania o promocje ani wizyty
+    expect(mockDbSelect).toHaveBeenCalledTimes(2);
+    expect(selectQueue).toHaveLength(firstVisitTrap.length);
+  });
+
+  it("zalogowany klient bez wizyt przy aktywnej promocji => zadatek bez rabatu", async () => {
+    queueSelect([baseService], /* happy hours */ [], /* ustawienia zadatku klienta */ []);
+
+    const result = await calculateExpectedDeposit({
+      ...baseParams,
+      sessionUser: { email: "nowy.user@example.com", emailVerified: true },
+    });
+
+    expect(result).toMatchObject({ ok: true, amount: 30 });
+    // usluga + happy hours + ustawienia zadatku klienta
+    expect(mockDbSelect).toHaveBeenCalledTimes(3);
+    expect(selectQueue).toHaveLength(0);
+  });
+});
+
+describe("calculateExpectedDeposit — happy hours obok zamrozonej pierwszej wizyty", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectQueue.length = 0;
+  });
+
+  it("happy hours 20% liczy sie jak dotad (100 - 20 = 80; 30% => 24)", async () => {
     queueSelect(
       [baseService],
-      /* happy hours */ [],
-      /* first_visit promocje */ [firstVisitPromo("15")],
-      /* clientRecords po emailu */ [],
+      /* happy hours */ [happyHoursPromo("20")],
+      /* ustawienia zadatku klienta */ []
+    );
+
+    const result = await calculateExpectedDeposit({
+      ...baseParams,
+      sessionUser: { email: "user@example.com", emailVerified: true },
+    });
+    expect(result).toMatchObject({ ok: true, amount: 24 });
+  });
+
+  it("wyzsza promocja pierwszej wizyty nie wypiera happy hours (10%, nie 50%)", async () => {
+    queueSelect(
+      [baseService],
+      /* happy hours */ [happyHoursPromo("10")],
+      /* pulapka: first_visit 50% */ [firstVisitPromo("50")],
+      /* clientRecords */ [],
       /* portalCount */ [{ count: 0 }]
     );
 
@@ -294,79 +355,8 @@ describe("calculateExpectedDeposit — rabat pierwszej wizyty", () => {
       ...baseParams,
       guestEmail: "nowy@example.com",
     });
-    // 100 - 15% = 85; ceil(85 * 30%) = ceil(25.5) = 26
-    expect(result).toMatchObject({ ok: true, amount: 26 });
-  });
-
-  it("nie stosuje rabatu, gdy klient ma juz wizyty w kartotece", async () => {
-    queueSelect(
-      [baseService],
-      [],
-      [firstVisitPromo("15")],
-      /* clientRecords */ [{ id: "client-1" }],
-      /* count wizyt klienta */ [{ count: 2 }],
-      /* portalCount */ [{ count: 0 }]
-    );
-
-    const result = await calculateExpectedDeposit({
-      ...baseParams,
-      guestEmail: "staly@example.com",
-    });
-    expect(result).toMatchObject({ ok: true, amount: 30 });
-  });
-
-  it("nie stosuje rabatu, gdy klient rezerwowal wczesniej przez portal (bez kartoteki)", async () => {
-    queueSelect(
-      [baseService],
-      [],
-      [firstVisitPromo("15")],
-      /* clientRecords */ [],
-      /* portalCount */ [{ count: 1 }]
-    );
-
-    const result = await calculateExpectedDeposit({
-      ...baseParams,
-      guestEmail: "portalowy@example.com",
-    });
-    expect(result).toMatchObject({ ok: true, amount: 30 });
-  });
-
-  it("wygasla promocja first_visit => brak rabatu bez liczenia wizyt", async () => {
-    const past = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-    queueSelect([baseService], [], [firstVisitPromo("15", { endDate: past })]);
-
-    const result = await calculateExpectedDeposit({
-      ...baseParams,
-      guestEmail: "ktos@example.com",
-    });
-    expect(result).toMatchObject({ ok: true, amount: 30 });
-    // validPromotions puste => zadnych dalszych selectow (kolejka zjedzona w calosci)
-    expect(selectQueue).toHaveLength(0);
-  });
-});
-
-describe("calculateExpectedDeposit — best-of rabatow (bez stackowania)", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    selectQueue.length = 0;
-  });
-
-  it("wybiera JEDEN wyzszy rabat: happy hours 20% > first visit 10%", async () => {
-    queueSelect(
-      [baseService],
-      /* happy hours */ [happyHoursPromo("20")],
-      /* first_visit */ [firstVisitPromo("10")],
-      /* clientRecords (first visit) */ [],
-      /* portalCount */ [{ count: 0 }],
-      /* ustawienia zadatku klienta */ []
-    );
-
-    const result = await calculateExpectedDeposit({
-      ...baseParams,
-      sessionEmail: "user@example.com",
-    });
-    // max(20, 10) = 20 (NIE 30 sumarycznie); 100 - 20 = 80; ceil(80 * 30%) = 24
-    expect(result).toMatchObject({ ok: true, amount: 24 });
+    // 100 - 10% = 90; ceil(90 * 30%) = 27 (z pierwsza wizyta 50% byloby 15)
+    expect(result).toMatchObject({ ok: true, amount: 27 });
   });
 });
 
@@ -380,7 +370,6 @@ describe("calculateExpectedDeposit — ustawienia zadatku klienta (nadpisuja usl
     queueSelect(
       [{ ...baseService, depositRequired: false }],
       /* happy hours */ [],
-      /* first_visit */ [],
       /* klient */ [
         { requireDeposit: true, depositType: "fixed", depositValue: "20.50" },
       ]
@@ -388,7 +377,7 @@ describe("calculateExpectedDeposit — ustawienia zadatku klienta (nadpisuja usl
 
     const result = await calculateExpectedDeposit({
       ...baseParams,
-      sessionEmail: "vip@example.com",
+      sessionUser: { email: "vip@example.com", emailVerified: true },
     });
     expect(result).toEqual({
       ok: true,
@@ -401,14 +390,13 @@ describe("calculateExpectedDeposit — ustawienia zadatku klienta (nadpisuja usl
   it("procent klienta nadpisuje procent uslugi (50% zamiast 30%)", async () => {
     queueSelect(
       [baseService],
-      [],
-      [],
+      /* happy hours */ [],
       [{ requireDeposit: true, depositType: "percentage", depositValue: "50" }]
     );
 
     const result = await calculateExpectedDeposit({
       ...baseParams,
-      sessionEmail: "ryzykowny@example.com",
+      sessionUser: { email: "ryzykowny@example.com", emailVerified: true },
     });
     // ceil(100 * 50%) = 50, a nie 30 z uslugi
     expect(result).toMatchObject({ ok: true, required: true, amount: 50 });
@@ -417,24 +405,41 @@ describe("calculateExpectedDeposit — ustawienia zadatku klienta (nadpisuja usl
   it("requireDeposit klienta z wartoscia 0 => required=true, ale kwota 0 (usluga bez zadatku)", async () => {
     queueSelect(
       [{ ...baseService, depositRequired: false }],
-      [],
-      [],
+      /* happy hours */ [],
       [{ requireDeposit: true, depositType: "percentage", depositValue: "0" }]
     );
 
     const result = await calculateExpectedDeposit({
       ...baseParams,
-      sessionEmail: "zero@example.com",
+      sessionUser: { email: "zero@example.com", emailVerified: true },
     });
     expect(result).toMatchObject({ ok: true, required: true, amount: 0 });
   });
 
-  it("brak kartoteki klienta => obowiazuja ustawienia uslugi", async () => {
-    queueSelect([baseService], [], [], /* klient nie znaleziony */ []);
+  it("niezweryfikowany e-mail sesji => brak dopasowania do kartoteki klienta (strazniki client-match)", async () => {
+    queueSelect(
+      [{ ...baseService, depositRequired: false }],
+      /* happy hours */ [],
+      /* pulapka: kartoteka klienta B — nie moze zostac odczytana */
+      [{ requireDeposit: true, depositType: "fixed", depositValue: "99" }]
+    );
 
     const result = await calculateExpectedDeposit({
       ...baseParams,
-      sessionEmail: "nieznany@example.com",
+      sessionUser: { email: "vip@example.com", emailVerified: false },
+    });
+
+    expect(result).toMatchObject({ ok: true, required: false, amount: 0 });
+    // tylko usluga + happy hours — zadnego zapytania o klienta
+    expect(mockDbSelect).toHaveBeenCalledTimes(2);
+  });
+
+  it("brak kartoteki klienta => obowiazuja ustawienia uslugi", async () => {
+    queueSelect([baseService], /* happy hours */ [], /* klient nie znaleziony */ []);
+
+    const result = await calculateExpectedDeposit({
+      ...baseParams,
+      sessionUser: { email: "nieznany@example.com", emailVerified: true },
     });
     expect(result).toMatchObject({ ok: true, required: true, amount: 30 });
   });

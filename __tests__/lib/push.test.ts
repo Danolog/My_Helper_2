@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Use vi.hoisted for mock variables
 const {
   mockWebpushSendNotification,
+  _mockDbDeleteWhere,
   mockDbReturning,
   mockDbValues,
   mockDbInsertInto,
@@ -64,15 +65,40 @@ vi.mock("@/lib/schema", () => ({
   },
 }));
 
+// Push jest zamrożony w rejestrze modułów (hardOff w src/lib/features.ts).
+// Kod wysyłki zostaje w repo i czeka na odmrożenie — jego testy też zostają:
+// `pushThaw.on = true` symuluje moduł odmrożony. Test blokady niżej używa
+// prawdziwego rejestru.
+const pushThaw = vi.hoisted(() => ({ on: false }));
+
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      key === "pushNotifications" && pushThaw.on ? false : actual.isModuleFrozen(key),
+  };
+});
+
 import {
   sendPushNotification,
   sendAppointmentReminderPush,
   sendAppointmentReminder24hPush,
 } from "@/lib/push";
+import { PUSH_SEND_DEADLINE_MS, PUSH_SEND_TIMEOUT_MS } from "@/lib/push-subscription";
+import {
+  VALID_AUTH,
+  VALID_ENDPOINTS,
+  VALID_P256DH,
+} from "../fixtures/push-subscriptions";
+
+const SUB_ROW_1 = { endpoint: VALID_ENDPOINTS.chromeFcm, p256dh: VALID_P256DH, auth: VALID_AUTH };
+const SUB_ROW_2 = { endpoint: VALID_ENDPOINTS.firefox, p256dh: VALID_P256DH, auth: VALID_AUTH };
 
 describe("sendPushNotification (push.ts)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pushThaw.on = true;
     mockDbSelect.mockReturnValue({ from: mockDbSelectFrom });
     mockDbSelectFrom.mockReturnValue({ where: mockDbSelectWhere });
     mockDbInsertInto.mockReturnValue({ values: mockDbValues });
@@ -97,8 +123,8 @@ describe("sendPushNotification (push.ts)", () => {
 
   it("should send to all subscriptions and count successes", async () => {
     mockDbSelectWhere.mockResolvedValue([
-      { id: "sub-1", endpoint: "https://push1.example.com", p256dh: "key1", auth: "auth1" },
-      { id: "sub-2", endpoint: "https://push2.example.com", p256dh: "key2", auth: "auth2" },
+      { id: "sub-1", ...SUB_ROW_1 },
+      { id: "sub-2", ...SUB_ROW_2 },
     ]);
     mockWebpushSendNotification.mockResolvedValue({});
     mockDbReturning.mockResolvedValue([{ id: "notif-1" }]);
@@ -117,8 +143,8 @@ describe("sendPushNotification (push.ts)", () => {
 
   it("should handle mixed success and failure", async () => {
     mockDbSelectWhere.mockResolvedValue([
-      { id: "sub-1", endpoint: "https://push1.example.com", p256dh: "key1", auth: "auth1" },
-      { id: "sub-2", endpoint: "https://push2.example.com", p256dh: "key2", auth: "auth2" },
+      { id: "sub-1", ...SUB_ROW_1 },
+      { id: "sub-2", ...SUB_ROW_2 },
     ]);
     mockWebpushSendNotification
       .mockResolvedValueOnce({})
@@ -138,7 +164,7 @@ describe("sendPushNotification (push.ts)", () => {
 
   it("should remove expired subscriptions (410)", async () => {
     mockDbSelectWhere.mockResolvedValue([
-      { id: "sub-1", endpoint: "https://push1.example.com", p256dh: "key1", auth: "auth1" },
+      { id: "sub-1", ...SUB_ROW_1 },
     ]);
     mockWebpushSendNotification.mockRejectedValue({ statusCode: 410 });
     mockDbReturning.mockResolvedValue([{ id: "notif-1" }]);
@@ -172,9 +198,102 @@ describe("sendPushNotification (push.ts)", () => {
   });
 });
 
+describe("sendPushNotification — obrona w głębi (wiersze sprzed allowlisty)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useRealTimers();
+    mockDbSelect.mockReturnValue({ from: mockDbSelectFrom });
+    mockDbSelectFrom.mockReturnValue({ where: mockDbSelectWhere });
+    mockDbInsertInto.mockReturnValue({ values: mockDbValues });
+    mockDbValues.mockReturnValue({ returning: mockDbReturning });
+    mockDbDelete.mockReturnValue({ where: _mockDbDeleteWhere });
+    _mockDbDeleteWhere.mockResolvedValue(undefined);
+    mockDbReturning.mockResolvedValue([{ id: "notif-1" }]);
+  });
+
+  it.each([
+    ["metadane chmury", "http://169.254.169.254/computeMetadata/v1/"],
+    ["obcy host", "https://evil.example/fcm/send/abc"],
+    ["sufiks doklejony do FCM", "https://fcm.googleapis.com.evil.example/fcm/send/abc"],
+    ["port", "https://fcm.googleapis.com:8443/fcm/send/abc"],
+  ])("pomija i usuwa zapisany endpoint: %s", async (_name, endpoint) => {
+    mockDbSelectWhere.mockResolvedValue([
+      { id: "sub-bad", endpoint, p256dh: VALID_P256DH, auth: VALID_AUTH },
+      { id: "sub-ok", ...SUB_ROW_1 },
+    ]);
+    mockWebpushSendNotification.mockResolvedValue({});
+
+    const result = await sendPushNotification("user-1", { title: "T", body: "B", salonId: "salon-1" });
+
+    expect(mockWebpushSendNotification).toHaveBeenCalledTimes(1);
+    expect(mockWebpushSendNotification.mock.calls[0]?.[0]).toMatchObject({ endpoint: SUB_ROW_1.endpoint });
+    for (const call of mockWebpushSendNotification.mock.calls) {
+      expect((call[0] as { endpoint: string }).endpoint).not.toBe(endpoint);
+    }
+    expect(mockDbDelete).toHaveBeenCalledTimes(1);
+    expect(_mockDbDeleteWhere).toHaveBeenCalledWith({ type: "eq", args: ["pushSubscriptions.id", "sub-bad"] });
+    expect(result).toMatchObject({ success: true, sent: 1, failed: 1 });
+  });
+
+  it("pomija wiersz z nieprawidłowymi kluczami", async () => {
+    mockDbSelectWhere.mockResolvedValue([
+      { id: "sub-bad", endpoint: VALID_ENDPOINTS.chromeFcm, p256dh: "key1", auth: "auth1" },
+    ]);
+
+    const result = await sendPushNotification("user-1", { title: "T", body: "B", salonId: "salon-1" });
+
+    expect(mockWebpushSendNotification).not.toHaveBeenCalled();
+    expect(mockDbDelete).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ success: false, sent: 0, failed: 1 });
+  });
+
+  it("przekazuje timeout gniazda do web-push", async () => {
+    mockDbSelectWhere.mockResolvedValue([{ id: "sub-1", ...SUB_ROW_1 }]);
+    mockWebpushSendNotification.mockResolvedValue({});
+
+    await sendPushNotification("user-1", { title: "T", body: "B", salonId: "salon-1" });
+
+    expect(mockWebpushSendNotification.mock.calls[0]?.[2]).toMatchObject({ timeout: PUSH_SEND_TIMEOUT_MS });
+  });
+
+  it("wiszący endpoint nie blokuje pozostałych: równolegle i z twardym terminem", async () => {
+    vi.useFakeTimers();
+    mockDbSelectWhere.mockResolvedValue([
+      { id: "sub-hang", ...SUB_ROW_1 },
+      { id: "sub-ok", ...SUB_ROW_2 },
+    ]);
+    mockWebpushSendNotification.mockImplementation((sub: { endpoint: string }) =>
+      sub.endpoint === SUB_ROW_1.endpoint ? new Promise(() => {}) : Promise.resolve({})
+    );
+
+    const pending = sendPushNotification("user-1", { title: "T", body: "B", salonId: "salon-1" });
+    await vi.advanceTimersByTimeAsync(0);
+    // Druga wysyłka ruszyła, choć pierwsza wisi (nie sekwencyjnie)
+    expect(mockWebpushSendNotification).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(PUSH_SEND_DEADLINE_MS);
+    const result = await pending;
+    expect(result).toMatchObject({ success: true, sent: 1, failed: 1 });
+    // timeout to nie 404/410 — subskrypcji nie usuwamy
+    expect(mockDbDelete).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("salonId null: wysyłka bez rekordu notifications", async () => {
+    mockDbSelectWhere.mockResolvedValue([{ id: "sub-1", ...SUB_ROW_1 }]);
+    mockWebpushSendNotification.mockResolvedValue({});
+
+    const result = await sendPushNotification("user-1", { title: "T", body: "B", salonId: null });
+
+    expect(result).toMatchObject({ success: true, sent: 1, failed: 0 });
+    expect(mockDbInsertInto).not.toHaveBeenCalled();
+  });
+});
+
 describe("sendAppointmentReminderPush", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pushThaw.on = true;
     mockDbSelect.mockReturnValue({ from: mockDbSelectFrom });
     mockDbSelectFrom.mockReturnValue({ where: mockDbSelectWhere });
     mockDbSelectWhere.mockResolvedValue([]);
@@ -203,6 +322,7 @@ describe("sendAppointmentReminderPush", () => {
 describe("sendAppointmentReminder24hPush", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pushThaw.on = true;
     mockDbSelect.mockReturnValue({ from: mockDbSelectFrom });
     mockDbSelectFrom.mockReturnValue({ where: mockDbSelectWhere });
     mockDbSelectWhere.mockResolvedValue([]);
@@ -224,5 +344,67 @@ describe("sendAppointmentReminder24hPush", () => {
 
     expect(result).toBeDefined();
     expect(result.success).toBe(false);
+  });
+});
+
+describe("push zamrożony (prawdziwy rejestr)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    pushThaw.on = false;
+    mockDbSelect.mockReturnValue({ from: mockDbSelectFrom });
+    mockDbSelectFrom.mockReturnValue({ where: mockDbSelectWhere });
+    // Użytkownik MA subskrypcję — gdyby blokada nie zadziałała, push by wyszedł.
+    mockDbSelectWhere.mockResolvedValue([
+      { id: "sub-1", userId: "user-1", endpoint: "https://push.example/1", p256dh: "k", auth: "a" },
+    ]);
+    mockWebpushSendNotification.mockResolvedValue({});
+  });
+
+  it("sendPushNotification nic nie wysyła, nie czyta subskrypcji i nie zapisuje powiadomienia", async () => {
+    const result = await sendPushNotification("user-1", {
+      title: "Zwolnil sie termin!",
+      body: "Test",
+      salonId: "salon-1",
+    });
+
+    expect(result).toEqual({
+      success: false,
+      sent: 0,
+      failed: 0,
+      error: "Push notifications are disabled",
+    });
+    expect(mockWebpushSendNotification).not.toHaveBeenCalled();
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbInsertInto).not.toHaveBeenCalled();
+  });
+
+  it("przypomnienia push 1 h i 24 h też nic nie wysyłają", async () => {
+    const params = {
+      userId: "user-1",
+      clientName: "Anna",
+      serviceName: "Strzyzenie",
+      employeeName: "Ewa",
+      salonName: "Salon",
+      appointmentDate: new Date("2026-11-20T10:00:00Z"),
+      salonId: "salon-1",
+      clientId: "client-1",
+      appointmentId: "appt-1",
+    };
+
+    expect((await sendAppointmentReminderPush(params)).success).toBe(false);
+    expect((await sendAppointmentReminder24hPush(params)).success).toBe(false);
+    expect(mockWebpushSendNotification).not.toHaveBeenCalled();
+  });
+
+  it("wynik ma ten sam kształt co „brak subskrypcji” — wywołujący (lista oczekujących) działa dalej", async () => {
+    const frozen = await sendPushNotification("user-1", { title: "T", body: "B", salonId: "s" });
+
+    pushThaw.on = true;
+    mockDbSelectWhere.mockResolvedValue([]);
+    const noSubscriptions = await sendPushNotification("user-1", { title: "T", body: "B", salonId: "s" });
+
+    expect(Object.keys(frozen).sort()).toEqual(Object.keys(noSubscriptions).sort());
+    expect(frozen.success).toBe(noSubscriptions.success);
+    expect(frozen.sent).toBe(0);
   });
 });

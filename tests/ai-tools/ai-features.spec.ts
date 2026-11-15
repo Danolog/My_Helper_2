@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,6 +16,14 @@ const AI_PAGES = [
   { path: '/dashboard/content-generator/templates', name: 'Templates' },
   { path: '/dashboard/content-generator/scheduled', name: 'Scheduled Posts' },
   { path: '/dashboard/ai-recommendations', name: 'AI Recommendations' },
+];
+
+// Strony modułów zamrożonych — przekierowanie na pulpit zamiast treści.
+const FROZEN_PAGES = [
+  { path: '/dashboard/ai-assistant/voice', name: 'Voice Assistant' },
+  { path: '/dashboard/content-generator/social-posts', name: 'Social Posts' },
+  { path: '/dashboard/content-generator/newsletters', name: 'Newsletters' },
+  { path: '/dashboard/content-generator/scheduled', name: 'Scheduled Posts' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -59,23 +67,17 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display social post generator', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/dashboard/content-generator/social-posts');
-      await page.waitForLoadState('domcontentloaded');
+    // Moduły zamrożone (hardOff w src/lib/features.ts): proxy przekierowuje
+    // ich strony na pulpit zamiast je pokazywać.
+    for (const frozenPage of FROZEN_PAGES) {
+      test(`should redirect frozen ${frozenPage.name} page to dashboard`, { tag: '@full' }, async ({ page }) => {
+        await page.goto(frozenPage.path);
+        await page.waitForLoadState('domcontentloaded');
 
-      await expect(
-        page.getByText(/post|social|media|instagram|facebook/i).first()
-      ).toBeVisible({ timeout: 5000 });
-    });
-
-    test('should display newsletter generator', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/dashboard/content-generator/newsletters');
-      await page.waitForLoadState('domcontentloaded');
-
-      await expect(
-        page.getByText(/newsletter|email|kampani/i).first()
-      ).toBeVisible({ timeout: 5000 });
-    });
+        await expect(page).toHaveURL(/\/dashboard\/?(\?.*)?$/);
+        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
+      });
+    }
 
     test('should display AI recommendations page', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/ai-recommendations');
@@ -94,25 +96,6 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
 
       await expect(
         page.getByText(/trend|analiz|analysis/i).first()
-      ).toBeVisible({ timeout: 5000 });
-    });
-
-    test('should display voice assistant configuration', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/dashboard/ai-assistant/voice');
-      await page.waitForLoadState('domcontentloaded');
-
-      await expect(
-        // UI uses "Asystent glosowy" (no diacritics)
-        page.getByText(/g[lł]osow|voice|asystent|konfigur/i).first()
-      ).toBeVisible({ timeout: 5000 });
-    });
-
-    test('should display scheduled posts page', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/dashboard/content-generator/scheduled');
-      await page.waitForLoadState('domcontentloaded');
-
-      await expect(
-        page.getByText(/zaplanowane|scheduled|harmonogram|post/i).first()
       ).toBeVisible({ timeout: 5000 });
     });
 

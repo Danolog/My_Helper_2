@@ -8,6 +8,7 @@
 
 import { Volume2, VolumeX, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { Button } from "@/components/ui/button";
 import { useTextToSpeech } from "@/hooks/use-text-to-speech";
 import { cn } from "@/lib/utils";
@@ -26,9 +27,14 @@ export function ReadAloudButton({
   variant = "ghost",
   size = "icon",
 }: ReadAloudButtonProps) {
+  // Głos to moduł z rejestru (src/lib/features.ts) — wyłączony albo zamrożony:
+  // przycisku nie ma (trasa TTS zwraca wtedy 404).
+  const voiceEnabled = useModuleEnabled("voiceAi");
   const { speak, stop, isSpeaking, isLoading } = useTextToSpeech({
     onError: (error) => toast.error(error),
   });
+
+  if (!voiceEnabled) return null;
 
   const handleClick = () => {
     if (isSpeaking) {

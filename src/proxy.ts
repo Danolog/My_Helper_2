@@ -1,5 +1,7 @@
 /**
- * Next.js 16 Proxy — handles three concerns:
+ * Next.js 16 Proxy — handles five concerns:
+ * -1. Ambiguous paths (encoded separators/dots, bad percent-encoding) → 404
+ * 0. Frozen modules (hardOff in src/lib/features.ts): API → 404, page → /dashboard
  * 1. CSP with per-request nonce (replaces 'unsafe-inline' in script-src)
  * 2. CSRF protection via signed double-submit cookie
  * 3. Auth protection for dashboard routes
@@ -14,6 +16,12 @@ import {
   hmacSign,
   validateCsrfToken,
 } from "@/lib/csrf";
+import {
+  MODULE_DISABLED_CODE,
+  MODULE_DISABLED_MESSAGE,
+  frozenModuleForPath,
+} from "@/lib/features";
+import { isAmbiguousPath } from "@/lib/path-normalize";
 
 // ============================================================
 // Auth helpers
@@ -96,15 +104,32 @@ async function ensureCsrfCookies(
 // CSP with nonce
 // ============================================================
 
-function buildCsp(nonce: string): string {
+// sha256 tresci <style>, ktory sonner wstrzykuje bez nonce (__insertCSS
+// w node_modules/sonner/dist/index.mjs; sonner nie ma opcji nonce), oraz
+// sha256 pustego <style> — sonner najpierw dolacza pusty element, potem
+// wpisuje tresc. Hash jest przypiety do sonner 2.0.7 (wersja przypieta
+// dokladnie w package.json); test __tests__/lib/csp.test.ts liczy go
+// z node_modules i wywali CI przy podbiciu sonnera.
+export const SONNER_STYLE_HASH = "sha256-CIxDM5jnsGiKqXs2v7NKCY5MzdR9gu6TtiMJrDw29AY=";
+export const EMPTY_STYLE_HASH = "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=";
+
+export function buildCsp(nonce: string): string {
   // Dev: React DevTools wymaga eval(), a next-devtools wstrzykuje inline
   // style bez nonce — bez tych zluzowan konsola tonie w ~20 bledach CSP
   // na strone (UAT B-11). Produkcyjna polityka pozostaje scisla.
   const isDev = process.env.NODE_ENV === "development";
   const scriptExtra = isDev ? " 'unsafe-eval'" : "";
+  // Produkcja: style-src zostaje bez 'unsafe-inline' (zapas dla przegladarek
+  // bez CSP3). style-src-elem dopuszcza <style> z nonce i dwa hashe sonnera.
+  // style-src-attr 'unsafe-inline' dopuszcza tylko atrybuty style="" z SSR
+  // (next/image fill, initial framer-motion) — nie elementy <style> ani skrypty.
   const styleSrc = isDev
     ? "style-src 'self' 'unsafe-inline' fonts.googleapis.com"
-    : `style-src 'self' 'nonce-${nonce}' fonts.googleapis.com`;
+    : [
+        `style-src 'self' 'nonce-${nonce}' fonts.googleapis.com`,
+        `style-src-elem 'self' 'nonce-${nonce}' '${SONNER_STYLE_HASH}' '${EMPTY_STYLE_HASH}' fonts.googleapis.com`,
+        "style-src-attr 'unsafe-inline'",
+      ].join("; ");
 
   return [
     "default-src 'self'",
@@ -125,6 +150,36 @@ function buildCsp(nonce: string): string {
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // --- -1. Sciezka dwuznaczna — odmowa z gory, przed wszystkim innym ---
+  // Zakodowany separator (%2f, %5c), zakodowana kropka (%2e), podwojne albo
+  // bledne kodowanie procentowe: router i bramki ponizej moglyby przeczytac
+  // taka sciezke roznie, wiec jej nie obslugujemy (src/lib/path-normalize.ts).
+  // Aplikacja nie ma poprawnych sciezek tego rodzaju.
+  if (isAmbiguousPath(pathname)) {
+    return NextResponse.json(
+      { success: false, code: "INVALID_PATH", error: "Nie znaleziono." },
+      { status: 404 }
+    );
+  }
+
+  // --- 0. Moduly zamrozone (hardOff) — przed CSRF i auth, dla kazdej metody ---
+  // Rejestr (src/lib/features.ts) jest jedynym nosnikiem reguly; tu tylko
+  // egzekucja. Trasa API => 404 MODULE_DISABLED, strona panelu => /dashboard.
+  // Jedno pytanie do rejestru, bez wstepnego filtra po surowym prefiksie:
+  // rejestr sprawdza OBA dopasowania (trasa API i strona panelu) na OBU
+  // postaciach kanonicznych sciezki — doslownej i zdekodowanej. Wariant
+  // zapisu sciezki (//, .., %69, wielkosc liter) nie omija blokady.
+  const frozen = frozenModuleForPath(pathname);
+  if (frozen?.kind === "api") {
+    return NextResponse.json(
+      { success: false, code: MODULE_DISABLED_CODE, error: MODULE_DISABLED_MESSAGE },
+      { status: 404 }
+    );
+  }
+  if (frozen?.kind === "page") {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
 
   // --- 1. API mutations: validate CSRF (no CSP needed for JSON responses) ---
   if (
