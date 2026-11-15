@@ -11,6 +11,21 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST as bookPackage } from "@/app/api/appointments/book-package/route";
 import { createMockRequest, parseResponse, TEST_IDS } from "./helpers";
 
+/**
+ * Moduł `complexPromotions` jest zamrożony (B2) i trasa odpowiada 404 zanim
+ * cokolwiek sprawdzi. Testy logiki poniżej omijają tę bramkę
+ * (`guardState.bypass`), żeby zachowanie było pilnowane także na wypadek
+ * odmrożenia; test „zamrożona” sprawdza bramkę prawdziwą.
+ */
+const { guardState } = vi.hoisted(() => ({ guardState: { bypass: true } }));
+vi.mock("@/lib/server/frozen-guard", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/server/frozen-guard")>();
+  return {
+    frozenModuleResponse: (module: Parameters<typeof real.frozenModuleResponse>[0]) =>
+      guardState.bypass ? null : real.frozenModuleResponse(module),
+  };
+});
+
 const { mockAssertSalonRefs, mockFindOne, mockListOwned, mockInsertValues, txQueue } = vi.hoisted(() => ({
   mockAssertSalonRefs: vi.fn(async (..._args: unknown[]): Promise<Response | null> => null),
   mockFindOne: vi.fn(),
@@ -90,6 +105,27 @@ function request(extra: Record<string, unknown> = {}) {
     },
   });
 }
+
+describe("POST /api/appointments/book-package — zamrożona (B2)", () => {
+  it("404 MODULE_DISABLED przed sesją, walidacją i bazą", async () => {
+    guardState.bypass = false;
+    try {
+      const res = await bookPackage(request());
+      const { status, body } = await parseResponse(res);
+      expect(status).toBe(404);
+      expect(body).toEqual({
+        success: false,
+        code: "MODULE_DISABLED",
+        error: "Ta funkcja jest obecnie niedostępna.",
+      });
+      expect(mockFindOne).not.toHaveBeenCalled();
+      expect(mockAssertSalonRefs).not.toHaveBeenCalled();
+      expect(mockInsertValues).not.toHaveBeenCalled();
+    } finally {
+      guardState.bypass = true;
+    }
+  });
+});
 
 describe("POST /api/appointments/book-package — referencje z salonu (P1)", () => {
   beforeEach(() => {

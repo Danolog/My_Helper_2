@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 
 /**
  * GET /api/promotions/check-first-visit
@@ -19,6 +20,10 @@ import { NextResponse } from "next/server";
  * the price shown in the portal.
  */
 export async function GET() {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("complexPromotions");
+  if (frozen) return frozen;
+
   return NextResponse.json({
     success: true,
     data: {

@@ -14,6 +14,7 @@ import {
   trackAIUsage,
 } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 import { upload } from "@/lib/storage";
 
 // ────────────────────────────────────────────────────────────
@@ -111,6 +112,10 @@ function buildOverlaySvg(
 // ────────────────────────────────────────────────────────────
 
 export async function POST(req: Request) {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("imageGen");
+  if (frozen) return frozen;
+
   // Auth + Pro plan check (+ monthly image unit limit)
   const proResult = await requireProAI({ op: "banner" });
   if (isProAIError(proResult)) return proResult;

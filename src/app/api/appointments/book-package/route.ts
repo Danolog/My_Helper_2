@@ -6,6 +6,7 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { assertSalonRefs } from "@/lib/salon-refs";
 import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 import { forSalon } from "@/lib/server/repository";
 /**
  * POST /api/appointments/book-package
@@ -19,6 +20,10 @@ import { forSalon } from "@/lib/server/repository";
  *   startTime - Start time for the first service (ISO string)
  */
 export async function POST(request: Request) {
+  // Druga linia obrony zamrożenia (pierwsza: src/proxy.ts).
+  const frozen = frozenModuleResponse("complexPromotions");
+  if (frozen) return frozen;
+
   try {
     const authResult = await requireAuth();
     if (isAuthError(authResult)) return authResult;
