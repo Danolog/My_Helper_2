@@ -22,7 +22,7 @@ import {
   clients,
   subscriptionPlans,
 } from "../src/lib/schema";
-import { checkSeedTarget } from "./seed-host-guard";
+import { checkSeedClientOptions, checkSeedTarget } from "./seed-host-guard";
 
 const connectionString = process.env.POSTGRES_URL;
 const target = checkSeedTarget(connectionString, { VERCEL_ENV: process.env.VERCEL_ENV });
@@ -30,9 +30,17 @@ if (!target.ok || !connectionString) {
   console.error(`[seed-test] Odmowa: ${target.ok ? "POSTGRES_URL jest wymagany" : target.reason}`);
   process.exit(1);
 }
-console.log(`[seed-test] Host docelowy: ${target.host}`);
 
+// postgres(...) nie łączy się przed pierwszym zapytaniem. Sprawdzamy hosty, które
+// wyliczył sam klient, bo jego parser URL różni się od WHATWG URL z etapu 1.
 const sql = postgres(connectionString);
+const clientTarget = checkSeedClientOptions(sql.options);
+if (!clientTarget.ok) {
+  console.error(`[seed-test] Odmowa: ${clientTarget.reason}`);
+  void sql.end({ timeout: 0 }).finally(() => process.exit(1));
+} else {
+  console.log(`[seed-test] Host docelowy: ${clientTarget.hosts.join(", ")}`);
+}
 const db = drizzle(sql);
 
 // Fixed IDs for idempotency
@@ -328,7 +336,9 @@ async function seed() {
   await sql.end();
 }
 
-seed().catch((err) => {
-  console.error("[seed-test] Seed failed:", err);
-  process.exit(1);
-});
+if (clientTarget.ok) {
+  seed().catch((err) => {
+    console.error("[seed-test] Seed failed:", err);
+    process.exit(1);
+  });
+}
