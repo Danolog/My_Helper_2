@@ -67,7 +67,7 @@ describe("kontrakt: konto salonu A z salonId=B => 403/404, bez zapytań (#94)", 
   );
 
   it.each(guarded.map((h) => [`${h.method} ${h.file}`, h.file, h.method] as const))(
-    "%s: konto bez salonu (portal klienta), salonId=B => odmowa",
+    "%s: konto bez salonu (portal klienta), salonId=B => 404",
     async (_name, file, method) => {
       const handler = await load(file, method);
       m.signIn("client-1");
@@ -75,11 +75,8 @@ describe("kontrakt: konto salonu A z salonId=B => 403/404, bez zapytań (#94)", 
 
       const res = await call(handler, file, method, SALON_B);
 
-      // requireReportSalon odpowiada 401 „Nieautoryzowany” przy braku
-      // kontekstu salonu (src/lib/reports/require-report-salon.ts) — odmowa
-      // bez danych, tylko inny kod niż requireSalonStaff (404).
-      const denied = file.startsWith("src/app/api/reports/") ? [401] : [403, 404];
-      expect(denied).toContain(res.status);
+      // #101: raporty też przez requireSalonStaff — jeden kod dla wszystkich.
+      expect(res.status).toBe(404);
       expect(m.rlsSalonIds()).toEqual([]);
     }
   );

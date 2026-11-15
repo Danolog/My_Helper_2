@@ -1,83 +1,73 @@
+import { NextResponse } from "next/server";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mockGetSalonContext = vi.fn();
-const mockHasFeatureAccess = vi.fn();
+const mockRequireSalonStaff = vi.fn();
 vi.mock("@/lib/salon-context", () => ({
-  getSalonContext: () => mockGetSalonContext(),
-  hasFeatureAccess: (...args: unknown[]) => mockHasFeatureAccess(...args),
+  requireSalonStaff: (...args: unknown[]) => mockRequireSalonStaff(...args),
 }));
 
-import { requireReportSalon } from "@/lib/reports/require-report-salon";
+import { requireReportSalon, REPORTS_FEATURE } from "@/lib/reports/require-report-salon";
 
 const OWN = "3c0b7926-3bcf-41ee-82c2-0b65ed48585c";
 const OTHER = "00000000-0000-4000-8000-000000000001";
 
-function req(salonId?: string) {
-  const url = salonId
-    ? `http://localhost/api/reports/revenue?salonId=${salonId}`
-    : `http://localhost/api/reports/revenue`;
-  return new Request(url);
+function req(query = "") {
+  return new Request(`http://localhost/api/reports/revenue${query}`);
 }
+const deny = (status: number) => ({
+  error: NextResponse.json({ success: false, error: "x" }, { status }),
+});
 
+/**
+ * #101: requireReportSalon to cienkie opakowanie — autoryzacja w
+ * requireSalonStaff (pełne ścieżki ról i salonu: reports-role.test.ts,
+ * salon-query-scope-contract.test.ts), tu tylko delegacja i walidacja 400.
+ */
 describe("requireReportSalon", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetSalonContext.mockResolvedValue({
-      salonId: OWN,
-      role: "owner",
-      employeeId: null,
-      userId: "u1",
+    mockRequireSalonStaff.mockResolvedValue({
+      ctx: { salonId: OWN, role: "owner", employeeId: null, userId: "u1" },
     });
-    mockHasFeatureAccess.mockResolvedValue(true);
   });
 
-  it("returns the session salon when the param matches", async () => {
-    const r = await requireReportSalon(req(OWN));
+  it("deleguje do requireSalonStaff z salonId z query i grantem reports", async () => {
+    const r = await requireReportSalon(req(`?salonId=${OTHER}`));
+    expect(mockRequireSalonStaff).toHaveBeenCalledWith({ requestedSalonId: OTHER, feature: REPORTS_FEATURE });
+    expect(REPORTS_FEATURE).toBe("reports");
     expect(r).toEqual({ salonId: OWN });
   });
 
-  // UAT X-1: cross-tenant read — inny salonId niz sesyjny musi byc odrzucony
-  it("returns 403 when the param is a different salon", async () => {
-    const r = await requireReportSalon(req(OTHER));
-    expect("error" in r).toBe(true);
-    expect((r as { error: Response }).error.status).toBe(403);
+  it("zwraca salon z sesji, gdy strażnik przepuszcza", async () => {
+    expect(await requireReportSalon(req(`?salonId=${OWN}`))).toEqual({ salonId: OWN });
   });
 
-  it("returns 400 when salonId is missing", async () => {
+  it.each([401, 403, 404])("odmowa strażnika %i przechodzi bez zmian", async (status) => {
+    mockRequireSalonStaff.mockResolvedValue(deny(status));
+    const r = await requireReportSalon(req(`?salonId=${OWN}`));
+    expect((r as { error: Response }).error.status).toBe(status);
+  });
+
+  it("odmowa strażnika ma pierwszeństwo przed walidacją 400", async () => {
+    mockRequireSalonStaff.mockResolvedValue(deny(404));
+    const r = await requireReportSalon(req(`?dateFrom=garbage`));
+    expect((r as { error: Response }).error.status).toBe(404);
+  });
+
+  it("brak salonId => 400", async () => {
     const r = await requireReportSalon(req());
+    expect(mockRequireSalonStaff).toHaveBeenCalledWith({ requestedSalonId: null, feature: REPORTS_FEATURE });
     expect((r as { error: Response }).error.status).toBe(400);
-  });
-
-  it("returns 401 when there is no session/salon", async () => {
-    mockGetSalonContext.mockResolvedValue(null);
-    const r = await requireReportSalon(req(OWN));
-    expect((r as { error: Response }).error.status).toBe(401);
-  });
-
-  // P1 (Ethan): pracownik salonu bez grantu "reports" nie czyta raportów
-  it("returns 403 for staff without the reports grant", async () => {
-    const staff = { salonId: OWN, role: "employee", employeeId: "e1", userId: "u2" };
-    mockGetSalonContext.mockResolvedValue(staff);
-    mockHasFeatureAccess.mockResolvedValue(false);
-    const r = await requireReportSalon(req(OWN));
-    expect((r as { error: Response }).error.status).toBe(403);
-    expect(mockHasFeatureAccess).toHaveBeenCalledWith(staff, "reports");
   });
 
   // UAT F2: niepoprawny format daty -> 400, nie 500 z DB
-  it("returns 400 for an unparseable dateFrom", async () => {
-    const request = new Request(
-      `http://localhost/api/reports/revenue?salonId=${OWN}&dateFrom=garbage&dateTo=2026-07-01`,
-    );
-    const r = await requireReportSalon(request);
+  it.each(["dateFrom", "dateTo"])("nieparsowalne %s => 400", async (key) => {
+    const r = await requireReportSalon(req(`?salonId=${OWN}&${key}=garbage`));
     expect((r as { error: Response }).error.status).toBe(400);
   });
 
-  it("accepts valid dateFrom/dateTo", async () => {
-    const request = new Request(
-      `http://localhost/api/reports/revenue?salonId=${OWN}&dateFrom=2026-06-01&dateTo=2026-07-01`,
-    );
-    const r = await requireReportSalon(request);
+  it("poprawne dateFrom/dateTo przechodzą", async () => {
+    const r = await requireReportSalon(req(`?salonId=${OWN}&dateFrom=2026-06-01&dateTo=2026-07-01`));
     expect(r).toEqual({ salonId: OWN });
   });
 });
