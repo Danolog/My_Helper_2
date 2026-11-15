@@ -44,6 +44,9 @@ vi.mock("@/lib/schema", () => {
 });
 
 let nextId = 1;
+// Równoległy POST tego samego konta zatwierdzony między naszym SELECT-em
+// a INSERT-em: indeks salons_owner_id_uq (T3b) odrzuca drugi salon (23505).
+let concurrentOwner: string | null = null;
 vi.mock("@/lib/db", () => ({
   db: {
     delete: () => ({
@@ -58,6 +61,11 @@ vi.mock("@/lib/db", () => ({
     insert: () => ({
       values: (v: Row) => ({
         returning: async () => {
+          if (concurrentOwner !== null && v.ownerId === concurrentOwner) {
+            throw Object.assign(new Error("insert failed"), {
+              cause: { code: "23505", constraint: "salons_owner_id_uq" },
+            });
+          }
           const row = { id: `new-salon-${nextId++}`, ...v };
           store.salons.push(row);
           return [row];
@@ -125,6 +133,7 @@ const salonIds = () => store.salons.map((s) => s.id).sort();
 beforeEach(() => {
   nextId = 1;
   sessionUserId = null;
+  concurrentOwner = null;
   store.salons = [
     { id: SALON_A, name: "Salon A", ownerId: OWNER_A },
     { id: SALON_B, name: "Salon B", ownerId: OWNER_B },
@@ -235,5 +244,14 @@ describe("POST /api/salons — jedno konto, jeden salon", () => {
     sessionUserId = CLIENT;
     expect((await callPost({ name: "Pierwszy" })).status).toBe(201);
     expect(salonsOf(CLIENT)).toHaveLength(1);
+  });
+
+  it("wyścig: równoległy POST zdążył pierwszy (23505 z salons_owner_id_uq) → 409, nie 500", async () => {
+    sessionUserId = CLIENT;
+    concurrentOwner = CLIENT;
+    const { status, body } = await callPost({ name: "Równoległy" });
+    expect(status).toBe(409);
+    expect(body).toEqual(expect.objectContaining({ success: false }));
+    expect(salonsOf(CLIENT)).toHaveLength(0);
   });
 });

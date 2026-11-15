@@ -3,7 +3,8 @@ import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { appointments, clients, employees, services } from "@/lib/schema";
+import { depositVariantFor } from "@/lib/salon-cancellation";
+import { appointments, clients, depositPayments, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/appointments/[id]/cancel-info - Get cancellation policy details for an appointment
 export async function GET(
@@ -24,8 +25,8 @@ export async function GET(
 
     const { id } = await params;
 
-    const result = await forSalon(salonId).raw((tx) =>
-      tx.select({
+    const [result, paidPayments] = await forSalon(salonId).raw(async (tx) => [
+      await tx.select({
         appointment: appointments,
         client: clients,
         employee: employees,
@@ -36,8 +37,19 @@ export async function GET(
       .leftJoin(employees, eq(appointments.employeeId, employees.id))
       .leftJoin(services, eq(appointments.serviceId, services.id))
       .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
-      .limit(1)
-    );
+      .limit(1),
+      // Wariant zadatku (RF3): online = płatność Stripe `succeeded`.
+      await tx
+        .select({ paymentMethod: depositPayments.paymentMethod })
+        .from(depositPayments)
+        .where(
+          and(
+            eq(depositPayments.appointmentId, id),
+            eq(depositPayments.salonId, salonId),
+            eq(depositPayments.status, "succeeded")
+          )
+        ),
+    ] as const);
 
     const row = result[0];
     if (!row) {
@@ -67,9 +79,11 @@ export async function GET(
     const hasDeposit = appointment.depositAmount && parseFloat(appointment.depositAmount) > 0;
     const depositPaid = appointment.depositPaid;
 
+    // refund-fix RF1: odwołanie przez salon zwraca zadatek w całości,
+    // niezależnie od reguły 24 h ("forfeit" zostaje w typie dla zgodności UI).
     let depositAction: "refund" | "forfeit" | "none" = "none";
     if (hasDeposit && depositPaid) {
-      depositAction = isMoreThan24h ? "refund" : "forfeit";
+      depositAction = "refund";
     }
 
     return NextResponse.json({
@@ -86,6 +100,7 @@ export async function GET(
           amount: appointment.depositAmount ? parseFloat(appointment.depositAmount) : 0,
           paid: !!depositPaid,
           action: depositAction,
+          variant: depositVariantFor(appointment.depositAmount, appointment.depositPaid, paidPayments),
         },
         client: row.client ? {
           id: row.client.id,

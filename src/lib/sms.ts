@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { maskPhoneNumber, normalizePolishPhoneNumber } from "@/lib/phone";
 import { notifications } from "@/lib/schema";
+import { isTestPhoneNumber } from "@/lib/test-phone";
 
 export interface SmsMessage {
   to: string; // Phone number
@@ -15,6 +16,16 @@ export interface SmsResult {
   notificationId?: string | undefined;
   error?: string | undefined;
 }
+
+/**
+ * Komunikat błędu wysyłki zwracany wołającemu (trafia m.in. do odpowiedzi
+ * /api/reminders/appointment). Ogólny: szczegóły dostawcy i bazy idą tylko do
+ * logu, przez `logger` (redakcja `safe-error`).
+ */
+export const SMS_SEND_FAILED_ERROR = "Nie udało się wysłać SMS.";
+
+/** Wynik dla numeru z listy TEST_PHONE_NUMBERS — SMS celowo nie wychodzi. */
+export const SMS_TEST_PHONE_ERROR = "SMS nie wysłany: numer testowy.";
 
 const SMSAPI_URL = "https://api.smsapi.pl/sms.do";
 const DEFAULT_SENDER = "Info";
@@ -77,7 +88,7 @@ async function sendViaSmsapi(
   }
 
   logger.info("SMS sent via SMSAPI", {
-    to,
+    to: maskPhoneNumber(to),
     count: data?.count,
     messageId: data?.list?.[0]?.id,
   });
@@ -145,6 +156,16 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
     };
   }
 
+  // Numery testowe (E2E, seed): nigdy do dostawcy, także z tokenem, i bez
+  // wpisu w notifications — test nie zostawia po sobie danych.
+  if (isTestPhoneNumber(normalizedTo)) {
+    logger.info("SMS skipped: test phone number", {
+      to: maskPhoneNumber(normalizedTo),
+      salonId: msg.salonId,
+    });
+    return { success: false, error: SMS_TEST_PHONE_ERROR };
+  }
+
   const token = process.env.SMSAPI_TOKEN;
 
   try {
@@ -152,10 +173,12 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
       // Real delivery through SMSAPI.pl
       await sendViaSmsapi(token, normalizedTo, msg.message);
     } else {
-      // Simulation mode - log instead of sending (no SMS provider configured)
+      // Simulation mode - log instead of sending (no SMS provider configured).
+      // Ryan: numer zamaskowany, bez treści (imię, usługa, termin = PII).
       logger.info("SMS notification (simulated - no SMSAPI_TOKEN)", {
-        to: normalizedTo,
-        message: msg.message,
+        to: maskPhoneNumber(normalizedTo),
+        salonId: msg.salonId,
+        messageLength: msg.message.length,
       });
     }
 
@@ -168,14 +191,20 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
       notificationId,
     };
   } catch (error) {
-    logger.error("Failed to send/save SMS", { error, to: normalizedTo });
+    // Szczegóły tylko w logu (`logger` redaguje `error` przez safe-error);
+    // wołający dostaje ogólny komunikat.
+    logger.error("Failed to send/save SMS", {
+      error,
+      to: maskPhoneNumber(normalizedTo),
+      salonId: msg.salonId,
+    });
 
     // Try to save notification with failed status
     await saveFailedNotification(msg);
 
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: SMS_SEND_FAILED_ERROR,
     };
   }
 }

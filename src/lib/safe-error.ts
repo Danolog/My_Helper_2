@@ -62,3 +62,32 @@ export function toSafeErrorMeta(value: unknown): unknown {
   if (typeof value === "string") return redactQueryParamsText(value);
   return value;
 }
+
+export interface ErrorIdentity {
+  errorName: string;
+  /** Kod własny błędu albo z `cause` (np. "23505", "40P01", "StripeAPIError"). */
+  errorCode?: string;
+}
+
+/**
+ * Sama tożsamość błędu — nazwa i kod, BEZ message, stack i treści zapytania
+ * (N1, Ryan, przegląd #62). Dla `catch`, który obsługuje wiele ścieżek naraz
+ * (webhook Stripe: subskrypcje i zadatki z danymi gości) — tam nawet tekst
+ * zapytania z placeholderami nie jest potrzebny do diagnozy.
+ */
+export function toErrorIdentity(value: unknown): ErrorIdentity {
+  const pickCode = (v: unknown): string | undefined => {
+    if (!v || typeof v !== "object") return undefined;
+    const { code, type } = v as { code?: unknown; type?: unknown };
+    if (typeof code === "string" || typeof code === "number") return String(code);
+    if (typeof type === "string") return type;
+    return undefined;
+  };
+  if (value instanceof Error) {
+    const errorCode = pickCode(value) ?? pickCode((value as { cause?: unknown }).cause);
+    // DrizzleQueryError nie ustawia `name` ("Error") — wtedy nazwa klasy.
+    const errorName = value.name === "Error" && value.constructor?.name ? value.constructor.name : value.name;
+    return errorCode ? { errorName, errorCode } : { errorName };
+  }
+  return { errorName: typeof value };
+}

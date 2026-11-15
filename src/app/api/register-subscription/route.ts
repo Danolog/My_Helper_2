@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { registerSubscriptionSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { TRIAL_DAYS } from "@/lib/constants";
@@ -8,6 +8,27 @@ import { TRIAL_DAYS } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { subscriptionPlans, salonSubscriptions, salons } from "@/lib/schema";
+import {
+  isSubscriptionLockFailure,
+  lockSalonSubscriptions,
+  setSubscriptionLockTimeout,
+} from "@/lib/subscription-locks";
+import { isUniqueViolation } from "@/lib/subscription-predicates";
+
+type SubscriptionRow = typeof salonSubscriptions.$inferSelect;
+
+function alreadySubscribed() {
+  // Bez zmiany planu: ta trasa nie pobiera płatności, więc podniesienie
+  // planu tutaj = Pro za darmo. Zmiana planu wyłącznie przez Stripe.
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Salon ma juz subskrypcje. Zmiana planu odbywa sie w ustawieniach subskrypcji.",
+    },
+    { status: 409 }
+  );
+}
+
 /**
  * POST /api/register-subscription
  *
@@ -21,6 +42,17 @@ import { subscriptionPlans, salonSubscriptions, salons } from "@/lib/schema";
  * ignorowany: konto zawsze z sesji (authResult.user). Istniejącej
  * subskrypcji ta trasa nie zmienia (409) — zmiana planu tylko przez Stripe
  * (/api/subscriptions/checkout, /api/subscriptions/downgrade).
+ *
+ * T3b (Ethan §3 — niezmiennik „każdy salon ma dokładnie jeden wiersz” od
+ * strony zapisu):
+ *  - salon i subskrypcja w JEDNEJ transakcji — błąd zapisu subskrypcji nie
+ *    zostawia salonu bez wiersza,
+ *  - blokada salonu (`lockSalonSubscriptions`) przed odczytem jego wierszy,
+ *    jak w confirm i webhooku; dwie równoległe rejestracje nie dają dwóch
+ *    triali,
+ *  - druga linia obrony: indeksy unikalne `salons_owner_id_uq` i
+ *    `salon_subscriptions_salon_current_uq` → 23505 → 409,
+ *  - tylko aktywny plan (`isActive`).
  */
 export async function POST(request: NextRequest) {
   try {
@@ -34,11 +66,11 @@ export async function POST(request: NextRequest) {
     const { planSlug } = rawBody as { planSlug: string };
     const account = authResult.user;
 
-    // Find the subscription plan
+    // Find the subscription plan (only plans offered for sale)
     const [plan] = await db
       .select()
       .from(subscriptionPlans)
-      .where(eq(subscriptionPlans.slug, planSlug))
+      .where(and(eq(subscriptionPlans.slug, planSlug), eq(subscriptionPlans.isActive, true)))
       .limit(1);
 
     if (!plan) {
@@ -48,75 +80,93 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Find the salon owned by this user
-    const [salon] = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.ownerId, account.id))
-      .limit(1);
+    let result: { exists: true } | { salonId: string; subscription: SubscriptionRow };
+    try {
+      result = await db.transaction(async (tx) => {
+        await setSubscriptionLockTimeout(tx);
 
-    let salonId: string;
+        // Salon konta z sesji (jeden na konto — salons_owner_id_uq).
+        const [salon] = await tx
+          .select({ id: salons.id })
+          .from(salons)
+          .where(eq(salons.ownerId, account.id))
+          .limit(1);
 
-    if (salon) {
-      salonId = salon.id;
-    } else {
-      // Create a default salon for the user
-      const [newSalon] = await db
-        .insert(salons)
-        .values({
-          name: `Salon ${account.name || "Nowy"}`,
-          email: account.email,
-          ownerId: account.id,
-        })
-        .returning();
-      salonId = newSalon!.id;
+        let salonId = salon?.id;
+        if (!salonId) {
+          const [newSalon] = await tx
+            .insert(salons)
+            .values({
+              name: `Salon ${account.name || "Nowy"}`,
+              email: account.email,
+              ownerId: account.id,
+            })
+            .returning({ id: salons.id });
+          if (!newSalon) throw new Error("Register subscription: salon insert returned no row");
+          salonId = newSalon.id;
+        }
+
+        await lockSalonSubscriptions(tx, salonId);
+
+        // Dowolny wiersz (także canceled) = bez drugiego triala.
+        const [existingSub] = await tx
+          .select({ id: salonSubscriptions.id })
+          .from(salonSubscriptions)
+          .where(eq(salonSubscriptions.salonId, salonId))
+          .limit(1);
+        if (existingSub) return { exists: true } as const;
+
+        const trialEnd = new Date();
+        trialEnd.setDate(trialEnd.getDate() + TRIAL_DAYS);
+
+        const [subscription] = await tx
+          .insert(salonSubscriptions)
+          .values({
+            salonId,
+            planId: plan.id,
+            status: "trialing",
+            trialEndsAt: trialEnd,
+            currentPeriodStart: new Date(),
+            currentPeriodEnd: trialEnd,
+          })
+          .returning();
+        if (!subscription) throw new Error("Register subscription: subscription insert returned no row");
+        return { salonId, subscription };
+      });
+    } catch (error) {
+      if (isSubscriptionLockFailure(error)) {
+        logger.warn("[Register Subscription] Lock failure — retry", { userId: account.id });
+        return NextResponse.json(
+          { success: false, code: "LOCK_BUSY", error: "Rejestracja jest w toku. Sprobuj ponownie za chwile." },
+          { status: 503 }
+        );
+      }
+      // Równoległa rejestracja tego samego konta zdążyła pierwsza
+      // (salons_owner_id_uq albo salon_subscriptions_salon_current_uq).
+      if (isUniqueViolation(error)) {
+        logger.info("[Register Subscription] Concurrent registration won — 409", { userId: account.id });
+        return alreadySubscribed();
+      }
+      throw error;
     }
 
-    // Check for existing subscription
-    const [existingSub] = await db
-      .select()
-      .from(salonSubscriptions)
-      .where(eq(salonSubscriptions.salonId, salonId))
-      .limit(1);
+    if ("exists" in result) return alreadySubscribed();
 
-    if (existingSub) {
-      // Bez zmiany planu: ta trasa nie pobiera płatności, więc podniesienie
-      // planu tutaj = Pro za darmo. Zmiana planu wyłącznie przez Stripe.
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Salon ma juz subskrypcje. Zmiana planu odbywa sie w ustawieniach subskrypcji.",
-        },
-        { status: 409 }
-      );
-    }
-
-    // Create salon subscription with trial period
-    const trialEnd = new Date();
-    trialEnd.setDate(trialEnd.getDate() + TRIAL_DAYS);
-
-    const [subscription] = await db
-      .insert(salonSubscriptions)
-      .values({
-        salonId,
-        planId: plan.id,
-        status: "trialing",
-        trialEndsAt: trialEnd,
-        currentPeriodStart: new Date(),
-        currentPeriodEnd: trialEnd,
-      })
-      .returning();
-
-    logger.info(`[Register Subscription] Created subscription for salon ${salonId}: plan=${plan.name}, status=trialing, trial_ends=${trialEnd.toISOString()}`);
+    const { salonId, subscription } = result;
+    logger.info("[Register Subscription] Created trial subscription", {
+      salonId,
+      planSlug: plan.slug,
+      trialEndsAt: subscription.trialEndsAt?.toISOString() ?? null,
+    });
 
     return NextResponse.json({
       success: true,
       data: {
-        subscriptionId: subscription!.id,
+        subscriptionId: subscription.id,
         planName: plan.name,
         planSlug: plan.slug,
-        status: subscription!.status,
-        trialEndsAt: subscription!.trialEndsAt,
+        status: subscription.status,
+        trialEndsAt: subscription.trialEndsAt,
       },
     });
   } catch (error) {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { validateBody, subscriptionCheckoutSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
@@ -10,6 +10,11 @@ import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { subscriptionPlans, salonSubscriptions } from "@/lib/schema";
 import { getStripe, isStripePricesConfigured } from "@/lib/stripe";
+import {
+  CURRENT_LOCAL_STATUSES,
+  isCurrentLocalStatus,
+  isCurrentPaidStripeRow,
+} from "@/lib/subscription-predicates";
 
 /**
  * Map plan slugs to their corresponding Stripe price env variables.
@@ -18,14 +23,6 @@ function getStripePriceId(slug: string): string | undefined {
   if (slug === "basic") return process.env.STRIPE_PRICE_BASIC || undefined;
   if (slug === "pro") return process.env.STRIPE_PRICE_PRO || undefined;
   return undefined;
-}
-
-/**
- * Lokalny wiersz subskrypcji bez prawdziwej subskrypcji w Stripe
- * (null albo identyfikator z dawnej symulacji `sim_*`).
- */
-function hasRealStripeSubscription(stripeSubscriptionId: string | null): boolean {
-  return !!stripeSubscriptionId && !stripeSubscriptionId.startsWith("sim_");
 }
 
 function stripeUnavailableResponse() {
@@ -105,46 +102,51 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check if salon already has an active subscription for the same plan
-    const existingSubscriptions = await db
-      .select()
-      .from(salonSubscriptions)
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          eq(salonSubscriptions.status, "active"),
-        ),
-      );
+    // Bieżące wiersze salonu (trialing/active). Ten sam predykat konfliktu co
+    // confirm (`isCurrentPaidStripeRow`): wiersz z prawdziwą subskrypcją
+    // Stripe — także trial prowadzony przez Stripe — blokuje nowy Checkout
+    // TUTAJ, przed pobraniem pieniędzy, a nie dopiero 409 w confirm.
+    const currentRows = (
+      await db
+        .select()
+        .from(salonSubscriptions)
+        .where(
+          and(
+            eq(salonSubscriptions.salonId, salonId),
+            inArray(salonSubscriptions.status, [...CURRENT_LOCAL_STATUSES]),
+          ),
+        )
+    ).filter((s) => isCurrentLocalStatus(s.status));
 
-    if (existingSubscriptions.length > 0 && existingSubscriptions[0]) {
-      const existingSub = existingSubscriptions[0];
-      if (existingSub.planId === plan.id) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Salon posiada juz aktywna subskrypcje tego planu.",
-          },
-          { status: 409 },
-        );
-      }
-      // Zmiana planu opłaconej subskrypcji Stripe wymaga
-      // stripe.subscriptions.update (proracja + synchronizacja planId z
-      // webhooka) — do decyzji architektonicznej. Nowy Checkout założyłby
-      // drugą subskrypcję w Stripe (podwójne obciążenie), więc odmawiamy.
-      if (hasRealStripeSubscription(existingSub.stripeSubscriptionId)) {
-        return NextResponse.json(
-          {
-            success: false,
-            code: "PLAN_CHANGE_UNSUPPORTED",
-            error:
-              "Zmiana planu opłaconej subskrypcji nie jest jeszcze dostępna online. Skontaktuj się z obsługą.",
-          },
-          { status: 409 },
-        );
-      }
-      // Subskrypcja bez prawdziwego Stripe: nowy plan tylko przez Checkout,
-      // planId zmienia /api/subscriptions/confirm po opłaceniu.
+    const paidStripeRow = currentRows.find(isCurrentPaidStripeRow);
+    const samePlanActive = currentRows.find((s) => s.status === "active" && s.planId === plan.id);
+    if (samePlanActive || paidStripeRow?.planId === plan.id) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Salon posiada juz aktywna subskrypcje tego planu.",
+        },
+        { status: 409 },
+      );
     }
+    // Zmiana planu opłaconej subskrypcji Stripe wymaga
+    // stripe.subscriptions.update (proracja + synchronizacja planId z
+    // webhooka) — do decyzji architektonicznej. Nowy Checkout założyłby
+    // drugą subskrypcję w Stripe (podwójne obciążenie), więc odmawiamy.
+    if (paidStripeRow) {
+      return NextResponse.json(
+        {
+          success: false,
+          code: "PLAN_CHANGE_UNSUPPORTED",
+          error:
+            "Zmiana planu opłaconej subskrypcji nie jest jeszcze dostępna online. Skontaktuj się z obsługą.",
+        },
+        { status: 409 },
+      );
+    }
+    // Wiersz bez prawdziwego Stripe (nasz trial z rejestracji, dawne `sim_*`):
+    // nowy plan tylko przez Checkout, planId zmienia confirm po opłaceniu —
+    // ten sam wiersz, bez drugiego.
 
     // Attempt to create a real Stripe Checkout Session
     const stripe = getStripe();
