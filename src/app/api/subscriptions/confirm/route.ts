@@ -71,15 +71,18 @@ export async function POST(request: Request) {
     const stripe = getStripe();
 
     if (!stripe) {
-      // If Stripe is not configured, the checkout flow would have used the
-      // dev fallback which creates a subscription directly in the DB.
-      // The success page may still call confirm with a dev session ID -- just
-      // return a success indicator.
-      return NextResponse.json({
-        success: true,
-        alreadyConfirmed: true,
-        message: "Stripe is not configured; subscription was created during checkout.",
-      });
+      // Bez Stripe nie da się zweryfikować płatności, a checkout bez Stripe
+      // niczego nie tworzy (PR #36) — to błąd, nie sukces. Kod spójny z checkout.
+      logger.warn("Subscription confirm refused: Stripe not configured");
+      return NextResponse.json(
+        {
+          success: false,
+          code: "STRIPE_UNAVAILABLE",
+          error:
+            "Płatności online są chwilowo niedostępne. Nie udało się potwierdzić płatności — spróbuj ponownie później.",
+        },
+        { status: 503 },
+      );
     }
 
     // Retrieve the Checkout Session from Stripe
