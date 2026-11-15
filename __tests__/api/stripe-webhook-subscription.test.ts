@@ -50,6 +50,7 @@ const PERIOD_START = 1783296000;
 const PERIOD_END = 1785888000;
 const STRIPE_SUB = {
   id: "sub_1",
+  status: "active",
   items: { data: [{ current_period_start: PERIOD_START, current_period_end: PERIOD_END }] },
 };
 
@@ -247,5 +248,55 @@ describe("webhook checkout.session.completed — subskrypcja, 400/500", () => {
     f.selects.push([], [PLAN_PRO], []);
     expect((await deliver(webhookSession())).status).toBe(500);
     expect(f.committed).toEqual([]);
+  });
+});
+
+describe("webhook — kolejność zdarzeń (ostrzeżenie [MEDIUM] fail-open state drift)", () => {
+  const LOCAL_ACTIVE = {
+    id: "sub-local",
+    salonId: "salon-1",
+    status: "active",
+    stripeSubscriptionId: "sub_1",
+    currentPeriodStart: new Date(PERIOD_START * 1000),
+    currentPeriodEnd: new Date(PERIOD_END * 1000),
+    canceledAt: null,
+  };
+
+  it.each([
+    ["customer.subscription.deleted", "canceled"],
+    ["customer.subscription.updated", "past_due"],
+  ])("checkout.session.completed po %s nie przywraca „active”", async (firstEvent, stripeStatus) => {
+    // 1) najpierw stan ze Stripe: anulowanie / zaległość
+    f.selects.push([LOCAL_ACTIVE]);
+    expect(
+      (
+        await deliver(
+          { id: "sub_1", status: stripeStatus, canceled_at: null, cancel_at_period_end: false, items: STRIPE_SUB.items },
+          firstEvent
+        )
+      ).status
+    ).toBe(200);
+    const afterFirst = [...f.committed];
+    expect(afterFirst.map((w) => w.values.status)).toEqual([stripeStatus]);
+
+    // 2) spóźniony checkout.session.completed — Stripe mówi już stripeStatus
+    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: stripeStatus });
+    f.selects.push([], [PLAN_PRO], []);
+    expect((await deliver(webhookSession())).status).toBe(200);
+
+    expect(f.committed).toEqual(afterFirst);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("manual handling"),
+      expect.objectContaining({ code: "SUBSCRIPTION_NOT_ACTIVE" })
+    );
+  });
+
+  it("trialing ze Stripe przez webhook → trialing z trial_end", async () => {
+    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "trialing", trial_end: PERIOD_END });
+    f.selects.push([], [PLAN_PRO], []);
+    expect((await deliver(webhookSession())).status).toBe(200);
+    expect(f.committed[0]?.values).toEqual(
+      expect.objectContaining({ status: "trialing", trialEndsAt: new Date(PERIOD_END * 1000) })
+    );
   });
 });

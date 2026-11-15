@@ -17,6 +17,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "@/app/api/subscriptions/confirm/route";
+import { logger } from "@/lib/logger";
 import { subscriptionPayments } from "@/lib/schema";
 
 const f = await vi.hoisted(async () =>
@@ -83,9 +84,18 @@ function checkoutSession(overrides: Record<string, unknown> = {}) {
 let retrieveSession: ReturnType<typeof vi.fn>;
 let retrieveSubscription: ReturnType<typeof vi.fn>;
 
-function withStripe(session: unknown) {
+/**
+ * Subskrypcja jest zawsze pobierana świeżo ze Stripe; domyślnie zwraca obiekt
+ * z sesji ze statusem `active`.
+ */
+function withStripe(session: { subscription?: unknown }, stripeStatus = "active") {
   retrieveSession = vi.fn().mockResolvedValue(session);
-  retrieveSubscription = vi.fn();
+  const sub = session.subscription;
+  retrieveSubscription = vi
+    .fn()
+    .mockResolvedValue(
+      sub && typeof sub === "object" ? { status: stripeStatus, ...sub } : undefined
+    );
   mockGetStripe.mockReturnValue({
     checkout: { sessions: { retrieve: retrieveSession } },
     subscriptions: { retrieve: retrieveSubscription },
@@ -174,6 +184,7 @@ describe("POST /api/subscriptions/confirm — 200", () => {
     withStripe(checkoutSession({ subscription: "sub_1" }));
     retrieveSubscription.mockResolvedValue({
       id: "sub_1",
+      status: "active",
       items: { data: [{ current_period_start: PERIOD_START, current_period_end: PERIOD_END }] },
     });
     f.selects.push([], [PLAN_PRO], []);
@@ -395,5 +406,75 @@ describe("POST /api/subscriptions/confirm — 5xx", () => {
     const { status, body } = await confirm();
     expect(status).toBe(500);
     expect(body.success).toBe(false);
+  });
+});
+
+describe("POST /api/subscriptions/confirm — stan subskrypcji w Stripe (ostrzeżenie [MEDIUM] fail-open state drift)", () => {
+  it.each(["canceled", "past_due", "incomplete", "incomplete_expired", "unpaid", "paused"])(
+    "sesja paid, subskrypcja %s → 409 SUBSCRIPTION_NOT_ACTIVE, bez „active”, log do ręcznej obsługi",
+    async (stripeStatus) => {
+      withStripe(checkoutSession(), stripeStatus);
+      f.selects.push([], [PLAN_PRO], []);
+
+      const { status, body } = await confirm();
+
+      expect(status).toBe(409);
+      expect(body.code).toBe("SUBSCRIPTION_NOT_ACTIVE");
+      expectNoWrites();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("manual handling"),
+        expect.objectContaining({ stripeStatus })
+      );
+    }
+  );
+
+  it("obiekt rozwinięty w sesji mówi active, świeży odczyt mówi canceled → odmowa (bez założenia świeżości)", async () => {
+    withStripe(checkoutSession({ subscription: { ...checkoutSession().subscription, status: "active" } }));
+    retrieveSubscription.mockResolvedValue({ ...checkoutSession().subscription, status: "canceled" });
+    f.selects.push([], [PLAN_PRO], []);
+
+    expect((await confirm()).status).toBe(409);
+    expect(retrieveSubscription).toHaveBeenCalledWith("sub_1");
+    expectNoWrites();
+  });
+
+  it("spóźniony confirm po anulowaniu (wiersz już canceled) nie przywraca dostępu", async () => {
+    withStripe(checkoutSession(), "canceled");
+    // wiersze active/trialing: brak — lokalny jest już canceled
+    f.selects.push([], [PLAN_PRO], []);
+    expect((await confirm()).status).toBe(409);
+    expect(f.committed).toEqual([]);
+  });
+
+  it("trialing ze Stripe → nasz trialing z trialEndsAt z trial_end", async () => {
+    const TRIAL_END = 1784505600; // 2026-07-20T00:00:00Z
+    withStripe(checkoutSession(), "trialing");
+    retrieveSubscription.mockResolvedValue({
+      ...checkoutSession().subscription,
+      status: "trialing",
+      trial_end: TRIAL_END,
+    });
+    f.selects.push([], [PLAN_PRO], []);
+
+    expect((await confirm()).status).toBe(200);
+    expect(subWrites()[0]?.values).toEqual(
+      expect.objectContaining({ status: "trialing", trialEndsAt: new Date(TRIAL_END * 1000) })
+    );
+  });
+
+  it("trialing bez trial_end → 502, bez zgadywania końca", async () => {
+    withStripe(checkoutSession(), "trialing");
+    f.selects.push([], [PLAN_PRO], []);
+    const { status, body } = await confirm();
+    expect(status).toBe(502);
+    expect(body.code).toBe("STRIPE_TRIAL_END_MISSING");
+    expectNoWrites();
+  });
+
+  it("active → trialEndsAt czyszczone (koniec triala z rejestracji nie zostaje)", async () => {
+    withStripe(checkoutSession());
+    f.selects.push([], [PLAN_PRO], [{ id: "sub-trial", status: "trialing", stripeSubscriptionId: null }]);
+    expect((await confirm()).status).toBe(200);
+    expect(subWrites()[0]?.values).toEqual(expect.objectContaining({ status: "active", trialEndsAt: null }));
   });
 });

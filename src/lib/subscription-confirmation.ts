@@ -37,7 +37,20 @@ export interface SubscriptionCheckoutSession {
 /** Subskrypcja Stripe: id + okres (`@/lib/stripe-period`). */
 interface RawStripeSubscription extends StripeSubscriptionPeriodSource {
   id: string;
+  /** Stan subskrypcji w Stripe w chwili odczytu (zawsze świeżo pobranej). */
+  status?: string | null;
+  trial_end?: number | null;
 }
+
+/**
+ * Stany Stripe, które dają dostęp, i ich odpowiednik u nas. Reszta
+ * (canceled, past_due, unpaid, incomplete, incomplete_expired, paused) →
+ * odmowa z logiem do ręcznej obsługi, bez zapisu: przejścia do tych stanów
+ * należą do handlerów customer.subscription.updated/deleted, a potwierdzenie
+ * Checkoutu tylko przyznaje plan — nigdy nie przywraca go spóźnionym
+ * zdarzeniem (ostrzeżenie [MEDIUM] fail-open state drift).
+ */
+const GRANTING_STRIPE_STATUSES = { active: "active", trialing: "trialing" } as const;
 
 type SubscriptionRow = typeof salonSubscriptions.$inferSelect;
 type PlanRow = typeof subscriptionPlans.$inferSelect;
@@ -140,16 +153,45 @@ export async function confirmSubscriptionCheckout(
   if (!subRef) {
     return fail(400, "MISSING_SUBSCRIPTION", "Sesja nie zawiera subskrypcji Stripe");
   }
+  // Zawsze świeży odczyt: obiekt rozwinięty w sesji albo payload spóźnionego
+  // zdarzenia może mieć stan sprzed anulowania.
+  const stripeSubId = typeof subRef === "string" ? subRef : subRef.id;
   let stripeSub: RawStripeSubscription;
-  if (typeof subRef === "string") {
-    try {
-      stripeSub = (await stripe.subscriptions.retrieve(subRef)) as unknown as RawStripeSubscription;
-    } catch (error) {
-      logger.error("Failed to retrieve Stripe subscription", { error, sessionId: session.id });
-      return fail(502, "STRIPE_ERROR", "Nie udalo sie pobrac subskrypcji ze Stripe");
-    }
-  } else {
-    stripeSub = subRef;
+  try {
+    stripeSub = (await stripe.subscriptions.retrieve(stripeSubId)) as unknown as RawStripeSubscription;
+  } catch (error) {
+    logger.error("Failed to retrieve Stripe subscription", { error, sessionId: session.id });
+    return fail(502, "STRIPE_ERROR", "Nie udalo sie pobrac subskrypcji ze Stripe");
+  }
+
+  const stripeStatus = stripeSub.status ?? "";
+  const localStatus =
+    stripeStatus in GRANTING_STRIPE_STATUSES
+      ? GRANTING_STRIPE_STATUSES[stripeStatus as keyof typeof GRANTING_STRIPE_STATUSES]
+      : null;
+  if (!localStatus) {
+    logger.warn("Subscription checkout NOT granted: Stripe subscription not active — manual handling", {
+      sessionId: session.id,
+      salonId,
+      stripeSubscriptionId: stripeSub.id,
+      stripeStatus,
+    });
+    return fail(
+      409,
+      "SUBSCRIPTION_NOT_ACTIVE",
+      "Subskrypcja w Stripe nie jest aktywna. Skontaktuj sie z obsluga."
+    );
+  }
+  const trialEndsAt =
+    localStatus === "trialing" && typeof stripeSub.trial_end === "number"
+      ? new Date(stripeSub.trial_end * 1000)
+      : null;
+  if (localStatus === "trialing" && !trialEndsAt) {
+    logger.error("Stripe trialing subscription without trial_end", {
+      sessionId: session.id,
+      stripeSubscriptionId: stripeSub.id,
+    });
+    return fail(502, "STRIPE_TRIAL_END_MISSING", "Stripe nie zwrocil konca okresu probnego");
   }
   // Okres ze Stripe, nie liczony lokalnie (miesiąc ≠ okres Stripe przy 31.,
   // zmianie czasu i triale po stronie Stripe).
@@ -195,8 +237,8 @@ export async function confirmSubscriptionCheckout(
         planId,
         stripeSubscriptionId: stripeSub.id,
         stripeCustomerId,
-        status: "active",
-        trialEndsAt: null,
+        status: localStatus,
+        trialEndsAt,
         currentPeriodStart: period.start,
         currentPeriodEnd: period.end,
       };

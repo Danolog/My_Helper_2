@@ -65,9 +65,7 @@ export async function POST(request: Request) {
     // Retrieve the Checkout Session from Stripe
     let checkoutSession;
     try {
-      checkoutSession = await stripe.checkout.sessions.retrieve(sessionId, {
-        expand: ["subscription"],
-      });
+      checkoutSession = await stripe.checkout.sessions.retrieve(sessionId);
     } catch (stripeError) {
       logger.error("Failed to retrieve Stripe session", { error: stripeError });
       return NextResponse.json(
