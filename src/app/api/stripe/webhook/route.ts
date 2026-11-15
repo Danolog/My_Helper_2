@@ -17,6 +17,7 @@ import { getStripe, isStripeWebhookConfigured } from "@/lib/stripe";
 import { stripeInvoicePeriod, stripeSubscriptionPeriod } from "@/lib/stripe-period";
 import {
   confirmSubscriptionCheckout,
+  withSalonSubscriptionLock,
   type SubscriptionCheckoutSession,
 } from "@/lib/subscription-confirmation";
 
@@ -291,7 +292,8 @@ async function handleInvoicePaid(event: Stripe.Event) {
     `stripe_pi_${event.id}`
   );
 
-  await db.transaction(async (tx) => {
+  // Ta sama blokada salonu co potwierdzenie Checkoutu (TOCTOU, T3).
+  await withSalonSubscriptionLock(sub.salonId, async (tx) => {
     await tx
       .update(salonSubscriptions)
       .set({
@@ -358,7 +360,7 @@ async function handleInvoicePaymentFailed(event: Stripe.Event) {
     `stripe_pi_failed_${event.id}`
   );
 
-  await db.transaction(async (tx) => {
+  await withSalonSubscriptionLock(sub.salonId, async (tx) => {
     await tx
       .update(salonSubscriptions)
       .set({ status: "past_due" })
@@ -414,21 +416,25 @@ async function handleSubscriptionUpdated(event: Stripe.Event) {
   const periodStart = period?.start ?? sub.currentPeriodStart;
   const periodEnd = period?.end ?? sub.currentPeriodEnd;
 
-  await db
-    .update(salonSubscriptions)
-    .set({
-      status,
-      currentPeriodStart: periodStart,
-      currentPeriodEnd: periodEnd,
-      canceledAt: stripeSub.canceled_at
-        ? new Date(stripeSub.canceled_at * 1000)
-        : sub.canceledAt,
-      // Trial po stronie Stripe: koniec ze Stripe, nie z rejestracji.
-      ...(stripeSub.status === "trialing" && typeof stripeSub.trial_end === "number"
-        ? { trialEndsAt: new Date(stripeSub.trial_end * 1000) }
-        : {}),
-    })
-    .where(eq(salonSubscriptions.id, sub.id));
+  // Ta sama blokada salonu co potwierdzenie Checkoutu (TOCTOU, T3): zapis
+  // stanu ze Stripe nie przeplata się z potwierdzeniem w toku.
+  await withSalonSubscriptionLock(sub.salonId, async (tx) => {
+    await tx
+      .update(salonSubscriptions)
+      .set({
+        status,
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodEnd,
+        canceledAt: stripeSub.canceled_at
+          ? new Date(stripeSub.canceled_at * 1000)
+          : sub.canceledAt,
+        // Trial po stronie Stripe: koniec ze Stripe, nie z rejestracji.
+        ...(stripeSub.status === "trialing" && typeof stripeSub.trial_end === "number"
+          ? { trialEndsAt: new Date(stripeSub.trial_end * 1000) }
+          : {}),
+      })
+      .where(eq(salonSubscriptions.id, sub.id));
+  });
 
   logger.info("Subscription updated", { subscriptionId: sub.id, status });
 }
@@ -449,13 +455,15 @@ async function handleSubscriptionDeleted(event: Stripe.Event) {
     return;
   }
 
-  await db
-    .update(salonSubscriptions)
-    .set({
-      status: "canceled",
-      canceledAt: new Date(),
-    })
-    .where(eq(salonSubscriptions.id, sub.id));
+  await withSalonSubscriptionLock(sub.salonId, async (tx) => {
+    await tx
+      .update(salonSubscriptions)
+      .set({
+        status: "canceled",
+        canceledAt: new Date(),
+      })
+      .where(eq(salonSubscriptions.id, sub.id));
+  });
 
   logger.info("Subscription deleted/canceled via Stripe", { subscriptionId: sub.id });
 }

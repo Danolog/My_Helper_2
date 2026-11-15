@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions, subscriptionPayments, subscriptionPlans } from "@/lib/schema";
@@ -75,6 +75,38 @@ export interface ConfirmSubscriptionOptions {
 }
 
 class PaymentAlreadyRecorded extends Error {}
+
+/** Transakcja Drizzle (typ z `db.transaction`). */
+export type SubscriptionTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Blokada wierszy subskrypcji salonu do końca transakcji (ostrzeżenie
+ * [MEDIUM] #2 TOCTOU). Biorą ją wszyscy, którzy zmieniają stan subskrypcji
+ * salonu: potwierdzenie Checkoutu i handlery webhooka (updated, deleted,
+ * invoice.paid, invoice.payment_failed) — więc „odczyt stanu → zapis” jednego
+ * nie przeplata się z zapisem drugiego. Blokada doradcza, bo wiersza może
+ * jeszcze nie być (pierwszy Checkout), a FOR UPDATE nie blokuje braku wiersza.
+ */
+export async function lockSalonSubscriptions(tx: SubscriptionTx, salonId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"salon_subscriptions:" + salonId}))`);
+}
+
+/** Transakcja z blokadą subskrypcji salonu (patrz `lockSalonSubscriptions`). */
+export function withSalonSubscriptionLock<T>(
+  salonId: string,
+  fn: (tx: SubscriptionTx) => Promise<T>
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    await lockSalonSubscriptions(tx, salonId);
+    return fn(tx);
+  });
+}
+
+/**
+ * Stany lokalne, po których subskrypcja Stripe nie wraca do życia przez
+ * potwierdzenie Checkoutu (zapisał je webhook — Stripe już to zgłosił).
+ */
+const ENDED_LOCAL_STATUSES = new Set(["canceled", "past_due", "unpaid", "incomplete_expired"]);
 
 function fail(
   status: 400 | 403 | 404 | 409 | 502,
@@ -208,16 +240,25 @@ export async function confirmSubscriptionCheckout(
     typeof session.customer === "string" ? session.customer : (session.customer?.id ?? null);
 
   try {
-    const result = await db.transaction(async (tx) => {
-      const current = await tx
+    const result = await withSalonSubscriptionLock(salonId, async (tx) => {
+      // WSZYSTKIE wiersze salonu (nie tylko active/trialing), odczytane pod
+      // blokadą — po webhooku, który mógł zapisać canceled w międzyczasie.
+      const rows = await tx
         .select()
         .from(salonSubscriptions)
-        .where(
-          and(
-            eq(salonSubscriptions.salonId, salonId),
-            inArray(salonSubscriptions.status, ["active", "trialing"])
-          )
-        );
+        .where(eq(salonSubscriptions.salonId, salonId));
+
+      // Ta subskrypcja Stripe jest u nas już zakończona: Stripe zgłosił to
+      // webhookiem po naszym odczycie stanu — nie wskrzeszamy jej ani nie
+      // zakładamy drugiego wiersza.
+      const ended = rows.find(
+        (s) => s.stripeSubscriptionId === stripeSub.id && ENDED_LOCAL_STATUSES.has(s.status)
+      );
+      if (ended) {
+        return { ended: ended.status } as const;
+      }
+
+      const current = rows.filter((s) => s.status === "active" || s.status === "trialing");
       const active = current.find((s) => s.status === "active");
 
       // Salon płaci już za INNĄ subskrypcję Stripe: nadpisanie osierociłoby
@@ -227,7 +268,7 @@ export async function confirmSubscriptionCheckout(
         hasRealStripeSubscription(active.stripeSubscriptionId) &&
         active.stripeSubscriptionId !== stripeSub.id
       ) {
-        return { conflict: true as const };
+        return { conflict: true } as const;
       }
 
       // Trial → płatny plan: ten sam wiersz przechodzi w „active”, a pozostałe
@@ -285,10 +326,24 @@ export async function confirmSubscriptionCheckout(
       // wycofaj całą transakcję i oddaj jego wynik.
       if (inserted.length === 0) throw new PaymentAlreadyRecorded();
 
-      return { conflict: false as const, record };
+      return { record } as const;
     });
 
-    if (result.conflict) {
+    if ("ended" in result) {
+      logger.warn("Subscription checkout NOT granted: subscription already ended locally — manual handling", {
+        sessionId: session.id,
+        salonId,
+        stripeSubscriptionId: stripeSub.id,
+        localStatus: result.ended,
+      });
+      return fail(
+        409,
+        "SUBSCRIPTION_NOT_ACTIVE",
+        "Subskrypcja w Stripe nie jest aktywna. Skontaktuj sie z obsluga."
+      );
+    }
+
+    if ("conflict" in result) {
       logger.error("Subscription checkout conflicts with another paid Stripe subscription", {
         sessionId: session.id,
         salonId,
