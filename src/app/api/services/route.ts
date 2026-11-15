@@ -4,7 +4,7 @@ import { withApiHandler } from "@/lib/api-handler";
 import { createServiceSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import { apiRateLimit } from "@/lib/rate-limit";
-import { getSalonContext } from "@/lib/salon-context";
+import { getSalonContext, requireSalonStaff } from "@/lib/salon-context";
 import { services, serviceCategories } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -86,7 +86,15 @@ export const POST = withApiHandler(
     errorMessage: "Failed to create service",
   },
   async ({ body }) => {
-    const { salonId, categoryId, name, description, basePrice, baseDuration } = body;
+    // P1 (przegląd Ryana): salon WYŁĄCZNIE z sesji — wcześniej forSalon(body.salonId)
+    // pozwalał każdemu zalogowanemu kontu dodać usługę (z ceną) do cudzego salonu.
+    // body.salonId tylko porównywany (inny => 403). Tworzenie usług: tylko
+    // właściciel, bez grantów — jak PUT/DELETE /api/services/[id].
+    const guard = await requireSalonStaff({ roles: [], requestedSalonId: body.salonId });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
+
+    const { categoryId, name, description, basePrice, baseDuration } = body;
     const parsedPrice = parseFloat(basePrice as string);
     const parsedDuration = parseInt(baseDuration as string, 10);
 
