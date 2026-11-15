@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  getNetworkErrorMessage,
+  fetchWithRetry,
+} from "@/lib/fetch-with-retry";
 
-// Mock the network status hooks
+// Mock the network status hooks (vi.mock is hoisted above the imports)
 vi.mock("@/hooks/use-network-status", () => ({
   isNetworkError: vi.fn((error: unknown) => {
     if (error instanceof TypeError) {
@@ -18,11 +22,6 @@ vi.mock("@/hooks/use-network-status", () => ({
     return false;
   }),
 }));
-
-import {
-  getNetworkErrorMessage,
-  fetchWithRetry,
-} from "@/lib/fetch-with-retry";
 
 describe("getNetworkErrorMessage", () => {
   beforeEach(() => {
@@ -133,7 +132,12 @@ describe("fetchWithRetry", () => {
   });
 
   describe("browser offline", () => {
-    it("should throw immediately when navigator.onLine is false", async () => {
+    // Offline = natychmiastowy błąd sieci, bez ponowień: ponawianie bez sieci
+    // nic nie daje, a użytkownik czekałby 1 s + 2 s na backoffie.
+    // Brak backoffu dowodzi deterministycznie test niżej (fake timers,
+    // getTimerCount() === 0) — bez asercji na czas zegarowy, która zależy
+    // od planisty systemu.
+    it("should return a network error without calling fetch", async () => {
       vi.stubGlobal("navigator", { onLine: false });
       vi.stubGlobal("fetch", vi.fn());
 
@@ -142,8 +146,65 @@ describe("fetchWithRetry", () => {
       // fetch should never be called because the offline check happens first
       expect(fetch).not.toHaveBeenCalled();
       expect(result.data).toBeNull();
-      expect(result.error).not.toBeNull();
       expect(result.isNetworkError).toBe(true);
+      expect(result.isTimeout).toBe(false);
+      expect(result.error).toContain("polaczenie");
+      expect(typeof result.retry).toBe("function");
+    });
+
+    it("should not schedule any backoff timer when offline", async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal("navigator", { onLine: false });
+      vi.stubGlobal("fetch", vi.fn());
+
+      const result = await fetchWithRetry(TEST_URL, { maxRetries: 5, retryDelay: 1000 });
+
+      expect(vi.getTimerCount()).toBe(0);
+      expect(result.isNetworkError).toBe(true);
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it("should stop retrying when the browser goes offline during backoff", async () => {
+      vi.useFakeTimers();
+      const nav = { onLine: true };
+      vi.stubGlobal("navigator", nav);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockImplementation(() => {
+          nav.onLine = false; // sieć znika po pierwszej próbie
+          return Promise.reject(new TypeError("Failed to fetch"));
+        })
+      );
+
+      const fetchPromise = fetchWithRetry(TEST_URL, { maxRetries: 2, retryDelay: 1000 });
+      await vi.advanceTimersByTimeAsync(1000); // pierwszy backoff
+      const result = await fetchPromise;
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0); // bez drugiego backoffu (2000 ms)
+      expect(result.isNetworkError).toBe(true);
+      expect(result.error).toContain("polaczenie");
+    });
+
+    it("should still retry network errors while online (fake timers)", async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn()
+          .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+          .mockResolvedValueOnce({ json: () => Promise.resolve({ ok: 1 }) })
+      );
+
+      const fetchPromise = fetchWithRetry(TEST_URL, { maxRetries: 2, retryDelay: 1000 });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetch).toHaveBeenCalledTimes(1); // jeszcze w backoffie
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await fetchPromise;
+
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(result.data).toEqual({ ok: 1 });
+      expect(result.error).toBeNull();
     });
   });
 
