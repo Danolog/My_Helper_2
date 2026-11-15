@@ -39,19 +39,24 @@
 #            połączenia, publiczne IP bez autoryzowanych sieci (połączenie przez
 #            wbudowany Cloud SQL Auth Proxy). Baza myhelper, login myhelper_owner,
 #            wersja sekretu postgres-url, losowe hasło wbudowanego `postgres`
-#            w osobnym sekrecie (niepodpiętym do usługi). cloudsql.client dla
-#            runtime i deploy oraz kopia na żądanie dla deploy — z warunkiem na
-#            tę instancję. Rolę myhelper_app NOLOGIN tworzy migracja 0005.
+#            w osobnym sekrecie (niepodpiętym do usługi). cloudsql.client
+#            wyłącznie dla runtime (usługa i job migracji działają jako runtime)
+#            oraz kopia na żądanie dla deploy — z warunkiem na tę instancję.
+#            Rolę myhelper_app NOLOGIN tworzy migracja 0005.
 #   run      powłoka usługi i joba migracji (próbka Google `hello`, usługa
 #            min 0 / max 1 instancja, bez sekretów i zmiennych), publiczny invoker
 #            na usłudze (ustawiany RAZ tutaj — konto deploy nie dostaje
 #            setIamPolicy), run.developer dla deploy NA ZASOBACH (nie projekt)
 #   wif      pula + provider OIDC GitHuba z warunkiem z pliku (--wif-condition-file)
-#            + workloadIdentityUser na koncie deploy. NIE WYKONYWAĆ przed
-#            rozstrzygnięciem wariantu warunku przez Ryana (runbook).
+#            + workloadIdentityUser na koncie deploy. Bramka wykonania: runbook
+#            3.8 (hook Ryana podpisany i zainstalowany ALBO agenci na koncie
+#            maszynowym).
+#
+# Region: wyłącznie europe-central2 (szacunek kosztu i lokalizacja danych —
+# Ethan, recenzja #134). Inna wartość = błąd przed pierwszym gcloud.
 #
 # Użycie:
-#   infra/gcp/bootstrap.sh --project=ID --region=REGION --stage=ETAP [opcje] [--apply]
+#   infra/gcp/bootstrap.sh --project=ID --region=europe-central2 --stage=ETAP [opcje] [--apply]
 # Opcje wspólne:
 #   --project-number=N   (wymagane w etapie wif)
 #   --ar-repo=myhelper --bucket=NAZWA (bucket, sa) --service=myhelper
@@ -85,9 +90,16 @@ DB_URL_SECRET="postgres-url"
 # (nie trafia do usługi ani joba).
 DB_ADMIN_SECRET="postgres-admin-password"
 
+# Jedyny dopuszczony region. Zmiana = nowa decyzja (koszt, lokalizacja danych).
+ALLOWED_REGION="europe-central2"
+
 # Stałe repozytorium GitHub (liczbowe id — odporne na zmianę nazwy repo/właściciela).
 GITHUB_REPOSITORY_ID="1152153440"
 GITHUB_REPOSITORY_OWNER_ID="171363250"
+# Jedyny dopuszczony wywołujący wdrożenie (Ryan 6899923012: zmiana konta
+# wywołującego = świadoma zmiana warunku z recenzją).
+GITHUB_ACTOR_ID="171363250"
+DEPLOY_WORKFLOW_REF="Danolog/My_Helper_2/.github/workflows/deploy-cloud-run.yml@refs/heads/main"
 # Obraz zastępczy (etap run): oficjalna próbka Google, dla usługi i joba.
 # Job z tym obrazem nigdy nie jest wykonywany — zastępuje go pierwszy przebieg workflow.
 PLACEHOLDER_IMAGE="us-docker.pkg.dev/cloudrun/container/hello"
@@ -122,7 +134,7 @@ done
 [[ -n "$REGION" ]] || die "missing required --region"
 [[ -n "$STAGE" ]] || die "missing required --stage"
 [[ "$PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] || die "invalid --project"
-[[ "$REGION" =~ ^[a-z]+-[a-z]+[0-9]$ ]] || die "invalid --region"
+[[ "$REGION" == "$ALLOWED_REGION" ]] || die "--region must be $ALLOWED_REGION"
 case "$STAGE" in
   apis|ar|bucket|secrets|sa|sql|run|wif) ;;
   *) die "--stage must be one of: apis ar bucket secrets sa sql run wif" ;;
@@ -163,6 +175,31 @@ exists() {
     return 0
   fi
   echo "  state: missing"
+  return 1
+}
+
+# Czy sekret ma wersję ENABLED. Rozróżnia „brak wersji” od błędu odczytu
+# (Ethan, recenzja #134): `versions list` kończy się kodem 0 także przy braku
+# wersji (puste wyjście), więc kod ≠ 0 to błąd odczytu (sieć, uprawnienia) —
+# wtedy etap się przerywa, zamiast wygenerować nowe hasło dla istniejącego loginu.
+# Wynik: 0 = ma wersję, 1 = brak wersji (lub dry-run); błąd odczytu = exit 2.
+secret_has_version() {
+  local secret="$1"
+  local args=(secrets versions list "$secret" --filter=state:ENABLED --limit=1 "--format=value(name)")
+  echo "? gcloud --project=$PROJECT_ID --quiet ${args[*]}"
+  if [[ "$APPLY" != 1 ]]; then
+    echo "  state: not checked (dry-run)"
+    return 1
+  fi
+  local out
+  if ! out="$("${GC[@]}" "${args[@]}" 2>/dev/null)"; then
+    die "cannot read versions of secret $secret (not 'no version') — stage stopped, nothing changed"
+  fi
+  if [[ -n "$out" ]]; then
+    echo "  state: has an enabled version"
+    return 0
+  fi
+  echo "  state: no enabled version"
   return 1
 }
 
@@ -280,7 +317,7 @@ password_flags() { printf -- '--password: "%s"\n' "$1"; }
 # $1 = użytkownik, $2 = sekret, $3 = „url” (sekret = POSTGRES_URL) albo „raw”
 db_password() {
   local user="$1" secret="$2" kind="$3"
-  if exists secrets versions describe latest --secret="$secret"; then
+  if secret_has_version "$secret"; then
     echo "  skip: $secret has a version (password of $user unchanged)"
     return 0
   fi
@@ -293,13 +330,15 @@ db_password() {
   local shown="<generated>"
   local value_shown="$shown"
   [[ "$kind" == "url" ]] && value_shown="postgresql://${user}:${shown}@localhost/${DB_NAME}?host=/cloudsql/${PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
-  echo "+ gcloud --project=$PROJECT_ID --quiet sql users $verb $user --instance=$SQL_INSTANCE --flags-file=<(--password: $shown)"
+  echo "+ CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$PROJECT_ID --quiet sql users $verb $user --instance=$SQL_INSTANCE --flags-file=<(--password: $shown)"
   echo "+ gcloud --project=$PROJECT_ID --quiet secrets versions add $secret --data-file=- <<< $value_shown"
   [[ "$APPLY" == 1 ]] || return 0
   local pw
   pw="$(gen_password)"
   [[ "$pw" =~ ^[A-Za-z0-9]{32}$ ]] || die "password generator failed"
-  "${GC[@]}" sql users "$verb" "$user" --instance="$SQL_INSTANCE" --flags-file=<(password_flags "$pw")
+  # Bez lokalnego logu gcloud (~/.config/gcloud/logs zapisuje wartości flag,
+  # także rozwinięte z --flags-file) — B-1, Ryan 6899923012.
+  CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" sql users "$verb" "$user" --instance="$SQL_INSTANCE" --flags-file=<(password_flags "$pw")
   if [[ "$kind" == "url" ]]; then
     printf 'postgresql://%s:%s@localhost/%s?host=/cloudsql/%s:%s:%s' \
       "$user" "$pw" "$DB_NAME" "$PROJECT_ID" "$REGION" "$SQL_INSTANCE" |
@@ -335,6 +374,17 @@ stage_sql() {
       --maintenance-window-hour=3 \
       --ssl-mode=ENCRYPTED_ONLY
   fi
+  # Baza, loginy i wiązania dopiero na instancji w stanie RUNNABLE.
+  echo "? gcloud --project=$PROJECT_ID --quiet sql instances describe $SQL_INSTANCE --format=value(state)"
+  if [[ "$APPLY" == 1 ]]; then
+    local state
+    state="$("${GC[@]}" sql instances describe "$SQL_INSTANCE" "--format=value(state)" 2>/dev/null)" ||
+      die "cannot read state of instance $SQL_INSTANCE"
+    [[ "$state" == "RUNNABLE" ]] || die "instance $SQL_INSTANCE is $state, not RUNNABLE — repeat stage sql later"
+    echo "  state: RUNNABLE"
+  else
+    echo "  state: not checked (dry-run)"
+  fi
   if ! exists sql databases describe "$DB_NAME" --instance="$SQL_INSTANCE"; then
     run sql databases create "$DB_NAME" --instance="$SQL_INSTANCE"
   fi
@@ -345,21 +395,28 @@ stage_sql() {
   db_password "$DB_USER" "$DB_URL_SECRET" url
   db_password postgres "$DB_ADMIN_SECRET" raw
   local cond="expression=resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"${SQL_RESOURCE}\",title=only-${SQL_INSTANCE}"
+  # Kopia na żądanie: operacje na kopiach mają typ zasobu BackupRun (W-1, Ryan).
+  local backup_cond="expression=(resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"${SQL_RESOURCE}\") || (resource.type == \"sqladmin.googleapis.com/BackupRun\" && resource.name.startsWith(\"${SQL_RESOURCE}/\")),title=only-${SQL_INSTANCE}-backups"
   # Usługa i job migracji działają jako konto runtime — tylko ono łączy się
   # z bazą: Cloud SQL Client wyłącznie na tej instancji. Konto deploy NIE
   # dostaje cloudsql.client (Oliver, recenzja #134): po jego stronie nic nie
   # łączy się z bazą (kopia na żądanie to Admin API — rola niżej).
   run projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:$RUNTIME_SA" --role=roles/cloudsql.client --condition="$cond"
-  # Deploy: kopia na żądanie przed migracją (run-migrate.sh).
+  # Deploy: kopia na żądanie przed migracją (run-migrate.sh: `sql backups
+  # create` czeka na operację). Dokładnie trzy uprawnienia (W-1): utworzenie
+  # i odczyt kopii oraz odczyt instancji (śledzenie operacji). Bez list.
+  # Istniejąca rola dostaje tę samą listę (update) — bez dryfu.
   local role="projects/${PROJECT_ID}/roles/myhelperSqlBackup"
-  if ! exists iam roles describe myhelperSqlBackup; then
+  local perms="cloudsql.backupRuns.create,cloudsql.backupRuns.get,cloudsql.instances.get"
+  if exists iam roles describe myhelperSqlBackup; then
+    run iam roles update myhelperSqlBackup --permissions="$perms"
+  else
     run iam roles create myhelperSqlBackup \
-      --title="MyHelper on-demand SQL backup" --stage=GA \
-      --permissions=cloudsql.backupRuns.create,cloudsql.backupRuns.get,cloudsql.backupRuns.list,cloudsql.instances.get
+      --title="MyHelper on-demand SQL backup" --stage=GA --permissions="$perms"
   fi
   run projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:$DEPLOY_SA" --role="$role" --condition="$cond"
+    --member="serviceAccount:$DEPLOY_SA" --role="$role" --condition="$backup_cond"
 }
 
 stage_run() {
@@ -384,29 +441,43 @@ stage_run() {
     --member="serviceAccount:$DEPLOY_SA" --role=roles/run.developer
 }
 
-# Warunek atrybutów WIF z pliku (CEL, jedna lub wiele linii). Odrzucamy pusty
-# plik i warunek bez obowiązkowych zawężeń — bez nich token GitHuba z dowolnego
-# repo/gałęzi/workflow mógłby wejść na konto deploy. Obowiązkowe: repo i
-# właściciel po id, ref main, workflow_ref, event_name workflow_dispatch,
-# run_attempt 1 (Ryan, 6899307577). Dalsze zawężenia (np. actor_id — otwarte)
-# dopisuje się w pliku; skrypt ich nie wymaga ani nie usuwa.
+# Warunek atrybutów WIF z pliku (CEL, jedna lub wiele linii). Warunek musi być
+# CZYSTĄ KONIUNKCJĄ równości `assertion.<pole> == '<wartość>'` połączonych `&&`
+# (#140): bez `||`, negacji, operatora warunkowego, nawiasów i funkcji — każdy
+# człon jest sprawdzany osobno, nie podciągiem. Obowiązkowe człony (Ryan,
+# 6899923012) muszą wystąpić dokładnie w tej postaci; dodatkowe równości wolno
+# dopisać (tylko zawężają).
 wif_condition() {
   local raw
   raw="$(grep -v '^[[:space:]]*#' "$WIF_CONDITION_FILE" | tr '\n' ' ' | tr -s ' ' | sed 's/^ //; s/ $//')"
   [[ -n "$raw" ]] || die "WIF condition file is empty"
+  local terms=() term rest="$raw"
+  while [[ "$rest" == *" && "* ]]; do
+    terms+=("${rest%% && *}")
+    rest="${rest#* && }"
+  done
+  terms+=("$rest")
+  for term in "${terms[@]}"; do
+    [[ "$term" =~ ^assertion\.[a-z_]+\ ==\ \'[A-Za-z0-9_./@-]+\'$ ]] ||
+      die "WIF condition must be a pure conjunction of assertion.<field> == '<value>'; bad term: $term"
+  done
   local required=(
     "assertion.repository_id == '${GITHUB_REPOSITORY_ID}'"
     "assertion.repository_owner_id == '${GITHUB_REPOSITORY_OWNER_ID}'"
     "assertion.ref == 'refs/heads/main'"
-    "assertion.workflow_ref == 'Danolog/My_Helper_2/.github/workflows/deploy-cloud-run.yml@refs/heads/main'"
+    "assertion.workflow_ref == '${DEPLOY_WORKFLOW_REF}'"
+    "assertion.job_workflow_ref == '${DEPLOY_WORKFLOW_REF}'"
+    "assertion.environment == 'production-gcp'"
     "assertion.event_name == 'workflow_dispatch'"
     "assertion.run_attempt == '1'"
+    "assertion.actor_id == '${GITHUB_ACTOR_ID}'"
   )
-  local r
+  local r found
   for r in "${required[@]}"; do
-    [[ "$raw" == *"$r"* ]] || die "WIF condition missing clause: $r"
+    found=0
+    for term in "${terms[@]}"; do [[ "$term" == "$r" ]] && found=1; done
+    [[ "$found" == 1 ]] || die "WIF condition missing clause: $r"
   done
-  [[ "$raw" != *"||"* ]] || die "WIF condition must not contain '||' (alternatywa osłabia warunek)"
   printf '%s' "$raw"
 }
 

@@ -12,7 +12,13 @@
  *    zonal, kopie i PITR, ENCRYPTED_ONLY, bez autoryzowanych sieci (Ethan, 0.4);
  *  - secretAccessor osobno na każdy sekret, nigdy na projekcie; zero ról
  *    owner/editor; run.developer tylko na zasobach;
- *  - WIF: warunek z pliku, niepusty, z czterema zawężeniami, bez `||`;
+ *  - WIF: warunek z pliku, czysta koniunkcja równości (#140), z dziewięcioma
+ *    obowiązkowymi członami (Ryan 6899923012);
+ *  - region przypięty do europe-central2 we wszystkich `create` (Ethan);
+ *  - hasło: błąd odczytu wersji sekretu przerywa etap, ścieżka samonaprawy
+ *    (login istnieje, sekret bez wersji → set-password), wywołania haseł
+ *    bez lokalnego logu gcloud (B-1);
+ *  - rola kopii: dokładnie trzy uprawnienia, warunek Instance + BackupRun (W-1);
  *  - idempotencja: istniejące zasoby nie są tworzone ponownie.
  * Mutacje (scratchpad, wynik w PR): usunąć --edition; edycja enterprise-plus;
  * objectViewer zamiast legacyObjectReader; usunąć --deletion-protection;
@@ -45,8 +51,11 @@ const VALID_CONDITION = [
   "assertion.repository_owner_id == '171363250' &&",
   "assertion.ref == 'refs/heads/main' &&",
   "assertion.workflow_ref == 'Danolog/My_Helper_2/.github/workflows/deploy-cloud-run.yml@refs/heads/main' &&",
+  "assertion.job_workflow_ref == 'Danolog/My_Helper_2/.github/workflows/deploy-cloud-run.yml@refs/heads/main' &&",
+  "assertion.environment == 'production-gcp' &&",
   "assertion.event_name == 'workflow_dispatch' &&",
-  "assertion.run_attempt == '1'",
+  "assertion.run_attempt == '1' &&",
+  "assertion.actor_id == '171363250'",
 ].join("\n");
 
 const DIR = mkdtempSync(join(tmpdir(), "g-d1-"));
@@ -58,12 +67,23 @@ writeFileSync(
   join(FAKE, "gcloud"),
   `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_LOG"
+case " $* " in *" sql users "*) printf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" >> "$FAKE_ENV" ;; esac
 for a in "$@"; do
   case "$a" in
     --flags-file=*) cat "\${a#--flags-file=}" >> "$FAKE_FLAGS" ;;
     --data-file=-) cat >> "$FAKE_STDIN"; printf '\\n' >> "$FAKE_STDIN" ;;
   esac
 done
+case " $* " in
+  *" secrets versions list "*)
+    [ -n "$FAKE_VERSIONS_ERROR" ] && { echo "ERROR: PERMISSION_DENIED" >&2; exit 1; }
+    [ -n "$FAKE_EXISTS" ] && echo "1"
+    exit 0 ;;
+  *" sql instances describe "*"--format=value(state)"*)
+    echo "\${FAKE_SQL_STATE:-RUNNABLE}"; exit 0 ;;
+  *" sql users describe "*)
+    [ -n "$FAKE_EXISTS$FAKE_USERS_EXIST" ] && exit 0; exit 1 ;;
+esac
 [ -n "$FAKE_EXISTS" ] && exit 0
 case " $* " in *" describe "*) exit 1 ;; esac
 exit 0
@@ -85,14 +105,23 @@ interface Run {
   calls: string[];
   flags: string;
   stdin: string;
+  env: string[];
 }
 
-function bootstrap(args: string[], opts: { exists?: boolean } = {}): Run {
+interface Opts {
+  exists?: boolean;
+  usersExist?: boolean;
+  versionsError?: boolean;
+  sqlState?: string;
+}
+
+function bootstrap(args: string[], opts: Opts = {}): Run {
   const id = n++;
   const log = join(DIR, `log-${id}`);
   const flags = join(DIR, `flags-${id}`);
   const stdin = join(DIR, `stdin-${id}`);
-  for (const f of [log, flags, stdin]) writeFileSync(f, "");
+  const env = join(DIR, `env-${id}`);
+  for (const f of [log, flags, stdin, env]) writeFileSync(f, "");
   const r = spawnSync("bash", [SCRIPT, ...args], {
     encoding: "utf8",
     env: {
@@ -101,7 +130,11 @@ function bootstrap(args: string[], opts: { exists?: boolean } = {}): Run {
       FAKE_LOG: log,
       FAKE_FLAGS: flags,
       FAKE_STDIN: stdin,
+      FAKE_ENV: env,
       ...(opts.exists ? { FAKE_EXISTS: "1" } : {}),
+      ...(opts.usersExist ? { FAKE_USERS_EXIST: "1" } : {}),
+      ...(opts.versionsError ? { FAKE_VERSIONS_ERROR: "1" } : {}),
+      ...(opts.sqlState ? { FAKE_SQL_STATE: opts.sqlState } : {}),
     },
   });
   const calls = readFileSync(log, "utf8").split("\n").filter(Boolean);
@@ -112,6 +145,7 @@ function bootstrap(args: string[], opts: { exists?: boolean } = {}): Run {
     calls,
     flags: readFileSync(flags, "utf8"),
     stdin: readFileSync(stdin, "utf8"),
+    env: readFileSync(env, "utf8").split("\n").filter(Boolean),
   };
 }
 
@@ -140,7 +174,7 @@ describe("G-D1: dry-run i parametry", () => {
   it("wyjście dry-run to wyłącznie polecenia i odczyty stanu", () => {
     for (const stage of STAGES) {
       for (const line of bootstrap(base(stage)).stdout.split("\n").filter(Boolean)) {
-        expect(line).toMatch(/^(mode: |\? gcloud |\+ gcloud |  state: |  policy: |  condition: |  skip: |  GCP_[A-Z_]+=|stage [a-z]+: done$)/);
+        expect(line).toMatch(/^(mode: |\? gcloud |\+ gcloud |\+ CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud |  state: |  policy: |  condition: |  skip: |  GCP_[A-Z_]+=|stage [a-z]+: done$)/);
       }
     }
   });
@@ -155,10 +189,24 @@ describe("G-D1: dry-run i parametry", () => {
     ["wif bez pliku warunku", [`--project=${PROJECT}`, "--region=europe-central2", "--stage=wif", "--project-number=1"]],
     ["wif bez numeru projektu", [`--project=${PROJECT}`, "--region=europe-central2", "--stage=wif", `--wif-condition-file=${cond(VALID_CONDITION)}`]],
     ["nieprawidłowa nazwa instancji", [...base("sql"), "--sql-instance=Bad_Name"]],
+    ["region spoza allowlisty", [...base("sql"), "--region=europe-west1"]],
+    ["region us-central1", [...base("bucket"), "--region=us-central1"]],
   ])("%s → błąd przed pierwszym gcloud, także z --apply", (_label, args) => {
     const r = bootstrap([...args, "--apply"]);
     expect(r.status).toBe(2);
     expect(r.calls).toEqual([]);
+  });
+
+  it("każde tworzenie zasobu regionalnego idzie z europe-central2 (Ethan: region przypięty)", () => {
+    const creates = STAGES.flatMap((s) => bootstrap([...base(s), "--apply"]).calls).filter((c) =>
+      / (repositories create|buckets create|secrets create|instances create|run deploy|jobs create) /.test(c),
+    );
+    // ar, bucket, 11 sekretów + admin, instancja, usługa, job
+    expect(creates.length).toBe(1 + 1 + 12 + 1 + 1 + 1);
+    for (const c of creates) {
+      expect(c).toMatch(/ --(region|location|locations)=europe-central2( |$)/);
+      expect(c).not.toMatch(/ --(region|location|locations)=(?!europe-central2( |$))/);
+    }
   });
 
   it("parametry instancji SQL nie są przełączalne z linii poleceń (decyzja Ethana)", () => {
@@ -178,7 +226,7 @@ describe("G-D1: każde wywołanie przez GC (--project, --quiet)", () => {
 
   it("w kodzie jedyne wywołanie gcloud to tablica GC (reszta to echo)", () => {
     const lines = SOURCE.split("\n").filter((l) => /\bgcloud\b/.test(l) && !l.trim().startsWith("#"));
-    for (const l of lines) expect(l).toMatch(/^GC=\(gcloud --project="\$PROJECT_ID" --quiet\)$|^\s*echo "[+?] gcloud /);
+    for (const l of lines) expect(l).toMatch(/^GC=\(gcloud --project="\$PROJECT_ID" --quiet\)$|^\s*echo "[+?] (CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 )?gcloud /);
   });
 });
 
@@ -205,7 +253,15 @@ describe("G-D1: apis, ar, bucket", () => {
     const policy = r.calls.find((c) => c.includes("set-cleanup-policies"))!;
     expect(policy).toBeDefined();
     expect(policy).not.toContain("--dry-run");
-    expect(r.stdout).toContain('"keepCount": 5');
+    const line = r.stdout.split("\n").find((l) => l.startsWith("  policy: "))!;
+    const rules = JSON.parse(line.slice("  policy: ".length)) as {
+      action: { type: string };
+      mostRecentVersions?: { keepCount: number };
+      condition?: { tagState: string };
+    }[];
+    expect(rules).toHaveLength(2);
+    expect(rules.filter((x) => x.action.type === "Keep").map((x) => x.mostRecentVersions?.keepCount)).toEqual([5]);
+    expect(rules.filter((x) => x.action.type === "Delete").map((x) => x.condition?.tagState)).toEqual(["any"]);
   });
 
   it("bucket: uniform access, allUsers wyłącznie legacyObjectReader", () => {
@@ -269,6 +325,7 @@ describe("G-D1: sekrety i konta", () => {
       for (const c of bootstrap([...base(stage), "--apply"]).calls.filter((c) => c.includes("projects add-iam-policy-binding"))) {
         expect(c).toMatch(/--role=(roles\/cloudsql\.client|projects\/my-helper-2-488419\/roles\/myhelperSqlBackup) /);
         expect(c).toContain('resource.name == "projects/my-helper-2-488419/instances/myhelper-pg"');
+        expect(c).not.toMatch(/resource\.name\.startsWith\("projects\/my-helper-2-488419\/instances\/myhelper-pg"\)/);
       }
     }
   });
@@ -348,10 +405,58 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
     expect(r.calls.join("\n")).not.toMatch(/myhelper_app|sql connect|psql/);
   });
 
-  it("hasło postgres trafia do osobnego sekretu spoza manifestu (bez dostępu runtime)", () => {
+  it("hasło postgres trafia do osobnego sekretu spoza manifestu — w ŻADNYM etapie bez wiązań IAM", () => {
     expect(SECRET_NAMES).not.toContain("postgres-admin-password");
-    const sa = bootstrap([...base("sa"), "--apply"]);
-    expect(sa.calls.join("\n")).not.toContain("postgres-admin-password");
+    for (const stage of STAGES) {
+      for (const exists of [false, true]) {
+        const calls = bootstrap([...base(stage), "--apply"], { exists }).calls;
+        expect(calls.filter((c) => c.includes("postgres-admin-password") && c.includes("iam-policy"))).toEqual([]);
+      }
+    }
+  });
+
+  it("B-1: wywołania z hasłem (sql users create|set-password) bez lokalnego logu gcloud", () => {
+    const users = r.calls.filter((c) => /sql users (create|set-password)/.test(c));
+    expect(users).toHaveLength(2);
+    // Fałszywy gcloud zapisuje zmienną przy każdym `sql users …` (describe też).
+    const all = r.calls.filter((c) => / sql users /.test(c));
+    const envAt = all.map((c, i) => [c, r.env[i]] as const).filter(([c]) => /sql users (create|set-password)/.test(c));
+    expect(envAt.map(([, e]) => e)).toEqual(["1", "1"]);
+    expect(SOURCE).toMatch(/CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "\$\{GC\[@\]\}" sql users/);
+  });
+
+  it("błąd odczytu wersji sekretu (≠ brak wersji) przerywa etap przed hasłem", () => {
+    const e = bootstrap([...base("sql"), "--apply"], { versionsError: true });
+    expect(e.status).toBe(2);
+    expect(e.stderr).toMatch(/cannot read versions of secret postgres-url/);
+    expect(e.calls.filter((c) => /sql users (create|set-password)|versions add/.test(c))).toEqual([]);
+    expect(e.flags + e.stdin).toBe("");
+  });
+
+  it("samonaprawa: login istnieje, sekret bez wersji → set-password (nie create) i nowa wersja", () => {
+    const h = bootstrap([...base("sql"), "--apply"], { usersExist: true });
+    expect(h.status, h.stderr).toBe(0);
+    const users = h.calls.filter((c) => /sql users (create|set-password)/.test(c));
+    expect(users).toEqual([
+      expect.stringMatching(/sql users set-password myhelper_owner --instance=myhelper-pg --flags-file=\S+$/),
+      expect.stringMatching(/sql users set-password postgres --instance=myhelper-pg --flags-file=\S+$/),
+    ]);
+    expect(h.calls.filter((c) => c.includes("versions add")).map((c) => c.split(" ")[5])).toEqual([
+      "postgres-url",
+      "postgres-admin-password",
+    ]);
+  });
+
+  it("baza i loginy dopiero na instancji RUNNABLE; inny stan przerywa etap", () => {
+    const p = bootstrap([...base("sql"), "--apply"], { sqlState: "PENDING_CREATE" });
+    expect(p.status).toBe(2);
+    expect(p.stderr).toMatch(/PENDING_CREATE, not RUNNABLE/);
+    const after = p.calls.findIndex((c) => c.includes("--format=value(state)"));
+    expect(after).toBeGreaterThan(-1);
+    expect(p.calls.slice(after + 1)).toEqual([]);
+    const ok = r.calls.findIndex((c) => c.includes("--format=value(state)"));
+    expect(ok).toBeGreaterThan(r.calls.findIndex((c) => c.includes("sql instances create")));
+    expect(ok).toBeLessThan(r.calls.findIndex((c) => c.includes("sql databases create")));
   });
 
   it("dry-run sql nie generuje hasła (same placeholdery)", () => {
@@ -364,6 +469,31 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
   it("cloudsql.client tylko dla runtime (usługa i job migracji), z warunkiem na instancję; deploy bez", () => {
     const client = r.calls.filter((c) => c.includes("roles/cloudsql.client"));
     expect(client.map((c) => c.match(/serviceAccount:([a-z-]+)@/)![1])).toEqual(["myhelper-runtime"]);
+    expect(client[0]).toMatch(
+      / --condition=expression=resource\.type == "sqladmin\.googleapis\.com\/Instance" && resource\.name == "projects\/my-helper-2-488419\/instances\/myhelper-pg",title=only-myhelper-pg$/,
+    );
+  });
+
+  it("W-1: rola kopii ma DOKŁADNIE backupRuns.create, backupRuns.get, instances.get (bez list)", () => {
+    for (const exists of [false, true]) {
+      const x = exists ? bootstrap([...base("sql"), "--apply"], { exists: true }) : r;
+      const role = x.calls.filter((c) => / iam roles (create|update) myhelperSqlBackup /.test(c));
+      expect(role).toHaveLength(1);
+      const perms = role[0]!.match(/ --permissions=(\S+)/)![1]!.split(",").sort();
+      expect(perms).toEqual(["cloudsql.backupRuns.create", "cloudsql.backupRuns.get", "cloudsql.instances.get"]);
+    }
+  });
+
+  it("W-1: wiązanie roli kopii dla deploy z warunkiem Instance + BackupRun tej instancji", () => {
+    const b = r.calls.filter((c) => c.includes("roles/myhelperSqlBackup"));
+    expect(b).toHaveLength(1);
+    expect(b[0]).toContain("--member=serviceAccount:myhelper-deploy@");
+    const condition = b[0]!.split(" --condition=")[1];
+    expect(condition).toBe(
+      'expression=(resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/my-helper-2-488419/instances/myhelper-pg") || ' +
+        '(resource.type == "sqladmin.googleapis.com/BackupRun" && resource.name.startsWith("projects/my-helper-2-488419/instances/myhelper-pg/")),' +
+        "title=only-myhelper-pg-backups",
+    );
   });
 
   it("idempotencja: istniejąca instancja, baza i wersje sekretów — nic nie jest tworzone ani zmieniane", () => {
@@ -431,6 +561,13 @@ describe("G-D1: WIF", () => {
     ]);
   });
 
+  it("dodatkowa równość (zawężenie) i inny podział na linie są przyjmowane", () => {
+    const extra = `${VALID_CONDITION.replace(/ &&\n/g, " && ")} &&\n  assertion.repository_visibility == 'public'`;
+    const r = bootstrap([...base("wif", cond(extra)), "--apply"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.calls.find((c) => c.includes("providers create-oidc"))).toContain("assertion.repository_visibility == 'public'");
+  });
+
   it("istniejący provider: update-oidc (warunek zawsze aktualizowany)", () => {
     const r = bootstrap([...base("wif"), "--apply"], { exists: true });
     expect(r.calls.some((c) => c.includes("providers update-oidc"))).toBe(true);
@@ -444,8 +581,24 @@ describe("G-D1: WIF", () => {
     ["bez ref main", VALID_CONDITION.replace("assertion.ref == 'refs/heads/main' &&", "")],
     ["inny workflow", VALID_CONDITION.replace("deploy-cloud-run.yml", "pr.yml")],
     ["bez event_name", VALID_CONDITION.replace("assertion.event_name == 'workflow_dispatch' &&", "")],
-    ["bez run_attempt", VALID_CONDITION.replace(" &&\nassertion.run_attempt == '1'", "")],
+    ["bez run_attempt", VALID_CONDITION.replace("assertion.run_attempt == '1' &&", "")],
+    ["bez job_workflow_ref", VALID_CONDITION.replace(/assertion\.job_workflow_ref == '[^']+' &&\n/, "")],
+    ["inny job_workflow_ref", VALID_CONDITION.replace("job_workflow_ref == 'Danolog/My_Helper_2/.github/workflows/deploy-cloud-run.yml", "job_workflow_ref == 'Danolog/My_Helper_2/.github/workflows/pr.yml")],
+    ["bez environment", VALID_CONDITION.replace("assertion.environment == 'production-gcp' &&", "")],
+    ["inne environment", VALID_CONDITION.replace("'production-gcp'", "'staging'")],
+    ["bez actor_id", VALID_CONDITION.replace(" &&\nassertion.actor_id == '171363250'", "")],
+    ["inny actor_id", VALID_CONDITION.replace("actor_id == '171363250'", "actor_id == '1'")],
     ["alternatywa ||", `${VALID_CONDITION} || true`],
+    ["alternatywa || w środku", VALID_CONDITION.replace("assertion.ref == 'refs/heads/main' &&", "assertion.ref == 'refs/heads/main' || assertion.ref == 'refs/heads/dev' &&")],
+    ["negacja całości", `!(${VALID_CONDITION})`],
+    ["negacja członu", VALID_CONDITION.replace("assertion.run_attempt == '1'", "!(assertion.run_attempt == '2')")],
+    ["nierówność", VALID_CONDITION.replace("assertion.actor_id == '171363250'", "assertion.actor_id == '171363250' && assertion.sub != 'x'")],
+    ["operator warunkowy", `${VALID_CONDITION.replace(" &&\nassertion.actor_id == '171363250'", "")} && (assertion.actor_id == '171363250' ? true : true)`],
+    ["operator warunkowy na całości", `true ? true : (${VALID_CONDITION})`],
+    ["człon w nawiasie z alternatywą", VALID_CONDITION.replace("assertion.ref == 'refs/heads/main'", "(assertion.ref == 'refs/heads/main' || true)")],
+    ["funkcja zamiast równości", VALID_CONDITION.replace("assertion.ref == 'refs/heads/main'", "assertion.ref.startsWith('refs/heads/')")],
+    ["wartość z podciągiem obowiązkowej", VALID_CONDITION.replace("'refs/heads/main'", "'refs/heads/main-x'")],
+    ["&& bez spacji (nie da się rozdzielić członów)", VALID_CONDITION.replace(/ &&\n/g, "&&")],
   ];
   it.each(broken)("%s → odrzucony przed jakimkolwiek wywołaniem, także w dry-run", (_label, text) => {
     for (const mode of [[], ["--apply"]]) {
