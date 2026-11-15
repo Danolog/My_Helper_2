@@ -112,6 +112,27 @@ describe("raporty — dostęp wg roli", () => {
     });
   });
 
+  // #101: jeden strażnik (requireSalonStaff) — konto bez salonu 404, nie 401.
+  it.each(Object.keys(ALL_REPORTS))(
+    "%s: zalogowany bez salonu => 404, zero zapytań o dane",
+    async (name) => {
+      m.signIn("client-1");
+      m.ctxRows.push([], []);
+      const res = await call(name, ALL_REPORTS[name]!);
+      expect(res.status).toBe(404);
+      expect(m.rlsSalonIds()).toEqual([]);
+    }
+  );
+
+  it.each(Object.keys(ALL_REPORTS))(
+    "%s: bez sesji => 401",
+    async (name) => {
+      m.getSession.mockResolvedValue(null);
+      const res = await call(name, ALL_REPORTS[name]!);
+      expect(res.status).toBe(401);
+    }
+  );
+
   it.each(Object.keys(ALL_REPORTS))(
     "%s: pracownik bez grantu => 403",
     async (name) => {
