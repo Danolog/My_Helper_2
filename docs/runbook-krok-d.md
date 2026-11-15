@@ -319,6 +319,13 @@ Harmonogram 29 lutego (najbliższy 2028) + natychmiastowa pauza = job nigdy nie
 wystrzeli. Jeśli `describe` nie pokazuje nagłówka albo pokazuje dosłownie ścieżkę
 `/dev/fd/…` — stop, `scheduler.sh` nie może być użyty (zgłoszenie do Evy).
 
+**Tylko dla tej próby z fikcyjnym tokenem.** Dla prawdziwych zadań `mh-*`
+(nagłówek z prawdziwym `CRON_SECRET`) nie używać `describe` ani `list` z
+`--format` obejmującym `httpTarget.headers`, ani bez zawężonego `--format`:
+wartość nagłówka trafia na ekran i do logu plikowego gcloud
+(`~/.config/gcloud/logs`) — #143 pkt 2. Stan prawdziwych zadań sprawdza
+`scheduler.sh --check` albo `--format='value(name,state)'` jak w sekcji 8.
+
 ## 5. D-5 — wartości sekretów (sesja główna)
 
 Zasada: generator albo plik spoza repo → strumień → `--data-file=-`. Nigdy wartość
@@ -522,17 +529,28 @@ tworzy zadanie z harmonogramem zaparkowanym (29 lutego), od razu je wstrzymuje,
 odczytuje stan i dopiero wtedy ustawia właściwy harmonogram. Tryb domyślny
 nigdy nie wznawia. Kolejność obowiązkowa:
 
+`BASE_URL` = główny adres usługi `https://myhelper-843777043748.europe-central2.run.app`
+(bez ścieżki i bez taga rewizji). Inny host skrypt odrzuca przed pierwszym
+wywołaniem gcloud (#143 pkt 1).
+
 ```bash
-S='PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://…'
-env $S infra/gcp/scheduler.sh            # 1. utworzenie/aktualizacja — wszystko PAUSED
+S='PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://myhelper-843777043748.europe-central2.run.app'
+env $S infra/gcp/scheduler.sh            # 1. utworzenie/aktualizacja — wszystkie 5 zadań PAUSED
 env $S infra/gcp/scheduler.sh --check    # 2. dryf ENABLED→PAUSED oczekiwany, innego dryfu brak
-env $S infra/gcp/scheduler.sh --resume   # 3. dopiero po decyzji Darka
-env $S infra/gcp/scheduler.sh --check    # 4. kod 0
+# 3. dopiero po decyzji Darka — jawne nazwy (W-3); można wznowić część zadań:
+env $S infra/gcp/scheduler.sh --resume mh-sms-reminders mh-push-reminders \
+  mh-push-reminders-24h mh-cleanup-pending-deposits mh-cleanup-temporary-access
+env $S infra/gcp/scheduler.sh --check    # 4. kod 0 (wznowione zgodne z tabelą)
 gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-central2 --format='value(name,state)'
 ```
 
+Zadań jest 5 (tabela `JOBS` w `scheduler.sh`). `--resume` bez nazw, z nazwą
+spoza tabeli albo z zadaniem oznaczonym w tabeli jako `PAUSED` → błąd przed
+pierwszym wywołaniem gcloud.
+
 Włączenie harmonogramu = prawdziwe SMS-y i push do klientów salonów — decyzja Darka.
-Zadania `mh-notify-*` zostają `PAUSED` także po `--resume`.
+Zadania `mh-notify-*` (urodziny, niski stan magazynu, „tęsknimy”) nie są
+tworzone — wracają z R3-C.
 
 ## 8a. Znane zachowanie przyjęte świadomie
 
