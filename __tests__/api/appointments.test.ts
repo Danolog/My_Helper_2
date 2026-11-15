@@ -2729,3 +2729,80 @@ describe("PUT /api/appointments/[id] — kolizja półotwarta (#165)", () => {
     expect(status).toBe(200);
   });
 });
+
+describe("PUT /api/appointments/[id] — koniec po początku na wartościach scalonych (#165)", () => {
+  // Zapisana wizyta: 10:00–11:00 (makeAppointment).
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+  });
+
+  async function put(body: Record<string, unknown>) {
+    queueSelects(chainMock([makeAppointment()]), filteringChain([]));
+    mockDbUpdate.mockReturnValue(chainMock([makeAppointment()]));
+    const response = await updateAppointment(
+      createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+        method: "PUT",
+        body,
+      }),
+      createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+    );
+    return parseResponse(response);
+  }
+
+  it.each([
+    ["samo endTime przed zapisanym startem", { endTime: at165("09:00") }],
+    ["samo startTime po zapisanym końcu", { startTime: at165("12:00") }],
+    ["samo endTime równe zapisanemu startowi", { endTime: at165("10:00") }],
+    ["oba pola odwrócone", { startTime: at165("12:00"), endTime: at165("11:00") }],
+    ["oba pola równe", { startTime: at165("12:00"), endTime: at165("12:00") }],
+  ])("%s → 400, bez sprawdzania kolizji i bez zapisu", async (_n, body) => {
+    const { status, body: res } = await put(body);
+    expect(status).toBe(400);
+    expect(res.error).toBe("Czas zakonczenia musi byc pozniej niz czas rozpoczecia");
+    expect(mockDbSelect).toHaveBeenCalledTimes(1); // tylko odczyt wizyty
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("samo endTime skracające wizytę (10:30) → 200", async () => {
+    const { status } = await put({ endTime: at165("10:30") });
+    expect(status).toBe(200);
+  });
+
+  it("sama notatka (czasy z zapisu) → 200", async () => {
+    const { status } = await put({ notes: "x" });
+    expect(status).toBe(200);
+  });
+});
+
+describe("POST /api/appointments — przedział pusty (#165)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+  afterEach(() => {
+    mockDbSelect.mockReset();
+  });
+
+  it("endTime = startTime → 400, bez zapytań do bazy", async () => {
+    const response = await createAppointment(
+      createMockRequest("http://localhost:3000/api/appointments", {
+        method: "POST",
+        body: {
+          salonId: TEST_IDS.SALON_UUID,
+          employeeId: TEST_IDS.EMPLOYEE_UUID,
+          serviceId: TEST_IDS.SERVICE_UUID,
+          startTime: at165("10:00"),
+          endTime: at165("10:00"),
+        },
+      })
+    );
+    const { status } = await parseResponse(response);
+    expect(status).toBe(400);
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+});

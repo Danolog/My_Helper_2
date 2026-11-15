@@ -183,6 +183,17 @@ export async function PUT(
     const newEndTime = endTime ? new Date(endTime) : existing.endTime;
     const newEmployeeId = employeeId || existing.employeeId;
 
+    // Koniec po początku — na wartościach SCALONYCH z istniejącą wizytą (samo
+    // endTime wcześniejsze niż zapisany start albo samo startTime po zapisanym
+    // końcu). Przedział pusty/odwrócony nigdy nie trafia w warunek kolizji
+    // półotwartej, więc ominąłby sprawdzenie (#165). Komunikat jak w POST.
+    if (!(newEndTime.getTime() > newStartTime.getTime())) {
+      return NextResponse.json(
+        { success: false, error: "Czas zakonczenia musi byc pozniej niz czas rozpoczecia" },
+        { status: 400 }
+      );
+    }
+
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {};
     if (startTime) updateData.startTime = newStartTime;
