@@ -368,6 +368,27 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
 });
 
 describe("G-D1: run i idempotencja pozostałych etapów", () => {
+  it("run: zastępcza rewizja = próbka Google hello, min 0 / max 1, bez sekretów i zmiennych", () => {
+    const r = bootstrap([...base("run"), "--apply"]);
+    const creates = r.calls.filter((c) => / run (deploy|jobs create) /.test(c));
+    expect(creates).toHaveLength(2);
+    for (const c of creates) {
+      expect(c).toContain("--image=us-docker.pkg.dev/cloudrun/container/hello ");
+      expect(c).toContain("--service-account=myhelper-runtime@");
+      expect(c).not.toMatch(/--(set|update)-(secrets|env-vars)|--env-vars-file|--add-cloudsql/);
+    }
+    const svc = creates.find((c) => c.includes(" run deploy "))!;
+    expect(svc.split(" ")).toEqual(expect.arrayContaining(["--min-instances=0", "--max-instances=1", "--no-allow-unauthenticated"]));
+  });
+
+  it("konto deploy nigdy nie dostaje ról zarządzania IAM ani run.admin", () => {
+    for (const stage of STAGES) {
+      for (const c of bootstrap([...base(stage), "--apply"]).calls.filter((c) => c.includes("serviceAccount:myhelper-deploy@"))) {
+        expect(c).not.toMatch(/roles\/(run\.admin|resourcemanager\.[a-zA-Z]+|iam\.securityAdmin|iam\.roleAdmin|iam\.serviceAccountAdmin|owner|editor)\b/);
+      }
+    }
+  });
+
   it("run: run.developer tylko na usłudze i jobie, publiczny invoker tylko na usłudze", () => {
     const r = bootstrap([...base("run"), "--apply"]);
     const dev = r.calls.filter((c) => c.includes("roles/run.developer"));

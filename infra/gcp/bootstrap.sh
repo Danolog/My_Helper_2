@@ -42,8 +42,10 @@
 #            w osobnym sekrecie (niepodpiętym do usługi). cloudsql.client dla
 #            runtime i deploy oraz kopia na żądanie dla deploy — z warunkiem na
 #            tę instancję. Rolę myhelper_app NOLOGIN tworzy migracja 0005.
-#   run      powłoka usługi i joba migracji (obraz-zaślepka Google), publiczny
-#            invoker na usłudze, run.developer dla deploy NA ZASOBACH (nie projekt)
+#   run      powłoka usługi i joba migracji (próbka Google `hello`, usługa
+#            min 0 / max 1 instancja, bez sekretów i zmiennych), publiczny invoker
+#            na usłudze (ustawiany RAZ tutaj — konto deploy nie dostaje
+#            setIamPolicy), run.developer dla deploy NA ZASOBACH (nie projekt)
 #   wif      pula + provider OIDC GitHuba z warunkiem z pliku (--wif-condition-file)
 #            + workloadIdentityUser na koncie deploy. NIE WYKONYWAĆ przed
 #            rozstrzygnięciem wariantu warunku przez Ryana (runbook).
@@ -86,9 +88,9 @@ DB_ADMIN_SECRET="postgres-admin-password"
 # Stałe repozytorium GitHub (liczbowe id — odporne na zmianę nazwy repo/właściciela).
 GITHUB_REPOSITORY_ID="1152153440"
 GITHUB_REPOSITORY_OWNER_ID="171363250"
-# Obrazy-zaślepki Google dla powłoki usługi i joba (etap run).
-PLACEHOLDER_SERVICE_IMAGE="us-docker.pkg.dev/cloudrun/container/hello"
-PLACEHOLDER_JOB_IMAGE="us-docker.pkg.dev/cloudrun/container/job"
+# Obraz zastępczy (etap run): oficjalna próbka Google, dla usługi i joba.
+# Job z tym obrazem nigdy nie jest wykonywany — zastępuje go pierwszy przebieg workflow.
+PLACEHOLDER_IMAGE="us-docker.pkg.dev/cloudrun/container/hello"
 
 die() { echo "error: $*" >&2; exit 2; }
 
@@ -357,17 +359,19 @@ stage_sql() {
 stage_run() {
   # Powłoka usługi i joba, żeby deploy dostał run.developer NA ZASOBIE,
   # a nie na projekcie. Zaślepki zastępuje pierwszy przebieg workflow.
+  # Zastępcza rewizja: bez sekretów i bez zmiennych środowiska; tylko konto runtime.
   if ! exists run services describe "$SERVICE" --region="$REGION"; then
-    run run deploy "$SERVICE" --region="$REGION" --image="$PLACEHOLDER_SERVICE_IMAGE" \
+    run run deploy "$SERVICE" --region="$REGION" --image="$PLACEHOLDER_IMAGE" \
       --service-account="$RUNTIME_SA" --no-allow-unauthenticated \
       --min-instances=0 --max-instances=1
   fi
+  # Publiczny invoker ustawia wyłącznie ten etap (konto sesji głównej).
   run run services add-iam-policy-binding "$SERVICE" --region="$REGION" \
     --member=allUsers --role=roles/run.invoker
   run run services add-iam-policy-binding "$SERVICE" --region="$REGION" \
     --member="serviceAccount:$DEPLOY_SA" --role=roles/run.developer
   if ! exists run jobs describe "$MIGRATE_JOB" --region="$REGION"; then
-    run run jobs create "$MIGRATE_JOB" --region="$REGION" --image="$PLACEHOLDER_JOB_IMAGE" \
+    run run jobs create "$MIGRATE_JOB" --region="$REGION" --image="$PLACEHOLDER_IMAGE" \
       --service-account="$RUNTIME_SA" --tasks=1 --max-retries=0
   fi
   run run jobs add-iam-policy-binding "$MIGRATE_JOB" --region="$REGION" \
