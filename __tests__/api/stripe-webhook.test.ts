@@ -192,6 +192,7 @@ describe("Stripe webhook — deposit checkout completion", () => {
     expect(mockConfirmDeposit).toHaveBeenCalledTimes(1);
     expect(mockConfirmDeposit).toHaveBeenCalledWith(DEPOSIT_PAYMENT_ID, {
       paymentIntentId: "pi_test_456",
+      stripePaymentStatus: "paid",
     });
   });
 
@@ -233,6 +234,7 @@ describe("Stripe webhook — deposit checkout completion", () => {
     expect((await parseResponse(response)).status).toBe(200);
     expect(mockConfirmDeposit).toHaveBeenCalledWith(DEPOSIT_PAYMENT_ID, {
       paymentIntentId: "pi_async_1",
+      stripePaymentStatus: "paid",
     });
   });
 
@@ -254,6 +256,7 @@ describe("Stripe webhook — deposit checkout completion", () => {
     expect((await parseResponse(response)).status).toBe(200);
     expect(mockConfirmDeposit).toHaveBeenCalledWith(DEPOSIT_PAYMENT_ID, {
       paymentIntentId: "pi_expanded_789",
+      stripePaymentStatus: "paid",
     });
   });
 
@@ -274,7 +277,7 @@ describe("Stripe webhook — deposit checkout completion", () => {
     const response = await stripeWebhook(request);
     expect((await parseResponse(response)).status).toBe(200);
     // Called WITHOUT paymentIntentId — the existing stored value stays.
-    expect(mockConfirmDeposit).toHaveBeenCalledWith(DEPOSIT_PAYMENT_ID, {});
+    expect(mockConfirmDeposit).toHaveBeenCalledWith(DEPOSIT_PAYMENT_ID, { stripePaymentStatus: "paid" });
   });
 
   it("ignores checkout sessions without deposit metadata and without mode \"subscription\" (subscriptions: stripe-webhook-subscription.test.ts)", async () => {
