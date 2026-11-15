@@ -58,22 +58,33 @@ const verb = pos[2], name = verb === "create" || verb === "update" ? pos[4] : po
 const file = path.join(process.env.FAKE_JOBS, name + ".json");
 const job = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
 const save = (j) => fs.writeFileSync(file, JSON.stringify(j));
+// Jak prawdziwy gcloud: create/update http bez --format=none wypisują zasób zadania
+// (z nagłówkami) na stdout.
+const headersOf = (t) => Object.fromEntries([...(t || "").matchAll(/^  ([A-Za-z-]+): "(.*)"$/gm)].map((m) => [m[1], m[2]]));
+const printResource = (j) => { if (flag("format") !== "none") console.log(JSON.stringify({ name, schedule: j.schedule, state: j.state, httpTarget: { uri: j.uri, headers: j.headers || {} } })); };
 if (verb === "describe") {
   if (!job) process.exit(1);
   const fmt = flag("format");
   if (fmt === "value(name)") console.log(name);
   else if (fmt === "value(state)") console.log(job.state);
-  else if (fmt === "value(schedule)") console.log(job.schedule);
+  else if (fmt === "value(schedule)") {
+    if (process.env.FAKE_SCHEDULE_READ === "fail") { process.stderr.write("ERROR: UNAVAILABLE\\n"); process.exit(1); }
+    console.log(process.env.FAKE_SCHEDULE_READ === "empty" ? "" : job.schedule);
+  }
   else console.log([job.schedule, job.timeZone, job.uri, job.method, job.state].join("\\t"));
 } else if (verb === "create") {
   if (job) process.exit(1);
   if (!ffText || !ffText.includes("Authorization")) process.exit(3);
   if (!flag("schedule")) process.exit(4);
-  save({ schedule: flag("schedule"), timeZone: flag("time-zone"), uri: flag("uri"), method: flag("http-method"), state: "ENABLED" });
+  const created = { schedule: flag("schedule"), timeZone: flag("time-zone"), uri: flag("uri"), method: flag("http-method"), state: "ENABLED", headers: headersOf(ffText) };
+  save(created);
+  printResource(created);
 } else if (verb === "update") {
   if (!job) process.exit(1);
   for (const [k, f] of [["schedule", "schedule"], ["timeZone", "time-zone"], ["uri", "uri"], ["method", "http-method"]]) if (flag(f)) job[k] = flag(f);
+  if (ffText) job.headers = { ...(job.headers || {}), ...headersOf(ffText) };
   save(job);
+  printResource(job);
 } else if (verb === "pause") {
   if (!job) process.exit(1);
   if (job.state !== "ENABLED") { process.stderr.write("ERROR: FAILED_PRECONDITION: job is not ENABLED\\n"); process.exit(1); }
@@ -277,12 +288,56 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     expect(w.state(job.name)).toMatchObject({ state: "PAUSED", schedule: job.schedule });
   });
 
+  // Ethan (#137 @ b4bf4d0): odczyt harmonogramu bez `|| true` — błąd odczytu
+  // nie może dać pustego tekstu, który pominąłby pauzę zaparkowanego zadania.
+  it.each(["fail", "empty"])("odczyt harmonogramu istniejącego zadania: %s → kod ≠ 0, bez pause/update/create", (mode) => {
+    const w = world();
+    const job = TABLE[0]!;
+    const seeded = { schedule: "0 0 29 2 *", timeZone: "Europe/Warsaw", uri: SERVICE_URL + job.path, method: "GET", state: "ENABLED" };
+    w.seed(job.name, seeded);
+    const r = w.run([], { FAKE_SCHEDULE_READ: mode });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(`cannot read schedule of ${job.name}`);
+    expect(w.calls().some((c) => /^(pause|update|create|resume)/.test(verbOf(c)))).toBe(false);
+    expect(w.state(job.name)).toEqual(seeded);
+  });
+
   it("--resume bez utworzonych zadań → błąd, nic nie wznowione", () => {
     const w = world();
     const r = w.run(["--resume", ...NAMES]);
     expect(r.status).toBe(1);
     expect(w.calls().some((c) => verbOf(c).startsWith("resume"))).toBe(false);
     expect(w.count()).toBe(0);
+  });
+
+  // Ryan (#137): wyjście gcloud z zasobem zadania — każde create/update http
+  // z --format=none, każde wywołanie gcloud bez logu plikowego.
+  it("create/update http zawsze z --format=none; każde wywołanie gcloud z CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1", () => {
+    const w = world();
+    const first = w.run([]);
+    const second = w.run([]);
+    const resume = w.run(["--resume", ...NAMES]);
+    for (const r of [first, second, resume]) {
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout + r.stderr).not.toContain(TOKEN);
+    }
+    const entries = w.entries();
+    const writes = entries.filter((e) => /^(create|update) http$/.test(verbOf(e.a)));
+    expect(writes.length).toBe(TABLE.length * 3);
+    for (const e of writes) expect(e.a, verbOf(e.a)).toContain("--format=none");
+    for (const e of entries) expect(e.env, e.a.join(" ")).toBe("1");
+  });
+
+  it("kontrola: fałszywy gcloud bez --format=none wypisuje zasób z nagłówkiem (jak prawdziwy)", () => {
+    const w = world();
+    expect(w.run([]).status).toBe(0);
+    const job = TABLE[0]!;
+    const r = spawnSync(join(BIN, "gcloud"), ["--project=my-helper-2-488419", "scheduler", "jobs", "update", "http", job.name, "--location=europe-central2", `--schedule=${job.schedule}`], {
+      encoding: "utf8",
+      env: { NODE_ENV: "test", PATH: process.env.PATH, FAKE_JOBS: w.jobs, FAKE_LOG: join(DIR, `log-${n++}`) },
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(TOKEN);
   });
 
   it("token z sekretu nigdy w argumentach gcloud ani na wyjściu", () => {

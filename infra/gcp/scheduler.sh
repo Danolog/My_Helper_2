@@ -30,8 +30,11 @@
 # - brak PROJECT_ID / REGION / BASE_URL → błąd przed pierwszym wywołaniem gcloud;
 # - nagłówek z CRON_SECRET idzie przez --flags-file ze strumienia, nie jako
 #   argument polecenia (nie trafia do tablicy procesów ani historii powłoki);
-#   wywołania z nagłówkiem idą z CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 (gcloud
-#   zapisuje rozwinięte flagi do ~/.config/gcloud/logs — B-1, Ryan 6900239072);
+#   WSZYSTKIE wywołania gcloud idą z CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1
+#   (export niżej; gcloud zapisuje do ~/.config/gcloud/logs rozwinięte flagi
+#   i wyjście poleceń — B-1, Ryan 6900239072);
+# - create/update http zawsze z --format=none: wyjście gcloud z zasobem
+#   zadania nie trafia na stdout ani do logu (Ryan, #137);
 # - token jest czytany RAZ przed pierwszą zmianą; błąd odczytu albo pusty
 #   token → stop (W-1), nigdy zadanie z pustym nagłówkiem;
 # - pause tylko dla stanu ENABLED, resume tylko dla PAUSED (API odrzuca inne
@@ -42,6 +45,8 @@
 #   nie istnieje → create.
 # Strażnicy: __tests__/lib/scheduler-config.test.ts (G-C5), scheduler-paused.test.ts (G-C5b).
 set -euo pipefail
+# Bez logu plikowego gcloud dla całego skryptu (także wywołań bez nagłówka).
+export CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1
 
 usage() {
   echo "usage: $0 [--check | --resume JOB_NAME...]" >&2
@@ -241,17 +246,24 @@ for entry in "${JOBS[@]}"; do
     # Istniejące zadanie: stan bez zmian, poza wymuszeniem PAUSED z tabeli
     # i zadaniem z harmonogramem zaparkowanym (przerwany przebieg między create
     # a pause) — to traktujemy jak nowe: najpierw pauza (Ethan, #137).
-    if [[ "$state" == "PAUSED" || "$(job_schedule "$name" || true)" == "$PARKED_SCHEDULE" ]]; then
+    # Odczyt harmonogramu obowiązkowy: błąd albo pusty wynik → stop (kod 1)
+    # BEZ aktualizacji — inaczej zaparkowane zadanie ENABLED dostałoby
+    # prawdziwy harmonogram bez pauzy (Ethan, #137 @ b4bf4d0).
+    if ! current_schedule="$(job_schedule "$name")" || [[ -z "$current_schedule" ]]; then
+      echo "error: cannot read schedule of $name — stop, job not updated" >&2
+      exit 1
+    fi
+    if [[ "$state" == "PAUSED" || "$current_schedule" == "$PARKED_SCHEDULE" ]]; then
       pause_if_enabled "$name"
     fi
-    CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" scheduler jobs update http "$name" "${common[@]}" --schedule="$schedule" \
-      --flags-file=<(auth_flags --update-headers)
+    "${GC[@]}" scheduler jobs update http "$name" "${common[@]}" --schedule="$schedule" \
+      --format=none --flags-file=<(auth_flags --update-headers)
     echo "updated $name"
   else
-    CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" scheduler jobs create http "$name" "${common[@]}" --schedule="$PARKED_SCHEDULE" \
-      --flags-file=<(auth_flags --headers)
+    "${GC[@]}" scheduler jobs create http "$name" "${common[@]}" --schedule="$PARKED_SCHEDULE" \
+      --format=none --flags-file=<(auth_flags --headers)
     pause_if_enabled "$name"
-    "${GC[@]}" scheduler jobs update http "$name" --location="$REGION" --schedule="$schedule"
+    "${GC[@]}" scheduler jobs update http "$name" --location="$REGION" --schedule="$schedule" --format=none
     require_state "$name" PAUSED
     echo "created $name (PAUSED)"
   fi
