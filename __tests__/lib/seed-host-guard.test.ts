@@ -4,8 +4,13 @@ import { describe, it, expect } from "vitest";
 import postgres from "postgres";
 import {
   checkSeedClientOptions,
+  checkSeedServerIdentity,
   checkSeedTarget,
+  SEED_ALLOWED_DATABASES,
   SEED_ALLOWED_HOSTS,
+  SEED_SERVER_PROBE_SQL,
+  type AmbiguousPart,
+  type SeedRejectCode,
 } from "../../scripts/seed-host-guard";
 
 /**
@@ -14,6 +19,11 @@ import {
  */
 
 const SECRET = "S3cr3t-P4ss_xyz";
+
+/** Odmowa z konkretnym kodem; kody są stabilne, treść komunikatu może się zmieniać. */
+function expectReject(result: { ok: boolean; code?: string }, code: SeedRejectCode) {
+  expect(result).toMatchObject({ ok: false, code });
+}
 
 function reasonOf(result: { ok: true } | { ok: false; reason: string }): string {
   expect(result.ok).toBe(false);
@@ -44,8 +54,7 @@ describe("checkSeedTarget — allowlista", () => {
 
   it("odrzuca hosty spoza allowlisty", () => {
     for (const host of ["db.example.com", "10.0.0.5", "localhost.evil.com", "postgres"]) {
-      const reason = reasonOf(checkSeedTarget(`postgresql://u:p@${host}:5432/db`));
-      expect(reason).toContain("spoza allowlisty");
+      expectReject(checkSeedTarget(`postgresql://u:p@${host}:5432/db`), "host_not_allowed");
     }
   });
 
@@ -54,7 +63,7 @@ describe("checkSeedTarget — allowlista", () => {
   });
 
   it("odrzuca literał IPv6 (postgres.js 3.4.8 parsuje [::1] jako host \"[\")", () => {
-    expect(reasonOf(checkSeedTarget("postgresql://u:p@[::1]:5432/db"))).toContain("IPv6");
+    expectReject(checkSeedTarget("postgresql://u:p@[::1]:5432/db"), "ipv6");
   });
 });
 
@@ -64,11 +73,15 @@ describe("checkSeedTarget — Neon", () => {
     "postgresql://u:pw@EP-X-POOLER.US-EAST-2.AWS.NEON.TECH/db",
     "postgresql://u:pw@neon.tech/db",
   ])("jawnie odrzuca %s", (url) => {
-    expect(reasonOf(checkSeedTarget(url))).toContain("Neon");
+    expectReject(checkSeedTarget(url), "neon");
   });
 
   it("odrzuca hasło z nieenkodowanym @ (WHATWG i postgres.js mogłyby widzieć różne hosty)", () => {
-    expect(reasonOf(checkSeedTarget("postgresql://u:p@localhost@ep-x.neon.tech/db"))).toContain("@");
+    expect(checkSeedTarget("postgresql://u:p@localhost@ep-x.neon.tech/db")).toMatchObject({
+      ok: false,
+      code: "ambiguous_authority",
+      ambiguous: ["multiple_at"],
+    });
   });
 
   it("odrzuca multi-host (postgres.js łączy się po kolei z każdym)", () => {
@@ -80,27 +93,26 @@ describe("checkSeedTarget — VERCEL_ENV", () => {
   it.each(["preview", "production", "Production", " preview "])(
     "odrzuca VERCEL_ENV=%j nawet na localhost",
     (vercelEnv) => {
-      const reason = reasonOf(checkSeedTarget("postgresql://u:p@localhost/db", { VERCEL_ENV: vercelEnv }));
-      expect(reason).toContain("VERCEL_ENV");
+      expectReject(checkSeedTarget("postgresql://u:p@localhost/db", { VERCEL_ENV: vercelEnv }), "vercel_env");
     },
   );
 });
 
 describe("checkSeedTarget — URL bez hosta i nieprawidłowy", () => {
   it.each([undefined, "", "   "])("odrzuca brak POSTGRES_URL (%j)", (url) => {
-    expect(reasonOf(checkSeedTarget(url))).toContain("wymagany");
+    expectReject(checkSeedTarget(url), "missing_url");
   });
 
   it("odrzuca URL bez hosta (postgres.js wziąłby PGHOST z env)", () => {
-    expect(reasonOf(checkSeedTarget("postgresql:///pos_dev"))).toContain("nie zawiera hosta");
+    expectReject(checkSeedTarget("postgresql:///pos_dev"), "no_host");
   });
 
   it("odrzuca napis, który nie jest URL", () => {
-    expect(reasonOf(checkSeedTarget("localhost:5432/pos_dev"))).not.toBe("");
+    expectReject(checkSeedTarget("localhost:5432/pos_dev"), "not_a_postgres_url");
   });
 
   it("odrzuca inny schemat niż postgres", () => {
-    expect(reasonOf(checkSeedTarget("mysql://u:p@localhost/db"))).toContain("schemat");
+    expectReject(checkSeedTarget("mysql://u:p@localhost/db"), "bad_scheme");
   });
 });
 
@@ -158,6 +170,7 @@ const STRICT_ONLY_URLS = [
   "postgres://u:p%40ss@localhost/db",
   "postgres://u:p%2Css@localhost/db",
 ];
+const STRICT_ONLY_AMBIGUOUS: AmbiguousPart[][] = [["multiple_at"], ["multiple_at"], ["comma"]];
 
 // N1 z ponownej recenzji Ryana (6891756918): postgres.js tnie authority tylko na `[?/]`, nie na `#`.
 const N1_URLS = [
@@ -167,10 +180,28 @@ const N1_URLS = [
   "postgres://u:p@localhost%23x/db",
   "postgres://u:p@localhost#x",
 ];
+const N1_AMBIGUOUS: AmbiguousPart[][] = [
+  ["multiple_at", "comma", "hash"],
+  ["multiple_at", "comma", "hash"],
+  ["hash"],
+  ["hash"],
+  ["hash"],
+];
 
 describe("N1: # w authority", () => {
-  it.each(N1_URLS)("etap URL odrzuca %s", (url) => {
-    expect(reasonOf(checkSeedTarget(url))).toContain("#");
+  // Leo (6892163799): zamiast `toContain("#")` dokładna lista niejednoznacznych elementów.
+  it.each(N1_URLS.map((url, i) => [url, N1_AMBIGUOUS[i]!] as const))(
+    "etap URL odrzuca %s z powodu %j",
+    (url, parts) => {
+      expect(checkSeedTarget(url)).toMatchObject({ ok: false, code: "ambiguous_authority", ambiguous: parts });
+    },
+  );
+
+  it("sam # w authority jest jedynym powodem odmowy (bez reguły # URL by przeszedł)", () => {
+    for (const url of N1_URLS.slice(2)) {
+      const result = checkSeedTarget(url);
+      expect(result.ok ? [] : result.ambiguous, url).toEqual(["hash"]);
+    }
   });
 
   it("URL z Neonem za # jest odrzucany także przez etap klienta", async () => {
@@ -198,12 +229,19 @@ describe("B1: authority z wieloma @ albo przecinkiem", () => {
     expect(checkSeedClientOptions(opts).ok).toBe(false);
   });
 
-  it.each(STRICT_ONLY_URLS)("etap URL odrzuca także %s (reguła ściślejsza niż parser)", (url) => {
-    expect(reasonOf(checkSeedTarget(url))).toContain("@");
-  });
+  it.each(STRICT_ONLY_URLS.map((url, i) => [url, STRICT_ONLY_AMBIGUOUS[i]!] as const))(
+    "etap URL odrzuca także %s (reguła ściślejsza niż parser): %j",
+    (url, parts) => {
+      expect(checkSeedTarget(url)).toMatchObject({ ok: false, code: "ambiguous_authority", ambiguous: parts });
+    },
+  );
 
   it("odrzuca zepsute kodowanie procentowe w authority", () => {
-    expect(checkSeedTarget("postgres://u:p%ZZ@localhost/db").ok).toBe(false);
+    expect(checkSeedTarget("postgres://u:p%ZZ@localhost/db")).toMatchObject({
+      ok: false,
+      code: "ambiguous_authority",
+      ambiguous: ["bad_percent_encoding"],
+    });
   });
 
   it("komunikaty B1 nie zawierają hasła", async () => {
@@ -224,7 +262,7 @@ describe("checkSeedClientOptions — hosty wyliczone przez postgres.js", () => {
   });
 
   it("odrzuca Neona na dowolnej pozycji listy", () => {
-    expect(reasonOf(checkSeedClientOptions({ host: ["localhost", "ep-x.aws.neon.tech"] }))).toContain("Neon");
+    expectReject(checkSeedClientOptions({ host: ["localhost", "ep-x.aws.neon.tech"] }), "neon");
   });
 
   it("odrzuca pustą listę hostów i brak hosta", () => {
@@ -233,7 +271,7 @@ describe("checkSeedClientOptions — hosty wyliczone przez postgres.js", () => {
   });
 
   it("odrzuca gniazdo unix (options.path), także z hostem localhost", () => {
-    expect(reasonOf(checkSeedClientOptions({ host: ["localhost"], path: "/tmp/.s.PGSQL.5432" }))).toContain("unix");
+    expectReject(checkSeedClientOptions({ host: ["localhost"], path: "/tmp/.s.PGSQL.5432" }), "unix_socket");
   });
 
   it("maskuje w komunikacie host, który nie wygląda na nazwę hosta", () => {
@@ -298,6 +336,86 @@ describe("zgodność guardu z postgres.js (test Leo)", () => {
   });
 });
 
+describe("etap 3: checkSeedServerIdentity (tunel localhost → zdalna baza)", () => {
+  it("przepuszcza lokalną bazę pos_dev bez ustawień neon.*", () => {
+    expect(checkSeedServerIdentity({ database: "pos_dev", neon_settings: 0 })).toEqual({ ok: true, database: "pos_dev" });
+  });
+
+  it("allowlista baz to dokładnie baza z docker-compose i CI", () => {
+    expect([...SEED_ALLOWED_DATABASES]).toEqual(["pos_dev"]);
+    const compose = readFileSync(join(process.cwd(), "docker-compose.yml"), "utf8");
+    const workflow = readFileSync(join(process.cwd(), ".github/workflows/quality-gate.yml"), "utf8");
+    const dbs = [...`${compose}\n${workflow}`.matchAll(/POSTGRES_DB:\s*(\S+)/g)].map((m) => m[1]!);
+    expect(dbs.length).toBeGreaterThan(0);
+    for (const name of dbs) expect(SEED_ALLOWED_DATABASES).toContain(name);
+  });
+
+  it("odrzuca serwer z ustawieniami neon.*, nawet gdy baza nazywa się pos_dev (Neon za tunelem)", () => {
+    expectReject(checkSeedServerIdentity({ database: "pos_dev", neon_settings: 7 }), "neon");
+  });
+
+  it.each(["neondb", "postgres", "pos_prod", "POS_DEV", ""])("odrzuca bazę %j spoza allowlisty", (database) => {
+    expectReject(checkSeedServerIdentity({ database, neon_settings: 0 }), "database_not_allowed");
+  });
+
+  it.each([
+    ["brak wiersza", undefined],
+    ["pusty wiersz", {}],
+    ["database nie jest napisem", { database: null, neon_settings: 0 }],
+    ["neon_settings jako napis (np. bigint bez rzutowania)", { database: "pos_dev", neon_settings: "0" }],
+    ["neon_settings ułamkowe", { database: "pos_dev", neon_settings: 0.5 }],
+    ["wiersz nie jest obiektem", "pos_dev"],
+  ])("fail closed: %s", (_label, row) => {
+    expectReject(checkSeedServerIdentity(row), "server_unknown");
+  });
+
+  it("maskuje w komunikacie nazwę bazy, która nie wygląda na identyfikator", () => {
+    const reason = reasonOf(checkSeedServerIdentity({ database: `x' ${SECRET}`, neon_settings: 0 }));
+    expect(reason).not.toContain(SECRET);
+    expect(reason).toContain("<nieprawidłowa nazwa>");
+  });
+
+  it("zapytanie sondy jest tylko do odczytu i zwraca dokładnie pola sprawdzane przez guard", () => {
+    expect(SEED_SERVER_PROBE_SQL).toMatch(/^select /i);
+    expect(SEED_SERVER_PROBE_SQL).not.toMatch(/\b(insert|update|delete|drop|alter|create|truncate|grant|set)\b/i);
+    expect(SEED_SERVER_PROBE_SQL).toContain("current_database() as database");
+    expect(SEED_SERVER_PROBE_SQL).toMatch(/::int as neon_settings$/);
+  });
+});
+
+describe("kontekst komunikatów (harness: INTEGRATION_POSTGRES_URL zamiast seed/POSTGRES_URL)", () => {
+  const ctx = { subject: "test integracyjny", varName: "INTEGRATION_POSTGRES_URL" };
+
+  it("etap URL używa nazwy zmiennej i podmiotu z kontekstu", () => {
+    expect(reasonOf(checkSeedTarget(undefined, {}, ctx))).toBe("INTEGRATION_POSTGRES_URL jest wymagany");
+    const neon = reasonOf(checkSeedTarget("postgresql://u:p@ep-x.neon.tech/db", {}, ctx));
+    expect(neon).toMatch(/^test integracyjny jest zablokowany/);
+    const vercel = reasonOf(checkSeedTarget("postgresql://u:p@localhost/db", { VERCEL_ENV: "production" }, ctx));
+    expect(vercel).toMatch(/^test integracyjny /);
+    for (const r of [neon, vercel]) {
+      expect(r).not.toMatch(/\bseed\b/);
+      expect(r).not.toMatch(/(^|[^_])POSTGRES_URL/);
+    }
+  });
+
+  it("etap klienta i etap serwera też używają kontekstu", () => {
+    expect(reasonOf(checkSeedClientOptions({ host: ["localhost"], path: "/tmp" }, ctx))).toMatch(/^test integracyjny /);
+    expect(reasonOf(checkSeedServerIdentity({ database: "neondb", neon_settings: 0 }, ctx))).toMatch(/^test integracyjny /);
+  });
+
+  it("bez kontekstu zostają domyślne komunikaty seeda", () => {
+    expect(reasonOf(checkSeedTarget(undefined))).toBe("POSTGRES_URL jest wymagany");
+    expect(reasonOf(checkSeedServerIdentity({ database: "neondb", neon_settings: 0 }))).toMatch(/^seed /);
+  });
+
+  it("pg-harness przekazuje kontekst do wszystkich trzech etapów", () => {
+    const src = readFileSync(join(process.cwd(), "__tests__/pg/pg-harness.ts"), "utf8");
+    expect(src).toMatch(/checkSeedTarget\([^)]*HARNESS_GUARD_CONTEXT\)/);
+    expect(src).toMatch(/checkSeedClientOptions\(client\.options, HARNESS_GUARD_CONTEXT\)/);
+    expect(src).toMatch(/checkSeedServerIdentity\(identity, HARNESS_GUARD_CONTEXT\)/);
+  });
+});
+
 describe("seed-test.ts używa guardu przed połączeniem", () => {
   it("checkSeedTarget jest wywołany przed postgres(...)", () => {
     const src = readFileSync(join(process.cwd(), "scripts/seed-test.ts"), "utf8");
@@ -313,5 +431,17 @@ describe("seed-test.ts używa guardu przed połączeniem", () => {
     expect(src).toContain("checkSeedClientOptions(sql.options)");
     expect(src).toMatch(/if \(clientTarget\.ok\) \{\s*seed\(\)/);
     expect(src.match(/^seed\(\)/gm)).toBeNull();
+  });
+
+  it("seed() sprawdza tożsamość serwera, zanim cokolwiek zapisze", () => {
+    const src = readFileSync(join(process.cwd(), "scripts/seed-test.ts"), "utf8");
+    const body = src.slice(src.indexOf("async function seed()"));
+    const probeAt = body.indexOf("sql.unsafe(SEED_SERVER_PROBE_SQL)");
+    const checkAt = body.indexOf("checkSeedServerIdentity(identity)");
+    const firstWrite = body.search(/\.(insert|update|delete)\(/);
+    expect(probeAt).toBeGreaterThan(-1);
+    expect(checkAt).toBeGreaterThan(probeAt);
+    expect(firstWrite).toBeGreaterThan(checkAt);
+    expect(body.slice(checkAt, firstWrite)).toContain("process.exit(1)");
   });
 });
