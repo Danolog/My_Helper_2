@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { useModuleEnabled } from "@/components/dashboard/modules-provider";
-import { mutationFetch } from "@/lib/api-client";
 import { useSalonId } from "@/hooks/use-salon-id";
+import { mutationFetch } from "@/lib/api-client";
 import {
   DEFAULT_BIRTHDAY_SETTINGS,
   DEFAULT_WE_MISS_YOU_SETTINGS,

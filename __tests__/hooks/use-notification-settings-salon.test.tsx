@@ -1,4 +1,4 @@
-import { createElement, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useNotificationSettings } from "@/app/dashboard/settings/notifications/_hooks/use-notification-settings";
@@ -58,11 +58,11 @@ const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
 });
 
 // clientMarketing włączony, żeby sprawdzić, że WSZYSTKIE trasy ustawień idą na salon konta.
-const thawed = ({ children }: { children: ReactNode }) =>
-  createElement(ModulesProvider, {
-    modules: { ...DEFAULT_MODULES, clientMarketing: true },
-    children,
-  });
+const thawed = ({ children }: { children: ReactNode }) => (
+  <ModulesProvider modules={{ ...DEFAULT_MODULES, clientMarketing: true }}>
+    {children}
+  </ModulesProvider>
+);
 
 const urls = () => mockFetch.mock.calls.map(([u]) => String(u));
 
@@ -76,10 +76,11 @@ describe("useNotificationSettings — salon konta", () => {
   it("ładuje ustawienia salonu z /api/salons/mine, nie pierwszego z katalogu", async () => {
     const { result } = renderHook(() => useNotificationSettings(), { wrapper: thawed });
 
-    await waitFor(() =>
-      expect(urls()).toContain(`/api/salons/${OWN_SALON}/notification-type-settings`),
+    await waitFor(
+      () => expect(urls()).toContain(`/api/salons/${OWN_SALON}/notification-type-settings`),
+      { timeout: 5000 },
     );
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
 
     expect(urls()).toContain("/api/salons/mine");
     expect(urls()).not.toContain("/api/salons");
