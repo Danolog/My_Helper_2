@@ -22,10 +22,20 @@ export type { Page } from '@playwright/test';
  * w tests/auth/authentication.spec.ts.
  *
  * Nie uzywac w tests/production/ — tam ida zadania do prawdziwego wdrozenia.
+ *
+ * Zaufane proxy (TRUSTED_PROXIES, src/lib/trusted-proxies.ts): fixture wysyla
+ * JEDNA wartosc X-Forwarded-For, tak jak przegladarka bez proxy. Pojedynczy
+ * adres spoza listy zaufanych proxy jest adresem klienta zarowno dla Better
+ * Auth, jak i dla getClientIp — niezaleznie od tego, czy lista jest pusta
+ * (CI, lokalnie, Vercel), czy ustawiona. Adresy losujemy z 198.18.0.0/15
+ * (RFC 2544, zakres testowy), a nie z 10.0.0.0/8: waski zakres prywatny
+ * 10.x moze legalnie trafic do TRUSTED_PROXIES (np. adres LB w VPC) i wtedy
+ * adres testu bylby uznany za proxy, a wszystkie testy wpadlyby do jednego
+ * kubelka limitu.
  */
 function uniqueClientIp(): string {
-  // 10.0.0.0/8 — adresy prywatne, nie koliduja z niczym realnym.
-  return `10.${randomInt(1, 255)}.${randomInt(0, 256)}.${randomInt(1, 255)}`;
+  // 198.18.0.0/15 — zakres testowy (RFC 2544), nigdy realny klient ani proxy.
+  return `198.${randomInt(18, 20)}.${randomInt(0, 256)}.${randomInt(1, 255)}`;
 }
 
 export const test = base.extend<{ clientIp: string }>({
