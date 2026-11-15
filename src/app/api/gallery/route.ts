@@ -6,7 +6,11 @@ import { logger } from "@/lib/logger";
 import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-// GET /api/gallery - List gallery photos
+import { isValidUuid } from "@/lib/validations";
+// GET /api/gallery - List gallery photos (panel salonu)
+// Salon WYŁĄCZNIE z sesji. salonId z query (wysyła go dashboard) jest tylko
+// porównywany z salonem sesji: inny = 403. Publiczna galeria salonu to
+// GET /api/salons/[id]/gallery (ukrywa productsUsed wg showProductsToClients).
 export const GET = withApiHandler(
   {
     auth: "user",
@@ -15,13 +19,29 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const requestedSalonId = searchParams.get("salonId");
     const employeeId = searchParams.get("employeeId");
     const serviceId = searchParams.get("serviceId");
 
-    if (!salonId) {
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+    if (requestedSalonId && requestedSalonId !== ctx.salonId) {
+      return NextResponse.json(
+        { success: false, error: "Brak dostepu do tego salonu" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
+
+    // Filtry trafiają do kolumn uuid — śmieć dałby 500 z Postgresa.
+    if ((employeeId && !isValidUuid(employeeId)) || (serviceId && !isValidUuid(serviceId))) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidlowy filtr" },
         { status: 400 }
       );
     }

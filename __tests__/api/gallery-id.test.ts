@@ -99,6 +99,9 @@ vi.mock("@/lib/schema", () => {
     galleryPhotos: createTable("galleryPhotos"),
     employees: createTable("employees"),
     services: createTable("services"),
+    // assertSalonRefs (PATCH employeeId/serviceId) importuje wszystkie tabele refów.
+    clients: createTable("clients"),
+    serviceCategories: createTable("serviceCategories"),
   };
 });
 
@@ -120,10 +123,9 @@ vi.mock("fs/promises", () => ({
   unlink: (...args: unknown[]) => mockUnlink(...args),
 }));
 
-vi.mock("@/lib/api-validation", () => ({
-  validateBody: vi.fn().mockReturnValue(null),
-  updateGalleryPhotoSchema: {},
-}));
+// Walidacja prawdziwa (bez mocka): PATCH zapisuje wyłącznie sparsowane
+// wartości schematu, więc pusty mock schematu nie ma już sensu. Kontrakt
+// i allowlista: __tests__/api/gallery-security.test.ts.
 
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },

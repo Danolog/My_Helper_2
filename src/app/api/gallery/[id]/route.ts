@@ -1,14 +1,14 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { unlink } from "fs/promises";
-import path from "path";
 import { eq, and } from "drizzle-orm";
 import { validateBody, updateGalleryPhotoSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { deleteGalleryFiles } from "@/lib/gallery-files";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { getSalonContext } from "@/lib/salon-context";
+import { assertSalonRefs } from "@/lib/salon-refs";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
@@ -141,37 +141,67 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       }
     }
 
-    const body = await request.json();
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        { success: false, error: "Invalid JSON body" },
+        { status: 400 }
+      );
+    }
+
+    // Schemat .strict() (kontrakt z UI) z allowlistą adresów zdjęć. Dalej
+    // używamy WYŁĄCZNIE sparsowanych wartości — nigdy surowego body.
     const validationError = validateBody(updateGalleryPhotoSchema, body);
     if (validationError) {
       return NextResponse.json(validationError, { status: 400 });
     }
-    const {
-      description,
-      techniques,
-      productsUsed,
-      employeeId,
-      serviceId,
-      duration,
-      beforePhotoUrl,
-      afterPhotoUrl,
-    } = body;
+    const data = updateGalleryPhotoSchema.parse(body);
+
+    // Pracownik nie przepina zdjęcia na kogoś innego (trafiłoby do cudzego
+    // portfolio, a on sam traciłby do niego dostęp).
+    if (
+      ctx.role !== "owner" &&
+      data.employeeId !== undefined &&
+      data.employeeId !== ctx.employeeId
+    ) {
+      return NextResponse.json(
+        { success: false, error: "You can only assign photos to yourself" },
+        { status: 403 }
+      );
+    }
+
+    // Pracownik i usługa muszą należeć do salonu z sesji (jak w POST).
+    const refsError = await assertSalonRefs(salonId, {
+      employeeId: data.employeeId,
+      serviceId: data.serviceId,
+    });
+    if (refsError) return refsError;
 
     // Build update object - only include fields that were sent
-    const updateData: Record<string, unknown> = {};
-    if (description !== undefined) updateData.description = description || null;
-    if (techniques !== undefined) updateData.techniques = techniques || null;
-    if (productsUsed !== undefined) updateData.productsUsed = productsUsed || null;
-    if (employeeId !== undefined) updateData.employeeId = employeeId || null;
-    if (serviceId !== undefined) updateData.serviceId = serviceId || null;
-    if (duration !== undefined)
-      updateData.duration = duration ? parseInt(String(duration), 10) : null;
-    if (beforePhotoUrl !== undefined) updateData.beforePhotoUrl = beforePhotoUrl || null;
-    if (afterPhotoUrl !== undefined) updateData.afterPhotoUrl = afterPhotoUrl || null;
+    const updateData: Partial<typeof galleryPhotos.$inferInsert> = {};
+    if (data.description !== undefined) updateData.description = data.description || null;
+    if (data.techniques !== undefined) updateData.techniques = data.techniques || null;
+    if (data.productsUsed !== undefined) updateData.productsUsed = data.productsUsed || null;
+    if (data.employeeId !== undefined) updateData.employeeId = data.employeeId;
+    if (data.serviceId !== undefined) updateData.serviceId = data.serviceId;
+    if (data.duration !== undefined) updateData.duration = data.duration;
+    if (data.showProductsToClients !== undefined)
+      updateData.showProductsToClients = data.showProductsToClients;
+    if (data.beforePhotoUrl !== undefined) updateData.beforePhotoUrl = data.beforePhotoUrl || null;
+    if (data.afterPhotoUrl !== undefined) updateData.afterPhotoUrl = data.afterPhotoUrl || null;
 
-    if (Object.keys(updateData).length === 0) {
+    // Jak w POST: zmiana adresów nie może zostawić wpisu bez żadnego zdjęcia.
+    const touchesPhotos =
+      updateData.beforePhotoUrl !== undefined || updateData.afterPhotoUrl !== undefined;
+    const nextBefore =
+      updateData.beforePhotoUrl !== undefined ? updateData.beforePhotoUrl : photo.beforePhotoUrl;
+    const nextAfter =
+      updateData.afterPhotoUrl !== undefined ? updateData.afterPhotoUrl : photo.afterPhotoUrl;
+    if (touchesPhotos && !nextBefore && !nextAfter) {
       return NextResponse.json(
-        { success: false, error: "No fields to update" },
+        { success: false, error: "Wymagane co najmniej jedno zdjecie (przed lub po)" },
         { status: 400 }
       );
     }
@@ -285,21 +315,11 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     // Delete from database (scoped to the caller's salon — defense in depth)
     await repo.deleteOwned(galleryPhotos, id);
 
-    // Try to delete files from disk (non-critical)
-    const photoUrls = [photo.beforePhotoUrl, photo.afterPhotoUrl].filter(Boolean);
-    for (const url of photoUrls) {
-      if (url && url.startsWith("/uploads/")) {
-        try {
-          const filePath = path.join(process.cwd(), "public", url);
-          await unlink(filePath);
-          // Also try to delete thumbnail
-          const thumbPath = filePath.replace("/gallery/", "/gallery/thumbs/");
-          await unlink(thumbPath).catch(() => {});
-        } catch {
-          // File might not exist, that's ok
-        }
-      }
-    }
+    // Pliki PO usunięciu wiersza: awaria storage'u (np. Blob niedostępny) nie
+    // blokuje usunięcia wpisu — błąd idzie do logu z pathname do sprzątnięcia.
+    // Lokalnie kasujemy tylko pliki pod public/uploads/gallery/ (traversal
+    // pomijany), na Blob tylko adresy z naszego store'u (lib/gallery-files).
+    await deleteGalleryFiles(id, [photo.beforePhotoUrl, photo.afterPhotoUrl]);
 
     logger.info(`[Gallery API] Deleted photo: ${id}`);
 
