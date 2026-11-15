@@ -96,15 +96,32 @@ async function ensureCsrfCookies(
 // CSP with nonce
 // ============================================================
 
-function buildCsp(nonce: string): string {
+// sha256 tresci <style>, ktory sonner wstrzykuje bez nonce (__insertCSS
+// w node_modules/sonner/dist/index.mjs; sonner nie ma opcji nonce), oraz
+// sha256 pustego <style> — sonner najpierw dolacza pusty element, potem
+// wpisuje tresc. Hash jest przypiety do sonner 2.0.7 (wersja przypieta
+// dokladnie w package.json); test __tests__/lib/csp.test.ts liczy go
+// z node_modules i wywali CI przy podbiciu sonnera.
+export const SONNER_STYLE_HASH = "sha256-CIxDM5jnsGiKqXs2v7NKCY5MzdR9gu6TtiMJrDw29AY=";
+export const EMPTY_STYLE_HASH = "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=";
+
+export function buildCsp(nonce: string): string {
   // Dev: React DevTools wymaga eval(), a next-devtools wstrzykuje inline
   // style bez nonce — bez tych zluzowan konsola tonie w ~20 bledach CSP
   // na strone (UAT B-11). Produkcyjna polityka pozostaje scisla.
   const isDev = process.env.NODE_ENV === "development";
   const scriptExtra = isDev ? " 'unsafe-eval'" : "";
+  // Produkcja: style-src zostaje bez 'unsafe-inline' (zapas dla przegladarek
+  // bez CSP3). style-src-elem dopuszcza <style> z nonce i dwa hashe sonnera.
+  // style-src-attr 'unsafe-inline' dopuszcza tylko atrybuty style="" z SSR
+  // (next/image fill, initial framer-motion) — nie elementy <style> ani skrypty.
   const styleSrc = isDev
     ? "style-src 'self' 'unsafe-inline' fonts.googleapis.com"
-    : `style-src 'self' 'nonce-${nonce}' fonts.googleapis.com`;
+    : [
+        `style-src 'self' 'nonce-${nonce}' fonts.googleapis.com`,
+        `style-src-elem 'self' 'nonce-${nonce}' '${SONNER_STYLE_HASH}' '${EMPTY_STYLE_HASH}' fonts.googleapis.com`,
+        "style-src-attr 'unsafe-inline'",
+      ].join("; ");
 
   return [
     "default-src 'self'",
