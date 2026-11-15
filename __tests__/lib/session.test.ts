@@ -81,8 +81,8 @@ describe("protectedRoutes", () => {
     expect(protectedRoutes).toContain("/dashboard");
   });
 
-  it("should include /chat", () => {
-    expect(protectedRoutes).toContain("/chat");
+  it("should not include the removed /chat page", () => {
+    expect(protectedRoutes).not.toContain("/chat");
   });
 
   it("should include /profile", () => {
@@ -110,7 +110,6 @@ describe("adminRoutes", () => {
 describe("isProtectedRoute", () => {
   it("should return true for exact protected route", () => {
     expect(isProtectedRoute("/dashboard")).toBe(true);
-    expect(isProtectedRoute("/chat")).toBe(true);
     expect(isProtectedRoute("/profile")).toBe(true);
     expect(isProtectedRoute("/admin")).toBe(true);
   });
@@ -152,7 +151,6 @@ describe("isAdminRoute", () => {
 
   it("should return false for non-admin routes", () => {
     expect(isAdminRoute("/dashboard")).toBe(false);
-    expect(isAdminRoute("/chat")).toBe(false);
     expect(isAdminRoute("/")).toBe(false);
   });
 
