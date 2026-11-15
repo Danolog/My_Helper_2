@@ -123,12 +123,23 @@ vi.mock("@vercel/blob", () => ({
   put: vi.fn(),
 }));
 
+// Nigdy prawdziwy GCS — kasowanie obiektu nie może zostać wywołane (C2b).
+const mockGcsDelete = vi.fn().mockResolvedValue(undefined);
+vi.mock("@google-cloud/storage", () => ({
+  Storage: class {
+    bucket() {
+      return { file: () => ({ delete: (...args: unknown[]) => mockGcsDelete(...args) }) };
+    }
+  },
+}));
+
 const mockLoggerError = vi.fn();
+const mockLoggerWarn = vi.fn();
 vi.mock("@/lib/logger", () => ({
   logger: {
     info: vi.fn(),
     error: (...args: unknown[]) => mockLoggerError(...args),
-    warn: vi.fn(),
+    warn: (...args: unknown[]) => mockLoggerWarn(...args),
     debug: vi.fn(),
   },
 }));
@@ -570,6 +581,48 @@ describe("DELETE /api/gallery/[id] — Vercel Blob (mock)", () => {
     const { status } = await del();
     expect(status).toBe(404);
     expect(mockBlobDel).not.toHaveBeenCalled();
+  });
+});
+
+describe("DELETE /api/gallery/[id] — GCS (C2b, mock SDK)", () => {
+  beforeEach(() => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+    vi.stubEnv("STORAGE_DRIVER", "gcs");
+    vi.stubEnv("GCS_BUCKET", "mh-media");
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "");
+  });
+
+  it("adres z naszego zasobnika: plik osierocony z logiem nazwy obiektu, bez kasowania, 200", async () => {
+    const name = `${crypto.randomUUID()}.jpg`;
+    selectsReturn([
+      photoRow({
+        beforePhotoUrl: `https://storage.googleapis.com/mh-media/gallery/${name}`,
+        afterPhotoUrl: null,
+      }),
+    ]);
+    const { status } = await del();
+
+    expect(status).toBe(200);
+    expect(mockDbDelete).toHaveBeenCalled();
+    expect(mockGcsDelete).not.toHaveBeenCalled();
+    expect(mockBlobDel).not.toHaveBeenCalled();
+    expect(mockUnlink).not.toHaveBeenCalled();
+    const orphanLog = mockLoggerWarn.mock.calls.find((c) => String(c[0]).includes("orphaned"));
+    expect(orphanLog?.[1]).toMatchObject({ storage: "gcs", objectName: `gallery/${name}` });
+    expect(JSON.stringify(orphanLog?.[1])).not.toContain("storage.googleapis.com");
+  });
+
+  it("cudzy zasobnik: nic nie kasujemy, brak logu osierocenia", async () => {
+    selectsReturn([
+      photoRow({
+        beforePhotoUrl: `https://storage.googleapis.com/mh-media-evil/gallery/${crypto.randomUUID()}.jpg`,
+        afterPhotoUrl: null,
+      }),
+    ]);
+    const { status } = await del();
+    expect(status).toBe(200);
+    expect(mockGcsDelete).not.toHaveBeenCalled();
+    expect(mockLoggerWarn.mock.calls.some((c) => String(c[0]).includes("orphaned"))).toBe(false);
   });
 });
 

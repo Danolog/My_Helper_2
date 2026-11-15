@@ -27,8 +27,13 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 const mockUpload = vi.fn();
-vi.mock("@/lib/storage", () => ({
+const mockGcsFile = vi.fn();
+// resolveStorageDriver prawdziwy (trasa i walidator decydują sterownikiem, C2b);
+// zapis i uchwyt obiektu GCS zamockowane
+vi.mock("@/lib/storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/storage")>()),
   upload: (...args: unknown[]) => mockUpload(...args),
+  gcsFile: (...args: unknown[]) => mockGcsFile(...args),
 }));
 
 const mockReadFile = vi.fn();
@@ -228,6 +233,46 @@ describe("POST /api/ai/image/enhance — lokalny storage (dev, bez tokenu Blob)"
     mockReadFile.mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
     const res = await POST(req(`/uploads/gallery/${PHOTO_ID}.jpg`));
     expect(res.status).toBe(400);
+  });
+});
+
+describe("POST /api/ai/image/enhance — GCS (C2b): odczyt przez SDK, bez fetch", () => {
+  const GCS_URL = `https://storage.googleapis.com/mh-media/gallery/${PHOTO_ID}.png`;
+
+  beforeEach(() => {
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+    vi.stubEnv("STORAGE_DRIVER", "gcs");
+    vi.stubEnv("GCS_BUCKET", "mh-media");
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "");
+    mockUpload.mockResolvedValue({
+      url: `https://storage.googleapis.com/mh-media/enhanced/enhanced-${SALON_ID}-1700000000000.jpg`,
+      pathname: `enhanced/enhanced-${SALON_ID}-1700000000000.jpg`,
+    });
+  });
+
+  it("zdjęcie galerii w naszym zasobniku -> 200, wynik zapisany przez upload (nie data URI)", async () => {
+    mockGcsFile.mockResolvedValue({
+      getMetadata: async () => [{ contentType: "image/png", size: String(PNG.length) }],
+      download: async () => [PNG],
+    });
+    const res = await POST(req(GCS_URL));
+    const { status, body: data } = await parseResponse<{ success: boolean; enhancedUrl: string }>(res);
+    expect(status).toBe(200);
+    expect(mockGcsFile).toHaveBeenCalledWith(`gallery/${PHOTO_ID}.png`);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mockUpload).toHaveBeenCalledTimes(1);
+    expect(data.enhancedUrl).toBe(`https://storage.googleapis.com/mh-media/enhanced/enhanced-${SALON_ID}-1700000000000.jpg`);
+  });
+
+  it.each([
+    `https://storage.googleapis.com/mh-media-evil/gallery/${PHOTO_ID}.png`,
+    `https://mh-media.storage.googleapis.com/gallery/${PHOTO_ID}.png`,
+    "http://metadata.google.internal/computeMetadata/v1/",
+  ])("adres spoza zasobnika %s -> 400 bez SDK i bez fetch", async (imageUrl) => {
+    const res = await POST(req(imageUrl));
+    expect(res.status).toBe(400);
+    expect(mockGcsFile).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

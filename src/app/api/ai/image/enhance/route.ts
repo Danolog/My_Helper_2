@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireProAI, isProAIError } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 import { loadOwnUploadImage } from "@/lib/own-upload-image";
-import { upload } from "@/lib/storage";
+import { resolveStorageDriver, upload } from "@/lib/storage";
 
 /**
  * Maximum allowed image size for enhancement (10 MB).
@@ -134,10 +134,11 @@ export async function POST(req: Request) {
 
     // Upload enhanced image to storage (or return data URI in local dev)
     const filename = `enhanced-${salonId}-${Date.now()}.jpg`;
-    const hasVercelBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+    // Trwały magazyn (gcs/vercel-blob) — decyzja sterownika, nie tokenu (C2b)
+    const persistent = resolveStorageDriver() !== "local";
 
     let enhancedUrl: string;
-    if (hasVercelBlob) {
+    if (persistent) {
       const stored = await upload(enhancedBuffer, filename, "enhanced", {
         maxSize: MAX_IMAGE_SIZE_BYTES,
         allowedTypes: ["image/jpeg"],
