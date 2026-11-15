@@ -24,6 +24,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
+import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 
 interface Client {
   id: string;
@@ -584,6 +585,7 @@ export function EditAppointmentDialog({
             <Textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+              maxLength={APPOINTMENT_NOTES_MAX_LENGTH}
               placeholder="Notatki wewnetrzne dla personelu (np. preferencje klienta, uwagi, szczegoly zabiegu)..."
               className="min-h-[80px]"
               data-testid="edit-appointment-notes-input"
