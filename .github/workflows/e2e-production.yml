@@ -6,7 +6,10 @@ on:
 jobs:
   e2e-production:
     name: Production Health Checks
-    if: github.event.deployment_status.state == 'success'
+    # Tylko udane wdrożenie środowiska Production (Vercel ustawia environment
+    # "Production" / "Preview"). Wcześniej warunek sprawdzał sam stan, więc job
+    # biegł też po każdym Preview, celując i tak w URL produkcji z sekretu.
+    if: github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'
     runs-on: ubuntu-24.04 # Playwright 1.58.2 nie obsługuje Ubuntu 26 (ubuntu-latest)
     timeout-minutes: 5
     env:

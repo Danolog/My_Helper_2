@@ -298,15 +298,13 @@ export const createAppointmentSchema = z.object({
   clientId: z.string().nullable().optional(),
   employeeId: requiredString("Pracownik"),
   serviceId: z.string().nullable().optional(),
-  startTime: requiredString("Czas rozpoczecia").refine(
-    (val) => !isNaN(new Date(val).getTime()),
-    { message: "Nieprawidlowy format daty rozpoczecia" }
-  ),
-  endTime: requiredString("Czas zakonczenia").refine(
-    (val) => !isNaN(new Date(val).getTime()),
-    { message: "Nieprawidlowy format daty zakonczenia" }
-  ),
-  notes: z.string().nullable().optional(),
+  // #66 (P3 Ryana z #67): ISO 8601 jak w create-session — sam Date.parse
+  // przyjmował np. "jutro o 10" (parsuje się jako rok 2010). Front portalu
+  // i panelu wysyła toISOString().
+  startTime: isoDateString("Czas rozpoczecia"),
+  endTime: isoDateString("Czas zakonczenia"),
+  // #66: limit jak w create-session; null/""/same spacje = brak uwag.
+  notes: absentAsUndefined(z.string().max(1000, "Uwagi mogą mieć maks. 1000 znaków")),
   depositAmount: z.string().nullable().optional(),
   bookedByUserId: z.string().nullable().optional(),
   promoCodeId: z.string().nullable().optional(),
