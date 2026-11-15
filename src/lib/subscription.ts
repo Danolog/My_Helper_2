@@ -12,9 +12,18 @@ export type CurrentPlan = {
   status: string;
 };
 
+/** Wartość dla wiersza `trialing`, którego okres próbny się skończył albo nie ma daty końca. */
+const TRIAL_EXPIRED_PLAN: CurrentPlan = { slug: "basic", name: "Basic", status: "trial_expired" };
+
 /**
  * Gets the current subscription plan for the given salon (or the authenticated user's salon).
  * Returns the plan slug and name, or defaults to "basic" if no subscription found.
+ *
+ * Okres próbny jest egzekwowany w chwili odczytu: wiersz `trialing` daje swój
+ * plan tylko dopóki `trialEndsAt > teraz` (granica wyłącznie). Brak
+ * `trialEndsAt` przy `trialing` zamyka dostęp. Porównanie w JS, nie w SQL:
+ * kolumna jest bez strefy, a `now()` zależałoby od strefy sesji. Wiersz
+ * `active` nie zależy od `trialEndsAt`.
  */
 export async function getCurrentPlan(salonId?: string): Promise<CurrentPlan> {
   try {
@@ -28,6 +37,7 @@ export async function getCurrentPlan(salonId?: string): Promise<CurrentPlan> {
         planSlug: subscriptionPlans.slug,
         planName: subscriptionPlans.name,
         status: salonSubscriptions.status,
+        trialEndsAt: salonSubscriptions.trialEndsAt,
       })
       .from(salonSubscriptions)
       .innerJoin(
@@ -46,6 +56,17 @@ export async function getCurrentPlan(salonId?: string): Promise<CurrentPlan> {
     const row = results[0];
     if (!row) {
       return { slug: "basic", name: "Basic", status: "active" };
+    }
+
+    if (row.status === "trialing") {
+      if (!row.trialEndsAt) {
+        // Stan niespójny (każdy trial ma datę końca) — widoczny w logach.
+        logger.warn("Trialing subscription without trial end date", { salonId: resolvedSalonId });
+        return TRIAL_EXPIRED_PLAN;
+      }
+      if (row.trialEndsAt.getTime() <= Date.now()) {
+        return TRIAL_EXPIRED_PLAN;
+      }
     }
 
     return {
