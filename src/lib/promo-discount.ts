@@ -7,6 +7,10 @@
 // - "percentage" i typy inne niz "fixed": value traktowane jako procent ceny,
 // - "fixed": kwota stala,
 // - wynik zawsze w przedziale [0, cena uslugi], zaokraglony do groszy.
+// - promocja typu zamrozonego (FROZEN_PROMOTION_TYPES, src/lib/features.ts)
+//   nie daje rabatu: kod z nia powiazany jest odrzucany ("type_frozen").
+
+import { isPromotionTypeFrozen } from "@/lib/features";
 
 export interface PromoDiscountPromotion {
   type: string;
@@ -17,7 +21,12 @@ export interface PromoDiscountPromotion {
   conditionsJson: unknown;
 }
 
-export type PromotionRejection = "inactive" | "not_started" | "ended" | "service_not_applicable";
+export type PromotionRejection =
+  | "type_frozen"
+  | "inactive"
+  | "not_started"
+  | "ended"
+  | "service_not_applicable";
 
 /** Sprawdza, czy promocje mozna zastosowac teraz do danej uslugi. */
 export function checkPromotionApplicable(
@@ -25,6 +34,7 @@ export function checkPromotionApplicable(
   serviceId: string,
   now: Date = new Date()
 ): PromotionRejection | null {
+  if (isPromotionTypeFrozen(promotion.type)) return "type_frozen";
   if (!promotion.isActive) return "inactive";
   if (promotion.startDate && new Date(promotion.startDate) > now) return "not_started";
   if (promotion.endDate && new Date(promotion.endDate) < now) return "ended";
@@ -42,6 +52,8 @@ export function computePromoDiscount(
   basePrice: string | number,
   promotion: Pick<PromoDiscountPromotion, "type" | "value">
 ): number {
+  if (isPromotionTypeFrozen(promotion.type)) return 0;
+
   const price = Number(basePrice);
   const value = Number(promotion.value);
   if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(value) || value <= 0) {

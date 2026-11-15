@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { FROZEN_PROMOTION_TYPES } from "@/lib/features";
 import { checkPromotionApplicable, computePromoDiscount } from "@/lib/promo-discount";
 
 const NOW = new Date("2026-06-01T12:00:00Z");
@@ -34,8 +35,10 @@ describe("computePromoDiscount", () => {
     expect(computePromoDiscount(80, { type: "percentage", value: 150 })).toBe(80);
   });
 
-  it("typy inne niz fixed licza value jako procent (jak panel)", () => {
-    expect(computePromoDiscount("200.00", { type: "package", value: "5" })).toBe(10);
+  it("typy zamrozone (B2) nie daja rabatu — takze z kodu promocyjnego", () => {
+    for (const type of FROZEN_PROMOTION_TYPES) {
+      expect(computePromoDiscount("200.00", { type, value: "5" }), type).toBe(0);
+    }
   });
 
   it("zero dla wartosci ujemnej, zerowej lub niepoprawnej", () => {
@@ -53,6 +56,10 @@ describe("computePromoDiscount", () => {
 describe("checkPromotionApplicable", () => {
   it("aktywna promocja bez warunkow => null (mozna zastosowac)", () => {
     expect(checkPromotionApplicable(basePromotion, "svc-1", NOW)).toBeNull();
+  });
+
+  it.each(FROZEN_PROMOTION_TYPES)("aktywna promocja typu zamrozonego %s => type_frozen", (type) => {
+    expect(checkPromotionApplicable({ ...basePromotion, type }, "svc-1", NOW)).toBe("type_frozen");
   });
 
   it("nieaktywna", () => {

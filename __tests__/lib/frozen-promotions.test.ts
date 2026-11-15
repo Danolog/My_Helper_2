@@ -7,7 +7,9 @@
  * - `PUT /api/promotions/[id]` nie zmienia typu na zamrożony i nie edytuje
  *   (ani nie „odmraża” zmianą typu) promocji zamrożonej,
  * - `GET /api/promotions` i `GET /api/promotions/[id]` ich nie zwracają,
- * - rabat z zamrożonej promocji nie jest naliczany (kod rabatowy, zadatek).
+ * - rabat z zamrożonej promocji nie jest naliczany: zadatek liczony przez
+ *   serwer nie zawiera rabatu happy hours (baza nie jest o nie pytana),
+ *   a kod rabatowy powiązany z promocją zamrożoną jest nieważny.
  *
  * Typy brane są z rejestru — test iteruje po `FROZEN_PROMOTION_TYPES`, więc
  * zdjęcie typu z listy (np. „package”) czerwieni sprawdzenie dokładnego
@@ -16,7 +18,9 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GET as getOne, PUT } from "@/app/api/promotions/[id]/route";
+import { POST as validateCode } from "@/app/api/promo-codes/validate/route";
 import { GET, POST } from "@/app/api/promotions/route";
+import { calculateExpectedDeposit } from "@/lib/deposit-calculation";
 import { FROZEN_PROMOTION_TYPES, isPromotionTypeFrozen } from "@/lib/features";
 import { SALON_A } from "../api/salon-staff-harness";
 
@@ -188,5 +192,94 @@ describe("GET/PUT /api/promotions/[id] — promocja zamrożona nie istnieje dla 
     m.txRows.push([row("p-1", "percentage")], [{ ...row("p-1", "percentage"), name: "Nowa" }]);
     const res = await update("p-1", { name: "Nowa" });
     expect(res.status).toBe(200);
+  });
+});
+
+describe("zadatek liczony przez serwer — bez rabatu happy hours", () => {
+  // 2026-07-06T12:00:00Z = poniedziałek 14:00 w Warszawie — w oknie promocji.
+  const MONDAY_1400_WARSAW = new Date("2026-07-06T12:00:00Z");
+  const service = {
+    id: "svc-1",
+    name: "Strzyżenie",
+    basePrice: "100.00",
+    depositRequired: true,
+    depositPercentage: 30,
+  };
+  const happyHours = {
+    ...row("p-hh", "happy_hours"),
+    value: "50",
+    conditionsJson: { daysOfWeek: [1], startTime: "12:00", endTime: "16:00" },
+  };
+
+  it("rezerwacja w oknie happy hours → zadatek od pełnej ceny, bez zapytania o promocje", async () => {
+    // Kolejka wyników db.select(): usługa, a gdyby trasa zapytała — promocja -50%.
+    const results: unknown[][] = [[service], [happyHours]];
+    const select = vi.spyOn(m.db, "select").mockImplementation((() => {
+      const rows = results.shift() ?? [];
+      const chain: Record<string, unknown> = {
+        from: () => chain,
+        where: () => chain,
+        limit: async () => rows,
+        then: (resolve: (r: unknown[]) => unknown) => Promise.resolve(rows).then(resolve),
+      };
+      return chain;
+    }) as unknown as typeof m.db.select);
+
+    try {
+      const result = await calculateExpectedDeposit({
+        salonId: SALON_A,
+        serviceId: "svc-1",
+        startTime: MONDAY_1400_WARSAW,
+      });
+
+      // 30% z pełnych 100 zł = 30 (z rabatem 50% byłoby 15).
+      expect(result).toEqual({ ok: true, required: true, amount: 30, serviceName: "Strzyżenie" });
+      // Tylko zapytanie o usługę — promocja happy hours została w kolejce.
+      expect(select).toHaveBeenCalledTimes(1);
+      expect(results).toEqual([[happyHours]]);
+    } finally {
+      select.mockRestore();
+    }
+  });
+});
+
+describe("POST /api/promo-codes/validate — kod powiązany z promocją zamrożoną", () => {
+  const promoCode = {
+    id: "pc-1",
+    salonId: SALON_A,
+    code: "LATO",
+    promotionId: "p-1",
+    usageLimit: null,
+    usedCount: 0,
+    expiresAt: null,
+  };
+
+  function validate() {
+    return validateCode(
+      new Request("http://localhost/api/promo-codes/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: "lato", salonId: SALON_A }),
+      })
+    );
+  }
+
+  it.each(FROZEN_PROMOTION_TYPES)("promocja %s → kod nieważny, bez rabatu", async (type) => {
+    m.txRows.push([{ promoCode, promotion: row("p-1", type) }]);
+    const res = await validate();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.valid).toBe(false);
+    expect(body.data).not.toHaveProperty("discountType");
+    expect(body.data).not.toHaveProperty("discountValue");
+  });
+
+  it("promocja procentowa → kod ważny z rabatem (kontrola)", async () => {
+    m.txRows.push([{ promoCode, promotion: row("p-1", "percentage") }]);
+    const res = await validate();
+    const body = await res.json();
+
+    expect(body.data).toMatchObject({ valid: true, discountType: "percentage", discountValue: 20 });
   });
 });

@@ -32,6 +32,17 @@ vi.mock("@/lib/db", () => ({
   db: { select: (...args: unknown[]) => mockDbSelect(...args) },
 }));
 
+/**
+ * Happy hours sa zamrozone (B2, FROZEN_PROMOTION_TYPES) — w produkcji rabat
+ * jest zawsze 0 i baza nie jest pytana (pilnuje tego
+ * __tests__/lib/frozen-promotions.test.ts). Testy logiki ponizej omijaja
+ * zamrozenie, zeby obliczenie bylo pilnowane takze na wypadek odmrozenia.
+ */
+vi.mock("@/lib/features", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/features")>();
+  return { ...real, isPromotionTypeFrozen: () => false };
+});
+
 vi.mock("@/lib/logger", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));

@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { verifiedClientMatchEmail, type SessionUserLike } from "@/lib/client-match";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
 import { db } from "@/lib/db";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import {
   clients,
@@ -20,7 +21,8 @@ import {
  *
  *   baseEffectivePrice = service.basePrice + variant.priceModifier
  *   discount           = happyHours — Math.round(base*pct)/100
- *                        (the first-visit promotion is frozen, never applied)
+ *                        (0 while happy hours are in FROZEN_PROMOTION_TYPES;
+ *                        the first-visit promotion is frozen, never applied)
  *   effectivePrice     = baseEffectivePrice - discount
  *   deposit:
  *     - client settings (requireDeposit) override service settings
@@ -76,11 +78,17 @@ function getWarsawWallClock(date: Date): { dayOfWeek: number; minutes: number } 
 /**
  * Best happy-hours discount percent for a booking start time
  * (0 when no promotion applies). Mirrors /api/promotions/check-happy-hours.
+ *
+ * Happy hours are frozen (`FROZEN_PROMOTION_TYPES`, src/lib/features.ts): the
+ * booking portal no longer asks for the discount, so the deposit must be
+ * computed from the full price — no database lookup at all.
  */
 async function getHappyHoursDiscountPercent(
   salonId: string,
   startTime: Date
 ): Promise<number> {
+  if (isPromotionTypeFrozen("happy_hours")) return 0;
+
   const activePromotions = await db
     .select()
     .from(promotions)

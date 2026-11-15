@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { validatePromoCodeSchema } from "@/lib/api-validation";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import { promoCodes, promotions } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -86,6 +87,20 @@ export const POST = withApiHandler(
 
     // If linked to a promotion, check that the promotion is active and within date range
     if (promotion) {
+      // Promocja typu zamrozonego (FROZEN_PROMOTION_TYPES) nie daje rabatu —
+      // tak samo odrzuca ja tworzenie wizyty (checkPromotionApplicable).
+      if (isPromotionTypeFrozen(promotion.type)) {
+        return NextResponse.json({
+          success: true,
+          data: {
+            valid: false,
+            errorType: "promotion_inactive",
+            reason: "Powiazana promocja jest obecnie niedostepna.",
+            code: promoCode.code,
+          },
+        });
+      }
+
       if (!promotion.isActive) {
         return NextResponse.json({
           success: true,
