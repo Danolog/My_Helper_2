@@ -2,7 +2,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
 import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
-import { trackAIUsage } from "@/lib/ai/openrouter";
+import { isProAIError, requireProAI, trackAIUsage } from "@/lib/ai/openrouter";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
@@ -15,7 +15,6 @@ import {
   promotions,
   newsletters,
 } from "@/lib/schema";
-import { isProPlan } from "@/lib/subscription";
 const requestSchema = z.object({
   topic: z.string().min(1).max(500),
   goals: z
@@ -70,26 +69,9 @@ const INDUSTRY_LABELS: Record<string, string> = {
 };
 
 export async function POST(req: Request) {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-
-  // Verify authentication and resolve salon
-  const salonId = await getUserSalonId();
-  if (!salonId) {
-    return Response.json({ error: "Salon not found" }, { status: 404 });
-  }
-
-  // Check Pro plan
-  const hasPro = await isProPlan();
-  if (!hasPro) {
-    return Response.json(
-      {
-        error: "Funkcje AI sa dostepne tylko w Planie Pro.",
-        code: "PLAN_UPGRADE_REQUIRED",
-      },
-      { status: 403 }
-    );
-  }
+  const gate = await requireProAI({ op: "text" });
+  if (isProAIError(gate)) return gate;
+  const { salonId } = gate;
 
   // Parse request
   let body: unknown;

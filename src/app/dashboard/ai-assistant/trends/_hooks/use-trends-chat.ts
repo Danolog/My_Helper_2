@@ -68,30 +68,30 @@ export function useTrendsChat(data: TrendsData | null): UseTrendsChatReturn {
     try {
       const trendsContext = data ? buildTrendsContext(data) : "";
 
-      const systemMessage = {
-        role: "system" as const,
-        parts: [
-          {
-            type: "text",
-            text:
-              `Jestes ekspertem od analizy trendow biznesowych salonu kosmetycznego. Odpowiadaj TYLKO po polsku. ` +
-              `Bazuj na dostarczonych danych trendow. Uzywaj konkretnych liczb i porownuj okresy. ` +
-              `Identyfikuj trendy wzrostowe i spadkowe. Dawaj praktyczne rekomendacje.` +
-              trendsContext,
-          },
-        ],
-      };
+      // Kontekst trendow idzie w wiadomosci uzytkownika — prompt systemowy
+      // buduje wylacznie serwer (trasa przyjmuje tylko role user/assistant).
+      const contextParts = trendsContext
+        ? [
+            {
+              type: "text",
+              text:
+                `Odpowiedz na podstawie ponizszych danych trendow salonu: uzywaj konkretnych liczb, ` +
+                `porownuj okresy, wskaz trendy wzrostowe i spadkowe, daj praktyczne rekomendacje.` +
+                trendsContext,
+            },
+          ]
+        : [];
 
       const userMessage = {
         role: "user" as const,
-        parts: [{ type: "text", text }],
+        parts: [...contextParts, { type: "text", text }],
       };
 
       const res = await mutationFetch("/api/ai/business/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [systemMessage, userMessage],
+          messages: [userMessage],
         }),
       });
 
