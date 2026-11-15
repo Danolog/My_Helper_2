@@ -148,8 +148,14 @@ export async function calculateExpectedDeposit(params: {
    * only needed for that lookup); kept so callers need no change.
    */
   guestEmail?: string | null;
+  /**
+   * Rekord klienta salonu znany serwerowi (np. wpis listy oczekujących,
+   * ustawiony przez salon). Gdy podany, ustawienia zadatku klienta czytamy
+   * po id (w obrębie salonu), a nie po e-mailu sesji. Nigdy z body żądania.
+   */
+  clientId?: string | null;
 }): Promise<ExpectedDeposit> {
-  const { salonId, serviceId, variantId, startTime, sessionUser } = params;
+  const { salonId, serviceId, variantId, startTime, sessionUser, clientId } = params;
   const sessionEmail = verifiedClientMatchEmail(sessionUser);
 
   // 1. Service (price + deposit settings)
@@ -160,11 +166,14 @@ export async function calculateExpectedDeposit(params: {
       basePrice: services.basePrice,
       depositRequired: services.depositRequired,
       depositPercentage: services.depositPercentage,
+      isActive: services.isActive,
     })
     .from(services)
     .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)));
 
-  if (!service) return { ok: false, error: "service_not_found" };
+  // #69: usługa wyłączona (isActive=false) jest dla rezerwacji jak usunięta —
+  // portal z nieaktualnej pamięci podręcznej nie zarezerwuje jej ani wariantu.
+  if (!service || service.isActive === false) return { ok: false, error: "service_not_found" };
 
   // 2. Variant price modifier
   let priceModifier = 0;
@@ -199,7 +208,7 @@ export async function calculateExpectedDeposit(params: {
   let clientDepositType = "percentage";
   let clientDepositValue = 0;
 
-  if (sessionEmail) {
+  if (clientId || sessionEmail) {
     const [clientRecord] = await db
       .select({
         requireDeposit: clients.requireDeposit,
@@ -207,7 +216,12 @@ export async function calculateExpectedDeposit(params: {
         depositValue: clients.depositValue,
       })
       .from(clients)
-      .where(and(eq(clients.salonId, salonId), eq(clients.email, sessionEmail)))
+      .where(
+        and(
+          eq(clients.salonId, salonId),
+          clientId ? eq(clients.id, clientId) : eq(clients.email, sessionEmail ?? "")
+        )
+      )
       .limit(1);
 
     if (clientRecord) {

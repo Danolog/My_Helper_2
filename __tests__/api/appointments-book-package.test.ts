@@ -35,6 +35,19 @@ const { mockAssertSalonRefs, mockFindOne, mockListOwned, mockInsertValues, txQue
   txQueue: [] as unknown[][],
 }));
 
+// #63: personel rozpoznawany jak w create-session (getSalonContext), a
+// wymóg zadatku liczy deposit-calculation (atrapa — kontrolujemy werdykt).
+const { mockGetSalonContext, mockCalcDeposit } = vi.hoisted(() => ({
+  mockGetSalonContext: vi.fn(),
+  mockCalcDeposit: vi.fn(),
+}));
+vi.mock("@/lib/salon-context", () => ({
+  getSalonContext: (...a: unknown[]) => mockGetSalonContext(...a),
+}));
+vi.mock("@/lib/deposit-calculation", () => ({
+  calculateExpectedDeposit: (...a: unknown[]) => mockCalcDeposit(...a),
+}));
+
 vi.mock("@/lib/salon-refs", () => ({
   assertSalonRefs: (...args: unknown[]) => mockAssertSalonRefs(...args),
   SALON_REF_ERROR: "Nieprawidlowe dane dla tego salonu",
@@ -133,6 +146,9 @@ describe("POST /api/appointments/book-package — referencje z salonu (P1)", () 
     txQueue.length = 0;
     txQueue.push([], []); // brak kolizji, brak blokad
     mockAssertSalonRefs.mockImplementation(async () => null);
+    // domyślnie: personel tego salonu (wyjątek od zadatku)
+    mockGetSalonContext.mockResolvedValue({ salonId: TEST_IDS.SALON_UUID, role: "owner" });
+    mockCalcDeposit.mockResolvedValue({ ok: true, required: false, amount: 0, serviceName: "A" });
     mockFindOne.mockResolvedValue({
       id: PROMOTION,
       salonId: TEST_IDS.SALON_UUID,
@@ -185,5 +201,70 @@ describe("POST /api/appointments/book-package — referencje z salonu (P1)", () 
     mockAssertSalonRefs.mockResolvedValueOnce(new Response("{}", { status: 400 }));
     await bookPackage(request({ employeeId: FOREIGN_CLIENT }));
     expect(mockFindOne).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/appointments/book-package — zadatek (#63, na wypadek odmrożenia)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    txQueue.length = 0;
+    txQueue.push([], []);
+    mockAssertSalonRefs.mockImplementation(async () => null);
+    mockFindOne.mockResolvedValue({
+      id: PROMOTION,
+      salonId: TEST_IDS.SALON_UUID,
+      name: "Pakiet",
+      type: "package",
+      isActive: true,
+      startDate: null,
+      endDate: null,
+      value: "150.00",
+      conditionsJson: { packageServiceIds: [SERVICE_1, SERVICE_2] },
+    });
+    mockListOwned.mockResolvedValue([
+      { id: SERVICE_1, name: "A", basePrice: "100.00", baseDuration: 30 },
+      { id: SERVICE_2, name: "B", basePrice: "80.00", baseDuration: 45 },
+    ]);
+    // druga usługa pakietu wymaga zadatku
+    mockCalcDeposit.mockImplementation(async (p: { serviceId: string }) =>
+      p.serviceId === SERVICE_2
+        ? { ok: true, required: true, amount: 24, serviceName: "B" }
+        : { ok: true, required: false, amount: 0, serviceName: "A" }
+    );
+  });
+
+  it("personel TEGO salonu → wyjątek: 201, wymóg zadatku nie jest liczony", async () => {
+    mockGetSalonContext.mockResolvedValue({ salonId: TEST_IDS.SALON_UUID, role: "owner" });
+    const res = await bookPackage(request());
+    expect(res.status).toBe(201);
+    expect(mockCalcDeposit).not.toHaveBeenCalled();
+    expect(mockInsertValues).toHaveBeenCalledTimes(2);
+  });
+
+  it("kontekst INNEGO salonu → bez wyjątku: 400 DEPOSIT_REQUIRED, bez kolizji i zapisu", async () => {
+    mockGetSalonContext.mockResolvedValue({ salonId: "99999999-9999-4999-8999-999999999999", role: "owner" });
+    const res = await bookPackage(request());
+    const { status, body } = await parseResponse<{ code: string }>(res);
+    expect(status).toBe(400);
+    expect(body.code).toBe("DEPOSIT_REQUIRED");
+    expect(mockInsertValues).not.toHaveBeenCalled();
+    expect(txQueue).toHaveLength(2); // kolizje nie sprawdzane
+  });
+
+  it("brak kontekstu salonu + błąd wyliczenia → 503, nic nie zapisane", async () => {
+    mockGetSalonContext.mockResolvedValue(null);
+    mockCalcDeposit.mockRejectedValue(new Error("db down"));
+    const res = await bookPackage(request());
+    expect(res.status).toBe(503);
+    expect(mockInsertValues).not.toHaveBeenCalled();
+    expect(txQueue).toHaveLength(2);
+  });
+
+  it("brak kontekstu salonu, żadna usługa nie wymaga zadatku → 201", async () => {
+    mockGetSalonContext.mockResolvedValue(null);
+    mockCalcDeposit.mockResolvedValue({ ok: true, required: false, amount: 0, serviceName: "A" });
+    const res = await bookPackage(request());
+    expect(res.status).toBe(201);
+    expect(mockCalcDeposit).toHaveBeenCalledTimes(2);
   });
 });
