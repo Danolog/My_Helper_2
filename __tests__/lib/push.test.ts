@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Use vi.hoisted for mock variables
 const {
   mockWebpushSendNotification,
+  _mockDbDeleteWhere,
   mockDbReturning,
   mockDbValues,
   mockDbInsertInto,
@@ -69,6 +70,15 @@ import {
   sendAppointmentReminderPush,
   sendAppointmentReminder24hPush,
 } from "@/lib/push";
+import { PUSH_SEND_DEADLINE_MS, PUSH_SEND_TIMEOUT_MS } from "@/lib/push-subscription";
+import {
+  VALID_AUTH,
+  VALID_ENDPOINTS,
+  VALID_P256DH,
+} from "../fixtures/push-subscriptions";
+
+const SUB_ROW_1 = { endpoint: VALID_ENDPOINTS.chromeFcm, p256dh: VALID_P256DH, auth: VALID_AUTH };
+const SUB_ROW_2 = { endpoint: VALID_ENDPOINTS.firefox, p256dh: VALID_P256DH, auth: VALID_AUTH };
 
 describe("sendPushNotification (push.ts)", () => {
   beforeEach(() => {
@@ -97,8 +107,8 @@ describe("sendPushNotification (push.ts)", () => {
 
   it("should send to all subscriptions and count successes", async () => {
     mockDbSelectWhere.mockResolvedValue([
-      { id: "sub-1", endpoint: "https://push1.example.com", p256dh: "key1", auth: "auth1" },
-      { id: "sub-2", endpoint: "https://push2.example.com", p256dh: "key2", auth: "auth2" },
+      { id: "sub-1", ...SUB_ROW_1 },
+      { id: "sub-2", ...SUB_ROW_2 },
     ]);
     mockWebpushSendNotification.mockResolvedValue({});
     mockDbReturning.mockResolvedValue([{ id: "notif-1" }]);
@@ -117,8 +127,8 @@ describe("sendPushNotification (push.ts)", () => {
 
   it("should handle mixed success and failure", async () => {
     mockDbSelectWhere.mockResolvedValue([
-      { id: "sub-1", endpoint: "https://push1.example.com", p256dh: "key1", auth: "auth1" },
-      { id: "sub-2", endpoint: "https://push2.example.com", p256dh: "key2", auth: "auth2" },
+      { id: "sub-1", ...SUB_ROW_1 },
+      { id: "sub-2", ...SUB_ROW_2 },
     ]);
     mockWebpushSendNotification
       .mockResolvedValueOnce({})
@@ -138,7 +148,7 @@ describe("sendPushNotification (push.ts)", () => {
 
   it("should remove expired subscriptions (410)", async () => {
     mockDbSelectWhere.mockResolvedValue([
-      { id: "sub-1", endpoint: "https://push1.example.com", p256dh: "key1", auth: "auth1" },
+      { id: "sub-1", ...SUB_ROW_1 },
     ]);
     mockWebpushSendNotification.mockRejectedValue({ statusCode: 410 });
     mockDbReturning.mockResolvedValue([{ id: "notif-1" }]);
@@ -169,6 +179,98 @@ describe("sendPushNotification (push.ts)", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("DB failure");
+  });
+});
+
+describe("sendPushNotification — obrona w głębi (wiersze sprzed allowlisty)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useRealTimers();
+    mockDbSelect.mockReturnValue({ from: mockDbSelectFrom });
+    mockDbSelectFrom.mockReturnValue({ where: mockDbSelectWhere });
+    mockDbInsertInto.mockReturnValue({ values: mockDbValues });
+    mockDbValues.mockReturnValue({ returning: mockDbReturning });
+    mockDbDelete.mockReturnValue({ where: _mockDbDeleteWhere });
+    _mockDbDeleteWhere.mockResolvedValue(undefined);
+    mockDbReturning.mockResolvedValue([{ id: "notif-1" }]);
+  });
+
+  it.each([
+    ["metadane chmury", "http://169.254.169.254/computeMetadata/v1/"],
+    ["obcy host", "https://evil.example/fcm/send/abc"],
+    ["sufiks doklejony do FCM", "https://fcm.googleapis.com.evil.example/fcm/send/abc"],
+    ["port", "https://fcm.googleapis.com:8443/fcm/send/abc"],
+  ])("pomija i usuwa zapisany endpoint: %s", async (_name, endpoint) => {
+    mockDbSelectWhere.mockResolvedValue([
+      { id: "sub-bad", endpoint, p256dh: VALID_P256DH, auth: VALID_AUTH },
+      { id: "sub-ok", ...SUB_ROW_1 },
+    ]);
+    mockWebpushSendNotification.mockResolvedValue({});
+
+    const result = await sendPushNotification("user-1", { title: "T", body: "B", salonId: "salon-1" });
+
+    expect(mockWebpushSendNotification).toHaveBeenCalledTimes(1);
+    expect(mockWebpushSendNotification.mock.calls[0]?.[0]).toMatchObject({ endpoint: SUB_ROW_1.endpoint });
+    for (const call of mockWebpushSendNotification.mock.calls) {
+      expect((call[0] as { endpoint: string }).endpoint).not.toBe(endpoint);
+    }
+    expect(mockDbDelete).toHaveBeenCalledTimes(1);
+    expect(_mockDbDeleteWhere).toHaveBeenCalledWith({ type: "eq", args: ["pushSubscriptions.id", "sub-bad"] });
+    expect(result).toMatchObject({ success: true, sent: 1, failed: 1 });
+  });
+
+  it("pomija wiersz z nieprawidłowymi kluczami", async () => {
+    mockDbSelectWhere.mockResolvedValue([
+      { id: "sub-bad", endpoint: VALID_ENDPOINTS.chromeFcm, p256dh: "key1", auth: "auth1" },
+    ]);
+
+    const result = await sendPushNotification("user-1", { title: "T", body: "B", salonId: "salon-1" });
+
+    expect(mockWebpushSendNotification).not.toHaveBeenCalled();
+    expect(mockDbDelete).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ success: false, sent: 0, failed: 1 });
+  });
+
+  it("przekazuje timeout gniazda do web-push", async () => {
+    mockDbSelectWhere.mockResolvedValue([{ id: "sub-1", ...SUB_ROW_1 }]);
+    mockWebpushSendNotification.mockResolvedValue({});
+
+    await sendPushNotification("user-1", { title: "T", body: "B", salonId: "salon-1" });
+
+    expect(mockWebpushSendNotification.mock.calls[0]?.[2]).toMatchObject({ timeout: PUSH_SEND_TIMEOUT_MS });
+  });
+
+  it("wiszący endpoint nie blokuje pozostałych: równolegle i z twardym terminem", async () => {
+    vi.useFakeTimers();
+    mockDbSelectWhere.mockResolvedValue([
+      { id: "sub-hang", ...SUB_ROW_1 },
+      { id: "sub-ok", ...SUB_ROW_2 },
+    ]);
+    mockWebpushSendNotification.mockImplementation((sub: { endpoint: string }) =>
+      sub.endpoint === SUB_ROW_1.endpoint ? new Promise(() => {}) : Promise.resolve({})
+    );
+
+    const pending = sendPushNotification("user-1", { title: "T", body: "B", salonId: "salon-1" });
+    await vi.advanceTimersByTimeAsync(0);
+    // Druga wysyłka ruszyła, choć pierwsza wisi (nie sekwencyjnie)
+    expect(mockWebpushSendNotification).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(PUSH_SEND_DEADLINE_MS);
+    const result = await pending;
+    expect(result).toMatchObject({ success: true, sent: 1, failed: 1 });
+    // timeout to nie 404/410 — subskrypcji nie usuwamy
+    expect(mockDbDelete).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("salonId null: wysyłka bez rekordu notifications", async () => {
+    mockDbSelectWhere.mockResolvedValue([{ id: "sub-1", ...SUB_ROW_1 }]);
+    mockWebpushSendNotification.mockResolvedValue({});
+
+    const result = await sendPushNotification("user-1", { title: "T", body: "B", salonId: null });
+
+    expect(result).toMatchObject({ success: true, sent: 1, failed: 0 });
+    expect(mockDbInsertInto).not.toHaveBeenCalled();
   });
 });
 

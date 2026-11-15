@@ -1,5 +1,10 @@
 import webpush from "web-push";
 import { logger } from "@/lib/logger";
+import {
+  PUSH_SEND_TIMEOUT_MS,
+  isValidPushSubscription,
+  withPushDeadline,
+} from "@/lib/push-subscription";
 
 /**
  * Initialize web-push with VAPID details.
@@ -28,6 +33,10 @@ export function isPushConfigured(): boolean {
 
 /**
  * Send a push notification to a specific subscription.
+ *
+ * Subskrypcja spoza allowlisty usług push (lib/push-subscription.ts) nie
+ * dostaje żądania: wynik `invalidSubscription: true` — wywołujący powinien
+ * usunąć ją z bazy, tak jak przy 404/410.
  */
 export async function sendPushNotification(
   subscription: {
@@ -45,20 +54,35 @@ export async function sendPushNotification(
     tag?: string;
     data?: Record<string, unknown>;
   }
-): Promise<{ success: boolean; error?: string | undefined; statusCode?: number | undefined }> {
+): Promise<{
+  success: boolean;
+  error?: string | undefined;
+  statusCode?: number | undefined;
+  invalidSubscription?: boolean | undefined;
+}> {
+  if (
+    !isValidPushSubscription({
+      endpoint: subscription?.endpoint,
+      p256dh: subscription?.keys?.p256dh,
+      auth: subscription?.keys?.auth,
+    })
+  ) {
+    logger.warn("Skipping web push to invalid subscription endpoint or keys");
+    return { success: false, error: "Invalid push subscription", invalidSubscription: true };
+  }
+
   const wp = getWebPush();
   if (!wp) {
     return { success: false, error: "VAPID keys not configured" };
   }
 
   try {
-    const result = await wp.sendNotification(
-      subscription,
-      JSON.stringify(payload),
-      {
+    const result = await withPushDeadline(
+      wp.sendNotification(subscription, JSON.stringify(payload), {
         TTL: 86400, // 24 hours in seconds
         urgency: "high",
-      }
+        timeout: PUSH_SEND_TIMEOUT_MS,
+      })
     );
 
     logger.info("Web push notification sent", { endpoint: subscription.endpoint.slice(0, 50), statusCode: result.statusCode });

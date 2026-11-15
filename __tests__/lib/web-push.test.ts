@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { PUSH_SEND_TIMEOUT_MS } from "@/lib/push-subscription";
+import { validSubscription } from "../fixtures/push-subscriptions";
+
+const VALID_SUB = validSubscription();
 
 // Mock web-push before importing the module
 vi.mock("web-push", () => ({
@@ -58,7 +62,7 @@ describe("web-push module", () => {
       const { sendPushNotification } = await import("@/lib/web-push");
 
       const result = await sendPushNotification(
-        { endpoint: "https://push.example.com", keys: { p256dh: "key", auth: "auth" } },
+        VALID_SUB,
         { title: "Test", body: "Test body" }
       );
 
@@ -79,7 +83,7 @@ describe("web-push module", () => {
       const { sendPushNotification } = await import("@/lib/web-push");
 
       const result = await sendPushNotification(
-        { endpoint: "https://push.example.com", keys: { p256dh: "key", auth: "auth" } },
+        VALID_SUB,
         { title: "Test", body: "Test body" }
       );
 
@@ -101,7 +105,7 @@ describe("web-push module", () => {
       const { sendPushNotification } = await import("@/lib/web-push");
 
       const result = await sendPushNotification(
-        { endpoint: "https://push.example.com", keys: { p256dh: "key", auth: "auth" } },
+        VALID_SUB,
         { title: "Test", body: "Test body" }
       );
 
@@ -124,7 +128,7 @@ describe("web-push module", () => {
       const { sendPushNotification } = await import("@/lib/web-push");
 
       const result = await sendPushNotification(
-        { endpoint: "https://push.example.com", keys: { p256dh: "key", auth: "auth" } },
+        VALID_SUB,
         { title: "Test", body: "Test body" }
       );
 
@@ -146,13 +150,47 @@ describe("web-push module", () => {
       const { sendPushNotification } = await import("@/lib/web-push");
 
       const result = await sendPushNotification(
-        { endpoint: "https://push.example.com", keys: { p256dh: "key", auth: "auth" } },
+        VALID_SUB,
         { title: "Test", body: "Test body" }
       );
 
       expect(result.success).toBe(false);
       expect(result.statusCode).toBe(500);
       expect(result.error).toBe("Internal Server Error");
+    });
+
+    it("passes socket timeout to web-push", async () => {
+      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY = "public-key";
+      process.env.VAPID_PRIVATE_KEY = "private-key";
+      const webpush = (await import("web-push")).default;
+      const send = webpush.sendNotification as ReturnType<typeof vi.fn>;
+      send.mockResolvedValue({ statusCode: 201 });
+
+      const { sendPushNotification } = await import("@/lib/web-push");
+      await sendPushNotification(VALID_SUB, { title: "Test", body: "Test body" });
+
+      expect(send.mock.calls.at(-1)?.[2]).toMatchObject({ timeout: PUSH_SEND_TIMEOUT_MS });
+    });
+
+    it.each([
+      ["metadane chmury", "http://169.254.169.254/computeMetadata/v1/"],
+      ["obcy host", "https://evil.example/x"],
+      ["sufiks doklejony do FCM", "https://fcm.googleapis.com.evil.example/fcm/send/x"],
+    ])("does not send to endpoint outside allowlist: %s", async (_name, endpoint) => {
+      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY = "public-key";
+      process.env.VAPID_PRIVATE_KEY = "private-key";
+      const webpush = (await import("web-push")).default;
+      const send = webpush.sendNotification as ReturnType<typeof vi.fn>;
+      send.mockClear();
+
+      const { sendPushNotification } = await import("@/lib/web-push");
+      const result = await sendPushNotification(
+        { endpoint, keys: VALID_SUB.keys },
+        { title: "Test", body: "Test body" }
+      );
+
+      expect(send).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ success: false, invalidSubscription: true });
     });
   });
 });
