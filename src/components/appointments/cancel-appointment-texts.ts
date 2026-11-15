@@ -6,10 +6,9 @@
  * zawsze zwraca zadatek w całości (RF1, `depositForfeited` zawsze false).
  */
 import type { CancellationDepositVariant } from "@/lib/salon-cancellation";
+import { SUPPORT_CONTACT } from "@/lib/support-contact";
 
-// TODO(Darek): prawdziwy kontakt do wsparcia (adres e-mail albo telefon).
-// Nie link do /contact (404). Do czasu podania wartości — wypełniacz.
-export const SUPPORT_CONTACT = "[kontakt do wsparcia MyHelper]";
+export { SUPPORT_CONTACT };
 
 export const CANCEL_DIALOG_TITLE = "Odwołać wizytę?";
 export const CANCEL_DIALOG_CONFIRM = "Odwołaj wizytę";

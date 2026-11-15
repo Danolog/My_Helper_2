@@ -60,7 +60,8 @@ describe("RF3 — teksty (dosłownie)", () => {
     expect(refundFailedToastDescription(50)).toBe(
       `Zadatek 50.00 PLN nie wrócił do klienta automatycznie. Napisz do nas: ${SUPPORT_CONTACT}, a zwrócimy go ręcznie. Nie oddawaj zadatku z kasy salonu, bo te pieniądze są na naszym koncie.`
     );
-    expect(SUPPORT_CONTACT).not.toContain("/contact");
+    expect(SUPPORT_CONTACT).toBe("dg@nordsignal.cc");
+    expect(refundFailedToastDescription(50)).toContain("Napisz do nas: dg@nordsignal.cc, a zwrócimy");
   });
 
   it("żaden tekst salonu nie mówi o SMS ani o utracie zadatku", () => {
