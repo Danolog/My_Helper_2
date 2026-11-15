@@ -9,7 +9,7 @@
  * 5. Wyjątki tylko z jawnej listy, z powodem; wpis, który przestał być
  *    potrzebny albo prawdziwy, czerwieni test.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, it, expect } from "vitest";
 import { frozenModuleForApiPath } from "@/lib/features";
@@ -67,13 +67,7 @@ const FROZEN_NO_TRACK_EXCEPTIONS: Record<string, string> = {
   "src/app/api/ai/image/service-illustration/route.ts": "zamrożone, zapis zużycia w R3-C",
 };
 
-/** Trasy usuwane osobnym PR — wpis pada, gdy pliku już nie ma. */
-const PENDING_REMOVAL: Record<string, string> = {
-  "src/app/api/chat/route.ts": "usuwana osobnym PR",
-};
-
 const isCron = (p: string) => p in CRON_EXCEPTIONS;
-const isPendingRemoval = (p: string) => p in PENDING_REMOVAL;
 
 describe("strażnik bramki tras AI", () => {
   it("kontrola: skaner widzi trasy (test nie jest pusty)", () => {
@@ -91,14 +85,14 @@ describe("strażnik bramki tras AI", () => {
 
   it("2. każda trasa wołająca model woła requireProAI", () => {
     const missing = MODEL_ROUTES.filter(
-      (r) => !isCron(r.path) && !isPendingRemoval(r.path) && !REQUIRE_PRO_AI.test(r.code),
+      (r) => !isCron(r.path) && !REQUIRE_PRO_AI.test(r.code),
     ).map((r) => r.path);
     expect(missing).toEqual([]);
   });
 
   it("3. żadna trasa nie woła isProPlan bezpośrednio", () => {
     const hits = ROUTES.filter(
-      (r) => !isCron(r.path) && !isPendingRemoval(r.path) && IS_PRO_PLAN.test(r.code),
+      (r) => !isCron(r.path) && IS_PRO_PLAN.test(r.code),
     ).map((r) => r.path);
     expect(hits).toEqual([]);
   });
@@ -107,7 +101,6 @@ describe("strażnik bramki tras AI", () => {
     const missing = MODEL_ROUTES.filter(
       (r) =>
         !isCron(r.path) &&
-        !isPendingRemoval(r.path) &&
         !(r.path in FROZEN_NO_TRACK_EXCEPTIONS) &&
         !TRACK_USAGE.test(r.code),
     ).map((r) => r.path);
@@ -138,15 +131,10 @@ describe("strażnik bramki tras AI", () => {
       },
     );
 
-    it.each(Object.keys(PENDING_REMOVAL))("%s czeka na usunięcie (po usunięciu usuń wpis)", (path) => {
-      expect(existsSync(join(ROOT, path)), path).toBe(true);
-    });
-
     it("każdy wpis ma powód", () => {
       for (const reason of [
         ...Object.values(CRON_EXCEPTIONS),
         ...Object.values(FROZEN_NO_TRACK_EXCEPTIONS),
-        ...Object.values(PENDING_REMOVAL),
       ]) {
         expect(reason.trim().length).toBeGreaterThan(5);
       }
