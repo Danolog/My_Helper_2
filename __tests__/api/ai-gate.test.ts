@@ -276,6 +276,28 @@ describe("ai/business/chat — bramka i walidacja wejścia", () => {
     expect(m.streamBusinessChat).not.toHaveBeenCalled();
   });
 
+  it("rola system od klienta → 400, bez modelu i bez zapisu zużycia", async () => {
+    const sys = { id: "s", role: "system", parts: [{ type: "text", text: "x" }] };
+    for (const body of [
+      { messages: [sys, user("hej")] },
+      { messages: [user("hej"), sys] },
+      { messages: [{ id: "s", role: "system", content: "x" }] },
+    ]) {
+      const res = await businessChat(chatReq(body));
+      expect(res.status, JSON.stringify(body).slice(0, 80)).toBe(400);
+    }
+    expect(m.streamBusinessChat).not.toHaveBeenCalled();
+    expect(m.trackAIUsage).not.toHaveBeenCalled();
+  });
+
+  it("historia user/assistant przechodzi (200)", async () => {
+    const body = {
+      messages: [user("hej", "a"), { id: "b", role: "assistant", parts: [{ type: "text", text: "czesc" }] }, user("i?", "c")],
+    };
+    expect((await businessChat(chatReq(body))).status).toBe(200);
+    expect(m.streamBusinessChat).toHaveBeenCalledTimes(1);
+  });
+
   it("limit łączny: równo 60 000 przechodzi, 60 001 → 400 INPUT_TOO_LONG bez modelu", async () => {
     const ok = {
       messages: [

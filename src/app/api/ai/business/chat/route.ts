@@ -17,7 +17,8 @@ const messagePartSchema = z.object({
 
 const messageSchema = z.object({
   id: z.string().max(128).optional(),
-  role: z.enum(["user", "assistant", "system"]),
+  // Prompt systemowy należy wyłącznie do serwera — rola system od klienta = 400.
+  role: z.enum(["user", "assistant"]),
   parts: z.array(messagePartSchema).max(MAX_PARTS).optional(),
   content: z
     .union([
