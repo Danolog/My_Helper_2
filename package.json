@@ -1,4 +1,7 @@
 {
+  "//": [
+    "pnpm.overrides axios@<1.20.0 i follow-redirects@<1.16.2: drzewo twilio (twilio>axios>follow-redirects). Usunąć po B3 (usunięcie twilio). #68"
+  ],
   "name": "myhelper",
   "version": "1.1.2",
   "scripts": {
@@ -103,7 +106,8 @@
     "overrides": {
       "@types/react": "19.2.5",
       "@types/react-dom": "19.2.3",
-      "axios": ">=1.15.1",
+      "axios@<1.20.0": "^1.20.0",
+      "follow-redirects@<1.16.2": "^1.16.2",
       "protobufjs": ">=7.5.5",
       "path-to-regexp": ">=8.4.2",
       "hono": ">=4.12.25",
