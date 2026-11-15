@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from '../fixtures';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -16,9 +16,17 @@ async function loginAsClient(page: Page) {
   await page.waitForTimeout(500);
   await page.fill('#email', CLIENT_CREDENTIALS.email);
   await page.fill('#password', CLIENT_CREDENTIALS.password);
+  // Po udanym logowaniu klient Better Auth robi pelne przeladowanie na adres
+  // docelowy (window.location.href = callbackURL, tu /salons). Czekamy na
+  // KONIEC tego ladowania — nasluch ustawiony przed kliknieciem.
+  // Poprzedni wzorzec /(salons|appointments|dashboard|portal)/ pasowal tez do
+  // samego /portal/login: helper wracal natychmiast, a nastepne page.goto()
+  // zrywalo trwajace zadanie logowania (test szedl dalej niezalogowany) albo
+  // samo bylo przerywane przez to przeladowanie.
+  const redirectedAfterLogin = page.waitForEvent('load', { timeout: 20000 });
   await page.locator('form button[type="submit"]').click();
-  // Wait for redirect or for page to change (login can be slow in CI)
-  await page.waitForURL(/\/(salons|appointments|dashboard|portal)/, { timeout: 45000 });
+  await redirectedAfterLogin;
+  await expect(page).toHaveURL(/\/salons/);
 }
 
 // ---------------------------------------------------------------------------

@@ -223,7 +223,7 @@ export function useBookingData(): UseBookingDataReturn {
     async function fetchClientDepositSettings() {
       try {
         const res = await fetch(
-          `/api/clients/deposit-settings?salonId=${salonId}&email=${encodeURIComponent(session!.user!.email!)}`,
+          `/api/clients/deposit-settings?salonId=${salonId}`,
           { signal: abortController.signal },
         );
         const json = await res.json();

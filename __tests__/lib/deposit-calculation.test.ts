@@ -312,7 +312,7 @@ describe("calculateExpectedDeposit — promocja pierwszej wizyty jest zamrozona"
 
     const result = await calculateExpectedDeposit({
       ...baseParams,
-      sessionEmail: "nowy.user@example.com",
+      sessionUser: { email: "nowy.user@example.com", emailVerified: true },
     });
 
     expect(result).toMatchObject({ ok: true, amount: 30 });
@@ -337,7 +337,7 @@ describe("calculateExpectedDeposit — happy hours obok zamrozonej pierwszej wiz
 
     const result = await calculateExpectedDeposit({
       ...baseParams,
-      sessionEmail: "user@example.com",
+      sessionUser: { email: "user@example.com", emailVerified: true },
     });
     expect(result).toMatchObject({ ok: true, amount: 24 });
   });
@@ -377,7 +377,7 @@ describe("calculateExpectedDeposit — ustawienia zadatku klienta (nadpisuja usl
 
     const result = await calculateExpectedDeposit({
       ...baseParams,
-      sessionEmail: "vip@example.com",
+      sessionUser: { email: "vip@example.com", emailVerified: true },
     });
     expect(result).toEqual({
       ok: true,
@@ -396,7 +396,7 @@ describe("calculateExpectedDeposit — ustawienia zadatku klienta (nadpisuja usl
 
     const result = await calculateExpectedDeposit({
       ...baseParams,
-      sessionEmail: "ryzykowny@example.com",
+      sessionUser: { email: "ryzykowny@example.com", emailVerified: true },
     });
     // ceil(100 * 50%) = 50, a nie 30 z uslugi
     expect(result).toMatchObject({ ok: true, required: true, amount: 50 });
@@ -411,9 +411,27 @@ describe("calculateExpectedDeposit — ustawienia zadatku klienta (nadpisuja usl
 
     const result = await calculateExpectedDeposit({
       ...baseParams,
-      sessionEmail: "zero@example.com",
+      sessionUser: { email: "zero@example.com", emailVerified: true },
     });
     expect(result).toMatchObject({ ok: true, required: true, amount: 0 });
+  });
+
+  it("niezweryfikowany e-mail sesji => brak dopasowania do kartoteki klienta (strazniki client-match)", async () => {
+    queueSelect(
+      [{ ...baseService, depositRequired: false }],
+      /* happy hours */ [],
+      /* pulapka: kartoteka klienta B — nie moze zostac odczytana */
+      [{ requireDeposit: true, depositType: "fixed", depositValue: "99" }]
+    );
+
+    const result = await calculateExpectedDeposit({
+      ...baseParams,
+      sessionUser: { email: "vip@example.com", emailVerified: false },
+    });
+
+    expect(result).toMatchObject({ ok: true, required: false, amount: 0 });
+    // tylko usluga + happy hours — zadnego zapytania o klienta
+    expect(mockDbSelect).toHaveBeenCalledTimes(2);
   });
 
   it("brak kartoteki klienta => obowiazuja ustawienia uslugi", async () => {
@@ -421,7 +439,7 @@ describe("calculateExpectedDeposit — ustawienia zadatku klienta (nadpisuja usl
 
     const result = await calculateExpectedDeposit({
       ...baseParams,
-      sessionEmail: "nieznany@example.com",
+      sessionUser: { email: "nieznany@example.com", emailVerified: true },
     });
     expect(result).toMatchObject({ ok: true, required: true, amount: 30 });
   });

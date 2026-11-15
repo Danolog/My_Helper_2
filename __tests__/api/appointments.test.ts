@@ -9,7 +9,7 @@
  * - DELETE /api/appointments/[id] (cancel with deposit rules)
  */
 import { eq } from "drizzle-orm";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createMockRequest,
   createRouteParams,
@@ -204,6 +204,28 @@ vi.mock("@/lib/salon-context", () => ({
   }),
   hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
 }));
+
+// P1 (Ryan): przynależność clientId/employeeId/serviceId do salonu.
+// Helper ma własne testy (__tests__/lib/salon-refs.test.ts) — tu sprawdzamy,
+// że trasa go woła z właściwymi id i honoruje odrzucenie. Domyślnie: OK (null).
+const mockAssertSalonRefs = vi.fn(async (..._args: unknown[]): Promise<Response | null> => null);
+vi.mock("@/lib/salon-refs", () => ({
+  assertSalonRefs: (...args: unknown[]) => mockAssertSalonRefs(...args),
+  SALON_REF_ERROR: "Nieprawidlowe dane dla tego salonu",
+}));
+
+// SMS potwierdzenia — atrapa (zero realnych wysyłek w testach).
+const mockSendBookingSms = vi.fn(async (..._args: unknown[]) => undefined);
+vi.mock("@/lib/sms", () => ({
+  sendBookingConfirmationSms: (...args: unknown[]) => mockSendBookingSms(...args),
+}));
+
+function salonRefRejection() {
+  return new Response(
+    JSON.stringify({ success: false, error: "Nieprawidlowe dane dla tego salonu" }),
+    { status: 400, headers: { "Content-Type": "application/json" } }
+  );
+}
 
 // -------------------------------------------------------
 // Helper to build a chainable mock with specific result
@@ -1053,6 +1075,93 @@ describe("POST /api/appointments", () => {
     expect(body.error).toContain("min. 2 znaki");
   });
 
+  // -------------------------------------------------------
+  // bookedByUserId: tylko z sesji. Wczesniej brany z body, wiec wizyte mozna
+  // bylo przypisac do cudzego konta (portal klienta, odwolanie, opinia,
+  // przypomnienia push trafialy do ofiary).
+  // -------------------------------------------------------
+
+  describe("bookedByUserId tylko z sesji", () => {
+    const VICTIM_USER_ID = "victim-user-id";
+
+    function arrangeInsert() {
+      const insertChain = chainMock([makeAppointment()]);
+      mockDbSelect
+        .mockReturnValueOnce(chainMock([]))
+        .mockReturnValueOnce(chainMock([]));
+      mockDbInsert.mockReturnValue(insertChain);
+      return insertChain;
+    }
+
+    function bookedByOf(insertChain: ReturnType<typeof chainMock>) {
+      return (insertChain.values!.mock.calls[0]![0] as Record<string, unknown>).bookedByUserId;
+    }
+
+    it("zalogowany: bookedByUserId z body jest ignorowany, zapisany jest uzytkownik sesji", async () => {
+      const insertChain = arrangeInsert();
+
+      const response = await createAppointment(
+        createMockRequest("http://localhost:3000/api/appointments", {
+          method: "POST",
+          body: {
+            salonId: TEST_IDS.SALON_UUID,
+            employeeId: TEST_IDS.EMPLOYEE_UUID,
+            clientId: TEST_IDS.CLIENT_UUID,
+            startTime: "2026-04-01T10:00:00Z",
+            endTime: "2026-04-01T11:00:00Z",
+            bookedByUserId: VICTIM_USER_ID,
+          },
+        })
+      );
+
+      expect(response.status).toBe(201);
+      expect(bookedByOf(insertChain)).toBe("test-user-id");
+    });
+
+    it("gosc: bookedByUserId z body jest ignorowany, zapisany jest null", async () => {
+      const { getOptionalSession } = await import("@/lib/session");
+      vi.mocked(getOptionalSession).mockResolvedValueOnce(null);
+      const insertChain = arrangeInsert();
+
+      const response = await createAppointment(
+        createMockRequest("http://localhost:3000/api/appointments", {
+          method: "POST",
+          body: {
+            salonId: TEST_IDS.SALON_UUID,
+            employeeId: TEST_IDS.EMPLOYEE_UUID,
+            startTime: "2026-04-01T10:00:00Z",
+            endTime: "2026-04-01T11:00:00Z",
+            guestName: "Jan Kowalski",
+            guestPhone: "123456789",
+            bookedByUserId: VICTIM_USER_ID,
+          },
+        })
+      );
+
+      expect(response.status).toBe(201);
+      expect(bookedByOf(insertChain)).toBeNull();
+    });
+
+    it("zalogowany bez bookedByUserId w body: zapisany jest uzytkownik sesji", async () => {
+      const insertChain = arrangeInsert();
+
+      const response = await createAppointment(
+        createMockRequest("http://localhost:3000/api/appointments", {
+          method: "POST",
+          body: {
+            salonId: TEST_IDS.SALON_UUID,
+            employeeId: TEST_IDS.EMPLOYEE_UUID,
+            startTime: "2026-04-01T10:00:00Z",
+            endTime: "2026-04-01T11:00:00Z",
+          },
+        })
+      );
+
+      expect(response.status).toBe(201);
+      expect(bookedByOf(insertChain)).toBe("test-user-id");
+    });
+  });
+
   it("should return 429 for a GUEST when strict rate limit is exceeded", async () => {
     // Guest (no session) uses the strict limiter (5/min anti-abuse)
     const { getOptionalSession } = await import("@/lib/session");
@@ -1373,6 +1482,183 @@ describe("POST /api/appointments — rabat liczony przez serwer (P1)", () => {
   });
 });
 
+// -------------------------------------------------------
+// P1 (Ryan): clientId/employeeId/serviceId z body POST musza nalezec do
+// salonu wizyty; gosc nie podpina cudzego klienta; depositAmount z body
+// ignorowany (zadatek tylko przez /api/deposits/create-session).
+// -------------------------------------------------------
+
+describe("POST /api/appointments — referencje z body nalezace do salonu (P1)", () => {
+  const FOREIGN_CLIENT_UUID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+  function arrange() {
+    const insertChain = chainMock([makeAppointment()]);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([])) // overlap
+      .mockReturnValueOnce(chainMock([])) // blokady czasu
+      .mockReturnValue(chainMock([])); // szczegoly do SMS
+    mockDbInsert.mockReturnValue(insertChain);
+    return insertChain;
+  }
+
+  function req(extra: Record<string, unknown> = {}) {
+    return createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        serviceId: TEST_IDS.SERVICE_UUID,
+        clientId: TEST_IDS.CLIENT_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+        ...extra,
+      },
+    });
+  }
+
+  function inserted(insertChain: ReturnType<typeof chainMock>) {
+    return insertChain.values!.mock.calls[0]![0] as Record<string, unknown>;
+  }
+
+  async function asGuest() {
+    const { getOptionalSession } = await import("@/lib/session");
+    vi.mocked(getOptionalSession).mockResolvedValueOnce(null);
+    // Wczesniejsze testy limitu (429) zostawiaja strict limiter wyczerpany.
+    const { strictRateLimit } = await import("@/lib/rate-limit");
+    vi.mocked(strictRateLimit.check).mockReturnValue({ success: true, remaining: 4, reset: 60000 });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  // Niezuzyte mockReturnValueOnce nie moga przeciec do kolejnych describe.
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    mockAssertSalonRefs.mockReset();
+    mockAssertSalonRefs.mockImplementation(async () => null);
+    mockGetSalonContext.mockReset();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  it("personel: sprawdza clientId, employeeId i serviceId w salonie wizyty", async () => {
+    arrange();
+    const res = await createAppointment(req());
+    expect(res.status).toBe(201);
+    expect(mockAssertSalonRefs).toHaveBeenCalledWith(TEST_IDS.SALON_UUID, {
+      clientId: TEST_IDS.CLIENT_UUID,
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      serviceId: TEST_IDS.SERVICE_UUID,
+    });
+  });
+
+  it("obcy clientId/employeeId/serviceId -> 400, bez sprawdzania kolizji, zapisu i SMS", async () => {
+    mockAssertSalonRefs.mockResolvedValueOnce(salonRefRejection());
+    arrange();
+    const res = await createAppointment(req({ clientId: FOREIGN_CLIENT_UUID }));
+    const { status, body } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(body).toEqual({ success: false, error: "Nieprawidlowe dane dla tego salonu" });
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockSendBookingSms).not.toHaveBeenCalled();
+  });
+
+  it("gosc: obcy employeeId (inny salon) -> 400 — nie blokuje kalendarza innego salonu", async () => {
+    await asGuest();
+    mockAssertSalonRefs.mockResolvedValueOnce(salonRefRejection());
+    arrange();
+    const res = await createAppointment(
+      req({ clientId: undefined, guestName: "Jan Kowalski", guestPhone: "123456789" })
+    );
+    expect(res.status).toBe(400);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("gosc: clientId z body jest ignorowany (zapis null, nie sprawdzany, SMS na telefon goscia)", async () => {
+    await asGuest();
+    // Szczegoly do SMS: brak klienta (clientId null) -> telefon goscia
+    const insertChain = chainMock([makeAppointment({ clientId: null })]);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(
+        chainMock([
+          {
+            clientFirstName: null,
+            clientPhone: null,
+            serviceName: "Strzyzenie",
+            employeeFirstName: "Anna",
+            employeeLastName: "Nowak",
+            salonName: "Salon",
+          },
+        ])
+      );
+    mockDbInsert.mockReturnValue(insertChain);
+
+    const res = await createAppointment(
+      req({ clientId: FOREIGN_CLIENT_UUID, guestName: "Jan Kowalski", guestPhone: "123456789" })
+    );
+
+    expect(res.status).toBe(201);
+    expect(inserted(insertChain).clientId).toBeNull();
+    expect(mockAssertSalonRefs).toHaveBeenCalledWith(TEST_IDS.SALON_UUID, {
+      clientId: null,
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      serviceId: TEST_IDS.SERVICE_UUID,
+    });
+    expect(mockSendBookingSms).toHaveBeenCalledTimes(1);
+    const sms = mockSendBookingSms.mock.calls[0]![0] as Record<string, unknown>;
+    expect(sms.clientPhone).toBe("123456789");
+    expect(sms).not.toHaveProperty("clientId");
+  });
+
+  it("zalogowany klient portalu (bez kontekstu salonu): clientId z body ignorowany", async () => {
+    mockGetSalonContext.mockResolvedValueOnce(null);
+    const insertChain = arrange();
+    const res = await createAppointment(req({ clientId: FOREIGN_CLIENT_UUID }));
+    expect(res.status).toBe(201);
+    expect(inserted(insertChain).clientId).toBeNull();
+  });
+
+  it("clientId 'none' (sentinel) zapisuje null", async () => {
+    const insertChain = arrange();
+    const res = await createAppointment(req({ clientId: "none" }));
+    expect(res.status).toBe(201);
+    expect(inserted(insertChain).clientId).toBeNull();
+  });
+
+  it("depositAmount z body jest ignorowany (null) i nie wylacza potwierdzenia SMS", async () => {
+    const insertChain = chainMock([makeAppointment({ depositAmount: null })]);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(
+        chainMock([
+          {
+            clientFirstName: "Ewa",
+            clientPhone: "500600700",
+            serviceName: "Strzyzenie",
+            employeeFirstName: "Anna",
+            employeeLastName: "Nowak",
+            salonName: "Salon",
+          },
+        ])
+      );
+    mockDbInsert.mockReturnValue(insertChain);
+
+    const res = await createAppointment(req({ depositAmount: "0.01" }));
+
+    expect(res.status).toBe(201);
+    expect(inserted(insertChain).depositAmount).toBeNull();
+    expect(mockSendBookingSms).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("GET /api/appointments/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1603,6 +1889,114 @@ describe("PUT /api/appointments/[id]", () => {
     expect(status).toBe(500);
     expect(body.success).toBe(false);
     expect(body.error).toContain("Failed to update appointment");
+  });
+});
+
+// -------------------------------------------------------
+// P1 (Ryan): PUT — clientId/employeeId/serviceId z body musza nalezec do
+// salonu; depositAmount/depositPaid zmienia tylko wlasciciel (pracownik nie
+// "oplaca" zadatku recznie; normalnie ustawia go potwierdzenie platnosci).
+// -------------------------------------------------------
+
+describe("PUT /api/appointments/[id] — referencje i zadatek (P1)", () => {
+  const RECEPTION_CTX = { ...EMPLOYEE_CTX, role: "receptionist" as const, employeeId: null };
+
+  function arrange() {
+    const updateChain = chainMock([makeAppointment()]);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([makeAppointment()])) // findOne
+      .mockReturnValueOnce(chainMock([])); // overlap
+    mockDbUpdate.mockReturnValue(updateChain);
+    return updateChain;
+  }
+
+  function put(body: Record<string, unknown>) {
+    return updateAppointment(
+      createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+        method: "PUT",
+        body,
+      }),
+      createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+    );
+  }
+
+  function updated(updateChain: ReturnType<typeof chainMock>) {
+    return updateChain.set!.mock.calls[0]![0] as Record<string, unknown>;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+    mockAssertSalonRefs.mockReset();
+    mockAssertSalonRefs.mockImplementation(async () => null);
+    mockGetSalonContext.mockReset();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  it("sprawdza clientId, employeeId i serviceId w salonie z sesji", async () => {
+    arrange();
+    const res = await put({
+      clientId: TEST_IDS.CLIENT_UUID,
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      serviceId: TEST_IDS.SERVICE_UUID,
+    });
+    expect(res.status).toBe(200);
+    expect(mockAssertSalonRefs).toHaveBeenCalledWith(TEST_IDS.SALON_UUID, {
+      clientId: TEST_IDS.CLIENT_UUID,
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      serviceId: TEST_IDS.SERVICE_UUID,
+    });
+  });
+
+  it("obcy clientId/employeeId/serviceId -> 400 i brak zapisu", async () => {
+    mockAssertSalonRefs.mockResolvedValueOnce(salonRefRejection());
+    arrange();
+    const res = await put({ employeeId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" });
+    const { status, body } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(body).toEqual({ success: false, error: "Nieprawidlowe dane dla tego salonu" });
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("wyczyszczenie klienta/uslugi (null) nadal dziala", async () => {
+    const updateChain = arrange();
+    const res = await put({ clientId: null, serviceId: null });
+    expect(res.status).toBe(200);
+    expect(updated(updateChain)).toMatchObject({ clientId: null, serviceId: null });
+  });
+
+  it.each([
+    ["pracownik", "depositPaid", true],
+    ["pracownik", "depositAmount", "0.01"],
+    ["recepcja", "depositPaid", true],
+    ["recepcja", "depositAmount", null],
+  ])("%s ustawiajacy %s -> 403, brak zapisu", async (who, field, value) => {
+    mockGetSalonContext.mockResolvedValue(who === "pracownik" ? EMPLOYEE_CTX : RECEPTION_CTX);
+    arrange();
+    const res = await put({ [field]: value });
+    expect(res.status).toBe(403);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("wlasciciel moze ustawic depositPaid (reczne rozliczenie)", async () => {
+    const updateChain = arrange();
+    const res = await put({ depositPaid: true });
+    expect(res.status).toBe(200);
+    expect(updated(updateChain).depositPaid).toBe(true);
+  });
+
+  it("pracownik przenosi wlasna wizyte bez pol zadatku -> 200", async () => {
+    mockGetSalonContext.mockResolvedValue(EMPLOYEE_CTX);
+    arrange();
+    const res = await put({ startTime: "2026-04-01T14:00:00Z", endTime: "2026-04-01T15:00:00Z" });
+    expect(res.status).toBe(200);
   });
 });
 
