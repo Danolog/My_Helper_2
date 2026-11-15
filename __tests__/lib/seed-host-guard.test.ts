@@ -159,6 +159,35 @@ const STRICT_ONLY_URLS = [
   "postgres://u:p%2Css@localhost/db",
 ];
 
+// N1 z ponownej recenzji Ryana (6891756918): postgres.js tnie authority tylko na `[?/]`, nie na `#`.
+const N1_URLS = [
+  "postgres://u:p@localhost#@ep-x.neon.tech,x/db",
+  "postgres://u:p@localhost%23@ep-x.neon.tech,x/db",
+  "postgres://u:p@localhost#frag/db",
+  "postgres://u:p@localhost%23x/db",
+  "postgres://u:p@localhost#x",
+];
+
+describe("N1: # w authority", () => {
+  it.each(N1_URLS)("etap URL odrzuca %s", (url) => {
+    expect(reasonOf(checkSeedTarget(url))).toContain("#");
+  });
+
+  it("URL z Neonem za # jest odrzucany także przez etap klienta", async () => {
+    for (const url of N1_URLS.slice(0, 2)) {
+      expect(checkSeedClientOptions(await clientOptionsOf(url)).ok, url).toBe(false);
+    }
+  });
+
+  it.each([
+    "postgres://u:p@localhost/db#frag",
+    "postgres://u:p@localhost:5432/db#x@ep-x.neon.tech",
+    "postgres://u:p@localhost/db?sslmode=disable#x,y",
+  ])("# za ścieżką lub query nie jest w authority, więc %s przechodzi", (url) => {
+    expect(checkSeedTarget(url)).toEqual({ ok: true, host: "localhost" });
+  });
+});
+
 describe("B1: authority z wieloma @ albo przecinkiem", () => {
   it.each(B1_URLS)("etap URL odrzuca %s", (url) => {
     expect(checkSeedTarget(url).ok).toBe(false);
@@ -229,6 +258,10 @@ describe("zgodność guardu z postgres.js (test Leo)", () => {
     "postgres://u:p@%2Ftmp/db",
     ...B1_URLS,
     ...STRICT_ONLY_URLS,
+    ...N1_URLS,
+    "postgres://u:p@localhost/db#frag",
+    "postgres://u:p@localhost:5432/db#x@ep-x.neon.tech",
+    "postgres://u:p@localhost/db?sslmode=disable#x,y",
   ];
 
   it("każdy URL przepuszczony przez guard ma w options.host wyłącznie hosty z allowlisty i brak path", async () => {

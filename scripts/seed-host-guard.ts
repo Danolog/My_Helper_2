@@ -49,17 +49,23 @@ function displayHost(host: string): string {
 }
 
 /**
- * Część authority tak, jak wycina ją postgres.js: od `://` do pierwszego `/`, `?` lub `#`.
+ * Część authority dokładnie tak, jak wycina ją postgres.js 3.4.8 (`parseUrl`):
+ * od `://` do pierwszego `/` lub `?`. Bez cięcia na `#`, bo postgres.js na `#` nie tnie.
  * `null`, gdy w napisie nie ma `://`.
  */
 function rawAuthority(connectionString: string): string | null {
   const start = connectionString.indexOf("://");
   if (start === -1) return null;
-  return connectionString.slice(start + 3).split(/[/?#]/)[0] ?? "";
+  return connectionString.slice(start + 3).split(/[?/]/)[0] ?? "";
 }
 
+/**
+ * `#` w authority też jest niejednoznaczny: WHATWG URL zaczyna od niego fragment,
+ * a postgres.js traktuje go jako część hosta.
+ */
 function hasAmbiguousAuthority(authority: string): boolean {
-  const ambiguous = (s: string) => (s.match(/@/g)?.length ?? 0) > 1 || s.includes(",");
+  const ambiguous = (s: string) =>
+    (s.match(/@/g)?.length ?? 0) > 1 || s.includes(",") || s.includes("#");
   if (ambiguous(authority)) return true;
   try {
     return ambiguous(decodeURIComponent(authority));
@@ -88,10 +94,11 @@ export function checkSeedTarget(
     return { ok: false, reason: "POSTGRES_URL musi mieć postać postgres(ql)://..." };
   }
   if (hasAmbiguousAuthority(authority)) {
-    // Obejmuje multi-host (`h1,h2`) i hasło z `@`/`%40`: oba parsery muszą widzieć ten sam host.
+    // Obejmuje multi-host (`h1,h2`), hasło z `@`/`%40` i `#`/`%23`: oba parsery muszą widzieć ten sam host.
     return {
       ok: false,
-      reason: "POSTGRES_URL ma w części host więcej niż jeden @ albo przecinek (także zakodowane %40/%2C)",
+      reason:
+        "POSTGRES_URL ma w części host więcej niż jeden @, przecinek albo # (także zakodowane %40/%2C/%23)",
     };
   }
 
