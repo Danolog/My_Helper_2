@@ -23,6 +23,8 @@ interface FetchResult<T> {
  * Features:
  * - Detects network errors vs server errors
  * - Automatic retry with exponential backoff for network failures
+ * - Browser offline (navigator.onLine === false): immediate network error,
+ *   no retries
  * - Timeout support
  * - Returns a retry function for manual retry
  */
@@ -40,22 +42,31 @@ export async function fetchWithRetry<T = unknown>(
   let lastError: unknown = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      // Check if browser is offline before attempting
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        throw new TypeError("Failed to fetch: browser is offline");
-      }
+    // Browser offline: fail fast as a network error, without retries or
+    // backoff. Retrying without a network achieves nothing and would make the
+    // user wait (1 s + 2 s by default). Checked before every attempt, so going
+    // offline during a backoff also stops further retries.
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      lastError = new TypeError("Failed to fetch: browser is offline");
+      break;
+    }
 
+    try {
       // Create AbortController for timeout
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-      const response = await fetch(url, {
-        ...fetchOptions,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          ...fetchOptions,
+          signal: controller.signal,
+        });
+      } finally {
+        // Clear on failure too, otherwise a rejected attempt leaves its
+        // timeout timer pending (up to `timeout` ms) after we give up.
+        clearTimeout(timeoutId);
+      }
 
       const data = await response.json();
 
