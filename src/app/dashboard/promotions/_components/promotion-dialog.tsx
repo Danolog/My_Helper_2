@@ -21,8 +21,26 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import { DAY_NAMES_PL, DAY_FULL_NAMES_PL } from "../_types";
 import type { Promotion, Service } from "../_types";
+
+/**
+ * Typy w wyborze. Typy z FROZEN_PROMOTION_TYPES (src/lib/features.ts) nie są
+ * pokazywane — API i tak odrzuca je 400.
+ */
+const PROMOTION_TYPE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "percentage", label: "Procentowa (%)" },
+  { value: "fixed", label: "Kwotowa (PLN)" },
+  { value: "package", label: "Pakiet" },
+  { value: "buy2get1", label: "2+1 gratis" },
+  { value: "happy_hours", label: "Happy Hours" },
+  { value: "first_visit", label: "Pierwsza wizyta" },
+];
+
+export const AVAILABLE_PROMOTION_TYPE_OPTIONS = PROMOTION_TYPE_OPTIONS.filter(
+  (o) => !isPromotionTypeFrozen(o.value)
+);
 
 interface PromotionDialogProps {
   open: boolean;
@@ -225,12 +243,11 @@ function TypeSelector({
           <SelectValue placeholder="Wybierz typ" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="percentage">Procentowa (%)</SelectItem>
-          <SelectItem value="fixed">Kwotowa (PLN)</SelectItem>
-          <SelectItem value="package">Pakiet</SelectItem>
-          <SelectItem value="buy2get1">2+1 gratis</SelectItem>
-          <SelectItem value="happy_hours">Happy Hours</SelectItem>
-          <SelectItem value="first_visit">Pierwsza wizyta</SelectItem>
+          {AVAILABLE_PROMOTION_TYPE_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
       {formType === "buy2get1" && (

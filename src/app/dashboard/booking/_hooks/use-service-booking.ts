@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
+import { isPromotionTypeFrozen } from "@/lib/features";
 import type {
   Service,
   Employee,
@@ -145,7 +146,8 @@ export function useServiceBooking({ salonId }: UseServiceBookingParams) {
   }, []);
 
   const checkPromotions = useCallback(async (clientId: string, serviceId: string, signal: AbortSignal | null = null) => {
-    if (!clientId || !serviceId || !salonId) {
+    // Promocja 2+1 jest zamrozona (FROZEN_PROMOTION_TYPES) — bez zapytania.
+    if (isPromotionTypeFrozen("buy2get1") || !clientId || !serviceId || !salonId) {
       setPromoCheck(null);
       return;
     }
