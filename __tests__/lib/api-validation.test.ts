@@ -8,7 +8,12 @@ import {
   createProductSchema,
   createAppointmentSchema,
   createPromotionSchema,
+  depositCreateSessionSchema,
+  updateAppointmentSchema,
 } from "@/lib/api-validation";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 
 describe("validateBody", () => {
   const simpleSchema = z.object({
@@ -580,5 +585,142 @@ describe("createPromotionSchema", () => {
       applicableServiceIds: ["svc-1", "svc-2"],
     });
     expect(result).toBeNull();
+  });
+});
+
+// #66 (P3 Ryana z #67): daty ISO 8601 i limit uwag — jak w create-session.
+describe("createAppointmentSchema — daty ISO i limit uwag (#66)", () => {
+  const base = {
+    salonId: "salon-123",
+    employeeId: "emp-456",
+    startTime: "2026-12-01T10:00:00.000Z",
+    endTime: "2026-12-01T11:00:00.000Z",
+  };
+  const parse = (extra: Record<string, unknown>) => createAppointmentSchema.safeParse({ ...base, ...extra });
+
+  it.each([
+    "2026-12-01T10:00:00.000Z", // toISOString() — portal i panel
+    "2026-12-01T10:00:00Z",
+    "2026-12-01T10:00:00+01:00",
+    "2026-12-01T10:00+01:00",
+  ])("przyjmuje ISO %s", (startTime) => {
+    expect(parse({ startTime }).success).toBe(true);
+  });
+
+  it.each([
+    "jutro o 10", // Date.parse: rok 2010 — przechodziło przed #66
+    "December 1, 2026 10:00",
+    "2026-12-01", // sama data, bez godziny
+    "01.12.2026 10:00",
+    "2026-13-45T10:00:00Z", // kształt ISO, ale nie data
+    // Follow-up #71 (Ethan): bez strefy Date.parse czyta czas serwera (UTC na Vercelu).
+    "2026-12-01T10:00",
+    "2026-12-01T10:00:00",
+    "2026-12-01T10:00:00.000",
+    "2026-12-01T10:00:00+0100", // offset bez dwukropka
+  ])("odrzuca nie-ISO %s (startTime i endTime)", (value) => {
+    const start = parse({ startTime: value });
+    const end = parse({ endTime: value });
+    expect(start.success).toBe(false);
+    expect(end.success).toBe(false);
+    expect(start.error!.issues[0]!.path).toEqual(["startTime"]);
+    expect(start.error!.issues[0]!.message).toMatch(/nieprawidłowy format daty/);
+  });
+
+  it("brak startTime → 'jest wymagane'", () => {
+    const r = parse({ startTime: undefined });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.message).toMatch(/jest wymagane/);
+  });
+
+  it("uwagi: 1000 znaków przechodzi, 1001 nie", () => {
+    expect(parse({ notes: "a".repeat(1000) }).success).toBe(true);
+    const r = parse({ notes: "a".repeat(1001) });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.path).toEqual(["notes"]);
+    expect(r.error!.issues[0]!.message).toBe("Uwagi mogą mieć maks. 1000 znaków");
+  });
+
+  it("uwagi: null, '' i same spacje = brak uwag (undefined)", () => {
+    for (const notes of [null, "", "   "]) {
+      const r = parse({ notes });
+      expect(r.success).toBe(true);
+      expect(r.data!.notes).toBeUndefined();
+    }
+  });
+});
+
+// Follow-up #71: strefa wymagana także w create-session (ten sam isoDateString).
+describe("depositCreateSessionSchema — data bez strefy (follow-up #71)", () => {
+  const base = {
+    salonId: "11111111-1111-4111-8111-111111111111",
+    employeeId: "22222222-2222-4222-8222-222222222222",
+    startTime: "2026-12-01T10:00:00.000Z",
+    endTime: "2026-12-01T11:00:00.000Z",
+    depositAmount: 30,
+  };
+
+  it("toISOString() przechodzi (kontrola, że baza testu jest poprawna)", () => {
+    expect(depositCreateSessionSchema.safeParse(base).success).toBe(true);
+  });
+
+  it.each(["startTime", "endTime"])("%s bez strefy → błąd na tym polu", (field) => {
+    const r = depositCreateSessionSchema.safeParse({ ...base, [field]: "2026-12-01T10:00:00" });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.path).toEqual([field]);
+  });
+});
+
+// Follow-up #71 (Ethan): PUT /api/appointments/[id] — limit i normalizacja notatek.
+describe("updateAppointmentSchema — notatki (follow-up #71)", () => {
+  const parse = (body: Record<string, unknown>) => updateAppointmentSchema.safeParse(body);
+
+  it("limit to ta sama stała co w POST i w polach dialogów", () => {
+    expect(APPOINTMENT_NOTES_MAX_LENGTH).toBe(1000);
+  });
+
+  it("1000 znaków przechodzi, 1001 nie (komunikat jak w POST)", () => {
+    expect(parse({ notes: "a".repeat(1000) }).success).toBe(true);
+    const r = parse({ notes: "a".repeat(1001) });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.path).toEqual(["notes"]);
+    expect(r.error!.issues[0]!.message).toBe("Uwagi mogą mieć maks. 1000 znaków");
+  });
+
+  it.each([null, "", "   "])("notes = %j → null (wyczyść notatki)", (notes) => {
+    const r = parse({ notes });
+    expect(r.success).toBe(true);
+    expect(r.data!.notes).toBeNull();
+  });
+
+  it("brak pola notes → undefined (trasa nie dotyka notatek)", () => {
+    const r = parse({ status: "confirmed" });
+    expect(r.success).toBe(true);
+    expect(r.data!.notes).toBeUndefined();
+    expect("notes" in r.data!).toBe(false);
+  });
+
+  it("notatka z treścią zapisuje się bez zmian (bez trim)", () => {
+    const r = parse({ notes: "  alergia na lateks " });
+    expect(r.success).toBe(true);
+    expect(r.data!.notes).toBe("  alergia na lateks ");
+  });
+
+  it("notes nie-napis → błąd", () => {
+    expect(parse({ notes: 123 }).success).toBe(false);
+  });
+});
+
+// Follow-up #71 (Ethan): pola notatek w panelu nie przepuszczą tekstu, który API odrzuci.
+describe("dialogi wizyt — maxLength notatek (follow-up #71)", () => {
+  it.each([
+    ["src/components/appointments/new-appointment-dialog.tsx", "appointment-notes-input"],
+    ["src/components/appointments/edit-appointment-dialog.tsx", "edit-appointment-notes-input"],
+  ])("%s: pole %s ma maxLength = APPOINTMENT_NOTES_MAX_LENGTH", (file, testId) => {
+    const src = readFileSync(join(process.cwd(), file), "utf8");
+    const field = src.slice(0, src.indexOf(`data-testid="${testId}"`));
+    const tag = field.slice(Math.max(field.lastIndexOf("<Input"), field.lastIndexOf("<Textarea")));
+    expect(tag).toMatch(/maxLength=\{APPOINTMENT_NOTES_MAX_LENGTH\}/);
+    expect(src).toMatch(/import \{ APPOINTMENT_NOTES_MAX_LENGTH \} from "@\/lib\/appointment-limits"/);
   });
 });

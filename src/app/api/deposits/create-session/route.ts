@@ -31,10 +31,10 @@ import { getStripe, isStripeConfigured } from "@/lib/stripe";
  *    (mode "payment", card/BLIK/P24) and returns its URL as `paymentUrl`.
  *    The payment is then confirmed exclusively by the signed Stripe webhook
  *    (`checkout.session.completed`).
- * 3. When Stripe is NOT configured outside Vercel (dev, CI E2E): returns
- *    `simulated: true` and a
- *    fake session id (on a Vercel production/preview deployment: 503
- *    instead) — the frontend then confirms via the dev-only
+ * 3. When Stripe is NOT configured and simulation is opted in (NODE_ENV=
+ *    development, or ALLOW_PAYMENT_SIMULATION=1 off Vercel — CI E2E): returns
+ *    `simulated: true` and a fake session id (otherwise: 503
+ *    STRIPE_UNAVAILABLE, nothing saved) — the frontend then confirms via the dev-only
  *    /api/deposits/confirm endpoint.
  *
  * Slot lifecycle: an unpaid deposit appointment DOES block the slot while
@@ -43,10 +43,27 @@ import { getStripe, isStripeConfigured } from "@/lib/stripe";
  * `async_payment_failed` (webhook) and by the cleanup cron
  * (/api/cron/cleanup-pending-deposits) as a backstop for lost webhooks.
  */
-/** Wdrożenie Vercela, na którym symulacja płatności jest zabroniona. */
-function isVercelDeployment(): boolean {
-  const env = process.env.VERCEL_ENV;
-  return env === "production" || env === "preview";
+/**
+ * Symulacja płatności (bez klucza Stripe) jest opt-in, nie opt-out:
+ * - Na Vercelu (`VERCEL=1`, ustawiane przez platformę) → NIGDY, niezależnie
+ *   od NODE_ENV i flagi. Ta bramka stoi PIERWSZA (#84, Ryan): dziś Next
+ *   wpisuje NODE_ENV=production w build, ale kolejność nie może na tym polegać.
+ *   Ustawiona tam flaga jest logowana jako błąd konfiguracji (druga bramka, Ethan).
+ * - `NODE_ENV=development` (lokalny `pnpm dev`) → dozwolona;
+ * - `ALLOW_PAYMENT_SIMULATION=1` → dozwolona. Flaga jest ustawiana wyłącznie
+ *   w krokach E2E workflow CI (serwer `pnpm start`, NODE_ENV=production) —
+ *   nie w `.env*` ani w Vercelu.
+ * Wszystko inne (production, test, preview, brak NODE_ENV) → 503.
+ */
+function isPaymentSimulationAllowed(): boolean {
+  if (process.env.VERCEL === "1") {
+    if (process.env.ALLOW_PAYMENT_SIMULATION === "1") {
+      logger.error("[Deposits API] ALLOW_PAYMENT_SIMULATION=1 ignored on Vercel — remove the flag from this deployment");
+    }
+    return false;
+  }
+  if (process.env.NODE_ENV === "development") return true;
+  return process.env.ALLOW_PAYMENT_SIMULATION === "1";
 }
 
 export async function POST(request: Request) {
@@ -128,13 +145,12 @@ export async function POST(request: Request) {
       );
     }
 
-    // #69/Ethan (#61): wdrożenie Vercela (production/preview) bez klucza
-    // Stripe → 503, nic nie zapisane. Symulacja (wizyta "scheduled" bez
-    // wpłaty) tylko poza Vercelem: dev i serwer E2E w CI (`pnpm start`,
-    // NODE_ENV=production, bez klucza — dlatego nie sam NODE_ENV). Sprawdzamy
-    // wyłącznie obecność klucza, nigdy wartość.
-    if (!isStripeConfigured() && isVercelDeployment()) {
-      logger.error("[Deposits API] Stripe not configured on a Vercel deployment — deposit booking refused");
+    // #69/Ethan: brak klucza Stripe → 503, nic nie zapisane — chyba że
+    // symulacja jest jawnie dozwolona (isPaymentSimulationAllowed: dev albo
+    // ALLOW_PAYMENT_SIMULATION=1 poza Vercelem). Sprawdzamy wyłącznie
+    // obecność klucza, nigdy wartość.
+    if (!isStripeConfigured() && !isPaymentSimulationAllowed()) {
+      logger.error("[Deposits API] Stripe not configured and payment simulation not allowed — deposit booking refused");
       return NextResponse.json(
         {
           success: false,

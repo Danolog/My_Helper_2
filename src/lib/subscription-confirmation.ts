@@ -10,6 +10,11 @@ import {
   retrieveStripeSubscriptionLocked,
   setSubscriptionLockTimeout,
 } from "@/lib/subscription-locks";
+import {
+  isCurrentLocalStatus,
+  isCurrentPaidStripeRow,
+  isUniqueViolation,
+} from "@/lib/subscription-predicates";
 import type Stripe from "stripe";
 
 /**
@@ -95,18 +100,6 @@ function fail(
   error: string
 ): ConfirmSubscriptionResult {
   return { ok: false, status, code, error };
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  for (let e: unknown = error, depth = 0; e && depth < 3; depth++) {
-    if ((e as { code?: unknown }).code === "23505") return true;
-    e = (e as { cause?: unknown }).cause;
-  }
-  return false;
-}
-
-function hasRealStripeSubscription(id: string | null): boolean {
-  return !!id && !id.startsWith("sim_");
 }
 
 async function findConfirmed(sessionId: string, salonId: string) {
@@ -259,16 +252,13 @@ export async function confirmSubscriptionCheckout(
         return { ended: ended.status, stripeSubscriptionId: stripeSub.id } as const;
       }
 
-      const current = rows.filter((s) => s.status === "active" || s.status === "trialing");
+      const current = rows.filter((s) => isCurrentLocalStatus(s.status));
 
       // Salon ma już INNĄ prawdziwą subskrypcję Stripe (active albo trial po
       // stronie Stripe): nadpisanie osierociłoby ją (podwójne obciążenie bez
-      // śladu u nas), a jej wiersz chroni cudza blokada stripe_sub.
-      if (
-        current.some(
-          (s) => hasRealStripeSubscription(s.stripeSubscriptionId) && s.stripeSubscriptionId !== stripeSub.id
-        )
-      ) {
+      // śladu u nas), a jej wiersz chroni cudza blokada stripe_sub. Ten sam
+      // predykat sprawdza `subscriptions/checkout` przed utworzeniem sesji.
+      if (current.some((s) => isCurrentPaidStripeRow(s) && s.stripeSubscriptionId !== stripeSub.id)) {
         return { conflict: true, stripeSubscriptionId: stripeSub.id } as const;
       }
 
