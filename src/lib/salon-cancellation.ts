@@ -20,6 +20,7 @@
 import { and, eq } from "drizzle-orm";
 import type { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { toErrorIdentity } from "@/lib/safe-error";
 import { appointments, depositPayments } from "@/lib/schema";
 import { getStripe } from "@/lib/stripe";
 
@@ -154,7 +155,8 @@ export async function expireCheckoutSessions(
       logger.warn("[Salon cancel] Checkout session expire failed — webhook will refund a late payment", {
         appointmentId,
         depositPaymentId: payment.id,
-        error,
+        // Tylko nazwa i kod — komunikat Stripe może nieść dane klienta (Ryan, P2 #98).
+        ...toErrorIdentity(error),
       });
     }
   }
