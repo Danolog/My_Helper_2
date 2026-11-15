@@ -193,7 +193,7 @@ describe("izolacja salonów przy zapisie wariantów (#125)", () => {
     ["PUT", "update", () => update(SERVICE, VARIANT_B)],
     ["DELETE", "delete", () => remove(SERVICE, VARIANT_B)],
   ] as const)(
-    "%s wariantu salonu B pod własną usługą => 404, zapis zawężony do service_id własnej usługi",
+    "%s wariantu salonu B pod własną usługą => 404, WHERE: id wariantu AND service_id własnej usługi",
     async (_name, op, call) => {
       m.asOwnerOf(SALON_A);
       // Usługa jest salonu A; wariant B należy do SERVICE_B, więc filtr
@@ -205,9 +205,10 @@ describe("izolacja salonów przy zapisie wariantów (#125)", () => {
       const [write] = m.writes;
       expect(write?.op).toBe(op);
       const q = whereOf(write?.where);
-      expect(q.sql).toMatch(/"service_variants"\."id" = \$\d+/);
-      expect(q.sql).toMatch(/"service_variants"\."service_id" = \$\d+/);
-      expect(q.params).toEqual(expect.arrayContaining([VARIANT_B, SERVICE]));
+      // Dokładny tekst: spójnik `and` (nie `or`) i przypisanie parametrów do
+      // kolumn — id wariantu = $1, service_id własnej usługi = $2 (Ryan, Y1–Y3).
+      expect(q.sql).toBe('("service_variants"."id" = $1 and "service_variants"."service_id" = $2)');
+      expect(q.params).toEqual([VARIANT_B, SERVICE]);
       expect(m.insertedValues).toEqual([]);
     }
   );
