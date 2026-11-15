@@ -150,7 +150,9 @@ export const IPV6_RATE_LIMIT_SUBNET = 64;
  *  - IPv6 → pełny zapis 8 grup po 4 cyfry hex, małe litery, bity poza /64
  *    wyzerowane, bez sufiksu (np. `2001:db8:1:2::abcd` →
  *    `2001:0db8:0001:0002:0000:0000:0000:0000`).
- * Wartość niebędąca poprawnym IP wraca bez zmian (jak dotąd).
+ * Wartość niebędąca poprawnym IP wraca bez zmian. `resolveClientIp` jej tu
+ * nie podaje: niepoprawny x-real-ip jest pomijany, a niepoprawny hop XFF
+ * daje null w `selectClientIp`.
  */
 export function normalizeClientIp(ip: string): string {
   const bytes = parseIp(ip);
@@ -316,8 +318,11 @@ export function isTrustedProxy(ip: string, trusted: readonly string[]): boolean 
  * (żądanie z wnętrza infrastruktury) — null, jak Better Auth (wywołujący
  * przechodzi do zapasu / "unknown"). Pusty nagłówek → null.
  *
- * Wpis niebędący poprawnym IP nie może być zaufanym proxy, więc jest
- * traktowany jak adres klienta (zwracany bez zmian, jak dotąd).
+ * Wpis niebędący poprawnym IP (napotkany od prawej przed adresem klienta)
+ * → null, jak Better Auth 1.7.25 (`getIPFromHeader`: `!ipBytes → null`).
+ * Dawniej taki wpis był kluczem limitu sam w sobie — klient bez proxy przed
+ * sobą mógł wtedy rotować dowolne napisy w XFF i za każdym razem dostać
+ * nowy kubełek. Teraz trafia do wspólnego zapasu "unknown".
  */
 export function selectClientIp(xff: string, trusted: readonly string[]): string | null {
   const hops = xff
@@ -327,6 +332,7 @@ export function selectClientIp(xff: string, trusted: readonly string[]): string 
   if (hops.length === 0) return null;
   for (let i = hops.length - 1; i >= 0; i--) {
     const hop = hops[i] as string;
+    if (!parseIp(hop)) return null;
     if (!isTrustedProxy(hop, trusted)) return hop;
   }
   return null;

@@ -37,7 +37,7 @@ test.describe('Flow 7: Client Portal', () => {
   // ── Happy path ──────────────────────────────────────────────────────────
 
   test.describe('Happy path', () => {
-    test('should display salon browsing page (public, no auth)', { tag: '@smoke' }, async ({ page }) => {
+    test('should display salon browsing page (public, no auth)', { tag: ['@smoke', '@csp'] }, async ({ page }) => {
       await page.goto('/salons');
       await page.waitForLoadState('domcontentloaded');
 
