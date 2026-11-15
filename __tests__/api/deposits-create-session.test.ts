@@ -424,6 +424,13 @@ describe("POST /api/deposits/create-session — kolizja półotwarta (#165)", ()
     expect((await createSession(makeRequest())).status).toBe(201);
   });
 
+  it("endTime = startTime → 400, bez zapytań o kolizje i zapisu", async () => {
+    const res = await createSession(makeRequest({ ...validBody, endTime: validBody.startTime }));
+    expect(res.status).toBe(400);
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
   it("blokada czasu nachodząca o 1 minutę → 409", async () => {
     prime([], [block("10:59", "12:00")]);
     const { status, body } = await parseResponse<{ error: string }>(await createSession(makeRequest()));
