@@ -19,14 +19,22 @@ export interface ConfirmDepositOptions {
    * (e.g. the Checkout session reference) is left untouched.
    */
   paymentIntentId?: string | undefined;
+  /**
+   * `payment_status` sesji Checkout ze zdarzenia Stripe. Tylko `"paid"`
+   * pozwala zapisać wpłatę płatności już `failed` (anulowanie przed wpłatą,
+   * #70; warunek Ethana). Bez tego (np. dev-symulator) `failed` = not_pending.
+   */
+  stripePaymentStatus?: string | undefined;
 }
 
 /**
- * Wpłata zadatku dla wizyty, której salon już nie oczekuje (#70): płatność
- * zapisana jako `succeeded`, wizyta bez zmian, potem automatyczny zwrot.
+ * Wpłata zadatku, której salon nie oczekuje (#70): płatność zapisana jako
+ * `succeeded`, wizyta bez zmian, potem automatyczny zwrot TEJ płatności.
+ * `reason`: wizyta już nieaktywna albo zadatek już opłacony inną płatnością.
  */
 export interface InactiveAppointmentDeposit {
   appointmentStatus: string;
+  reason: "appointment_inactive" | "deposit_already_paid";
   refunded: boolean;
   refundId?: string | undefined;
 }
@@ -51,12 +59,15 @@ export interface ConfirmDepositResult {
 /** Wpłata może zmienić tylko wizytę z tych stanów (#70 pkt 3). */
 const PAYABLE_APPOINTMENT_STATUSES = new Set(["scheduled", "confirmed"]);
 /**
- * Stany płatności, z których wpłata przechodzi w `succeeded`. `failed`
- * ustawia anulowanie wizyty (DELETE, cron, `checkout.session.expired`)
- * PRZED wpłatą — jeśli Stripe mimo to pobrał pieniądze (otwarta sesja),
- * księga musi to pokazać, a wizyta dostaje zwrot. `refunded` jest końcowe.
+ * `failed` ustawia anulowanie wizyty (DELETE, cron, `checkout.session.expired`)
+ * PRZED wpłatą. Jeśli Stripe mimo to pobrał pieniądze (otwarta sesja,
+ * `payment_status === "paid"`), księga musi to pokazać: osobny warunkowy
+ * UPDATE `WHERE status = 'failed'` w tej samej transakcji co odczyt wizyty.
+ * `refunded` jest końcowe (warunki Ethana, #70).
  */
-const CONFIRMABLE_PAYMENT_STATUSES = ["pending", "failed"] as const;
+function mayConfirmFailed(options: ConfirmDepositOptions): boolean {
+  return options.stripePaymentStatus === "paid";
+}
 
 /**
  * #70 — wizyta anulowana (albo zakończona) przed wpłatą: płatność zostaje
@@ -112,8 +123,8 @@ export async function confirmDepositPayment(
     };
   }
 
-  if (!(CONFIRMABLE_PAYMENT_STATUSES as readonly string[]).includes(payment.status)) {
-    // refunded — terminal state, never resurrected here.
+  if (payment.status !== "pending" && !(payment.status === "failed" && mayConfirmFailed(options))) {
+    // refunded — terminal; failed bez potwierdzonej wpłaty Stripe — bez zmian.
     logger.warn("[Deposit] Confirmation attempted on non-pending payment", {
       depositPaymentId,
       status: payment.status,
@@ -130,38 +141,54 @@ export async function confirmDepositPayment(
   // Update deposit payment and appointment atomically. The status guard
   // makes this idempotent under concurrent deliveries: whoever loses the
   // race gets zero rows back and no-ops.
+  const paidValues = {
+    status: "succeeded",
+    paidAt: new Date(),
+    ...(options.paymentIntentId ? { stripePaymentIntentId: options.paymentIntentId } : {}),
+  };
   const txResult = await db.transaction(async (tx) => {
-    const [updatedPayment] = await tx
+    let [updatedPayment] = await tx
       .update(depositPayments)
-      .set({
-        status: "succeeded",
-        paidAt: new Date(),
-        ...(options.paymentIntentId
-          ? { stripePaymentIntentId: options.paymentIntentId }
-          : {}),
-      })
-      .where(
-        and(
-          eq(depositPayments.id, depositPaymentId),
-          inArray(depositPayments.status, [...CONFIRMABLE_PAYMENT_STATUSES])
-        )
-      )
+      .set(paidValues)
+      .where(and(eq(depositPayments.id, depositPaymentId), eq(depositPayments.status, "pending")))
       .returning();
+
+    // Anulowanie (DELETE / cron / expired) wygrało wyścig i ustawiło `failed`,
+    // a Stripe pobrał pieniądze: warunkowo `failed → succeeded`.
+    if (!updatedPayment && mayConfirmFailed(options)) {
+      [updatedPayment] = await tx
+        .update(depositPayments)
+        .set(paidValues)
+        .where(and(eq(depositPayments.id, depositPaymentId), eq(depositPayments.status, "failed")))
+        .returning();
+    }
 
     if (!updatedPayment) return null;
 
     // Stan wizyty PO blokadzie płatności — anulowanie (DELETE / cron)
     // czeka na nas albo już się zatwierdziło i to widzimy.
     const [current] = await tx
-      .select({ id: appointments.id, status: appointments.status })
+      .select({ id: appointments.id, status: appointments.status, depositPaid: appointments.depositPaid })
       .from(appointments)
       .where(eq(appointments.id, payment.appointmentId))
       .for("update");
 
     if (!current || !PAYABLE_APPOINTMENT_STATUSES.has(current.status)) {
-      return { updatedPayment, inactiveStatus: current?.status ?? "missing" };
+      return {
+        updatedPayment,
+        refundInstead: { appointmentStatus: current?.status ?? "missing", reason: "appointment_inactive" as const },
+      };
+    }
+    // Zadatek już opłacony inną płatnością (np. dwie sesje Checkout) —
+    // druga wpłata wraca do klienta, wizyta bez zmian.
+    if (current.depositPaid) {
+      return {
+        updatedPayment,
+        refundInstead: { appointmentStatus: current.status, reason: "deposit_already_paid" as const },
+      };
     }
 
+    const wasScheduled = current.status === "scheduled";
     const [updatedAppointment] = await tx
       .update(appointments)
       .set({
@@ -178,19 +205,54 @@ export async function confirmDepositPayment(
       )
       .returning();
 
-    return { updatedPayment, updatedAppointment };
+    return { updatedPayment, updatedAppointment, wasScheduled };
   });
 
   if (!txResult) {
-    // Lost the race against a concurrent confirmation — already done.
-    return { success: true, alreadyConfirmed: true, smsSent: false };
+    // Guard nie złapał wiersza: konkurencyjne potwierdzenie (→ succeeded)
+    // albo anulowanie ustawiło `failed` bez potwierdzonej wpłaty. Decyzja
+    // na świeżym stanie, nie na odczycie sprzed transakcji.
+    const [current] = await db
+      .select()
+      .from(depositPayments)
+      .where(eq(depositPayments.id, depositPaymentId));
+    if (current?.status === "succeeded") {
+      return { success: true, alreadyConfirmed: true, smsSent: false, depositPayment: current };
+    }
+    logger.warn("[Deposit] Payment left pending before confirmation", {
+      depositPaymentId,
+      status: current?.status ?? "missing",
+    });
+    return {
+      success: false,
+      alreadyConfirmed: false,
+      smsSent: false,
+      ...(current ? { depositPayment: current } : {}),
+      error: current ? "not_pending" : "not_found",
+    };
   }
 
-  if ("inactiveStatus" in txResult) {
-    return refundDepositForInactiveAppointment(payment, txResult.updatedPayment, txResult.inactiveStatus);
+  if ("refundInstead" in txResult) {
+    return refundUnexpectedDeposit(payment, txResult.updatedPayment, txResult.refundInstead);
   }
 
-  const { updatedPayment, updatedAppointment } = txResult;
+  const { updatedPayment, updatedAppointment, wasScheduled } = txResult;
+
+  // Wizyta `confirmed` przed wpłatą: zadatek zapisany, bez drugiego SMS
+  // „potwierdzono wizytę” (warunek Ethana).
+  if (!wasScheduled) {
+    logger.info("[Deposit] Deposit paid for an already confirmed appointment — no SMS", {
+      depositPaymentId,
+      appointmentId: payment.appointmentId,
+    });
+    return {
+      success: true,
+      alreadyConfirmed: false,
+      smsSent: false,
+      depositPayment: updatedPayment,
+      appointment: updatedAppointment,
+    };
+  }
 
   logger.info(
     `[Deposit] Payment confirmed: ${depositPaymentId}, appointment: ${payment.appointmentId}`
@@ -275,30 +337,34 @@ export async function confirmDepositPayment(
   };
 }
 
-async function refundDepositForInactiveAppointment(
+async function refundUnexpectedDeposit(
   payment: typeof depositPayments.$inferSelect,
   updatedPayment: typeof depositPayments.$inferSelect,
-  appointmentStatus: string
+  why: { appointmentStatus: string; reason: InactiveAppointmentDeposit["reason"] }
 ): Promise<ConfirmDepositResult> {
+  // Same identyfikatory — bez danych osobowych.
   const context = {
     depositPaymentId: payment.id,
     appointmentId: payment.appointmentId,
     salonId: payment.salonId,
-    appointmentStatus,
+    appointmentStatus: why.appointmentStatus,
+    reason: why.reason,
   };
-  logger.warn("[Deposit] Deposit paid for an appointment that is no longer active — refunding", context);
+  logger.warn("[Deposit] Unexpected deposit payment — refunding", context);
 
+  // Zwrot TEJ płatności (klucz idempotencji z jej id w refund.ts);
+  // `depositPaid` wizyty bez zmian.
   const refund = await processAutomaticRefund(
     payment.appointmentId,
-    "Wplata zadatku po anulowaniu wizyty - automatyczny zwrot"
+    why.reason === "appointment_inactive"
+      ? "Wplata zadatku po anulowaniu wizyty - automatyczny zwrot"
+      : "Druga wplata zadatku za te sama wizyte - automatyczny zwrot",
+    { depositPaymentId: payment.id, resetAppointmentDepositPaid: false }
   );
   if (!refund.refunded) {
-    logger.error("Deposit paid for cancelled appointment — manual refund", {
-      ...context,
-      refundMessage: refund.message,
-    });
+    logger.error("Deposit paid for cancelled appointment — manual refund", context);
   } else {
-    logger.info("[Deposit] Late deposit refunded automatically", { ...context, refundId: refund.refundId });
+    logger.info("[Deposit] Unexpected deposit refunded automatically", { ...context, refundId: refund.refundId });
   }
 
   return {
@@ -307,7 +373,8 @@ async function refundDepositForInactiveAppointment(
     smsSent: false,
     depositPayment: updatedPayment,
     inactiveAppointment: {
-      appointmentStatus,
+      appointmentStatus: why.appointmentStatus,
+      reason: why.reason,
       refunded: refund.refunded,
       refundId: refund.refundId,
     },

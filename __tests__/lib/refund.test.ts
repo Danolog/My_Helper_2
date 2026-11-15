@@ -58,6 +58,7 @@ vi.mock("@/lib/db", () => ({
 // Mock drizzle-orm
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
+  and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
 }));
 
 // Mock schema
@@ -138,11 +139,51 @@ describe("processAutomaticRefund", () => {
     expect(result.refunded).toBe(true);
     expect(result.refundId).toBe("re_123");
     expect(result.amount).toBe(50);
-    expect(mockStripeRefundsCreate).toHaveBeenCalledWith({
-      payment_intent: "pi_123",
-      amount: 5000, // 50.00 * 100 cents
-      reason: "requested_by_customer",
+    expect(mockStripeRefundsCreate).toHaveBeenCalledWith(
+      {
+        payment_intent: "pi_123",
+        amount: 5000, // 50.00 * 100 cents
+        reason: "requested_by_customer",
+      },
+      // jeden zwrot na płatność (Ethan, #70): klucz z id płatności
+      { idempotencyKey: "deposit-refund:pay-1" }
+    );
+  });
+
+  it("depositPaymentId: zwraca TE platnosc (id + appointmentId), bez resetu depositPaid gdy reset=false", async () => {
+    const { and, eq } = await import("drizzle-orm");
+    mockDbSelectWhere.mockResolvedValue([
+      { id: "pay-2", status: "succeeded", amount: "50.00", stripePaymentIntentId: "pi_2", paymentMethod: "stripe" },
+    ]);
+    mockStripeRefundsCreate.mockResolvedValue({ id: "re_2" });
+
+    const result = await processAutomaticRefund("appt-1", "druga wplata", {
+      depositPaymentId: "pay-2",
+      resetAppointmentDepositPaid: false,
     });
+
+    expect(result.refunded).toBe(true);
+    expect(and).toHaveBeenCalledWith(
+      { type: "eq", args: ["depositPayments.id", "pay-2"] },
+      { type: "eq", args: ["depositPayments.appointmentId", "appt-1"] }
+    );
+    expect(eq).toHaveBeenCalledWith("depositPayments.id", "pay-2");
+    expect(mockStripeRefundsCreate).toHaveBeenCalledWith(expect.anything(), { idempotencyKey: "deposit-refund:pay-2" });
+    // tylko update platnosci (refunded); wizyta (depositPaid) nietknieta
+    expect(mockDbUpdateTable).toHaveBeenCalledTimes(1);
+    expect(mockDbUpdateSet.mock.calls[0]![0]).toMatchObject({ status: "refunded" });
+  });
+
+  it("domyslnie resetuje depositPaid wizyty po zwrocie", async () => {
+    mockDbSelectWhere.mockResolvedValue([
+      { id: "pay-1", status: "succeeded", amount: "50.00", stripePaymentIntentId: "pi_1", paymentMethod: "stripe" },
+    ]);
+    mockStripeRefundsCreate.mockResolvedValue({ id: "re_1" });
+
+    await processAutomaticRefund("appt-1");
+
+    expect(mockDbUpdateTable).toHaveBeenCalledTimes(2);
+    expect(mockDbUpdateSet.mock.calls[1]![0]).toEqual({ depositPaid: false });
   });
 
   it("should NOT mark as refunded when the Stripe refund fails (money still with us)", async () => {

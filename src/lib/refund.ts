@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { depositPayments, appointments, notifications } from "@/lib/schema";
@@ -11,6 +11,24 @@ export interface RefundResult {
   amount?: number;
   error?: string;
   message: string;
+}
+
+export interface RefundOptions {
+  /**
+   * Zwrot TEJ płatności (np. późna wpłata albo druga wpłata za tę samą
+   * wizytę, #70) zamiast pierwszej płatności wizyty.
+   */
+  depositPaymentId?: string;
+  /**
+   * false = nie ruszaj `appointments.depositPaid` (wizyta anulowana zostaje
+   * bez zmian; druga wpłata nie kasuje pierwszej). Domyślnie true.
+   */
+  resetAppointmentDepositPaid?: boolean;
+}
+
+/** Klucz idempotencji zwrotu w Stripe: jeden zwrot na płatność (Ethan, #70). */
+export function depositRefundIdempotencyKey(depositPaymentId: string): string {
+  return `deposit-refund:${depositPaymentId}`;
 }
 
 /**
@@ -26,14 +44,19 @@ export interface RefundResult {
  */
 export async function processAutomaticRefund(
   appointmentId: string,
-  reason: string = "Anulacja wizyty wiecej niz 24h przed terminem"
+  reason: string = "Anulacja wizyty wiecej niz 24h przed terminem",
+  options: RefundOptions = {}
 ): Promise<RefundResult> {
   try {
     // Find the succeeded deposit payment for this appointment
     const [payment] = await db
       .select()
       .from(depositPayments)
-      .where(eq(depositPayments.appointmentId, appointmentId));
+      .where(
+        options.depositPaymentId
+          ? and(eq(depositPayments.id, options.depositPaymentId), eq(depositPayments.appointmentId, appointmentId))
+          : eq(depositPayments.appointmentId, appointmentId)
+      );
 
     if (!payment) {
       logger.debug("No deposit payment found for appointment", { appointmentId });
@@ -70,11 +93,16 @@ export async function processAutomaticRefund(
       if (stripe) {
         try {
           // Create refund via Stripe API
-          const refund = await stripe.refunds.create({
-            payment_intent: payment.stripePaymentIntentId,
-            amount: Math.round(amount * 100), // Stripe uses cents
-            reason: "requested_by_customer",
-          });
+          // Klucz idempotencji z id płatności: powtórzony webhook / ponowienie
+          // nie zleci drugiego zwrotu tej samej wpłaty.
+          const refund = await stripe.refunds.create(
+            {
+              payment_intent: payment.stripePaymentIntentId,
+              amount: Math.round(amount * 100), // Stripe uses cents
+              reason: "requested_by_customer",
+            },
+            { idempotencyKey: depositRefundIdempotencyKey(payment.id) }
+          );
 
           stripeRefundId = refund.id;
           logger.info("Stripe refund created", { refundId: refund.id, paymentIntentId: payment.stripePaymentIntentId });
@@ -114,12 +142,14 @@ export async function processAutomaticRefund(
       .where(eq(depositPayments.id, payment.id));
 
     // Update appointment to reflect deposit is no longer paid (refunded)
-    await db
-      .update(appointments)
-      .set({
-        depositPaid: false,
-      })
-      .where(eq(appointments.id, appointmentId));
+    if (options.resetAppointmentDepositPaid !== false) {
+      await db
+        .update(appointments)
+        .set({
+          depositPaid: false,
+        })
+        .where(eq(appointments.id, appointmentId));
+    }
 
     logger.info("Refund processed successfully", { appointmentId, amount });
 

@@ -421,7 +421,11 @@ async function handleCheckoutSessionCompleted(event: Stripe.Event, stripe: Strip
 
   const result = await confirmDepositPayment(
     depositPaymentId,
-    paymentIntentId ? { paymentIntentId } : {}
+    {
+      ...(paymentIntentId ? { paymentIntentId } : {}),
+      // "paid" (sprawdzone wyżej) pozwala zapisać wpłatę płatności `failed` (#70).
+      stripePaymentStatus: checkoutSession.payment_status,
+    }
   );
 
   if (!result.success) {
