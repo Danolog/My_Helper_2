@@ -6,9 +6,15 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: false,
   },
 
-  // Prevent bundling of native Node.js modules — required for sharp on Vercel.
-  // Without this, Next.js tries to bundle sharp but cannot include native binaries,
-  // causing image generation/enhancement to silently fail in production.
+  // Samodzielny serwer (.next/standalone/server.js) z minimalnym node_modules —
+  // to uruchamia obraz Dockera na Cloud Run (Dockerfile, etap `runner`).
+  // Strażnik: __tests__/lib/container-config.test.ts (G-C1).
+  output: "standalone",
+
+  // Prevent bundling of native Node.js modules (sharp) — on Vercel and in the
+  // standalone container alike. Without this, Next.js tries to bundle sharp but
+  // cannot include native binaries, causing image generation/enhancement to
+  // silently fail in production.
   serverExternalPackages: ["sharp"],
 
   // Image optimization configuration

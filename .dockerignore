@@ -1,0 +1,26 @@
+# Kontekst budowy obrazu (Dockerfile). Strażnik G-C1 pilnuje `.env*`:
+# plik z sekretem nie może trafić do żadnej warstwy obrazu.
+.env*
+.git
+node_modules
+.next
+memory
+.claude
+.remember
+.playwright-mcp
+.vercel
+.github
+.cursor
+.vscode
+.autoforge
+.mcp.json
+coverage
+playwright-report
+test-results*
+tests
+__tests__
+docs
+scratchpad
+*.png
+tsconfig.tsbuildinfo
+public/uploads
