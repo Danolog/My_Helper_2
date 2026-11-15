@@ -15,9 +15,25 @@
  * która usunie dowód, wywraca test; wyjątek, który przestał być potrzebny
  * (trasa spełnia regułę ogólną albo nie czyta już salonId), też.
  *
- * Granice analizy tekstowej (nazwane, nie ukryte): nie widzi salonId z
- * segmentu ścieżki (`[salonId]`), z body ani z `Object.fromEntries(searchParams)`
- * — tego ostatniego dziś w `src/app/api` nie ma, pilnuje ostatni test.
+ * Granice skanera (nazwane, nie ukryte — Ethan, recenzja #99; „pilnuje” =
+ * osobny test niżej, „poza zasięgiem” = świadomie nie sprawdzane):
+ *
+ *   1. Tylko query i tylko nazwa `salonId`. Inna nazwa tego samego parametru
+ *      (`salon_id`, `salon`, `salonID`, `salon-id`) — pilnuje test „aliasy”.
+ *   2. Całe query naraz (`Object.fromEntries(searchParams)`, `.entries()`,
+ *      `.forEach()`) — pilnuje test „hurtem”.
+ *   3. Handler tylko jako `export const|async function|function METODA`.
+ *      Reeksport (`export { h as GET }`) — pilnuje test „reeksport”.
+ *   4. Poza zasięgiem: salonId z segmentu ścieżki (`[salonId]`) i z body —
+ *      inne źródło, inny wzorzec (POST/PUT już przez requireSalonStaff z body).
+ *   5. Poza zasięgiem: przepływ danych. Skaner widzi, że strażnik stoi przed
+ *      pierwszym zapytaniem, nie że zapytanie używa `guard.ctx.salonId`.
+ *      Strażnik z requestedSalonId odrzuca inny salon (403), więc po nim
+ *      wartość z query i z sesji są równe — z wyjątkiem pustego query
+ *      (wtedy salon z sesji). Kontrakt (salon-query-scope-contract.test.ts)
+ *      sprawdza to zachowaniem, nie tekstem.
+ *   6. Komentarze są wycinane przed analizą; stringi nie (`"// ..."` w
+ *      stringu może uciąć resztę linii — dziś nie występuje w `src/app/api`).
  */
 import { describe, it, expect } from "vitest";
 import { isModuleFrozen } from "@/lib/features";
@@ -146,7 +162,28 @@ describe("niezmiennik: salonId z query przechodzi przez strażnika salonu z sesj
     expect(isModuleFrozen("complexPromotions")).toBe(true);
   });
 
-  it("żadna trasa nie czyta całego query hurtem (poza zasięgiem skanera)", () => {
+  it("aliasy: żadna trasa nie czyta salonu z query pod inną nazwą niż salonId", () => {
+    const aliases: string[] = [];
+    for (const file of allRouteFiles()) {
+      for (const m of readRoute(file).matchAll(/\.get\(\s*["'`]([^"'`]+)["'`]\s*\)/g)) {
+        const key = m[1]!;
+        const normalized = key.toLowerCase().replace(/[-_]/g, "");
+        if ((normalized === "salon" || normalized === "salonid") && key !== "salonId") {
+          aliases.push(`${file}: ${key}`);
+        }
+      }
+    }
+    expect(aliases).toEqual([]);
+  });
+
+  it("reeksport: żaden handler nie jest eksportowany przez `export { … as METODA }`", () => {
+    const reexports = allRouteFiles().filter((file) =>
+      /export\s*\{[^}]*\b(?:as\s+)?(?:GET|POST|PUT|PATCH|DELETE)\b[^}]*\}/.test(readRoute(file))
+    );
+    expect(reexports).toEqual([]);
+  });
+
+  it("hurtem: żadna trasa nie czyta całego query naraz", () => {
     const bulk = allRouteFiles().filter((file) =>
       /fromEntries\([^)]*searchParams|searchParams\.(?:entries|forEach)\(/.test(readRoute(file))
     );
