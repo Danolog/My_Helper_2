@@ -1,5 +1,7 @@
 # Next.js App Router Quickstart
 
+> **Uwaga (2026-11-15):** to tutorial AI SDK, nie opis MyHelper. Przykładowa trasa `app/api/chat/route.ts` z tego tekstu nie istnieje w aplikacji (strona `/chat` i trasa `/api/chat` usunięte, decyzja PO). Czaty AI w MyHelper używają `/api/ai/business/chat` przez `requireProAI`; nie dodawaj trasy wg tego tutoriala.
+
 The AI SDK is a powerful Typescript library designed to help developers build AI-powered applications.
 
 In this quickstart tutorial, you'll build a simple AI-chatbot with a streaming user interface. Along the way, you'll learn key concepts and techniques that are fundamental to using the SDK in your own projects.
