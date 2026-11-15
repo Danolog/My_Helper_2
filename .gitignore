@@ -54,6 +54,7 @@ nul
 /scripts/*
 !scripts/generate-pwa-icons.ts
 !scripts/seed-test.ts
+!scripts/seed-host-guard.ts
 
 # PWA icons (unignore)
 !public/icon-192.png

@@ -506,9 +506,24 @@ describe("getClientIp: normalizacja klucza limitu", () => {
     ["::FFFF:203.0.113.50", "203.0.113.50"],
     ["::ffff:cb00:7132", "203.0.113.50"],
     ["203.0.113.50", "203.0.113.50"],
-    ["garbage", "garbage"],
+    ["garbage", "unknown"],
   ])("XFF %s → klucz %s", (xff, expected) => {
     expect(ipOf({ "x-forwarded-for": xff })).toBe(expected);
+  });
+
+  it("rotacja niepoprawnych napisów w XFF nie daje nowych kubełków (wspólne 'unknown')", () => {
+    const limiter = createRateLimit({ interval: 60_000, limit: 1 });
+    const keys = ["garbage-1", "garbage-2", "203.0.113.50:1", "x"].map((xff) =>
+      ipOf({ "x-forwarded-for": xff })
+    );
+    expect(new Set(keys)).toEqual(new Set(["unknown"]));
+    expect(limiter.check(keys[0]!).success).toBe(true);
+    expect(limiter.check(keys[1]!).success).toBe(false);
+  });
+
+  it("na Vercelu: niepoprawny x-real-ip i niepoprawny XFF → 'unknown'", () => {
+    process.env.VERCEL = "1";
+    expect(ipOf({ "x-real-ip": "not-an-ip", "x-forwarded-for": "garbage" })).toBe("unknown");
   });
 
   it("na Vercelu normalizuje też x-real-ip", () => {
