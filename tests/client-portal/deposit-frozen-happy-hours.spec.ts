@@ -1,6 +1,6 @@
-import type { Browser, Page } from '@playwright/test';
-
+import { TEST_PHONE } from '../../src/lib/test-phone';
 import { test, expect } from '../fixtures';
+import type { Browser, Page } from '@playwright/test';
 
 // Rezerwacja z zadatkiem w oknie happy hours, gdy happy hours sa zamrozone
 // (FROZEN_PROMOTION_TYPES, modul complexPromotions — B2/#59, #60).
@@ -17,11 +17,14 @@ import { test, expect } from '../fixtures';
 // (simulated === true). Lokalnie: uruchamiaj serwer z pustym STRIPE_SECRET_KEY.
 // Zapis do bazy: udane create-session tworzy wizyte "scheduled" bez wplaty.
 // Sprzatanie: afterEach anuluje ja przez DELETE /api/appointments/[id] (sesja
-// wlasciciela) — to ten sam stan koncowy, ktory dla nieoplaconego zadatku
-// ustawia webhook Stripe albo cron cleanup-pending-deposits (status
-// "cancelled"), tylko od razu. Termin wraca do puli, nic "scheduled" nie
-// zostaje. Unikalne dane per przebieg nic by nie daly: kazdy przebieg i tak
-// zostawialby wizyte "scheduled", tylko na innym terminie.
+// wlasciciela): wizyta -> "cancelled", termin wraca do puli, nic "scheduled"
+// nie zostaje. Rekord deposit_payments zostaje "pending" — DELETE go nie
+// rusza (webhook Stripe i cron cleanup-pending-deposits ustawiaja "failed",
+// DELETE nie). Unikalne dane per przebieg nic by nie daly: kazdy przebieg
+// i tak zostawialby wizyte "scheduled", tylko na innym terminie.
+//
+// Telefon goscia: TEST_PHONE (src/lib/test-phone.ts) — sendSms blokuje go
+// przed dostawca, wiec zaden przebieg nie wysle SMS do realnej osoby.
 
 const SALON_ID = '00000000-0000-4000-8000-000000000001';
 const SERVICE_ID = '00000000-0000-4000-8000-5e0000000004';
@@ -61,7 +64,7 @@ async function openDepositSummary(page: Page): Promise<string> {
 /** create-session z przegladarki: ta sama sesja, ciasteczka i token CSRF co formularz. */
 async function postCreateSession(page: Page, amount: number, localStart: string) {
   return page.evaluate(
-    async ({ salonId, serviceId, employeeId, amount, localStart }) => {
+    async ({ salonId, serviceId, employeeId, amount, localStart, testPhone }) => {
       const token = document.cookie.match(/(?:^|; )csrf-token=([^;]*)/)?.[1] ?? '';
       const start = new Date(localStart); // bez strefy = czas lokalny przegladarki (timezoneId Europe/Warsaw)
       const res = await fetch('/api/deposits/create-session', {
@@ -72,12 +75,12 @@ async function postCreateSession(page: Page, amount: number, localStart: string)
           startTime: start.toISOString(),
           endTime: new Date(start.getTime() + 60 * 60000).toISOString(),
           depositAmount: amount, paymentMethod: 'stripe',
-          guestName: 'Gosc E2E', guestPhone: '+48500600700',
+          guestName: 'Gosc E2E', guestPhone: testPhone,
         }),
       });
       return { status: res.status, json: (await res.json()) as { success: boolean; data?: { simulated?: boolean; appointmentId?: string }; error?: string } };
     },
-    { salonId: SALON_ID, serviceId: SERVICE_ID, employeeId: EMPLOYEE_ID, amount, localStart }
+    { salonId: SALON_ID, serviceId: SERVICE_ID, employeeId: EMPLOYEE_ID, amount, localStart, testPhone: TEST_PHONE }
   );
 }
 
@@ -143,6 +146,16 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
   // Prawdziwe body formularza gościa: clientId/variantId/guestEmail = null
   // i telefon w formacie placeholdera (ze spacjami). Do #65 trasa odrzucała je
   // 400 "Validation failed" — kazda rezerwacja z zadatkiem z portalu.
+  //
+  // Zakres (Ethan, #61): ten test dowodzi, ze formularz wysyla poprawny
+  // ksztalt body i serwer go przyjmuje. NIE dowodzi, ze serwer sam liczy
+  // kwote — formularz wysyla 60 i serwer odpowiada 60. Odrzucenie kwoty
+  // z rabatem happy hours (30 PLN) dowodzi test wyzej ("30 PLN rejected,
+  // 60 PLN accepted"); oba razem pokrywaja sciezke. Wariant "podmien w body
+  // 59,99 i oczekuj 60 w odpowiedzi" (w tolerancji serwera |roznica| <= 0,01)
+  // odrzucony: ten test przestalby wysylac prawdziwe body formularza, a to
+  // jest jego jedyny przedmiot. Kolejnosc testow nie ma znaczenia — kazdy
+  // otwiera wlasny termin i sprzata swoja wizyte.
   test('guest submits the booking form with a deposit and create-session accepts it', { tag: '@full' }, async ({ page }) => {
     let sentBody: Record<string, unknown> | null = null;
     let created: { status: number; json: CreateSessionJson } | null = null;
@@ -157,7 +170,7 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
     await openDepositSummary(page);
     // Format numeru jak w placeholderze pola.
     await page.getByPlaceholder('Twoje imie').fill('Gosc E2E');
-    await page.getByPlaceholder('+48 123 456 789').fill('+48 500 600 700');
+    await page.getByPlaceholder('+48 123 456 789').fill(TEST_PHONE);
     await page.getByTestId('book-appointment-btn').click();
 
     await expect.poll(() => created, { timeout: 15000 }).not.toBeNull();
@@ -168,7 +181,7 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
       clientId: null,
       variantId: null,
       guestEmail: null,
-      guestPhone: '+48 500 600 700',
+      guestPhone: TEST_PHONE,
     });
     expect(created!.status, `create-session: ${JSON.stringify(created!.json)}`).toBe(201);
     expect(created!.json.success).toBe(true);
