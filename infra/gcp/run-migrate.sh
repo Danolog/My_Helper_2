@@ -24,6 +24,9 @@ fi
 
 JOB="${JOB:-myhelper-migrate}"
 GC=(gcloud --project="$PROJECT_ID" --quiet)
+# Połączenie z bazą przez wbudowany konektor Cloud SQL (gniazdo /cloudsql/…,
+# K-1); POSTGRES_URL z `?host=/cloudsql/…` — infra/db/pg-socket.mjs.
+CLOUDSQL_INSTANCE="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
 
 network=()
 if [[ -n "${VPC_NETWORK:-}" || -n "${VPC_SUBNET:-}" ]]; then
@@ -45,6 +48,7 @@ echo "backup: on-demand Cloud SQL backup before migration"
   --max-retries=0 \
   --task-timeout=600s \
   --set-secrets="POSTGRES_URL=postgres-url:latest" \
+  --set-cloudsql-instances="$CLOUDSQL_INSTANCE" \
   ${network[@]+"${network[@]}"}
 
 "${GC[@]}" run jobs execute "$JOB" --region="$REGION" --wait
