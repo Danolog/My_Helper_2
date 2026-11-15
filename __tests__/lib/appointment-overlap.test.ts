@@ -4,7 +4,7 @@
  */
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, it, expect } from "vitest";
-import { appointmentConflictWhere, overlapsRange, rangesOverlap } from "@/lib/appointment-overlap";
+import { appointmentConflictWhere, assertValidRange, overlapsRange, rangesOverlap } from "@/lib/appointment-overlap";
 import { timeBlocks } from "@/lib/schema";
 
 const at = (hhmm: string) => new Date(`2026-08-01T${hhmm}:00.000Z`);
@@ -98,5 +98,30 @@ describe("appointmentConflictWhere", () => {
       appointmentConflictWhere({ salonId: "s", employeeId: "e", start: at("10:00"), end: at("11:00"), excludeId: "x" })
     );
     expect(q.sql).not.toMatch(/<=|>=/);
+  });
+});
+
+describe("przedział pusty lub odwrócony (obrona w głębi)", () => {
+  const cases: Array<[string, Date, Date]> = [
+    ["pusty (end = start)", at("10:00"), at("10:00")],
+    ["odwrócony (end < start)", at("11:00"), at("10:00")],
+    ["nieprawidłowa data", new Date("nie-data"), at("10:00")],
+  ];
+
+  it.each(cases)("appointmentConflictWhere rzuca RangeError: %s", (_n, start, end) => {
+    expect(() => appointmentConflictWhere({ employeeId: "e", start, end })).toThrow(RangeError);
+  });
+
+  it.each(cases)("overlapsRange rzuca RangeError: %s", (_n, start, end) => {
+    expect(() => overlapsRange(timeBlocks.startTime, timeBlocks.endTime, start, end)).toThrow(RangeError);
+  });
+
+  it("assertValidRange przepuszcza przedział 1 ms", () => {
+    expect(() => assertValidRange(at("10:00"), new Date(at("10:00").getTime() + 1))).not.toThrow();
+  });
+
+  it("rangesOverlap: przedział pusty nie koliduje z niczym (bez wyjątku — sloty)", () => {
+    expect(rangesOverlap(600, 600, 0, 1440)).toBe(false);
+    expect(rangesOverlap(0, 1440, 600, 600)).toBe(false);
   });
 });

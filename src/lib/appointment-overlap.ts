@@ -20,16 +20,34 @@ type Instant = Date | number;
 
 const toMs = (v: Instant): number => (typeof v === "number" ? v : v.getTime());
 
-/** Kolizja dwóch przedziałów półotwartych `[aStart, aEnd)` i `[bStart, bEnd)`. */
+/**
+ * Kolizja dwóch przedziałów półotwartych `[aStart, aEnd)` i `[bStart, bEnd)`.
+ * Przedział pusty lub odwrócony (`end <= start`) nie koliduje z niczym — tu
+ * celowo bez wyjątku: available-slots przycina blokady do dnia i bywa `[0, 0)`.
+ * Termin, który ma zostać ZAPISANY, sprawdzają `overlapsRange` /
+ * `appointmentConflictWhere`, które przedział pusty odrzucają.
+ */
 export function rangesOverlap(aStart: Instant, aEnd: Instant, bStart: Instant, bEnd: Instant): boolean {
   return toMs(aStart) < toMs(bEnd) && toMs(aEnd) > toMs(bStart);
 }
 
 /**
+ * Obrona w głębi: przy `end <= start` (albo nieprawidłowej dacie) warunek
+ * półotwarty nigdy nie trafia, więc taki termin ominąłby sprawdzenie kolizji.
+ * Trasy odrzucają go wcześniej z 400; tu błąd programisty, nie wejście.
+ */
+export function assertValidRange(start: Date, end: Date): void {
+  if (!(end.getTime() > start.getTime())) {
+    throw new RangeError("appointment-overlap: przedział pusty lub odwrócony (end <= start)");
+  }
+}
+
+/**
  * Predykat SQL: wiersz `[startCol, endCol)` koliduje z `[start, end)`.
- * Dla wizyt i blokad czasu (urlop, przerwa).
+ * Dla wizyt i blokad czasu (urlop, przerwa). Rzuca `RangeError` przy `end <= start`.
  */
 export function overlapsRange(startCol: AnyPgColumn, endCol: AnyPgColumn, start: Date, end: Date): SQL {
+  assertValidRange(start, end);
   return and(lt(startCol, end), gt(endCol, start)) as SQL;
 }
 
@@ -43,7 +61,10 @@ export interface AppointmentConflictParams {
   excludeId?: string | null;
 }
 
-/** Warunek WHERE na `appointments`: wizyty, które blokują termin `[start, end)` pracownika. */
+/**
+ * Warunek WHERE na `appointments`: wizyty, które blokują termin `[start, end)` pracownika.
+ * Rzuca `RangeError` przy `end <= start` (przez `overlapsRange`).
+ */
 export function appointmentConflictWhere(params: AppointmentConflictParams): SQL {
   const conditions: SQL[] = [eq(appointments.employeeId, params.employeeId)];
   if (params.salonId) conditions.push(eq(appointments.salonId, params.salonId));
