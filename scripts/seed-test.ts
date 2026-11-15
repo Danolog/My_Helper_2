@@ -3,8 +3,9 @@
  * Creates test users (owner + client) with salon data needed for E2E tests.
  *
  * Usage: pnpm db:seed:test
- * Requires: POSTGRES_URL env var pointing at a host from SEED_ALLOWED_HOSTS
- * (see ./seed-host-guard.ts). Neon and VERCEL_ENV=preview/production are refused.
+ * Requires: POSTGRES_URL env var pointing at a host from SEED_ALLOWED_HOSTS and a
+ * database from SEED_ALLOWED_DATABASES (see ./seed-host-guard.ts). Neon (also behind
+ * a localhost tunnel) and VERCEL_ENV=preview/production are refused.
  */
 
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -26,7 +27,12 @@ import {
   promotions,
   promoCodes,
 } from "../src/lib/schema";
-import { checkSeedClientOptions, checkSeedTarget } from "./seed-host-guard";
+import {
+  checkSeedClientOptions,
+  checkSeedServerIdentity,
+  checkSeedTarget,
+  SEED_SERVER_PROBE_SQL,
+} from "./seed-host-guard";
 
 const connectionString = process.env.POSTGRES_URL;
 const target = checkSeedTarget(connectionString, { VERCEL_ENV: process.env.VERCEL_ENV });
@@ -71,6 +77,17 @@ const E2E_PROMOTIONS = {
 } as const;
 
 async function seed() {
+  // Etap 3, przed pierwszym zapisem: co mówi o sobie serwer. Łapie tunel
+  // localhost:<port> → zdalna baza, którego etapy 1–2 nie widzą.
+  const [identity] = await sql.unsafe(SEED_SERVER_PROBE_SQL);
+  const server = checkSeedServerIdentity(identity);
+  if (!server.ok) {
+    console.error(`[seed-test] Odmowa: ${server.reason}`);
+    await sql.end({ timeout: 0 });
+    process.exit(1);
+  }
+  console.log(`[seed-test] Baza docelowa: ${server.database}`);
+
   console.log("[seed-test] Starting test seed...");
 
   // 1. Create owner user
