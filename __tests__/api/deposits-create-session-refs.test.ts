@@ -18,7 +18,7 @@
  *   - refRows:   tx.select() w forSalon (zapytania assertSalonRefs, kolejność
  *                clientId -> employeeId -> serviceId).
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SALON_REF_ERROR } from "@/lib/salon-refs";
 import { createMockRequest, parseResponse } from "./helpers";
 
@@ -132,8 +132,15 @@ function asStaffOf(salonId: string) {
   h.getSalonContext.mockResolvedValue({ salonId, role: "receptionist", employeeId: "e-x", userId: "staff-u" });
 }
 
+// #69: flaga symulacji nie przecieka między testami.
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("POST /api/deposits/create-session: referencje salonu", () => {
   beforeEach(() => {
+    // #69: symulacja bez klucza Stripe jest opt-in (vitest: NODE_ENV=test).
+    vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
     h.routeRows.length = 0;
     h.refRows.length = 0;
     h.insertedValues.length = 0;
