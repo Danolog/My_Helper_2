@@ -2,12 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  AlertTriangle,
   Ban,
   Clock,
   DollarSign,
   Bell,
-  CheckCircle,
   XCircle,
   RefreshCw,
   User,
@@ -24,6 +22,14 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { mutationFetch } from "@/lib/api-client";
+import type { CancellationDepositVariant } from "@/lib/salon-cancellation";
+import {
+  CANCEL_DIALOG_BACK,
+  CANCEL_DIALOG_CONFIRM,
+  CANCEL_DIALOG_TITLE,
+  cancelDialogBody,
+  salonCancelToast,
+} from "./cancel-appointment-texts";
 
 interface CancellationInfo {
   appointmentId: string;
@@ -37,6 +43,7 @@ interface CancellationInfo {
     amount: number;
     paid: boolean;
     action: "refund" | "forfeit" | "none";
+    variant: CancellationDepositVariant;
   };
   client: {
     id: string;
@@ -86,10 +93,10 @@ export function CancelAppointmentDialog({
       if (data.success) {
         setCancelInfo(data.data);
       } else {
-        setError(data.error || "Nie udalo sie pobrac informacji o wizycie");
+        setError(data.error || "Nie udało się pobrać informacji o wizycie");
       }
     } catch {
-      setError("Blad polaczenia z serwerem");
+      setError("Błąd połączenia z serwerem");
     } finally {
       setLoading(false);
     }
@@ -122,31 +129,22 @@ export function CancelAppointmentDialog({
       const data = await res.json();
 
       if (data.success) {
-        const details = data.cancellationDetails;
-        let description = "Wizyta zostala pomyslnie anulowana.";
-
-        if (details?.depositRefunded && details?.refund?.processed) {
-          description += ` Zwrot zadatku ${details.refund.amount?.toFixed(2) || details.depositAmount.toFixed(2)} PLN zostal zainicjowany automatycznie.`;
-        } else if (details?.depositRefunded) {
-          description += ` Zadatek ${details.depositAmount.toFixed(2)} PLN do zwrotu.`;
-        } else if (details?.depositForfeited) {
-          description += ` Zadatek ${details.depositAmount.toFixed(2)} PLN zostaje zatrzymany.`;
+        // RF3: toast zależny od wyniku zwrotu; nieudany zwrot bez auto-zamknięcia.
+        const notice = salonCancelToast(data.cancellationDetails);
+        if (notice.kind === "error") {
+          toast.error(notice.title, { description: notice.description, duration: notice.duration });
+        } else {
+          toast.success(notice.title, notice.description ? { description: notice.description } : undefined);
         }
-
-        if (details?.clientNotified) {
-          description += " Klient zostanie powiadomiony.";
-        }
-
-        toast.success("Wizyta anulowana", { description });
         onOpenChange(false);
         onAppointmentCancelled();
       } else {
-        toast.error("Nie udalo sie anulowac wizyty", {
+        toast.error("Nie udało się odwołać wizyty", {
           description: data.error,
         });
       }
     } catch {
-      toast.error("Blad podczas anulowania wizyty");
+      toast.error("Błąd podczas odwoływania wizyty");
     } finally {
       setCancelling(false);
     }
@@ -184,7 +182,7 @@ export function CancelAppointmentDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-destructive">
             <Ban className="h-5 w-5" />
-            Anulowanie wizyty
+            {CANCEL_DIALOG_TITLE}
           </DialogTitle>
         </DialogHeader>
 
@@ -231,83 +229,24 @@ export function CancelAppointmentDialog({
               )}
             </div>
 
-            {/* Cancellation policy */}
-            <div
-              className={`p-3 rounded-lg border ${
-                cancelInfo.isMoreThan24h
-                  ? "bg-green-50 dark:bg-green-950/30 border-green-300 dark:border-green-700"
-                  : "bg-orange-50 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700"
-              }`}
-              data-testid="cancellation-policy"
-            >
-              <div className="flex items-start gap-2">
-                {cancelInfo.isMoreThan24h ? (
-                  <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400 mt-0.5 shrink-0" />
-                ) : (
-                  <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400 mt-0.5 shrink-0" />
-                )}
-                <div className="text-sm">
-                  <p className="font-medium">
-                    {cancelInfo.isPast
-                      ? "Wizyta juz sie odbyla"
-                      : cancelInfo.isMoreThan24h
-                        ? "Anulacja bez kosztow"
-                        : "Anulacja z utrata zadatku"}
-                  </p>
-                  <p className="text-muted-foreground mt-1">
-                    {cancelInfo.isPast
-                      ? "Ta wizyta jest juz w przeszlosci."
-                      : `Do wizyty pozostalo: ${formatTimeRemaining(cancelInfo.hoursUntilAppointment)}`}
-                  </p>
-                  {!cancelInfo.isPast && (
-                    <p className="text-muted-foreground mt-1">
-                      {cancelInfo.isMoreThan24h
-                        ? "Wizyta moze byc anulowana bez kosztow (wiecej niz 24h do wizyty)."
-                        : "Uwaga: Anulacja mniej niz 24h przed wizyta oznacza utrate zadatku."}
-                    </p>
-                  )}
-                </div>
-              </div>
+            {/* Czas do wizyty (informacyjnie — salon zwraca zadatek zawsze, RF1) */}
+            <div className="p-3 rounded-lg border bg-muted/30 text-sm" data-testid="cancellation-policy">
+              <p className="text-muted-foreground">
+                {cancelInfo.isPast
+                  ? "Ta wizyta jest już w przeszłości."
+                  : `Do wizyty zostało: ${formatTimeRemaining(cancelInfo.hoursUntilAppointment)}`}
+              </p>
             </div>
 
-            {/* Deposit info */}
-            {cancelInfo.deposit.amount > 0 && cancelInfo.deposit.paid && (
-              <div
-                className={`p-3 rounded-lg border ${
-                  cancelInfo.deposit.action === "refund"
-                    ? "bg-blue-50 dark:bg-blue-950/30 border-blue-300 dark:border-blue-700"
-                    : "bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-700"
-                }`}
-                data-testid="deposit-info"
-              >
-                <div className="flex items-start gap-2">
-                  <DollarSign
-                    className={`h-4 w-4 mt-0.5 shrink-0 ${
-                      cancelInfo.deposit.action === "refund"
-                        ? "text-blue-600 dark:text-blue-400"
-                        : "text-red-600 dark:text-red-400"
-                    }`}
-                  />
-                  <div className="text-sm">
-                    <p className="font-medium">
-                      Zadatek: {cancelInfo.deposit.amount.toFixed(2)} PLN
-                    </p>
-                    <p
-                      className={
-                        cancelInfo.deposit.action === "refund"
-                          ? "text-blue-700 dark:text-blue-400"
-                          : "text-red-700 dark:text-red-400"
-                      }
-                      data-testid="deposit-action-message"
-                    >
-                      {cancelInfo.deposit.action === "refund"
-                        ? "Zadatek zostanie zwrocony klientowi."
-                        : "Zadatek nie podlega zwrotowi (anulacja < 24h)."}
-                    </p>
-                  </div>
-                </div>
+            {/* Zadatek i skutek odwołania (RF3) */}
+            <div className="p-3 rounded-lg border" data-testid="deposit-info">
+              <div className="flex items-start gap-2">
+                <DollarSign className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+                <p className="text-sm" data-testid="deposit-action-message">
+                  {cancelDialogBody(cancelInfo.deposit.variant, cancelInfo.deposit.amount)}
+                </p>
               </div>
-            )}
+            </div>
 
             {/* Notify client option */}
             {cancelInfo.client && (
@@ -324,7 +263,7 @@ export function CancelAppointmentDialog({
                     className="text-sm font-medium flex items-center gap-1.5 cursor-pointer"
                   >
                     <Bell className="h-3.5 w-3.5 text-primary" />
-                    Powiadom klienta o anulowaniu
+                    Powiadom klienta o odwołaniu
                   </label>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     {cancelInfo.client.name}
@@ -333,11 +272,6 @@ export function CancelAppointmentDialog({
                 </div>
               </div>
             )}
-
-            {/* Warning */}
-            <p className="text-sm text-muted-foreground text-center">
-              Czy na pewno chcesz anulowac te wizyte? Tej operacji nie mozna cofnac.
-            </p>
           </div>
         )}
 
@@ -348,7 +282,7 @@ export function CancelAppointmentDialog({
             disabled={cancelling}
             data-testid="cancel-dialog-back-btn"
           >
-            Wstecz
+            {CANCEL_DIALOG_BACK}
           </Button>
           <Button
             variant="destructive"
@@ -356,7 +290,7 @@ export function CancelAppointmentDialog({
             disabled={cancelling || loading || !!error}
             data-testid="confirm-cancel-btn"
           >
-            {cancelling ? "Anulowanie..." : "Anuluj wizyte"}
+            {cancelling ? "Odwoływanie..." : CANCEL_DIALOG_CONFIRM}
           </Button>
         </DialogFooter>
       </DialogContent>

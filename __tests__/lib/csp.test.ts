@@ -95,6 +95,44 @@ describe("buildCsp — produkcja", () => {
   });
 });
 
+describe("buildCsp — img-src zawężony do naszego zasobnika (C2b)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const img = () => (directives(buildCsp(NONCE)).get("img-src") ?? "").split(" ");
+
+  it("przy GCS_BUCKET: dokładnie https://storage.googleapis.com/<bucket>/, bez hosta ogólnego", () => {
+    vi.stubEnv("GCS_BUCKET", "mh-media");
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "");
+    expect(img()).toContain("https://storage.googleapis.com/mh-media/");
+    expect(img()).not.toContain("storage.googleapis.com");
+    expect(img()).toContain("*.public.blob.vercel-storage.com");
+  });
+
+  it("przy GCS_PUBLIC_BASE_URL: prefiks własnego hosta", () => {
+    vi.stubEnv("GCS_BUCKET", "mh-media");
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "https://media.example.pl/mh-media");
+    expect(img()).toContain("https://media.example.pl/mh-media/");
+    expect(img().some((s) => s.includes("storage.googleapis.com"))).toBe(false);
+  });
+
+  it("niepoprawna konfiguracja GCS: brak źródła GCS (fail-closed)", () => {
+    vi.stubEnv("GCS_BUCKET", "mh-media");
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "http://media.example.pl/mh-media");
+    expect(img().some((s) => s.includes("storage.googleapis.com") || s.includes("media.example.pl"))).toBe(false);
+  });
+
+  it("connect-src i reszta polityki bez zmian (kontrakt G6 z B4)", () => {
+    const base = directives(buildCsp(NONCE));
+    vi.stubEnv("GCS_BUCKET", "mh-media");
+    const narrowed = directives(buildCsp(NONCE));
+    for (const [name, value] of base) {
+      if (name !== "img-src") expect(narrowed.get(name), name).toBe(value);
+    }
+  });
+});
+
 describe("buildCsp — development bez zmian", () => {
   afterEach(() => {
     vi.unstubAllEnvs();

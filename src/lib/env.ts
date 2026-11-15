@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { logger } from "@/lib/logger";
+import { resolveStorageDriver } from "@/lib/storage";
 
 /**
  * Server-side environment variables schema.
@@ -22,8 +23,14 @@ const serverEnvSchema = z.object({
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_MODEL: z.string().default("anthropic/claude-sonnet-4"),
 
-  // Storage
+  // Storage (sterownik: lib/storage.resolveStorageDriver)
+  STORAGE_DRIVER: z.string().optional(),
+  GCS_BUCKET: z.string().optional(),
+  GCS_PUBLIC_BASE_URL: z.string().optional(),
   BLOB_READ_WRITE_TOKEN: z.string().optional(),
+  // Niesekretny identyfikator store'u Blob (jest w każdym publicznym adresie);
+  // pozwala przyjmować stare adresy Blob bez tokenu (C2b, usunięcie w C4)
+  BLOB_STORE_ID: z.string().optional(),
 
   // Stripe (subscriptions + deposits)
   STRIPE_SECRET_KEY: z.string().optional(),
@@ -126,8 +133,12 @@ export function checkEnv(): void {
     warnings.push("OPENROUTER_API_KEY is not set. AI chat will not work.");
   }
 
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    warnings.push("BLOB_READ_WRITE_TOKEN is not set. Using local storage for file uploads.");
+  try {
+    if (resolveStorageDriver() === "local") {
+      warnings.push("Storage driver is local. File uploads go to public/uploads (dev only).");
+    }
+  } catch (error) {
+    warnings.push(`Storage driver is misconfigured: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   if (!process.env.STRIPE_SECRET_KEY) {

@@ -480,9 +480,21 @@ describe("upload / deleteFile — sterownik gcs (mock SDK)", () => {
   });
 
   it("GCS_PUBLIC_BASE_URL z ukośnikiem końcowym nie daje podwójnego ukośnika", async () => {
-    vi.stubEnv("GCS_PUBLIC_BASE_URL", "https://media.example.pl/");
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "https://media.example.pl/mh-media/");
     const result = await upload(Buffer.alloc(10), "a.webp", "gallery");
-    expect(result.url).toBe("https://media.example.pl/gallery/a.webp");
+    expect(result.url).toBe("https://media.example.pl/mh-media/gallery/a.webp");
+  });
+
+  it("GCS_PUBLIC_BASE_URL bez segmentu zasobnika rzuca przed SDK (C2b — lib/gcs-config)", async () => {
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "https://media.example.pl/");
+    await expect(upload(Buffer.alloc(10), "a.webp", "gallery")).rejects.toThrow(/GCS_PUBLIC_BASE_URL/);
+    expect(mockGcsSave).not.toHaveBeenCalled();
+  });
+
+  it("niepoprawna nazwa GCS_BUCKET rzuca przed SDK", async () => {
+    vi.stubEnv("GCS_BUCKET", "../other");
+    await expect(upload(Buffer.alloc(10), "a.webp")).rejects.toThrow(/GCS_BUCKET/);
+    expect(mockGcsSave).not.toHaveBeenCalled();
   });
 
   it("nieznane rozszerzenie nie przejdzie walidacji (contentType z mapy, nie z wejścia)", async () => {

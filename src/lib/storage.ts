@@ -2,6 +2,8 @@ import { existsSync } from "fs";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { put, del } from "@vercel/blob";
+import { gcsPublicTarget, type GcsPublicTarget } from "@/lib/gcs-config";
+import type { File as GcsFile } from "@google-cloud/storage";
 
 /**
  * Sterownik magazynu plików (brief C, sekcja 2 — zadanie 0.8).
@@ -13,7 +15,7 @@ import { put, del } from "@vercel/blob";
  * - `gcs` → Google Cloud Storage przez ADC (tożsamość konta serwisowego usługi
  *   Cloud Run). Żadnych kluczy JSON ani zmiennej z poświadczeniem. Wymaga
  *   `GCS_BUCKET`; opcjonalnie `GCS_PUBLIC_BASE_URL` (domyślnie
- *   `https://storage.googleapis.com/<bucket>`).
+ *   `https://storage.googleapis.com/<bucket>`; zasady w lib/gcs-config).
  * - `local` przy `NODE_ENV=production` → błąd (fail-closed): system plików
  *   Cloud Run jest ulotny, a użytkownik `node` nie pisze do `/app/public`.
  *   Ciche „udane" wgranie pliku, który znika, jest gorsze niż błąd.
@@ -47,19 +49,17 @@ export function resolveStorageDriver(env: StorageEnv = process.env): StorageDriv
   return driver;
 }
 
-interface GcsTarget {
-  bucket: string;
-  /** Publiczny prefiks adresu, bez ukośnika na końcu. */
-  publicBase: string;
-}
-
-function gcsTarget(env: StorageEnv = process.env): GcsTarget {
-  const bucket = env.GCS_BUCKET?.trim();
-  if (!bucket) {
+/**
+ * Zasobnik i publiczny prefiks adresów — z lib/gcs-config, tego samego źródła,
+ * z którego korzysta walidator „czy to nasz upload" (C2b, G-C2b).
+ * Niepoprawny `GCS_BUCKET`/`GCS_PUBLIC_BASE_URL` rzuca przed wywołaniem SDK.
+ */
+function gcsTarget(env: StorageEnv = process.env): GcsPublicTarget {
+  const target = gcsPublicTarget(env);
+  if (!target) {
     throw new Error("STORAGE_DRIVER=gcs requires GCS_BUCKET");
   }
-  const base = env.GCS_PUBLIC_BASE_URL?.trim() || `https://storage.googleapis.com/${bucket}`;
-  return { bucket, publicBase: base.replace(/\/+$/, "") };
+  return target;
 }
 
 /** Koduje każdy segment ścieżki osobno (spacje, polskie znaki), zachowując `/`. */
@@ -84,6 +84,16 @@ async function gcsBucket(bucket: string) {
   // Import leniwy: Vercel (vercel-blob/local) nie ładuje SDK Google w ogóle.
   const { Storage } = await import("@google-cloud/storage");
   return new Storage().bucket(bucket);
+}
+
+/**
+ * Uchwyt obiektu w skonfigurowanym zasobniku (odczyt przez SDK, bez HTTP po
+ * adresie od klienta — lib/own-upload-image). `objectName` musi pochodzić
+ * z walidatora isOwnUploadUrl.
+ */
+export async function gcsFile(objectName: string): Promise<GcsFile> {
+  const { bucket } = gcsTarget();
+  return (await gcsBucket(bucket)).file(objectName);
 }
 
 /**
