@@ -440,7 +440,8 @@ async function seed() {
       type: "package",
       value: "150",
       conditionsJson: {
-        packageServiceIds: ["00000000-0000-4000-8000-5e0000000001", "00000000-0000-4000-8000-5e0000000003"],
+        // Odwolania do uslug z serviceData (Strzyzenie damskie, Manicure hybrydowy) — bez powtorzonych literalow id.
+        packageServiceIds: [serviceData[0]!.id, serviceData[2]!.id],
         packagePrice: 150,
       },
     },
