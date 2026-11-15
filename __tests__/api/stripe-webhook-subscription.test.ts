@@ -250,6 +250,46 @@ describe("webhook checkout.session.completed — subskrypcja, 400/500", () => {
     expect((await deliver(webhookSession())).status).toBe(500);
     expect(f.committed).toEqual([]);
   });
+
+  it("N1: 500 z błędem zapytania z danymi → w logu tylko nazwa, kod i id zdarzenia (bez message/stack/parametrów)", async () => {
+    const pii = ["Anna Nowak", "+48123456789", "anna@test.pl"];
+    retrieveSubscription.mockRejectedValue(
+      Object.assign(
+        new Error(`Failed query: insert into "appointments" values ($1, $2, $3)\nparams: ${pii.join(",")}`),
+        { cause: { code: "23505", detail: "Key (guest_email)=(anna@test.pl) already exists." } }
+      )
+    );
+    f.selects.push([], [PLAN_PRO]);
+
+    expect((await deliver(webhookSession())).status).toBe(500);
+
+    // confirm opakowuje błąd odczytu Stripe w nowy Error (bez cause) — kodu nie ma
+    expect(logger.error).toHaveBeenCalledWith("Stripe webhook processing failed", {
+      errorName: "Error",
+      eventId: "evt_1",
+      eventType: "checkout.session.completed",
+    });
+    // Wewnętrzne logi `{ error }` redaguje prawdziwy logger (N3, #67) — tu sprawdzamy catch webhooka.
+    const logged = JSON.stringify(
+      vi.mocked(logger.error).mock.calls.filter(([msg]) => msg === "Stripe webhook processing failed")
+    );
+    for (const value of pii) expect(logged).not.toContain(value);
+    expect(logged).not.toContain("Failed query");
+  });
+
+  it("N1: 500 z błędem bazy z kodem → kod Postgresa w logu catch webhooka", async () => {
+    f.state.failNextSubscriptionWrite = { code: "08006" };
+    f.selects.push([], [PLAN_PRO], []);
+
+    expect((await deliver(webhookSession())).status).toBe(500);
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "Stripe webhook processing failed",
+      expect.objectContaining({ errorCode: "08006", eventId: "evt_1" })
+    );
+    const [, meta] = vi.mocked(logger.error).mock.calls.find(([m]) => m === "Stripe webhook processing failed")!;
+    expect(Object.keys(meta as object).sort()).toEqual(["errorCode", "errorName", "eventId", "eventType"]);
+  });
 });
 
 describe("webhook — kolejność zdarzeń (ostrzeżenie [MEDIUM] fail-open state drift)", () => {
