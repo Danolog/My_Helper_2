@@ -92,6 +92,12 @@ vi.mock("@/lib/salon-context", () => ({
     userId: "user-1",
   }),
   hasFeatureAccess: vi.fn(async (ctx: { role: string }) => ctx.role === "owner"),
+  // P1: GET/POST listy przeszły na requireSalonStaff({ feature: "products" }) —
+  // izolację salonu i role testuje products-tenant.test.ts (prawdziwa bramka);
+  // tu właściciel salonu testowego.
+  requireSalonStaff: vi.fn(async () => ({
+    ctx: { salonId: TEST_IDS.SALON_UUID, role: "owner", employeeId: null, userId: "user-1" },
+  })),
 }));
 
 vi.mock("@/lib/get-user-salon", () => ({
@@ -131,10 +137,7 @@ import { GET as listProducts, POST as createProduct } from "@/app/api/products/r
 
 // Mocked tenant resolver — flip it to simulate "no salon" / wrong tenant.
 import { getUserSalonId } from "@/lib/get-user-salon";
-import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 const mockGetUserSalonId = vi.mocked(getUserSalonId);
-const mockGetSalonContext = vi.mocked(getSalonContext);
-const mockHasFeatureAccess = vi.mocked(hasFeatureAccess);
 
 // -------------------------------------------------------
 // Tests
@@ -687,47 +690,5 @@ describe("P0-A tenant isolation — /api/products/[id]", () => {
   });
 });
 
-// =======================================================
-// Faza 3 · Role — /api/products za feature-gate "products"
-// (nie-owner tylko z czasowym grantem temporary-access).
-// =======================================================
-describe("Faza 3 role — /api/products (feature 'products')", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  const EMPLOYEE_CTX = {
-    salonId: TEST_IDS.SALON_UUID,
-    role: "employee" as const,
-    employeeId: TEST_IDS.EMPLOYEE_UUID,
-    userId: "user-emp",
-  };
-
-  it("GET jako employee bez grantu -> 403 Brak uprawnien", async () => {
-    mockGetSalonContext.mockResolvedValueOnce(EMPLOYEE_CTX);
-    // Domyślny mock hasFeatureAccess: false dla nie-ownera (brak grantu).
-
-    const request = createMockRequest("http://localhost:3000/api/products");
-    const response = await listProducts(request);
-    const { status, body } = await parseResponse(response);
-
-    expect(status).toBe(403);
-    expect(body.success).toBe(false);
-    expect(body.error).toContain("Brak uprawnien");
-    expect(mockDbSelect).not.toHaveBeenCalled();
-  });
-
-  it("GET jako employee z czasowym grantem -> 200 (zakres własnego salonu)", async () => {
-    mockGetSalonContext.mockResolvedValueOnce(EMPLOYEE_CTX);
-    mockHasFeatureAccess.mockResolvedValueOnce(true);
-    mockDbSelect.mockReturnValue(chainMock([makeProduct()]));
-
-    const request = createMockRequest("http://localhost:3000/api/products");
-    const response = await listProducts(request);
-    const { status, body } = await parseResponse(response);
-
-    expect(status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(body.data).toHaveLength(1);
-  });
-});
+// Faza 3 · Role (employee bez/z grantem "products") — przeniesione do
+// products-tenant.test.ts, który przechodzi przez prawdziwe requireSalonStaff.
