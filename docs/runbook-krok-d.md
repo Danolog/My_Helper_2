@@ -289,7 +289,27 @@ gh variable set ADMIN_EMAILS --env $E < "$HOME/secure/admin-emails"
 ## 7. D-7 — pierwszy przebieg (sesja główna)
 
 Workflow `deploy-cloud-run.yml` uruchamia wyłącznie sesja główna, po zgodzie
-Darka. Recenzent środowiska `production-gcp` — zależy od decyzji Ryana (otwarte).
+Darka.
+
+Ochrona środowiska `production-gcp` (ustawia sesja główna, Oliver 19:5x):
+- `can_admins_bypass=false` — administrator nie omija zatwierdzenia;
+- własna polityka gałęzi: tylko `main`;
+- wymagany recenzent: Darek, `prevent_self_review=false`.
+
+Zatwierdzenie oczekującego wdrożenia (`pending_deployments`) wykonuje
+**wyłącznie sesja główna**, po sygnale Olivera „Gotowe do wdrożenia: <sha>”,
+i tylko gdy sha przebiegu = sha z sygnału:
+
+```bash
+RUN=<id przebiegu>
+gh api repos/Danolog/My_Helper_2/actions/runs/$RUN --jq .head_sha     # = <sha> z sygnału
+ENV_ID=$(gh api repos/Danolog/My_Helper_2/actions/runs/$RUN/pending_deployments --jq '.[0].environment.id')
+gh api -X POST repos/Danolog/My_Helper_2/actions/runs/$RUN/pending_deployments \
+  -F "environment_ids[]=$ENV_ID" -f state=approved -f comment="Gotowe do wdrożenia: <sha>"
+```
+
+Sha inne niż w sygnale → `state=rejected`. Lista dozwolonych akcji GitHub
+w repo — P3 po becie.
 
 ```bash
 gh workflow run deploy-cloud-run.yml --ref main -f run_migrations=false
@@ -341,6 +361,25 @@ i nową wersją kodu:
 - zmiana nazwy = dodaj nową → zapis do obu → przenieś dane → contract.
 Recenzent PR z migracją sprawdza tę regułę; kopia na żądanie jest siatką, nie planem.
 
+## 7a. Pilna poprawka a czerwony „Security Audit”
+
+`main` jest chroniony (tylko PR + zielone TypeScript Check / Unit Tests /
+E2E Smoke Tests / Security Audit, enforce_admins). Gdy nowa zewnętrzna
+podatność w zależności czerwieni „Security Audit” i blokuje niezwiązaną pilną
+poprawkę — **ochrony `main` nie wyłączamy**. Jedna z dwóch dróg:
+
+1. **Dwa PR-y:** osobny PR z podbiciem zależności (lockfile, `pnpm.overrides`
+   gdy brak wydania nadrzędnego) idzie pierwszy; PR z pilną poprawką robi
+   merge `main` i przechodzi audyt;
+2. **Jawny wyjątek w audycie** (gdy łatki jeszcze nie ma): wpis wyjątku dla
+   jednego identyfikatora podatności w konfiguracji audytu, z datą wygaśnięcia
+   i uzasadnieniem (czy podatny kod jest osiągalny), w PR z recenzją Ryana;
+   zdjęcie wyjątku = osobny PR, gdy łatka wyjdzie.
+
+W obu przypadkach: treść niezałatanej, wykorzystywalnej podatności w naszym
+kodzie nie trafia do publicznych opisów ani komentarzy — prywatny szkic
+Security Advisory przez Olivera.
+
 ## 8. D-8 — harmonogram (sesja główna)
 
 Warunek (#121 j): job Scheduler powstaje wstrzymany albo obowiązkowy odczyt
@@ -378,7 +417,6 @@ pisze Ethan w planie 0.5 — ten runbook jej nie zawiera.
 ## 11. Punkty otwarte
 
 - `wif`: ostateczny warunek (Ryan) — `actor_id`, wariant `environment`, `job_workflow_ref`.
-- Recenzent środowiska `production-gcp` (Ryan).
 - Tryb migracji pierwszego przebiegu (Ryan, #121).
 - K-1: łączność Cloud SQL, puste sekrety opcjonalne, `--allow-unauthenticated`
   vs `run.developer`, `GCS_PUBLIC_BASE_URL` jako build-arg (#133 pkt 1).
