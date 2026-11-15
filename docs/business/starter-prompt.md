@@ -9,7 +9,6 @@ I'm working with the MyHelper project - an affordable Booksy alternative with AI
 - **Current Routes**:
   - `/` - Home page with setup instructions and feature overview
   - `/dashboard` - Protected dashboard page (requires authentication)
-  - `/chat` - AI chat interface (requires OpenRouter API key)
 
 ## Important Context
 
