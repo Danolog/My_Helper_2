@@ -54,6 +54,7 @@ const { getStripeMock } = vi.hoisted(() => ({ getStripeMock: vi.fn() }));
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => getStripeMock(),
   isStripeWebhookConfigured: () => true,
+  getStripeWebhookSecret: () => "mock-webhook-secret",
 }));
 vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },

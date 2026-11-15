@@ -44,6 +44,7 @@ vi.mock("@/lib/db", () => ({ db: f.db }));
 vi.mock("@/lib/stripe", () => ({
   getStripe: (...a: unknown[]) => mockGetStripe(...a),
   isStripeWebhookConfigured: () => true,
+  getStripeWebhookSecret: () => "mock-webhook-secret",
 }));
 vi.mock("@/lib/deposit-confirmation", () => ({ confirmDepositPayment: vi.fn() }));
 vi.mock("@/lib/logger", () => ({
