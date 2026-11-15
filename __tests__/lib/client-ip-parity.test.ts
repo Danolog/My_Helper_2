@@ -73,6 +73,15 @@ const nonVercelCases: Case[] = [
   ["brak nagłówków", {}],
   ["łańcuch przez LB z listy", { "x-forwarded-for": `6.6.6.6, 203.0.113.50, ${LB}` }],
   ["sam LB (cały łańcuch zaufany → brak IP)", { "x-forwarded-for": LB }],
+  // N1 (Ryan, #55): niepoprawny hop → brak IP w obu warstwach.
+  ["niepoprawny pojedynczy XFF", { "x-forwarded-for": "garbage" }],
+  ["XFF z portem", { "x-forwarded-for": "203.0.113.50:1234" }],
+  ["IPv6 ze strefą", { "x-forwarded-for": "fe80::1%eth0" }],
+  ["IPv6 w nawiasach", { "x-forwarded-for": "[2001:db8::1]" }],
+  ["IPv4 z zerem wiodącym", { "x-forwarded-for": "203.0.113.050" }],
+  ["niepoprawny hop między klientem a LB", { "x-forwarded-for": `203.0.113.50, unknown, ${LB}` }],
+  ["niepoprawny hop na miejscu LB", { "x-forwarded-for": `203.0.113.50, ${LB}, not-an-ip` }],
+  ["niepoprawny wpis na lewo od klienta (bez wpływu)", { "x-forwarded-for": `garbage, 203.0.113.50, ${LB}` }],
 ];
 
 const vercelCases: Case[] = [
@@ -81,6 +90,8 @@ const vercelCases: Case[] = [
   ["tylko x-real-ip", { "x-real-ip": "203.0.113.50" }],
   ["brak x-real-ip, pojedynczy XFF (zapas)", { "x-forwarded-for": "203.0.113.50" }],
   ["niepoprawny x-real-ip → XFF", { "x-forwarded-for": "203.0.113.50", "x-real-ip": "not-an-ip" }],
+  ["niepoprawny x-real-ip i niepoprawny XFF", { "x-forwarded-for": "garbage", "x-real-ip": "not-an-ip" }],
+  ["brak x-real-ip, XFF z portem", { "x-forwarded-for": "203.0.113.50:1234" }],
   ["brak nagłówków", {}],
 ];
 
