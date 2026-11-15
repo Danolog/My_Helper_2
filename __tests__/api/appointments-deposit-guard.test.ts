@@ -392,3 +392,37 @@ describe("#69: usługa usunięta lub wyłączona (portal z nieaktualnej pamięci
     expect(h.insert).not.toHaveBeenCalled();
   });
 });
+
+describe("#66: walidacja dat i uwag w POST /api/appointments (P3 Ryana)", () => {
+  it.each([
+    ["startTime", "jutro o 10"],
+    ["endTime", "December 1, 2026 11:00"],
+  ])("%s nie-ISO (%s) → 400 bez wyceny i zapisu", async (field, value) => {
+    h.session.mockResolvedValue(null);
+    const res = await post(body({ ...GUEST, [field]: value }));
+    const { status, body: json } = await parseResponse<{ details: Record<string, string> }>(res);
+    expect(status).toBe(400);
+    expect(json.details[field]).toMatch(/nieprawidłowy format daty/);
+    expect(h.calc).not.toHaveBeenCalled();
+    expect(h.insert).not.toHaveBeenCalled();
+  });
+
+  it("uwagi > 1000 znaków → 400 bez zapisu; 1000 znaków → 201", async () => {
+    h.session.mockResolvedValue(null);
+    const tooLong = await post(body({ ...GUEST, notes: "a".repeat(1001) }));
+    expect(tooLong.status).toBe(400);
+    expect(h.insert).not.toHaveBeenCalled();
+
+    const ok = await post(body({ ...GUEST, notes: "a".repeat(1000) }));
+    expect(ok.status).toBe(201);
+    expect(inserted().notes).toBe("a".repeat(1000));
+  });
+
+  it("uwagi z samych spacji → zapis null", async () => {
+    h.session.mockResolvedValue(null);
+    const res = await post(body({ ...GUEST, notes: "   " }));
+    expect(res.status).toBe(201);
+    expect(inserted().notes).toBeNull();
+  });
+});
+
