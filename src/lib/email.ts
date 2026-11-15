@@ -140,7 +140,8 @@ export async function sendEmail(msg: EmailMessage): Promise<EmailResult> {
     await saveFailedNotification(msg);
     return {
       success: false,
-      error: `Invalid email address: ${msg.to}`,
+      // Wynik trafia do logów wywołujących (newsletter, faktura) — bez pełnego adresu.
+      error: `Invalid email address: ${maskEmailAddress(msg.to)}`,
     };
   }
 

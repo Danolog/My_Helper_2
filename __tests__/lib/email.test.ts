@@ -134,6 +134,7 @@ describe("sendEmail", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("Invalid email address");
+    expect(result.error).not.toContain("nie-email");
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
