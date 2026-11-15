@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from '../fixtures';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -179,9 +179,12 @@ test.describe('Flow 1: Authentication', () => {
       await expect(submit).toBeEnabled({ timeout: 15000 });
       await page.fill('#email', TEST_USER.email);
       await submit.click();
-      // Should show success message, error, or "Wysylanie..." — confirms form submitted
+      // Uzytkowniczka widzi potwierdzenie wyslania linku. Poprzedni lokator laczyl
+      // w jednym wyrazeniu komunikat i przycisk "Powrot do logowania" — po
+      // sukcesie pasowal do DWOCH elementow i padal na "strict mode violation",
+      // o ile odpowiedz przyszla przed pierwszym sprawdzeniem (wyscig).
       await expect(
-        page.getByText(/jesli konto z tym adresem|jeśli konto z tym adresem|nie udalo|blad|wyslano|user not found|powrot do logowania|wysylanie/i)
+        page.getByText(/je[sś]li konto z tym adresem/i)
       ).toBeVisible({ timeout: 30000 });
     });
   });
@@ -201,6 +204,29 @@ test.describe('Flow 1: Authentication', () => {
       ).toBeVisible({ timeout: 30000 });
       // Should NOT redirect
       await expect(page).toHaveURL(/\/login/);
+    });
+
+    // Straznik limitu prob logowania. tests/fixtures.ts daje kazdemu testowi
+    // wlasny adres IP, zeby testy nie zjadaly sobie nawzajem limitu. Ten test
+    // pilnuje, ze sam limit w aplikacji nadal dziala: z JEDNEGO adresu czwarta
+    // proba logowania w ciagu 10 s dostaje 429 (Better Auth: 3 proby / 10 s).
+    test('should rate-limit repeated sign-in attempts from one client', { tag: '@full' }, async ({ request, baseURL }) => {
+      test.skip(!process.env.CI, 'Better Auth wlacza limit tylko w buildzie produkcyjnym (CI: pnpm start)');
+
+      const statuses: number[] = [];
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        const response = await request.post('/api/auth/sign-in/email', {
+          data: { email: 'wrong@example.com', password: 'WrongPass123!' },
+          // Jak przegladarka: zadanie z ciasteczkami bez naglowka Origin Better Auth odrzuca (403).
+          headers: { Origin: baseURL ?? 'http://localhost:3000' },
+        });
+        statuses.push(response.status());
+      }
+
+      expect(
+        statuses,
+        'limit prob logowania nie zadzialal — czwarta proba z tego samego adresu powinna dostac 429'
+      ).toEqual([401, 401, 401, 429]);
     });
 
     test('should show validation errors on empty login form', { tag: '@full' }, async ({ page }) => {
