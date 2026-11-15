@@ -4,9 +4,10 @@ import { withApiHandler } from "@/lib/api-handler";
 import { createServiceSchema } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import { apiRateLimit } from "@/lib/rate-limit";
-import { getSalonContext, requireSalonStaff } from "@/lib/salon-context";
+import { requireSalonStaff } from "@/lib/salon-context";
 import { services, serviceCategories } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import { isValidUuid } from "@/lib/validations";
 import type { z } from "zod";
 
 // GET /api/services - List all services
@@ -18,20 +19,26 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    // Brak salonId w query => salon zalogowanego użytkownika (dawna gałąź
-    // "lista bez zawężenia" była wyciekiem cross-salon).
-    // Faza 3 (role): getSalonContext obejmuje też recepcję/pracownika (podgląd
-    // kalendarza); mutacje zostają owner-only.
-    const salonId =
-      searchParams.get("salonId") || (await getSalonContext())?.salonId;
+    // #73: salon WYŁĄCZNIE z sesji. Wcześniej salonId z query szedł prosto do
+    // forSalon(), więc każde zalogowane konto (także klient portalu) czytało
+    // pełną listę usług dowolnego salonu, z nieaktywnymi włącznie. salonId
+    // z query jest tylko porównywany (inny => 403), jak w POST.
+    // Faza 3 (role): domyślne role requireSalonStaff to recepcja i pracownik
+    // (podgląd kalendarza), właściciel zawsze; mutacje zostają owner-only.
+    const requestedSalonId = searchParams.get("salonId")?.trim() || null;
     const activeOnly = searchParams.get("activeOnly") === "true";
 
-    if (!salonId) {
+    // #73: "null"/"undefined" z panelu dawały 500 (22P02) zamiast 400.
+    if (requestedSalonId !== null && !isValidUuid(requestedSalonId)) {
       return NextResponse.json(
-        { success: false, error: "Salon not found" },
-        { status: 404 }
+        { success: false, error: "Invalid salon ID format" },
+        { status: 400 }
       );
     }
+
+    const guard = await requireSalonStaff({ requestedSalonId });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
 
     logger.info("[Services API] GET with params", { salonId, activeOnly });
 
