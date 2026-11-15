@@ -10,7 +10,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { processAutomaticRefund, type RefundResult } from "@/lib/refund";
+import { refundAppointmentDeposits, type RefundResult } from "@/lib/refund";
 import {
   buildSalonCancellationSms,
   cancelAppointmentInTx,
@@ -350,7 +350,8 @@ export async function DELETE(
     // RF1: odwołanie przez salon = pełny zwrot, niezależnie od reguły 24 h.
     let refundResult: RefundResult | null = null;
     if (hasDeposit && depositPaid) {
-      refundResult = await processAutomaticRefund(id, "Odwolanie wizyty przez salon - pelny zwrot zadatku");
+      // Każda płatność `succeeded` osobno, od najstarszej (Ethan, #98).
+      refundResult = await refundAppointmentDeposits(id, "Odwolanie wizyty przez salon - pelny zwrot zadatku");
       if (!refundResult.success) {
         logger.error("[Appointments API] Deposit refund failed after salon cancellation — manual refund", {
           appointmentId: id,

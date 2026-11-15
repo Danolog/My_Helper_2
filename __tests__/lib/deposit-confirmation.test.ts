@@ -255,7 +255,6 @@ describe("confirmDepositPayment", () => {
     );
   });
 
-  const REFUND_THIS_PAYMENT = { depositPaymentId: "dp-1", resetAppointmentDepositPaid: false };
   const failedPayment = { ...pendingPayment, status: "failed" };
   // where() update'u platnosci: and(eq(id), eq(status, X)) => X
   const statusGuard = (call: number) =>
@@ -281,7 +280,7 @@ describe("confirmDepositPayment", () => {
       expect(mockTxUpdate).toHaveBeenCalledTimes(1);
       expect(mockTxSet.mock.calls[0]![0]).toMatchObject({ status: "succeeded", stripePaymentIntentId: "pi_late" });
       expect(mockTxFor).toHaveBeenCalledWith("update");
-      expect(mockRefund).toHaveBeenCalledWith("appt-1", expect.stringContaining("po anulowaniu"), REFUND_THIS_PAYMENT);
+      expect(mockRefund).toHaveBeenCalledWith("appt-1", "dp-1", expect.stringContaining("po anulowaniu"));
       expect(mockSendSms).not.toHaveBeenCalled();
       expect(logger.error).not.toHaveBeenCalled();
     }
@@ -304,7 +303,7 @@ describe("confirmDepositPayment", () => {
     expect(mockTransaction).toHaveBeenCalledTimes(1);
     expect(mockTxFor).toHaveBeenCalledWith("update");
     expect(mockRefund).toHaveBeenCalledTimes(1);
-    expect(mockRefund).toHaveBeenCalledWith("appt-1", expect.any(String), REFUND_THIS_PAYMENT);
+    expect(mockRefund).toHaveBeenCalledWith("appt-1", "dp-1", expect.any(String));
   });
 
   it("#70 powtorzony webhook => dokladnie jeden zwrot (drugi widzi succeeded)", async () => {
@@ -427,7 +426,7 @@ describe("confirmDepositPayment", () => {
         refundId: "re_1",
       });
       expect(mockTxUpdate).toHaveBeenCalledTimes(1);
-      expect(mockRefund).toHaveBeenCalledWith("appt-1", expect.stringContaining("Druga wplata"), REFUND_THIS_PAYMENT);
+      expect(mockRefund).toHaveBeenCalledWith("appt-1", "dp-1", expect.stringContaining("Druga wplata"));
       expect(mockSendSms).not.toHaveBeenCalled();
     }
   );

@@ -97,7 +97,7 @@ vi.mock("@/lib/stripe", () => ({
 }));
 
 vi.mock("@/lib/refund", () => ({
-  processAutomaticRefund: (...args: unknown[]) => mockProcessAutomaticRefund(...args),
+  refundAppointmentDeposits: (...args: unknown[]) => mockProcessAutomaticRefund(...args),
   createRefundNotification: (...args: unknown[]) => mockCreateRefundNotification(...args),
 }));
 

@@ -356,10 +356,10 @@ async function refundUnexpectedDeposit(
   // `depositPaid` wizyty bez zmian.
   const refund = await processAutomaticRefund(
     payment.appointmentId,
+    payment.id,
     why.reason === "appointment_inactive"
       ? "Wplata zadatku po anulowaniu wizyty - automatyczny zwrot"
-      : "Druga wplata zadatku za te sama wizyte - automatyczny zwrot",
-    { depositPaymentId: payment.id, resetAppointmentDepositPaid: false }
+      : "Druga wplata zadatku za te sama wizyte - automatyczny zwrot"
   );
   if (!refund.refunded) {
     logger.error("Deposit paid for cancelled appointment — manual refund", context);
