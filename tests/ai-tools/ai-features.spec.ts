@@ -9,7 +9,6 @@ const AI_PAGES = [
   { path: '/dashboard/ai-assistant', name: 'AI Assistant Hub' },
   { path: '/dashboard/ai-assistant/business', name: 'Business Intelligence' },
   { path: '/dashboard/ai-assistant/trends', name: 'Trend Analysis' },
-  { path: '/dashboard/ai-assistant/voice', name: 'Voice Assistant' },
   { path: '/dashboard/content-generator', name: 'Content Generator Hub' },
   { path: '/dashboard/content-generator/newsletters', name: 'Newsletters' },
   { path: '/dashboard/ai-recommendations', name: 'AI Recommendations' },
@@ -24,6 +23,8 @@ const FROZEN_PAGES = [
   // B4: strony usunięte (social, testimoniale, szablony) — prefiks zostaje w ROUTE_MODULE_MAP.
   { path: '/dashboard/content-generator/templates', name: 'Templates' },
   { path: '/dashboard/content-generator/testimonials', name: 'Testimonials' },
+  // B5: strona fiskalizacji usunięta — prefiks zostaje, otwarta karta wraca na pulpit.
+  { path: '/dashboard/settings/fiscal', name: 'Fiscal Settings' },
 ];
 
 // ---------------------------------------------------------------------------
