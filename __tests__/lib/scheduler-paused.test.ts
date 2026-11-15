@@ -182,7 +182,7 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     w.seed("mh-future", { schedule: "0 6 * * *", timeZone: "Europe/Warsaw", uri: "x", method: "GET", state: "ENABLED" });
     const r = spawnSync("bash", [copy], {
       encoding: "utf8",
-      env: { PATH: `${BIN}:${process.env.PATH}`, PROJECT_ID: "p-123456", REGION: "europe-central2", BASE_URL: SERVICE_URL, FAKE_JOBS: w.jobs, FAKE_LOG: join(DIR, `log-${n++}`), FAKE_TOKEN: TOKEN },
+      env: { NODE_ENV: "test", PATH: `${BIN}:${process.env.PATH}`, PROJECT_ID: "p-123456", REGION: "europe-central2", BASE_URL: SERVICE_URL, FAKE_JOBS: w.jobs, FAKE_LOG: join(DIR, `log-${n++}`), FAKE_TOKEN: TOKEN },
     });
     expect(r.status, r.stderr).toBe(0);
     expect(w.state("mh-future").state).toBe("PAUSED");
@@ -230,7 +230,7 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     const w = world();
     const r = spawnSync("bash", [copy, "--resume", "mh-future"], {
       encoding: "utf8",
-      env: { PATH: `${BIN}:${process.env.PATH}`, PROJECT_ID: "p-123456", REGION: "europe-central2", BASE_URL: SERVICE_URL, FAKE_JOBS: w.jobs, FAKE_LOG: join(DIR, `log-${n++}`), FAKE_TOKEN: TOKEN },
+      env: { NODE_ENV: "test", PATH: `${BIN}:${process.env.PATH}`, PROJECT_ID: "p-123456", REGION: "europe-central2", BASE_URL: SERVICE_URL, FAKE_JOBS: w.jobs, FAKE_LOG: join(DIR, `log-${n++}`), FAKE_TOKEN: TOKEN },
     });
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/PAUSED in the table/);
