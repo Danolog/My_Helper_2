@@ -11,6 +11,7 @@
  * Każdy adres spoza allowlisty -> 400 bez jednego wywołania fetch.
  * Brak prawdziwej sieci: global fetch, storage i fs są zamockowane.
  */
+import { Readable } from "node:stream";
 import sharp from "sharp";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { POST } from "@/app/api/ai/image/enhance/route";
@@ -253,7 +254,7 @@ describe("POST /api/ai/image/enhance — GCS (C2b): odczyt przez SDK, bez fetch"
   it("zdjęcie galerii w naszym zasobniku -> 200, wynik zapisany przez upload (nie data URI)", async () => {
     mockGcsFile.mockResolvedValue({
       getMetadata: async () => [{ contentType: "image/png", size: String(PNG.length) }],
-      download: async () => [PNG],
+      createReadStream: () => Readable.from([PNG]),
     });
     const res = await POST(req(GCS_URL));
     const { status, body: data } = await parseResponse<{ success: boolean; enhancedUrl: string }>(res);
