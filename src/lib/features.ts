@@ -297,6 +297,7 @@ export const ROUTE_MODULE_MAP: ReadonlyArray<{ prefix: string; module: ModuleKey
   { prefix: "/dashboard/waiting-list", module: "waitingList" },
   { prefix: "/dashboard/invoices", module: "invoices" },
   { prefix: "/dashboard/settings/loyalty", module: "loyalty" },
+  // B5: strona fiskalizacji usunięta — otwarta karta wraca na pulpit.
   { prefix: "/dashboard/settings/fiscal", module: "fiscal" },
   { prefix: "/dashboard/content-generator/newsletters", module: "newsletters" },
   { prefix: "/dashboard/content-generator/social-posts", module: "socialPosts" },
@@ -360,12 +361,9 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
     pattern: /^\/api\/ai\/image\/(generate|banner|service-illustration)(\/|$)/,
     module: "imageGen",
   },
-  // Moduły zamrożone wcześniej (kod kasowany w B3–B5). Paragon wizyty jest
-  // schowany w interfejsie przez useModuleEnabled("fiscal"). Głos (voiceAi,
-  // B3), wideo (videoGen) i publikacja postów (socialPosts, B4) usunięte —
-  // tras nie ma, wzorców też (strażnik: removed-features).
-  { pattern: /^\/api\/salons\/[^/]+\/fiscal-settings(\/|$)/, module: "fiscal" },
-  { pattern: /^\/api\/appointments\/[^/]+\/fiscal-receipt(\/|$)/, module: "fiscal" },
+  // Moduły zamrożone wcześniej i usunięte w B3–B5: głos (voiceAi, B3), wideo
+  // (videoGen) i publikacja postów (socialPosts, B4), fiskalizacja (fiscal,
+  // B5) — tras nie ma, wzorców też (strażnik: removed-features).
 ];
 
 export interface FrozenTarget {
