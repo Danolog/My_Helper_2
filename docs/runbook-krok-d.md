@@ -27,6 +27,10 @@ Powiązane: #110, #118, #121, #131, #133; plan 0.5 (dane z Neona).
 B='infra/gcp/bootstrap.sh --project=my-helper-2-488419 --region=europe-central2'
 ```
 
+- **Region.** Skrypt przyjmuje wyłącznie `--region=europe-central2` (inna wartość
+  = błąd przed pierwszym gcloud; Ethan, #134). Na tym regionie opiera się
+  szacunek kosztu i lokalizacja danych.
+
 ## 1. Przed startem
 
 1. `gcloud config list` — zalogowane konto sesji głównej z rolą owner; projekt
@@ -51,9 +55,18 @@ B='infra/gcp/bootstrap.sh --project=my-helper-2-488419 --region=europe-central2'
 ## 2. Kolejność etapów i odczyt stanu po każdym
 
 Etapy `apis → ar → bucket → secrets → sa → sql → run` mogą ruszyć po recenzji
-skryptu (Oliver 19:44). Etap **`wif` wykonuje się osobno, później** — dopiero po
-ostatecznej wersji warunku od Ryana (sekcja 3.8). Etapy `run` i `wif` są od
-siebie niezależne; workflow wdrożenia potrzebuje obu.
+skryptu (Oliver 19:44) i nie czekają na hook. Etap **`wif` wykonuje się osobno,
+później**, z bramką z sekcji 3.8. Etapy `run` i `wif` są od siebie niezależne;
+workflow wdrożenia potrzebuje obu.
+
+**Etap `sql` nie rusza bez B-1** (Ryan 6899923012): wersja skryptu musi
+wywoływać `sql users create|set-password` z `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`
+(inaczej hasła bazy lądują jawnym tekstem w `~/.config/gcloud/logs/`).
+Sprawdzenie przed etapem:
+
+```bash
+grep -c 'CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC\[@\]}" sql users' infra/gcp/bootstrap.sh   # = 1
+```
 
 | # | Etap | Polecenie | Odczyt stanu po etapie (oczekiwany wynik) |
 |---|---|---|---|
@@ -62,10 +75,10 @@ siebie niezależne; workflow wdrożenia potrzebuje obu.
 | D-2 | `ar` | `$B --stage=ar [--apply]` | `gcloud --project=… artifacts repositories describe myhelper --location=europe-central2 --format='yaml(format,cleanupPolicies)'` → `DOCKER`, `keep-5-most-recent` + `delete-older`, bez `cleanupPolicyDryRun: true` |
 | D-3 | `bucket` | `$B --stage=bucket --bucket=NAZWA [--apply]` | `gcloud --project=… storage buckets describe gs://NAZWA --format='yaml(uniform_bucket_level_access,public_access_prevention)'` → uniform `true`, PAP `inherited`; `… storage buckets get-iam-policy gs://NAZWA` → `allUsers` tylko w `roles/storage.legacyObjectReader` |
 | D-4 | `secrets` | `$B --stage=secrets [--apply]` | `gcloud --project=… secrets list --format='value(name)'` → 11 nazw z manifestu; `… secrets versions list NAZWA` → pusto dla każdej |
-| D-4b | `sa` | `$B --stage=sa --bucket=NAZWA [--apply]` | `… iam service-accounts list` → `myhelper-runtime`, `myhelper-deploy`; `… secrets get-iam-policy NAZWA` → runtime jako `secretAccessor` na KAŻDYM z 11; `… projects get-iam-policy my-helper-2-488419` → brak nowych ról na projekcie |
-| D-4c | `sql` | po sekcji 1 pkt 3: `$B --stage=sql [--apply]` | sekcja 3.6 |
+| D-4b | `sa` | `$B --stage=sa --bucket=NAZWA [--apply]` | `… iam service-accounts list` → `myhelper-runtime`, `myhelper-deploy`; `… secrets get-iam-policy NAZWA` → runtime jako `secretAccessor`, deploy jako `secretmanager.viewer` na KAŻDYM z 11; `… projects get-iam-policy my-helper-2-488419` → brak nowych ról na projekcie |
+| D-4c | `sql` | po sekcji 1 pkt 3 i sprawdzeniu B-1: `$B --stage=sql [--apply]` | sekcja 3.6 (w tym Policy Troubleshooter) |
 | D-4d | `run` | `$B --stage=run [--apply]` | `… run services describe myhelper --region=europe-central2 --format='value(spec.template.spec.serviceAccountName)'` → runtime; `… run services get-iam-policy myhelper --region=…` → `allUsers` invoker, deploy `run.developer`; to samo dla `run jobs … myhelper-migrate` (bez invokera) |
-| D-4e | `wif` | **później**, sekcja 3.8 | `… iam workload-identity-pools providers describe github-actions --workload-identity-pool=github --location=global --format='value(attributeCondition)'` = plik warunku |
+| D-4e | `wif` | **później**, bramka w sekcji 3.8 | `… iam workload-identity-pools providers describe github-actions --workload-identity-pool=github --location=global --format='value(attributeCondition)'` = plik warunku |
 | D-5 | wartości sekretów | sekcja 5 | `… secrets versions list NAZWA --format='value(name,state)'` → `1 ENABLED` dla ustawionych |
 | D-6 | zmienne GitHub | sekcja 6 | `gh variable list --env production-gcp` |
 | D-7 | pierwszy przebieg | sekcja 7 | sekcja 7 |
@@ -73,6 +86,23 @@ siebie niezależne; workflow wdrożenia potrzebuje obu.
 
 Przebieg z `--apply` jest idempotentny: ponowne uruchomienie etapu nie tworzy
 zasobów drugi raz (`state: exists`) i nie zmienia haseł bazy (sekcja 3.6).
+
+## 2a. Cofanie etapu (sesja główna)
+
+Zasada: najpierw poprawić i **powtórzyć** etap (idempotentny); cofać tylko, gdy
+zasób powstał z błędną konfiguracją, której nie da się zmienić w miejscu.
+`P=my-helper-2-488419; R=europe-central2`.
+
+| Etap | Cofnięcie | Pułapka |
+|---|---|---|
+| `run` | `gcloud --project=$P run services delete myhelper --region=$R` i `… run jobs delete myhelper-migrate --region=$R` | wiązania na zasobie znikają razem z nim — powtórzyć cały etap `run` |
+| `sql` | padło po utworzeniu instancji → **nie usuwać**, poprawić i powtórzyć etap (skrypt czeka na `RUNNABLE`, a przed bazą i loginami sprawdza stan). Usunięcie tylko po `… sql instances patch myhelper-pg --no-deletion-protection`, potem `… sql instances delete myhelper-pg` | nazwy usuniętej instancji nie da się użyć ponownie przez ok. **tydzień** → nowa nazwa: `--sql-instance=<nowa>`, zmiana `SQL_INSTANCE` w D-6 i nowa wersja `postgres-url` (skrypt ją utworzy, jeśli sekret nie ma wersji — starą wyłączyć `secrets versions disable`). Wiązania z warunkiem na starą nazwę usunąć (`projects remove-iam-policy-binding … --condition=…`) |
+| `sa` | `… remove-iam-policy-binding` dla każdego wiązania z sekcji 3.5 (sekrety, zasobnik, repo, actAs); konta (`iam service-accounts delete`) **dopiero na końcu** | usunięte konto zostawia w politykach wpisy `deleted:serviceAccount:…` — dlatego najpierw wiązania |
+| `secrets` | `… secrets delete NAZWA` | usuwa wszystkie wersje — tylko przed D-5 albo z kopią wartości u źródła |
+| `bucket` | najpierw `… storage buckets remove-iam-policy-binding gs://NAZWA --member=allUsers --role=roles/storage.legacyObjectReader`; zasobnik usuwać (`storage buckets delete`) tylko pusty | nazwy zasobników są globalne — usunięta może zostać zajęta przez kogoś innego |
+| `ar` | `… artifacts repositories delete myhelper --location=$R` | usuwa wszystkie obrazy |
+| `wif` | `… iam workload-identity-pools delete github --location=global` | pula usunięta jest miękko przez **30 dni** i nazwa jest zajęta — przywrócenie: `… iam workload-identity-pools undelete github --location=global` |
+| `apis` | nie cofać (wyłączenie API niszczy zależne zasoby) | — |
 
 ## 3. Etapy — co tworzą i zmieniają
 
@@ -111,6 +141,11 @@ replikacja tylko w `europe-central2`. Żadnych wartości.
   `secretmanager.viewer` osobno na każdym z 11 sekretów — tylko metadane wersji,
   bez dostępu do wartości (`run-deploy.sh` mapuje wyłącznie sekrety z wersją, K-1).
 - Zero ról na poziomie projektu w tym etapie.
+- **Zasięg deploy (Ryan, #141):** deploy nie ma `secretAccessor`, ale
+  `iam.serviceAccountUser` (actAs) na runtime razem z `run.developer` na usłudze
+  i jobie pozwala mu wdrożyć i uruchomić kod jako runtime, czyli pośrednio
+  sięgnąć po sekrety i bazę — tak ma każdy wdrażający. Barierą jest warunek WIF
+  (sekcja 3.8) i recenzent środowiska `production-gcp` (sekcja 7).
 
 ### 3.6 `sql` (decyzja Ethana, #121 komentarz 6899299212)
 Strażnik w skrypcie przerywa etap, jeśli edycja ≠ `enterprise` albo tier ≠
@@ -132,19 +167,31 @@ Tworzy:
 - losowe hasło wbudowanego `postgres` w osobnym sekrecie
   `postgres-admin-password` — spoza manifestu, bez dostępu runtime, niepodpięty
   do usługi ani joba; tylko do dostępu administracyjnego (sekcja 9);
-- `roles/cloudsql.client` wyłącznie dla runtime oraz własną rolę
-  `myhelperSqlBackup` (kopia na żądanie przed migracją, Admin API) dla deploy —
-  obie z warunkiem IAM na tę jedną instancję (Cloud SQL nie ma polityk IAM na
-  instancji, więc wiązanie projektowe z warunkiem; Oliver). Z bazą łączy się
+- `roles/cloudsql.client` wyłącznie dla runtime, z warunkiem
+  `resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/P/instances/myhelper-pg"`;
+- własną rolę `myhelperSqlBackup` dla deploy (kopia na żądanie przed migracją,
+  Admin API) z **dokładnie** trzema uprawnieniami: `cloudsql.backupRuns.create`,
+  `cloudsql.backupRuns.get`, `cloudsql.instances.get` (śledzenie operacji; bez
+  `list` — W-1, Ryan). Istniejąca rola dostaje tę samą listę (`iam roles update`).
+  Warunek obejmuje oba typy zasobu, bo operacje na kopiach mają typ `BackupRun`:
+  `(resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/P/instances/myhelper-pg") || (resource.type == "sqladmin.googleapis.com/BackupRun" && resource.name.startsWith("projects/P/instances/myhelper-pg/"))`.
+  Cloud SQL nie ma polityk IAM na instancji, więc wiązanie projektowe z warunkiem
+  (Oliver). Z bazą łączy się
   tylko konto runtime: usługa i job migracji `myhelper-migrate` działają jako
   `myhelper-runtime` (`run-migrate.sh`: `--service-account="$RUNTIME_SA"`).
   Po stronie deploy nic nie łączy się z bazą, więc deploy nie ma `cloudsql.client`.
 
 Hasła: generowane w pamięci procesu, do gcloud tylko przez `--flags-file`
 ze strumienia (`sql users create|set-password`) i `--data-file=-`
-(`secrets versions add`); nie są wypisywane. Gdy sekret ma już wersję, etap
-pomija dany login (hasło bez zmian). Gdy wersji brak, a login istnieje (przerwany
-przebieg), hasło jest ustawiane od nowa — stan sam się naprawia.
+(`secrets versions add`); nie są wypisywane. Wywołania `sql users …` idą
+z `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1` (B-1). Gdy sekret ma już wersję
+ENABLED, etap pomija dany login (hasło bez zmian). Gdy wersji brak, a login
+istnieje (przerwany przebieg), hasło jest ustawiane od nowa (`set-password`) —
+stan sam się naprawia. **Błąd odczytu** wersji (sieć, uprawnienia — kod ≠ 0
+z `secrets versions list`) przerywa etap przed jakąkolwiek zmianą hasła; to nie
+jest traktowane jak „brak wersji” (Ethan, #134). Po utworzeniu instancji skrypt
+sprawdza `state`; baza, loginy i wiązania powstają tylko przy `RUNNABLE`, inaczej
+stop — powtórzyć etap później.
 
 Bootstrap **nie tworzy ról NOLOGIN**. `myhelper_app` tworzy migracja 0005.
 
@@ -165,6 +212,26 @@ kopie włączone z PITR i `retainedBackups: 7`, okno `day: 7 hour: 3`,
 bazy zawierają `myhelper`; loginy: `myhelper_owner`, `postgres`; oba sekrety:
 `1 ENABLED`.
 
+**Policy Troubleshooter po etapie `sql`** (W-1, Ryan): deploy ma
+`cloudsql.backupRuns.create` na `myhelper-pg`, a na innej instancji nie.
+
+```bash
+P=my-helper-2-488419; D="myhelper-deploy@$P.iam.gserviceaccount.com"
+for I in myhelper-pg inna-instancja; do
+  gcloud --project=$P policy-intelligence troubleshoot-policy iam \
+    "//sqladmin.googleapis.com/projects/$P/instances/$I" \
+    --principal-email="$D" --permission=cloudsql.backupRuns.create \
+    --resource-service=sqladmin.googleapis.com \
+    --resource-type=sqladmin.googleapis.com/Instance \
+    --resource-name="projects/$P/instances/$I" \
+    --format='value(overallAccessState)'
+done
+```
+
+Oczekiwane: `CAN_ACCESS` dla `myhelper-pg`, `CANNOT_ACCESS` dla drugiej. Inny
+wynik dla `myhelper-pg` → pierwszy przebieg z `run_migrations=true` padnie na
+kopii (fail-closed) — zgłoszenie do Evy i Ryana przed D-7.
+
 ### 3.7 `run` (odstępstwo od listy etapów w zleceniu — uzasadnienie)
 Powłoki usługi `myhelper` i joba `myhelper-migrate`, żeby konto deploy dostało
 `roles/run.developer` **na tych dwóch zasobach**, a nie na projekcie. Warunki
@@ -181,26 +248,43 @@ Powłoki usługi `myhelper` i joba `myhelper-migrate`, żeby konto deploy dosta�
 Zastępcze rewizje zastępuje pierwszy przebieg workflow. Do sprawdzenia przy
 pierwszym przebiegu: czy odczyt operacji/wykonań joba wymaga dodatkowego uprawnienia.
 
-### 3.8 `wif` — NIE WYKONYWAĆ przed ostatecznym warunkiem Ryana
+### 3.8 `wif` — bramka wykonania
+**Sesja główna wykonuje `wif` dopiero, gdy spełnione jest jedno z dwóch:**
+- hook Ryana (ASK dla poleceń z dostępem do projektu) jest podpisany przez
+  Darka i zainstalowany, **albo**
+- agenci pracują na koncie maszynowym (nie na koncie Darka).
+
+Pozostałe etapy na hook nie czekają.
+
 Pula `github`, provider OIDC `github-actions`, `workloadIdentityUser` na koncie
 deploy dla `principalSet://…/attribute.repository_id/1152153440`. Warunek
-atrybutów skrypt czyta z pliku (`--wif-condition-file=`) i odrzuca plik pusty,
-z `||` albo bez któregoś z obowiązkowych zawężeń:
+atrybutów skrypt czyta z pliku (`--wif-condition-file=`). Ostateczna treść
+(Ryan, 6899923012):
 
 ```
 assertion.repository_id == '1152153440' &&
 assertion.repository_owner_id == '171363250' &&
 assertion.ref == 'refs/heads/main' &&
 assertion.workflow_ref == 'Danolog/My_Helper_2/.github/workflows/deploy-cloud-run.yml@refs/heads/main' &&
+assertion.job_workflow_ref == 'Danolog/My_Helper_2/.github/workflows/deploy-cloud-run.yml@refs/heads/main' &&
+assertion.environment == 'production-gcp' &&
 assertion.event_name == 'workflow_dispatch' &&
-assertion.run_attempt == '1'
+assertion.run_attempt == '1' &&
+assertion.actor_id == '171363250'
 ```
 
-Otwarte u Ryana (przeliczenie po upublicznieniu repo): `actor_id`, wariant
-`sub=…:environment:production-gcp`, propozycja Evy: równość
-`assertion.job_workflow_ref` (w workflow wielokrotnego użytku `workflow_ref` jest
-wywołującego; Oliver popiera ją jako zamiennik prefiksu `workflow_ref`) —
-rozstrzyga Ryan przy recenzji. Dodatkowe zawężenia dopisuje się do pliku — skrypt ich nie usuwa.
+- `job_workflow_ref` jako równość **obok** `workflow_ref`: oba wskazują ten sam
+  plik na `main`, więc wywołanie z innego workflow nie przejdzie żadną drogą.
+- `environment`: token dostaje tylko job ze środowiskiem `production-gcp`, czyli
+  za ochroną środowiska (sekcja 7).
+- `actor_id` od razu: zmiana konta wywołującego (współpracownik, konto
+  maszynowe) = świadoma zmiana pliku warunku z recenzją.
+
+Skrypt wymaga wszystkich dziewięciu członów w dokładnie tej postaci i przyjmuje
+wyłącznie **czystą koniunkcję** równości `assertion.<pole> == '<wartość>'`
+połączonych ` && ` (#140): `||`, negacja, operator warunkowy, nawiasy i funkcje
+są odrzucane przed pierwszym wywołaniem gcloud. Dodatkowe równości wolno
+dopisać (tylko zawężają).
 Wynik etapu: trzy wartości do D-6 (`GCP_WIF_PROVIDER`, `GCP_DEPLOY_SA`,
 `GCP_RUNTIME_SA`) — wypisywane przez skrypt.
 
@@ -349,13 +433,23 @@ gh api -X POST repos/Danolog/My_Helper_2/actions/runs/$RUN/pending_deployments \
 Sha inne niż w sygnale → `state=rejected`. Lista dozwolonych akcji GitHub
 w repo — P3 po becie.
 
+**Dwa przebiegi** (decyzja: pierwszy z migracjami na pustej bazie; warunek 4
+Ryana). Bez migracji pierwsza rewizja wstałaby na bazie bez tabel.
+
 ```bash
+# 1. pierwszy przebieg — migracje od zera na pustej bazie
+gh workflow run deploy-cloud-run.yml --ref main -f run_migrations=true
+gh run watch "$(gh run list --workflow=deploy-cloud-run.yml --limit=1 --json databaseId -q '.[0].databaseId')"
+# 2. drugi przebieg — bez migracji, musi być zielony (warunek 4)
 gh workflow run deploy-cloud-run.yml --ref main -f run_migrations=false
 gh run watch "$(gh run list --workflow=deploy-cloud-run.yml --limit=1 --json databaseId -q '.[0].databaseId')"
 ```
 
-**Tryb migracji pierwszego przebiegu rozstrzyga Ryan** (komentarz w #121). Warunki
-Ryana przed pierwszym przebiegiem z `run_migrations=true` (#121, 6899276171):
+Każdy przebieg osobno przechodzi zatwierdzenie `pending_deployments` (wyżej).
+Warunek WIF `run_attempt == '1'`: ponowienie nieudanego przebiegu („Re-run”) nie
+dostanie tokenu — zawsze nowy `gh workflow run`.
+
+Warunki Ryana przed pierwszym przebiegiem z `run_migrations=true` (#121, 6899276171):
 
 1. migracje od zera na pustej bazie lokalnej przechodzą, a `drizzle-kit generate`
    zwraca „No schema changes” (sesja główna, lokalnie);
@@ -451,11 +545,12 @@ sieci, bez publicznego dostępu hasłem):
 
 ```bash
 cloud-sql-proxy --port 6543 my-helper-2-488419:europe-central2:myhelper-pg &
-PGPASSWORD="$(gcloud --project=my-helper-2-488419 secrets versions access latest --secret=postgres-admin-password)" \
+PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=my-helper-2-488419 secrets versions access latest --secret=postgres-admin-password)" \
   psql "host=127.0.0.1 port=6543 user=postgres dbname=myhelper sslmode=disable"
 ```
 
-Hasło trafia tylko do środowiska procesu `psql` (nie do argumentów ani historii).
+Hasło trafia tylko do środowiska procesu `psql` (nie do argumentów, historii
+ani lokalnego logu gcloud — `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`, B-1).
 Po pracy: zakończyć proxy (`kill %1`).
 
 ## 10. Opcjonalnie — przeniesienie danych Neon → Cloud SQL
@@ -465,9 +560,9 @@ pisze Ethan w planie 0.5 — ten runbook jej nie zawiera.
 
 ## 11. Punkty otwarte
 
-- `wif`: ostateczny warunek (Ryan) — `actor_id`, wariant `environment`, `job_workflow_ref`.
-- Tryb migracji pierwszego przebiegu (Ryan, #121).
-- K-1 (#138): musi być na `main` przed D-7 — łączność Cloud SQL przez gniazdo,
+- `wif`: warunek ostateczny (sekcja 3.8); wykonanie czeka na bramkę (hook Ryana
+  podpisany i zainstalowany albo konto maszynowe).
+- K-1: musi być na `main` przed D-7 — łączność Cloud SQL przez gniazdo,
   sekrety tylko z wersją, bez `--allow-unauthenticated`, `GCS_PUBLIC_BASE_URL`
   z jednego źródła.
 - K-2 (#135): zawężenie allowlisty e2e do naszej usługi. K-3 (#137): harmonogram wstrzymany.
