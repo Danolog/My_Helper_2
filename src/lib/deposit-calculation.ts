@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { verifiedClientMatchEmail, type SessionUserLike } from "@/lib/client-match";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
@@ -128,15 +129,20 @@ export async function calculateExpectedDeposit(params: {
   serviceId: string;
   variantId?: string | null;
   startTime: Date;
-  /** Logged-in user's email — used for client deposit settings + first visit. */
-  sessionEmail?: string | null;
+  /**
+   * Logged-in user — their client deposit settings apply only when the
+   * session email is VERIFIED (src/lib/client-match.ts); otherwise the
+   * account is not matched to any client record.
+   */
+  sessionUser?: SessionUserLike | null;
   /**
    * Guest email. Unused since the first-visit promotion is frozen (it was
    * only needed for that lookup); kept so callers need no change.
    */
   guestEmail?: string | null;
 }): Promise<ExpectedDeposit> {
-  const { salonId, serviceId, variantId, startTime, sessionEmail } = params;
+  const { salonId, serviceId, variantId, startTime, sessionUser } = params;
+  const sessionEmail = verifiedClientMatchEmail(sessionUser);
 
   // 1. Service (price + deposit settings)
   const [service] = await db

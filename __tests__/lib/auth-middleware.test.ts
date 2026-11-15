@@ -2,12 +2,11 @@
  * requireAuth — brama sesji dla tras API (P0 audytu: 91 endpointow bez auth).
  * Kontrakt:
  *   - brak sesji => NextResponse 401,
- *   - requiredRole i inna rola usera => NextResponse 403,
- *   - zgodna rola / brak wymogu roli => { session, user },
+ *   - sesja => { session, user } (bez sprawdzania user.role),
  *   - isAuthError odroznia NextResponse od wyniku auth.
  * (requireCronSecret jest testowany przy trasach cronowych.)
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextResponse } from "next/server";
 
 const { mockGetSession } = vi.hoisted(() => ({ mockGetSession: vi.fn() }));
@@ -24,7 +23,7 @@ vi.mock("@/lib/auth", () => ({
   },
 }));
 
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { requireAuth, requirePlatformAdmin, isAuthError } from "@/lib/auth-middleware";
 
 describe("requireAuth", () => {
   beforeEach(() => {
@@ -51,30 +50,61 @@ describe("requireAuth", () => {
     expect(result).toEqual({ session, user: session.user });
   });
 
-  it("zwraca 403, gdy rola usera nie zgadza sie z wymagana", async () => {
-    mockGetSession.mockResolvedValue({ user: { id: "u1", role: "employee" } });
+  it("nie przyjmuje roli — user.role nie jest uprawnieniem (sygnatura bez argumentu)", async () => {
+    const session = { user: { id: "u1", role: "employee" } };
+    mockGetSession.mockResolvedValue(session);
 
-    const result = await requireAuth("owner");
-    expect(isAuthError(result)).toBe(true);
-    const response = result as NextResponse;
-    expect(response.status).toBe(403);
-    const body = await response.json();
-    expect(body).toEqual({ success: false, error: "Brak uprawnień" });
+    // requireAuth nie ma już parametru roli: uprawnienia salonu =
+    // requireSalonStaff (salons.ownerId / employees.role), admin platformy =
+    // requirePlatformAdmin (ADMIN_EMAILS).
+    expect(requireAuth.length).toBe(0);
+    const result = await requireAuth();
+    expect(result).toEqual({ session, user: session.user });
+  });
+});
+
+describe("requirePlatformAdmin (jawna lista ADMIN_EMAILS, nie user.role)", () => {
+  const original = process.env.ADMIN_EMAILS;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("zwraca 403 takze gdy user w ogole nie ma roli", async () => {
-    mockGetSession.mockResolvedValue({ user: { id: "u1" } });
+  afterEach(() => {
+    if (original === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = original;
+  });
 
-    const result = await requireAuth("owner");
-    expect(isAuthError(result)).toBe(true);
+  it("401 bez sesji", async () => {
+    process.env.ADMIN_EMAILS = "admin@myhelper.pl";
+    mockGetSession.mockResolvedValue(null);
+    const result = await requirePlatformAdmin();
+    expect((result as NextResponse).status).toBe(401);
+  });
+
+  it("pusta/nieustawiona lista => nikt (nawet user.role='owner')", async () => {
+    delete process.env.ADMIN_EMAILS;
+    mockGetSession.mockResolvedValue({ user: { id: "u1", email: "darek@x.pl", role: "owner" } });
+    const result = await requirePlatformAdmin();
+    expect((result as NextResponse).status).toBe(403);
+
+    process.env.ADMIN_EMAILS = " , ";
+    const again = await requirePlatformAdmin();
+    expect((again as NextResponse).status).toBe(403);
+  });
+
+  it("user.role='owner' spoza listy => 403", async () => {
+    process.env.ADMIN_EMAILS = "admin@myhelper.pl";
+    mockGetSession.mockResolvedValue({ user: { id: "u1", email: "owner@salon.pl", role: "owner" } });
+    const result = await requirePlatformAdmin();
     expect((result as NextResponse).status).toBe(403);
   });
 
-  it("przepuszcza usera ze zgodna rola", async () => {
-    const session = { user: { id: "u1", role: "owner" } };
+  it("e-mail z listy (bez roli, wielkość liter i spacje bez znaczenia) => przepuszcza", async () => {
+    process.env.ADMIN_EMAILS = "ops@myhelper.pl, Admin@MyHelper.pl";
+    const session = { user: { id: "u2", email: "admin@myhelper.pl" } };
     mockGetSession.mockResolvedValue(session);
-
-    const result = await requireAuth("owner");
+    const result = await requirePlatformAdmin();
     expect(isAuthError(result)).toBe(false);
     expect(result).toEqual({ session, user: session.user });
   });

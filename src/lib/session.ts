@@ -1,9 +1,10 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { employees, salons } from "@/lib/schema";
+import { resolveSalonContext } from "@/lib/salon-context";
+import { salons } from "@/lib/schema";
 
 /**
  * Protected routes that require authentication.
@@ -12,7 +13,7 @@ import { employees, salons } from "@/lib/schema";
 export const protectedRoutes = ["/chat", "/dashboard", "/profile", "/admin"];
 
 /**
- * Admin routes that require owner/admin role in addition to authentication.
+ * Admin routes that require salon ownership in addition to authentication.
  */
 export const adminRoutes = ["/admin"];
 
@@ -37,9 +38,9 @@ export async function requireAuth() {
  * Checks if the current user is authenticated AND is a salon owner (admin).
  * Should be called in Server Components for admin-only routes.
  *
- * A user is considered admin if:
- * - Their user.role is "admin" or "owner", OR
- * - They own a salon (salons.ownerId matches their user ID)
+ * A user is considered admin only if they own a salon (salons.ownerId matches
+ * their user ID). user.role is NOT consulted — on production it is set on a
+ * single account and does not imply salon ownership.
  *
  * @returns Object with session and isAdmin boolean
  * @throws Redirects to login page if not authenticated
@@ -54,12 +55,6 @@ export async function requireAdmin(): Promise<{
     redirect("/login");
   }
 
-  // Check user role
-  const userRole = (session.user as { role?: string }).role;
-  if (userRole === "admin" || userRole === "owner") {
-    return { session, isAdmin: true };
-  }
-
   // Check salon ownership
   const [salon] = await db
     .select({ id: salons.id })
@@ -72,10 +67,13 @@ export async function requireAdmin(): Promise<{
 
 /**
  * Checks if the current user may access the dashboard (Faza 3 — role
- * pracownik/recepcja). Like requireAdmin, but ALSO admits an active employee
+ * pracownik/recepcja): salon owner (salons.ownerId) or an active employee
  * whose account is linked (employees.userId === user.id AND isActive).
  *
- * requireAdmin stays untouched (used elsewhere for owner-only gates).
+ * Delegates to resolveSalonContext (single source of truth with
+ * getSalonContext / requireSalonStaff): no user.role shortcut (an account
+ * with role "owner" but no salon used to land in an empty panel) and an
+ * account linked to several active employee records is denied.
  *
  * @returns Object with session, allowed flag and the resolved salon role
  *   ("owner" | "receptionist" | "employee" | null)
@@ -92,46 +90,10 @@ export async function requireDashboardAccess(): Promise<{
     redirect("/login");
   }
 
-  // Check user role (same fast path as requireAdmin)
-  const userRole = (session.user as { role?: string }).role;
-  if (userRole === "admin" || userRole === "owner") {
-    return { session, allowed: true, role: "owner" };
-  }
+  const { ctx } = await resolveSalonContext(session.user.id);
+  if (!ctx) return { session, allowed: false, role: null };
 
-  // Check salon ownership
-  const [salon] = await db
-    .select({ id: salons.id })
-    .from(salons)
-    .where(eq(salons.ownerId, session.user.id))
-    .limit(1);
-
-  if (salon) {
-    return { session, allowed: true, role: "owner" };
-  }
-
-  // Active employee with a linked account
-  const [employee] = await db
-    .select({ role: employees.role })
-    .from(employees)
-    .where(
-      and(eq(employees.userId, session.user.id), eq(employees.isActive, true))
-    )
-    .limit(1);
-
-  if (employee) {
-    return {
-      session,
-      allowed: true,
-      // Uprawnienia właścicielskie daje wyłącznie salons.ownerId (wyżej) —
-      // employees.role mapujemy tylko na "receptionist" | "employee".
-      role:
-        employee.role === "receptionist" || employee.role === "reception"
-          ? "receptionist"
-          : "employee",
-    };
-  }
-
-  return { session, allowed: false, role: null };
+  return { session, allowed: true, role: ctx.role };
 }
 
 /**

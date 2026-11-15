@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { desc, eq, and, sql } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
+import { requireSalonStaff } from "@/lib/salon-context";
 import { notifications, clients } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 /**
@@ -11,7 +12,8 @@ import { forSalon } from "@/lib/server/repository";
  * Includes client name if the notification is linked to a client.
  *
  * Query params:
- *   - salonId: required - the salon to fetch notifications for
+ *   - salonId: optional - musi byc salonem z sesji (inny => 403); salon
+ *     zawsze pochodzi z sesji (requireSalonStaff), nie z query
  *   - type: optional - filter by notification type ('sms', 'email', 'push')
  *   - status: optional - filter by status ('pending', 'sent', 'failed')
  *   - limit: optional - max number of results (default 50)
@@ -25,18 +27,18 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    // P0 (przeglad Ryana): salon z sesji, query salonId tylko porownywany.
+    // Dostep: kazdy personel wlasnego salonu (zachowanie sprzed naprawy w
+    // obrebie salonu; zawezenie roli = decyzja produktowa, opis PR).
+    const guard = await requireSalonStaff({
+      requestedSalonId: searchParams.get("salonId"),
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
     const type = searchParams.get("type");
     const status = searchParams.get("status");
     const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100);
     const offset = parseInt(searchParams.get("offset") || "0");
-
-    if (!salonId) {
-      return NextResponse.json(
-        { success: false, error: "salonId is required" },
-        { status: 400 }
-      );
-    }
 
     // Build conditions
     const conditions = [eq(notifications.salonId, salonId)];

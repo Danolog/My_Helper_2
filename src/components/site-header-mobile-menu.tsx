@@ -20,8 +20,8 @@ export function SiteHeaderMobileMenu() {
   const { salonId, loading: salonLoading } = useSalonId();
   const [open, setOpen] = useState(false);
 
-  const role = (session?.user as { role?: string } | undefined)?.role;
-  const isOwner = role === "admin" || role === "owner" || !!salonId;
+  // Linki panelu tylko dla konta z salonem (salons.ownerId), nie po user.role.
+  const isOwner = !!salonId;
 
   const ownerLinks = [
     { href: "/dashboard", label: "Pulpit" },

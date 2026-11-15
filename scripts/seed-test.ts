@@ -34,7 +34,7 @@ const db = drizzle(sql);
 // Fixed IDs for idempotency
 const OWNER_USER_ID = "test-owner-user-id-00001";
 const CLIENT_USER_ID = "test-client-user-id-00001";
-const SALON_ID = "00000000-0000-0000-0000-000000000001";
+const SALON_ID = "00000000-0000-4000-8000-000000000001";
 
 async function seed() {
   console.log("[seed-test] Starting test seed...");
@@ -178,7 +178,7 @@ async function seed() {
   // 4. Create employee linked to owner user
   const employeeData = [
     {
-      id: "00000000-0000-0000-0000-e00000000001",
+      id: "00000000-0000-4000-8000-e00000000001",
       firstName: "Anna",
       lastName: "Kowalska",
       color: "#3b82f6",
@@ -186,7 +186,7 @@ async function seed() {
       userId: OWNER_USER_ID,
     },
     {
-      id: "00000000-0000-0000-0000-e00000000002",
+      id: "00000000-0000-4000-8000-e00000000002",
       firstName: "Marta",
       lastName: "Nowak",
       color: "#10b981",
@@ -220,7 +220,7 @@ async function seed() {
   console.log("[seed-test] Created 2 employees");
 
   // 5. Create service category + services
-  const categoryId = "00000000-0000-0000-0000-ca0000000001";
+  const categoryId = "00000000-0000-4000-8000-ca0000000001";
   await db
     .insert(serviceCategories)
     .values({
@@ -234,9 +234,9 @@ async function seed() {
     });
 
   const serviceData = [
-    { id: "00000000-0000-0000-0000-5e0000000001", name: "Strzyzenie damskie", basePrice: "80", baseDuration: 60 },
-    { id: "00000000-0000-0000-0000-5e0000000002", name: "Koloryzacja", basePrice: "150", baseDuration: 90 },
-    { id: "00000000-0000-0000-0000-5e0000000003", name: "Manicure hybrydowy", basePrice: "100", baseDuration: 60 },
+    { id: "00000000-0000-4000-8000-5e0000000001", name: "Strzyzenie damskie", basePrice: "80", baseDuration: 60 },
+    { id: "00000000-0000-4000-8000-5e0000000002", name: "Koloryzacja", basePrice: "150", baseDuration: 90 },
+    { id: "00000000-0000-4000-8000-5e0000000003", name: "Manicure hybrydowy", basePrice: "100", baseDuration: 60 },
   ];
 
   for (const svc of serviceData) {
@@ -261,8 +261,8 @@ async function seed() {
 
   // 6. Create test clients
   const clientData = [
-    { id: "00000000-0000-0000-0000-c10000000001", firstName: "Maria", lastName: "Kaczmarek", phone: "+48 111 222 333" },
-    { id: "00000000-0000-0000-0000-c10000000002", firstName: "Joanna", lastName: "Lewandowska", phone: "+48 444 555 666" },
+    { id: "00000000-0000-4000-8000-c10000000001", firstName: "Maria", lastName: "Kaczmarek", phone: "+48 111 222 333" },
+    { id: "00000000-0000-4000-8000-c10000000002", firstName: "Joanna", lastName: "Lewandowska", phone: "+48 444 555 666" },
   ];
 
   for (const c of clientData) {
@@ -286,14 +286,14 @@ async function seed() {
   // 7. Create subscription plans (needed for registration flow)
   const planData = [
     {
-      id: "00000000-0000-0000-0000-a10000000001",
+      id: "00000000-0000-4000-8000-a10000000001",
       name: "Basic",
       slug: "basic",
       priceMonthly: "49.00",
       featuresJson: [...PLAN_FEATURES.basic],
     },
     {
-      id: "00000000-0000-0000-0000-a10000000002",
+      id: "00000000-0000-4000-8000-a10000000002",
       name: "Pro",
       slug: "pro",
       priceMonthly: "149.00",

@@ -916,9 +916,11 @@ export const clientWaitingListResponseSchema = z.object({
   accepted: z.boolean({ message: "Pole 'accepted' jest wymagane i musi byc wartoscia logiczna (true/false)" }),
 });
 
+// Konto bierze trasa z sesji. `email` zostaje opcjonalne tylko dla zgodnosci
+// ze starszymi klientami (UI go wysyla), trasa go IGNORUJE.
 export const registerSubscriptionSchema = z.object({
   planSlug: z.string().min(1, "planSlug is required"),
-  email: z.string().email("Wprowadz poprawny adres email"),
+  email: z.string().optional(),
 });
 
 export const sendInvoiceEmailSchema = z.object({
