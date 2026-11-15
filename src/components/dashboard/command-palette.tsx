@@ -33,7 +33,6 @@ import {
   Receipt,
   Brain,
   Loader2,
-  MessageSquare,
   PenTool,
   Lightbulb,
   Search,
@@ -107,11 +106,10 @@ const SETTINGS_PAGES: CommandPage[] = [
 
 const AI_PAGES: CommandPage[] = [
   { label: "Asystent AI", href: "/dashboard/ai-assistant", icon: Bot },
-  { label: "Asystent biznesowy", href: "/dashboard/ai-assistant/business", icon: Brain },
+  { label: "Asystent biznesowy", href: "/dashboard/ai-assistant/business", icon: Brain, keywords: ["chat", "czat", "rozmowa"] },
   { label: "Rekomendacje AI", href: "/dashboard/ai-recommendations", icon: Lightbulb },
   { label: "Generator tresci", href: "/dashboard/content-generator", icon: PenTool },
   { label: "Koszty AI", href: "/dashboard/ai-usage", icon: DollarSign, keywords: ["monitoring", "zuzycie", "koszt"] },
-  { label: "Chat AI", href: "/chat", icon: MessageSquare },
 ];
 
 const QUICK_ACTIONS: CommandPage[] = [

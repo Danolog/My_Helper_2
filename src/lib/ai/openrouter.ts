@@ -1,11 +1,7 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { eq, and, gte, sql, count, desc } from "drizzle-orm";
-import { checkAIBudget, type AIOperation } from "@/lib/ai/usage-limits";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
-import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
-import { aiRateLimit } from "@/lib/rate-limit";
 import {
   aiGeneratedMedia,
   appointments,
@@ -16,7 +12,6 @@ import {
   products,
   salons,
 } from "@/lib/schema";
-import { isProPlan } from "@/lib/subscription";
 
 // ────────────────────────────────────────────────────────────
 // Shared AI client factory
@@ -54,100 +49,17 @@ export const INDUSTRY_LABELS: Record<string, string> = {
 };
 
 // ────────────────────────────────────────────────────────────
-// Combined auth + Pro plan check for AI endpoints
+// Bramka planu i AI — niezależna od dostawcy, w @/lib/ai/gate.
+// Re-eksport zachowuje dotychczasowe importy z tego modułu.
 // ────────────────────────────────────────────────────────────
 
-export type ProAIContext = {
-  salonId: string;
-};
-
-export type ProAIOptions = {
-  /**
-   * Operation about to be performed. "image" / "banner" additionally
-   * enforce the per-unit monthly cap (AI_MONTHLY_IMAGE_LIMIT).
-   * Omit for plain text AI calls.
-   */
-  op?: AIOperation;
-};
-
-/**
- * Combined auth + salon + Pro plan + rate limit + AI budget check for
- * AI endpoints. Returns `{ salonId }` on success, or a Response (error)
- * on failure:
- * - 401/404 — auth / salon missing
- * - 403 `PLAN_UPGRADE_REQUIRED` — not on Pro plan
- * - 429 `RATE_LIMITED` (with Retry-After) — too many AI requests per minute
- * - 429 `AI_BUDGET_EXCEEDED` — monthly budget or unit limit exhausted
- *
- * Backwards compatible: existing zero-argument call sites keep working.
- */
-export async function requireProAI(
-  options: ProAIOptions = {},
-): Promise<ProAIContext | Response> {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-
-  const salonId = await getUserSalonId();
-  if (!salonId) {
-    return Response.json({ error: "Salon not found" }, { status: 404 });
-  }
-
-  const hasPro = await isProPlan();
-  if (!hasPro) {
-    return Response.json(
-      {
-        error: "Funkcje AI sa dostepne tylko w Planie Pro.",
-        code: "PLAN_UPGRADE_REQUIRED",
-      },
-      { status: 403 },
-    );
-  }
-
-  // Rate limit per salon (distributed via Upstash when configured)
-  const rate = await aiRateLimit.checkAsync(`salon:${salonId}`);
-  if (!rate.success) {
-    const retryAfterSec = Math.max(1, Math.ceil(rate.reset / 1000));
-    return Response.json(
-      {
-        error:
-          "Zbyt wiele zapytan AI. Prosze odczekac chwile i sprobowac ponownie.",
-        code: "RATE_LIMITED",
-        retryAfter: retryAfterSec,
-      },
-      {
-        status: 429,
-        headers: { "Retry-After": String(retryAfterSec) },
-      },
-    );
-  }
-
-  // Hard monthly budget + per-type unit limits
-  const budgetCheck = await checkAIBudget(salonId, options.op);
-  if (!budgetCheck.allowed) {
-    return Response.json(
-      {
-        error:
-          budgetCheck.reason ??
-          "Miesieczny budzet AI zostal wyczerpany. Limit odnowi sie na poczatku nastepnego miesiaca.",
-        code: "AI_BUDGET_EXCEEDED",
-        usage: budgetCheck.usage,
-        budget: budgetCheck.budget,
-      },
-      { status: 429 },
-    );
-  }
-
-  return { salonId };
-}
-
-/**
- * Type guard: returns true when requireProAI returned an error Response.
- */
-export function isProAIError(
-  result: ProAIContext | Response,
-): result is Response {
-  return result instanceof Response;
-}
+export {
+  isProAIError,
+  requireProAI,
+  requireProPlan,
+  type ProAIContext,
+  type ProAIOptions,
+} from "@/lib/ai/gate";
 
 // ────────────────────────────────────────────────────────────
 // Salon context gathering

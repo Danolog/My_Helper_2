@@ -4,6 +4,7 @@
  * B3: asystent głosowy, dyktowanie i czytanie na głos (Twilio, ElevenLabs).
  * B4: generowanie wideo (Veo) i publikacja postów social (W, S).
  * B5: fiskalizacja (F) i martwy `createRefundNotification`.
+ * 2026-11-15: ogólny czat (strona /chat i trasa /api/chat, decyzja PO).
  * Test pada, gdy ktoś przywróci którąkolwiek ścieżkę, zależność, import
  * (statyczny, `require`, dynamiczny `import()`), odwołanie do trasy, zmienną
  * środowiskową albo zluzuje nagłówki bezpieczeństwa po usuniętych dostawcach.
@@ -53,6 +54,9 @@ const REMOVED_PATHS = [
   "src/app/dashboard/settings/fiscal",
   "src/components/appointments/detail/appointment-fiscal-receipt-card.tsx",
   "src/components/appointments/detail/fiscal-receipt-dialog.tsx",
+  // Ogólny czat (decyzja PO 2026-11-15) — czaty AI to asystent biznesowy i trendy
+  "src/app/(site)/chat",
+  "src/app/api/chat",
 ];
 
 /**
@@ -107,6 +111,12 @@ const FORBIDDEN_REFERENCES: Array<[string, RegExp]> = [
   ["link do /dashboard/settings/fiscal", /\bhref:\s*["'`]\/dashboard\/settings\/fiscal/],
   ["bramka modułu fiscal w interfejsie", /useModuleEnabled\(\s*["'`]fiscal["'`]\s*\)|<ModuleGate\s+module=["'`]fiscal["'`]/],
   ["martwy createRefundNotification", /\bcreateRefundNotification\b/],
+  // Ogólny czat: trasa i strona (także w szablonie `${base}/chat`). Czaty
+  // salonu żyją pod /api/ai/business/chat i /dashboard/ai-assistant/*.
+  ["trasa /api/chat", /\/api\/chat(\/|["'`?#]|$)/m],
+  ["link lub trasa chroniona /chat", /(["'`]|\})\/chat(\/[^"'`]*)?["'`]/],
+  // useChat bez transportu woła domyślnie /api/chat
+  ["useChat z @ai-sdk/react (domyślny endpoint /api/chat)", importOf("@ai-sdk/react")],
   // Importy usuniętych pakietów
   ...REMOVED_PACKAGES.map((pkg): [string, RegExp] => [`import ${pkg}`, importOf(pkg)]),
 ];
@@ -309,6 +319,25 @@ describe("G6 — usunięte funkcje nie wracają (B3: głos, B4: wideo i social, 
   it.each(FORBIDDEN_REFERENCES)("w src nie ma odwołania: %s", (_label, pattern) => {
     const hits = SRC_FILES.filter((f) => pattern.test(f.text)).map((f) => f.path);
     expect(hits).toEqual([]);
+  });
+
+  it("kontrola: reguły ogólnego czatu łapią trasę, link i szablon, a nie czaty salonu", () => {
+    const rule = (label: string) => FORBIDDEN_REFERENCES.find(([l]) => l === label)![1];
+    const api = rule("trasa /api/chat");
+    const page = rule("link lub trasa chroniona /chat");
+    for (const sample of [`fetch("/api/chat")`, "fetch(`/api/chat?x=1`)", `api: "/api/chat/"`]) {
+      expect(api.test(sample), sample).toBe(true);
+    }
+    for (const sample of [`href: "/chat"`, `["/chat", "/dashboard"]`, "url: `${baseUrl}/chat`", `"/chat/:path*"`]) {
+      expect(page.test(sample), sample).toBe(true);
+    }
+    for (const sample of [
+      `fetch("/api/ai/business/chat")`,
+      `href: "/dashboard/ai-assistant/business"`,
+      `"/dashboard/ai-assistant/trends/chat"`,
+    ]) {
+      expect(api.test(sample) || page.test(sample), sample).toBe(false);
+    }
   });
 
   it("kontrola: wzorzec importu łapie każdą formę (statyczny, side-effect, require, dynamiczny, podścieżka)", () => {
