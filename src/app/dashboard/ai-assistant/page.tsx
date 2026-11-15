@@ -8,8 +8,6 @@ import {
   Brain,
   Lightbulb,
   MessageSquare,
-  Mic,
-  PenTool,
   TrendingUp,
   type LucideIcon,
 } from "lucide-react";
@@ -29,14 +27,6 @@ interface AiTile {
 }
 
 const AI_TILES: AiTile[] = [
-  {
-    icon: PenTool,
-    title: "Generator tresci",
-    description:
-      "Opisy usług tworzone przez AI",
-    href: "/dashboard/content-generator",
-    cta: "Otworz generator",
-  },
   {
     icon: Brain,
     title: "Asystent biznesowy",
@@ -72,15 +62,6 @@ const AI_TILES: AiTile[] = [
     description: "Monitoruj wykorzystanie funkcji AI i limity planu",
     href: "/dashboard/ai-usage",
     cta: "Zobacz zuzycie",
-  },
-  {
-    icon: Mic,
-    title: "Asystent glosowy",
-    description:
-      "Automatyczne odbieranie polaczen i umawianie wizyt przez telefon",
-    href: "/dashboard/ai-assistant/voice",
-    cta: "Konfiguruj",
-    module: "voiceAi",
   },
 ];
 

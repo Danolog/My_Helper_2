@@ -36,7 +36,6 @@ const LABELS: Record<string, string> = {
   payments: "Platnosci",
   notifications: "Powiadomienia",
   schedule: "Grafik",
-  templates: "Szablony",
   newsletters: "Newslettery",
   business: "Biznes",
   trends: "Trendy",

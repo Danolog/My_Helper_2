@@ -1,16 +1,11 @@
 import { NextResponse } from "next/server";
 import { eq, and, isNotNull, ne, inArray, count, avg } from "drizzle-orm";
-import { validateBody, createSalonSchema } from "@/lib/api-validation";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001: operacje na korzeniu najemcy (salons) — GET to publiczny katalog (bez
-// sesji salonu), POST tworzy salon zanim istnieje salonId — poza modelem forSalon,
-// świadomie surowe db.
+// ADR-001: korzeń najemcy (salons) — GET to publiczny katalog (bez sesji
+// salonu), poza modelem forSalon, świadomie surowe db.
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { salons, services, reviews } from "@/lib/schema";
-import { isUniqueViolation } from "@/lib/subscription-predicates";
 
 // Revalidate salon list every 60 seconds (ISR)
 export const revalidate = 60;
@@ -119,89 +114,11 @@ export async function GET() {
   }
 }
 
-// POST /api/salons - Create a new salon
-export async function POST(request: Request) {
-  try {
-    const ip = getClientIp(request);
-    const rateLimitResult = apiRateLimit.check(ip);
-    if (!rateLimitResult.success) {
-      return NextResponse.json(
-        { success: false, error: "Zbyt wiele żądań. Spróbuj ponownie później." },
-        { status: 429, headers: { "Retry-After": String(Math.ceil(rateLimitResult.reset / 1000)) } }
-      );
-    }
-
-    const authResult = await requireAuth();
-    if (isAuthError(authResult)) return authResult;
-
-    const body = await request.json();
-
-    // Server-side validation with Zod schema
-    const validationError = validateBody(createSalonSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
-    }
-
-    // Właściciel wyłącznie z sesji — `ownerId` z body jest ignorowany (inaczej
-    // salon na cudze konto albo bez właściciela).
-    const { name, phone, email, address, industryType } = body;
-    const ownerId = authResult.user.id;
-
-    // Jedno konto = jeden salon: salon-context i get-user-salon rozwiązują
-    // salon po ownerId z limit(1) bez ORDER BY — drugi salon robi kontekst
-    // właściciela niedeterministycznym.
-    const [existing] = await db
-      .select({ id: salons.id })
-      .from(salons)
-      .where(eq(salons.ownerId, ownerId))
-      .limit(1);
-    if (existing) {
-      return NextResponse.json(
-        { success: false, error: "To konto ma już salon" },
-        { status: 409 }
-      );
-    }
-
-    let newSalon: typeof salons.$inferSelect | undefined;
-    try {
-      [newSalon] = await db
-        .insert(salons)
-        .values({
-          name,
-          phone: phone || null,
-          email: email || null,
-          address: address || null,
-          industryType: industryType || null,
-          ownerId,
-        })
-        .returning();
-    } catch (error) {
-      // Równoległe żądanie tego samego konta zdążyło pierwsze — indeks
-      // salons_owner_id_uq (T3b) pilnuje „jedno konto = jeden salon” także
-      // przy wyścigu, którego SELECT wyżej nie widzi.
-      if (isUniqueViolation(error)) {
-        return NextResponse.json(
-          { success: false, error: "To konto ma już salon" },
-          { status: 409 }
-        );
-      }
-      throw error;
-    }
-
-    logger.info(`[Salons API] INSERT successful, created salon with id: ${newSalon?.id}`);
-
-    return NextResponse.json({
-      success: true,
-      data: newSalon,
-    }, { status: 201 });
-  } catch (error) {
-    logger.error("[Salons API] Database error", { error: error });
-    return NextResponse.json(
-      { success: false, error: "Failed to create salon" },
-      { status: 500 }
-    );
-  }
-}
+// POST /api/salons — świadomie brak (#86, Leo z recenzji #76): trasa bez
+// wołającego w src/ i tests/ tworzyła salon BEZ wiersza subskrypcji, co łamie
+// niezmiennik „każdy salon ma subskrypcję” (Ethan §3). Salon powstaje wyłącznie
+// przez POST /api/register-subscription (salon + subskrypcja razem); tutaj
+// Next.js odpowiada 405.
 
 // DELETE /api/salons — świadomie brak (P0, Ryan): trasa bez wołającego w UI
 // kasowała dowolny salon po id dla każdego zalogowanego konta, a 26 FK do
