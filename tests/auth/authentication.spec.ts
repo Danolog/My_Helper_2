@@ -212,6 +212,13 @@ test.describe('Flow 1: Authentication', () => {
     // proba logowania w ciagu 10 s dostaje 429 (Better Auth: 3 proby / 10 s).
     test('should rate-limit repeated sign-in attempts from one client', { tag: '@full' }, async ({ request, baseURL }) => {
       test.skip(!process.env.CI, 'Better Auth wlacza limit tylko w buildzie produkcyjnym (CI: pnpm start)');
+      // Nie bijemy limitu logowania na zdalnym wdrozeniu (produkcja, preview):
+      // strażnik ma sens tylko na lokalnym serwerze z CI.
+      const targetHost = new URL(baseURL ?? 'http://localhost:3000').hostname;
+      test.skip(
+        !['localhost', '127.0.0.1', '[::1]', '::1'].includes(targetHost),
+        `Straznik limitu dziala tylko lokalnie — BASE_URL wskazuje zdalny host (${targetHost})`
+      );
 
       const statuses: number[] = [];
       for (let attempt = 0; attempt < 4; attempt += 1) {

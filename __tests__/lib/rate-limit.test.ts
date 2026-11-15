@@ -367,39 +367,108 @@ describe("checkAsync (Upstash adapter)", () => {
 });
 
 describe("getClientIp", () => {
-  it("should extract IP from x-forwarded-for header", () => {
-    const request = new Request("http://localhost", {
-      headers: { "x-forwarded-for": "203.0.113.50, 70.41.3.18" },
-    });
-    expect(getClientIp(request)).toBe("203.0.113.50");
+  const originalTrusted = process.env.TRUSTED_PROXIES;
+  const originalVercel = process.env.VERCEL;
+
+  beforeEach(() => {
+    delete process.env.TRUSTED_PROXIES;
+    delete process.env.VERCEL;
   });
 
-  it("should extract IP from x-real-ip header when x-forwarded-for is absent", () => {
-    const request = new Request("http://localhost", {
-      headers: { "x-real-ip": "198.51.100.10" },
-    });
-    expect(getClientIp(request)).toBe("198.51.100.10");
+  afterEach(() => {
+    if (originalTrusted === undefined) delete process.env.TRUSTED_PROXIES;
+    else process.env.TRUSTED_PROXIES = originalTrusted;
+    if (originalVercel === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = originalVercel;
   });
 
-  it("should return 'unknown' when no IP headers are present", () => {
-    const request = new Request("http://localhost");
-    expect(getClientIp(request)).toBe("unknown");
+  const req = (headers: Record<string, string>) => new Request("http://localhost", { headers });
+
+  describe("poza Vercelem (lokalnie, GCP)", () => {
+    it("should extract a single-value x-forwarded-for unchanged", () => {
+      expect(getClientIp(req({ "x-forwarded-for": "203.0.113.50" }))).toBe("203.0.113.50");
+    });
+
+    it("should trim whitespace from x-forwarded-for entries", () => {
+      expect(getClientIp(req({ "x-forwarded-for": "  203.0.113.50  " }))).toBe("203.0.113.50");
+    });
+
+    it("should NOT trust the spoofable leftmost x-forwarded-for entry (no trusted proxies)", () => {
+      // Lewy wpis wpisuje klient — wcześniej wygrywał i pozwalał obejść limit.
+      expect(getClientIp(req({ "x-forwarded-for": "203.0.113.50, 70.41.3.18" }))).toBe("70.41.3.18");
+    });
+
+    it("should skip trusted proxies from TRUSTED_PROXIES and return the first untrusted hop from the right", () => {
+      process.env.TRUSTED_PROXIES = "34.120.10.5,35.191.0.0/16";
+      expect(
+        getClientIp(req({ "x-forwarded-for": "6.6.6.6, 203.0.113.50, 34.120.10.5, 35.191.1.2" }))
+      ).toBe("203.0.113.50");
+    });
+
+    it("should ignore broad private ranges in TRUSTED_PROXIES (10.0.0.0/8)", () => {
+      process.env.TRUSTED_PROXIES = "10.0.0.0/8";
+      // 10/8 odrzucone → lista pusta → prawy wpis, a nie podrobiony lewy
+      expect(getClientIp(req({ "x-forwarded-for": "203.0.113.50, 10.1.2.3" }))).toBe("10.1.2.3");
+    });
+
+    it("should IGNORE client-supplied x-real-ip (no XFF → 'unknown')", () => {
+      expect(getClientIp(req({ "x-real-ip": "198.51.100.10" }))).toBe("unknown");
+    });
+
+    it("should IGNORE x-real-ip when x-forwarded-for is empty", () => {
+      expect(getClientIp(req({ "x-forwarded-for": " , ", "x-real-ip": "198.51.100.10" }))).toBe(
+        "unknown"
+      );
+    });
+
+    it("should prefer x-forwarded-for over x-real-ip", () => {
+      expect(
+        getClientIp(req({ "x-forwarded-for": "203.0.113.50", "x-real-ip": "198.51.100.10" }))
+      ).toBe("203.0.113.50");
+    });
+
+    it("should return 'unknown' when no IP headers are present", () => {
+      expect(getClientIp(req({}))).toBe("unknown");
+    });
   });
 
-  it("should prefer x-forwarded-for over x-real-ip", () => {
-    const request = new Request("http://localhost", {
-      headers: {
-        "x-forwarded-for": "203.0.113.50",
-        "x-real-ip": "198.51.100.10",
-      },
+  describe("na Vercelu (VERCEL=1)", () => {
+    beforeEach(() => {
+      process.env.VERCEL = "1";
     });
-    expect(getClientIp(request)).toBe("203.0.113.50");
-  });
 
-  it("should trim whitespace from x-forwarded-for first entry", () => {
-    const request = new Request("http://localhost", {
-      headers: { "x-forwarded-for": "  203.0.113.50  , 70.41.3.18" },
+    it("should use x-real-ip (set by Vercel Proxy) even when XFF is a chain 'a, b'", () => {
+      expect(
+        getClientIp(req({ "x-forwarded-for": "6.6.6.6, 76.76.21.1", "x-real-ip": "203.0.113.50" }))
+      ).toBe("203.0.113.50");
     });
-    expect(getClientIp(request)).toBe("203.0.113.50");
+
+    it("should use x-real-ip when XFF has the same single value (today's Vercel)", () => {
+      expect(
+        getClientIp(req({ "x-forwarded-for": "203.0.113.50", "x-real-ip": "203.0.113.50" }))
+      ).toBe("203.0.113.50");
+    });
+
+    it("should fall back to XFF (right-to-left) when x-real-ip is missing or empty", () => {
+      expect(getClientIp(req({ "x-forwarded-for": "6.6.6.6, 203.0.113.50" }))).toBe("203.0.113.50");
+      expect(getClientIp(req({ "x-forwarded-for": "203.0.113.50", "x-real-ip": "  " }))).toBe(
+        "203.0.113.50"
+      );
+    });
+
+    it("should skip an invalid x-real-ip and use XFF (same as Better Auth)", () => {
+      expect(
+        getClientIp(req({ "x-forwarded-for": "203.0.113.50", "x-real-ip": "not-an-ip" }))
+      ).toBe("203.0.113.50");
+    });
+
+    it("should return 'unknown' when no IP headers are present", () => {
+      expect(getClientIp(req({}))).toBe("unknown");
+    });
+
+    it("VERCEL other than '1' is treated as non-Vercel", () => {
+      process.env.VERCEL = "true";
+      expect(getClientIp(req({ "x-real-ip": "198.51.100.10" }))).toBe("unknown");
+    });
   });
 });

@@ -22,6 +22,7 @@
  */
 
 import { logger } from "@/lib/logger";
+import { resolveClientIp } from "@/lib/trusted-proxies";
 
 interface RateLimitConfig {
   /** Time window in milliseconds */
@@ -281,14 +282,19 @@ export const aiRateLimit = createRateLimit({
 /**
  * Extract the client IP address from request headers.
  *
- * Checks headers in order of reliability for proxied environments
- * (Vercel, Cloudflare, nginx). Falls back to "unknown" which still
- * provides a shared bucket for requests without identifiable IPs.
+ * Logic lives in src/lib/trusted-proxies.ts (`resolveClientIp`) and is shared
+ * with Better Auth's `advanced.ipAddress` (same headers, same trusted proxies):
+ *
+ * - Vercel (VERCEL=1): `x-real-ip` set by Vercel Proxy, X-Forwarded-For only
+ *   as a fallback.
+ * - Elsewhere (local, GCP): X-Forwarded-For, first entry from the right that
+ *   is not a trusted proxy (env TRUSTED_PROXIES). The leftmost entry is
+ *   client-written and spoofable, so it is never preferred. `x-real-ip` is
+ *   NOT used — a client can set it.
+ *
+ * Falls back to "unknown" (a shared bucket for requests without an
+ * identifiable IP).
  */
 export function getClientIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-  );
+  return resolveClientIp(request.headers) ?? "unknown";
 }
