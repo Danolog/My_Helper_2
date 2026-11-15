@@ -3,6 +3,7 @@
  *
  * B3: asystent głosowy, dyktowanie i czytanie na głos (Twilio, ElevenLabs).
  * B4: generowanie wideo (Veo) i publikacja postów social (W, S).
+ * B5: fiskalizacja (F) i martwy `createRefundNotification`.
  * Test pada, gdy ktoś przywróci którąkolwiek ścieżkę, zależność, import
  * (statyczny, `require`, dynamiczny `import()`), odwołanie do trasy, zmienną
  * środowiskową albo zluzuje nagłówki bezpieczeństwa po usuniętych dostawcach.
@@ -12,6 +13,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, it, expect } from "vitest";
+import { MODULES } from "@/lib/features";
 import { buildCsp } from "@/proxy";
 import nextConfig from "../../next.config";
 
@@ -45,6 +47,12 @@ const REMOVED_PATHS = [
   "src/app/dashboard/content-generator/scheduled",
   "src/app/dashboard/content-generator/templates",
   "src/components/content-generator/image-generator.tsx",
+  // B5 — fiskalizacja (F)
+  "src/app/api/appointments/[id]/fiscal-receipt",
+  "src/app/api/salons/[id]/fiscal-settings",
+  "src/app/dashboard/settings/fiscal",
+  "src/components/appointments/detail/appointment-fiscal-receipt-card.tsx",
+  "src/components/appointments/detail/fiscal-receipt-dialog.tsx",
 ];
 
 /**
@@ -83,6 +91,18 @@ const FORBIDDEN_REFERENCES: Array<[string, RegExp]> = [
   // Cena video:google_veo w COST_MAP to tylko dane historyczne (decyzja Olivera,
   // #114) — żaden kod nie może zapisać nowego użycia wideo.
   ["zapis nowego użycia wideo (type video / provider google_veo)", /\btype:\s*["'`]video["'`]|\bprovider:\s*["'`]google_veo["'`]/],
+  // B5
+  ["trasa /api/appointments/[id]/fiscal-receipt", /\/fiscal-receipt(\/|["'`?]|$)/m],
+  ["trasa /api/salons/[id]/fiscal-settings", /\/fiscal-settings(\/|["'`?]|$)/m],
+  [
+    "usunięte komponenty, typy i schematy fiskalizacji",
+    /fiscal-receipt-dialog|appointment-fiscal-receipt-card|FiscalReceiptDialog|AppointmentFiscalReceiptCard|FiscalReceiptData|fiscalSettingsSchema|fiscalReceiptSchema|fiscalTestSchema/,
+  ],
+  // Prefiks strony zostaje w ROUTE_MODULE_MAP (otwarta karta → pulpit), ale
+  // żaden link (kafelek ustawień, paleta poleceń) nie może na nią prowadzić.
+  ["link do /dashboard/settings/fiscal", /\bhref:\s*["'`]\/dashboard\/settings\/fiscal/],
+  ["bramka modułu fiscal w interfejsie", /useModuleEnabled\(\s*["'`]fiscal["'`]\s*\)|<ModuleGate\s+module=["'`]fiscal["'`]/],
+  ["martwy createRefundNotification", /\bcreateRefundNotification\b/],
   // Importy usuniętych pakietów
   ...REMOVED_PACKAGES.map((pkg): [string, RegExp] => [`import ${pkg}`, importOf(pkg)]),
 ];
@@ -131,7 +151,7 @@ function directives(csp: string): Map<string, string[]> {
   return map;
 }
 
-describe("G6 — usunięte funkcje nie wracają (B3: głos, B4: wideo i social)", () => {
+describe("G6 — usunięte funkcje nie wracają (B3: głos, B4: wideo i social, B5: fiskalizacja)", () => {
   it("kontrola: skaner widzi kod src (test nie jest pusty)", () => {
     expect(SRC_FILES.length).toBeGreaterThan(500);
   });
@@ -188,6 +208,26 @@ describe("G6 — usunięte funkcje nie wracają (B3: głos, B4: wideo i social)"
     const hits = SRC_FILES.filter((f) => re.test(f.text)).map((f) => f.path);
     expect(hits).toEqual([]);
     expect(readFileSync(join(ROOT, "env.example"), "utf8")).not.toMatch(re);
+  });
+});
+
+describe("G6 — dane fiskalne zostają w bazie, kod nie (B5)", () => {
+  it("tabela fiscalReceipts jest tylko w schemacie — żaden kod jej nie czyta ani nie pisze", () => {
+    const hits = SRC_FILES.filter(
+      (f) => f.path !== join("src", "lib", "schema.ts") && /\bfiscalReceipts\b|fiscal_receipts/.test(f.text)
+    ).map((f) => f.path);
+    expect(hits).toEqual([]);
+    // Kontrola: definicja tabeli zostaje (brief B §3 — bez DROP, bez migracji).
+    expect(SRC_FILES.find((f) => f.path === join("src", "lib", "schema.ts"))?.text).toMatch(
+      /export const fiscalReceipts = pgTable\(\s*"fiscal_receipts"/
+    );
+  });
+
+  it("etykiety i opisy modułów nie wymieniają usuniętych dostawców", () => {
+    const hits = MODULES.filter((m) => REMOVED_PROVIDER_HOSTS.test(`${m.label} ${m.description}`)).map(
+      (m) => m.key
+    );
+    expect(hits).toEqual([]);
   });
 });
 
