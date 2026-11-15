@@ -54,6 +54,7 @@ vi.mock("@/lib/schema", () => ({
     salonId: "salonSubscriptions.salonId",
     planId: "salonSubscriptions.planId",
     status: "salonSubscriptions.status",
+    trialEndsAt: "salonSubscriptions.trialEndsAt",
     createdAt: "salonSubscriptions.createdAt",
   },
   subscriptionPlans: {
@@ -108,10 +109,22 @@ describe("getCurrentPlan", () => {
 
   it("should return trialing plan", async () => {
     mockDbLimit.mockResolvedValue([
-      { planSlug: "pro", planName: "Pro", status: "trialing" },
+      // okres próbny w toku (koniec triala: __tests__/lib/subscription-trial-end.test.ts)
+      { planSlug: "pro", planName: "Pro", status: "trialing", trialEndsAt: new Date(Date.now() + 86_400_000) },
     ]);
     const plan = await getCurrentPlan("salon-123");
     expect(plan).toEqual({ slug: "pro", name: "Pro", status: "trialing" });
+  });
+
+  it("zapytanie pobiera trialEndsAt i wybiera najnowszy wiersz (desc createdAt, limit 1)", async () => {
+    mockDbLimit.mockResolvedValue([]);
+    await getCurrentPlan("salon-123");
+    // bez trialEndsAt w select koniec triala nie byłby widoczny w chwili odczytu
+    expect(mockDbSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "salonSubscriptions.status", trialEndsAt: "salonSubscriptions.trialEndsAt" }),
+    );
+    expect(mockDbOrderBy).toHaveBeenCalledWith({ type: "desc", col: "salonSubscriptions.createdAt" });
+    expect(mockDbLimit).toHaveBeenCalledWith(1);
   });
 
   it("should fallback to basic plan on database error", async () => {

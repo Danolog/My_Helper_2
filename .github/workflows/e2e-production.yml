@@ -29,15 +29,17 @@ jobs:
       BASE_URL: ${{ github.event_name == 'deployment_status' && secrets.BETTER_AUTH_BASE_URL_PROD || inputs.base_url }}
       CI: true
     steps:
-      # Allowlista: tylko https i host *.run.app (URL Cloud Run). Odrzucone:
-      # pusty, http, vercel.app, własna domena aplikacji (do przełączenia DNS
-      # wskazuje Vercela), userinfo/port/inne znaki w hoście.
-      - name: Cloud Run mode must target a *.run.app URL
+      # Allowlista (#121 h): wyłącznie URL taga NASZEJ usługi Cloud Run —
+      # https://<tag>---myhelper-843777043748.europe-central2.run.app
+      # (deterministyczny format: tag, usługa, numer projektu, region; tag jak
+      # REVISION_TAG w run-deploy.sh). Odrzucone: pusty, http, vercel.app,
+      # cudze *.run.app, adres bez taga, ścieżka, userinfo, port.
+      - name: Cloud Run mode must target our tagged Cloud Run URL
         if: github.event_name != 'deployment_status'
         run: |
           if [[ -z "$BASE_URL" || "$BASE_URL" != https://* || "$BASE_URL" == *vercel.app* ]] \
-            || ! [[ "$BASE_URL" =~ ^https://[a-z0-9-]+(\.[a-z0-9-]+)*\.run\.app(/.*)?$ ]]; then
-            echo "::error::workflow_call needs an https://*.run.app base_url (got empty, non-https, Vercel or other host)"
+            || ! [[ "$BASE_URL" =~ ^https://[a-z][a-z0-9-]{0,45}---myhelper-843777043748\.europe-central2\.run\.app/?$ ]]; then
+            echo "::error::workflow_call needs the tagged URL of our Cloud Run service (got empty, non-https, Vercel or other host)"
             exit 1
           fi
 
