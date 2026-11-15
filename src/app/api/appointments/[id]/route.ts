@@ -10,10 +10,15 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { processAutomaticRefund, createRefundNotification } from "@/lib/refund";
+import { refundAppointmentDeposits, type AppointmentDepositsRefund } from "@/lib/refund";
+import {
+  buildSalonCancellationSms,
+  cancelAppointmentInTx,
+  expireCheckoutSessions,
+} from "@/lib/salon-cancellation";
 import { getSalonContext, type SalonContext } from "@/lib/salon-context";
 import { assertSalonRefs } from "@/lib/salon-refs";
-import { appointments, clients, employees, services, notifications, depositPayments, salons } from "@/lib/schema";
+import { appointments, clients, employees, services, notifications, salons } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { isValidUuid } from "@/lib/validations";
 import { notifyWaitingList } from "@/lib/waiting-list";
@@ -313,131 +318,98 @@ export async function DELETE(
       );
     }
 
-    // Calculate time difference for cancellation policy
+    // Calculate time difference (informacyjnie — salon zwraca zadatek zawsze, RF1)
     const now = new Date();
     const startTime = new Date(appointment.startTime);
     const hoursUntilAppointment = (startTime.getTime() - now.getTime()) / (1000 * 60 * 60);
     const isMoreThan24h = hoursUntilAppointment > 24;
 
-    // Determine deposit handling
-    const hasDeposit = appointment.depositAmount && parseFloat(appointment.depositAmount) > 0;
-    const depositPaid = appointment.depositPaid;
-    let depositRefunded = false;
-    let depositForfeited = false;
+    // refund-fix RF1 + #70 pkt 1: płatność pending → failed i wizyta →
+    // cancelled w JEDNEJ transakcji (kontekst RLS salonu); decyzja o zwrocie
+    // na stanie wizyty po blokadzie (`src/lib/salon-cancellation.ts`).
+    const txResult = await forSalon(salonId).raw((tx) => cancelAppointmentInTx(tx, salonId, id));
+    if ("notFound" in txResult) {
+      return NextResponse.json(
+        { success: false, error: "Appointment not found" },
+        { status: 404 }
+      );
+    }
+    if ("alreadyCancelled" in txResult) {
+      return NextResponse.json(
+        { success: false, error: "Wizyta jest juz anulowana" },
+        { status: 400 }
+      );
+    }
+    const { cancelled: cancelledAppointment, depositPaid, variant, failedPayments } = txResult;
+    const depositAmount = appointment.depositAmount ? parseFloat(appointment.depositAmount) : 0;
+    const hasDeposit = depositAmount > 0;
 
+    // #70 pkt 1: otwarta sesja Checkout nie przyjmie już wpłaty (błąd = warn).
+    await expireCheckoutSessions(id, failedPayments);
+
+    // RF1: odwołanie przez salon = pełny zwrot, niezależnie od reguły 24 h.
+    let refundResult: AppointmentDepositsRefund | null = null;
     if (hasDeposit && depositPaid) {
-      if (isMoreThan24h) {
-        // More than 24h before - eligible for refund
-        depositRefunded = true;
-      } else {
-        // Less than 24h before - deposit is forfeited
-        depositForfeited = true;
+      // Każda płatność `succeeded` osobno, od najstarszej (Ethan, #98).
+      refundResult = await refundAppointmentDeposits(id, "Odwolanie wizyty przez salon - pelny zwrot zadatku");
+      if (!refundResult.success) {
+        logger.error("[Appointments API] Deposit refund failed after salon cancellation — manual refund", {
+          appointmentId: id,
+          salonId,
+          refundMessage: refundResult.message,
+        });
       }
     }
+    const refundFailed = refundResult?.success === false;
 
-    // Soft delete by setting status to cancelled (scoped to caller's salon)
-    const cancelledAppointment = await forSalon(salonId).updateOwned(appointments, id, {
-      status: "cancelled",
-    });
-
-    logger.info(`[Appointments API] Cancelled appointment ${id}`, {
+    logger.info("[Appointments API] Cancelled appointment by salon", {
+      appointmentId: id,
       hoursUntilAppointment: hoursUntilAppointment.toFixed(1),
-      isMoreThan24h,
       hasDeposit,
       depositPaid,
-      depositRefunded,
-      depositForfeited,
+      variant,
+      refunded: refundResult?.refunded ?? false,
+      refundFailed,
+      expiredSessions: failedPayments.length,
       notifyClient,
     });
 
-    // Process automatic refund if eligible (24h+ before appointment, deposit paid)
-    let refundResult = null;
-    if (depositRefunded) {
-      refundResult = await processAutomaticRefund(
-        id,
-        "Anulacja wizyty przez personel - wiecej niz 24h przed terminem"
-      );
-      logger.info(`[Appointments API] Refund result for appointment ${id}`, { refundResult: refundResult as unknown as Record<string, unknown> });
+    const [salon] = await db
+      .select({ name: salons.name, phone: salons.phone })
+      .from(salons)
+      .where(eq(salons.id, appointment.salonId))
+      .limit(1);
+    const salonName = salon?.name || "Salon";
+    const serviceName = row.service?.name || "Wizyta";
 
-      // Create refund notification for client
-      if (refundResult.refunded && row.client) {
-        const clientName = `${row.client.firstName} ${row.client.lastName}`;
-        const serviceName = row.service?.name || "Wizyta";
-        await createRefundNotification(
-          appointment.salonId,
-          row.client.id,
-          refundResult.amount || 0,
-          clientName,
-          serviceName,
-          startTime
-        );
-      }
-    }
-
-    // Mark deposit as forfeited if late cancellation (<24h)
-    if (depositForfeited) {
-      try {
-        await db
-          .update(depositPayments)
-          .set({
-            status: "forfeited",
-            refundReason: "Anulacja wizyty mniej niz 24h przed terminem - zadatek zatrzymany przez salon",
-          })
-          .where(eq(depositPayments.appointmentId, id));
-        logger.info(`[Appointments API] Deposit marked as forfeited for appointment ${id}`);
-      } catch (forfeitError) {
-        logger.error("[Appointments API] Failed to mark deposit as forfeited", { error: forfeitError });
-        // Don't fail the cancellation if deposit status update fails
-      }
-    }
-
-    // Create notification record if client exists and notification requested
-    if (notifyClient && row.client) {
-      const clientName = `${row.client.firstName} ${row.client.lastName}`;
-      const serviceName = row.service?.name || "Wizyta";
-      const formattedDate = startTime.toLocaleDateString("pl-PL", {
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-
-      let notificationMessage = `Szanowny/a ${clientName}, Twoja wizyta "${serviceName}" zaplanowana na ${formattedDate} zostala anulowana.`;
-
-      if (depositRefunded && refundResult?.refunded) {
-        notificationMessage += ` Zadatek w kwocie ${parseFloat(appointment.depositAmount!).toFixed(2)} PLN zostanie zwrocony.`;
-      } else if (depositForfeited) {
-        notificationMessage += ` Zadatek w kwocie ${parseFloat(appointment.depositAmount!).toFixed(2)} PLN nie podlega zwrotowi (anulacja mniej niz 24h przed wizyta).`;
-      }
-
+    // RF2: JEDEN SMS (odwołanie + ewentualny zwrot), bez linku do rezerwacji.
+    const shouldNotify = !!row.client && (notifyClient || refundResult?.refunded === true);
+    let clientNotified = false;
+    if (shouldNotify && row.client) {
       try {
         await db.insert(notifications).values({
           salonId: appointment.salonId,
           clientId: row.client.id,
           type: "sms",
-          message: notificationMessage,
+          message: buildSalonCancellationSms({
+            salonName,
+            salonPhone: salon?.phone ?? null,
+            serviceName,
+            startTime,
+            variant,
+            depositAmount,
+          }),
           status: "pending",
         });
-        logger.info(`[Appointments API] Created cancellation notification for client ${row.client.id}`);
+        clientNotified = true;
       } catch (notifError) {
-        logger.error("[Appointments API] Failed to create notification", { error: notifError });
+        logger.error("[Appointments API] Failed to create notification", { error: notifError, appointmentId: id });
         // Don't fail the cancellation if notification creation fails
       }
     }
 
     // Notify waiting list entries about the freed slot
     try {
-      // Get salon name for notification (only need name)
-      const [salon] = await db
-        .select({ name: salons.name })
-        .from(salons)
-        .where(eq(salons.id, appointment.salonId))
-        .limit(1);
-
-      const salonName = salon?.name || "Salon";
-      const serviceName = row.service?.name || "Wizyta";
       const employeeName = row.employee
         ? `${row.employee.firstName} ${row.employee.lastName}`
         : "Pracownik";
@@ -466,16 +438,21 @@ export async function DELETE(
       cancellationDetails: {
         hoursUntilAppointment: Math.max(0, hoursUntilAppointment),
         isMoreThan24h,
-        hasDeposit: !!hasDeposit,
-        depositPaid: !!depositPaid,
-        depositAmount: appointment.depositAmount ? parseFloat(appointment.depositAmount) : 0,
-        depositRefunded,
-        depositForfeited,
-        clientNotified: notifyClient && !!row.client,
+        hasDeposit,
+        depositPaid,
+        depositAmount,
+        depositRefunded: refundResult?.refunded === true,
+        // RF1: salon nigdy nie zatrzymuje zadatku (pole zostaje dla zgodności UI).
+        depositForfeited: false,
+        depositVariant: variant,
+        refundFailed,
+        clientNotified,
         refund: refundResult ? {
           processed: refundResult.refunded,
           refundId: refundResult.refundId,
           amount: refundResult.amount,
+          // Kwota, która nie wróciła (toast przy refundFailed — Leo, #98).
+          failedAmount: refundResult.failedAmount ?? null,
           message: refundResult.message,
         } : null,
       },
