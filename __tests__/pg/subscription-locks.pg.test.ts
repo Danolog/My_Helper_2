@@ -525,7 +525,7 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
     });
 
     it("register-subscription ×2 równolegle dla nowego konta → jedno 200 + jedno 409, jeden salon, jeden trial", async () => {
-      const freshId = `it-t3b-${RUN}`;
+      const freshId = `it-t3-b-${RUN}`; // prefiks it-t3- = sprzątanie z pg-harness.ts
       await h!.db.insert(user).values({ id: freshId, name: "IT T3b", email: `${freshId}@example.invalid` });
       const previous = sessionUser.current;
       sessionUser.current = { id: freshId, name: "IT T3b", email: `${freshId}@example.invalid` };
