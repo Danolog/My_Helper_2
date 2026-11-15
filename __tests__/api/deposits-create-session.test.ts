@@ -19,6 +19,7 @@ import {
   parseResponse,
   createChainMock,
 } from "./helpers";
+import { sqlMatches } from "./sql-predicate";
 
 // Zod 4's z.string().uuid() enforces RFC 4122 version/variant nibbles, so the
 // simple TEST_IDS placeholders (all-1s etc.) do not pass — use valid v4 UUIDs.
@@ -340,5 +341,93 @@ describe("POST /api/deposits/create-session — Stripe NOT configured (dev simul
 
     expect(status).toBe(409);
     expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/deposits/create-session — kolizja półotwarta (#165)", () => {
+  // Rezerwacja z validBody: 10:00–11:00Z. Wiersze przechodzą przez WHERE trasy.
+  function filteringChain(rows: Record<string, unknown>[]) {
+    const c = createChainMock([]);
+    let where: unknown;
+    c.where = vi.fn((w: unknown) => {
+      where = w;
+      return c;
+    });
+    c.then = (resolve: (v: unknown[]) => unknown) =>
+      resolve(rows.filter((r) => sqlMatches(where as Parameters<typeof sqlMatches>[0], r)));
+    return c;
+  }
+  const appt = (start: string, end: string, extra: Record<string, unknown> = {}) => ({
+    id: "aaaaaaaa-0000-4000-8000-000000000001",
+    employee_id: EMPLOYEE_UUID,
+    status: "scheduled",
+    start_time: new Date(`2026-08-01T${start}:00.000Z`),
+    end_time: new Date(`2026-08-01T${end}:00.000Z`),
+    ...extra,
+  });
+  const block = (start: string, end: string) => ({
+    id: "block-165",
+    employee_id: EMPLOYEE_UUID,
+    start_time: new Date(`2026-08-01T${start}:00.000Z`),
+    end_time: new Date(`2026-08-01T${end}:00.000Z`),
+  });
+
+  beforeEach(() => {
+    vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
+    vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    mockDbInsert
+      .mockReturnValueOnce(createChainMock([insertedAppointment]))
+      .mockReturnValueOnce(createChainMock([insertedPayment]));
+    mockDbUpdate.mockReturnValue(createChainMock([]));
+    mockDbDelete.mockReturnValue(createChainMock([]));
+    primeExpectedDeposit(50);
+    mockIsStripeConfigured.mockReturnValue(false);
+    mockGetStripe.mockReturnValue(null);
+  });
+
+  function prime(rows: Record<string, unknown>[], blocks: Record<string, unknown>[] = []) {
+    mockDbSelect.mockReturnValueOnce(filteringChain(rows)).mockReturnValueOnce(filteringChain(blocks));
+  }
+
+  it("styk: wizyta 09–10, rezerwacja 10–11 → 201", async () => {
+    prime([appt("09:00", "10:00")]);
+    expect((await createSession(makeRequest())).status).toBe(201);
+  });
+
+  it("styk z drugiej strony: wizyta 11–12 → 201", async () => {
+    prime([appt("11:00", "12:00")]);
+    expect((await createSession(makeRequest())).status).toBe(201);
+  });
+
+  it("nakładanie o 1 minutę → 409 z dotychczasowym komunikatem, nic nie zapisane", async () => {
+    prime([appt("10:59", "12:00")]);
+    const { status, body } = await parseResponse<{ error: string }>(await createSession(makeRequest()));
+    expect(status).toBe(409);
+    expect(body.error).toBe("Wybrany termin jest juz zajety. Wybierz inny termin.");
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("anulowana wizyta w tym samym terminie nie koliduje → 201", async () => {
+    prime([appt("10:00", "11:00", { status: "cancelled" })]);
+    expect((await createSession(makeRequest())).status).toBe(201);
+  });
+
+  it("wizyta z zadatkiem w toku (scheduled, nieopłacona) blokuje → 409", async () => {
+    prime([appt("10:30", "11:30", { status: "scheduled", deposit_paid: false })]);
+    expect((await createSession(makeRequest())).status).toBe(409);
+  });
+
+  it("blokada czasu na styku (11–12) → 201", async () => {
+    prime([], [block("11:00", "12:00")]);
+    expect((await createSession(makeRequest())).status).toBe(201);
+  });
+
+  it("blokada czasu nachodząca o 1 minutę → 409", async () => {
+    prime([], [block("10:59", "12:00")]);
+    const { status, body } = await parseResponse<{ error: string }>(await createSession(makeRequest()));
+    expect(status).toBe(409);
+    expect(body.error).toBe("Pracownik nie jest dostepny w wybranym terminie.");
   });
 });
