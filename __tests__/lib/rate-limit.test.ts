@@ -367,16 +367,59 @@ describe("checkAsync (Upstash adapter)", () => {
 });
 
 describe("getClientIp", () => {
-  it("should extract IP from x-forwarded-for header", () => {
+  const originalTrusted = process.env.TRUSTED_PROXIES;
+
+  beforeEach(() => {
+    delete process.env.TRUSTED_PROXIES;
+  });
+
+  afterEach(() => {
+    if (originalTrusted === undefined) delete process.env.TRUSTED_PROXIES;
+    else process.env.TRUSTED_PROXIES = originalTrusted;
+  });
+
+  it("should extract a single-value x-forwarded-for unchanged (local, Vercel)", () => {
+    const request = new Request("http://localhost", {
+      headers: { "x-forwarded-for": "203.0.113.50" },
+    });
+    expect(getClientIp(request)).toBe("203.0.113.50");
+  });
+
+  it("should NOT trust the spoofable leftmost x-forwarded-for entry (no trusted proxies)", () => {
+    // Lewy wpis wpisuje klient — wcześniej wygrywał i pozwalał obejść limit.
     const request = new Request("http://localhost", {
       headers: { "x-forwarded-for": "203.0.113.50, 70.41.3.18" },
     });
+    expect(getClientIp(request)).toBe("70.41.3.18");
+  });
+
+  it("should skip trusted proxies from TRUSTED_PROXIES and return the first untrusted hop from the right", () => {
+    process.env.TRUSTED_PROXIES = "34.120.10.5,35.191.0.0/16";
+    const request = new Request("http://localhost", {
+      headers: { "x-forwarded-for": "6.6.6.6, 203.0.113.50, 34.120.10.5, 35.191.1.2" },
+    });
     expect(getClientIp(request)).toBe("203.0.113.50");
+  });
+
+  it("should ignore broad private ranges in TRUSTED_PROXIES (10.0.0.0/8)", () => {
+    process.env.TRUSTED_PROXIES = "10.0.0.0/8";
+    const request = new Request("http://localhost", {
+      headers: { "x-forwarded-for": "203.0.113.50, 10.1.2.3" },
+    });
+    // 10/8 odrzucone → lista pusta → prawy wpis, a nie podrobiony lewy
+    expect(getClientIp(request)).toBe("10.1.2.3");
   });
 
   it("should extract IP from x-real-ip header when x-forwarded-for is absent", () => {
     const request = new Request("http://localhost", {
       headers: { "x-real-ip": "198.51.100.10" },
+    });
+    expect(getClientIp(request)).toBe("198.51.100.10");
+  });
+
+  it("should fall back to x-real-ip when x-forwarded-for is empty", () => {
+    const request = new Request("http://localhost", {
+      headers: { "x-forwarded-for": " , ", "x-real-ip": "198.51.100.10" },
     });
     expect(getClientIp(request)).toBe("198.51.100.10");
   });
@@ -396,9 +439,9 @@ describe("getClientIp", () => {
     expect(getClientIp(request)).toBe("203.0.113.50");
   });
 
-  it("should trim whitespace from x-forwarded-for first entry", () => {
+  it("should trim whitespace from x-forwarded-for entries", () => {
     const request = new Request("http://localhost", {
-      headers: { "x-forwarded-for": "  203.0.113.50  , 70.41.3.18" },
+      headers: { "x-forwarded-for": "  203.0.113.50  " },
     });
     expect(getClientIp(request)).toBe("203.0.113.50");
   });

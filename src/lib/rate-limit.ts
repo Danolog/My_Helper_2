@@ -22,6 +22,7 @@
  */
 
 import { logger } from "@/lib/logger";
+import { selectClientIpFromEnv } from "@/lib/trusted-proxies";
 
 interface RateLimitConfig {
   /** Time window in milliseconds */
@@ -281,14 +282,22 @@ export const aiRateLimit = createRateLimit({
 /**
  * Extract the client IP address from request headers.
  *
- * Checks headers in order of reliability for proxied environments
- * (Vercel, Cloudflare, nginx). Falls back to "unknown" which still
- * provides a shared bucket for requests without identifiable IPs.
+ * X-Forwarded-For: the leftmost entry is written by the client and can be
+ * spoofed, so it is NOT used. We take the first entry from the right that is
+ * not one of our trusted proxies (env TRUSTED_PROXIES, shared with Better
+ * Auth's `advanced.ipAddress.trustedProxies` — see src/lib/trusted-proxies.ts).
+ *
+ * - Local and Vercel (TRUSTED_PROXIES empty): Vercel overwrites
+ *   X-Forwarded-For with the single client IP, and a single value is
+ *   returned unchanged — same as before.
+ * - Behind a load balancer (e.g. GCP): `<client>, <LB>` → `<client>` once
+ *   the LB address is listed in TRUSTED_PROXIES.
+ *
+ * Falls back to x-real-ip only when X-Forwarded-For is absent or empty, then
+ * to "unknown" (a shared bucket for requests without an identifiable IP).
  */
 export function getClientIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-  );
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  const fromForwarded = forwardedFor ? selectClientIpFromEnv(forwardedFor) : null;
+  return fromForwarded ?? request.headers.get("x-real-ip") ?? "unknown";
 }

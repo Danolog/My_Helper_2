@@ -3,6 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { db } from "./db"
 import { logger } from "./logger"
 import { isEmailConfigured, sendPasswordResetEmail, sendVerificationEmail } from "./email"
+import { getTrustedProxies } from "./trusted-proxies"
 
 /**
  * Kontekst logu dla zdarzeń „wysłano link resetu hasła / weryfikacji e-mail".
@@ -23,6 +24,20 @@ function authLinkLogContext(
   return { userId: user.id, email: user.email, [urlKey]: url }
 }
 
+/**
+ * Zaufane proxy dla limitu żądań Better Auth — to samo źródło (env
+ * TRUSTED_PROXIES) co getClientIp w src/lib/rate-limit.ts.
+ *
+ * Pusta lista → `trustedProxies` nieustawione: Better Auth przyjmuje tylko
+ * jednowartościowy X-Forwarded-For (lokalnie i Vercel — bez zmian). Za LB
+ * (GCP) łańcuch `<klient>, <LB>` bez tej listy daje null, czyli JEDEN wspólny
+ * kubełek limitu dla wszystkich (3 próby logowania / 10 s = globalny DoS).
+ *
+ * `advanced.trustedProxyHeaders` zostaje celowo WYŁĄCZONE (przegląd Ryana
+ * #17, b2): nie mamy dowodu, że LB nadpisuje X-Forwarded-Host od klienta.
+ */
+const trustedProxies = getTrustedProxies()
+
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
   database: drizzleAdapter(db, {
@@ -35,6 +50,11 @@ export const auth = betterAuth({
       ? [process.env.BETTER_AUTH_URL]
       : []),
   ],
+  advanced: {
+    ipAddress: {
+      ...(trustedProxies.length > 0 ? { trustedProxies } : {}),
+    },
+  },
   session: {
     /**
      * Session expires after 15 minutes of inactivity.
