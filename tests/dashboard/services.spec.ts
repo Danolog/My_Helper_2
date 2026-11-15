@@ -167,21 +167,32 @@ test.describe('Flow 3: Services & Categories', () => {
     });
 
     test('should delete a category with confirmation', { tag: '@full' }, async ({ page }) => {
+      // Jak przy usludze: usuwamy kategorie zalozona przez ten test (bez uslug),
+      // nie "pierwsza z listy" — ta mogla byc kategoria z seeda.
+      await navigateToServices(page);
+      const salonId = '00000000-0000-4000-8000-000000000001';
+      const token = (await page.context().cookies()).find((c) => c.name === 'csrf-token')?.value ?? '';
+      const name = `E2E kategoria do usuniecia ${Date.now()}`;
+      const createRes = await page.request.post('/api/service-categories', {
+        headers: { 'x-csrf-token': decodeURIComponent(token) },
+        data: { salonId, name },
+      });
+      expect(createRes.status(), `zalozenie kategorii do usuniecia: ${await createRes.text()}`).toBe(201);
+      const categoryId: string = (await createRes.json()).data.id;
+
       await navigateToServices(page);
       await page.getByTestId('tab-categories').click();
-      await page.waitForLoadState('domcontentloaded');
+      await page.getByTestId(`delete-category-${categoryId}`).click();
+      await expect(page.getByTestId('confirm-delete-category-btn')).toBeVisible({ timeout: 3000 });
+      await page.getByTestId('confirm-delete-category-btn').click();
 
-      const deleteBtn = page.locator('[data-testid^="delete-category-"]').first();
-      await deleteBtn.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
-      if (await deleteBtn.isVisible()) {
-        await deleteBtn.click();
-        const confirmBtn = page.getByTestId('confirm-delete-category-btn');
-        await confirmBtn.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
-        if (await confirmBtn.isVisible()) {
-          await confirmBtn.click();
-          await page.waitForLoadState('domcontentloaded');
-        }
-      }
+      await expect
+        .poll(async () => {
+          const res = await page.request.get(`/api/service-categories?salonId=${salonId}`);
+          const json = (await res.json()) as { data?: Array<{ id: string }> };
+          return (json.data ?? []).some((cat) => cat.id === categoryId);
+        }, { message: 'usunieta kategoria nadal na liscie', timeout: 10000 })
+        .toBe(false);
     });
   });
 
