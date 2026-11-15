@@ -7,7 +7,7 @@ import { ClientDepositCard, CLIENT_DEPOSIT_SCOPE_NOTE } from "@/components/clien
 // portalu, rezerwacji jako gość nie obejmuje.
 
 const SOPHIA_TEXT =
-  "Działa, gdy klient rezerwuje online po zalogowaniu na swoje konto. Nie obejmuje rezerwacji bez logowania (jako gość).";
+  "Działa tylko wtedy, gdy klient rezerwuje online zalogowany na konto z potwierdzonym e-mailem, a w tej kartotece jest wpisany dokładnie ten sam e-mail. Nie działa przy rezerwacji bez logowania (jako gość) ani gdy kartoteka nie ma e-maila.";
 
 function renderCard(formRequireDeposit: boolean) {
   return render(
