@@ -274,11 +274,27 @@ describe("sendSms (real delivery via SMSAPI)", () => {
     // Ryan: szczegół dostawcy tylko w logu, wołający dostaje ogólny komunikat
     expect(result.error).toBe(SMS_SEND_FAILED_ERROR);
     expect(result.error).not.toContain("Authorization failed");
-    expect(loggedErrorMessage()).toContain("Authorization failed");
+    // #75: do logu tylko kod błędu — `message` dostawcy bywa echem danych wejściowych
+    expect(loggedErrorMessage()).toBe("SMSAPI error: code 101");
+    expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("Authorization failed");
     expect(result.notificationId).toBeUndefined();
     expect(mockDbValues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "failed" })
     );
+  });
+
+  it("nienumeryczny `error` od dostawcy nie trafia do logu (#75)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ error: "Invalid number 48111222333", message: "x" }),
+    });
+
+    const result = await sendSms({ to: "+48123456789", message: "Hello", salonId: "salon-1" });
+
+    expect(result.error).toBe(SMS_SEND_FAILED_ERROR);
+    expect(loggedErrorMessage()).toBe("SMSAPI error: code unknown");
+    expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("48111222333");
   });
 
   it("should fail on non-OK HTTP response without JSON error", async () => {
@@ -453,7 +469,7 @@ describe("sendSms: blokada numerów testowych", () => {
     async (phone) => {
       const result = await sendSms({ to: phone, message: "Hello", salonId: "salon-1" });
 
-      expect(result).toEqual({ success: false, error: SMS_TEST_PHONE_ERROR });
+      expect(result).toEqual({ success: false, error: SMS_TEST_PHONE_ERROR, skipped: "test_phone" });
       expect(mockFetch).not.toHaveBeenCalled();
       expect(mockDbInsertInto).not.toHaveBeenCalled();
     }
