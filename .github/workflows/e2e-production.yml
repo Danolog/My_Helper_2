@@ -1,21 +1,46 @@
 name: Production E2E
 
 on:
+  # Vercel — zostaje do C4 (brief C §3).
   deployment_status:
+  # Cloud Run — wywoływany z deploy-cloud-run.yml po promocji nowej wersji;
+  # testy idą WYŁĄCZNIE na inputs.base_url (URL Cloud Run), nigdy na sekretny
+  # URL Vercela. (Wywołany workflow widzi github.event_name wywołującego,
+  # dlatego tryb rozróżnia tylko deployment_status vs reszta i nie ma tu
+  # osobnego workflow_dispatch.)
+  workflow_call:
+    inputs:
+      base_url:
+        description: "Adres wdrożenia Cloud Run do sprawdzenia (https://…)"
+        type: string
+        required: true
 
 jobs:
   e2e-production:
     name: Production Health Checks
-    # Tylko udane wdrożenie środowiska Production (Vercel ustawia environment
-    # "Production" / "Preview"). Wcześniej warunek sprawdzał sam stan, więc job
-    # biegł też po każdym Preview, celując i tak w URL produkcji z sekretu.
-    if: github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'
+    # deployment_status: tylko udane wdrożenie środowiska Production (Vercel
+    # ustawia environment "Production" / "Preview"). Wcześniej warunek sprawdzał
+    # sam stan, więc job biegł też po każdym Preview, celując i tak w URL
+    # produkcji z sekretu. workflow_call: zawsze.
+    if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production')
     runs-on: ubuntu-24.04 # Playwright 1.58.2 nie obsługuje Ubuntu 26 (ubuntu-latest)
     timeout-minutes: 5
     env:
-      BASE_URL: ${{ secrets.BETTER_AUTH_BASE_URL_PROD }}
+      BASE_URL: ${{ github.event_name == 'deployment_status' && secrets.BETTER_AUTH_BASE_URL_PROD || inputs.base_url }}
       CI: true
     steps:
+      # Allowlista: tylko https i host *.run.app (URL Cloud Run). Odrzucone:
+      # pusty, http, vercel.app, własna domena aplikacji (do przełączenia DNS
+      # wskazuje Vercela), userinfo/port/inne znaki w hoście.
+      - name: Cloud Run mode must target a *.run.app URL
+        if: github.event_name != 'deployment_status'
+        run: |
+          if [[ -z "$BASE_URL" || "$BASE_URL" != https://* || "$BASE_URL" == *vercel.app* ]] \
+            || ! [[ "$BASE_URL" =~ ^https://[a-z0-9-]+(\.[a-z0-9-]+)*\.run\.app(/.*)?$ ]]; then
+            echo "::error::workflow_call needs an https://*.run.app base_url (got empty, non-https, Vercel or other host)"
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4

@@ -8,6 +8,26 @@ vi.mock("@vercel/blob", () => ({
   del: (...args: unknown[]) => mockDel(...args),
 }));
 
+// Mock @google-cloud/storage (bez prawdziwego zasobnika — weryfikacja na żywo w kroku D)
+const mockGcsSave = vi.fn();
+const mockGcsDelete = vi.fn();
+const mockGcsFile = vi.fn((_path: string) => ({
+  save: (...args: unknown[]) => mockGcsSave(...args),
+  delete: (...args: unknown[]) => mockGcsDelete(...args),
+}));
+const mockGcsBucket = vi.fn((_name: string) => ({ file: mockGcsFile }));
+const mockGcsCtor = vi.fn();
+vi.mock("@google-cloud/storage", () => ({
+  Storage: class {
+    constructor(...args: unknown[]) {
+      mockGcsCtor(...args);
+    }
+    bucket(name: string) {
+      return mockGcsBucket(name);
+    }
+  },
+}));
+
 // Mock fs and fs/promises
 const mockExistsSync = vi.fn();
 const mockWriteFile = vi.fn();
@@ -33,6 +53,7 @@ import {
   validateFile,
   upload,
   deleteFile,
+  resolveStorageDriver,
 } from "@/lib/storage";
 
 describe("sanitizeFilename", () => {
@@ -366,5 +387,152 @@ describe("deleteFile", () => {
     await deleteFile("/uploads/missing.jpg");
 
     expect(mockUnlink).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveStorageDriver (G-C2 / G-C3)", () => {
+  it("bez STORAGE_DRIVER i z BLOB_READ_WRITE_TOKEN wybiera vercel-blob (G-C3: Vercel bez zmian)", () => {
+    expect(resolveStorageDriver({ BLOB_READ_WRITE_TOKEN: "t", NODE_ENV: "production" })).toBe("vercel-blob");
+  });
+
+  it("bez STORAGE_DRIVER i bez tokenu poza produkcją wybiera local", () => {
+    expect(resolveStorageDriver({ NODE_ENV: "development" })).toBe("local");
+    expect(resolveStorageDriver({ NODE_ENV: "test" })).toBe("local");
+  });
+
+  it("pusta i biała wartość STORAGE_DRIVER = brak zmiennej", () => {
+    expect(resolveStorageDriver({ STORAGE_DRIVER: "", BLOB_READ_WRITE_TOKEN: "t" })).toBe("vercel-blob");
+    expect(resolveStorageDriver({ STORAGE_DRIVER: "  ", NODE_ENV: "test" })).toBe("local");
+  });
+
+  it("jawny wybór wygrywa z tokenem Blob", () => {
+    expect(resolveStorageDriver({ STORAGE_DRIVER: "gcs", BLOB_READ_WRITE_TOKEN: "t" })).toBe("gcs");
+    expect(resolveStorageDriver({ STORAGE_DRIVER: "vercel-blob" })).toBe("vercel-blob");
+  });
+
+  it("local przy NODE_ENV=production rzuca — jawnie i domyślnie (fail-closed)", () => {
+    expect(() => resolveStorageDriver({ STORAGE_DRIVER: "local", NODE_ENV: "production" })).toThrow(
+      /disabled in production/,
+    );
+    expect(() => resolveStorageDriver({ NODE_ENV: "production" })).toThrow(/disabled in production/);
+  });
+
+  it("literówka w STORAGE_DRIVER rzuca, zamiast cicho wybrać inny sterownik", () => {
+    expect(() => resolveStorageDriver({ STORAGE_DRIVER: "gsc" })).toThrow(/Unknown STORAGE_DRIVER "gsc"/);
+    expect(() => resolveStorageDriver({ STORAGE_DRIVER: "GCS" })).toThrow(/Unknown STORAGE_DRIVER/);
+  });
+});
+
+describe("upload / deleteFile — sterownik gcs (mock SDK)", () => {
+  beforeEach(() => {
+    mockGcsSave.mockReset().mockResolvedValue(undefined);
+    mockGcsDelete.mockReset().mockResolvedValue(undefined);
+    mockGcsFile.mockClear();
+    mockGcsBucket.mockClear();
+    mockGcsCtor.mockClear();
+    mockPut.mockReset();
+    mockWriteFile.mockReset();
+    vi.stubEnv("STORAGE_DRIVER", "gcs");
+    vi.stubEnv("GCS_BUCKET", "mh-media");
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "");
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("wgrywa przez klienta GCS (ADC — konstruktor bez argumentów) i zwraca adres storage.googleapis.com/<zasobnik>/…", async () => {
+    const buffer = Buffer.alloc(1024);
+    const result = await upload(buffer, "photo.jpg", "gallery");
+
+    expect(mockGcsCtor).toHaveBeenCalledWith();
+    expect(mockGcsBucket).toHaveBeenCalledWith("mh-media");
+    expect(mockGcsFile).toHaveBeenCalledWith("gallery/photo.jpg");
+    expect(mockGcsSave).toHaveBeenCalledWith(buffer, { resumable: false, contentType: "image/jpeg" });
+    expect(result).toEqual({
+      url: "https://storage.googleapis.com/mh-media/gallery/photo.jpg",
+      pathname: "gallery/photo.jpg",
+    });
+    expect(mockPut).not.toHaveBeenCalled();
+    expect(mockWriteFile).not.toHaveBeenCalled();
+  });
+
+  it("działa także przy NODE_ENV=production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const result = await upload(Buffer.alloc(10), "a.png");
+    expect(result.url).toBe("https://storage.googleapis.com/mh-media/a.png");
+  });
+
+  it("brak GCS_BUCKET rzuca przed jakimkolwiek wywołaniem SDK", async () => {
+    vi.stubEnv("GCS_BUCKET", "");
+    await expect(upload(Buffer.alloc(10), "photo.jpg")).rejects.toThrow(/requires GCS_BUCKET/);
+    expect(mockGcsSave).not.toHaveBeenCalled();
+  });
+
+  it("koduje spacje i polskie znaki w adresie, ale nie w nazwie obiektu", async () => {
+    const result = await upload(Buffer.alloc(10), "zdjęcie ślubne.jpg", "gallery");
+    expect(mockGcsFile).toHaveBeenCalledWith("gallery/zdjęcie ślubne.jpg");
+    expect(result.url).toBe(
+      "https://storage.googleapis.com/mh-media/gallery/zdj%C4%99cie%20%C5%9Blubne.jpg",
+    );
+    expect(result.pathname).toBe("gallery/zdjęcie ślubne.jpg");
+  });
+
+  it("GCS_PUBLIC_BASE_URL z ukośnikiem końcowym nie daje podwójnego ukośnika", async () => {
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "https://media.example.pl/mh-media/");
+    const result = await upload(Buffer.alloc(10), "a.webp", "gallery");
+    expect(result.url).toBe("https://media.example.pl/mh-media/gallery/a.webp");
+  });
+
+  it("GCS_PUBLIC_BASE_URL bez segmentu zasobnika rzuca przed SDK (C2b — lib/gcs-config)", async () => {
+    vi.stubEnv("GCS_PUBLIC_BASE_URL", "https://media.example.pl/");
+    await expect(upload(Buffer.alloc(10), "a.webp", "gallery")).rejects.toThrow(/GCS_PUBLIC_BASE_URL/);
+    expect(mockGcsSave).not.toHaveBeenCalled();
+  });
+
+  it("niepoprawna nazwa GCS_BUCKET rzuca przed SDK", async () => {
+    vi.stubEnv("GCS_BUCKET", "../other");
+    await expect(upload(Buffer.alloc(10), "a.webp")).rejects.toThrow(/GCS_BUCKET/);
+    expect(mockGcsSave).not.toHaveBeenCalled();
+  });
+
+  it("nieznane rozszerzenie nie przejdzie walidacji (contentType z mapy, nie z wejścia)", async () => {
+    await expect(upload(Buffer.alloc(10), "x.exe")).rejects.toThrow(/not allowed/);
+    expect(mockGcsSave).not.toHaveBeenCalled();
+  });
+
+  it("błąd SDK przechodzi do wywołującego (trasa zwraca kontrolowane 500)", async () => {
+    mockGcsSave.mockRejectedValue(new Error("403 forbidden"));
+    await expect(upload(Buffer.alloc(10), "a.jpg")).rejects.toThrow("403 forbidden");
+  });
+
+  it("deleteFile kasuje obiekt z naszego zasobnika (dekodując ścieżkę)", async () => {
+    await deleteFile("https://storage.googleapis.com/mh-media/gallery/zdj%C4%99cie%20a.jpg");
+    expect(mockGcsFile).toHaveBeenCalledWith("gallery/zdjęcie a.jpg");
+    expect(mockGcsDelete).toHaveBeenCalledWith({ ignoreNotFound: true });
+  });
+
+  it("deleteFile odmawia adresu spoza zasobnika (w tym cudzego zasobnika o wspólnym prefiksie)", async () => {
+    await expect(deleteFile("https://storage.googleapis.com/mh-media-other/a.jpg")).rejects.toThrow(
+      /outside the configured GCS bucket/,
+    );
+    await expect(deleteFile("/uploads/a.jpg")).rejects.toThrow(/outside/);
+    expect(mockGcsDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("upload — local przy NODE_ENV=production (G-C2)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("rzuca zamiast zapisać na ulotny dysk", async () => {
+    mockWriteFile.mockReset();
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "");
+    vi.stubEnv("STORAGE_DRIVER", "");
+    await expect(upload(Buffer.alloc(10), "a.jpg")).rejects.toThrow(/disabled in production/);
+    expect(mockWriteFile).not.toHaveBeenCalled();
   });
 });

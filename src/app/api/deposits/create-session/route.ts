@@ -10,6 +10,7 @@ import {
   DEPOSIT_NOT_APPLICABLE_CODE,
   depositDecision,
 } from "@/lib/deposit-guard";
+import { hostingPlatform } from "@/lib/hosting";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getSalonContext } from "@/lib/salon-context";
@@ -45,7 +46,8 @@ import { getStripe, isStripeConfigured } from "@/lib/stripe";
  */
 /**
  * Symulacja płatności (bez klucza Stripe) jest opt-in, nie opt-out:
- * - Na Vercelu (`VERCEL=1`, ustawiane przez platformę) → NIGDY, niezależnie
+ * - Na hostingu — Vercel (`VERCEL=1`) albo Cloud Run (`K_SERVICE`), oba
+ *   ustawiane przez platformę (lib/hosting, #106) → NIGDY, niezależnie
  *   od NODE_ENV i flagi. Ta bramka stoi PIERWSZA (#84, Ryan): dziś Next
  *   wpisuje NODE_ENV=production w build, ale kolejność nie może na tym polegać.
  *   Ustawiona tam flaga jest logowana jako błąd konfiguracji (druga bramka, Ethan).
@@ -56,9 +58,10 @@ import { getStripe, isStripeConfigured } from "@/lib/stripe";
  * Wszystko inne (production, test, preview, brak NODE_ENV) → 503.
  */
 function isPaymentSimulationAllowed(): boolean {
-  if (process.env.VERCEL === "1") {
+  const platform = hostingPlatform();
+  if (platform) {
     if (process.env.ALLOW_PAYMENT_SIMULATION === "1") {
-      logger.error("[Deposits API] ALLOW_PAYMENT_SIMULATION=1 ignored on Vercel — remove the flag from this deployment");
+      logger.error(`[Deposits API] ALLOW_PAYMENT_SIMULATION=1 ignored on ${platform} — remove the flag from this deployment`);
     }
     return false;
   }
@@ -146,8 +149,10 @@ export async function POST(request: Request) {
     }
 
     // #69/Ethan: brak klucza Stripe → 503, nic nie zapisane — chyba że
-    // symulacja jest jawnie dozwolona (isPaymentSimulationAllowed: dev albo
-    // ALLOW_PAYMENT_SIMULATION=1 poza Vercelem). Sprawdzamy wyłącznie
+    // symulacja jest jawnie dozwolona (isPaymentSimulationAllowed): tylko
+    // poza hostingiem (Vercel, Cloud Run — tam NIGDY, także przy
+    // NODE_ENV=development), czyli lokalny `pnpm dev` albo
+    // ALLOW_PAYMENT_SIMULATION=1 na serwerze E2E w CI. Sprawdzamy wyłącznie
     // obecność klucza, nigdy wartość.
     if (!isStripeConfigured() && !isPaymentSimulationAllowed()) {
       logger.error("[Deposits API] Stripe not configured and payment simulation not allowed — deposit booking refused");

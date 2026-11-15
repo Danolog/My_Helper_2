@@ -182,3 +182,95 @@ describe("logger — development (format czytelny)", () => {
     expect(logSpy).toHaveBeenCalledWith("[INFO]", "Bez pol");
   });
 });
+
+describe("logger — redakcja danych osobowych (hotfix P1)", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("produkcja: { client: { firstName, phone } } zredagowane, klucze techniczne zostają", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("Rezerwacja", {
+      salonId: "salon-1",
+      appointmentId: "appt-1",
+      client: { id: "c-1", firstName: "Anna", phone: "+48600123456" },
+    });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    const entry = JSON.parse(raw);
+    expect(entry).toMatchObject({
+      salonId: "salon-1",
+      appointmentId: "appt-1",
+      client: { id: "c-1", firstName: "[redacted]", phone: "[redacted]" },
+    });
+    expect(raw).not.toContain("Anna");
+    expect(raw).not.toContain("600123456");
+  });
+
+  it("produkcja: message, name i stack błędu zostają w logu", async () => {
+    const logger = await importLoggerWithEnv("production");
+    const err = new TypeError("Nie udalo sie zapisac wizyty");
+    logger.error("Blad", { error: err, nested: { error: err } });
+
+    const entry = JSON.parse(errorSpy.mock.calls[0]![0] as string);
+    for (const meta of [entry.error, entry.nested.error]) {
+      expect(meta.message).toBe("Nie udalo sie zapisac wizyty");
+      expect(meta.name).toBe("TypeError");
+      expect(typeof meta.stack).toBe("string");
+      expect(meta.stack.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("development: ta sama redakcja (każde środowisko)", async () => {
+    const logger = await importLoggerWithEnv("development");
+    logger.info("x", { notes: "alergia na lateks" });
+
+    expect(logSpy).toHaveBeenCalledWith("[INFO]", "x", { notes: "[redacted]" });
+  });
+
+  it("każdy klucz z listy, bez wielkości liter, na dowolnym poziomie i w tablicach", async () => {
+    const { redactLogContext, PII_LOG_KEYS, REDACTED } = await import("@/lib/logger");
+    for (const key of PII_LOG_KEYS) {
+      const ctx = {
+        [key]: "v",
+        [key.toUpperCase()]: "v",
+        deep: { a: { b: [{ [key]: "v" }, [{ [key]: "v" }]] } },
+      };
+      expect(redactLogContext(ctx), key).toEqual({
+        [key]: REDACTED,
+        [key.toUpperCase()]: REDACTED,
+        deep: { a: { b: [{ [key]: REDACTED }, [{ [key]: REDACTED }]] } },
+      });
+    }
+  });
+
+  it("obiekt pod kluczem z listy znika w całości; inne wartości bez zmian", async () => {
+    const { redactLogContext } = await import("@/lib/logger");
+    const at = new Date("2026-11-15T10:00:00Z");
+    expect(
+      redactLogContext({ body: { anything: 1 }, count: 3, ok: true, none: null, at, name: "Strzyzenie" }),
+    ).toEqual({ body: "[redacted]", count: 3, ok: true, none: null, at, name: "Strzyzenie" });
+  });
+
+  it("nie modyfikuje wejścia; cykl i głębokość nie wywracają logu", async () => {
+    const { redactLogContext } = await import("@/lib/logger");
+    const input: Record<string, unknown> = { client: { email: "a@b.pl" } };
+    input.self = input;
+    const out = redactLogContext(input) as Record<string, unknown>;
+    expect((input.client as Record<string, unknown>).email).toBe("a@b.pl");
+    expect(out).toEqual({ client: { email: "[redacted]" }, self: "[circular]" });
+
+    let deep: Record<string, unknown> = { phone: "1" };
+    for (let i = 0; i < 20; i++) deep = { x: deep };
+    expect(JSON.stringify(redactLogContext(deep))).not.toContain('"1"');
+  });
+});

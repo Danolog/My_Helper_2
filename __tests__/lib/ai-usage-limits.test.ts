@@ -59,35 +59,31 @@ afterEach(() => {
 describe("getAIBudgetLimits", () => {
   it("returns sensible defaults when env vars are unset", () => {
     vi.stubEnv("AI_MONTHLY_BUDGET_USD", "");
-    vi.stubEnv("AI_MONTHLY_VIDEO_LIMIT", "");
     vi.stubEnv("AI_MONTHLY_IMAGE_LIMIT", "");
 
     expect(getAIBudgetLimits()).toEqual({
       monthlyBudgetUSD: 20,
-      monthlyVideoLimit: 10,
       monthlyImageLimit: 100,
     });
   });
 
   it("reads overrides from env vars", () => {
     vi.stubEnv("AI_MONTHLY_BUDGET_USD", "5");
-    vi.stubEnv("AI_MONTHLY_VIDEO_LIMIT", "2");
     vi.stubEnv("AI_MONTHLY_IMAGE_LIMIT", "50");
 
     expect(getAIBudgetLimits()).toEqual({
       monthlyBudgetUSD: 5,
-      monthlyVideoLimit: 2,
       monthlyImageLimit: 50,
     });
   });
 
   it("falls back to defaults for invalid or negative env values", () => {
     vi.stubEnv("AI_MONTHLY_BUDGET_USD", "not-a-number");
-    vi.stubEnv("AI_MONTHLY_VIDEO_LIMIT", "-3");
+    vi.stubEnv("AI_MONTHLY_IMAGE_LIMIT", "-3");
 
     const limits = getAIBudgetLimits();
     expect(limits.monthlyBudgetUSD).toBe(20);
-    expect(limits.monthlyVideoLimit).toBe(10);
+    expect(limits.monthlyImageLimit).toBe(100);
   });
 });
 
@@ -108,12 +104,10 @@ describe("checkAIBudget", () => {
     expect(result.reason).toBeUndefined();
     expect(result.usage).toEqual({
       totalCostUSD: 0.25,
-      videoCount: 0,
       imageCount: 5,
     });
     expect(result.budget).toEqual({
       monthlyBudgetUSD: 20,
-      monthlyVideoLimit: 10,
       monthlyImageLimit: 100,
     });
   });
@@ -140,22 +134,13 @@ describe("checkAIBudget", () => {
     expect(result.budget.monthlyBudgetUSD).toBe(1);
   });
 
-  it("blocks video generation when the monthly video unit limit is reached", async () => {
-    // 10 videos = default limit; cost 10 * 0.15 = 1.5 USD (within budget)
-    mockUsageRows([{ type: "video", provider: "google_veo", count: 10 }]);
-
-    const result = await checkAIBudget(SALON_ID, "video");
-
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain("wideo");
-    expect(result.usage.videoCount).toBe(10);
-  });
-
-  it("does not apply the video unit limit to non-video operations", async () => {
+  it("B4: historyczne wiersze wideo liczą się do budżetu po cenie Veo, bez limitu sztuk", async () => {
+    // 10 klipów sprzed usunięcia wideo: 10 * 0.15 = 1.5 USD (w budżecie)
     mockUsageRows([{ type: "video", provider: "google_veo", count: 10 }]);
 
     const textResult = await checkAIBudget(SALON_ID);
     expect(textResult.allowed).toBe(true);
+    expect(textResult.usage).toEqual({ totalCostUSD: 1.5, imageCount: 0 });
 
     const imageResult = await checkAIBudget(SALON_ID, "image");
     expect(imageResult.allowed).toBe(true);
@@ -201,12 +186,11 @@ describe("checkAIBudget", () => {
   it("fails open (allowed) when the database query throws", async () => {
     mockGroupBy.mockRejectedValue(new Error("db down"));
 
-    const result = await checkAIBudget(SALON_ID, "video");
+    const result = await checkAIBudget(SALON_ID, "image");
 
     expect(result.allowed).toBe(true);
     expect(result.usage).toEqual({
       totalCostUSD: 0,
-      videoCount: 0,
       imageCount: 0,
     });
     expect(logger.warn).toHaveBeenCalled();

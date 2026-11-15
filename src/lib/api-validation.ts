@@ -13,7 +13,7 @@ import {
 } from "@/lib/push-subscription";
 import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 import { normalizePolishPhoneNumber } from "@/lib/phone";
-import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
+import { isOwnUploadUrl } from "@/lib/upload-url";
 
 // ==========================================
 // Validation Helper
@@ -628,22 +628,6 @@ export const birthdaySettingsSchema = z.object({
   autoSend: z.boolean().optional(),
 });
 
-export const fiscalSettingsSchema = z.object({
-  enabled: z.boolean().optional(),
-  connectionType: z.enum(["network", "usb", "serial"]).optional(),
-  printerModel: z.string().max(100).optional(),
-  ipAddress: z.string().max(45).optional(),
-  port: z.number().int().min(1).max(65535).optional(),
-  serialPort: z.string().max(50).optional(),
-  baudRate: z.number().optional(),
-  autoprint: z.boolean().optional(),
-  printCopy: z.boolean().optional(),
-  nip: z.string().max(13).optional(),
-  headerLine1: z.string().max(40).optional(),
-  headerLine2: z.string().max(40).optional(),
-  headerLine3: z.string().max(40).optional(),
-});
-
 const rewardTierSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1, "Nazwa nagrody jest wymagana"),
@@ -739,17 +723,6 @@ export const treatmentSchema = z.object({
   techniques: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
   materialsJson: z.any().optional(),
-});
-
-export const fiscalReceiptSchema = z.object({
-  items: z.array(z.object({
-    name: z.string(),
-    quantity: z.number().positive(),
-    price: z.number().nonnegative(),
-    vatRate: z.string().optional(),
-  })).min(1, "Wymagana co najmniej jedna pozycja"),
-  paymentMethod: z.enum(["cash", "card", "transfer", "mixed"]).optional(),
-  nip: z.string().optional(),
 });
 
 export const invoiceSchema = z.object({
@@ -862,7 +835,7 @@ const optionalUuidId = uuidId.nullable().optional();
 // Adres zdjecia: wylacznie to, co zwrocil nasz upload galerii (lib/upload-url).
 const galleryUploadUrl = z
   .string()
-  .refine(isOwnGalleryUploadUrl, "Adres zdjecia musi pochodzic z uploadu galerii")
+  .refine((url) => isOwnUploadUrl(url, { folder: "gallery" }).ok, "Adres zdjecia musi pochodzic z uploadu galerii")
   .nullable()
   .optional();
 
@@ -1104,15 +1077,6 @@ export const clientCancelSchema = z.object({
 export const sendReminderSchema = z.object({
   appointmentId: z.string().uuid(),
   type: z.enum(["sms", "push", "email"]).default("push"),
-});
-
-// ==========================================
-// Fiscal Test Schema
-// ==========================================
-
-export const fiscalTestSchema = z.object({
-  apiKey: z.string().min(1),
-  endpoint: z.string().url(),
 });
 
 // ==========================================

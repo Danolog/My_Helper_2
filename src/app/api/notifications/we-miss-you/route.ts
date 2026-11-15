@@ -303,7 +303,7 @@ export async function POST(request: Request) {
 
     for (const client of inactiveClients) {
       if (recentlyNotifiedIds.has(client.id)) {
-        logger.info(`[We Miss You Notifications] Already sent notification to ${client.firstName} ${client.lastName} in the last ${SPAM_GUARD_DAYS} days, skipping`);
+        logger.info(`[We Miss You Notifications] Already sent notification to client ${client.id} in the last ${SPAM_GUARD_DAYS} days, skipping`);
         continue;
       }
 
@@ -362,7 +362,7 @@ export async function POST(request: Request) {
         clientPhone: client.phone,
       });
 
-      logger.info(`[We Miss You Notifications] Queued notification for ${client.firstName} ${client.lastName} (${notificationType})`);
+      logger.info(`[We Miss You Notifications] Queued notification for client ${client.id} (${notificationType})`);
     }
 
     // Batch-insert all notifications in a single query instead of N individual INSERTs
