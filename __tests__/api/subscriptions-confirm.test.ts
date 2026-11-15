@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "@/app/api/subscriptions/confirm/route";
 import { logger } from "@/lib/logger";
 import { subscriptionPayments } from "@/lib/schema";
+import { STRIPE_LOCKED_READ_OPTIONS } from "@/lib/subscription-locks";
 
 const f = await vi.hoisted(async () =>
   (await import("./subscription-db-fake")).createSubscriptionDbFake()
@@ -116,9 +117,10 @@ async function confirm(body: unknown = { sessionId: "cs_test_123" }) {
 const subWrites = () => f.committed.filter((w) => w.table === "salon_subscriptions");
 const paymentWrites = () => f.committed.filter((w) => w.table === "subscription_payments");
 
+/** Zero zapisów (odczyt Stripe jest w transakcji pod blokadą, więc ona może być — pusta). */
 function expectNoWrites() {
-  expect(f.state.transactions).toBe(0);
   expect(f.committed).toEqual([]);
+  expect(f.log.filter((e) => e.startsWith("insert:") || e.startsWith("update:"))).toEqual([]);
 }
 
 beforeEach(() => {
@@ -189,7 +191,7 @@ describe("POST /api/subscriptions/confirm — 200", () => {
     });
     f.selects.push([], [PLAN_PRO], []);
     expect((await confirm()).status).toBe(200);
-    expect(retrieveSubscription).toHaveBeenCalledWith("sub_1");
+    expect(retrieveSubscription).toHaveBeenCalledWith("sub_1", {}, STRIPE_LOCKED_READ_OPTIONS);
   });
 
   it("trial → płatny plan: ten sam wiersz przechodzi w active, bez drugiego wiersza", async () => {
@@ -391,6 +393,37 @@ describe("POST /api/subscriptions/confirm — 5xx", () => {
     expectNoWrites();
   });
 
+  it("503: błąd Stripe przy odczycie subskrypcji pod blokadą — „spróbuj ponownie”, zero zapisów", async () => {
+    withStripe(checkoutSession());
+    retrieveSubscription.mockRejectedValue(new Error("timeout"));
+    f.selects.push([], [PLAN_PRO]);
+    const { status, body } = await confirm();
+    expect(status).toBe(503);
+    expect(body.code).toBe("STRIPE_UNAVAILABLE");
+    expectNoWrites();
+  });
+
+  it.each([
+    ["40P01", "zakleszczenie"],
+    ["55P03", "lock_timeout"],
+  ])("503: %s (%s) przy blokadzie — nigdy 2xx, zero zapisów", async (code) => {
+    withStripe(checkoutSession());
+    f.state.failNextLock = { code };
+    f.selects.push([], [PLAN_PRO]);
+    const { status, body } = await confirm();
+    expect(status).toBe(503);
+    expect(body.code).toBe("LOCK_BUSY");
+    expectNoWrites();
+    expect(f.log).toContain("rollback");
+  });
+
+  it("503: 40P01 opakowany przez Drizzle w `cause` też jest rozpoznany", async () => {
+    withStripe(checkoutSession());
+    f.state.failNextLock = { code: "XX000", cause: { code: "40P01" } } as unknown as { code: string };
+    f.selects.push([], [PLAN_PRO]);
+    expect((await confirm()).status).toBe(503);
+  });
+
   it("500: błąd bazy w transakcji — wycofana, bez zapisów", async () => {
     withStripe(checkoutSession());
     f.state.failNextSubscriptionWrite = { code: "08006" };
@@ -434,7 +467,7 @@ describe("POST /api/subscriptions/confirm — stan subskrypcji w Stripe (ostrze�
     f.selects.push([], [PLAN_PRO], []);
 
     expect((await confirm()).status).toBe(409);
-    expect(retrieveSubscription).toHaveBeenCalledWith("sub_1");
+    expect(retrieveSubscription).toHaveBeenCalledWith("sub_1", {}, STRIPE_LOCKED_READ_OPTIONS);
     expectNoWrites();
   });
 

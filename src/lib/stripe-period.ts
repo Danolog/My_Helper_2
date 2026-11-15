@@ -36,33 +36,3 @@ export function stripeSubscriptionPeriod(sub: StripeSubscriptionPeriodSource): B
     toPeriod(sub.current_period_start, sub.current_period_end)
   );
 }
-
-export interface StripeInvoicePeriodSource {
-  period_start?: number | null;
-  period_end?: number | null;
-  lines?: {
-    data?: Array<{
-      /** Starsze API: "subscription" | "invoiceitem". */
-      type?: string | null;
-      /** Nowsze API: `parent.type === "subscription_item_details"`. */
-      parent?: { type?: string | null } | null;
-      period?: { start?: number | null; end?: number | null } | null;
-    }>;
-  } | null;
-}
-
-/**
- * Okres opłacony fakturą subskrypcji: z pozycji subskrypcji na fakturze.
- * `invoice.period_start/end` dla faktury odnowienia opisuje okres, w którym
- * dodawano pozycje (poprzedni), a nie okres, za który klient właśnie zapłacił
- * — to tylko zapas, gdy faktura nie ma pozycji subskrypcji.
- */
-export function stripeInvoicePeriod(invoice: StripeInvoicePeriodSource): BillingPeriod | null {
-  const line = invoice.lines?.data?.find(
-    (l) => l.type === "subscription" || l.parent?.type === "subscription_item_details"
-  );
-  return (
-    toPeriod(line?.period?.start, line?.period?.end) ??
-    toPeriod(invoice.period_start, invoice.period_end)
-  );
-}

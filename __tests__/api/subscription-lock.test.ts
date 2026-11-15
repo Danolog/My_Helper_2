@@ -1,33 +1,24 @@
 /**
- * Ostrzeżenie [MEDIUM] #2 TOCTOU (T3): potwierdzenie Checkoutu i webhook
- * zmieniający stan subskrypcji są serializowane blokadą salonu.
+ * Blokady subskrypcji (T3): ostrzeżenia [MEDIUM] #2 TOCTOU i #3 „zdarzenie
+ * przed wierszem” — testy jednostkowe na atrapie `tx` z logiem kolejności
+ * wywołań (`f.log`). Kolejność i czekanie na prawdziwym Postgresie dowodzi
+ * test integracyjny `__tests__/integration/subscription-locks.pg.test.ts`.
  *
- * Przed poprawką confirm czytał tylko wiersze active/trialing, bez blokady:
- * „confirm odczytał active ze Stripe → webhook deleted zapisał canceled →
- * transakcja confirm” zakładała NOWY wiersz active (stary canceled nie był
- * widoczny dla filtra), a częściowy indeks unikalny z T3(b) tego nie
- * zatrzyma, bo obejmuje tylko trialing/active.
- *
- * Teraz:
- * - confirm bierze `pg_advisory_xact_lock(hashtext('salon_subscriptions:'||salon))`
- *   na początku transakcji i pod nią czyta WSZYSTKIE wiersze salonu,
- * - wiersz tej subskrypcji Stripe w stanie canceled/past_due/unpaid/
- *   incomplete_expired → odmowa (409, „manual handling”), bez drugiego wiersza,
- * - handlery webhooka updated/deleted/invoice.paid/invoice.payment_failed
- *   biorą tę samą blokadą przed zapisem.
- * Wariant (2) bez ponownego odczytu Stripe pod blokadą: wywołanie sieciowe
- * trzymałoby blokadę salonu przez czas odpowiedzi Stripe, a stan, który
- * Stripe już zgłosił, jest u nas w wierszu odczytanym pod tą blokadą.
- *
- * Test na atrapie `tx` z zapisem kolejności wywołań (`f.log`), nie na dwóch
- * prawdziwych transakcjach: lokalna baza należy do sesji głównej, a ten PR nie
- * uruchamia `db:*`. Blokada w Postgresie to `pg_advisory_xact_lock` — tu
- * sprawdzamy, że jest brana przed odczytem i zapisem w obu ścieżkach.
+ * Kształt (Ethan, `scratchpad/ethan/pr62-shape.md`):
+ * - dwuargumentowe `pg_advisory_xact_lock(<przestrzeń>, hashtext(id))`,
+ *   przestrzenie `stripe_sub` i `salon`, tylko `xact`;
+ * - kolejność: lock_timeout → stripe_sub → odczyt Stripe → salon; co najwyżej
+ *   jedna blokada z każdej przestrzeni na transakcję;
+ * - confirm czyta Stripe DOPIERO pod blokadą stripe_sub; webhook szuka
+ *   wiersza DOPIERO pod blokadą stripe_sub;
+ * - pod blokadą salonu confirm czyta WSZYSTKIE wiersze salonu; wiersz tej
+ *   subskrypcji Stripe w stanie zakończonym → 409, bez drugiego wiersza.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST as stripeWebhook } from "@/app/api/stripe/webhook/route";
 import { POST as confirmRoute } from "@/app/api/subscriptions/confirm/route";
 import { salonSubscriptions } from "@/lib/schema";
+import { lockSalonSubscriptions, lockStripeSubscription } from "@/lib/subscription-locks";
 
 const f = await vi.hoisted(async () =>
   (await import("./subscription-db-fake")).createSubscriptionDbFake()
@@ -87,6 +78,7 @@ const LOCAL_ACTIVE = {
 };
 
 let retrieveSubscription: ReturnType<typeof vi.fn>;
+let stripeStatus = "active";
 
 async function deliver(type: string, object: Record<string, unknown>) {
   constructEvent.mockReturnValueOnce({ id: `evt_${type}`, type, data: { object } });
@@ -115,7 +107,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   f.reset();
   inArrayCalls.length = 0;
-  retrieveSubscription = vi.fn().mockResolvedValue(STRIPE_SUB);
+  stripeStatus = "active";
+  // Odczyt Stripe trafia do logu kolejności — widać, pod którą blokadą jest.
+  retrieveSubscription = vi.fn().mockImplementation(async () => {
+    f.log.push("stripe:retrieve");
+    return { ...STRIPE_SUB, status: stripeStatus };
+  });
   mockGetStripe.mockReturnValue({
     webhooks: { constructEvent },
     subscriptions: { retrieve: retrieveSubscription },
@@ -123,17 +120,18 @@ beforeEach(() => {
   });
 });
 
-describe("TOCTOU — blokada salonu w potwierdzeniu", () => {
-  it("odczyt stanu i zapisy confirm są pod blokadą salonu, w jednej transakcji", async () => {
+describe("confirm — kolejność: stripe_sub → odczyt Stripe → salon", () => {
+  it("odczyt Stripe jest pod blokadą stripe_sub i przed blokadą salonu; wiersze salonu pod obiema", async () => {
     f.selects.push([], [PLAN_PRO], []);
     expect((await confirm()).status).toBe(200);
-    const lockAt = f.log.indexOf("lock:salon-1");
-    expect(lockAt).toBeGreaterThan(-1);
-    // przed blokadą: tylko odczyt idempotencji i planu
-    expect(f.log.slice(0, lockAt)).toEqual(["select", "select"]);
-    expect(f.log.slice(lockAt)).toEqual([
-      "lock:salon-1",
-      "select",
+    expect(f.log).toEqual([
+      "select", // idempotencja (przed transakcją)
+      "select", // plan (przed transakcją)
+      "lock_timeout",
+      "lock:stripe_sub:sub_1",
+      "stripe:retrieve",
+      "lock:salon:salon-1",
+      "select", // wszystkie wiersze salonu
       "insert:salon_subscriptions",
       "insert:subscription_payments",
       "commit",
@@ -146,37 +144,32 @@ describe("TOCTOU — blokada salonu w potwierdzeniu", () => {
     expect(inArrayCalls.some(([col]) => col === salonSubscriptions.status)).toBe(false);
   });
 
-  it("przeplot: confirm odczytał active → webhook deleted zapisał canceled → transakcja confirm: brak active i brak drugiego wiersza", async () => {
-    // confirm: idempotencja, plan; webhook deleted: wiersz po stripe id;
-    // confirm pod blokadą: wiersze salonu — już canceled (zapisał webhook).
-    f.selects.push([], [PLAN_PRO], [LOCAL_ACTIVE], [{ ...LOCAL_ACTIVE, status: "canceled" }]);
-    // Stripe odpowiada „active” (stan sprzed anulowania), a zanim confirm
-    // otworzy transakcję, przychodzi customer.subscription.deleted.
-    retrieveSubscription.mockImplementationOnce(async () => {
-      expect(await deliver("customer.subscription.deleted", { id: "sub_1", status: "canceled" })).toBe(200);
-      return STRIPE_SUB;
-    });
+  it("Stripe nieaktywny pod blokadą → 409 bez blokady salonu i bez odczytu wierszy", async () => {
+    stripeStatus = "canceled";
+    f.selects.push([], [PLAN_PRO]);
+    expect((await confirm()).status).toBe(409);
+    expect(f.log).not.toContain("lock:salon:salon-1");
+    expect(f.committed).toEqual([]);
+  });
 
+  it("gałąź SUBSCRIPTION_CONFLICT: jedna blokada stripe_sub (bez drugiej dla cudzej subskrypcji)", async () => {
+    f.selects.push([], [PLAN_PRO], [{ ...LOCAL_ACTIVE, stripeSubscriptionId: "sub_OTHER" }]);
     const { status, body } = await confirm();
+    expect(status).toBe(409);
+    expect(body.code).toBe("SUBSCRIPTION_CONFLICT");
+    expect(f.log.filter((e) => e.startsWith("lock:stripe_sub:"))).toEqual(["lock:stripe_sub:sub_1"]);
+    expect(f.log.filter((e) => e.startsWith("lock:salon:"))).toEqual(["lock:salon:salon-1"]);
+  });
 
+  it("deleted przed confirm (bez wiersza): webhook 200 + warn, confirm czyta canceled ze Stripe → 409, zero zapisów", async () => {
+    stripeStatus = "canceled";
+    f.selects.push([]); // webhook pod blokadą: brak wiersza
+    expect(await deliver("customer.subscription.deleted", { id: "sub_1" })).toBe(200);
+    f.selects.push([], [PLAN_PRO]);
+    const { status, body } = await confirm();
     expect(status).toBe(409);
     expect(body.code).toBe("SUBSCRIPTION_NOT_ACTIVE");
-    // Jedyny zapis: canceled z webhooka. Ani active, ani drugiego wiersza.
-    expect(f.committed.map((w) => [w.op, w.table, w.values.status])).toEqual([
-      ["update", "salon_subscriptions", "canceled"],
-    ]);
-    // Webhook zatwierdził pod blokadą, zanim confirm wziął swoją.
-    expect(f.log).toEqual([
-      "select", // confirm: idempotencja
-      "select", // confirm: plan
-      "select", // webhook: wiersz po stripe id
-      "lock:salon-1",
-      "update:salon_subscriptions",
-      "commit",
-      "lock:salon-1", // confirm
-      "select",
-      "commit",
-    ]);
+    expect(f.committed).toEqual([]);
   });
 
   it.each(["canceled", "past_due", "unpaid", "incomplete_expired"])(
@@ -199,23 +192,59 @@ describe("TOCTOU — blokada salonu w potwierdzeniu", () => {
   });
 });
 
-describe("TOCTOU — ta sama blokada w handlerach webhooka", () => {
+describe("webhook — wiersz szukany pod blokadą stripe_sub, odczyt Stripe przed blokadą salonu", () => {
   it.each([
-    ["customer.subscription.updated", { id: "sub_1", status: "past_due", canceled_at: null, cancel_at_period_end: false, items: { data: [PERIOD] } }, [[LOCAL_ACTIVE]]],
-    ["customer.subscription.deleted", { id: "sub_1", status: "canceled" }, [[LOCAL_ACTIVE]]],
+    ["customer.subscription.updated", { id: "sub_1" }, [[LOCAL_ACTIVE]]],
+    ["customer.subscription.deleted", { id: "sub_1" }, [[LOCAL_ACTIVE]]],
     ["invoice.payment_failed", { id: "in_1", subscription: "sub_1", payment_intent: "pi_1" }, [[LOCAL_ACTIVE], [PLAN_PRO]]],
     [
       "invoice.paid",
-      { id: "in_1", subscription: "sub_1", payment_intent: "pi_1", billing_reason: "subscription_cycle", amount_paid: 14900, period_start: 1, period_end: 2 },
+      { id: "in_1", subscription: "sub_1", payment_intent: "pi_1", billing_reason: "subscription_cycle", amount_paid: 14900 },
       [[LOCAL_ACTIVE], [PLAN_PRO]],
     ],
-  ] as const)("%s: blokada salonu przed zapisem stanu", async (type, object, selects) => {
+  ] as const)("%s: lock_timeout → stripe_sub → select → Stripe → salon → zapis", async (type, object, selects) => {
     f.selects.push(...(selects as unknown as unknown[][]));
     expect(await deliver(type, object as unknown as Record<string, unknown>)).toBe(200);
-    const lockAt = f.log.indexOf("lock:salon-1");
+    expect(f.log.slice(0, 5)).toEqual([
+      "lock_timeout",
+      "lock:stripe_sub:sub_1",
+      "select",
+      "stripe:retrieve",
+      "lock:salon:salon-1",
+    ]);
     const firstWrite = f.log.findIndex((e) => e.startsWith("update:") || e.startsWith("insert:"));
-    expect(lockAt).toBeGreaterThan(-1);
-    expect(lockAt).toBeLessThan(firstWrite);
+    expect(firstWrite).toBeGreaterThan(4);
+  });
+});
+
+describe("reguły blokad pilnowane w kodzie", () => {
+  type LockTx = Parameters<typeof lockStripeSubscription>[0];
+  it("druga blokada stripe_sub w jednej transakcji → błąd", async () => {
+    await expect(
+      f.db.transaction(async (tx: unknown) => {
+        await lockStripeSubscription(tx as LockTx, "sub_1");
+        await lockStripeSubscription(tx as LockTx, "sub_2");
+      })
+    ).rejects.toThrow(/second stripeSub lock/);
+  });
+
+  it("stripe_sub po blokadzie salonu → błąd (odwrotna kolejność = ryzyko zakleszczenia)", async () => {
+    await expect(
+      f.db.transaction(async (tx: unknown) => {
+        await lockSalonSubscriptions(tx as LockTx, "salon-1");
+        await lockStripeSubscription(tx as LockTx, "sub_1");
+      })
+    ).rejects.toThrow(/stripe_sub lock after salon lock/);
+  });
+
+  it("druga blokada salonu w jednej transakcji → błąd", async () => {
+    await expect(
+      f.db.transaction(async (tx: unknown) => {
+        await lockStripeSubscription(tx as LockTx, "sub_1");
+        await lockSalonSubscriptions(tx as LockTx, "salon-1");
+        await lockSalonSubscriptions(tx as LockTx, "salon-2");
+      })
+    ).rejects.toThrow(/second salon lock/);
   });
 });
 

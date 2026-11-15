@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST as stripeWebhook } from "@/app/api/stripe/webhook/route";
 import { POST as confirmRoute } from "@/app/api/subscriptions/confirm/route";
 import { logger } from "@/lib/logger";
+import { STRIPE_LOCKED_READ_OPTIONS } from "@/lib/subscription-locks";
 
 const f = await vi.hoisted(async () =>
   (await import("./subscription-db-fake")).createSubscriptionDbFake()
@@ -116,7 +117,7 @@ describe("webhook checkout.session.completed — subskrypcja, 200", () => {
     const { status } = await deliver(webhookSession());
 
     expect(status).toBe(200);
-    expect(retrieveSubscription).toHaveBeenCalledWith("sub_1");
+    expect(retrieveSubscription).toHaveBeenCalledWith("sub_1", {}, STRIPE_LOCKED_READ_OPTIONS);
     expect(f.committed).toEqual([
       expect.objectContaining({
         table: "salon_subscriptions",
@@ -266,8 +267,9 @@ describe("webhook — kolejność zdarzeń (ostrzeżenie [MEDIUM] fail-open stat
     ["customer.subscription.deleted", "canceled"],
     ["customer.subscription.updated", "past_due"],
   ])("checkout.session.completed po %s nie przywraca „active”", async (firstEvent, stripeStatus) => {
-    // 1) najpierw stan ze Stripe: anulowanie / zaległość
-    f.selects.push([LOCAL_ACTIVE]);
+    // 1) najpierw stan ze Stripe: anulowanie / zaległość (handler czyta go ze Stripe)
+    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: stripeStatus });
+    f.selects.push([LOCAL_ACTIVE], [PLAN_PRO]);
     expect(
       (
         await deliver(
@@ -280,7 +282,7 @@ describe("webhook — kolejność zdarzeń (ostrzeżenie [MEDIUM] fail-open stat
     expect(afterFirst.map((w) => w.values.status)).toEqual([stripeStatus]);
 
     // 2) spóźniony checkout.session.completed — Stripe mówi już stripeStatus
-    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: stripeStatus });
+    f.selects.length = 0;
     f.selects.push([], [PLAN_PRO], []);
     expect((await deliver(webhookSession())).status).toBe(200);
 
@@ -298,5 +300,140 @@ describe("webhook — kolejność zdarzeń (ostrzeżenie [MEDIUM] fail-open stat
     expect(f.committed[0]?.values).toEqual(
       expect.objectContaining({ status: "trialing", trialEndsAt: new Date(PERIOD_END * 1000) })
     );
+  });
+});
+
+describe("webhook — zdarzenie tylko jako sygnał: stan bieżący ze Stripe, canceled końcowe", () => {
+  const LOCAL = {
+    id: "sub-local",
+    salonId: "salon-1",
+    planId: PLAN_PRO.id,
+    status: "active",
+    stripeSubscriptionId: "sub_1",
+    currentPeriodStart: new Date(PERIOD_START * 1000),
+    currentPeriodEnd: new Date(PERIOD_END * 1000),
+    canceledAt: null,
+    scheduledPlanId: null,
+    scheduledChangeAt: null,
+  };
+  const INVOICE_PAID = {
+    id: "in_2",
+    subscription: "sub_1",
+    payment_intent: "pi_2",
+    billing_reason: "subscription_cycle",
+    amount_paid: 14900,
+  };
+  const subWrites = () => f.committed.filter((w) => w.table === "salon_subscriptions");
+  const payments = () => f.committed.filter((w) => w.table === "subscription_payments");
+
+  it("deleted, potem późne invoice.paid → zostaje canceled, płatność zapisana", async () => {
+    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "canceled", canceled_at: PERIOD_START });
+    f.selects.push([LOCAL]);
+    expect((await deliver({ id: "sub_1", status: "canceled" }, "customer.subscription.deleted")).status).toBe(200);
+    expect(subWrites().map((w) => w.values.status)).toEqual(["canceled"]);
+
+    // późne invoice.paid: wiersz już canceled
+    f.selects.push([{ ...LOCAL, status: "canceled" }], [PLAN_PRO]);
+    expect((await deliver(INVOICE_PAID, "invoice.paid")).status).toBe(200);
+
+    expect(subWrites().map((w) => w.values.status)).toEqual(["canceled"]); // bez „active”
+    expect(payments()).toEqual([
+      expect.objectContaining({
+        values: expect.objectContaining({ stripePaymentIntentId: "pi_2", status: "succeeded" }),
+      }),
+    ]);
+  });
+
+  it("invoice.paid nie bierze statusu ze zdarzenia: Stripe mówi canceled → zapis canceled, nie „active”", async () => {
+    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "canceled", canceled_at: PERIOD_START });
+    f.selects.push([LOCAL], [PLAN_PRO]);
+    expect((await deliver(INVOICE_PAID, "invoice.paid")).status).toBe(200);
+    expect(subWrites().map((w) => w.values.status)).toEqual(["canceled"]);
+    expect(payments()).toHaveLength(1);
+  });
+
+  it("invoice.paid: status i okres z bieżącego stanu Stripe (świeży odczyt pod blokadą)", async () => {
+    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "past_due" });
+    f.selects.push([LOCAL], [PLAN_PRO]);
+    await deliver(INVOICE_PAID, "invoice.paid");
+    expect(retrieveSubscription).toHaveBeenCalledWith("sub_1", {}, STRIPE_LOCKED_READ_OPTIONS);
+    expect(subWrites()[0]?.values).toEqual(
+      expect.objectContaining({
+        status: "past_due",
+        currentPeriodStart: new Date(PERIOD_START * 1000),
+        currentPeriodEnd: new Date(PERIOD_END * 1000),
+      })
+    );
+  });
+
+  it.each([
+    ["customer.subscription.updated", { id: "sub_1", status: "active" }, []],
+    ["customer.subscription.deleted", { id: "sub_1", status: "canceled" }, []],
+    ["invoice.paid", INVOICE_PAID, [[PLAN_PRO]]],
+    ["invoice.payment_failed", { id: "in_3", subscription: "sub_1", payment_intent: "pi_3" }, [[PLAN_PRO]]],
+  ] as const)(
+    "lokalne canceled (np. subscriptions/cancel), Stripe nadal active → %s nie wskrzesza",
+    async (type, object, extra) => {
+      retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "active" });
+      f.selects.push([{ ...LOCAL, status: "canceled" }], ...(extra as unknown as unknown[][]));
+      expect((await deliver(object as unknown as Record<string, unknown>, type)).status).toBe(200);
+      expect(subWrites()).toEqual([]);
+    }
+  );
+
+  it("późne invoice.payment_failed po invoice.paid: Stripe mówi active → bez fałszywego past_due", async () => {
+    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "active" });
+    f.selects.push([LOCAL], [PLAN_PRO]);
+    await deliver({ id: "in_3", subscription: "sub_1", payment_intent: "pi_3" }, "invoice.payment_failed");
+    expect(subWrites().map((w) => w.values.status)).toEqual(["active"]);
+    expect(payments()[0]?.values).toEqual(expect.objectContaining({ status: "failed" }));
+  });
+
+  it("customer.subscription.updated: payload mówi active, Stripe mówi canceled → canceled", async () => {
+    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "canceled", canceled_at: PERIOD_START });
+    f.selects.push([LOCAL]);
+    await deliver({ id: "sub_1", status: "active" }, "customer.subscription.updated");
+    expect(subWrites().map((w) => w.values.status)).toEqual(["canceled"]);
+  });
+
+  it.each([
+    ["customer.subscription.updated", { id: "sub_404" }],
+    ["customer.subscription.deleted", { id: "sub_404" }],
+    ["invoice.paid", { ...INVOICE_PAID, subscription: "sub_404" }],
+    ["invoice.payment_failed", { id: "in_3", subscription: "sub_404", payment_intent: "pi_3" }],
+  ] as const)("%s: brak wiersza pod blokadą → 200 + warn z id zdarzenia, bez odczytu Stripe i zapisu", async (type, object) => {
+    f.selects.push([]);
+    expect((await deliver(object as unknown as Record<string, unknown>, type)).status).toBe(200);
+    expect(f.committed).toEqual([]);
+    expect(retrieveSubscription).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("No local subscription"),
+      expect.objectContaining({ eventId: "evt_1", eventType: type, stripeSubscriptionId: "sub_404" })
+    );
+    // pod blokadą stripe_sub, nie przed nią
+    expect(f.log.slice(0, 3)).toEqual(["lock_timeout", "lock:stripe_sub:sub_404", "select"]);
+  });
+
+  it.each([
+    ["customer.subscription.updated", { id: "sub_1" }],
+    ["invoice.paid", INVOICE_PAID],
+  ] as const)("%s: błąd Stripe pod blokadą → 500 (Stripe ponowi), bez zapisu", async (type, object) => {
+    retrieveSubscription.mockRejectedValue(new Error("timeout"));
+    f.selects.push([LOCAL]);
+    expect((await deliver(object as unknown as Record<string, unknown>, type)).status).toBe(500);
+    expect(f.committed).toEqual([]);
+  });
+
+  it.each(["40P01", "55P03"])("%s przy blokadzie w webhooku → 500, nigdy 2xx", async (code) => {
+    f.state.failNextLock = { code };
+    expect((await deliver({ id: "sub_1" }, "customer.subscription.deleted")).status).toBe(500);
+    expect(f.committed).toEqual([]);
+  });
+
+  it("checkout.session.completed: 40P01 w confirm → 500 (Stripe ponowi)", async () => {
+    f.state.failNextLock = { code: "40P01" };
+    f.selects.push([], [PLAN_PRO]);
+    expect((await deliver(webhookSession())).status).toBe(500);
+    expect(f.committed).toEqual([]);
   });
 });

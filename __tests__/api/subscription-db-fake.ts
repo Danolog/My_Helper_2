@@ -9,7 +9,8 @@
  *   `[]` = konflikt na unikalnym indeksie (ktoś potwierdził pierwszy),
  * - `failNextSubscriptionWrite`: wyjątek z kodem Postgresa przy zapisie
  *   `salon_subscriptions` (np. 23505 z częściowego indeksu unikalnego),
- * - `log`: kolejność operacji (`lock:<salonId>`, `select`, `insert:<tabela>`,
+ * - `log`: kolejność operacji (`lock_timeout`, `lock:stripe_sub:<id>`,
+ *   `lock:salon:<salonId>`, `select`, `insert:<tabela>`,
  *   `update:<tabela>`, `commit`, `rollback`) — dowód, że odczyt stanu jest
  *   pod blokadą salonu,
  * - `partialUniqueActiveTrialing`: emulacja częściowego indeksu unikalnego
@@ -23,6 +24,7 @@
  *   vi.mock("@/lib/db", () => ({ db: f.db }));
  */
 import { salonSubscriptions, subscriptionPayments } from "@/lib/schema";
+import { SUBSCRIPTION_LOCK_NAMESPACE } from "@/lib/subscription-lock-namespace";
 
 export interface FakeWrite {
   op: "insert" | "update";
@@ -40,6 +42,8 @@ export function createSubscriptionDbFake() {
     rolledBack: 0,
     paymentInsertResult: null as unknown[] | null,
     failNextSubscriptionWrite: null as { code: string } | null,
+    /** Wyjątek przy następnej blokadzie (np. 40P01 zakleszczenie, 55P03 lock_timeout). */
+    failNextLock: null as { code: string } | null,
   };
 
   function tableName(t: unknown): FakeWrite["table"] {
@@ -126,9 +130,28 @@ export function createSubscriptionDbFake() {
         insert: (t: unknown) => writeChain("insert", t, pending),
         update: (t: unknown) => writeChain("update", t, pending),
         execute: async (q: { queryChunks?: unknown[] }) => {
-          const text = JSON.stringify(q.queryChunks ?? []);
-          const salon = /salon_subscriptions:([^"\\]+)/.exec(text)?.[1];
-          log.push(text.includes("pg_advisory_xact_lock") ? `lock:${salon}` : "execute");
+          const chunks = q.queryChunks ?? [];
+          const text = JSON.stringify(chunks);
+          if (text.includes("lock_timeout")) {
+            log.push("lock_timeout");
+            return [];
+          }
+          if (!text.includes("pg_advisory_xact_lock")) {
+            log.push("execute");
+            return [];
+          }
+          const ns = text.includes(String(SUBSCRIPTION_LOCK_NAMESPACE.stripeSub))
+            ? "stripe_sub"
+            : text.includes(String(SUBSCRIPTION_LOCK_NAMESPACE.salon))
+              ? "salon"
+              : "?";
+          const key = chunks.find((c) => typeof c === "string");
+          log.push(`lock:${ns}:${String(key)}`);
+          if (state.failNextLock) {
+            const err = Object.assign(new Error("lock failure"), state.failNextLock);
+            state.failNextLock = null;
+            throw err;
+          }
           return [];
         },
       };
@@ -154,6 +177,7 @@ export function createSubscriptionDbFake() {
     state.rolledBack = 0;
     state.paymentInsertResult = null;
     state.failNextSubscriptionWrite = null;
+    state.failNextLock = null;
   }
 
   return { db, selects, committed, log, partialUniqueActiveTrialing, state, reset };

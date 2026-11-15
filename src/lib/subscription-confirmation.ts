@@ -1,8 +1,15 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions, subscriptionPayments, subscriptionPlans } from "@/lib/schema";
 import { stripeSubscriptionPeriod, type StripeSubscriptionPeriodSource } from "@/lib/stripe-period";
+import {
+  isSubscriptionLockFailure,
+  lockSalonSubscriptions,
+  lockStripeSubscription,
+  retrieveStripeSubscriptionLocked,
+  setSubscriptionLockTimeout,
+} from "@/lib/subscription-locks";
 import type Stripe from "stripe";
 
 /**
@@ -64,7 +71,7 @@ export type ConfirmSubscriptionResult =
     }
   | {
       ok: false;
-      status: 400 | 403 | 404 | 409 | 502;
+      status: 400 | 403 | 404 | 409 | 502 | 503;
       code: string;
       error: string;
     };
@@ -76,32 +83,6 @@ export interface ConfirmSubscriptionOptions {
 
 class PaymentAlreadyRecorded extends Error {}
 
-/** Transakcja Drizzle (typ z `db.transaction`). */
-export type SubscriptionTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-/**
- * Blokada wierszy subskrypcji salonu do końca transakcji (ostrzeżenie
- * [MEDIUM] #2 TOCTOU). Biorą ją wszyscy, którzy zmieniają stan subskrypcji
- * salonu: potwierdzenie Checkoutu i handlery webhooka (updated, deleted,
- * invoice.paid, invoice.payment_failed) — więc „odczyt stanu → zapis” jednego
- * nie przeplata się z zapisem drugiego. Blokada doradcza, bo wiersza może
- * jeszcze nie być (pierwszy Checkout), a FOR UPDATE nie blokuje braku wiersza.
- */
-export async function lockSalonSubscriptions(tx: SubscriptionTx, salonId: string): Promise<void> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"salon_subscriptions:" + salonId}))`);
-}
-
-/** Transakcja z blokadą subskrypcji salonu (patrz `lockSalonSubscriptions`). */
-export function withSalonSubscriptionLock<T>(
-  salonId: string,
-  fn: (tx: SubscriptionTx) => Promise<T>
-): Promise<T> {
-  return db.transaction(async (tx) => {
-    await lockSalonSubscriptions(tx, salonId);
-    return fn(tx);
-  });
-}
-
 /**
  * Stany lokalne, po których subskrypcja Stripe nie wraca do życia przez
  * potwierdzenie Checkoutu (zapisał je webhook — Stripe już to zgłosił).
@@ -109,7 +90,7 @@ export function withSalonSubscriptionLock<T>(
 const ENDED_LOCAL_STATUSES = new Set(["canceled", "past_due", "unpaid", "incomplete_expired"]);
 
 function fail(
-  status: 400 | 403 | 404 | 409 | 502,
+  status: 400 | 403 | 404 | 409 | 502 | 503,
   code: string,
   error: string
 ): ConfirmSubscriptionResult {
@@ -185,94 +166,115 @@ export async function confirmSubscriptionCheckout(
   if (!subRef) {
     return fail(400, "MISSING_SUBSCRIPTION", "Sesja nie zawiera subskrypcji Stripe");
   }
-  // Zawsze świeży odczyt: obiekt rozwinięty w sesji albo payload spóźnionego
-  // zdarzenia może mieć stan sprzed anulowania.
   const stripeSubId = typeof subRef === "string" ? subRef : subRef.id;
-  let stripeSub: RawStripeSubscription;
-  try {
-    stripeSub = (await stripe.subscriptions.retrieve(stripeSubId)) as unknown as RawStripeSubscription;
-  } catch (error) {
-    logger.error("Failed to retrieve Stripe subscription", { error, sessionId: session.id });
-    return fail(502, "STRIPE_ERROR", "Nie udalo sie pobrac subskrypcji ze Stripe");
-  }
-
-  const stripeStatus = stripeSub.status ?? "";
-  const localStatus =
-    stripeStatus in GRANTING_STRIPE_STATUSES
-      ? GRANTING_STRIPE_STATUSES[stripeStatus as keyof typeof GRANTING_STRIPE_STATUSES]
-      : null;
-  if (!localStatus) {
-    logger.warn("Subscription checkout NOT granted: Stripe subscription not active — manual handling", {
-      sessionId: session.id,
-      salonId,
-      stripeSubscriptionId: stripeSub.id,
-      stripeStatus,
-    });
-    return fail(
-      409,
-      "SUBSCRIPTION_NOT_ACTIVE",
-      "Subskrypcja w Stripe nie jest aktywna. Skontaktuj sie z obsluga."
-    );
-  }
-  const trialEndsAt =
-    localStatus === "trialing" && typeof stripeSub.trial_end === "number"
-      ? new Date(stripeSub.trial_end * 1000)
-      : null;
-  if (localStatus === "trialing" && !trialEndsAt) {
-    logger.error("Stripe trialing subscription without trial_end", {
-      sessionId: session.id,
-      stripeSubscriptionId: stripeSub.id,
-    });
-    return fail(502, "STRIPE_TRIAL_END_MISSING", "Stripe nie zwrocil konca okresu probnego");
-  }
-  // Okres ze Stripe, nie liczony lokalnie (miesiąc ≠ okres Stripe przy 31.,
-  // zmianie czasu i triale po stronie Stripe).
-  const period = stripeSubscriptionPeriod(stripeSub);
-  if (!period) {
-    logger.error("Stripe subscription without billing period", {
-      sessionId: session.id,
-      stripeSubscriptionId: stripeSub.id,
-    });
-    return fail(502, "STRIPE_PERIOD_MISSING", "Stripe nie zwrocil okresu rozliczeniowego");
-  }
 
   const stripeCustomerId =
     typeof session.customer === "string" ? session.customer : (session.customer?.id ?? null);
 
   try {
-    const result = await withSalonSubscriptionLock(salonId, async (tx) => {
-      // WSZYSTKIE wiersze salonu (nie tylko active/trialing), odczytane pod
-      // blokadą — po webhooku, który mógł zapisać canceled w międzyczasie.
+    const result = await db.transaction(async (tx) => {
+      // Kolejność: stripe_sub → odczyt Stripe → salon (`subscription-locks.ts`).
+      await setSubscriptionLockTimeout(tx);
+      await lockStripeSubscription(tx, stripeSubId);
+
+      // Stan ze Stripe czytany DOPIERO pod blokadą stripe_sub (ostrzeżenie #3):
+      // webhook tej subskrypcji, który przyszedł przed nami, już się
+      // zatwierdził, więc Stripe zwraca stan po nim (np. canceled); webhook,
+      // który przyjdzie po nas, czeka na blokadę i znajdzie nasz wiersz.
+      // Nigdy obiekt rozwinięty w sesji ani payload spóźnionego zdarzenia
+      // (ostrzeżenie #1).
+      let stripeSub: RawStripeSubscription;
+      try {
+        stripeSub = (await retrieveStripeSubscriptionLocked(
+          stripe,
+          stripeSubId
+        )) as unknown as RawStripeSubscription;
+      } catch (error) {
+        logger.error("Failed to retrieve Stripe subscription", { error, sessionId: session.id });
+        return {
+          failure: fail(503, "STRIPE_UNAVAILABLE", "Nie udalo sie pobrac subskrypcji ze Stripe. Sprobuj ponownie."),
+        } as const;
+      }
+
+      const stripeStatus = stripeSub.status ?? "";
+      const localStatus =
+        stripeStatus in GRANTING_STRIPE_STATUSES
+          ? GRANTING_STRIPE_STATUSES[stripeStatus as keyof typeof GRANTING_STRIPE_STATUSES]
+          : null;
+      if (!localStatus) {
+        logger.warn("Subscription checkout NOT granted: Stripe subscription not active — manual handling", {
+          sessionId: session.id,
+          salonId,
+          stripeSubscriptionId: stripeSub.id,
+          stripeStatus,
+        });
+        return {
+          failure: fail(
+            409,
+            "SUBSCRIPTION_NOT_ACTIVE",
+            "Subskrypcja w Stripe nie jest aktywna. Skontaktuj sie z obsluga."
+          ),
+        } as const;
+      }
+      const trialEndsAt =
+        localStatus === "trialing" && typeof stripeSub.trial_end === "number"
+          ? new Date(stripeSub.trial_end * 1000)
+          : null;
+      if (localStatus === "trialing" && !trialEndsAt) {
+        logger.error("Stripe trialing subscription without trial_end", {
+          sessionId: session.id,
+          stripeSubscriptionId: stripeSub.id,
+        });
+        return {
+          failure: fail(502, "STRIPE_TRIAL_END_MISSING", "Stripe nie zwrocil konca okresu probnego"),
+        } as const;
+      }
+      // Okres ze Stripe, nie liczony lokalnie (miesiąc ≠ okres Stripe przy 31.,
+      // zmianie czasu i triale po stronie Stripe).
+      const period = stripeSubscriptionPeriod(stripeSub);
+      if (!period) {
+        logger.error("Stripe subscription without billing period", {
+          sessionId: session.id,
+          stripeSubscriptionId: stripeSub.id,
+        });
+        return {
+          failure: fail(502, "STRIPE_PERIOD_MISSING", "Stripe nie zwrocil okresu rozliczeniowego"),
+        } as const;
+      }
+
+      // Blokada salonu dopiero po odczycie Stripe — nie trwa przez wywołanie
+      // sieciowe. Pod nią WSZYSTKIE wiersze salonu (nie tylko active/trialing).
+      await lockSalonSubscriptions(tx, salonId);
       const rows = await tx
         .select()
         .from(salonSubscriptions)
         .where(eq(salonSubscriptions.salonId, salonId));
 
       // Ta subskrypcja Stripe jest u nas już zakończona: Stripe zgłosił to
-      // webhookiem po naszym odczycie stanu — nie wskrzeszamy jej ani nie
-      // zakładamy drugiego wiersza.
+      // webhookiem — nie wskrzeszamy jej ani nie zakładamy drugiego wiersza.
       const ended = rows.find(
         (s) => s.stripeSubscriptionId === stripeSub.id && ENDED_LOCAL_STATUSES.has(s.status)
       );
       if (ended) {
-        return { ended: ended.status } as const;
+        return { ended: ended.status, stripeSubscriptionId: stripeSub.id } as const;
       }
 
       const current = rows.filter((s) => s.status === "active" || s.status === "trialing");
-      const active = current.find((s) => s.status === "active");
 
-      // Salon płaci już za INNĄ subskrypcję Stripe: nadpisanie osierociłoby
-      // płacącą subskrypcję (podwójne obciążenie bez śladu u nas).
+      // Salon ma już INNĄ prawdziwą subskrypcję Stripe (active albo trial po
+      // stronie Stripe): nadpisanie osierociłoby ją (podwójne obciążenie bez
+      // śladu u nas), a jej wiersz chroni cudza blokada stripe_sub.
       if (
-        active &&
-        hasRealStripeSubscription(active.stripeSubscriptionId) &&
-        active.stripeSubscriptionId !== stripeSub.id
+        current.some(
+          (s) => hasRealStripeSubscription(s.stripeSubscriptionId) && s.stripeSubscriptionId !== stripeSub.id
+        )
       ) {
-        return { conflict: true } as const;
+        return { conflict: true, stripeSubscriptionId: stripeSub.id } as const;
       }
 
       // Trial → płatny plan: ten sam wiersz przechodzi w „active”, a pozostałe
       // wiersze „trialing” są zamykane — bez drugiego wiersza dla salonu.
+      const active = current.find((s) => s.status === "active");
       const target = active ?? current.find((s) => s.status === "trialing");
       const values = {
         planId,
@@ -329,11 +331,13 @@ export async function confirmSubscriptionCheckout(
       return { record } as const;
     });
 
+    if ("failure" in result) return result.failure;
+
     if ("ended" in result) {
       logger.warn("Subscription checkout NOT granted: subscription already ended locally — manual handling", {
         sessionId: session.id,
         salonId,
-        stripeSubscriptionId: stripeSub.id,
+        stripeSubscriptionId: result.stripeSubscriptionId,
         localStatus: result.ended,
       });
       return fail(
@@ -347,7 +351,7 @@ export async function confirmSubscriptionCheckout(
       logger.error("Subscription checkout conflicts with another paid Stripe subscription", {
         sessionId: session.id,
         salonId,
-        stripeSubscriptionId: stripeSub.id,
+        stripeSubscriptionId: result.stripeSubscriptionId,
       });
       return fail(
         409,
@@ -362,6 +366,15 @@ export async function confirmSubscriptionCheckout(
     });
     return { ok: true, alreadyConfirmed: false, subscription: result.record, plan };
   } catch (error) {
+    if (isSubscriptionLockFailure(error)) {
+      // Zakleszczenie albo lock_timeout: nic nie zapisano, klient ponawia.
+      logger.warn("Subscription checkout lock failure — retry", {
+        sessionId: session.id,
+        salonId,
+        code: (error as { code?: unknown }).code ?? (error as { cause?: { code?: unknown } }).cause?.code,
+      });
+      return fail(503, "LOCK_BUSY", "Potwierdzenie jest w toku. Sprobuj ponownie za chwile.");
+    }
     if (error instanceof PaymentAlreadyRecorded || isUniqueViolation(error)) {
       const winner = await findConfirmed(session.id, salonId);
       if (winner) {
