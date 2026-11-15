@@ -246,6 +246,15 @@ describe("G-C6: skrypty wdrożenia", () => {
     expect(code(text)).not.toContain("--add-cloudsql-instances");
   });
 
+  it("manifest: klucze AI (OpenRouter, Google AI, ElevenLabs) poza Secret Manager i nigdy required — aplikacja startuje bez nich", () => {
+    const ai = Object.entries(MANIFEST.variables).filter(([n]) => /OPENROUTER|GOOGLE_AI|GEMINI|ELEVENLABS|VERTEX/.test(n) && /KEY|TOKEN|SECRET/.test(n));
+    expect(ai.map(([n]) => n).sort()).toEqual(["ELEVENLABS_API_KEY", "GOOGLE_AI_API_KEY", "OPENROUTER_API_KEY"]);
+    for (const [n, e] of ai) {
+      expect(e.class, n).not.toBe("secret");
+      expect(e.required, n).not.toBe(true);
+    }
+  });
+
   it("manifest: każdy sekret ma jawne required; wymagane dokładnie postgres-url i better-auth-secret", () => {
     const secrets = Object.values(MANIFEST.variables).filter((e) => e.class === "secret");
     for (const e of secrets) expect(typeof e.required, e.secretName).toBe("boolean");

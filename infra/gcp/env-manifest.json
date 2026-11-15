@@ -116,9 +116,8 @@
       "class": "platform"
     },
     "OPENROUTER_API_KEY": {
-      "class": "secret",
-      "secretName": "openrouter-api-key",
-      "required": false
+      "class": "vercel-only",
+      "note": "Poza Secret Manager i Cloud Run: klucz skasowany u dostawcy 14.11; AI wraca przez Vertex w kroku F kontem serwisowym, bez klucza (Oliver 20:36)."
     },
     "OPENROUTER_MODEL": {
       "class": "var",
