@@ -11,9 +11,13 @@
  *     więc POST z dobrym adresem + PATCH z dowolnym omijał allowlistę).
  *  2. DELETE — kasowanie plików lokalnych wyłącznie pod public/uploads/gallery/
  *     (i gallery/thumbs/); traversal odrzucany BEZ unlink.
- *  3. DELETE na Vercel Blob — del() dla adresów z naszego store'u (zdjęcie +
- *     miniatura); błąd del() logowany, nie cofa usunięcia wiersza.
+ *  3. DELETE na Vercel Blob — del() NIE jest wołane (jak na main): plik nie
+ *     jest powiązany z salonem, więc salon A mógłby skasować plik salonu B
+ *     (B1 Ryana/Leo na #45). Wiersz usuwany, 200.
  *  4. GET /api/gallery — salon z sesji; salonId z query tylko porównany (403).
+ *  5. POST/PATCH — adres przypięty już do innego wpisu TEGO salonu = 400
+ *     (inaczej DELETE jednego wpisu kasowałby plik drugiego).
+ *  6. showProductsToClients wraca w GET listy i odpowiedzi PATCH (B2 Leo).
  *
  * Walidacja jest PRAWDZIWA (bez mocka @/lib/api-validation) — test ma złapać
  * zmianę schematu, nie tylko trasy.
@@ -29,12 +33,14 @@ import { createMockRequest, createRouteParams, parseResponse } from "./helpers";
 const mockDbSelect = vi.fn();
 const mockDbUpdate = vi.fn();
 const mockDbDelete = vi.fn();
+const mockDbInsert = vi.fn();
 const mockUpdateSet = vi.fn();
 
 const mockTx = {
   select: (...args: unknown[]) => mockDbSelect(...args),
   update: (...args: unknown[]) => mockDbUpdate(...args),
   delete: (...args: unknown[]) => mockDbDelete(...args),
+  insert: (...args: unknown[]) => mockDbInsert(...args),
   execute: vi.fn().mockResolvedValue(undefined), // SET LOCAL (forSalon)
 };
 
@@ -89,9 +95,14 @@ vi.mock("@/lib/schema", () => {
 });
 
 const mockEq = vi.fn((...args: unknown[]) => ({ type: "eq", args }));
+const mockNe = vi.fn((...args: unknown[]) => ({ type: "ne", args }));
+const mockInArray = vi.fn((...args: unknown[]) => ({ type: "inArray", args }));
 vi.mock("drizzle-orm", () => ({
   eq: (...args: unknown[]) => mockEq(...args),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
+  or: vi.fn((...args: unknown[]) => ({ type: "or", args })),
+  ne: (...args: unknown[]) => mockNe(...args),
+  inArray: (...args: unknown[]) => mockInArray(...args),
   desc: vi.fn((...args: unknown[]) => ({ type: "desc", args })),
   sql: Object.assign(
     vi.fn((...args: unknown[]) => ({ type: "sql", args })),
@@ -135,8 +146,9 @@ function chainMock(result: unknown[] = []) {
   return chain;
 }
 
-import { PATCH, DELETE } from "@/app/api/gallery/[id]/route";
-import { GET as listGallery } from "@/app/api/gallery/route";
+import { GET as getPhoto, PATCH, DELETE } from "@/app/api/gallery/[id]/route";
+import { getUserSalonId } from "@/lib/get-user-salon";
+import { GET as listGallery, POST as createGallery } from "@/app/api/gallery/route";
 
 // -------------------------------------------------------
 // Fixtures
@@ -189,6 +201,16 @@ async function patch(body: unknown) {
 async function del() {
   const req = createMockRequest(`http://localhost:3000/api/gallery/${PHOTO_ID}`, { method: "DELETE" });
   return parseResponse(await DELETE(req, createRouteParams(PHOTO_ID)));
+}
+
+async function create(body: unknown) {
+  const req = createMockRequest("http://localhost:3000/api/gallery", { method: "POST", body });
+  return parseResponse(await createGallery(req));
+}
+
+/** Projekcja (obiekt z select()) z n-tego wywołania SELECT-a. */
+function selectProjection(n: number) {
+  return mockDbSelect.mock.calls[n]?.[0] as Record<string, unknown> | undefined;
 }
 
 async function list(query: string) {
@@ -247,7 +269,8 @@ describe("PATCH /api/gallery/[id] — kontrakt z UI", () => {
   });
 
   it("200 dla body z photo-link-dialog (adres z naszego uploadu)", async () => {
-    selectsReturn([photoRow({ beforePhotoUrl: null })]);
+    // zdjęcie, sprawdzenie duplikatu (brak), join odpowiedzi
+    selectsReturn([photoRow({ beforePhotoUrl: null })], []);
     const url = localUrl();
     const { status } = await patch({ beforePhotoUrl: url });
     expect(status).toBe(200);
@@ -256,7 +279,7 @@ describe("PATCH /api/gallery/[id] — kontrakt z UI", () => {
 
   it("200 dla adresu z naszego store'u Blob", async () => {
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", BLOB_TOKEN);
-    selectsReturn([photoRow()]);
+    selectsReturn([photoRow()], []);
     const url = `${BLOB_HOST}/gallery/${crypto.randomUUID()}.webp`;
     const { status } = await patch({ afterPhotoUrl: url });
     expect(status).toBe(200);
@@ -331,6 +354,90 @@ describe("PATCH /api/gallery/[id] — kontrakt z UI", () => {
     const { status } = await patch({});
     expect(status).toBe(400);
     expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("odpowiedź zawiera showProductsToClients (B2) — PATCH {showProductsToClients:false}", async () => {
+    selectsReturn([photoRow()], [{ id: PHOTO_ID, showProductsToClients: false }]);
+    const { status, body } = await patch({ showProductsToClients: false });
+
+    expect(status).toBe(200);
+    expect(mockUpdateSet).toHaveBeenCalledWith({ showProductsToClients: false });
+    expect((body.data as Record<string, unknown>).showProductsToClients).toBe(false);
+    // projekcja joina odpowiedzi (2. SELECT) musi zawierać kolumnę
+    expect(selectProjection(1)).toHaveProperty(
+      "showProductsToClients",
+      "galleryPhotos.showProductsToClients"
+    );
+  });
+});
+
+describe("GET /api/gallery/[id] — showProductsToClients (B2)", () => {
+  it("projekcja zawiera showProductsToClients", async () => {
+    vi.mocked(getUserSalonId).mockResolvedValue(SALON_A);
+    mockDbSelect.mockReturnValue(chainMock([{ id: PHOTO_ID, showProductsToClients: false }]));
+    const req = createMockRequest(`http://localhost:3000/api/gallery/${PHOTO_ID}`, { method: "GET" });
+    const { status, body } = await parseResponse(await getPhoto(req, createRouteParams(PHOTO_ID)));
+
+    expect(status).toBe(200);
+    expect((body.data as Record<string, unknown>).showProductsToClients).toBe(false);
+    expect(selectProjection(0)).toHaveProperty(
+      "showProductsToClients",
+      "galleryPhotos.showProductsToClients"
+    );
+  });
+});
+
+describe("PATCH/POST /api/gallery — plik przypięty do innego wpisu salonu", () => {
+  it("PATCH: 400, gdy adres jest już w innym wpisie salonu — bez zapisu", async () => {
+    const url = localUrl();
+    selectsReturn([photoRow({ beforePhotoUrl: null })], [{ id: crypto.randomUUID() }]);
+    const { status, body } = await patch({ beforePhotoUrl: url });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("Ten plik zdjecia jest juz uzyty w innym wpisie galerii");
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+    // zapytanie w kontekście salonu sesji, z pominięciem edytowanego wpisu
+    expect(mockEq).toHaveBeenCalledWith("galleryPhotos.salonId", SALON_A);
+    expect(mockNe).toHaveBeenCalledWith("galleryPhotos.id", PHOTO_ID);
+    expect(mockInArray).toHaveBeenCalledWith("galleryPhotos.beforePhotoUrl", [url]);
+    expect(mockInArray).toHaveBeenCalledWith("galleryPhotos.afterPhotoUrl", [url]);
+  });
+
+  it("PATCH bez zmiany adresów nie pyta o duplikat", async () => {
+    selectsReturn([photoRow()]);
+    const { status } = await patch({ description: "x" });
+    expect(status).toBe(200);
+    expect(mockInArray).not.toHaveBeenCalled();
+  });
+
+  it("PATCH czyszczący jedno zdjęcie (null) nie pyta o duplikat", async () => {
+    selectsReturn([photoRow({ beforePhotoUrl: localUrl() })]);
+    const { status } = await patch({ afterPhotoUrl: null });
+    expect(status).toBe(200);
+    expect(mockInArray).not.toHaveBeenCalled();
+  });
+
+  it("POST: 400, gdy adres jest już w innym wpisie salonu — bez insertu", async () => {
+    const url = localUrl();
+    selectsReturn([{ id: crypto.randomUUID() }]);
+    const { status, body } = await create({
+      salonId: SALON_A,
+      employeeId: null,
+      serviceId: null,
+      afterPhotoUrl: url,
+      beforePhotoUrl: null,
+      description: null,
+      techniques: null,
+      productsUsed: null,
+      duration: null,
+    });
+
+    expect(status).toBe(400);
+    expect(body.error).toBe("Ten plik zdjecia jest juz uzyty w innym wpisie galerii");
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    expect(mockEq).toHaveBeenCalledWith("galleryPhotos.salonId", SALON_A);
+    expect(mockInArray).toHaveBeenCalledWith("galleryPhotos.afterPhotoUrl", [url]);
+    expect(mockNe).not.toHaveBeenCalled();
   });
 });
 
@@ -429,28 +536,19 @@ describe("DELETE /api/gallery/[id] — Vercel Blob (mock)", () => {
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", BLOB_TOKEN);
   });
 
-  it("wywołuje del() dla zdjęcia 'przed', 'po' i ich miniatur", async () => {
-    const before = `${crypto.randomUUID()}.jpg`;
-    const after = `${crypto.randomUUID()}.png`;
+  it("adres z naszego store'u: del() nie jest wołane, wiersz usunięty, 200 (B1)", async () => {
     selectsReturn([
       photoRow({
-        beforePhotoUrl: `${BLOB_HOST}/gallery/${before}`,
-        afterPhotoUrl: `${BLOB_HOST}/gallery/${after}`,
+        beforePhotoUrl: `${BLOB_HOST}/gallery/${crypto.randomUUID()}.jpg`,
+        afterPhotoUrl: `${BLOB_HOST}/gallery/${crypto.randomUUID()}.png`,
       }),
     ]);
-    const { status } = await del();
+    const { status, body } = await del();
 
     expect(status).toBe(200);
-    expect(mockBlobDel).toHaveBeenCalledTimes(1);
-    const urls = mockBlobDel.mock.calls[0]?.[0] as string[];
-    expect(urls.sort()).toEqual(
-      [
-        `${BLOB_HOST}/gallery/${before}`,
-        `${BLOB_HOST}/gallery/thumbs/${before}`,
-        `${BLOB_HOST}/gallery/${after}`,
-        `${BLOB_HOST}/gallery/thumbs/${after}`,
-      ].sort()
-    );
+    expect(body.success).toBe(true);
+    expect(mockDbDelete).toHaveBeenCalled();
+    expect(mockBlobDel).not.toHaveBeenCalled();
     expect(mockUnlink).not.toHaveBeenCalled();
   });
 
@@ -467,21 +565,7 @@ describe("DELETE /api/gallery/[id] — Vercel Blob (mock)", () => {
     expect(mockUnlink).not.toHaveBeenCalled();
   });
 
-  it("błąd del() jest logowany i nie cofa usunięcia wiersza (200)", async () => {
-    mockBlobDel.mockRejectedValue(new Error("blob down"));
-    selectsReturn([photoRow({ afterPhotoUrl: `${BLOB_HOST}/gallery/${crypto.randomUUID()}.jpg` })]);
-    const { status, body } = await del();
-
-    expect(status).toBe(200);
-    expect(body.success).toBe(true);
-    expect(mockDbDelete).toHaveBeenCalled();
-    expect(mockBlobDel).toHaveBeenCalled();
-    expect(mockLoggerError).toHaveBeenCalled();
-    // token nie trafia do logu
-    expect(JSON.stringify(mockLoggerError.mock.calls)).not.toContain("secretpart");
-  });
-
-  it("wiersz usuwany przed del() — zdjęcie innego salonu (404) nie rusza Blob", async () => {
+  it("zdjęcie innego salonu (404) nie rusza Blob", async () => {
     selectsReturn([]);
     const { status } = await del();
     expect(status).toBe(404);
@@ -506,6 +590,17 @@ describe("GET /api/gallery — salon z sesji", () => {
     expect(status).toBe(200);
     expect(body.count).toBe(1);
     expect(mockEq).toHaveBeenCalledWith("galleryPhotos.salonId", SALON_A);
+  });
+
+  it("lista zawiera showProductsToClients (B2) — dialog edycji startuje z wartości z bazy", async () => {
+    mockDbSelect.mockReturnValue(chainMock([{ id: PHOTO_ID, showProductsToClients: false }]));
+    const { status, body } = await list("");
+    expect(status).toBe(200);
+    expect((body.data as Array<Record<string, unknown>>)[0]?.showProductsToClients).toBe(false);
+    expect(selectProjection(0)).toHaveProperty(
+      "showProductsToClients",
+      "galleryPhotos.showProductsToClients"
+    );
   });
 
   it("200 bez salonId — salon z sesji", async () => {

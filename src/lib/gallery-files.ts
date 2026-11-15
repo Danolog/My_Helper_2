@@ -1,7 +1,9 @@
 import { unlink } from "fs/promises";
 import path from "path";
-import { del } from "@vercel/blob";
+import { and, eq, inArray, ne, or } from "drizzle-orm";
 import { logger } from "@/lib/logger";
+import { galleryPhotos } from "@/lib/schema";
+import type { forSalon } from "@/lib/server/repository";
 import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
 
 /**
@@ -10,9 +12,14 @@ import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
  * Adres zdjęcia pochodzi z wiersza w bazie, a do #32/PATCH-fix dało się tam
  * zapisać dowolny napis. Dlatego niczego nie kasujemy „bo zaczyna się od
  * /uploads/": plik lokalny musi leżeć BEZPOŚREDNIO w public/uploads/gallery/
- * (miniatura: public/uploads/gallery/thumbs/ pod tą samą nazwą), a Blob
- * kasujemy tylko dla adresów z naszego store'u (isOwnGalleryUploadUrl).
- * Wszystko inne jest pomijane — bez unlink, bez del().
+ * (miniatura: public/uploads/gallery/thumbs/ pod tą samą nazwą). Wszystko
+ * inne jest pomijane — bez unlink.
+ *
+ * Vercel Blob NIE jest kasowany (jak na main). Ścieżka `gallery/<uuid>.<ext>`
+ * nie wiąże pliku z salonem, a adresy są publiczne (/api/salons/[id]/gallery),
+ * więc del() pozwalałby salonowi A skasować plik salonu B przypięty do
+ * własnego wpisu (blokada Ryana/Leo na #45, B1). Kasowanie Blob wraca razem
+ * z powiązaniem pliku z salonem (`gallery/<salonId>/<uuid>`) — osobny PR.
  */
 
 const LOCAL_PREFIX = "/uploads/gallery/";
@@ -45,18 +52,6 @@ export function localGalleryFilePaths(url: string): { file: string; thumb: strin
   return { file, thumb };
 }
 
-/**
- * Adresy Blob do skasowania (zdjęcie + miniatura) albo [], gdy adres nie jest
- * z naszego store'u. Miniatura: upload zapisuje ją pod `gallery/thumbs/<ta
- * sama nazwa>` (@vercel/blob 2.x domyślnie bez losowego sufiksu).
- */
-export function ownBlobGalleryUrls(url: string): string[] {
-  if (!process.env.BLOB_READ_WRITE_TOKEN || !isOwnGalleryUploadUrl(url)) return [];
-  const thumb = new URL(url);
-  thumb.pathname = thumb.pathname.replace(/^\/gallery\//, "/gallery/thumbs/");
-  return [url, thumb.href];
-}
-
 function isNotFound(error: unknown): boolean {
   return (error as { code?: string } | null)?.code === "ENOENT";
 }
@@ -69,8 +64,6 @@ export async function deleteGalleryFiles(
   photoId: string,
   urls: Array<string | null | undefined>
 ): Promise<void> {
-  const blobUrls: string[] = [];
-
   for (const url of urls) {
     if (!url) continue;
 
@@ -87,9 +80,13 @@ export async function deleteGalleryFiles(
       continue;
     }
 
-    const blob = ownBlobGalleryUrls(url);
-    if (blob.length > 0) {
-      blobUrls.push(...blob);
+    if (process.env.BLOB_READ_WRITE_TOKEN && isOwnGalleryUploadUrl(url)) {
+      // Plik zostaje w Blob (osierocony) — pathname do późniejszego
+      // sprzątnięcia (RODO art. 17), bez hosta i tokenu.
+      logger.warn("[Gallery files] Blob file kept — orphaned until tenant-bound delete", {
+        photoId,
+        pathname: new URL(url).pathname,
+      });
       continue;
     }
 
@@ -97,17 +94,36 @@ export async function deleteGalleryFiles(
     // kasujemy niczego, czego nie stworzyliśmy.
     logger.warn("[Gallery files] Skipped file outside gallery storage", { photoId });
   }
+}
 
-  if (blobUrls.length === 0) return;
+type SalonTx = Parameters<Parameters<ReturnType<typeof forSalon>["raw"]>[0]>[0];
 
-  try {
-    await del(blobUrls);
-  } catch (error) {
-    // Pathname (bez hosta) wystarcza do sprzątnięcia; token nie trafia do logu.
-    logger.error("[Gallery files] Blob delete failed — orphaned files", {
-      photoId,
-      pathnames: blobUrls.map((u) => new URL(u).pathname),
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+/**
+ * Czy któryś z adresów jest już przypięty do INNEGO wpisu galerii tego salonu.
+ * Bez tego dwa wpisy dzieliłyby plik, a DELETE jednego kasowałby (unlink)
+ * zdjęcie drugiego. Zapytanie idzie w kontekście salonu (RLS) — duplikatu
+ * w innym salonie stąd nie widać; to domyka powiązanie pliku z salonem
+ * (osobny PR, decyzja Ethana), nie obejście RLS.
+ */
+export async function hasGalleryUrlConflict(
+  tx: SalonTx,
+  salonId: string,
+  urls: Array<string | null | undefined>,
+  excludePhotoId?: string
+): Promise<boolean> {
+  const wanted = urls.filter((u): u is string => typeof u === "string" && u.length > 0);
+  if (wanted.length === 0) return false;
+
+  const conditions = [
+    eq(galleryPhotos.salonId, salonId),
+    or(inArray(galleryPhotos.beforePhotoUrl, wanted), inArray(galleryPhotos.afterPhotoUrl, wanted)),
+  ];
+  if (excludePhotoId) conditions.push(ne(galleryPhotos.id, excludePhotoId));
+
+  const [hit] = await tx
+    .select({ id: galleryPhotos.id })
+    .from(galleryPhotos)
+    .where(and(...conditions))
+    .limit(1);
+  return Boolean(hit);
 }

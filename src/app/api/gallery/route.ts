@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq, desc, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createGalleryPhotoSchema } from "@/lib/api-validation";
+import { hasGalleryUrlConflict } from "@/lib/gallery-files";
 import { logger } from "@/lib/logger";
 import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import { galleryPhotos, employees, services } from "@/lib/schema";
@@ -68,6 +69,7 @@ export const GET = withApiHandler(
         productsUsed: galleryPhotos.productsUsed,
         techniques: galleryPhotos.techniques,
         duration: galleryPhotos.duration,
+        showProductsToClients: galleryPhotos.showProductsToClients,
         createdAt: galleryPhotos.createdAt,
         employeeFirstName: employees.firstName,
         employeeLastName: employees.lastName,
@@ -151,6 +153,11 @@ export const POST = withApiHandler(
           .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
           .limit(1);
         if (!svc) return { error: "Usluga nie nalezy do salonu" } as const;
+      }
+      // Plik przypięty już do innego wpisu tego salonu — DELETE jednego
+      // kasowałby zdjęcie drugiego (kontekst salonu, RLS).
+      if (await hasGalleryUrlConflict(tx, salonId, [beforePhotoUrl, afterPhotoUrl])) {
+        return { error: "Ten plik zdjecia jest juz uzyty w innym wpisie galerii" } as const;
       }
 
       const [photo] = await tx

@@ -4,7 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { validateBody, updateGalleryPhotoSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { deleteGalleryFiles } from "@/lib/gallery-files";
+import { deleteGalleryFiles, hasGalleryUrlConflict } from "@/lib/gallery-files";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { getSalonContext } from "@/lib/salon-context";
@@ -13,6 +13,8 @@ import { galleryPhotos, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
 type RouteParams = { params: Promise<{ id: string }> };
+
+const GALLERY_URL_IN_USE_ERROR = "Ten plik zdjecia jest juz uzyty w innym wpisie galerii";
 
 // GET /api/gallery/[id] - Get a single gallery photo
 export async function GET(_request: Request, { params }: RouteParams) {
@@ -44,6 +46,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
           productsUsed: galleryPhotos.productsUsed,
           techniques: galleryPhotos.techniques,
           duration: galleryPhotos.duration,
+          showProductsToClients: galleryPhotos.showProductsToClients,
           createdAt: galleryPhotos.createdAt,
           employeeFirstName: employees.firstName,
           employeeLastName: employees.lastName,
@@ -206,6 +209,20 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       );
     }
 
+    // Plik przypięty już do innego wpisu tego salonu — DELETE jednego
+    // kasowałby zdjęcie drugiego. Zapytanie w kontekście salonu (RLS).
+    if (
+      touchesPhotos &&
+      (await repo.raw((tx) =>
+        hasGalleryUrlConflict(tx, salonId, [updateData.beforePhotoUrl, updateData.afterPhotoUrl], id)
+      ))
+    ) {
+      return NextResponse.json(
+        { success: false, error: GALLERY_URL_IN_USE_ERROR },
+        { status: 400 }
+      );
+    }
+
     await repo.updateOwned(galleryPhotos, id, updateData);
 
     // Fetch with joins for the response (raw(tx) + jawny eq(salonId)).
@@ -222,6 +239,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
           productsUsed: galleryPhotos.productsUsed,
           techniques: galleryPhotos.techniques,
           duration: galleryPhotos.duration,
+          showProductsToClients: galleryPhotos.showProductsToClients,
           createdAt: galleryPhotos.createdAt,
           employeeFirstName: employees.firstName,
           employeeLastName: employees.lastName,
@@ -315,10 +333,10 @@ export async function DELETE(_request: Request, { params }: RouteParams) {
     // Delete from database (scoped to the caller's salon — defense in depth)
     await repo.deleteOwned(galleryPhotos, id);
 
-    // Pliki PO usunięciu wiersza: awaria storage'u (np. Blob niedostępny) nie
-    // blokuje usunięcia wpisu — błąd idzie do logu z pathname do sprzątnięcia.
-    // Lokalnie kasujemy tylko pliki pod public/uploads/gallery/ (traversal
-    // pomijany), na Blob tylko adresy z naszego store'u (lib/gallery-files).
+    // Pliki PO usunięciu wiersza: błąd storage'u nie blokuje usunięcia wpisu
+    // (idzie do logu). Lokalnie kasujemy tylko pliki pod public/uploads/gallery/
+    // (traversal pomijany). Blob nie jest kasowany — plik nie jest powiązany
+    // z salonem, więc del() mógłby trafić w cudzy plik (lib/gallery-files).
     await deleteGalleryFiles(id, [photo.beforePhotoUrl, photo.afterPhotoUrl]);
 
     logger.info(`[Gallery API] Deleted photo: ${id}`);
