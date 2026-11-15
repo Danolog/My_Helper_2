@@ -139,3 +139,60 @@ describe("GET /api/available-slots — time block privacy", () => {
     expect(JSON.stringify(body)).not.toContain("lekarza");
   });
 });
+
+describe("GET /api/available-slots — kolizja półotwarta (#165)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-06T08:00:00"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Wtorek 2026-07-07, czas lokalny (trasa liczy minuty od północy lokalnie).
+  async function slotsWith(appointmentsRows: unknown[], blocks: unknown[] = []) {
+    mockDbSelect
+      .mockReturnValueOnce(
+        chainMock([{ employeeId: EMPLOYEE_ID, dayOfWeek: 2, startTime: "09:00", endTime: "17:00" }]),
+      )
+      .mockReturnValueOnce(chainMock(appointmentsRows))
+      .mockReturnValueOnce(chainMock(blocks));
+    const body = await (await GET(requestFor("2026-07-07"))).json();
+    return body.data.slots.map((s: { time: string }) => s.time) as string[];
+  }
+  const appt = (start: string, end: string) => ({
+    employeeId: EMPLOYEE_ID,
+    status: "scheduled",
+    startTime: new Date(`2026-07-07T${start}:00`),
+    endTime: new Date(`2026-07-07T${end}:00`),
+  });
+
+  it("slot na styku po wizycie (11:00 po 10–11) i przed nią (09:00) jest wolny", async () => {
+    const times = await slotsWith([appt("10:00", "11:00")]);
+    expect(times).toContain("11:00");
+    expect(times).toContain("09:00");
+  });
+
+  it("slot nachodzący na wizytę (09:15, 10:45) jest zajęty", async () => {
+    const times = await slotsWith([appt("10:00", "11:00")]);
+    expect(times).not.toContain("09:15");
+    expect(times).not.toContain("10:00");
+    expect(times).not.toContain("10:45");
+  });
+
+  it("blokada czasu na styku (12–13) zwalnia 11:00 i 13:00", async () => {
+    const times = await slotsWith([], [{
+      employeeId: EMPLOYEE_ID,
+      startTime: new Date("2026-07-07T12:00:00"),
+      endTime: new Date("2026-07-07T13:00:00"),
+      blockType: "break",
+      reason: null,
+    }]);
+    expect(times).toContain("11:00");
+    expect(times).toContain("13:00");
+    expect(times).not.toContain("11:15");
+    expect(times).not.toContain("12:45");
+  });
+});
