@@ -2162,6 +2162,11 @@ describe("DELETE /api/appointments/[id]", () => {
       refund: { success: false, refunded: false, refundId: "re_1", amount: 25, failedAmount: 25, error: "stripe_refund_failed", paymentCount: 2 },
       expected: "Zadatek 25.00 PLN nie wrócił",
     },
+    {
+      name: "częściowa porażka 30 OK + 20 nieudane (kwoty różne — odróżnia amount od failedAmount)",
+      refund: { success: false, refunded: false, refundId: "re_1", amount: 30, failedAmount: 20, error: "stripe_refund_failed", paymentCount: 2 },
+      expected: "Zadatek 20.00 PLN nie wrócił",
+    },
   ])("RF3 + Leo: $name → odpowiedź niesie failedAmount, toast z tej odpowiedzi pokazuje kwotę niezwróconą", async ({ refund, expected }) => {
     const appointment = makeAppointment({ depositAmount: "50.00", depositPaid: true });
     queueSalonCancel({ appointment, paidMethods: ["stripe"] });
