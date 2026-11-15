@@ -74,8 +74,8 @@ grep -c 'CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC\[@\]}" sql users' infra/gcp/
 | D-1b | test `--flags-file` | sekcja 4 | nagłówek ustawiony, job usunięty |
 | D-2 | `ar` | `$B --stage=ar [--apply]` | `gcloud --project=… artifacts repositories describe myhelper --location=europe-central2 --format='yaml(format,cleanupPolicies)'` → `DOCKER`, `keep-5-most-recent` + `delete-older`, bez `cleanupPolicyDryRun: true` |
 | D-3 | `bucket` | `$B --stage=bucket --bucket=NAZWA [--apply]` | `gcloud --project=… storage buckets describe gs://NAZWA --format='yaml(uniform_bucket_level_access,public_access_prevention)'` → uniform `true`, PAP `inherited`; `… storage buckets get-iam-policy gs://NAZWA` → `allUsers` tylko w `roles/storage.legacyObjectReader` |
-| D-4 | `secrets` | `$B --stage=secrets [--apply]` | `gcloud --project=… secrets list --format='value(name)'` → 11 nazw z manifestu; `… secrets versions list NAZWA` → pusto dla każdej |
-| D-4b | `sa` | `$B --stage=sa --bucket=NAZWA [--apply]` | `… iam service-accounts list` → `myhelper-runtime`, `myhelper-deploy`; `… secrets get-iam-policy NAZWA` → runtime jako `secretAccessor`, deploy jako `secretmanager.viewer` na KAŻDYM z 11; `… projects get-iam-policy my-helper-2-488419` → brak nowych ról na projekcie |
+| D-4 | `secrets` | `$B --stage=secrets [--apply]` | `gcloud --project=… secrets list --format='value(name)'` → nazwy wszystkich sekretów z manifestu (od K-1: 10, bez `openrouter-api-key`); `… secrets versions list NAZWA` → pusto dla każdej |
+| D-4b | `sa` | `$B --stage=sa --bucket=NAZWA [--apply]` | `… iam service-accounts list` → `myhelper-runtime`, `myhelper-deploy`; `… secrets get-iam-policy NAZWA` → runtime jako `secretAccessor`, deploy jako `secretmanager.viewer` na KAŻDYM sekrecie z manifestu; `… projects get-iam-policy my-helper-2-488419` → brak nowych ról na projekcie |
 | D-4c | `sql` | po sekcji 1 pkt 3 i sprawdzeniu B-1: `$B --stage=sql [--apply]` | sekcja 3.6 (w tym Policy Troubleshooter) |
 | D-4d | `run` | `$B --stage=run [--apply]` | `… run services describe myhelper --region=europe-central2 --format='value(spec.template.spec.serviceAccountName)'` → runtime; `… run services get-iam-policy myhelper --region=…` → `allUsers` invoker, deploy `run.developer`; to samo dla `run jobs … myhelper-migrate` (bez invokera) |
 | D-4e | `wif` | **później**, bramka w sekcji 3.8 | `… iam workload-identity-pools providers describe github-actions --workload-identity-pool=github --location=global --format='value(attributeCondition)'` = plik warunku |
@@ -129,16 +129,18 @@ Na start `vars.GCS_PUBLIC_BASE_URL` zostaje **pusta**: obrazy idą z
 `storage.googleapis.com/<bucket>` (Oliver 19:47, #133 pkt 1).
 
 ### 3.4 `secrets`
-11 pustych kontenerów (nazwy z `secretName` w `infra/gcp/env-manifest.json`),
+Puste kontenery dla każdego sekretu z manifestu (nazwy z `secretName` w
+`infra/gcp/env-manifest.json`; od K-1 10 — `OPENROUTER_API_KEY` jest poza
+Secret Manager, klucz skasowany u dostawcy 14.11, AI wraca przez Vertex w kroku F),
 replikacja tylko w `europe-central2`. Żadnych wartości.
 
 ### 3.5 `sa`
 - `myhelper-runtime` (usługa i job migracji): `secretAccessor` osobno na każdym
-  z 11 sekretów, `roles/storage.objectUser` na zasobniku (aplikacja zapisuje,
+  sekretów z manifestu, `roles/storage.objectUser` na zasobniku (aplikacja zapisuje,
   czyta metadane i usuwa).
 - `myhelper-deploy` (GitHub Actions przez WIF): `artifactregistry.writer` na jednym
   repo, `iam.serviceAccountUser` wyłącznie na koncie runtime,
-  `secretmanager.viewer` osobno na każdym z 11 sekretów — tylko metadane wersji,
+  `secretmanager.viewer` osobno na każdym sekrecie z manifestu — tylko metadane wersji,
   bez dostępu do wartości (`run-deploy.sh` mapuje wyłącznie sekrety z wersją, K-1).
 - Zero ról na poziomie projektu w tym etapie.
 - **Zasięg deploy (Ryan, #141):** deploy nie ma `secretAccessor`, ale
@@ -340,14 +342,13 @@ rm -P "$TMPDIR/vapid.json"
 gcloud --project=$P secrets versions add stripe-secret-key --data-file="$HOME/secure/stripe-secret-key"
 rm -P "$HOME/secure/stripe-secret-key"
 # … analogicznie: stripe-webhook-secret, resend-api-key, smsapi-token,
-#    openrouter-api-key, upstash-redis-rest-token, google-client-secret
+#    upstash-redis-rest-token, google-client-secret (openrouter-api-key: od K-1 poza Secret Manager)
 ```
 
 `postgres-url` i `postgres-admin-password` ustawia etap `sql` — w D-5 ich nie ruszać.
 
 **Brakujące sekrety zostają puste.** Zachowanie aplikacji bez danego sekretu
-(stan kodu na dziś; pole `required` w manifeście jest dziś nieustawione dla
-wszystkich 11):
+(stan kodu na dziś; od K-1 pole `required` w manifeście):
 
 | Sekret | Bez wartości |
 |---|---|
@@ -358,10 +359,10 @@ wszystkich 11):
 | stripe-secret-key, stripe-webhook-secret | webhook 503 „Webhook not configured”; płatności nie działają |
 | upstash-redis-rest-token | limitowanie zapytań w pamięci instancji |
 | vapid-private-key | push wyłączony |
-| openrouter-api-key | czat AI nie działa (ostrzeżenie) |
+| openrouter-api-key | od K-1 poza Secret Manager i Cloud Run (klucz skasowany 14.11, AI przez Vertex w kroku F); bez klucza aplikacja startuje, czat AI nie działa (ostrzeżenie) |
 | google-client-secret | **moduł NIE wyłącza się sam**: przycisk Google jest zawsze widoczny (także bez `GOOGLE_CLIENT_ID`), logowanie Google kończy się błędem — P3 po K-1 |
 
-**Bloker pierwszego wdrożenia:** `run-deploy.sh` mapuje wszystkie 11 sekretów
+**Bloker pierwszego wdrożenia:** `run-deploy.sh` mapuje wszystkie sekrety z manifestu
 (`NAZWA=sekret:latest`). Cloud Run odrzuca rewizję, której sekret nie ma żadnej
 wersji. Od K-1: `required` w manifeście (wymagane: `postgres-url`,
 `better-auth-secret`); `run-deploy.sh` mapuje wyłącznie sekrety, których

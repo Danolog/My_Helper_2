@@ -201,8 +201,8 @@ describe("G-D1: dry-run i parametry", () => {
     const creates = STAGES.flatMap((s) => bootstrap([...base(s), "--apply"]).calls).filter((c) =>
       / (repositories create|buckets create|secrets create|instances create|run deploy|jobs create) /.test(c),
     );
-    // ar, bucket, 11 sekretów + admin, instancja, usługa, job
-    expect(creates.length).toBe(1 + 1 + 12 + 1 + 1 + 1);
+    // ar, bucket, sekrety z manifestu + admin, instancja, usługa, job
+    expect(creates.length).toBe(1 + 1 + SECRET_NAMES.length + 1 + 1 + 1 + 1);
     for (const c of creates) {
       expect(c).toMatch(/ --(region|location|locations)=europe-central2( |$)/);
       expect(c).not.toMatch(/ --(region|location|locations)=(?!europe-central2( |$))/);
@@ -280,7 +280,7 @@ describe("G-D1: sekrety i konta", () => {
     const r = bootstrap([...base("secrets"), "--apply"]);
     const creates = r.calls.filter((c) => c.includes("secrets create"));
     expect(creates.map((c) => c.split(" ")[4]).sort()).toEqual(SECRET_NAMES);
-    expect(SECRET_NAMES.length).toBe(11);
+    expect(SECRET_NAMES).toEqual(expect.arrayContaining(["postgres-url", "better-auth-secret"]));
     for (const c of creates) {
       expect(c).not.toMatch(/--data-file/);
       expect(c).toContain("--replication-policy=user-managed --locations=europe-central2");
@@ -591,6 +591,8 @@ describe("G-D1: WIF", () => {
     ["alternatywa ||", `${VALID_CONDITION} || true`],
     ["alternatywa || w środku", VALID_CONDITION.replace("assertion.ref == 'refs/heads/main' &&", "assertion.ref == 'refs/heads/main' || assertion.ref == 'refs/heads/dev' &&")],
     ["negacja całości", `!(${VALID_CONDITION})`],
+    ["negacja bez nawiasu (dodatkowy człon)", `${VALID_CONDITION} && !assertion.repository_visibility == 'private'`],
+    ["negacja bez nawiasu (człon obowiązkowy)", VALID_CONDITION.replace("assertion.ref == 'refs/heads/main'", "!assertion.ref == 'refs/heads/main'")],
     ["negacja członu", VALID_CONDITION.replace("assertion.run_attempt == '1'", "!(assertion.run_attempt == '2')")],
     ["nierówność", VALID_CONDITION.replace("assertion.actor_id == '171363250'", "assertion.actor_id == '171363250' && assertion.sub != 'x'")],
     ["operator warunkowy", `${VALID_CONDITION.replace(" &&\nassertion.actor_id == '171363250'", "")} && (assertion.actor_id == '171363250' ? true : true)`],
