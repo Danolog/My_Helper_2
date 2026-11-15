@@ -17,8 +17,8 @@
  * POST 400, GET bez wiersza, kod nieważny — a nie tylko porównanie list.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { GET as getOne, PUT } from "@/app/api/promotions/[id]/route";
 import { POST as validateCode } from "@/app/api/promo-codes/validate/route";
+import { GET as getOne, PUT } from "@/app/api/promotions/[id]/route";
 import { GET, POST } from "@/app/api/promotions/route";
 import { calculateExpectedDeposit } from "@/lib/deposit-calculation";
 import { FROZEN_PROMOTION_TYPES, isPromotionTypeFrozen } from "@/lib/features";
