@@ -292,6 +292,10 @@ export const aiRateLimit = createRateLimit({
  *   client-written and spoofable, so it is never preferred. `x-real-ip` is
  *   NOT used — a client can set it.
  *
+ * The key is normalized like Better Auth's (`normalizeClientIp`): IPv6 is cut
+ * to its /64 prefix (one client cannot rotate addresses inside its /64 to get
+ * fresh buckets) and `::ffff:a.b.c.d` becomes `a.b.c.d`.
+ *
  * Falls back to "unknown" (a shared bucket for requests without an
  * identifiable IP).
  */

@@ -13,6 +13,15 @@ export default defineConfig({
     // i wymagaja REALNEJ lokalnej bazy + env spoza repo (setup-real-db.ts).
     // Domyslny `pnpm test` (CI, happy-dom, mocki) ich nie laduje.
     exclude: ['node_modules/**', 'dist/**', '.next/**', '__tests__/integration/**'],
+    // Limity czasu: w CI (GitHub Actions ustawia CI=true) dokladnie domyslne
+    // Vitest (5000/10000 ms) — bramka bez zmian. Lokalnie dluzsze, bo pod
+    // obciazeniem maszyny (load avg 15-70 na 8 rdzeniach) workery sa glodzone
+    // CPU i limity zegarowe daja losowe faile (pomiar: PR #52, komentarz
+    // 6890658471 — 3/5 czerwonych przebiegow przed, 0/5 po). Wiszacy test
+    // lokalnie nadal pada (po 15 s); test, ktory zwolnil do 6-14 s, wylapie CI.
+    // Jawne { timeout: N } w tescie ma pierwszenstwo nad tymi wartosciami.
+    testTimeout: process.env.CI ? 5000 : 15000,
+    hookTimeout: process.env.CI ? 10000 : 20000,
     coverage: {
       provider: 'v8',
       // Bramka pokrycia mierzy RDZEN testowany jednostkowo (src/lib/**: utils,
