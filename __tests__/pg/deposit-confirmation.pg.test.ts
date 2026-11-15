@@ -10,7 +10,12 @@
  *   potwierdzenie, jeden SMS, paidAt bez zmian.
  * - Wyścig z cronem `cleanup-pending-deposits` (prawdziwa trasa): kolejność
  *   wymuszona blokadą wiersza trzymaną przez test i dowiedziona przez
- *   `pg_blocking_pids`, nie przez `sleep`. Oba porządki.
+ *   `pg_blocking_pids`, nie przez `sleep`. Oba porządki. Kontrakt (1) z #98:
+ *   cron przed webhookiem `paid` → płatność failed → succeeded → refunded
+ *   (zwrot TEJ płatności), wizyta zostaje `cancelled`, wynik `inactiveAppointment`.
+ * - Bariera cron ‖ ręczne potwierdzenie przez salon: test trzyma `FOR UPDATE`
+ *   na wizycie, cron czeka (`pg_blocking_pids`), test ustawia `confirmed` i
+ *   zatwierdza — UPDATE crona z `status = 'scheduled'` nie nadpisuje wizyty.
  *
  * Cron jest międzysalonowy: przed jego wywołaniem test sprawdza, że w bazie nie
  * ma martwych rezerwacji SPOZA salonu testu (inaczej cron by je anulował) — jeśli
@@ -38,6 +43,11 @@ vi.mock("@/lib/db", () => ({
 }));
 const { smsMock } = vi.hoisted(() => ({ smsMock: vi.fn() }));
 vi.mock("@/lib/sms", () => ({ sendPaymentConfirmationSms: (...a: unknown[]) => smsMock(...a) }));
+// Zwrot (#70/#98) idzie przez prawdziwy refund.ts na tej bazie; Stripe podmieniony.
+const { refundsCreate } = vi.hoisted(() => ({ refundsCreate: vi.fn() }));
+vi.mock("@/lib/stripe", () => ({
+  getStripe: () => ({ refunds: { create: (...a: unknown[]) => refundsCreate(...a) } }),
+}));
 vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
@@ -121,15 +131,18 @@ async function runCron() {
 }
 
 /**
- * Transakcja testu trzymająca `FOR UPDATE` na wierszu płatności (pula observer).
+ * Transakcja testu trzymająca `FOR UPDATE` na wierszu `table` (pula observer).
+ * `release(beforeCommit?)` — opcjonalny zapis w TEJ transakcji przed COMMIT
+ * (np. ręczne potwierdzenie wizyty przez salon).
  * `waiters(n)` czeka, aż n połączeń stoi w łańcuchu blokad zaczynającym się od
  * tej transakcji. Drugi czekający na ten sam wiersz jest blokowany przez
  * PIERWSZEGO czekającego (blokada krotki), nie bezpośrednio przez nas — stąd
  * rekurencja po `pg_blocking_pids`.
  */
-async function holdPaymentRow(paymentId: string) {
-  let release!: () => void;
-  const releaseP = new Promise<void>((r) => (release = r));
+type BeforeCommit = (sql: Sql) => Promise<unknown>;
+async function holdRow(table: "deposit_payments" | "appointments", id: string) {
+  let release!: (beforeCommit?: BeforeCommit) => void;
+  const releaseP = new Promise<BeforeCommit | undefined>((r) => (release = r));
   let pid!: number;
   let held!: () => void;
   const heldP = new Promise<void>((r) => (held = r));
@@ -138,9 +151,10 @@ async function holdPaymentRow(paymentId: string) {
     const sql = txSql as unknown as Sql;
     const [me] = await sql<{ pid: number }[]>`select pg_backend_pid() as pid`;
     pid = me!.pid;
-    await sql`select id from deposit_payments where id = ${paymentId} for update`;
+    await sql`select id from ${sql(table)} where id = ${id} for update`;
     held();
-    await releaseP;
+    const beforeCommit = await releaseP;
+    if (beforeCommit) await beforeCommit(sql);
   });
   await heldP;
   async function waiters(n: number, timeoutMs = 5_000) {
@@ -160,6 +174,7 @@ async function holdPaymentRow(paymentId: string) {
   }
   return { release, done, waiters };
 }
+const holdPaymentRow = (paymentId: string) => holdRow("deposit_payments", paymentId);
 
 const suite = h ? describe : describe.skip;
 
@@ -195,6 +210,8 @@ suite("confirmDepositPayment — prawdziwy Postgres", () => {
   beforeEach(() => {
     smsMock.mockReset();
     smsMock.mockResolvedValue({ success: true });
+    refundsCreate.mockReset();
+    refundsCreate.mockResolvedValue({ id: "re_it_1" });
     vi.stubEnv("CRON_SECRET", CRON_SECRET);
   });
   afterEach(() => {
@@ -328,7 +345,8 @@ suite("confirmDepositPayment — prawdziwy Postgres", () => {
     expect(smsMock).toHaveBeenCalledTimes(1);
   });
 
-  it("wyścig: cron przed webhookiem w kolejce blokady → płatność failed, wizyta cancelled; wpłata NIE wskrzesza wizyty", async () => {
+  /** Cron wchodzi pierwszy w kolejkę blokady płatności, potem webhook z `options`. */
+  async function cronThenWebhook(options: Parameters<typeof confirmDepositPayment>[1]) {
     const b = await booking({ ageMinutes: 120 });
     const lock = await holdPaymentRow(b.paymentId);
 
@@ -337,7 +355,7 @@ suite("confirmDepositPayment — prawdziwy Postgres", () => {
     try {
       cronP = runCron();
       expect(await lock.waiters(1), "cron nie czeka na blokadę wiersza").toBe(true);
-      confirmP = confirmDepositPayment(b.paymentId, { paymentIntentId: "pi_it_race2" });
+      confirmP = confirmDepositPayment(b.paymentId, options);
       expect(await lock.waiters(2), "webhook nie czeka na blokadę wiersza").toBe(true);
     } finally {
       lock.release();
@@ -346,17 +364,78 @@ suite("confirmDepositPayment — prawdziwy Postgres", () => {
 
     const [cron, confirmed] = await Promise.all([cronP, confirmP]);
     expect(cron.status).toBe(200);
+    // Cron zdążył przed webhookiem: to on przestawił płatność na failed.
+    expect(await cron.json()).toMatchObject({ failedPayments: 1 });
+    return { b, confirmed };
+  }
+
+  it("kontrakt (1): cron przed webhookiem `paid` → failed → succeeded → refunded, wizyta cancelled, inactiveAppointment", async () => {
+    const { b, confirmed } = await cronThenWebhook({ paymentIntentId: "pi_it_race2", stripePaymentStatus: "paid" });
+
+    expect(confirmed).toMatchObject({
+      success: true,
+      alreadyConfirmed: false,
+      smsSent: false,
+      inactiveAppointment: {
+        appointmentStatus: "cancelled",
+        reason: "appointment_inactive",
+        refunded: true,
+        refundId: "re_it_1",
+      },
+    });
+    const { payment, appointment } = await state(b);
+    // succeeded po drodze: paidAt i pi_ z webhooka; potem zwrot tej płatności.
+    expect(payment).toMatchObject({
+      status: "refunded",
+      stripePaymentIntentId: "pi_it_race2",
+      stripeRefundId: "re_it_1",
+    });
+    expect(payment.paidAt).not.toBeNull();
+    expect(payment.refundedAt).not.toBeNull();
+    expect(appointment).toMatchObject({ status: "cancelled", depositPaid: false });
+    expect(smsMock).not.toHaveBeenCalled();
+    expect(refundsCreate).toHaveBeenCalledTimes(1);
+    expect(refundsCreate.mock.calls[0]![0]).toMatchObject({ payment_intent: "pi_it_race2", amount: 5000 });
+    expect(refundsCreate.mock.calls[0]![1]).toMatchObject({ idempotencyKey: `deposit-refund:${b.paymentId}` });
+  });
+
+  it("cron przed zdarzeniem bez potwierdzonej wpłaty Stripe → not_pending, płatność failed, wizyta cancelled, bez zwrotu", async () => {
+    const { b, confirmed } = await cronThenWebhook({ paymentIntentId: "pi_it_race3" });
+
+    expect(confirmed).toMatchObject({ success: false, alreadyConfirmed: false, smsSent: false, error: "not_pending" });
     const { payment, appointment } = await state(b);
     expect(payment.status).toBe("failed");
     expect(payment.paidAt).toBeNull();
-    expect(payment.stripePaymentIntentId).not.toBe("pi_it_race2");
+    expect(payment.stripePaymentIntentId).not.toBe("pi_it_race3");
     expect(appointment).toMatchObject({ status: "cancelled", depositPaid: false });
     expect(smsMock).not.toHaveBeenCalled();
-    // Znane (#70, refund-fix Maxa): webhook przegrywający z cronem dostaje dziś
-    // { success: true, alreadyConfirmed: true } — gałąź „przegrany wyścig” zakłada
-    // równoległe potwierdzenie, a tu wygrał cron. Klient zapłacił, wizyta jest
-    // anulowana, a wynik nie sygnalizuje zwrotu. Asercję na wynik dopisze #70.
-    expect(confirmed.success).toBe(true);
-    expect(confirmed.alreadyConfirmed).toBe(true);
+    expect(refundsCreate).not.toHaveBeenCalled();
+  });
+
+  // ------------------------------------------------------------ cron ‖ ręczne potwierdzenie
+
+  it("bariera: salon potwierdza wizytę ręcznie, cron czeka na wiersz wizyty → wizyta zostaje confirmed", async () => {
+    const b = await booking({ ageMinutes: 120 });
+    const lock = await holdRow("appointments", b.appointmentId);
+
+    let cronP: ReturnType<typeof runCron>;
+    try {
+      cronP = runCron();
+      // Cron przestawił już płatność (wiersz nietrzymany) i stoi na UPDATE wizyty.
+      expect(await lock.waiters(1), "cron nie czeka na blokadę wizyty").toBe(true);
+    } finally {
+      lock.release(async (sql) => {
+        await sql`update appointments set status = 'confirmed', updated_at = now() where id = ${b.appointmentId}`;
+      });
+      await lock.done;
+    }
+
+    const cron = await cronP;
+    expect(cron.status).toBe(200);
+    const { payment, appointment } = await state(b);
+    // Ponowna ocena WHERE po zwolnieniu blokady: `status = 'scheduled'` już nie
+    // pasuje, więc cron nie anuluje wizyty potwierdzonej przez salon.
+    expect(appointment).toMatchObject({ status: "confirmed", depositPaid: false });
+    expect(payment.status).toBe("failed");
   });
 });
