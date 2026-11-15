@@ -93,8 +93,8 @@ listowania** (#118 pkt 5; nie `objectViewer`).
 
 #118 pkt 4 (zawężenie `remotePatterns`) — **spełniony** na `main`:
 `next.config.ts` dodaje wpis `storage.googleapis.com` tylko gdy przy budowie
-ustawiono `GCS_BUCKET`, z `pathname: /<GCS_BUCKET>/**`. Asercji w testach na ten
-wpis dziś nie ma — dopisuje ją K-1.
+ustawiono `GCS_BUCKET`, z `pathname: /<GCS_BUCKET>/**` — pokrywa to test
+`__tests__/lib/next-config-gcs.test.ts` (#132).
 Na start `vars.GCS_PUBLIC_BASE_URL` zostaje **pusta**: obrazy idą z
 `storage.googleapis.com/<bucket>` (Oliver 19:47, #133 pkt 1).
 
@@ -279,9 +279,13 @@ wszystkich 11):
 
 **Bloker pierwszego wdrożenia:** `run-deploy.sh` mapuje wszystkie 11 sekretów
 (`NAZWA=sekret:latest`). Cloud Run odrzuca rewizję, której sekret nie ma żadnej
-wersji. K-1 (przed D-7): `required` w manifeście; `run-deploy.sh` mapuje
-wyłącznie sekrety z wersją, a sekret wymagany bez wersji przerywa wdrożenie
-**przed** `gcloud run deploy`. Żadnych wersji-zaślepek.
+wersji. Od K-1: `required` w manifeście (wymagane: `postgres-url`,
+`better-auth-secret`); `run-deploy.sh` mapuje wyłącznie sekrety, których
+najnowsza wersja ma stan `ENABLED`; sekret wymagany bez wersji przerywa
+wdrożenie **przed** `gcloud run deploy`; błąd odczytu inny niż brak wersji
+(np. uprawnienia) też przerywa. Żadnych wersji-zaślepek. Webhook Stripe bez
+`stripe-webhook-secret` odrzuca każde żądanie (503) —
+`__tests__/api/stripe-webhook-no-secret.test.ts`.
 Sprawdzenie, że moduł bez sekretu wyłącza się sam: po K-1, przebieg z pustym
 sekretem opcjonalnym → smoke zielony, w logach tylko ostrzeżenie modułu.
 
@@ -305,7 +309,10 @@ gh variable set ADMIN_EMAILS --env $E < "$HOME/secure/admin-emails"
 # … pozostałe zmienne klasy `var` z infra/gcp/env-manifest.json
 ```
 
-- `GCS_PUBLIC_BASE_URL` — **pusta** na start.
+- `GCS_PUBLIC_BASE_URL` — **pusta** na start. Od K-1 jedno źródło
+  (`vars.GCS_PUBLIC_BASE_URL`) dla build-argu obrazu i zmiennej usługi.
+- `SQL_INSTANCE=myhelper-pg` — z niej `run-deploy.sh` i `run-migrate.sh` składają
+  `--set-cloudsql-instances=my-helper-2-488419:europe-central2:myhelper-pg` (K-1).
 - `STORAGE_DRIVER=gcs` i `GCS_BUCKET=<zasobnik z D-3>` — na Cloud Run **od
   pierwszego wdrożenia** (`required: true` w manifeście; Oliver). Warunki:
   #118 pkt 4 (spełniony), #118 pkt 5 (`legacyObjectReader` w etapie `bucket`),
@@ -460,10 +467,9 @@ pisze Ethan w planie 0.5 — ten runbook jej nie zawiera.
 
 - `wif`: ostateczny warunek (Ryan) — `actor_id`, wariant `environment`, `job_workflow_ref`.
 - Tryb migracji pierwszego przebiegu (Ryan, #121).
-- K-1 (po #132): łączność Cloud SQL przez gniazdo, `required` dla sekretów i
-  mapowanie tylko sekretów z wersją, bez `--allow-unauthenticated`, webhook
-  Stripe bez sekretu odrzuca każde żądanie, `GCS_PUBLIC_BASE_URL` jako build-arg
-  z jednego źródła (#133 pkt 1), asercja `remotePatterns` (#118 pkt 4).
+- K-1 (#138): musi być na `main` przed D-7 — łączność Cloud SQL przez gniazdo,
+  sekrety tylko z wersją, bez `--allow-unauthenticated`, `GCS_PUBLIC_BASE_URL`
+  z jednego źródła.
 - K-2 (#135): zawężenie allowlisty e2e do naszej usługi. K-3 (#137): harmonogram wstrzymany.
 - Logowanie Google bez sekretu nie wyłącza się samo (P3 po K-1).
 - Koszt IP instancji: potwierdzić odczytem kosztów po 24 h (sekcja 1 pkt 3).
