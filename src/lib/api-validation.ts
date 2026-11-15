@@ -5,6 +5,7 @@
  * Returns field-level error messages in Polish for consistency with the UI.
  */
 import { z } from "zod";
+import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
 
 // ==========================================
 // Validation Helper
@@ -672,9 +673,10 @@ export const loyaltyRedeemSchema = z.object({
   pointsToRedeem: z.number().int().positive("Liczba punktow musi byc wieksza od 0"),
 });
 
+// Kontrakt = body z use-appointment-detail.ts: comment to trim() || null.
 export const clientReviewSchema = z.object({
   rating: z.number().int().min(1).max(5, "Ocena musi byc od 1 do 5"),
-  comment: z.string().max(2000).optional(),
+  comment: z.string().max(2000).nullable().optional(),
 });
 
 export const clientWaitingListSchema = z.object({
@@ -717,14 +719,36 @@ export const albumPhotosSchema = z.object({
   photoIds: z.array(z.string()).min(1, "Wymagane co najmniej jedno zdjecie"),
 });
 
-export const createGalleryPhotoSchema = z.object({
-  salonId: requiredString("Salon ID"),
-  employeeId: z.string().nullable().optional(),
-  imageUrl: requiredString("URL zdjecia"),
-  title: z.string().nullable().optional(),
-  description: z.string().nullable().optional(),
-  tags: z.array(z.string()).optional(),
-});
+// Id pracownika/uslugi: kolumny uuid w bazie (defaultRandom = v4), wiec smiec
+// dalby 500. Od #33 id z seeda tez sa v4 (00000000-0000-4000-8000-...), wiec
+// scisly z.uuid() (wersja + wariant RFC) — jak reszta schematow tras.
+const uuidId = z.uuid("Nieprawidlowy identyfikator");
+const optionalUuidId = uuidId.nullable().optional();
+
+// Adres zdjecia: wylacznie to, co zwrocil nasz upload galerii (lib/upload-url).
+const galleryUploadUrl = z
+  .string()
+  .refine(isOwnGalleryUploadUrl, "Adres zdjecia musi pochodzic z uploadu galerii")
+  .nullable()
+  .optional();
+
+// Kontrakt = body z src/components/gallery/photo-upload-dialog.tsx.
+export const createGalleryPhotoSchema = z
+  .object({
+    salonId: requiredString("Salon ID"),
+    employeeId: optionalUuidId,
+    serviceId: optionalUuidId,
+    beforePhotoUrl: galleryUploadUrl,
+    afterPhotoUrl: galleryUploadUrl,
+    description: z.string().max(2000).nullable().optional(),
+    productsUsed: z.string().max(1000).nullable().optional(),
+    techniques: z.string().max(1000).nullable().optional(),
+    duration: z.number().int().min(0).max(1440, "Czas trwania maksymalnie 1440 minut").nullable().optional(),
+  })
+  .refine((d) => Boolean(d.beforePhotoUrl || d.afterPhotoUrl), {
+    message: "Wymagane co najmniej jedno zdjecie (przed lub po)",
+    path: ["afterPhotoUrl"],
+  });
 
 export const updateGalleryPhotoSchema = z.object({
   title: z.string().nullable().optional(),
@@ -768,11 +792,18 @@ export const depositConfirmSchema = z.object({
   sessionId: requiredString("ID sesji"),
 });
 
+// Kontrakt = body z UI: src/app/(site)/pricing/page.tsx oraz
+// src/app/dashboard/subscription/_hooks/use-subscription-data.ts → { planSlug }.
+// Salon wylacznie z sesji (getUserSalonId), wiec salonId nie jest czescia body.
+// Plany sprzedawane online = sloty cen Stripe (STRIPE_PRICE_BASIC/PRO); trasa
+// i tak sprawdza w bazie, czy plan jest aktywny.
+export const CHECKOUT_PLAN_SLUGS = ["basic", "pro"] as const;
+export type CheckoutPlanSlug = (typeof CHECKOUT_PLAN_SLUGS)[number];
+
 export const subscriptionCheckoutSchema = z.object({
-  salonId: requiredString("Salon ID"),
-  planId: requiredString("Plan"),
-  successUrl: z.string().url().optional(),
-  cancelUrl: z.string().url().optional(),
+  planSlug: z.enum(CHECKOUT_PLAN_SLUGS, {
+    message: "planSlug musi byc 'basic' lub 'pro'",
+  }),
 });
 
 export const subscriptionConfirmSchema = z.object({
@@ -920,13 +951,22 @@ export const temporaryAccessSchema = z.object({
   durationMinutes: z.number().int().positive().optional(),
 });
 
+// Kontrakt = body z block-time-dialog.tsx i use-schedule-data.ts. Salon
+// trasa bierze z sesji (getSalonContext), wiec salonId nie jest czescia body.
+const isoDateTime = (fieldName: string) =>
+  requiredString(fieldName).refine(
+    (v) => !Number.isNaN(Date.parse(v)),
+    `${fieldName}: nieprawidlowa data`
+  );
+
 export const createTimeBlockSchema = z.object({
-  salonId: requiredString("Salon ID"),
-  employeeId: requiredString("Pracownik"),
-  startTime: requiredString("Czas rozpoczecia"),
-  endTime: requiredString("Czas zakonczenia"),
-  reason: z.string().nullable().optional(),
-  isRecurring: z.boolean().optional(),
+  employeeId: uuidId,
+  startTime: isoDateTime("Czas rozpoczecia"),
+  endTime: isoDateTime("Czas zakonczenia"),
+  blockType: z.enum(["break", "vacation", "personal", "holiday", "other"], {
+    message: "Nieprawidlowy typ blokady",
+  }),
+  reason: z.string().max(500).nullable().optional(),
 });
 
 export const createWorkScheduleSchema = z.object({

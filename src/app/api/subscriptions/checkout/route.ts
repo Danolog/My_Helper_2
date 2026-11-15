@@ -83,14 +83,9 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    const { planSlug } = body as { planSlug: string };
-
-    if (planSlug !== "basic" && planSlug !== "pro") {
-      return NextResponse.json(
-        { success: false, error: "planSlug must be 'basic' or 'pro'" },
-        { status: 400 },
-      );
-    }
+    // salonId z body (jesli ktos go wysle) jest odrzucany przez schemat —
+    // salon wylacznie z sesji (wyzej).
+    const { planSlug } = subscriptionCheckoutSchema.parse(body);
 
     // Look up the plan in the database
     const [plan] = await db
