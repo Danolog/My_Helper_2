@@ -26,7 +26,8 @@ export const COST_MAP: Record<string, number> = {
   "image:sharp": 0, // Photo enhancement — server-side, no API cost
   "banner:google_imagen": 0.01, // Banner generation
   "banner:sharp": 0, // Server-side banner compositing
-  // Wideo (Veo) usunięte w B4. Wpis zostaje dla wierszy historycznych
+  // Tylko dane historyczne: wideo (Veo) usunięte w B4, nowych wywołań nie ma
+  // (strażnik G6, removed-features.test.ts). Wpis zostaje dla wierszy historycznych
   // (`ai_generated_media.type = 'video'`): bez niego budżet bieżącego miesiąca
   // i raport GET /api/ai/usage liczyłyby je po DEFAULT_COST_PER_USE.
   "video:google_veo": 0.15,

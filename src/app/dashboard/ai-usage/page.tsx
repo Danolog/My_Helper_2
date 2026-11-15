@@ -55,7 +55,7 @@ const TYPE_LABELS: Record<
   { label: string; icon: React.ComponentType<{ className?: string }> }
 > = {
   image: { label: "Obrazy", icon: Image },
-  // Wideo usunięte w B4 — etykieta zostaje dla wierszy historycznych.
+  // Tylko dane historyczne: wideo usunięte w B4 — etykieta dla starych wierszy.
   video: { label: "Wideo", icon: Video },
   banner: { label: "Banery", icon: Image },
   text: { label: "Tekst AI", icon: Sparkles },
@@ -63,7 +63,7 @@ const TYPE_LABELS: Record<
 
 const PROVIDER_LABELS: Record<string, string> = {
   google_imagen: "Google Imagen",
-  google_veo: "Google Veo",
+  google_veo: "Google Veo", // tylko dane historyczne (B4)
   sharp: "Sharp (serwer)",
   openrouter: "OpenRouter (Claude)",
 };

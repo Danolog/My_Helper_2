@@ -80,6 +80,9 @@ const FORBIDDEN_REFERENCES: Array<[string, RegExp]> = [
   ["trasa /api/ai/content/social-post", /\/api\/ai\/content\/social-post(\/|["'`?]|$)/m],
   ["trasa /api/cron/publish-scheduled-posts", /\/api\/cron\/publish-scheduled-posts(\/|["'`?]|$)/m],
   ["usunięte moduły wideo i social", /google-veo|video-generator|story-generator|testimonial-template|image-generator/],
+  // Cena video:google_veo w COST_MAP to tylko dane historyczne (decyzja Olivera,
+  // #114) — żaden kod nie może zapisać nowego użycia wideo.
+  ["zapis nowego użycia wideo (type video / provider google_veo)", /\btype:\s*["'`]video["'`]|\bprovider:\s*["'`]google_veo["'`]/],
   // Importy usuniętych pakietów
   ...REMOVED_PACKAGES.map((pkg): [string, RegExp] => [`import ${pkg}`, importOf(pkg)]),
 ];
