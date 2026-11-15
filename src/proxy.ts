@@ -30,7 +30,6 @@ import { isAmbiguousPath } from "@/lib/path-normalize";
 
 const PROTECTED_PREFIXES = [
   "/dashboard",
-  "/chat",
   "/profile",
   "/admin",
 ];

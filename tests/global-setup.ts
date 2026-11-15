@@ -4,12 +4,38 @@ import { type FullConfig, request } from '@playwright/test';
 
 const OWNER = { email: 'owner@test.com', password: 'TestPassword123!' };
 
+// Hosty, na które globalSetup może wysłać logowanie konta testowego.
+// Porównanie po sparsowanym hoście URL — nie podciągiem adresu.
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * true tylko dla adresu, który parsuje się jako URL z hostem lokalnym.
+ * Pusty, brakujący lub niesparsowalny adres = zdalny (fail-closed).
+ */
+export function isLocalBaseURL(baseURL: string | undefined): baseURL is string {
+  if (!baseURL) return false;
+  try {
+    return LOCAL_HOSTS.has(new URL(baseURL).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Global setup — creates an authenticated session via API call (no UI).
  * Saves cookies to storageState so dashboard/ai-tools tests skip login.
+ *
+ * Runs only against a local server. For any other target (e.g. the
+ * post-deploy @production health checks) it sends no request and writes no
+ * state file — those tests do not use a session.
  */
 async function globalSetup(config: FullConfig) {
-  const baseURL = config.projects[0]?.use?.baseURL || 'http://localhost:3000';
+  const baseURL = config.projects[0]?.use?.baseURL;
+
+  if (!isLocalBaseURL(baseURL)) {
+    console.warn('[global-setup] Non-local target: owner sign-in skipped (no session state created)');
+    return;
+  }
 
   const authDir = path.join(__dirname, '.auth');
   if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });

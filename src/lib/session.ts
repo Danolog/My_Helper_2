@@ -10,7 +10,7 @@ import { salons } from "@/lib/schema";
  * Protected routes that require authentication.
  * These are also configured in src/proxy.ts for optimistic redirects.
  */
-export const protectedRoutes = ["/chat", "/dashboard", "/profile", "/admin"];
+export const protectedRoutes = ["/dashboard", "/profile", "/admin"];
 
 /**
  * Admin routes that require salon ownership in addition to authentication.
