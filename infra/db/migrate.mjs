@@ -14,6 +14,8 @@ import { resolve } from "node:path";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
+// Cloud SQL przez gniazdo (`?host=/cloudsql/…` → opcja `path`), jak src/lib/db.ts.
+import { socketAwareConnection } from "./pg-socket.mjs";
 
 const url = process.env.POSTGRES_URL;
 if (!url) {
@@ -22,7 +24,20 @@ if (!url) {
 }
 
 const migrationsFolder = resolve(process.env.MIGRATIONS_DIR || "drizzle");
-const sql = postgres(url, { max: 1, prepare: false, onnotice: () => {} });
+let connection;
+try {
+  connection = socketAwareConnection(url);
+} catch (error) {
+  // Komunikat helpera nie zawiera adresu.
+  console.error("[migrate] failed:", error instanceof Error ? error.message : "invalid POSTGRES_URL");
+  process.exit(1);
+}
+const sql = postgres(connection.url, {
+  ...(connection.path ? { path: connection.path } : {}),
+  max: 1,
+  prepare: false,
+  onnotice: () => {},
+});
 
 try {
   await migrate(drizzle(sql), { migrationsFolder });

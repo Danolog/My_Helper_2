@@ -68,6 +68,7 @@ ENV NODE_ENV=production
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY drizzle ./drizzle
 COPY infra/db/migrate.mjs ./migrate.mjs
+COPY infra/db/pg-socket.mjs ./pg-socket.mjs
 USER node
 # POSTGRES_URL przychodzi z Secret Manager w czasie uruchomienia Joba.
 # drizzle-orm/migrator: ta sama tabela dziennika co `drizzle-kit migrate`

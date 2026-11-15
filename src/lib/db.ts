@@ -1,6 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "./schema";
+import { socketAwareConnection } from "../../infra/db/pg-socket.mjs";
 
 // Konfiguracja pod serverless (Vercel Fluid Compute) + pooler transakcyjny
 // (Neon/PgBouncer):
@@ -8,8 +9,12 @@ import * as schema from "./schema";
 //   poolingu (błędy "prepared statement s1 already exists/does not exist"),
 // - max z DB_POOL_MAX (domyślnie 5) — domyślne 10 połączeń × N instancji
 //   funkcji szybko wyczerpuje limit połączeń bazy.
+// - Cloud SQL na Cloud Run: `?host=/cloudsql/…` → opcja `path` (gniazdo),
+//   infra/db/pg-socket.mjs (K-1, #121 a).
 function createDb(connectionString: string) {
-  const client = postgres(connectionString, {
+  const { url, path } = socketAwareConnection(connectionString);
+  const client = postgres(url, {
+    ...(path ? { path } : {}),
     prepare: false,
     max: Number(process.env.DB_POOL_MAX) || 5,
     connect_timeout: 5, // 5 second connection timeout
