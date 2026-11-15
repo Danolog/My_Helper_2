@@ -27,15 +27,27 @@ export function createSalonStaffMocks() {
   const txRows: unknown[][] = [];
   /** Argumenty każdego tx.insert(...).values(x) — dowód, do którego salonu zapis. */
   const insertedValues: unknown[] = [];
+  /**
+   * Każde tx.update(...) / tx.delete(...) z argumentem .where(...) — dowód,
+   * że zapis w ogóle poszedł i jakim filtrem był zawężony.
+   */
+  const writes: { op: "update" | "delete"; where?: unknown }[] = [];
   const txExecute = vi.fn().mockResolvedValue(undefined);
 
-  function txChain(): Record<string, unknown> {
+  function txChain(write?: { op: "update" | "delete"; where?: unknown }): Record<string, unknown> {
     const chain: Record<string, unknown> = {};
     for (const method of [
       "select", "from", "where", "leftJoin", "innerJoin", "orderBy",
       "limit", "offset", "groupBy", "insert", "returning", "update", "set",
     ]) {
       chain[method] = () => chain;
+    }
+    if (write) {
+      writes.push(write);
+      chain.where = (w: unknown) => {
+        write.where = w;
+        return chain;
+      };
     }
     chain.values = (v: unknown) => {
       insertedValues.push(v);
@@ -49,7 +61,8 @@ export function createSalonStaffMocks() {
   const tx = {
     select: () => txChain(),
     insert: () => txChain(),
-    update: () => txChain(),
+    update: () => txChain({ op: "update" }),
+    delete: () => txChain({ op: "delete" }),
     execute: txExecute,
   };
 
@@ -69,6 +82,7 @@ export function createSalonStaffMocks() {
     ctxRows.length = 0;
     txRows.length = 0;
     insertedValues.length = 0;
+    writes.length = 0;
     txExecute.mockClear();
   }
 
@@ -108,6 +122,7 @@ export function createSalonStaffMocks() {
     ctxRows,
     txRows,
     insertedValues,
+    writes,
     db,
     reset,
     signIn,

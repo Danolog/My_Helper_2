@@ -7,7 +7,12 @@
  *   personel dostawał 404 w dialogach wizyty.
  * - POST/PUT/DELETE: tylko właściciel (personel 403).
  * - Cudzy serwis => 404 (findOne zawężony do salonu z sesji).
+ * - Izolacja zapisu (#125): service_variants nie ma salon_id ani RLS, więc
+ *   jedyne bariery to serviceBelongsToSalon i filtr service_id w PUT/DELETE.
+ *   Testy sprawdzają, że cudzy serviceId nie dochodzi do zapisu, a cudzy
+ *   variantId pod własną usługą jest odcięty filtrem service_id.
  */
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DELETE, PUT } from "@/app/api/services/[id]/variants/[variantId]/route";
 import { GET, POST } from "@/app/api/services/[id]/variants/route";
@@ -152,4 +157,58 @@ describe("zapis wariantów — tylko właściciel (#104)", () => {
     expect(res.status).toBe(400);
     expect(m.rlsSalonIds()).toEqual([]);
   });
+});
+
+describe("izolacja salonów przy zapisie wariantów (#125)", () => {
+  beforeEach(() => m.reset());
+
+  /** Usługa i wariant salonu B — właściciel A zna tylko ich identyfikatory. */
+  const SERVICE_B = "33333333-3333-4333-8333-333333333333";
+  const VARIANT_B = "44444444-4444-4444-8444-444444444444";
+
+  const dialect = new PgDialect();
+  const whereOf = (w: unknown) => dialect.sqlToQuery(w as Parameters<PgDialect["sqlToQuery"]>[0]);
+
+  it.each([
+    ["POST", () => create(SERVICE_B)],
+    ["PUT", () => update(SERVICE_B, VARIANT_B)],
+    ["DELETE", () => remove(SERVICE_B, VARIANT_B)],
+  ] as const)(
+    "%s na usłudze salonu B => 404, bez insert/update/delete",
+    async (_name, call) => {
+      m.asOwnerOf(SALON_A);
+      // findOne(services, SERVICE_B) w kontekście salonu A: brak wiersza.
+      // Kolejne wyniki udają „zapis się udał” — gdyby trasa przeszła dalej,
+      // dostałaby wiersz i odpowiedziała 2xx.
+      m.txRows.push([], [{ id: VARIANT_B, serviceId: SERVICE_B }]);
+      const res = await call();
+      expect(res.status).toBe(404);
+      expect(m.insertedValues).toEqual([]);
+      expect(m.writes).toEqual([]);
+      expect(new Set(m.rlsSalonIds())).toEqual(new Set([SALON_A]));
+    }
+  );
+
+  it.each([
+    ["PUT", "update", () => update(SERVICE, VARIANT_B)],
+    ["DELETE", "delete", () => remove(SERVICE, VARIANT_B)],
+  ] as const)(
+    "%s wariantu salonu B pod własną usługą => 404, zapis zawężony do service_id własnej usługi",
+    async (_name, op, call) => {
+      m.asOwnerOf(SALON_A);
+      // Usługa jest salonu A; wariant B należy do SERVICE_B, więc filtr
+      // service_id = SERVICE w bazie daje 0 wierszy.
+      m.txRows.push([{ id: SERVICE, salonId: SALON_A }], []);
+      const res = await call();
+      expect(res.status).toBe(404);
+      expect(m.writes).toHaveLength(1);
+      const [write] = m.writes;
+      expect(write?.op).toBe(op);
+      const q = whereOf(write?.where);
+      expect(q.sql).toMatch(/"service_variants"\."id" = \$\d+/);
+      expect(q.sql).toMatch(/"service_variants"\."service_id" = \$\d+/);
+      expect(q.params).toEqual(expect.arrayContaining([VARIANT_B, SERVICE]));
+      expect(m.insertedValues).toEqual([]);
+    }
+  );
 });
