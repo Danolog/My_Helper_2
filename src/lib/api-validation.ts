@@ -11,6 +11,7 @@ import {
   isValidPushAuth,
   isValidPushEndpoint,
 } from "@/lib/push-subscription";
+import { normalizePolishPhoneNumber } from "@/lib/phone";
 import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
 
 // ==========================================
@@ -220,6 +221,78 @@ export const createProductSchema = z.object({
   ]).optional().nullable(),
 });
 
+/**
+ * Pole opcjonalne tolerujące każdego klienta: null, "" i same spacje znaczą "brak pola"
+ * i wychodzą ze schematu jako undefined (dalsza logika nie widzi null).
+ * Formularz portalu wysyła clientId: null, variantId: null (usługa bez
+ * wariantu) i guestEmail: null (gość bez e-maila) — sam .optional()
+ * odrzucał je 400 "Validation failed" (P0 od a00d059).
+ */
+function absentAsUndefined<T extends z.ZodType>(schema: T) {
+  return z.preprocess(
+    (v) => (v === null || (typeof v === "string" && v.trim() === "") ? undefined : v),
+    schema.optional()
+  );
+}
+
+/**
+ * Telefon PL: spacje, myślniki i nawiasy zdejmowane PRZED walidacją, zapis
+ * w E.164 przez normalizePolishPhoneNumber (ta sama funkcja co wysyłka SMS):
+ * "+48 123 456 789" -> "+48123456789", "123-456-789" -> "+48123456789".
+ * Ryan N1 / #64 pkt 4.
+ */
+function normalizedPlPhone(message: string) {
+  return absentAsUndefined(
+    z.preprocess(
+      (v) => (typeof v === "string" ? v.replace(/[\s\-()]/g, "") : v),
+      z.string().transform((v, ctx) => {
+        const e164 = normalizePolishPhoneNumber(v);
+        if (!e164) {
+          ctx.addIssue({ code: "custom", message });
+          return z.NEVER;
+        }
+        return e164;
+      })
+    )
+  );
+}
+
+/**
+ * Data-czas ISO 8601 (np. z toISOString() frontu): kształt sprawdzany
+ * regexem, bo Date.parse jest pobłażliwy ("jutro o 10" -> rok 2010), a potem
+ * Date.parse odrzuca nieistniejące wartości (miesiąc 13, godzina 99).
+ */
+const ISO_DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?$/;
+
+function isoDateString(field: string) {
+  return z
+    .string({ message: `${field} jest wymagane` })
+    .min(1, `${field} jest wymagane`)
+    .refine(
+      (v) => ISO_DATE_TIME_RE.test(v) && !Number.isNaN(Date.parse(v)),
+      `${field}: nieprawidłowy format daty`
+    );
+}
+
+const GUEST_NAME_TOO_SHORT = "Imię i nazwisko musi mieć min. 2 znaki (jedna litera to za mało)";
+
+/** Pola gościa wspólne dla create-session i /api/appointments. */
+const guestFields = {
+  guestName: absentAsUndefined(
+    z
+      .string()
+      .trim()
+      .min(2, GUEST_NAME_TOO_SHORT)
+      .max(200, "Imię i nazwisko może mieć maks. 200 znaków")
+  ),
+  guestPhone: normalizedPlPhone("Podaj prawidłowy numer telefonu (9 cyfr, opcjonalnie +48)"),
+  guestEmail: absentAsUndefined(
+    z.string().trim().max(254, "Adres e-mail jest zbyt długi").email("Podaj prawidłowy adres e-mail")
+  ),
+};
+
+
+
 export const createAppointmentSchema = z.object({
   salonId: requiredString("Salon ID"),
   clientId: z.string().nullable().optional(),
@@ -238,6 +311,10 @@ export const createAppointmentSchema = z.object({
   bookedByUserId: z.string().nullable().optional(),
   promoCodeId: z.string().nullable().optional(),
   discountAmount: z.union([z.string(), z.number()]).nullable().optional(),
+  // #63/#64: trasa czyta parsed.data — pola gościa i wariant muszą być
+  // w schemacie (inaczej Zod je zdejmuje). Telefon zapisywany w E.164.
+  variantId: absentAsUndefined(z.string().uuid("variantId musi byc poprawnym UUID")),
+  ...guestFields,
 }).refine(
   (data) => {
     if (!data.startTime || !data.endTime) return true;
@@ -821,42 +898,14 @@ export const updateGalleryPhotoSchema = z
 // Payment & Subscription Schemas
 // ==========================================
 
-/**
- * Pole opcjonalne tolerujące każdego klienta: null, "" i same spacje znaczą "brak pola"
- * i wychodzą ze schematu jako undefined (dalsza logika nie widzi null).
- * Formularz portalu wysyła clientId: null, variantId: null (usługa bez
- * wariantu) i guestEmail: null (gość bez e-maila) — sam .optional()
- * odrzucał je 400 "Validation failed" (P0 od a00d059).
- */
-function absentAsUndefined<T extends z.ZodType>(schema: T) {
-  return z.preprocess(
-    (v) => (v === null || (typeof v === "string" && v.trim() === "") ? undefined : v),
-    schema.optional()
-  );
-}
-
-/**
- * Telefon PL: spacje, myślniki i nawiasy zdejmowane PRZED regexem, wynik
- * znormalizowany ("+48 123 456 789" -> "+48123456789", "123-456-789" ->
- * "123456789") — taki trafia do bazy i do SMS.
- */
-function normalizedPlPhone(message: string) {
-  return absentAsUndefined(
-    z.preprocess(
-      (v) => (typeof v === "string" ? v.replace(/[\s\-()]/g, "") : v),
-      z.string().regex(/^(\+48)?[0-9]{9}$/, message)
-    )
-  );
-}
-
 export const depositCreateSessionSchema = z.object({
   salonId: z.string().uuid("salonId musi byc poprawnym UUID"),
   employeeId: z.string().uuid("employeeId musi byc poprawnym UUID"),
   serviceId: absentAsUndefined(z.string().uuid("serviceId musi byc poprawnym UUID")),
   variantId: absentAsUndefined(z.string().uuid("variantId musi byc poprawnym UUID")),
   clientId: absentAsUndefined(z.string().uuid("clientId musi byc poprawnym UUID")),
-  startTime: z.string().min(1, "startTime jest wymagane"),
-  endTime: z.string().min(1, "endTime jest wymagane"),
+  startTime: isoDateString("startTime"),
+  endTime: isoDateString("endTime"),
   depositAmount: z.preprocess(
     (v) => (typeof v === "string" ? parseFloat(v) : v),
     z.number().positive("Kwota zadatku musi byc wieksza od 0")
@@ -865,10 +914,11 @@ export const depositCreateSessionSchema = z.object({
     z.enum(["stripe", "blik"], { message: "paymentMethod musi byc 'stripe' lub 'blik'" })
   ),
   blikPhoneNumber: normalizedPlPhone("Nieprawidlowy numer telefonu BLIK (9 cyfr)"),
-  guestName: absentAsUndefined(z.string().trim().min(2, "Imie i nazwisko musi miec min. 2 znaki")),
-  guestPhone: normalizedPlPhone("Podaj prawidlowy numer telefonu (9 cyfr)"),
-  guestEmail: absentAsUndefined(z.string().trim().email("Podaj prawidlowy adres email")),
-  notes: absentAsUndefined(z.string()),
+  ...guestFields,
+  notes: absentAsUndefined(z.string().max(1000, "Uwagi mogą mieć maks. 1000 znaków")),
+}).refine((d) => Date.parse(d.endTime) > Date.parse(d.startTime), {
+  message: "Czas zakończenia musi być późniejszy niż czas rozpoczęcia",
+  path: ["endTime"],
 });
 
 export const depositConfirmSchema = z.object({

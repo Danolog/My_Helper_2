@@ -5,7 +5,7 @@ import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
 import { isPromotionTypeFrozen } from "@/lib/features";
-import { buildDepositBody } from "../_lib/deposit-body";
+import { buildDepositBody, isDepositNotApplicable } from "../_lib/deposit-body";
 import type {
   SalonDetail,
   AssignedEmployee,
@@ -519,6 +519,10 @@ export function useBookingData(): UseBookingDataReturn {
     const variantName = selectedVariant?.name ?? "";
     const notesText = `Rezerwacja online: ${selectedService.name}${variantName ? ` - ${variantName}` : ""}`;
 
+    // #67: create-session odpowiada DEPOSIT_NOT_APPLICABLE, gdy serwer nie
+    // pobierze zadatku — wtedy zwykła rezerwacja poniżej, bez błędu.
+    let fallBackToStandardBooking = false;
+
     // If deposit is required, use the deposit flow
     if (depositRequired && depositAmount > 0) {
       // NOTE: the "Blik P2P" mock (payment request to a phone number) was
@@ -551,7 +555,9 @@ export function useBookingData(): UseBookingDataReturn {
         });
 
         const sessionJson = await sessionRes.json();
-        if (!sessionJson.success) {
+        if (!sessionJson.success && isDepositNotApplicable(sessionRes.status, sessionJson)) {
+          fallBackToStandardBooking = true;
+        } else if (!sessionJson.success) {
           if (sessionRes.status === 409) {
             toast.error("Wybrany termin jest juz zajety. Wybierz inny termin.");
           } else {
@@ -563,48 +569,50 @@ export function useBookingData(): UseBookingDataReturn {
           return;
         }
 
-        const {
-          depositPaymentId: payId,
-          sessionId: sessId,
-          paymentUrl,
-          simulated,
-        } = sessionJson.data;
-        setDepositPaymentId(payId);
-        setDepositSessionId(sessId);
+        if (!fallBackToStandardBooking) {
+          const {
+            depositPaymentId: payId,
+            sessionId: sessId,
+            paymentUrl,
+            simulated,
+          } = sessionJson.data;
+          setDepositPaymentId(payId);
+          setDepositSessionId(sessId);
 
-        // Step 2a: Real Stripe Checkout — redirect the browser to Stripe.
-        // Confirmation happens via the signed Stripe webhook; the user comes
-        // back to this page with ?deposit=success|cancelled.
-        if (!simulated && paymentUrl) {
-          redirectingToStripe = true;
-          toast.info("Przekierowanie do bezpiecznej platnosci...", {
-            duration: 3000,
+          // Step 2a: Real Stripe Checkout — redirect the browser to Stripe.
+          // Confirmation happens via the signed Stripe webhook; the user comes
+          // back to this page with ?deposit=success|cancelled.
+          if (!simulated && paymentUrl) {
+            redirectingToStripe = true;
+            toast.info("Przekierowanie do bezpiecznej platnosci...", {
+              duration: 3000,
+            });
+            window.location.href = paymentUrl;
+            return;
+          }
+
+          // Step 2b: Dev fallback (Stripe not configured) — simulate processing
+          toast.info("Przetwarzanie platnosci zadatku...", { duration: 2000 });
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+
+          // Step 3: Confirm the payment via the dev-only endpoint
+          const confirmRes = await mutationFetch("/api/deposits/confirm", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ depositPaymentId: payId, sessionId: sessId }),
           });
-          window.location.href = paymentUrl;
-          return;
-        }
 
-        // Step 2b: Dev fallback (Stripe not configured) — simulate processing
-        toast.info("Przetwarzanie platnosci zadatku...", { duration: 2000 });
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-
-        // Step 3: Confirm the payment via the dev-only endpoint
-        const confirmRes = await mutationFetch("/api/deposits/confirm", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ depositPaymentId: payId, sessionId: sessId }),
-        });
-
-        const confirmJson = await confirmRes.json();
-        if (confirmJson.success) {
-          toast.success("Zadatek oplacony! Wizyta potwierdzona.", {
-            duration: 4000,
-          });
-          setBookingSuccess(true);
-        } else {
-          toast.error(
-            confirmJson.error || "Nie udalo sie potwierdzic platnosci",
-          );
+          const confirmJson = await confirmRes.json();
+          if (confirmJson.success) {
+            toast.success("Zadatek oplacony! Wizyta potwierdzona.", {
+              duration: 4000,
+            });
+            setBookingSuccess(true);
+          } else {
+            toast.error(
+              confirmJson.error || "Nie udalo sie potwierdzic platnosci",
+            );
+          }
         }
       } catch {
         toast.error("Blad przetwarzania platnosci");
@@ -614,7 +622,7 @@ export function useBookingData(): UseBookingDataReturn {
           setIsProcessingPayment(false);
         }
       }
-      return;
+      if (!fallBackToStandardBooking) return;
     }
 
     // Standard booking without deposit

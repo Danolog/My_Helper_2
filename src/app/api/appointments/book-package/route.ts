@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { eq, and, not, lte, gte, or, lt, gt, inArray } from "drizzle-orm";
 import { validateBody, bookPackageSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { depositGuardResponse } from "@/lib/deposit-guard";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
+import { getSalonContext } from "@/lib/salon-context";
 import { assertSalonRefs } from "@/lib/salon-refs";
 import { appointments, promotions, services, timeBlocks } from "@/lib/schema";
 import { frozenModuleResponse } from "@/lib/server/frozen-guard";
@@ -143,6 +145,24 @@ export async function POST(request: Request) {
     });
 
     // 5. Check for overlapping appointments for the entire duration
+    // #63: ta sama reguła co /api/appointments — usługa z zadatkiem nie
+    // powstaje bez wpłaty, chyba że rezerwuje personel TEGO salonu
+    // (rozpoznany jak w create-session). Moduł jest zamrożony; reguła działa
+    // na wypadek odmrożenia. Każda usługa pakietu osobno, przed kolizjami.
+    const staffCtx = await getSalonContext();
+    const isSalonStaff = staffCtx?.salonId === salonId;
+    if (!isSalonStaff) {
+      for (const slot of appointmentSlots) {
+        const depositError = await depositGuardResponse({
+          salonId,
+          serviceId: slot.service.id,
+          startTime: slot.start,
+          sessionUser: authResult.user ?? null,
+        });
+        if (depositError) return depositError;
+      }
+    }
+
     const firstStart = appointmentSlots[0]!.start;
     const lastEnd = appointmentSlots[appointmentSlots.length - 1]!.end;
 
