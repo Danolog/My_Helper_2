@@ -11,6 +11,7 @@ import {
   isValidPushAuth,
   isValidPushEndpoint,
 } from "@/lib/push-subscription";
+import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 import { normalizePolishPhoneNumber } from "@/lib/phone";
 import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
 
@@ -261,8 +262,14 @@ function normalizedPlPhone(message: string) {
  * Data-czas ISO 8601 (np. z toISOString() frontu): kształt sprawdzany
  * regexem, bo Date.parse jest pobłażliwy ("jutro o 10" -> rok 2010), a potem
  * Date.parse odrzuca nieistniejące wartości (miesiąc 13, godzina 99).
+ * Strefa (`Z` albo `±hh:mm`) jest WYMAGANA: wartość bez strefy Date.parse
+ * czyta w strefie serwera (UTC na Vercelu), więc "10:00" z Polski byłoby
+ * zapisane godzinę lub dwie później (Ethan, przegląd #71). Wszyscy nadawcy
+ * wysyłają toISOString(), czyli `Z`.
  */
-const ISO_DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})?$/;
+const ISO_DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+const NOTES_TOO_LONG = `Uwagi mogą mieć maks. ${APPOINTMENT_NOTES_MAX_LENGTH} znaków`;
 
 function isoDateString(field: string) {
   return z
@@ -304,7 +311,7 @@ export const createAppointmentSchema = z.object({
   startTime: isoDateString("Czas rozpoczecia"),
   endTime: isoDateString("Czas zakonczenia"),
   // #66: limit jak w create-session; null/""/same spacje = brak uwag.
-  notes: absentAsUndefined(z.string().max(1000, "Uwagi mogą mieć maks. 1000 znaków")),
+  notes: absentAsUndefined(z.string().max(APPOINTMENT_NOTES_MAX_LENGTH, NOTES_TOO_LONG)),
   depositAmount: z.string().nullable().optional(),
   bookedByUserId: z.string().nullable().optional(),
   promoCodeId: z.string().nullable().optional(),
@@ -375,7 +382,13 @@ export const updateAppointmentSchema = z.object({
   employeeId: z.string().optional(),
   clientId: z.string().nullable().optional(),
   serviceId: z.string().nullable().optional(),
-  notes: z.string().nullable().optional(),
+  // PUT: null, "" i same spacje = wyczyść notatki (null), brak pola = bez zmian
+  // (undefined). Inaczej niż w POST, gdzie brak uwag to undefined: tu null jest
+  // poleceniem (edit-appointment-dialog wysyła `notes.trim() || null`).
+  notes: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? null : v),
+    z.string().max(APPOINTMENT_NOTES_MAX_LENGTH, NOTES_TOO_LONG).nullable().optional()
+  ),
   status: z.enum(["scheduled", "confirmed", "completed", "cancelled", "no_show"], {
     message: "Nieprawidlowy status wizyty",
   }).optional(),
@@ -585,21 +598,6 @@ export const reviewModerateSchema = z.object({
   action: z.enum(["approve", "reject"], {
     message: "Akcja musi byc 'approve' lub 'reject'",
   }),
-});
-
-// ==========================================
-// Salon Schemas
-// ==========================================
-
-export const createSalonSchema = z.object({
-  name: requiredString("Nazwa salonu"),
-  phone: z.string().nullable().optional(),
-  email: emailField,
-  address: z.string().nullable().optional(),
-  industryType: z.enum(["hair_salon", "beauty_salon", "nails", "barbershop", "spa", "medical"], {
-    message: "Nieprawidlowy typ branzy",
-  }).nullable().optional(),
-  ownerId: z.string().nullable().optional(),
 });
 
 export const birthdaySettingsSchema = z.object({
@@ -913,7 +911,7 @@ export const depositCreateSessionSchema = z.object({
   ),
   blikPhoneNumber: normalizedPlPhone("Nieprawidlowy numer telefonu BLIK (9 cyfr)"),
   ...guestFields,
-  notes: absentAsUndefined(z.string().max(1000, "Uwagi mogą mieć maks. 1000 znaków")),
+  notes: absentAsUndefined(z.string().max(APPOINTMENT_NOTES_MAX_LENGTH, NOTES_TOO_LONG)),
 }).refine((d) => Date.parse(d.endTime) > Date.parse(d.startTime), {
   message: "Czas zakończenia musi być późniejszy niż czas rozpoczęcia",
   path: ["endTime"],

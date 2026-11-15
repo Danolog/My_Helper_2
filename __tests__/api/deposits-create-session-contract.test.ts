@@ -498,6 +498,9 @@ describe("startTime/endTime: format i kolejność", () => {
     ["startTime", "jutro o 10"],
     ["endTime", "2026-13-45T99:00"],
     ["startTime", ""],
+    // Follow-up #71: bez strefy → 400 przed wyceną (Date.parse czytałby czas serwera).
+    ["startTime", "2026-12-01T10:00:00"],
+    ["endTime", "2026-12-01T11:00:00.000"],
   ])("%s = %j → 400", async (field, value) => {
     const res = await post({ ...buildDepositBody(formState()), [field]: value });
     const { status, body } = await parseResponse<{ details: Record<string, string> }>(res);
