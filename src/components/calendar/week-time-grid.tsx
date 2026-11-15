@@ -336,11 +336,13 @@ export function WeekTimeGrid({
                 const height = getEventHeight(event);
                 const widthPercent = 100 / totalCols;
                 const leftPercent = col * widthPercent;
+                // Cancelled below active, same as the day view (#164)
+                const layer = event.appointment.status === "cancelled" ? "z-[1]" : "z-[2]";
 
                 return (
                   <div
                     key={event.id}
-                    className="absolute z-[2]"
+                    className={`absolute ${layer}`}
                     style={{
                       top,
                       height,
