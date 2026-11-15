@@ -12,6 +12,7 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { employees, salons, user } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import { revokeSalonGrantsForUser } from "@/lib/temporary-access";
 import type { z } from "zod";
 
 // PUT /api/employees/[id]/link-account - Podepnij/odepnij konto użytkownika
@@ -23,7 +24,7 @@ export const PUT = withApiHandler(
     logLabel: "[Employees API] PUT link-account",
     errorMessage: "Nie udalo sie zaktualizowac konta pracownika",
   },
-  async ({ body, params }) => {
+  async ({ body, params, auth }) => {
     // Tenant isolation (ADR-001): salon TYLKO z sesji właściciela —
     // getUserSalonId rozpoznaje wyłącznie salons.ownerId.
     const salonId = await getUserSalonId();
@@ -45,8 +46,22 @@ export const PUT = withApiHandler(
       );
     }
 
+    // Granty czasowe nadane przez właściciela TEGO salonu odpinanemu kontu
+    // kasujemy przed zmianą powiązania (fail-closed: jeśli zmiana się nie
+    // uda, konto zostaje bez grantów, a nie z grantem bez pracownika).
+    // getUserSalonId => wołający jest właścicielem (salons.ownerId).
+    const revokeGrantsOf = async (previousUserId: string) => {
+      const revoked = await revokeSalonGrantsForUser(previousUserId, auth!.user.id);
+      if (revoked > 0) {
+        logger.info(
+          `[Employees API] Revoked ${revoked} temporary access grant(s) of unlinked account on employee ${id}`
+        );
+      }
+    };
+
     // email = null => odłączenie konta od pracownika
     if (body.email === null) {
+      if (employee.userId) await revokeGrantsOf(employee.userId);
       const updated = await forSalon(salonId).updateOwned(employees, id, {
         userId: null,
       });
@@ -113,6 +128,11 @@ export const PUT = withApiHandler(
         },
         { status: 409 }
       );
+    }
+
+    // Przepięcie na inne konto = odpięcie poprzedniego
+    if (employee.userId && employee.userId !== account.id) {
+      await revokeGrantsOf(employee.userId);
     }
 
     const updated = await forSalon(salonId).updateOwned(employees, id, {

@@ -200,6 +200,24 @@ describe("getSalonContext", () => {
     expect(result).toBeNull();
   });
 
+  it("should return null (fail-closed) when the account has several ACTIVE employees records", async () => {
+    // Konto podpięte pod >1 aktywny rekord (np. dwa salony) — wybór salonu
+    // byłby przypadkowy (brak orderBy). Odmowa zamiast zgadywania.
+    mockGetSession.mockResolvedValue({ user: { id: "user-123" } });
+    mockDbLimit
+      .mockResolvedValueOnce([]) // no owned salon
+      .mockResolvedValueOnce([
+        { id: "emp-1", salonId: "salon-A", role: "employee" },
+        { id: "emp-2", salonId: "salon-B", role: "receptionist" },
+      ]);
+
+    const result = await getSalonContext();
+
+    expect(result).toBeNull();
+    // Pobieramy 2 rekordy, żeby wykryć niejednoznaczność (nie .limit(1)).
+    expect(mockDbLimit).toHaveBeenLastCalledWith(2);
+  });
+
   it("should return null when user is neither owner nor employee", async () => {
     mockGetSession.mockResolvedValue({ user: { id: "user-123" } });
     mockDbLimit.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
@@ -247,7 +265,7 @@ describe("hasFeatureAccess", () => {
     const result = await hasFeatureAccess(employeeCtx, "reports");
 
     expect(result).toBe(false);
-    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-emp", "reports");
+    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-emp", "reports", "salon-1");
   });
 
   it("should return true for employee with an active temporary access grant", async () => {
@@ -256,7 +274,7 @@ describe("hasFeatureAccess", () => {
     const result = await hasFeatureAccess(employeeCtx, "reports");
 
     expect(result).toBe(true);
-    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-emp", "reports");
+    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-emp", "reports", "salon-1");
   });
 
   it("should consult temporary access for receptionist as well", async () => {
@@ -265,6 +283,6 @@ describe("hasFeatureAccess", () => {
     const result = await hasFeatureAccess(receptionistCtx, "sms");
 
     expect(result).toBe(false);
-    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-rec", "sms");
+    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("user-rec", "sms", "salon-1");
   });
 });

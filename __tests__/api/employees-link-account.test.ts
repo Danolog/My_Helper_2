@@ -80,6 +80,11 @@ vi.mock("@/lib/api-validation", () => ({
   linkEmployeeAccountSchema: {},
 }));
 
+const mockRevokeSalonGrants = vi.fn();
+vi.mock("@/lib/temporary-access", () => ({
+  revokeSalonGrantsForUser: (...args: unknown[]) => mockRevokeSalonGrants(...args),
+}));
+
 const mockGetUserSalonId = vi.fn();
 vi.mock("@/lib/get-user-salon", () => ({
   getUserSalonId: (...args: unknown[]) => mockGetUserSalonId(...args),
@@ -121,6 +126,7 @@ describe("PUT /api/employees/[id]/link-account", () => {
     mockRequireAuth.mockResolvedValue({ user: { id: OWNER_ID } });
     mockGetUserSalonId.mockResolvedValue(TEST_IDS.SALON_UUID);
     mockDbSelect.mockReturnValue(chainMock([]));
+    mockRevokeSalonGrants.mockResolvedValue(0);
   });
 
   it("happy path: podpina istniejace konto do pracownika salonu", async () => {
@@ -245,5 +251,56 @@ describe("PUT /api/employees/[id]/link-account", () => {
     expect(updateChain.set).toHaveBeenCalledWith({ userId: null });
     // Tylko findOne — zadnych zapytan o user/salons przy odlaczaniu.
     expect(mockDbSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("email=null kasuje granty czasowe nadane temu kontu przez wlasciciela salonu", async () => {
+    mockDbSelect.mockReturnValueOnce(
+      chainMock([makeEmployee({ userId: LINKED_USER_ID })])
+    );
+    mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: null })]));
+
+    const response = await callPut({ email: null });
+
+    expect(response.status).toBe(200);
+    // Tylko granty TEGO salonu (granted_by = wlasciciel z sesji) dla odpinanego konta.
+    expect(mockRevokeSalonGrants).toHaveBeenCalledWith(LINKED_USER_ID, OWNER_ID);
+  });
+
+  it("email=null na pracowniku bez konta nie kasuje niczego", async () => {
+    mockDbSelect.mockReturnValueOnce(chainMock([makeEmployee({ userId: null })]));
+    mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: null })]));
+
+    const response = await callPut({ email: null });
+
+    expect(response.status).toBe(200);
+    expect(mockRevokeSalonGrants).not.toHaveBeenCalled();
+  });
+
+  it("przepiecie na inne konto kasuje granty poprzedniego konta", async () => {
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([makeEmployee({ userId: "user-old" })]))
+      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(chainMock([]));
+    mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: LINKED_USER_ID })]));
+
+    const response = await callPut({ email: "anna@konto.pl" });
+
+    expect(response.status).toBe(200);
+    expect(mockRevokeSalonGrants).toHaveBeenCalledWith("user-old", OWNER_ID);
+  });
+
+  it("ponowne podpiecie tego samego konta nie kasuje jego grantow", async () => {
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([makeEmployee({ userId: LINKED_USER_ID })]))
+      .mockReturnValueOnce(chainMock([{ id: LINKED_USER_ID, emailVerified: true }]))
+      .mockReturnValueOnce(chainMock([]))
+      .mockReturnValueOnce(chainMock([]));
+    mockDbUpdate.mockReturnValue(chainMock([makeEmployee({ userId: LINKED_USER_ID })]));
+
+    const response = await callPut({ email: "anna@konto.pl" });
+
+    expect(response.status).toBe(200);
+    expect(mockRevokeSalonGrants).not.toHaveBeenCalled();
   });
 });

@@ -115,7 +115,19 @@ describe("requireSalonStaff", () => {
     asStaff("employee");
     const r = await requireSalonStaff({ roles: ["owner"], feature: "promotions" });
     expect(await status(r)).toBe(403);
-    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("staff-1", "promotions");
+    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("staff-1", "promotions", SALON_A);
+  });
+
+  it("grant sprawdzany w salonie z sesji (grant z salonu B nie otwiera salonu A)", async () => {
+    // Pracownik salonu A; grant istnieje tylko w salonie B => sprawdzenie
+    // zawężone do SALON_A musi go nie znaleźć.
+    asStaff("employee", SALON_A);
+    mockHasTemporaryAccess.mockImplementation(
+      async (_u: string, _f: string, salonId?: string) => salonId === SALON_B
+    );
+    const r = await requireSalonStaff({ roles: ["owner"], feature: "promotions" });
+    expect(await status(r)).toBe(403);
+    expect(mockHasTemporaryAccess).toHaveBeenCalledWith("staff-1", "promotions", SALON_A);
   });
 
   it("pracownik z grantem feature => OK", async () => {
@@ -142,6 +154,18 @@ describe("requireSalonStaff", () => {
     asStaff("employee");
     const r = await requireSalonStaff();
     expect(r.ctx?.salonId).toBe(SALON_A);
+  });
+
+  it("konto z kilkoma aktywnymi rekordami pracownika => 403 z komunikatem (bez zgadywania salonu)", async () => {
+    mockGetSession.mockResolvedValue({ user: { id: "staff-2" } });
+    mockDbLimit.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { id: "emp-1", salonId: SALON_A, role: "employee" },
+      { id: "emp-2", salonId: SALON_B, role: "employee" },
+    ]);
+    const r = await requireSalonStaff();
+    expect(await status(r)).toBe(403);
+    const body = await r.error!.json();
+    expect(body.error).toMatch(/kilku aktywnych rekord/);
   });
 
   it("nie polega na user.role: konto z user.role='owner' bez salonu => 404", async () => {
