@@ -1,5 +1,11 @@
 {
   "buildCommand": "pnpm build:ci",
+  "git": {
+    "deploymentEnabled": {
+      "main": true,
+      "**": false
+    }
+  },
   "crons": [
     { "path": "/api/cron/cleanup-pending-deposits", "schedule": "30 2 * * *" },
     { "path": "/api/cron/cleanup-temporary-access", "schedule": "0 3 * * *" }
