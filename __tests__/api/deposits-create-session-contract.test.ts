@@ -148,6 +148,8 @@ function insertedAppointment(): Record<string, unknown> {
 }
 
 beforeEach(() => {
+  // #69: symulacja bez klucza Stripe jest opt-in (vitest: NODE_ENV=test).
+  vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
   vi.clearAllMocks();
   mockDbSelect.mockReset();
   mockDbInsert.mockReset();
@@ -158,6 +160,11 @@ beforeEach(() => {
 // -------------------------------------------------------
 // Kontrakt: dokładny payload formularza
 // -------------------------------------------------------
+
+// #69: flaga symulacji nie przecieka między testami.
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("kontrakt formularza portalu → create-session", () => {
   it("zalogowany klient, usługa bez wariantu: payload formularza (clientId/variantId: null) → 201", async () => {
@@ -646,22 +653,26 @@ describe("#69: usługa usunięta lub wyłączona", () => {
 });
 
 // -------------------------------------------------------
-// Ethan (#61) / #69: wdrożenie bez klucza Stripe nie symuluje płatności
+// #69 (Ethan): symulacja płatności bez klucza Stripe jest opt-in.
+// Środowisko ustawiane jawnie w każdym teście; globalny beforeEach włącza
+// flagę, więc tu najpierw ją czyścimy. VERCEL_ENV nie ma już znaczenia.
 // -------------------------------------------------------
 
-describe("bez klucza Stripe: symulacja tylko poza wdrożeniem Vercela", () => {
+describe("bez klucza Stripe: symulacja tylko po jawnym opt-in", () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
   beforeEach(() => {
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "");
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("VERCEL_ENV", "");
+    mockGetOptionalSession.mockResolvedValue(null);
   });
   afterEach(() => {
     vi.unstubAllEnvs();
     errorSpy.mockRestore();
   });
 
-  it.each(["production", "preview"])("VERCEL_ENV=%s bez klucza → 503 STRIPE_UNAVAILABLE, nic nie zapisane", async (env) => {
-    vi.stubEnv("VERCEL_ENV", env);
-    mockGetOptionalSession.mockResolvedValue(null);
+  async function expectRefused() {
     const res = await post(buildDepositBody(formState(GUEST)));
     const { status, body: json } = await parseResponse<{ code: string }>(res);
     expect(status).toBe(503);
@@ -669,25 +680,60 @@ describe("bez klucza Stripe: symulacja tylko poza wdrożeniem Vercela", () => {
     expect(mockCalcDeposit).not.toHaveBeenCalled();
     expect(mockDbSelect).not.toHaveBeenCalled();
     expect(mockDbInsert).not.toHaveBeenCalled();
-  });
+  }
 
-  it("dev bez klucza → symulacja jak dotąd (201, simulated: true)", async () => {
-    vi.stubEnv("VERCEL_ENV", "");
-    vi.stubEnv("NODE_ENV", "development");
-    mockGetOptionalSession.mockResolvedValue(null);
+  async function expectSimulated() {
     const res = await post(buildDepositBody(formState(GUEST)));
     const { status, body: json } = await parseResponse<{ data: { simulated: boolean } }>(res);
     expect(status).toBe(201);
     expect(json.data.simulated).toBe(true);
+    expect(mockDbInsert).toHaveBeenCalled();
+  }
+
+  it("NODE_ENV=development, bez flagi → symulacja (201, simulated: true)", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    await expectSimulated();
   });
 
-  it("serwer E2E w CI (NODE_ENV=production, poza Vercelem) bez klucza → symulacja (testy @full portalu)", async () => {
-    vi.stubEnv("VERCEL_ENV", "");
+  it("ALLOW_PAYMENT_SIMULATION=1 poza Vercelem (serwer E2E w CI: NODE_ENV=production) → symulacja", async () => {
     vi.stubEnv("NODE_ENV", "production");
-    mockGetOptionalSession.mockResolvedValue(null);
-    const res = await post(buildDepositBody(formState(GUEST)));
-    expect(res.status).toBe(201);
+    vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
+    await expectSimulated();
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("ALLOW_PAYMENT_SIMULATION");
   });
+
+  it("NODE_ENV=production bez flagi → 503 STRIPE_UNAVAILABLE, nic nie zapisane", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    await expectRefused();
+  });
+
+  it("NODE_ENV=test bez flagi → 503", async () => {
+    vi.stubEnv("NODE_ENV", "test");
+    await expectRefused();
+  });
+
+  it.each(["true", "yes", "0", " 1"])("ALLOW_PAYMENT_SIMULATION=%j (nie dokładnie \"1\") → 503", async (flag) => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("ALLOW_PAYMENT_SIMULATION", flag);
+    await expectRefused();
+  });
+
+  it("druga bramka: VERCEL=1 + ALLOW_PAYMENT_SIMULATION=1 → flaga zignorowana, 503 + błąd w logu", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
+    await expectRefused();
+    expect(JSON.stringify(errorSpy.mock.calls)).toContain("ALLOW_PAYMENT_SIMULATION=1 ignored on Vercel");
+  });
+
+  it.each(["production", "preview", "development"])(
+    "VERCEL_ENV=%s nie decyduje: NODE_ENV=production bez flagi → 503",
+    async (vercelEnv) => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("VERCEL_ENV", vercelEnv);
+      await expectRefused();
+    }
+  );
 });
 
 describe("#67: kod DEPOSIT_NOT_APPLICABLE wspólny dla serwera i portalu", () => {

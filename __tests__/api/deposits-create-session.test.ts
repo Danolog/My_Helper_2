@@ -13,7 +13,7 @@
  * - Stripe configured but session creation fails -> 502 and the just-created
  *   appointment is deleted so the slot is not blocked by an unpayable booking.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createMockRequest,
   parseResponse,
@@ -165,6 +165,11 @@ function makeRequest(body: Record<string, unknown> = validBody) {
 // Tests
 // -------------------------------------------------------
 
+// #69: flaga symulacji nie przecieka między testami.
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("POST /api/deposits/create-session — Stripe configured", () => {
   const mockSessionsCreate = vi.fn();
   const fakeStripe = {
@@ -299,6 +304,8 @@ describe("POST /api/deposits/create-session — Stripe configured", () => {
 
 describe("POST /api/deposits/create-session — Stripe NOT configured (dev simulation)", () => {
   beforeEach(() => {
+    // #69: symulacja bez klucza Stripe jest opt-in (vitest: NODE_ENV=test).
+    vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
     vi.clearAllMocks();
     primeHappyPathDb();
     primeExpectedDeposit(50);
