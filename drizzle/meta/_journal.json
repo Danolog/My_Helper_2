@@ -57,6 +57,13 @@
       "when": 1783167046637,
       "tag": "0007_numerous_sister_grimm",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794741291806,
+      "tag": "0008_bitter_shen",
+      "breakpoints": true
     }
   ]
 }
