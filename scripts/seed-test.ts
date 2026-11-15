@@ -21,6 +21,10 @@ import {
   serviceCategories,
   clients,
   subscriptionPlans,
+  employeeServices,
+  workSchedules,
+  promotions,
+  promoCodes,
 } from "../src/lib/schema";
 import { checkSeedClientOptions, checkSeedTarget } from "./seed-host-guard";
 
@@ -47,6 +51,24 @@ const db = drizzle(sql);
 const OWNER_USER_ID = "test-owner-user-id-00001";
 const CLIENT_USER_ID = "test-client-user-id-00001";
 const SALON_ID = "00000000-0000-4000-8000-000000000001";
+
+// Dane E2E zadatku i promocji zamrozonych (tests/client-portal/deposit-frozen-happy-hours.spec.ts,
+// tests/dashboard/frozen-promotions.spec.ts). Stale ID — te same co w testach (testy NIE importuja
+// tego pliku: ma efekty uboczne na poziomie modulu, laczy sie z baza).
+const E2E_DEPOSIT = {
+  employeeId: "00000000-0000-4000-8000-e00000000003",
+  serviceId: "00000000-0000-4000-8000-5e0000000004",
+  employeeServiceId: "00000000-0000-4000-8000-e5e000000001",
+  basePrice: "200",
+  depositPercentage: 30,
+} as const;
+const E2E_PROMOTIONS = {
+  happyHoursId: "00000000-0000-4000-8000-9c0000000001",
+  packageId: "00000000-0000-4000-8000-9c0000000002",
+  percentageId: "00000000-0000-4000-8000-9c0000000003",
+  happyHoursCodeId: "00000000-0000-4000-8000-9cc000000001",
+  percentageCodeId: "00000000-0000-4000-8000-9cc000000002",
+} as const;
 
 async function seed() {
   console.log("[seed-test] Starting test seed...");
@@ -331,6 +353,150 @@ async function seed() {
   }
 
   console.log("[seed-test] Created 2 subscription plans (Basic + Pro)");
+
+  // 8. Zadatek + promocje zamrozone (E2E). Osobny pracownik i usluga, zeby
+  // rezerwacje testu nie kolidowaly z innymi testami kalendarza.
+  await db
+    .insert(employees)
+    .values({
+      id: E2E_DEPOSIT.employeeId,
+      salonId: SALON_ID,
+      firstName: "Ewa",
+      lastName: "Zadatkowa",
+      color: "#f59e0b",
+      role: "employee",
+      isActive: true,
+    })
+    .onConflictDoUpdate({
+      target: employees.id,
+      set: { firstName: "Ewa", lastName: "Zadatkowa", isActive: true, salonId: SALON_ID },
+    });
+
+  await db
+    .insert(services)
+    .values({
+      id: E2E_DEPOSIT.serviceId,
+      salonId: SALON_ID,
+      name: "Zabieg z zadatkiem (E2E)",
+      basePrice: E2E_DEPOSIT.basePrice,
+      baseDuration: 60,
+      categoryId: categoryId,
+      depositRequired: true,
+      depositPercentage: E2E_DEPOSIT.depositPercentage,
+      isActive: true,
+    })
+    .onConflictDoUpdate({
+      target: services.id,
+      set: {
+        name: "Zabieg z zadatkiem (E2E)",
+        basePrice: E2E_DEPOSIT.basePrice,
+        baseDuration: 60,
+        depositRequired: true,
+        depositPercentage: E2E_DEPOSIT.depositPercentage,
+        isActive: true,
+      },
+    });
+
+  await db
+    .insert(employeeServices)
+    .values({ id: E2E_DEPOSIT.employeeServiceId, employeeId: E2E_DEPOSIT.employeeId, serviceId: E2E_DEPOSIT.serviceId })
+    .onConflictDoUpdate({
+      target: employeeServices.id,
+      set: { employeeId: E2E_DEPOSIT.employeeId, serviceId: E2E_DEPOSIT.serviceId },
+    });
+
+  // Grafik 7 dni w tygodniu 08:00-20:00: test rezerwuje "jutro", niezaleznie od dnia tygodnia.
+  for (let day = 0; day <= 6; day++) {
+    await db
+      .insert(workSchedules)
+      .values({
+        id: `00000000-0000-4000-8000-35c00000000${day}`,
+        employeeId: E2E_DEPOSIT.employeeId,
+        dayOfWeek: day,
+        startTime: "08:00",
+        endTime: "20:00",
+      })
+      .onConflictDoUpdate({
+        target: workSchedules.id,
+        set: { employeeId: E2E_DEPOSIT.employeeId, dayOfWeek: day, startTime: "08:00", endTime: "20:00" },
+      });
+  }
+
+  // Promocje: dwie zamrozone (happy_hours obejmujace kazdy termin, package)
+  // i jedna dozwolona (percentage) jako kontrola, ze lista w ogole sie laduje.
+  // Happy hours 50% przez cala dobe, codziennie, bez dat: gdyby zamrozenie
+  // przestalo dzialac, zadatek testu spadlby z 60 do 30 PLN.
+  const promotionData = [
+    {
+      id: E2E_PROMOTIONS.happyHoursId,
+      name: "Happy Hours -50% (E2E, zamrozona)",
+      type: "happy_hours",
+      value: "50",
+      conditionsJson: { daysOfWeek: [], startTime: "00:00", endTime: "23:59" },
+    },
+    {
+      id: E2E_PROMOTIONS.packageId,
+      name: "Pakiet strzyzenie + manicure (E2E, zamrozona)",
+      type: "package",
+      value: "150",
+      conditionsJson: {
+        packageServiceIds: ["00000000-0000-4000-8000-5e0000000001", "00000000-0000-4000-8000-5e0000000003"],
+        packagePrice: 150,
+      },
+    },
+    {
+      id: E2E_PROMOTIONS.percentageId,
+      name: "Rabat 10% (E2E)",
+      type: "percentage",
+      value: "10",
+      conditionsJson: {},
+    },
+  ];
+
+  for (const promo of promotionData) {
+    await db
+      .insert(promotions)
+      .values({
+        id: promo.id,
+        salonId: SALON_ID,
+        name: promo.name,
+        type: promo.type,
+        value: promo.value,
+        startDate: null,
+        endDate: null,
+        conditionsJson: promo.conditionsJson,
+        isActive: true,
+      })
+      .onConflictDoUpdate({
+        target: promotions.id,
+        set: {
+          salonId: SALON_ID,
+          name: promo.name,
+          type: promo.type,
+          value: promo.value,
+          startDate: null,
+          endDate: null,
+          conditionsJson: promo.conditionsJson,
+          isActive: true,
+        },
+      });
+  }
+
+  const promoCodeData = [
+    { id: E2E_PROMOTIONS.happyHoursCodeId, code: "E2E-HAPPY", promotionId: E2E_PROMOTIONS.happyHoursId },
+    { id: E2E_PROMOTIONS.percentageCodeId, code: "E2E-RABAT10", promotionId: E2E_PROMOTIONS.percentageId },
+  ];
+  for (const pc of promoCodeData) {
+    await db
+      .insert(promoCodes)
+      .values({ id: pc.id, salonId: SALON_ID, code: pc.code, promotionId: pc.promotionId, usageLimit: null, usedCount: 0, expiresAt: null })
+      .onConflictDoUpdate({
+        target: promoCodes.id,
+        set: { salonId: SALON_ID, code: pc.code, promotionId: pc.promotionId, usageLimit: null, usedCount: 0, expiresAt: null },
+      });
+  }
+
+  console.log("[seed-test] Created E2E deposit service + employee schedule, 3 promotions (2 frozen), 2 promo codes");
 
   console.log("[seed-test] Seed completed successfully!");
   await sql.end();
