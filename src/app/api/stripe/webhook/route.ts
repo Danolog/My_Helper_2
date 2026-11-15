@@ -6,6 +6,7 @@ import Stripe from "stripe";
 import { db } from "@/lib/db";
 import { confirmDepositPayment } from "@/lib/deposit-confirmation";
 import { logger } from "@/lib/logger";
+import { toErrorIdentity } from "@/lib/safe-error";
 import {
   appointments,
   depositPayments,
@@ -123,6 +124,7 @@ function getPaymentIntentIdFromInvoice(invoice: RawInvoiceData, fallback: string
  * The webhook secret is used to verify the event signature.
  */
 export async function POST(request: Request) {
+  let received: { eventId: string; eventType: string } | undefined;
   try {
     const body = await request.text();
     const stripe = getStripe();
@@ -163,6 +165,7 @@ export async function POST(request: Request) {
       );
     }
 
+    received = { eventId: event.id, eventType: event.type };
     logger.info("Stripe webhook event received", { eventType: event.type, eventId: event.id });
 
     switch (event.type) {
@@ -197,7 +200,10 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ received: true });
   } catch (error) {
-    logger.error("Stripe webhook processing failed", { error });
+    // N1 (Ryan, #62): ten catch obsługuje też zadatki (dane gości w
+    // parametrach zapytań) — w logu tylko nazwa i kod błędu oraz id
+    // zdarzenia (pełne zdarzenie jest w panelu Stripe), bez message/stack.
+    logger.error("Stripe webhook processing failed", { ...toErrorIdentity(error), ...received });
     return NextResponse.json(
       { error: "Webhook processing failed" },
       { status: 500 }

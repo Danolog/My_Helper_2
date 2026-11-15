@@ -1,0 +1,204 @@
+/**
+ * `subscriptions/downgrade` (POST, DELETE) i `subscriptions/expiration-warning`
+ * (POST) — odczyt „active” i zapis pod blokadą salonu (T3b; Ethan,
+ * `scratchpad/ethan/pr62-shape.md` §1 „Poza tym PR, ale to ten sam wyścig”).
+ *
+ * Bez blokady zapis trasy mógł się przepleść z webhookiem, który w tym czasie
+ * zmienia stan tej subskrypcji (utrata zapisu / decyzja na nieaktualnym
+ * „active”). Te trasy nie wołają Stripe, więc biorą TYLKO blokadę salonu —
+ * zgodnie z regułą kolejności (`subscription-locks.ts`).
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
+import { DELETE as cancelDowngrade, POST as downgrade } from "@/app/api/subscriptions/downgrade/route";
+import { POST as expirationWarning } from "@/app/api/subscriptions/expiration-warning/route";
+import { createMockRequest } from "./helpers";
+
+const f = await vi.hoisted(async () =>
+  (await import("./subscription-db-fake")).createSubscriptionDbFake()
+);
+const { mockRequireAuth, mockGetUserSalonId } = vi.hoisted(() => ({
+  mockRequireAuth: vi.fn(),
+  mockGetUserSalonId: vi.fn(),
+}));
+
+vi.mock("@/lib/db", () => ({ db: f.db }));
+vi.mock("@/lib/auth-middleware", () => ({
+  requireAuth: (...args: unknown[]) => mockRequireAuth(...args),
+  isAuthError: (r: unknown) => r instanceof NextResponse,
+}));
+vi.mock("@/lib/get-user-salon", () => ({
+  getUserSalonId: (...args: unknown[]) => mockGetUserSalonId(...args),
+}));
+vi.mock("@/lib/logger", () => ({
+  logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+}));
+
+const PLAN_PRO = { id: "plan-pro", name: "Pro", slug: "pro", priceMonthly: "149.00", isActive: true };
+const PLAN_BASIC = { id: "plan-basic", name: "Basic", slug: "basic", priceMonthly: "49.00", isActive: true };
+const PERIOD_END = new Date(Date.now() + 20 * 24 * 3600 * 1000);
+const ACTIVE = {
+  id: "sub-local",
+  salonId: "salon-1",
+  planId: PLAN_PRO.id,
+  status: "active",
+  stripeSubscriptionId: "sub_1",
+  currentPeriodEnd: PERIOD_END,
+  scheduledPlanId: null,
+  scheduledChangeAt: null,
+};
+const LOCKED_PREFIX = ["lock_timeout", "lock:salon:salon-1"];
+const subWrites = () => f.committed.filter((w) => w.table === "salon_subscriptions");
+
+async function call(handler: (r: Request) => Promise<Response>, method: string, body?: unknown) {
+  const res = await handler(
+    createMockRequest("http://localhost:3000/api/subscriptions/x", { method, body }) as unknown as Request
+  );
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  f.reset();
+  mockRequireAuth.mockResolvedValue({ user: { id: "user-1" } });
+  mockGetUserSalonId.mockResolvedValue("salon-1");
+});
+
+describe("POST /api/subscriptions/downgrade — pod blokadą salonu", () => {
+  it("200: Pro → Basic na koniec okresu; odczyt i zapis po blokadzie salonu, w jednej transakcji", async () => {
+    f.selects.push([{ subscription: ACTIVE, plan: PLAN_PRO }], [PLAN_BASIC]);
+
+    const { status, body } = await call(downgrade, "POST", { targetPlanSlug: "basic" });
+
+    expect(status).toBe(200);
+    expect(body).toEqual(expect.objectContaining({ success: true, currentPlan: "pro", targetPlan: "basic" }));
+    expect(f.log).toEqual([...LOCKED_PREFIX, "select", "select", "update:salon_subscriptions", "commit"]);
+    expect(subWrites()[0]?.values).toEqual({ scheduledPlanId: PLAN_BASIC.id, scheduledChangeAt: PERIOD_END });
+  });
+
+  it.each([
+    ["404 bez aktywnej subskrypcji", [[]], "pro", 404],
+    ["409 ten sam plan", [[{ subscription: ACTIVE, plan: PLAN_BASIC }]], "basic", 409],
+    ["404 plan docelowy nie istnieje / nieaktywny", [[{ subscription: ACTIVE, plan: PLAN_PRO }], []], "basic", 404],
+    ["400 to nie jest obniżenie", [[{ subscription: ACTIVE, plan: PLAN_BASIC }], [PLAN_PRO]], "pro", 400],
+  ] as const)("%s → zero zapisów (decyzja pod blokadą)", async (_n, selects, target, expected) => {
+    f.selects.push(...(selects as unknown as unknown[][]));
+
+    const { status } = await call(downgrade, "POST", { targetPlanSlug: target });
+
+    expect(status).toBe(expected);
+    expect(f.committed).toEqual([]);
+    expect(f.log.slice(0, 2)).toEqual(LOCKED_PREFIX);
+  });
+
+  it.each(["40P01", "55P03"])("503: %s przy blokadzie → LOCK_BUSY, bez odczytu i zapisu", async (code) => {
+    f.state.failNextLock = { code };
+    f.selects.push([{ subscription: ACTIVE, plan: PLAN_PRO }], [PLAN_BASIC]);
+
+    const { status, body } = await call(downgrade, "POST", { targetPlanSlug: "basic" });
+
+    expect(status).toBe(503);
+    expect(body.code).toBe("LOCK_BUSY");
+    expect(f.log).not.toContain("select");
+    expect(f.committed).toEqual([]);
+  });
+
+  it("500: błąd bazy przy zapisie → rollback", async () => {
+    f.state.failNextSubscriptionWrite = { code: "XX000" };
+    f.selects.push([{ subscription: ACTIVE, plan: PLAN_PRO }], [PLAN_BASIC]);
+
+    const { status } = await call(downgrade, "POST", { targetPlanSlug: "basic" });
+
+    expect(status).toBe(500);
+    expect(f.committed).toEqual([]);
+    expect(f.log.at(-1)).toBe("rollback");
+  });
+
+  it("400 przy niepoprawnym body — bez transakcji", async () => {
+    const { status } = await call(downgrade, "POST", { targetPlanSlug: 42 });
+    expect(status).toBe(400);
+    expect(f.state.transactions).toBe(0);
+  });
+
+  it("401 bez sesji, 404 bez salonu", async () => {
+    mockRequireAuth.mockResolvedValueOnce(NextResponse.json({ error: "Unauthorized" }, { status: 401 }));
+    expect((await call(downgrade, "POST", { targetPlanSlug: "basic" })).status).toBe(401);
+    mockGetUserSalonId.mockResolvedValueOnce(null);
+    expect((await call(downgrade, "POST", { targetPlanSlug: "basic" })).status).toBe(404);
+    expect(f.state.transactions).toBe(0);
+  });
+});
+
+describe("DELETE /api/subscriptions/downgrade — pod blokadą salonu", () => {
+  it("200: czyści zaplanowane obniżenie po blokadzie salonu", async () => {
+    f.selects.push([{ ...ACTIVE, scheduledPlanId: PLAN_BASIC.id, scheduledChangeAt: PERIOD_END }]);
+
+    const res = await cancelDowngrade();
+
+    expect(res.status).toBe(200);
+    expect(f.log).toEqual([...LOCKED_PREFIX, "select", "update:salon_subscriptions", "commit"]);
+    expect(subWrites()[0]?.values).toEqual({ scheduledPlanId: null, scheduledChangeAt: null });
+  });
+
+  it("404: brak zaplanowanego obniżenia → bez zapisu", async () => {
+    f.selects.push([ACTIVE]);
+    expect((await cancelDowngrade()).status).toBe(404);
+    expect(f.committed).toEqual([]);
+  });
+
+  it("503: 55P03 przy blokadzie → LOCK_BUSY", async () => {
+    f.state.failNextLock = { code: "55P03" };
+    expect((await cancelDowngrade()).status).toBe(503);
+    expect(f.committed).toEqual([]);
+  });
+});
+
+describe("POST /api/subscriptions/expiration-warning — zapis symulacji pod blokadą salonu", () => {
+  it("simulate: zapis okresu po blokadzie salonu i commit, powiadomienia dopiero po transakcji", async () => {
+    f.selects.push([{ subscription: ACTIVE, plan: PLAN_PRO }]);
+
+    const { status, body } = await call(expirationWarning, "POST", { simulate: true });
+
+    expect(status).toBe(200);
+    expect(body.isNearExpiry).toBe(true);
+    expect(f.log.slice(0, 5)).toEqual([...LOCKED_PREFIX, "select", "update:salon_subscriptions", "commit"]);
+    expect(f.log.slice(5)).toEqual(["insert:other", "insert:other"]);
+    expect(subWrites()[0]?.values).toEqual({ currentPeriodEnd: expect.any(Date) });
+  });
+
+  it("bez simulate, daleko do końca okresu: odczyt pod blokadą, zero zapisów", async () => {
+    f.selects.push([{ subscription: ACTIVE, plan: PLAN_PRO }]);
+
+    const { status, body } = await call(expirationWarning, "POST", {});
+
+    expect(status).toBe(200);
+    expect(body.warnings).toEqual([]);
+    expect(f.log).toEqual([...LOCKED_PREFIX, "select", "commit"]);
+    expect(f.committed).toEqual([]);
+  });
+
+  it("brak aktywnej subskrypcji → 200 bez zapisu", async () => {
+    f.selects.push([]);
+    const { status, body } = await call(expirationWarning, "POST", { simulate: true });
+    expect(status).toBe(200);
+    expect(body.message).toBe("Brak aktywnej subskrypcji");
+    expect(f.committed).toEqual([]);
+  });
+
+  it("503: 40P01 przy blokadzie → LOCK_BUSY, bez zapisu i bez powiadomień", async () => {
+    f.state.failNextLock = { code: "40P01" };
+    f.selects.push([{ subscription: ACTIVE, plan: PLAN_PRO }]);
+
+    const { status, body } = await call(expirationWarning, "POST", { simulate: true });
+
+    expect(status).toBe(503);
+    expect(body.code).toBe("LOCK_BUSY");
+    expect(f.committed).toEqual([]);
+  });
+
+  it("400 przy niepoprawnym body — bez transakcji", async () => {
+    const { status } = await call(expirationWarning, "POST", { warningDays: "dużo" });
+    expect(status).toBe(400);
+    expect(f.state.transactions).toBe(0);
+  });
+});
