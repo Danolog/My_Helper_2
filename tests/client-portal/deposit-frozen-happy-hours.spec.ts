@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Browser, Page } from '@playwright/test';
 
 import { test, expect } from '../fixtures';
 
@@ -15,8 +15,13 @@ import { test, expect } from '../fixtures';
 // Bez wywolan zewnetrznych: serwer E2E w CI dziala BEZ STRIPE_SECRET_KEY, wiec
 // create-session idzie sciezka "simulated" (bez Stripe). Test to sprawdza
 // (simulated === true). Lokalnie: uruchamiaj serwer z pustym STRIPE_SECRET_KEY.
-// Zapis do bazy: udane create-session tworzy wizyte "scheduled" bez wplaty
-// (jak prawdziwa rezerwacja); kolejny przebieg bierze nastepny wolny termin.
+// Zapis do bazy: udane create-session tworzy wizyte "scheduled" bez wplaty.
+// Sprzatanie: afterEach anuluje ja przez DELETE /api/appointments/[id] (sesja
+// wlasciciela) — to ten sam stan koncowy, ktory dla nieoplaconego zadatku
+// ustawia webhook Stripe albo cron cleanup-pending-deposits (status
+// "cancelled"), tylko od razu. Termin wraca do puli, nic "scheduled" nie
+// zostaje. Unikalne dane per przebieg nic by nie daly: kazdy przebieg i tak
+// zostawialby wizyte "scheduled", tylko na innym terminie.
 
 const SALON_ID = '00000000-0000-4000-8000-000000000001';
 const SERVICE_ID = '00000000-0000-4000-8000-5e0000000004';
@@ -24,7 +29,7 @@ const EMPLOYEE_ID = '00000000-0000-4000-8000-e00000000003';
 const FULL_PRICE_DEPOSIT = 60; // 30% z 200 PLN
 const HAPPY_HOURS_DEPOSIT = 30; // 30% z 100 PLN (200 PLN - 50%) — kwota, ktorej NIE wolno przyjac
 
-type CreateSessionJson = { success: boolean; data?: { simulated?: boolean; paymentUrl?: string }; error?: string; details?: unknown };
+type CreateSessionJson = { success: boolean; data?: { simulated?: boolean; paymentUrl?: string; appointmentId?: string }; error?: string; details?: unknown };
 
 function tomorrowInWarsaw(): string {
   const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -70,14 +75,37 @@ async function postCreateSession(page: Page, amount: number, localStart: string)
           guestName: 'Gosc E2E', guestPhone: '+48500600700',
         }),
       });
-      return { status: res.status, json: (await res.json()) as { success: boolean; data?: { simulated?: boolean }; error?: string } };
+      return { status: res.status, json: (await res.json()) as { success: boolean; data?: { simulated?: boolean; appointmentId?: string }; error?: string } };
     },
     { salonId: SALON_ID, serviceId: SERVICE_ID, employeeId: EMPLOYEE_ID, amount, localStart }
   );
 }
 
+/** Anuluje wizyty jako wlasciciel salonu (portal biegnie bez sesji wlasciciela). */
+async function cancelAsOwner(browser: Browser, baseURL: string, appointmentIds: string[]) {
+  const context = await browser.newContext({ storageState: 'tests/.auth/owner.json', baseURL });
+  try {
+    const page = await context.newPage();
+    await page.goto('/dashboard', { waitUntil: 'domcontentloaded' }); // ustawia ciasteczka CSRF
+    const token = (await context.cookies()).find((c) => c.name === 'csrf-token')?.value ?? '';
+    for (const id of appointmentIds) {
+      const res = await page.request.delete(`/api/appointments/${id}`, { headers: { 'x-csrf-token': decodeURIComponent(token) } });
+      expect(res.status(), `sprzatanie: anulowanie wizyty ${id}: ${await res.text()}`).toBe(200);
+    }
+  } finally {
+    await context.close();
+  }
+}
+
 test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
   test.use({ timezoneId: 'Europe/Warsaw' });
+
+  let createdAppointmentIds: string[] = [];
+  test.afterEach(async ({ browser, baseURL }) => {
+    const ids = createdAppointmentIds;
+    createdAppointmentIds = [];
+    if (ids.length > 0) await cancelAsOwner(browser, baseURL!, ids);
+  });
 
   test.beforeEach(async ({ page }) => {
     test.skip(!!process.env.STRIPE_SECRET_KEY, 'Serwer E2E ma dzialac bez STRIPE_SECRET_KEY (jak CI) — inaczej create-session wola Stripe');
@@ -102,6 +130,7 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
 
     // Pelna cena: przyjeta, sciezka bez Stripe.
     const accepted = await postCreateSession(page, FULL_PRICE_DEPOSIT, localStart);
+    if (accepted.json.data?.appointmentId) createdAppointmentIds.push(accepted.json.data.appointmentId);
     expect(accepted.status, `create-session z pelna cena: ${JSON.stringify(accepted.json)}`).toBe(201);
     expect(accepted.json.success).toBe(true);
     expect(accepted.json.data?.simulated, 'serwer poszedl sciezka Stripe — uruchom go bez STRIPE_SECRET_KEY').toBe(true);
@@ -125,6 +154,7 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
       sentBody = route.request().postDataJSON();
       const response = await route.fetch();
       created = { status: response.status(), json: await response.json() };
+      if (created.json.data?.appointmentId) createdAppointmentIds.push(created.json.data.appointmentId);
       await route.fulfill({ response });
     });
 
