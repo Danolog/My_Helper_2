@@ -67,9 +67,12 @@ const API_DIR_NAMES: Record<string, RegExp | null> = {
   // blokowane: płatne generowanie mowy i wideo nie może być osiągalne.
   // B3: kod głosu usunięty — tras /api/ai/voice nie ma (removed-features.test.ts).
   voiceAi: null,
-  videoGen: /\/ai\/video(\/|$)/,
-  fiscal: /fiscal/,
-  socialPosts: /scheduled-posts|social-post/,
+  // B4: wideo usunięte — tras /api/ai/video nie ma (removed-features.test.ts).
+  videoGen: null,
+  // B5: fiskalizacja usunięta — tras nie ma (removed-features.test.ts).
+  fiscal: null,
+  // B4: publikacja postów usunięta — tras nie ma (removed-features.test.ts).
+  socialPosts: null,
   // Promocje złożone: trasy sprawdzające (2+1, happy hours, pakiet, pierwsza
   // wizyta) i rezerwacja pakietu. Lista i edycja promocji zostają.
   complexPromotions: /^\/api\/promotions\/check|\/book-package(\/|$)/,
@@ -157,15 +160,6 @@ describe("frozenModuleForApiPath", () => {
     ["/api/push/test", "pushNotifications"],
     ["/api/cron/push-reminders", "pushNotifications"],
     ["/api/cron/push-reminders-24h", "pushNotifications"],
-    ["/api/appointments/abc/fiscal-receipt", "fiscal"],
-    ["/api/ai/video/generate", "videoGen"],
-    ["/api/ai/video/status/abc", "videoGen"],
-    ["/api/scheduled-posts", "socialPosts"],
-    ["/api/scheduled-posts/abc", "socialPosts"],
-    ["/api/ai/content/social-post", "socialPosts"],
-    ["/api/cron/publish-scheduled-posts", "socialPosts"],
-    ["/api/salons/abc/fiscal-settings", "fiscal"],
-    ["/api/salons/abc/fiscal-settings/test-print", "fiscal"],
     ["/api/promotions/check", "complexPromotions"],
     ["/api/promotions/check-happy-hours", "complexPromotions"],
     ["/api/promotions/check-package", "complexPromotions"],
@@ -295,6 +289,12 @@ describe("frozenModuleForPage", () => {
     ["/dashboard/settings/loyalty", "loyalty"],
     ["/dashboard/content-generator/newsletters", "newsletters"],
     ["/dashboard/ai-assistant/voice", "voiceAi"],
+    // B4: strony usunięte — otwarta karta dostaje przekierowanie, nie 404.
+    ["/dashboard/content-generator/social-posts", "socialPosts"],
+    ["/dashboard/content-generator/scheduled", "socialPosts"],
+    ["/dashboard/content-generator/templates", "socialPosts"],
+    ["/dashboard/content-generator/testimonials", "videoGen"],
+    // B5: strona usunięta — otwarta karta dostaje przekierowanie, nie 404.
     ["/dashboard/settings/fiscal", "fiscal"],
     ["/Dashboard/Invoices", "invoices"],
     ["/dashboard//invoices", "invoices"],

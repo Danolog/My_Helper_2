@@ -5,33 +5,27 @@ import {
   Pencil,
   CheckCircle,
   FileText,
-  Printer,
-  Receipt,
 } from "lucide-react";
 import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { Button } from "@/components/ui/button";
-import type { AppointmentDetail, InvoiceData, FiscalReceiptData } from "./types";
+import type { AppointmentDetail, InvoiceData } from "./types";
 
 interface AppointmentHeaderProps {
   appointment: AppointmentDetail;
   invoice: InvoiceData | null;
-  fiscalReceipt: FiscalReceiptData | null;
   onBack: () => void;
   onEdit: () => void;
   onComplete: () => void;
   onInvoiceAction: () => void;
-  onReceiptAction: () => void;
 }
 
 export function AppointmentHeader({
   appointment,
   invoice,
-  fiscalReceipt,
   onBack,
   onEdit,
   onComplete,
   onInvoiceAction,
-  onReceiptAction,
 }: AppointmentHeaderProps) {
   const startDate = new Date(appointment.startTime);
   const isActive = appointment.status !== "completed" && appointment.status !== "cancelled";
@@ -39,8 +33,6 @@ export function AppointmentHeader({
   // Faktury to moduł z rejestru (src/lib/features.ts) — wyłączony albo
   // zamrożony chowa przyciski faktury.
   const invoicesEnabled = useModuleEnabled("invoices");
-  // Fiskalizacja tak samo: wyłączona albo zamrożona chowa przyciski paragonu.
-  const fiscalEnabled = useModuleEnabled("fiscal");
 
   return (
     <div className="flex items-center gap-4 mb-6">
@@ -104,25 +96,6 @@ export function AppointmentHeader({
               >
                 <FileText className="h-4 w-4 mr-2" />
                 Generuj fakture
-              </Button>
-            ))}
-          {fiscalEnabled &&
-            (fiscalReceipt ? (
-              <Button
-                variant="outline"
-                onClick={onReceiptAction}
-                data-testid="view-receipt-btn"
-              >
-                <Receipt className="h-4 w-4 mr-2" />
-                Podglad paragonu
-              </Button>
-            ) : (
-              <Button
-                onClick={onReceiptAction}
-                data-testid="print-receipt-btn"
-              >
-                <Printer className="h-4 w-4 mr-2" />
-                Drukuj paragon
               </Button>
             ))}
         </div>

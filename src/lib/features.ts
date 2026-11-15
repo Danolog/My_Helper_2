@@ -113,7 +113,7 @@ export const MODULES: readonly ModuleDef[] = [
   // --- wyłączone globalnie (na później) ---
   {
     key: "voiceAi",
-    label: "Asystent głosowy (Twilio)",
+    label: "Asystent głosowy",
     description: "Przyjmowanie rezerwacji telefonicznych przez AI.",
     defaultEnabled: false,
     hardOff: true,
@@ -297,11 +297,14 @@ export const ROUTE_MODULE_MAP: ReadonlyArray<{ prefix: string; module: ModuleKey
   { prefix: "/dashboard/waiting-list", module: "waitingList" },
   { prefix: "/dashboard/invoices", module: "invoices" },
   { prefix: "/dashboard/settings/loyalty", module: "loyalty" },
+  // B5: strona fiskalizacji usunięta — otwarta karta wraca na pulpit.
   { prefix: "/dashboard/settings/fiscal", module: "fiscal" },
   { prefix: "/dashboard/content-generator/newsletters", module: "newsletters" },
   { prefix: "/dashboard/content-generator/social-posts", module: "socialPosts" },
   { prefix: "/dashboard/content-generator/scheduled", module: "socialPosts" },
   { prefix: "/dashboard/content-generator/testimonials", module: "videoGen" },
+  // B4: strona szablonów usunięta razem z social — otwarta karta wraca na pulpit.
+  { prefix: "/dashboard/content-generator/templates", module: "socialPosts" },
   { prefix: "/dashboard/ai-assistant/voice", module: "voiceAi" },
 ];
 
@@ -358,15 +361,9 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
     pattern: /^\/api\/ai\/image\/(generate|banner|service-illustration)(\/|$)/,
     module: "imageGen",
   },
-  // Moduły zamrożone wcześniej (kod kasowany w B3–B5). Paragon wizyty jest
-  // schowany w interfejsie przez useModuleEnabled("fiscal"). Głos (voiceAi)
-  // usunięty w B3 — tras nie ma, wzorca też (strażnik: removed-features).
-  { pattern: /^\/api\/ai\/video(\/|$)/, module: "videoGen" },
-  { pattern: /^\/api\/scheduled-posts(\/|$)/, module: "socialPosts" },
-  { pattern: /^\/api\/ai\/content\/social-post(\/|$)/, module: "socialPosts" },
-  { pattern: /^\/api\/cron\/publish-scheduled-posts(\/|$)/, module: "socialPosts" },
-  { pattern: /^\/api\/salons\/[^/]+\/fiscal-settings(\/|$)/, module: "fiscal" },
-  { pattern: /^\/api\/appointments\/[^/]+\/fiscal-receipt(\/|$)/, module: "fiscal" },
+  // Moduły zamrożone wcześniej i usunięte w B3–B5: głos (voiceAi, B3), wideo
+  // (videoGen) i publikacja postów (socialPosts, B4), fiskalizacja (fiscal,
+  // B5) — tras nie ma, wzorców też (strażnik: removed-features).
 ];
 
 export interface FrozenTarget {

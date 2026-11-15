@@ -27,12 +27,10 @@ function renderHeader(opts: {
       <AppointmentHeader
         appointment={{ ...appointment, status: opts.status ?? "completed" }}
         invoice={opts.invoice ?? null}
-        fiscalReceipt={null}
         onBack={vi.fn()}
         onEdit={vi.fn()}
         onComplete={vi.fn()}
         onInvoiceAction={vi.fn()}
-        onReceiptAction={vi.fn()}
       />
     </ModulesProvider>
   );
@@ -62,7 +60,7 @@ describe("AppointmentHeader — faktury zamrożone", () => {
     expect(screen.getByTestId("back-btn")).toBeInTheDocument();
   });
 
-  it("fiskalizacja zamrożona: nie ma przycisków paragonu", () => {
+  it("fiskalizacja usunięta (B5): nie ma przycisków paragonu", () => {
     renderHeader({});
 
     expect(screen.queryByTestId("print-receipt-btn")).not.toBeInTheDocument();
@@ -70,10 +68,12 @@ describe("AppointmentHeader — faktury zamrożone", () => {
     expect(document.body.textContent).not.toMatch(/paragon/i);
   });
 
-  it("kontrola: przy module fiskalizacji włączonym przycisk paragonu wraca", () => {
+  it("fiskalizacja usunięta (B5): flaga fiscal w stanie modułów nie przywraca przycisków paragonu", () => {
     renderHeader({ modules: { ...DEFAULT_MODULES, fiscal: true } });
 
-    expect(screen.getByTestId("print-receipt-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("print-receipt-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("view-receipt-btn")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/paragon/i);
   });
 
   it("kontrola: przy module faktur włączonym przyciski wracają", () => {

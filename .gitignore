@@ -80,3 +80,4 @@ memory/
 
 # Katalog roboczy agentow (pliki tymczasowe, nie commitowac)
 scratchpad/
+/test-results.json

@@ -9,12 +9,8 @@ const AI_PAGES = [
   { path: '/dashboard/ai-assistant', name: 'AI Assistant Hub' },
   { path: '/dashboard/ai-assistant/business', name: 'Business Intelligence' },
   { path: '/dashboard/ai-assistant/trends', name: 'Trend Analysis' },
-  { path: '/dashboard/ai-assistant/voice', name: 'Voice Assistant' },
   { path: '/dashboard/content-generator', name: 'Content Generator Hub' },
-  { path: '/dashboard/content-generator/social-posts', name: 'Social Posts' },
   { path: '/dashboard/content-generator/newsletters', name: 'Newsletters' },
-  { path: '/dashboard/content-generator/templates', name: 'Templates' },
-  { path: '/dashboard/content-generator/scheduled', name: 'Scheduled Posts' },
   { path: '/dashboard/ai-recommendations', name: 'AI Recommendations' },
 ];
 
@@ -24,6 +20,11 @@ const FROZEN_PAGES = [
   { path: '/dashboard/content-generator/social-posts', name: 'Social Posts' },
   { path: '/dashboard/content-generator/newsletters', name: 'Newsletters' },
   { path: '/dashboard/content-generator/scheduled', name: 'Scheduled Posts' },
+  // B4: strony usunięte (social, testimoniale, szablony) — prefiks zostaje w ROUTE_MODULE_MAP.
+  { path: '/dashboard/content-generator/templates', name: 'Templates' },
+  { path: '/dashboard/content-generator/testimonials', name: 'Testimonials' },
+  // B5: strona fiskalizacji usunięta — prefiks zostaje, otwarta karta wraca na pulpit.
+  { path: '/dashboard/settings/fiscal', name: 'Fiscal Settings' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -99,15 +100,6 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display templates page', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/dashboard/content-generator/templates');
-      await page.waitForLoadState('domcontentloaded');
-
-      await expect(
-        page.getByText(/szablon|template/i).first()
-      ).toBeVisible({ timeout: 5000 });
-    });
-
     test('should show AI chat input for Pro users', { tag: '@full' }, async ({ page }) => {
       await page.goto('/dashboard/ai-assistant/business');
       await page.waitForLoadState('domcontentloaded');
@@ -159,19 +151,6 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
       if (await submitBtn.isVisible()) {
         await submitBtn.click();
         // Should not crash
-        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
-      }
-    });
-
-    test('should handle AI content generation without required fields', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/dashboard/content-generator/social-posts');
-      await page.waitForLoadState('domcontentloaded');
-
-      // Try to generate without filling required fields
-      const generateBtn = page.getByRole('button', { name: /generuj|generate|utw[oó]rz|create/i }).first();
-      if (await generateBtn.isVisible()) {
-        await generateBtn.click();
-        // Should show validation error, not crash
         await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
       }
     });

@@ -89,7 +89,6 @@ const mockProcessAutomaticRefund = vi.fn().mockResolvedValue({
   refunded: false,
   message: "Mock refund",
 });
-const mockCreateRefundNotification = vi.fn().mockResolvedValue(undefined);
 
 const mockSessionsExpire = vi.fn().mockResolvedValue({ status: "expired" });
 vi.mock("@/lib/stripe", () => ({
@@ -98,7 +97,6 @@ vi.mock("@/lib/stripe", () => ({
 
 vi.mock("@/lib/refund", () => ({
   refundAppointmentDeposits: (...args: unknown[]) => mockProcessAutomaticRefund(...args),
-  createRefundNotification: (...args: unknown[]) => mockCreateRefundNotification(...args),
 }));
 
 // Mock waiting list (used in DELETE)
@@ -1886,6 +1884,36 @@ describe("PUT /api/appointments/[id]", () => {
     expect(body.message).toContain("rescheduled");
   });
 
+  // Ryan (hotfix P1, dane osobowe w logach): PUT logował cały updateData —
+  // z wolnym tekstem notatki o kliencie — do logów produkcyjnych.
+  it("PII: log aktualizacji wizyty nie zawiera treści notatki, tylko nazwy pól", async () => {
+    const PII_NOTE = "Anna Kowalska, tel. 600123456, alergia na lateks";
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {})
+    );
+    try {
+      mockDbSelect
+        .mockReturnValueOnce(chainMock([makeAppointment()]))
+        .mockReturnValueOnce(chainMock([]));
+      mockDbUpdate.mockReturnValue(chainMock([makeAppointment({ notes: PII_NOTE })]));
+
+      const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+        method: "PUT",
+        body: { notes: PII_NOTE },
+      });
+      const response = await updateAppointment(request, createRouteParams(TEST_IDS.APPOINTMENT_UUID));
+      expect(response.status).toBe(200);
+
+      const logged = spies.flatMap((s) => s.mock.calls).map((args) => JSON.stringify(args)).join("\n");
+      expect(logged).toContain("Updating appointment");
+      expect(logged).toContain("notes");
+      expect(logged).not.toContain("Kowalska");
+      expect(logged).not.toContain("600123456");
+    } finally {
+      spies.forEach((s) => s.mockRestore());
+    }
+  });
+
   // Ryan (przegląd #90): zapis czyta sparsowane dane, nie surowe body —
   // preprocess schematu zamienia same spacje na null.
   it.each([
@@ -1908,6 +1936,24 @@ describe("PUT /api/appointments/[id]", () => {
 
     expect(response.status).toBe(200);
     expect(updateChain.set).toHaveBeenCalledWith(expect.objectContaining({ notes: saved }));
+  });
+
+  // #95: data bez strefy => 400 przed jakimkolwiek zapytaniem.
+  it.each([
+    ["startTime", { startTime: "2026-04-01T14:00:00", endTime: "2026-04-01T15:00:00Z" }],
+    ["endTime", { startTime: "2026-04-01T14:00:00Z", endTime: "2026-04-01T15:00" }],
+  ])("PUT %s bez strefy => 400, bez zapisu", async (field, body) => {
+    const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+      method: "PUT",
+      body,
+    });
+    const response = await updateAppointment(request, createRouteParams(TEST_IDS.APPOINTMENT_UUID));
+    const { status, body: res } = await parseResponse(response);
+
+    expect(status).toBe(400);
+    expect(res.details).toHaveProperty(field as string);
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbUpdate).not.toHaveBeenCalled();
   });
 
   it("PUT bez pola notes nie rusza notatek", async () => {
@@ -2168,7 +2214,6 @@ describe("DELETE /api/appointments/[id]", () => {
       expect(sms[0]!.message).toBe(
         "Salon Lodz: Twoja wizyta Strzyzenie 17 listopada 2026 zostala odwolana przez salon. Zadatek 50.00 PLN wroci w calosci w ciagu 5-10 dni roboczych."
       );
-      expect(mockCreateRefundNotification).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

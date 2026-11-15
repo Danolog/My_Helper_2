@@ -1,95 +1,162 @@
+import { gcsPublicTarget } from "@/lib/gcs-config";
+import { resolveStorageDriver, type StorageDriver } from "@/lib/storage";
+
 /**
- * Czy adres zdjęcia pochodzi z NASZEGO uploadu galerii?
+ * Czy adres pliku pochodzi z NASZEGO uploadu? (C2b — jedno źródło prawdy)
  *
- * POST /api/gallery/upload zapisuje plik przez lib/storage.upload pod nazwą
- * `<randomUUID>.<ext>` (ext z formatu wykrytego przez sharp: jpg/png/webp/gif)
- * w folderze "gallery". Zwracany adres zależy od środowiska:
- *  - bez BLOB_READ_WRITE_TOKEN: `/uploads/gallery/<uuid>.<ext>` (dysk lokalny),
- *  - z tokenem: `https://<storeId>.public.blob.vercel-storage.com/gallery/<uuid>.<ext>`,
- *    gdzie storeId to 4. segment tokenu (`vercel_blob_rw_<storeId>_<secret>`,
- *    jak parseStoreIdFromReadWriteToken w @vercel/blob). Blob może dokleić
- *    losowy sufiks `-<alnum>` przed rozszerzeniem.
+ * lib/storage.upload zapisuje plik w folderze i zwraca adres zależny od
+ * sterownika (STORAGE_DRIVER, lib/storage.resolveStorageDriver):
+ *  - `local`:       `/uploads/<folder>/<nazwa>`,
+ *  - `gcs`:         `https://storage.googleapis.com/<bucket>/<folder>/<nazwa>`
+ *                   (albo `GCS_PUBLIC_BASE_URL`, zasady w lib/gcs-config),
+ *  - `vercel-blob`: `https://<storeId>.public.blob.vercel-storage.com/<folder>/<nazwa>`,
+ *                   storeId to 4. segment tokenu Blob (`vercel_blob_rw_<storeId>_<secret>`,
+ *                   jak parseStoreIdFromReadWriteToken w @vercel/blob) albo
+ *                   niesekretne `BLOB_STORE_ID`. Blob może dokleić losowy
+ *                   sufiks `-<alnum>` przed rozszerzeniem; GCS nie dokleja.
  *
- * Każdy inny adres jest odrzucany: obce hosty, cudzy store, http, porty,
- * userinfo, query/fragment, traversal. Ten sam walidator ma osłonić trasy,
- * które same pobierają obraz (SSRF) — dlatego allowlista, nie denylista.
+ * `ownUploadOrigins()` zwraca WSZYSTKIE skonfigurowane źródła, nie tylko
+ * bieżący sterownik: w okresie przejściowym (krok D) Vercel z `GCS_BUCKET`
+ * przyjmuje adresy GCS, a Cloud Run z `BLOB_STORE_ID` przyjmuje stare adresy
+ * Blob. Wyjątek: `local` tylko wtedy, gdy upload faktycznie pisze na dysk.
+ * Źródło `vercel-blob` i `BLOB_STORE_ID` znikają w C4 (po migracji adresów).
+ *
+ * Każdy inny adres jest odrzucany: obce hosty, cudzy store/zasobnik, http,
+ * porty, userinfo, query/fragment, `%`, traversal, podfoldery. Ten sam
+ * walidator osłania trasy, które same czytają obraz (SSRF) — allowlista,
+ * nie denylista. Wynik mówi, które źródło pasuje, żeby wywołujący nie
+ * zgadywał drugi raz.
  */
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const UUID_RE = new RegExp(`^${UUID}$`, "i");
 const EXT = "(?:jpg|png|webp|gif)";
-
-const LOCAL_GALLERY_RE = new RegExp(`^/uploads/gallery/${UUID}\\.${EXT}$`, "i");
-const BLOB_GALLERY_PATH_RE = new RegExp(`^/gallery/${UUID}(?:-[A-Za-z0-9]{1,64})?\\.${EXT}$`, "i");
+const BLOB_SUFFIX = "(?:-[A-Za-z0-9]{1,64})?";
 
 const MAX_URL_LENGTH = 500;
+const LOCAL_PREFIX = "/uploads/";
+
+export type OwnUploadOrigin =
+  | { driver: "local"; prefix: string }
+  | { driver: "gcs"; host: string; bucket: string; prefix: string }
+  | { driver: "vercel-blob"; host: string; prefix: string };
+
+export type OwnUploadKind = { folder: "gallery" } | { folder: "enhanced"; salonId: string };
+
+export type OwnUploadMatch =
+  | { ok: true; origin: StorageDriver; objectName: string }
+  | { ok: false };
+
+const NO_MATCH: OwnUploadMatch = { ok: false };
 
 function blobStoreId(): string | null {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) return null;
-  const storeId = token.split("_")[3] ?? "";
+  const fromToken = token ? (token.split("_")[3] ?? "") : "";
+  const storeId = fromToken || process.env.BLOB_STORE_ID?.trim() || "";
   return /^[A-Za-z0-9]+$/.test(storeId) ? storeId.toLowerCase() : null;
 }
 
-/**
- * Wspólny rdzeń: adres w naszym store Blob (https, dokładny host store'u,
- * bez portu/userinfo/query/fragmentu, w postaci kanonicznej) ze ścieżką
- * pasującą do wzorca.
- */
-function isOwnBlobUrl(url: string, pathRe: RegExp): boolean {
-  const storeId = blobStoreId();
-  if (!storeId) return false;
+/** Dokładne źródła adresów naszego uploadu z bieżącej konfiguracji (bez wildcardów). */
+export function ownUploadOrigins(): OwnUploadOrigin[] {
+  const origins: OwnUploadOrigin[] = [];
 
-  let parsed: URL;
+  let driver: StorageDriver | null;
   try {
-    parsed = new URL(url);
+    driver = resolveStorageDriver();
   } catch {
-    return false;
+    // literówka / local w produkcji: upload i tak rzuca — dysku nie przyjmujemy
+    driver = null;
+  }
+  if (driver === "local") origins.push({ driver: "local", prefix: LOCAL_PREFIX });
+
+  let gcs: ReturnType<typeof gcsPublicTarget>;
+  try {
+    gcs = gcsPublicTarget();
+  } catch {
+    gcs = null; // niepoprawna konfiguracja GCS: fail-closed
+  }
+  if (gcs) {
+    origins.push({ driver: "gcs", host: gcs.host, bucket: gcs.bucket, prefix: `${gcs.publicBase}/` });
   }
 
-  return (
-    parsed.protocol === "https:" &&
-    parsed.hostname === `${storeId}.public.blob.vercel-storage.com` &&
-    parsed.port === "" &&
-    parsed.username === "" &&
-    parsed.password === "" &&
-    parsed.search === "" &&
-    parsed.hash === "" &&
-    // porównanie z surowym wejściem: URL normalizuje "..", więc wymagamy,
-    // by adres był już w postaci kanonicznej
-    parsed.href === url &&
-    pathRe.test(parsed.pathname)
-  );
+  const storeId = blobStoreId();
+  if (storeId) {
+    const host = `${storeId}.public.blob.vercel-storage.com`;
+    origins.push({ driver: "vercel-blob", host, prefix: `https://${host}/` });
+  }
+
+  return origins;
+}
+
+/** Wzorzec nazwy obiektu (bez źródła) dla danego folderu. */
+function objectNameRe(kind: OwnUploadKind, driver: StorageDriver): RegExp {
+  const suffix = driver === "vercel-blob" ? BLOB_SUFFIX : "";
+  if (kind.folder === "gallery") {
+    return new RegExp(`^gallery/${UUID}${suffix}\\.${EXT}$`, "i");
+  }
+  // salonId zwalidowany jako UUID przed złożeniem wzorca (bez regex injection)
+  return new RegExp(`^enhanced/enhanced-${kind.salonId}-\\d{13}${suffix}\\.jpg$`, "i");
 }
 
 function isSaneInput(url: unknown): url is string {
   return typeof url === "string" && url.length > 0 && url.length <= MAX_URL_LENGTH;
 }
 
-export function isOwnGalleryUploadUrl(url: string): boolean {
-  if (!isSaneInput(url)) return false;
-
-  // Lokalny storage: tylko gdy upload faktycznie zapisuje na dysk.
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    return LOCAL_GALLERY_RE.test(url);
-  }
-  return isOwnBlobUrl(url, BLOB_GALLERY_PATH_RE);
-}
-
 /**
- * Czy adres to wynik NASZEGO POST /api/ai/image/enhance dla TEGO salonu?
- *
- * Enhance zapisuje `enhanced-<salonId>-<Date.now()>.jpg` w folderze
- * "enhanced" — ale tylko z tokenem Blob; bez tokenu zwraca data URI, którego
- * tu nie przyjmujemy. UI (photo-enhance-dialog) po akceptacji podmienia
- * afterPhotoUrl na ten adres, więc ponowny enhance tego samego zdjęcia
- * wysyła właśnie go. Wiązanie z salonId: salon nie wskaże wyniku innego.
+ * Sprawdza adres względem `ownUploadOrigins()` i wzorca folderu:
+ *  - `{ folder: "gallery" }`: `gallery/<uuid>.<jpg|png|webp|gif>` (POST /api/gallery/upload),
+ *  - `{ folder: "enhanced", salonId }`: `enhanced/enhanced-<salonId>-<13 cyfr>.jpg`
+ *    (POST /api/ai/image/enhance TEGO salonu; lokalnie enhance zwraca data URI,
+ *    więc źródło `local` nie jest tu przyjmowane).
  */
-export function isOwnEnhancedUploadUrl(url: string, salonId: string): boolean {
-  if (!isSaneInput(url) || !process.env.BLOB_READ_WRITE_TOKEN) return false;
-  if (typeof salonId !== "string" || !new RegExp(`^${UUID}$`, "i").test(salonId)) return false;
-  const pathRe = new RegExp(
-    `^/enhanced/enhanced-${salonId}-\\d{13}(?:-[A-Za-z0-9]{1,64})?\\.jpg$`,
-    "i",
-  );
-  return isOwnBlobUrl(url, pathRe);
+export function isOwnUploadUrl(url: unknown, kind: OwnUploadKind): OwnUploadMatch {
+  if (!isSaneInput(url)) return NO_MATCH;
+  if (kind.folder === "enhanced" && (typeof kind.salonId !== "string" || !UUID_RE.test(kind.salonId))) {
+    return NO_MATCH;
+  }
+
+  const origins = ownUploadOrigins();
+
+  // Ścieżka względna: tylko dysk lokalny (bez `//host`, `%`, query — wzorzec jest zakotwiczony).
+  if (url.startsWith("/")) {
+    if (kind.folder !== "gallery" || url.startsWith("//") || url.includes("%")) return NO_MATCH;
+    if (!origins.some((o) => o.driver === "local") || !url.startsWith(LOCAL_PREFIX)) return NO_MATCH;
+    const objectName = url.slice(LOCAL_PREFIX.length);
+    return objectNameRe(kind, "local").test(objectName)
+      ? { ok: true, origin: "local", objectName }
+      : NO_MATCH;
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return NO_MATCH;
+  }
+
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.port !== "" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    // URL normalizuje "..", host i kodowanie — wymagamy postaci kanonicznej
+    parsed.href !== url ||
+    parsed.pathname.includes("%")
+  ) {
+    return NO_MATCH;
+  }
+
+  for (const origin of origins) {
+    if (origin.driver === "local" || parsed.hostname !== origin.host) continue;
+    // GCS: pierwszy segment ścieżki to dokładnie nasz zasobnik (nie `bucket-evil`, nie `bucket.evil`)
+    const pathPrefix = origin.driver === "gcs" ? `/${origin.bucket}/` : "/";
+    if (!parsed.pathname.startsWith(pathPrefix)) continue;
+    const objectName = parsed.pathname.slice(pathPrefix.length);
+    if (objectNameRe(kind, origin.driver).test(objectName)) {
+      return { ok: true, origin: origin.driver, objectName };
+    }
+  }
+  return NO_MATCH;
 }

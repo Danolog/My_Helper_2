@@ -7,7 +7,7 @@
  * the P0-A fix these routes mutated salon settings for ANY authenticated user.
  *
  * We use birthday-settings as the representative route — the other settings
- * routes (fiscal-settings, loyalty-settings, notification-type-settings,
+ * routes (loyalty-settings, notification-type-settings,
  * we-miss-you-settings) share the identical owner-check pattern.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";

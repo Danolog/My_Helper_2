@@ -13,7 +13,6 @@ import {
   AppointmentTreatment,
   AppointmentCommission,
   AppointmentInvoiceCard,
-  AppointmentFiscalReceiptCard,
   AppointmentMaterials,
 } from "@/components/appointments/detail";
 import type {
@@ -24,7 +23,6 @@ import type {
   CommissionRecord,
   RefundStatus,
   InvoiceData,
-  FiscalReceiptData,
 } from "@/components/appointments/detail";
 import { useModuleEnabled } from "@/components/dashboard/modules-provider";
 import { useSalonId } from "@/hooks/use-salon-id";
@@ -42,11 +40,6 @@ const CompleteAppointmentDialog = dynamic(
   { ssr: false },
 );
 
-const FiscalReceiptDialog = dynamic(
-  () => import("@/components/appointments/detail/fiscal-receipt-dialog").then((m) => ({ default: m.FiscalReceiptDialog })),
-  { ssr: false },
-);
-
 const InvoiceDialog = dynamic(
   () => import("@/components/appointments/detail/invoice-dialog").then((m) => ({ default: m.InvoiceDialog })),
   { ssr: false },
@@ -61,8 +54,6 @@ export default function AppointmentDetailPage() {
   // Faktury to modul z rejestru (src/lib/features.ts) — wylaczony albo
   // zamrozony: strona nie pyta API o fakture i nie laduje dialogu.
   const invoicesEnabled = useModuleEnabled("invoices");
-  // Fiskalizacja tak samo: bez pytania o paragon i bez dialogu paragonu.
-  const fiscalEnabled = useModuleEnabled("fiscal");
 
   const [appointment, setAppointment] = useState<AppointmentDetail | null>(null);
   const [materials, setMaterials] = useState<MaterialRecord[]>([]);
@@ -71,10 +62,6 @@ export default function AppointmentDetailPage() {
   const [commission, setCommission] = useState<CommissionRecord | null>(null);
   const [refundStatus, setRefundStatus] = useState<RefundStatus | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Fiscal receipt state
-  const [fiscalReceipt, setFiscalReceipt] = useState<FiscalReceiptData | null>(null);
-  const [receiptDialogOpen, setReceiptDialogOpen] = useState(false);
 
   // Invoice state
   const [invoice, setInvoice] = useState<InvoiceData | null>(null);
@@ -173,20 +160,6 @@ export default function AppointmentDetailPage() {
     }
   }, [appointmentId]);
 
-  const fetchFiscalReceipt = useCallback(async (signal: AbortSignal | null = null) => {
-    if (!fiscalEnabled) return;
-    try {
-      const res = await fetch(`/api/appointments/${appointmentId}/fiscal-receipt`, { signal });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.success && data.hasReceipt) {
-        setFiscalReceipt(data.data);
-      }
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") return;
-    }
-  }, [appointmentId, fiscalEnabled]);
-
   const fetchInvoice = useCallback(async (signal: AbortSignal | null = null) => {
     if (!invoicesEnabled) return;
     try {
@@ -211,10 +184,9 @@ export default function AppointmentDetailPage() {
     fetchTreatment(controller.signal);
     fetchCommission(controller.signal);
     fetchRefundStatus(controller.signal);
-    fetchFiscalReceipt(controller.signal);
     fetchInvoice(controller.signal);
     return () => controller.abort();
-  }, [fetchAppointment, fetchMaterials, fetchProducts, fetchTreatment, fetchCommission, fetchRefundStatus, fetchFiscalReceipt, fetchInvoice]);
+  }, [fetchAppointment, fetchMaterials, fetchProducts, fetchTreatment, fetchCommission, fetchRefundStatus, fetchInvoice]);
 
   // Cross-tab sync: refetch when another tab modifies appointments
   useTabSync("appointments", fetchAppointment);
@@ -278,12 +250,10 @@ export default function AppointmentDetailPage() {
       <AppointmentHeader
         appointment={appointment}
         invoice={invoice}
-        fiscalReceipt={fiscalReceipt}
         onBack={() => router.back()}
         onEdit={() => setEditDialogOpen(true)}
         onComplete={() => setCompleteDialogOpen(true)}
         onInvoiceAction={handleOpenInvoiceDialog}
-        onReceiptAction={() => setReceiptDialogOpen(true)}
       />
 
       <AppointmentInfoCard appointment={appointment} />
@@ -306,13 +276,6 @@ export default function AppointmentDetailPage() {
         <AppointmentInvoiceCard
           invoice={invoice}
           onViewDetails={() => setInvoiceDialogOpen(true)}
-        />
-      )}
-
-      {fiscalReceipt && (
-        <AppointmentFiscalReceiptCard
-          fiscalReceipt={fiscalReceipt}
-          onViewDetails={() => setReceiptDialogOpen(true)}
         />
       )}
 
@@ -341,18 +304,6 @@ export default function AppointmentDetailPage() {
           onOpenChange={setEditDialogOpen}
           appointment={appointment}
           onAppointmentUpdated={fetchAppointment}
-        />
-      )}
-
-      {/* Fiscal Receipt Dialog */}
-      {fiscalEnabled && (
-        <FiscalReceiptDialog
-          open={receiptDialogOpen}
-          onOpenChange={setReceiptDialogOpen}
-          appointment={appointment}
-          fiscalReceipt={fiscalReceipt}
-          totalMaterialCost={totalMaterialCost}
-          onReceiptPrinted={setFiscalReceipt}
         />
       )}
 
