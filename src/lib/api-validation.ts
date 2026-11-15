@@ -5,6 +5,12 @@
  * Returns field-level error messages in Polish for consistency with the UI.
  */
 import { z } from "zod";
+import {
+  PUSH_ENDPOINT_MAX_LENGTH,
+  isValidP256dh,
+  isValidPushAuth,
+  isValidPushEndpoint,
+} from "@/lib/push-subscription";
 import { isOwnGalleryUploadUrl } from "@/lib/upload-url";
 
 // ==========================================
@@ -950,17 +956,29 @@ export const sendInvoiceEmailSchema = z.object({
   email: z.string().email("Nieprawidlowy format adresu email").optional(),
 });
 
+// Endpoint: https + allowlista hostów usług push (lib/push-subscription.ts).
+// Bez niej web-push robił POST na dowolny host:port z bazy (SSRF, P1).
 export const pushSubscribeSchema = z.object({
-  endpoint: requiredString("Endpoint"),
+  endpoint: z
+    .string({ message: "Endpoint jest wymagane" })
+    .min(1, "Endpoint jest wymagane")
+    .max(PUSH_ENDPOINT_MAX_LENGTH, "Endpoint jest zbyt dlugi")
+    .refine(isValidPushEndpoint, "Nieobslugiwany adres uslugi push"),
   keys: z.object({
-    p256dh: requiredString("Klucz p256dh"),
-    auth: requiredString("Klucz auth"),
+    p256dh: requiredString("Klucz p256dh").refine(isValidP256dh, "Nieprawidlowy klucz p256dh"),
+    auth: requiredString("Klucz auth").refine(isValidPushAuth, "Nieprawidlowy klucz auth"),
   }),
   salonId: z.string().optional(),
 });
 
+// Bez allowlisty: usunięcie własnego wiersza jest nieszkodliwe (także starego,
+// nieważnego). Limit długości jak przy subscribe — inaczej długi endpoint
+// WNS/APNs dałoby się zapisać, ale nie wypisać.
 export const pushUnsubscribeSchema = z.object({
-  endpoint: requiredString("Endpoint"),
+  endpoint: z
+    .string({ message: "Endpoint jest wymagane" })
+    .min(1, "Endpoint jest wymagane")
+    .max(PUSH_ENDPOINT_MAX_LENGTH, "Endpoint jest zbyt dlugi"),
 });
 
 export const temporaryAccessSchema = z.object({
