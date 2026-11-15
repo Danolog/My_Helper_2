@@ -95,6 +95,12 @@ const REMOVED_ENV = [
   "AI_MONTHLY_VIDEO_LIMIT",
 ];
 
+/**
+ * Prefiksy zmiennych usuniętych dostawców — żadna zmienna o tym prefiksie
+ * (także nowa, np. `ELEVENLABS_VOICE_ID`) nie wraca do src ani env.example (Ryan, #109).
+ */
+const REMOVED_ENV_PREFIXES = ["TWILIO_", "ELEVENLABS_"];
+
 /** Hosty usuniętych dostawców — nie mogą wrócić do CSP. */
 const REMOVED_PROVIDER_HOSTS = /twilio|elevenlabs/i;
 
@@ -172,6 +178,13 @@ describe("G6 — usunięte funkcje nie wracają (B3: głos, B4: wideo i social)"
     const hits = SRC_FILES.filter((f) => f.text.includes(name)).map((f) => f.path);
     expect(hits).toEqual([]);
     expect(readFileSync(join(ROOT, "env.example"), "utf8")).not.toContain(name);
+  });
+
+  it.each(REMOVED_ENV_PREFIXES)("żadna zmienna %s* w src ani w env.example", (prefix) => {
+    const re = new RegExp(`\\b${prefix}[A-Z0-9_]+`);
+    const hits = SRC_FILES.filter((f) => re.test(f.text)).map((f) => f.path);
+    expect(hits).toEqual([]);
+    expect(readFileSync(join(ROOT, "env.example"), "utf8")).not.toMatch(re);
   });
 });
 
