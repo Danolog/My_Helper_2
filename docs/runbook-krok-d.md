@@ -32,11 +32,21 @@ B='infra/gcp/bootstrap.sh --project=my-helper-2-488419 --region=europe-central2'
 1. `gcloud config list` — zalogowane konto sesji głównej z rolą owner; projekt
    NIE jest brany z konfiguracji (skrypt podaje `--project` w każdym wywołaniu).
 2. Budżet 300 PLN/mies. z progami 50/90/100% istnieje (stan dzisiejszy).
-3. **Koszt przed etapem `sql` (warunek Ethana):** Oliver sprawdza w cenniku GCP
-   dla `europe-central2` konfigurację z sekcji 3.6 i wpisuje wynik do #121.
-   **> 200 PLN/mies. → stop i raport.** Szacunek Ethana: 50–60 PLN/mies.
-   (Eva nie ma wyliczenia ze stawkami z cennika — tylko szacunek bez źródła,
-   więc go tu nie podaje.)
+3. **Koszt przed etapem `sql` (warunek Ethana) — SPEŁNIONY** (Oliver, 2026-11-15).
+   Źródło: publiczny katalog cen Google (Cloud Billing Catalog API, usługa
+   `9662-B51E-5089`, PLN, netto), `europe-central2`, PostgreSQL Enterprise, zonal:
+
+   | SKU | Pozycja | Stawka | Miesięcznie |
+   |---|---|---|---|
+   | `E52B-F700-310D` | Micro instance (db-f1-micro) | 0,049823 PLN/h × 730 h | 36,37 PLN |
+   | `0743-3BA4-1E28` | Standard storage (SSD) | 0,806657 PLN/GiB | 8,07 PLN (10 GiB); 24,20 PLN (30 GiB) |
+   | `D1A5-025C-19C9` | Backups | 0,379603 PLN/GiB | < 1–2 PLN przy małej bazie |
+   | `437B-C3AE-F62F` | IP address reservation | 0,047450 PLN/h | 0 przy działającej instancji; najgorzej 34,64 PLN — do potwierdzenia odczytem kosztów po 24 h |
+
+   Oczekiwane ok. 45–47 PLN/mies. netto; najgorszy przypadek (30 GiB, IP
+   naliczany stale, kopie 5 PLN) ok. 100 PLN/mies. netto. Próg **200 PLN/mies.
+   = stop** — nieprzekroczony. Zmiana tieru lub edycji = nowe wyliczenie
+   (strażnik w `bootstrap.sh`).
 
 ## 2. Kolejność etapów i odczyt stanu po każdym
 
@@ -410,6 +420,12 @@ gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-centra
 
 Włączenie harmonogramu = prawdziwe SMS-y i push do klientów salonów — decyzja Darka.
 
+## 8a. Znane zachowanie przyjęte świadomie
+
+- Płacący klient może chwilowo dostać 403 na funkcjach AI w oknie między końcem
+  okresu próbnego a webhookiem potwierdzającym płatność — przyjęte świadomie,
+  bez okresu łaski (Oliver).
+
 ## 9. Dostęp administracyjny do bazy
 
 Wyłącznie przez `cloud-sql-proxy` z kontem sesji głównej (bez autoryzowanych
@@ -439,4 +455,4 @@ pisze Ethan w planie 0.5 — ten runbook jej nie zawiera.
   z jednego źródła (#133 pkt 1), asercja `remotePatterns` (#118 pkt 4).
 - K-2: zawężenie allowlisty e2e do naszej usługi. K-3: harmonogram wstrzymany.
 - Logowanie Google bez sekretu nie wyłącza się samo (P3 po K-1).
-- Koszt: weryfikacja w cenniku przez Olivera przed `sql`.
+- Koszt IP instancji: potwierdzić odczytem kosztów po 24 h (sekcja 1 pkt 3).
