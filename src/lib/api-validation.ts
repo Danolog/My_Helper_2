@@ -371,14 +371,11 @@ export const createPromotionSchema = z.object({
  * All fields are optional; only provided fields are applied.
  */
 export const updateAppointmentSchema = z.object({
-  startTime: z.string().refine(
-    (val) => !isNaN(new Date(val).getTime()),
-    { message: "Nieprawidlowy format daty rozpoczecia" }
-  ).optional(),
-  endTime: z.string().refine(
-    (val) => !isNaN(new Date(val).getTime()),
-    { message: "Nieprawidlowy format daty zakonczenia" }
-  ).optional(),
+  // #95: ta sama reguła co POST i create-session — ISO ze strefą. Luźne
+  // new Date() czytało "2026-04-01T10:00" w strefie serwera (UTC na Vercelu),
+  // więc przesunięcie wizyty zapisywało godzinę lub dwie później.
+  startTime: isoDateString("Czas rozpoczecia").optional(),
+  endTime: isoDateString("Czas zakonczenia").optional(),
   employeeId: z.string().optional(),
   clientId: z.string().nullable().optional(),
   serviceId: z.string().nullable().optional(),

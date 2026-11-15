@@ -724,3 +724,39 @@ describe("dialogi wizyt — maxLength notatek (follow-up #71)", () => {
     expect(src).toMatch(/import \{ APPOINTMENT_NOTES_MAX_LENGTH \} from "@\/lib\/appointment-limits"/);
   });
 });
+
+// #95: PUT /api/appointments/[id] — daty jak w POST (ISO ze strefą).
+describe("updateAppointmentSchema — startTime/endTime ze strefą (#95)", () => {
+  const parse = (body: Record<string, unknown>) => updateAppointmentSchema.safeParse(body);
+
+  it.each(["2026-04-01T10:00:00Z", "2026-04-01T10:00:00.000Z", "2026-04-01T10:00+02:00", "2026-04-01T10:00:00-05:30"])(
+    "%s przechodzi",
+    (v) => {
+      expect(parse({ startTime: v, endTime: v }).success).toBe(true);
+    }
+  );
+
+  it.each([
+    ["bez strefy", "2026-04-01T10:00:00"],
+    ["bez strefy, bez sekund", "2026-04-01T10:00"],
+    ["sama data", "2026-04-01"],
+    ["tekst daty", "April 1, 2026 10:00"],
+    ["pusty", ""],
+    ["niemożliwa godzina", "2026-04-01T25:00:00Z"],
+  ])("startTime %s => błąd na polu startTime", (_name, v) => {
+    const r = parse({ startTime: v });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.path).toEqual(["startTime"]);
+  });
+
+  it("endTime bez strefy => błąd na polu endTime, komunikat jak w POST", () => {
+    const r = parse({ startTime: "2026-04-01T10:00:00Z", endTime: "2026-04-01T11:00:00" });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.path).toEqual(["endTime"]);
+    expect(r.error!.issues[0]!.message).toBe("Czas zakonczenia: nieprawidłowy format daty");
+  });
+
+  it("brak dat (np. zmiana samych notatek) przechodzi", () => {
+    expect(parse({ notes: "x" }).success).toBe(true);
+  });
+});

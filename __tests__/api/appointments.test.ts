@@ -1904,6 +1904,24 @@ describe("PUT /api/appointments/[id]", () => {
     expect(updateChain.set).toHaveBeenCalledWith(expect.objectContaining({ notes: saved }));
   });
 
+  // #95: data bez strefy => 400 przed jakimkolwiek zapytaniem.
+  it.each([
+    ["startTime", { startTime: "2026-04-01T14:00:00", endTime: "2026-04-01T15:00:00Z" }],
+    ["endTime", { startTime: "2026-04-01T14:00:00Z", endTime: "2026-04-01T15:00" }],
+  ])("PUT %s bez strefy => 400, bez zapisu", async (field, body) => {
+    const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+      method: "PUT",
+      body,
+    });
+    const response = await updateAppointment(request, createRouteParams(TEST_IDS.APPOINTMENT_UUID));
+    const { status, body: res } = await parseResponse(response);
+
+    expect(status).toBe(400);
+    expect(res.details).toHaveProperty(field as string);
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
   it("PUT bez pola notes nie rusza notatek", async () => {
     const updateChain = chainMock([makeAppointment()]);
     mockDbSelect
