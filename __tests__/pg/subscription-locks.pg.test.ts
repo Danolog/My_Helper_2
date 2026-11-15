@@ -16,6 +16,9 @@
  *     lokalne canceled + Stripe active → zostaje canceled; 50 iteracji
  *     confirm ‖ updated ‖ invoice.paid z losowymi opóźnieniami = zero 40P01
  *     i stan zgodny z atrapą Stripe.
+ * (T3b) Prawdziwa trasa `subscriptions/cancel` (502 przy błędzie Stripe,
+ *     `canceled` tylko po potwierdzeniu, cancel ‖ updated), bliźniak (c3'')
+ *     bez potwierdzenia, indeksy unikalne 0008 i równoległa rejestracja.
  * (d) Baza z `INTEGRATION_POSTGRES_URL` + ochrona hosta z seeda (#56)
  *     (`pg-harness.ts`); przy `CI=true` bez adresu — błąd, nie skip. Własne
  *     wiersze (user, salon, plan) z unikalnymi id, sprzątane w `afterAll`.
@@ -26,7 +29,9 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { POST as registerSubscription } from "@/app/api/register-subscription/route";
 import { POST as stripeWebhook } from "@/app/api/stripe/webhook/route";
+import { POST as cancelSubscription } from "@/app/api/subscriptions/cancel/route";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions, salons, subscriptionPayments, subscriptionPlans, user } from "@/lib/schema";
 import {
@@ -35,6 +40,7 @@ import {
 } from "@/lib/subscription-confirmation";
 import { SUBSCRIPTION_LOCK_NAMESPACE } from "@/lib/subscription-lock-namespace";
 import { withStripeSubscriptionLock } from "@/lib/subscription-locks";
+import { isUniqueViolation } from "@/lib/subscription-predicates";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
 
@@ -52,6 +58,18 @@ vi.mock("@/lib/stripe", () => ({
 vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
+// Tylko sesja jest atrapą — trasy cancel/register-subscription działają na prawdziwej bazie.
+const { sessionUser, sessionSalonId } = vi.hoisted(() => ({
+  sessionUser: { current: { id: "", name: "IT", email: "it@example.invalid" } },
+  sessionSalonId: { current: "" },
+}));
+vi.mock("@/lib/auth-middleware", () => ({
+  requireAuth: async () => ({ user: sessionUser.current }),
+  isAuthError: () => false,
+}));
+vi.mock("@/lib/get-user-salon", () => ({
+  getUserSalonId: async () => sessionSalonId.current || null,
+}));
 
 // ---------------------------------------------------------------- atrapa Stripe
 
@@ -59,6 +77,7 @@ interface FakeStripeSub {
   id: string;
   status: string;
   canceled_at?: number | null;
+  cancel_at_period_end?: boolean;
   trial_end?: number | null;
   items: { data: Array<{ current_period_start: number; current_period_end: number }> };
 }
@@ -68,6 +87,18 @@ const stripeState = new Map<string, FakeStripeSub>();
 /** Bariera na NASTĘPNYM odczycie danej subskrypcji: odczyt czeka na `release`. */
 const gates = new Map<string, { reached: () => void; wait: Promise<void> }>();
 let randomReadDelayMs = 0;
+/** Bariera i błąd NASTĘPNEGO `subscriptions.update` (anulowanie w trasie cancel). */
+let updateGate: { reached: () => void; wait: Promise<void> } | null = null;
+let failNextUpdate = false;
+
+function gateNextUpdate() {
+  let release!: () => void;
+  let reached!: () => void;
+  const wait = new Promise<void>((r) => (release = r));
+  const reachedP = new Promise<void>((r) => (reached = r));
+  updateGate = { reached, wait };
+  return { reached: reachedP, release };
+}
 
 function setStripe(id: string, status: string, extra: Partial<FakeStripeSub> = {}) {
   stripeState.set(id, { id, status, items: { data: [PERIOD] }, ...extra });
@@ -96,6 +127,23 @@ const fakeStripe = {
       if (randomReadDelayMs) await new Promise((r) => setTimeout(r, Math.random() * randomReadDelayMs));
       if (!snapshot) throw new Error(`no such subscription: ${id}`);
       return snapshot;
+    }),
+    update: vi.fn(async (id: string, params: { cancel_at_period_end?: boolean }) => {
+      const gate = updateGate;
+      if (gate) {
+        updateGate = null;
+        gate.reached();
+        await gate.wait;
+      }
+      if (failNextUpdate) {
+        failNextUpdate = false;
+        throw Object.assign(new Error("Stripe API unavailable"), { type: "StripeAPIError" });
+      }
+      const current = stripeState.get(id);
+      if (!current) throw new Error(`no such subscription: ${id}`);
+      const next = { ...current, ...params };
+      stripeState.set(id, next);
+      return structuredClone(next);
     }),
   },
   webhooks: { constructEvent: vi.fn() },
@@ -203,6 +251,8 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
     salonId = salon!.id;
     planId = plan!.id;
     getStripeMock.mockReturnValue(fakeStripe);
+    sessionUser.current = { id: USER_ID, name: "IT T3", email: `${USER_ID}@example.invalid` };
+    sessionSalonId.current = salonId;
   });
 
   afterAll(async () => {
@@ -221,6 +271,8 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
     stripeState.clear();
     gates.clear();
     randomReadDelayMs = 0;
+    updateGate = null;
+    failNextUpdate = false;
     await h!.db.delete(salonSubscriptions).where(eq(salonSubscriptions.salonId, salonId));
   });
 
@@ -319,10 +371,13 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
     expect((await payments()).map((p) => p.stripePaymentIntentId)).toContain(late.payment_intent);
   });
 
-  it("(c3') lokalne canceled (cancel w panelu), Stripe nadal active → późne updated i invoice.paid nie wskrzeszają", async () => {
+  // (c3') przez prawdziwą trasę `subscriptions/cancel`: describe „T3b” niżej.
+  it("(c3') lokalne canceled, Stripe active z cancel_at_period_end=true → późne updated i invoice.paid nie wskrzeszają", async () => {
     const sub = `sub_it_${randomUUID().slice(0, 8)}`;
     setStripe(sub, "active");
     expect(await confirm(session(sub))).toEqual(expect.objectContaining({ ok: true }));
+    // stan po anulowaniu w panelu: Stripe active do końca okresu, cancel_at_period_end
+    setStripe(sub, "active", { cancel_at_period_end: true });
     await h!.db
       .update(salonSubscriptions)
       .set({ status: "canceled", canceledAt: new Date() })
@@ -331,6 +386,27 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
     expect((await deliver("customer.subscription.updated", { id: sub })).status).toBe(200);
     expect((await deliver("invoice.paid", invoicePaid(sub))).status).toBe(200);
     expect((await rows()).map((r) => r.status)).toEqual(["canceled"]);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("(c3'' bliźniak) lokalne canceled bez potwierdzenia w Stripe (cancel_at_period_end=false) → stan ze Stripe + manual handling", async () => {
+    const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+    setStripe(sub, "active");
+    expect(await confirm(session(sub))).toEqual(expect.objectContaining({ ok: true }));
+    // dryf: lokalne canceled, a Stripe dalej odnawia (np. dawne anulowanie mimo błędu Stripe)
+    setStripe(sub, "active", { cancel_at_period_end: false });
+    await h!.db
+      .update(salonSubscriptions)
+      .set({ status: "canceled", canceledAt: new Date() })
+      .where(eq(salonSubscriptions.salonId, salonId));
+
+    expect((await deliver("invoice.paid", invoicePaid(sub))).status).toBe(200);
+
+    expect((await rows()).map((r) => [r.status, r.canceledAt])).toEqual([["active", null]]);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("manual handling"),
+      expect.objectContaining({ stripeSubscriptionId: sub, cancelAtPeriodEnd: false })
+    );
   });
 
   it(
@@ -376,6 +452,113 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
     },
     60_000
   );
+
+  describe("T3b — anulowanie przez trasę cancel i niezmiennik „jeden bieżący wiersz”", () => {
+    const cancel = async () => {
+      const res = await cancelSubscription();
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+
+    it("(c3') cancel w panelu (Stripe potwierdza cap=true) → późne updated i invoice.paid nie wskrzeszają", async () => {
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+      expect(await confirm(session(sub))).toEqual(expect.objectContaining({ ok: true }));
+
+      const { status, body } = await cancel();
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(stripeState.get(sub)?.cancel_at_period_end).toBe(true);
+      expect((await rows()).map((r) => r.status)).toEqual(["canceled"]);
+
+      expect((await deliver("customer.subscription.updated", { id: sub })).status).toBe(200);
+      expect((await deliver("invoice.paid", invoicePaid(sub))).status).toBe(200);
+      expect((await rows()).map((r) => r.status)).toEqual(["canceled"]);
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it("cancel przy błędzie Stripe → 502, wiersz zostaje active, Stripe bez zmian", async () => {
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+      expect(await confirm(session(sub))).toEqual(expect.objectContaining({ ok: true }));
+      failNextUpdate = true;
+
+      const { status, body } = await cancel();
+
+      expect(status).toBe(502);
+      expect(body.code).toBe("STRIPE_ERROR");
+      expect((await rows()).map((r) => [r.status, r.canceledAt])).toEqual([["active", null]]);
+      expect(stripeState.get(sub)?.cancel_at_period_end).toBeUndefined();
+    });
+
+    it("cancel ‖ updated: webhook czeka na stripe_sub (pg_locks), czyta Stripe PO anulowaniu → canceled", async () => {
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+      expect(await confirm(session(sub))).toEqual(expect.objectContaining({ ok: true }));
+      const gate = gateNextUpdate();
+
+      const canceling = cancel();
+      await gate.reached; // cancel trzyma stripe_sub i czeka na Stripe
+      const updated = deliver("customer.subscription.updated", { id: sub });
+      expect(await waitForLockWaiters("stripeSub", sub)).toBe(true);
+      gate.release();
+
+      expect((await canceling).status).toBe(200);
+      expect((await updated).status).toBe(200);
+      expect((await rows()).map((r) => r.status)).toEqual(["canceled"]);
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it("indeks salon_subscriptions_salon_current_uq: drugi bieżący wiersz salonu → 23505", async () => {
+      await h!.db.insert(salonSubscriptions).values({ salonId, planId, status: "active" });
+      await expect(
+        h!.db.insert(salonSubscriptions).values({ salonId, planId, status: "trialing" })
+      ).rejects.toSatisfy(isUniqueViolation);
+      // canceled obok bieżącego — dozwolone (historia)
+      await h!.db.insert(salonSubscriptions).values({ salonId, planId, status: "canceled" });
+      expect((await rows()).map((r) => r.status).sort()).toEqual(["active", "canceled"]);
+    });
+
+    it("indeks salons_owner_id_uq: drugi salon tego samego konta → 23505", async () => {
+      await expect(
+        h!.db.insert(salons).values({ name: `IT T3 dup ${RUN}`, ownerId: USER_ID })
+      ).rejects.toSatisfy(isUniqueViolation);
+    });
+
+    it("register-subscription ×2 równolegle dla nowego konta → jedno 200 + jedno 409, jeden salon, jeden trial", async () => {
+      const freshId = `it-t3b-${RUN}`;
+      await h!.db.insert(user).values({ id: freshId, name: "IT T3b", email: `${freshId}@example.invalid` });
+      const previous = sessionUser.current;
+      sessionUser.current = { id: freshId, name: "IT T3b", email: `${freshId}@example.invalid` };
+      try {
+        const [planRow] = await h!.db.select().from(subscriptionPlans).where(eq(subscriptionPlans.id, planId));
+        const register = async () => {
+          const res = await registerSubscription(
+            new Request("http://localhost/api/register-subscription", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ planSlug: planRow!.slug }),
+            }) as never
+          );
+          return res.status;
+        };
+
+        const statuses = (await Promise.all([register(), register()])).sort();
+
+        expect(statuses).toEqual([200, 409]);
+        const owned = await h!.db.select().from(salons).where(eq(salons.ownerId, freshId));
+        expect(owned).toHaveLength(1);
+        const subs = await h!.db
+          .select()
+          .from(salonSubscriptions)
+          .where(eq(salonSubscriptions.salonId, owned[0]!.id));
+        expect(subs.map((s) => s.status)).toEqual(["trialing"]);
+      } finally {
+        sessionUser.current = previous;
+        await h!.db.delete(salons).where(eq(salons.ownerId, freshId));
+        await h!.db.delete(user).where(eq(user.id, freshId));
+      }
+    });
+  });
 
   it("sprzątanie: test nie zostawia blokad (żadnej czekającej ani trzymanej w przestrzeniach subskrypcji)", async () => {
     const [r] = await h!.observer<{ n: number }[]>`
