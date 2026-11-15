@@ -226,7 +226,9 @@ export async function PUT(
         return { conflicting: overlapping[0], updated: null as typeof appointments.$inferSelect | null };
       }
 
-      logger.info(`[Appointments API] Updating appointment ${id}`, { updateData });
+      // Tylko nazwy pól — wartości (notatka o kliencie, clientId, zadatek) nie
+      // trafiają do logów (hotfix P1, dane osobowe w logach).
+      logger.info(`[Appointments API] Updating appointment ${id}`, { fields: Object.keys(updateData) });
 
       const [updatedAppointment] = await tx
         .update(appointments)
@@ -427,7 +429,9 @@ export async function DELETE(
         salonName,
       });
 
-      logger.info(`[Appointments API] Waiting list notification result`, { waitingListResult });
+      // Tylko liczniki — wynik nie może zawierać danych klientów z listy oczekujących.
+      const { notified, smsCount, pushCount, errors } = waitingListResult;
+      logger.info(`[Appointments API] Waiting list notification result`, { notified, smsCount, pushCount, errors });
     } catch (waitingListError) {
       logger.error("[Appointments API] Failed to notify waiting list", { error: waitingListError });
       // Don't fail the cancellation if waiting list notification fails
