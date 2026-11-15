@@ -2,11 +2,16 @@ import { NextResponse } from "next/server";
 import { eq, desc, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { createGalleryPhotoSchema } from "@/lib/api-validation";
+import { hasGalleryUrlConflict } from "@/lib/gallery-files";
 import { logger } from "@/lib/logger";
 import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-// GET /api/gallery - List gallery photos
+import { isValidUuid } from "@/lib/validations";
+// GET /api/gallery - List gallery photos (panel salonu)
+// Salon WYŁĄCZNIE z sesji. salonId z query (wysyła go dashboard) jest tylko
+// porównywany z salonem sesji: inny = 403. Publiczna galeria salonu to
+// GET /api/salons/[id]/gallery (ukrywa productsUsed wg showProductsToClients).
 export const GET = withApiHandler(
   {
     auth: "user",
@@ -15,13 +20,29 @@ export const GET = withApiHandler(
   },
   async ({ request }) => {
     const { searchParams } = new URL(request.url);
-    const salonId = searchParams.get("salonId");
+    const requestedSalonId = searchParams.get("salonId");
     const employeeId = searchParams.get("employeeId");
     const serviceId = searchParams.get("serviceId");
 
-    if (!salonId) {
+    const ctx = await getSalonContext();
+    if (!ctx) {
       return NextResponse.json(
-        { success: false, error: "salonId is required" },
+        { success: false, error: "Salon not found" },
+        { status: 404 }
+      );
+    }
+    if (requestedSalonId && requestedSalonId !== ctx.salonId) {
+      return NextResponse.json(
+        { success: false, error: "Brak dostepu do tego salonu" },
+        { status: 403 }
+      );
+    }
+    const salonId = ctx.salonId;
+
+    // Filtry trafiają do kolumn uuid — śmieć dałby 500 z Postgresa.
+    if ((employeeId && !isValidUuid(employeeId)) || (serviceId && !isValidUuid(serviceId))) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidlowy filtr" },
         { status: 400 }
       );
     }
@@ -48,6 +69,7 @@ export const GET = withApiHandler(
         productsUsed: galleryPhotos.productsUsed,
         techniques: galleryPhotos.techniques,
         duration: galleryPhotos.duration,
+        showProductsToClients: galleryPhotos.showProductsToClients,
         createdAt: galleryPhotos.createdAt,
         employeeFirstName: employees.firstName,
         employeeLastName: employees.lastName,
@@ -131,6 +153,11 @@ export const POST = withApiHandler(
           .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
           .limit(1);
         if (!svc) return { error: "Usluga nie nalezy do salonu" } as const;
+      }
+      // Plik przypięty już do innego wpisu tego salonu — DELETE jednego
+      // kasowałby zdjęcie drugiego (kontekst salonu, RLS).
+      if (await hasGalleryUrlConflict(tx, salonId, [beforePhotoUrl, afterPhotoUrl])) {
+        return { error: "Ten plik zdjecia jest juz uzyty w innym wpisie galerii" } as const;
       }
 
       const [photo] = await tx
