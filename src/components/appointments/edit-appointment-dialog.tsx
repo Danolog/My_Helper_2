@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useSalonId } from "@/hooks/use-salon-id";
 import { mutationFetch } from "@/lib/api-client";
 import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
+import { notesChange } from "@/lib/appointment-notes";
 
 interface Client {
   id: string;
@@ -326,7 +327,9 @@ export function EditAppointmentDialog({
         endTime: endTime.toISOString(),
         clientId: selectedClientId === "none" ? null : selectedClientId || null,
         serviceId: selectedServiceId === "none" ? null : selectedServiceId || null,
-        notes: notes.trim() || null,
+        // Tylko zmienione notatki (#90): wizyta z notatkami ponad limit
+        // sprzed #71 da się przesunąć bez 400 za nietknięte pole.
+        ...notesChange(notes, appointment.notes),
       };
 
       const res = await mutationFetch(`/api/appointments/${appointment.id}`, {

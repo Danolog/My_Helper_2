@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq, and, not, or, lte, gte } from "drizzle-orm";
-import { validateBody, updateAppointmentSchema } from "@/lib/api-validation";
+import { parseBody, updateAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // `db` pozostaje dla efektow ubocznych anulacji (forfeit zadatku, notyfikacja,
 // nazwa salonu do waiting-list) — to NIE jest brama zasobu [id], ktora pilnuje
@@ -132,13 +132,15 @@ export async function PUT(
 
     const body = await request.json();
 
-    // Server-side validation with Zod schema
-    const validationError = validateBody(updateAppointmentSchema, body);
-    if (validationError) {
-      return NextResponse.json(validationError, { status: 400 });
+    // Server-side validation with Zod schema. Zapis czyta SPARSOWANE dane
+    // (jak POST): preprocess schematu zamienia same spacje w notes na null —
+    // surowe body zapisałoby "   " bez zmian (Ryan, przegląd #90).
+    const parsed = parseBody(updateAppointmentSchema, body);
+    if (!parsed.ok) {
+      return NextResponse.json(parsed.error, { status: 400 });
     }
 
-    const { startTime, endTime, employeeId, clientId, serviceId, notes, status, depositAmount, depositPaid } = body;
+    const { startTime, endTime, employeeId, clientId, serviceId, notes, status, depositAmount, depositPaid } = parsed.data;
 
     // P1 (Ryan): pola zadatku zmienia tylko wlasciciel (reczne rozliczenie).
     // Normalnie depositPaid ustawia potwierdzenie platnosci (webhook Stripe ->
