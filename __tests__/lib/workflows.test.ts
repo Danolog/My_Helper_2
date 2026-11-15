@@ -11,7 +11,13 @@
  *  - `STORAGE_DRIVER=gcs` nie jest wpisane na sztywno nigdzie w infra/ ani workflow;
  *  - e2e-production.yml: workflow_call + workflow_dispatch z base_url,
  *    deployment_status (Vercel) zostaje do C4.
- * Mutacja: dopisać `push:` do wyzwalaczy → czerwony.
+ *  - wdraża tylko commit przebiegu z main: bez wejścia `ref`, warunek
+ *    refs/heads/main, `merge-base --is-ancestor` przed budową; środowisko
+ *    `production-gcp` (nie „Production" Vercela); jedna grupa concurrency;
+ *  - e2e po wdrożeniu idzie na URL Cloud Run, nigdy na sekretny URL Vercela.
+ * Mutacje: dopisać `push:`; przywrócić wejście `ref`; usunąć warunek main;
+ * usunąć krok is-ancestor; environment → production; cancel-in-progress →
+ * true; base_url → vars.NEXT_PUBLIC_APP_URL; BASE_URL z sekretu w workflow_call.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -34,6 +40,9 @@ function triggers(yaml: string): string[] {
   return [...block[1]!.matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]!);
 }
 
+/** Jedyna nazwa środowiska wdrożeń Cloud Run (decyzja Olivera 15:52). */
+const DEPLOY_ENVIRONMENT = "production-gcp";
+
 const code = (text: string) =>
   text
     .split("\n")
@@ -45,9 +54,40 @@ describe("G-C6: deploy-cloud-run.yml", () => {
     expect(triggers(DEPLOY)).toEqual(["workflow_dispatch"]);
   });
 
-  it("wejścia ref i run_migrations (domyślnie false)", () => {
-    expect(DEPLOY).toMatch(/ {6}ref:\n[\s\S]*?required: true/);
+  it("jedyne wejście: run_migrations (domyślnie false); bez wejścia ref", () => {
     expect(DEPLOY).toMatch(/ {6}run_migrations:\n[\s\S]*?type: boolean\n\s+default: false/);
+    const inputs = DEPLOY.match(/^ {4}inputs:\n((?: {6,}.*\n)*)/m)![1]!;
+    expect([...inputs.matchAll(/^ {6}([a-z_]+):/gm)].map((m) => m[1])).toEqual(["run_migrations"]);
+    expect(code(DEPLOY)).not.toContain("inputs.ref");
+  });
+
+  it("checkout bez ref z wejścia (commit przebiegu), pełna historia", () => {
+    for (const m of code(DEPLOY).matchAll(/^\s+ref:\s*(.*)$/gm)) {
+      expect(m[1], "ref:").not.toMatch(/inputs\./);
+      expect(m[1], "ref:").toBe("${{ github.sha }}");
+    }
+    expect(DEPLOY).toMatch(/uses: actions\/checkout@[0-9a-f]{40}.*\n\s+with:\n\s+fetch-depth: 0\n/);
+  });
+
+  it("job deploy tylko z main, w środowisku production-gcp", () => {
+    const job = DEPLOY.slice(DEPLOY.indexOf("\n  deploy:\n"), DEPLOY.indexOf("\n    steps:"));
+    expect(job).toContain("\n    if: github.ref == 'refs/heads/main'\n");
+    const envs = [...code(DEPLOY).matchAll(/^\s+environment:\s*(\S+)\s*$/gm)].map((m) => m[1]!);
+    expect(envs).toEqual([DEPLOY_ENVIRONMENT]);
+    expect(job).toContain(`\n    environment: ${DEPLOY_ENVIRONMENT}\n`);
+    // środowisko Vercela (nazwy środowisk GitHuba nie rozróżniają wielkości liter)
+    expect(DEPLOY_ENVIRONMENT.toLowerCase()).not.toBe("production");
+  });
+
+  it("commit musi być na origin/main — sprawdzone przed pierwszą budową", () => {
+    const check = DEPLOY.indexOf('git merge-base --is-ancestor "$GITHUB_SHA" origin/main');
+    expect(check).toBeGreaterThan(0);
+    expect(check).toBeLessThan(DEPLOY.indexOf("docker build"));
+    expect(DEPLOY.slice(check, DEPLOY.indexOf("\n\n", check))).toContain("exit 1");
+  });
+
+  it("concurrency: jedna grupa wdrożeń, bez anulowania trwającego", () => {
+    expect(DEPLOY).toMatch(/^concurrency:\n {2}group: deploy-cloud-run\n {2}cancel-in-progress: false\n/m);
   });
 
   it("permissions: id-token: write, contents: read", () => {
@@ -127,8 +167,11 @@ describe("G-C6: deploy-cloud-run.yml", () => {
     for (const name of forbidden) expect(code(DEPLOY), name).not.toContain(name);
   });
 
-  it("e2e po wdrożeniu przez workflow_call z base_url", () => {
-    expect(DEPLOY).toMatch(/uses: \.\/\.github\/workflows\/e2e-production\.yml\n\s+with:\n\s+base_url:/);
+  it("e2e po wdrożeniu przez workflow_call na URL Cloud Run (tag rewizji), bez sekretów", () => {
+    const e2e = DEPLOY.slice(DEPLOY.indexOf("\n  e2e:\n"));
+    expect(e2e).toContain("uses: ./.github/workflows/e2e-production.yml");
+    expect(code(e2e)).toMatch(/\n\s+with:\n\s+base_url: \$\{\{ needs\.deploy\.outputs\.tag_url \}\}\n/);
+    expect(code(e2e)).not.toContain("secrets");
   });
 });
 
@@ -180,13 +223,30 @@ describe("G-C6: skrypty wdrożenia", () => {
 });
 
 describe("G-C6: e2e-production.yml", () => {
-  it("deployment_status (Vercel, do C4) + workflow_call + workflow_dispatch", () => {
-    expect(triggers(E2E)).toEqual(["deployment_status", "workflow_call", "workflow_dispatch"]);
+  it("deployment_status (Vercel, do C4) + workflow_call", () => {
+    expect(triggers(E2E)).toEqual(["deployment_status", "workflow_call"]);
   });
 
-  it("base_url jako wejście obu ręcznych wyzwalaczy; BASE_URL = inputs.base_url || sekret produkcji", () => {
-    expect([...E2E.matchAll(/ {6}base_url:\n/g)]).toHaveLength(2);
-    expect(E2E).toContain("BASE_URL: ${{ inputs.base_url || secrets.BETTER_AUTH_BASE_URL_PROD }}");
+  it("workflow_call: base_url wymagane", () => {
+    expect(E2E).toMatch(/ {2}workflow_call:\n {4}inputs:\n {6}base_url:\n(?: {8}.*\n)*? {8}required: true\n/);
+  });
+
+  it("BASE_URL: sekret Vercela tylko dla deployment_status, w workflow_call wyłącznie inputs.base_url", () => {
+    expect(E2E).toContain(
+      "BASE_URL: ${{ github.event_name == 'deployment_status' && secrets.BETTER_AUTH_BASE_URL_PROD || inputs.base_url }}",
+    );
+    // sekret produkcji pojawia się dokładnie raz, w gałęzi deployment_status
+    expect(code(E2E).match(/secrets\./g)).toHaveLength(1);
+  });
+
+  it("tryb Cloud Run odmawia pustego, nie-https albo Vercelowego URL, przed checkoutem", () => {
+    const guard = E2E.indexOf("Cloud Run mode must not target Vercel");
+    expect(guard).toBeGreaterThan(0);
+    expect(guard).toBeLessThan(E2E.indexOf("actions/checkout"));
+    const step = E2E.slice(guard, E2E.indexOf("\n\n", guard));
+    expect(step).toContain("if: github.event_name != 'deployment_status'");
+    expect(step).toContain('"$BASE_URL" == *vercel.app*');
+    expect(step).toContain("exit 1");
   });
 
   it("deployment_status nadal tylko dla udanego Production", () => {

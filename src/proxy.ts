@@ -150,7 +150,12 @@ export function buildCsp(nonce: string): string {
 
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${scriptExtra} storage.googleapis.com`,
+    // Bez hostów: 'strict-dynamic' i tak je ignoruje w przeglądarkach CSP3,
+    // a w starszych host storage.googleapis.com dopuszczałby skrypt z dowolnego
+    // zasobnika GCS (Ryan, P3). Workbox z tego hosta ładuje tylko /sw.js przez
+    // importScripts — worker ma politykę z własnej odpowiedzi, a /sw.js jest
+    // poza matcherem proxy (config niżej), więc ta polityka go nie dotyczy.
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${scriptExtra}`,
     styleSrc,
     "font-src 'self' fonts.gstatic.com",
     `img-src 'self' data: blob: lh3.googleusercontent.com avatars.githubusercontent.com *.public.blob.vercel-storage.com${gcsImgSource()} images.unsplash.com`,

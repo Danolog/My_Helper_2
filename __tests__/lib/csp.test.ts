@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildCsp, EMPTY_STYLE_HASH, SONNER_STYLE_HASH } from "@/proxy";
+import { buildCsp, config as proxyConfig, EMPTY_STYLE_HASH, SONNER_STYLE_HASH } from "@/proxy";
 
 const NONCE = "testnonce0123456789abcdef";
 
@@ -75,10 +75,19 @@ describe("buildCsp — produkcja", () => {
     expect(csp).not.toContain("'unsafe-eval'");
   });
 
-  it("script-src bez zmian", () => {
-    expect(d.get("script-src")).toBe(
-      `'self' 'nonce-${NONCE}' 'strict-dynamic' storage.googleapis.com`,
+  it("script-src: self, nonce, strict-dynamic — bez hostów (C3, ustalenie Ryana P3)", () => {
+    expect(d.get("script-src")).toBe(`'self' 'nonce-${NONCE}' 'strict-dynamic'`);
+  });
+
+  it("/sw.js (importScripts Workbox z storage.googleapis.com) zostaje poza matcherem proxy", () => {
+    // Gdyby proxy objęło /sw.js, worker dostałby tę CSP bez hosta Workboxa
+    // i importScripts by padło — tak długo, jak sw.js ładuje Workbox z CDN.
+    expect(readFileSync(join(process.cwd(), "public", "sw.js"), "utf8")).toContain(
+      "https://storage.googleapis.com/workbox-cdn/",
     );
+    const matcher = new RegExp(`^${proxyConfig.matcher[0]!}$`);
+    expect(matcher.test("/sw.js")).toBe(false);
+    expect(matcher.test("/dashboard")).toBe(true);
   });
 
   it("pozostale dyrektywy bez zmian", () => {
@@ -145,7 +154,7 @@ describe("buildCsp — development bez zmian", () => {
     expect(d.has("style-src-elem")).toBe(false);
     expect(d.has("style-src-attr")).toBe(false);
     expect(d.get("script-src")).toBe(
-      `'self' 'nonce-${NONCE}' 'strict-dynamic' 'unsafe-eval' storage.googleapis.com`,
+      `'self' 'nonce-${NONCE}' 'strict-dynamic' 'unsafe-eval'`,
     );
   });
 });
