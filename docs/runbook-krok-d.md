@@ -628,8 +628,8 @@ dopiero po decyzji Darka — jawne nazwy (W-3), można wznowić część zadań;
 S='PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://myhelper-843777043748.europe-central2.run.app'
 env $S infra/gcp/scheduler.sh
 env $S infra/gcp/scheduler.sh --check
-env $S infra/gcp/scheduler.sh --resume mh-sms-reminders mh-push-reminders \
-  mh-push-reminders-24h mh-cleanup-pending-deposits mh-cleanup-temporary-access
+env $S infra/gcp/scheduler.sh --resume mh-sms-reminders \
+  mh-cleanup-pending-deposits mh-cleanup-temporary-access
 env $S infra/gcp/scheduler.sh --check
 gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-central2 --format='value(name,state)'
 ```
@@ -637,6 +637,11 @@ gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-centra
 Zadań jest 5 (tabela `JOBS` w `scheduler.sh`). `--resume` bez nazw, z nazwą
 spoza tabeli albo z zadaniem oznaczonym w tabeli jako `PAUSED` → błąd przed
 pierwszym wywołaniem gcloud.
+
+`mh-push-reminders` i `mh-push-reminders-24h` są w tabeli `PAUSED`, dopóki
+moduł `pushNotifications` ma `hardOff` w `src/lib/features.ts`: przebieg
+domyślny je wstrzymuje (także wcześniej wznowione), a `--resume` z ich nazwą
+kończy się błędem przed gcloud.
 
 Włączenie harmonogramu = prawdziwe SMS-y i push do klientów salonów — decyzja Darka.
 Zadania `mh-notify-*` (urodziny, niski stan magazynu, „tęsknimy”) nie są

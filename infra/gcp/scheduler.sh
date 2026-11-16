@@ -94,11 +94,16 @@ SECRET_NAME="cron-secret"
 # nazwa|ścieżka|harmonogram (Europe/Warsaw)|stan (ENABLED|PAUSED)
 JOBS=(
   "mh-sms-reminders|/api/cron/sms-reminders|*/5 * * * *|ENABLED"
-  "mh-push-reminders|/api/cron/push-reminders|*/5 * * * *|ENABLED"
-  "mh-push-reminders-24h|/api/cron/push-reminders-24h|13,43 * * * *|ENABLED"
+  "mh-push-reminders|/api/cron/push-reminders|*/5 * * * *|PAUSED"
+  "mh-push-reminders-24h|/api/cron/push-reminders-24h|13,43 * * * *|PAUSED"
   "mh-cleanup-pending-deposits|/api/cron/cleanup-pending-deposits|*/15 * * * *|ENABLED"
   "mh-cleanup-temporary-access|/api/cron/cleanup-temporary-access|7 * * * *|ENABLED"
 )
+# mh-push-reminders i mh-push-reminders-24h: PAUSED, dopóki moduł
+# pushNotifications ma `hardOff` w src/lib/features.ts (crony i tak nic nie
+# wysyłają). Tryb domyślny wymusza PAUSED, --resume odrzuca je przed gcloud.
+# Po odmrożeniu modułu: zmiana stanu w tabeli na ENABLED (strażnik:
+# __tests__/lib/scheduler-config.test.ts, zadania tras zamrożonych modułów).
 # Zadań mh-notify-* (birthday, low-stock, we-miss-you) NIE tworzymy (Oliver):
 # trasy /api/notifications/* działają na jeden salon (wymagają salonId) i nic
 # nie zrobią z harmonogramu. Wracają z R3-C razem z systemową trasą po
