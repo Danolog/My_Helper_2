@@ -1,0 +1,41 @@
+-- #171: reguła kolizji wizyt i „koniec po początku” także w bazie (druga linia
+-- obrony za @/lib/appointment-overlap, #165).
+--
+-- 1. CHECK end_time > start_time na appointments i time_blocks: przedział pusty
+--    lub odwrócony nigdy nie trafia w warunek półotwarty, więc taki wiersz
+--    (skrypt, seed, ręczny SQL) nie blokowałby terminu i sam nie byłby blokowany.
+--    Wygenerowane ze schematu (check() w src/lib/schema.ts, snapshot 0009).
+-- 2. EXCLUDE appointments_no_overlap: ten sam pracownik, przedziały [start, end)
+--    nachodzą na siebie, status inny niż 'cancelled' → odrzucenie (SQLSTATE 23P01).
+--    Łapie wyścig dwóch równoległych zapisów, którego SELECT przed INSERT nie łapie.
+--    Trasy zamieniają 23P01 na 409 (isAppointmentOverlapViolation).
+--    Drizzle nie wyraża EXCLUDE w schemacie — ograniczenie żyje tylko tutaj.
+--    tsrange, nie tstzrange: kolumny to `timestamp` (bez strefy); tstzrange
+--    wymagałby rzutowania timestamp → timestamptz, które zależy od TimeZone
+--    sesji (STABLE), a wyrażenie ograniczenia musi być IMMUTABLE.
+--    Styk (10:00–11:00 i 11:00–12:00) nie jest kolizją: '[)' — jak w kodzie.
+--
+-- Przed zastosowaniem na każdej bazie (produkcja: słowo Darka) wszystkie trzy
+-- zapytania muszą zwrócić 0 — inaczej ADD CONSTRAINT się nie powiedzie:
+--   SELECT count(*) FROM appointments WHERE end_time <= start_time;
+--   SELECT count(*) FROM time_blocks WHERE end_time <= start_time;
+--   SELECT count(*) FROM appointments a JOIN appointments b
+--     ON a.employee_id = b.employee_id AND a.id < b.id
+--    AND a.status <> 'cancelled' AND b.status <> 'cancelled'
+--    AND a.start_time < b.end_time AND a.end_time > b.start_time;
+-- Lokalnie (2026-11-15, sesja główna): 95 wizyt, 0 / 0 nakładających się par;
+-- time_blocks: 0 wierszy.
+--
+-- Wymaga rozszerzenia btree_gist (operator = dla uuid w indeksie gist);
+-- dostępne w Postgresie od wersji contrib, na Neonie i Cloud SQL na liście
+-- obsługiwanych rozszerzeń. CREATE EXTENSION wymaga uprawnień właściciela bazy.
+--
+-- ROLLBACK:
+--   ALTER TABLE "appointments" DROP CONSTRAINT "appointments_no_overlap";
+--   ALTER TABLE "time_blocks" DROP CONSTRAINT "time_blocks_end_after_start";
+--   ALTER TABLE "appointments" DROP CONSTRAINT "appointments_end_after_start";
+--   (rozszerzenie btree_gist zostaje — nieszkodliwe, może go używać coś innego)
+CREATE EXTENSION IF NOT EXISTS btree_gist;--> statement-breakpoint
+ALTER TABLE "appointments" ADD CONSTRAINT "appointments_end_after_start" CHECK ("appointments"."end_time" > "appointments"."start_time");--> statement-breakpoint
+ALTER TABLE "time_blocks" ADD CONSTRAINT "time_blocks_end_after_start" CHECK ("time_blocks"."end_time" > "time_blocks"."start_time");--> statement-breakpoint
+ALTER TABLE "appointments" ADD CONSTRAINT "appointments_no_overlap" EXCLUDE USING gist ("employee_id" WITH =, tsrange("start_time", "end_time", '[)') WITH &&) WHERE ("status" <> 'cancelled');
