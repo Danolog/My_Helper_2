@@ -216,9 +216,29 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
       expect(rows[0]!.indexdef).toMatch(/\(updated_at\)/);
     });
 
+    /**
+     * Warunek wstępny (#193): w bazie testowej obowiązuje reguła domyślnych uprawnień
+     * dla nowych tabel w `public` (właściciel = rola połączenia testu) z prawami tabelowymi
+     * roli żądań. Bez niej brak uprawnień niczego nie dowodzi o REVOKE w migracji.
+     */
+    const expectDefaultAclForRequestRole = async () => {
+      const rows = (await h!.observer.unsafe(`
+        SELECT array_agg(DISTINCT a.privilege_type ORDER BY a.privilege_type) AS privs
+        FROM pg_default_acl d, aclexplode(d.defaclacl) a
+        WHERE d.defaclrole = (SELECT oid FROM pg_roles WHERE rolname = current_user)
+          AND d.defaclnamespace = 'public'::regnamespace
+          AND d.defaclobjtype = 'r'
+          AND a.grantee = 'myhelper_app'::regrole`)) as unknown as Array<{ privs: string[] | null }>;
+      expect(
+        rows[0]!.privs ?? [],
+        "bez reguły domyślnej ten test nie dowodzi REVOKE (#193)",
+      ).toEqual(expect.arrayContaining(["DELETE", "INSERT", "SELECT", "UPDATE"]));
+    };
+
     it.each([["SELECT"], ["INSERT"], ["UPDATE"], ["DELETE"], ["TRUNCATE"], ["REFERENCES"], ["TRIGGER"]])(
       "rola żądań myhelper_app nie ma %s (wprost, przez PUBLIC ani członkostwo)",
       async (priv) => {
+        await expectDefaultAclForRequestRole();
         const rows = (await h!.observer.unsafe(
           `SELECT has_table_privilege('myhelper_app', 'public.auth_rate_limit', '${priv}') AS ok`,
         )) as unknown as Array<{ ok: boolean }>;
