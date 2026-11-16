@@ -32,31 +32,43 @@ const SALON_ID = "11111111-2222-4333-8444-555555555555";
 const PHONE = "+48512345678";
 const DATE = new Date("2030-01-15T14:00:00");
 
+/**
+ * Nazwy salonu (tekst właściciela) podawane do każdego szablonu: zwykła
+ * oraz wrogie — z nową linią, znakiem sterującym, adresem, emoji, ponad limit.
+ */
+const SALON_NAMES: readonly string[] = [
+  "Salon Uroda",
+  "Salon\nUroda\u0007 https://aplikacja-salonu.example/book",
+  "Salon www.uroda-ania.pl",
+  "Uroda.com",
+  "Salon 💇‍♀️ Uroda " + "x".repeat(60),
+];
+
 /** Każdy eksportowany szablon SMS transakcyjnego z parametrami do wywołania. */
-const TEMPLATES: Record<string, (mod: typeof sms) => Promise<sms.SmsResult>> = {
-  sendAppointmentReminderSms: (mod) =>
+const TEMPLATES: Record<string, (mod: typeof sms, salonName: string) => Promise<sms.SmsResult>> = {
+  sendAppointmentReminderSms: (mod, salonName) =>
     mod.sendAppointmentReminderSms({
       clientPhone: PHONE,
       clientName: "Jan Kowalski",
       serviceName: "Strzyzenie",
       employeeName: "Anna Nowak",
       appointmentDate: DATE,
-      salonName: "Salon Uroda",
+      salonName,
       salonId: SALON_ID,
       clientId: "client-1",
     }),
-  sendBookingConfirmationSms: (mod) =>
+  sendBookingConfirmationSms: (mod, salonName) =>
     mod.sendBookingConfirmationSms({
       clientPhone: PHONE,
       clientName: "Jan Kowalski",
       serviceName: "Strzyzenie",
       employeeName: "Anna Nowak",
       appointmentDate: DATE,
-      salonName: "Salon Uroda",
+      salonName,
       salonId: SALON_ID,
       clientId: "client-1",
     }),
-  sendPaymentConfirmationSms: (mod) =>
+  sendPaymentConfirmationSms: (mod, salonName) =>
     mod.sendPaymentConfirmationSms({
       clientPhone: PHONE,
       clientName: "Jan Kowalski",
@@ -65,7 +77,7 @@ const TEMPLATES: Record<string, (mod: typeof sms) => Promise<sms.SmsResult>> = {
       serviceName: "Strzyzenie",
       appointmentDate: DATE,
       employeeName: "Anna Nowak",
-      salonName: "Salon Uroda",
+      salonName,
       salonId: SALON_ID,
       clientId: "client-1",
     }),
@@ -110,14 +122,18 @@ describe("szablony SMS transakcyjnych: lista zamknięta względem eksportów", (
 });
 
 describe("szablony SMS transakcyjnych: bez linku i bez wezwania do rezerwacji", () => {
-  it.each(Object.keys(TEMPLATES).map((name) => [name]))(
-    "%s: treść do dostawcy bez URL, adresu aplikacji, /book i „Zarezerwuj”",
-    async (name) => {
-      const result = await TEMPLATES[name]!(sms);
+  it.each(
+    Object.keys(TEMPLATES).flatMap((name) => SALON_NAMES.map((salonName) => [name, salonName]))
+  )(
+    "%s: treść do dostawcy bez URL, adresu aplikacji, /book i „Zarezerwuj” (salon: %j)",
+    async (name, salonName) => {
+      const result = await TEMPLATES[name]!(sms, salonName!);
       expect(result.success).toBe(true);
 
       const message = sentMessage();
       expect(message.length).toBeGreaterThan(0);
+      expect(message).not.toMatch(/[\u0000-\u001f\u007f]/);
+      expect(message).not.toMatch(/\.pl\b|\.com\b/i);
       expect(message).not.toMatch(/https?:\/\//i);
       expect(message).not.toMatch(/www\./i);
       expect(message).not.toContain(APP_URL);

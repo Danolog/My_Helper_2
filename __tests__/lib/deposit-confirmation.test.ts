@@ -22,6 +22,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const {
+  salonQueue,
+  mockSalonWhere,
+  mockSalonRaw,
+  mockForSalon,
   selectQueue,
   mockDbSelect,
   txReturningQueue,
@@ -68,7 +72,21 @@ const {
   const mockSendSms = vi.fn();
   const mockRefund = vi.fn();
 
+  // forSalon(salonId).raw(tx => tx.select().from(salons).where()) — odczyt
+  // nazwy salonu przez bramę salonu; wyniki z osobnej kolejki.
+  const salonQueue: unknown[][] = [];
+  const mockSalonWhere = vi.fn((..._args: unknown[]) =>
+    Promise.resolve(salonQueue.length > 0 ? salonQueue.shift()! : [])
+  );
+  const salonTx = { select: vi.fn((..._args: unknown[]) => ({ from: () => ({ where: mockSalonWhere }) })) };
+  const mockSalonRaw = vi.fn((fn: (tx: typeof salonTx) => unknown) => fn(salonTx));
+  const mockForSalon = vi.fn((_salonId: string) => ({ raw: mockSalonRaw }));
+
   return {
+    salonQueue,
+    mockSalonWhere,
+    mockSalonRaw,
+    mockForSalon,
     selectQueue,
     mockDbSelect,
     txReturningQueue,
@@ -116,7 +134,11 @@ vi.mock("@/lib/schema", () => ({
   clients: { id: "clients.id" },
   services: { id: "services.id" },
   employees: { id: "employees.id" },
-  salons: { id: "salons.id" },
+  salons: { id: "salons.id", name: "salons.name" },
+}));
+
+vi.mock("@/lib/server/repository", () => ({
+  forSalon: (salonId: string) => mockForSalon(salonId),
 }));
 
 vi.mock("@/lib/sms", () => ({
@@ -161,6 +183,7 @@ describe("confirmDepositPayment", () => {
     selectQueue.length = 0;
     txReturningQueue.length = 0;
     txSelectQueue.length = 0;
+    salonQueue.length = 0;
     mockSendSms.mockResolvedValue({ success: true });
     mockRefund.mockResolvedValue({ success: true, refunded: true, refundId: "re_1", amount: 50, message: "ok" });
   });
@@ -220,9 +243,9 @@ describe("confirmDepositPayment", () => {
         { id: "client-1", phone: "+48111222333", firstName: "Jan", lastName: "Kowalski" },
       ],
       /* pracownik */ [{ id: "emp-1", firstName: "Ewa", lastName: "Nowak" }],
-      /* usluga */ [{ id: "svc-1", name: "Strzyzenie" }],
-      /* salon */ [{ id: "salon-1", name: "Salon Uroda" }]
+      /* usluga */ [{ id: "svc-1", name: "Strzyzenie" }]
     );
+    salonQueue.push([{ name: "Salon Uroda" }]);
     txReturningQueue.push([updatedPayment], [confirmedAppointment]);
 
     const result = await confirmDepositPayment("dp-1", { paymentIntentId: "pi_real_1" });
@@ -259,20 +282,52 @@ describe("confirmDepositPayment", () => {
     );
   });
 
-  it("nazwa salonu czytana po salonId płatności i przekazana do SMS", async () => {
+  it("nazwa salonu czytana przez bramę salonu z salonId płatności i przekazana do SMS", async () => {
     queueSelect(
       [pendingPayment],
       [{ id: "client-1", phone: "+48111222333", firstName: "Jan", lastName: "Kowalski" }],
       [{ id: "emp-1", firstName: "Ewa", lastName: "Nowak" }],
-      [{ id: "svc-1", name: "Strzyzenie" }],
-      [{ id: "salon-1", name: "Salon Uroda" }]
+      [{ id: "svc-1", name: "Strzyzenie" }]
     );
+    salonQueue.push([{ name: "Salon Uroda" }]);
     txReturningQueue.push([updatedPayment], [confirmedAppointment]);
 
     await confirmDepositPayment("dp-1");
 
+    expect(mockForSalon).toHaveBeenCalledTimes(1);
+    expect(mockForSalon).toHaveBeenCalledWith("salon-1");
+    expect(mockSalonRaw).toHaveBeenCalledTimes(1);
+    expect(mockSalonWhere).toHaveBeenCalledWith({ type: "eq", args: ["salons.id", "salon-1"] });
     expect(eq).toHaveBeenCalledWith("salons.id", "salon-1");
+    // zwykłe połączenie nie czyta salonu: 4 odczyty jak przed zmianą
+    // (płatność, klient, pracownik, usługa)
+    expect(mockDbSelect).toHaveBeenCalledTimes(4);
     expect(mockSendSms.mock.calls[0]![0]).toMatchObject({ salonName: "Salon Uroda" });
+  });
+
+  it("odczyt salonu rzuca => potwierdzenie OK (success true), SMS niewysłany, smsSent false", async () => {
+    queueSelect(
+      [pendingPayment],
+      [{ id: "client-1", phone: "+48111222333", firstName: "Jan", lastName: "Kowalski" }],
+      [{ id: "emp-1", firstName: "Ewa", lastName: "Nowak" }],
+      [{ id: "svc-1", name: "Strzyzenie" }]
+    );
+    mockSalonRaw.mockRejectedValueOnce(new Error("salon read failed"));
+    txReturningQueue.push([updatedPayment], [confirmedAppointment]);
+
+    const result = await confirmDepositPayment("dp-1");
+
+    expect(result).toMatchObject({
+      success: true,
+      alreadyConfirmed: false,
+      smsSent: false,
+      depositPayment: updatedPayment,
+      appointment: confirmedAppointment,
+    });
+    expect(mockSendSms).not.toHaveBeenCalled();
+    expect(mockTxSet.mock.calls[0]![0]).toMatchObject({ status: "succeeded" });
+    expect(mockTxSet.mock.calls[1]![0]).toMatchObject({ depositPaid: true, status: "confirmed" });
+    expect(mockRefund).not.toHaveBeenCalled();
   });
 
   it("brak wiersza salonu => SMS wysłany z salonName null, potwierdzenie OK", async () => {
