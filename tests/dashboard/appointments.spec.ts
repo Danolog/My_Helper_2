@@ -100,7 +100,7 @@ async function createAppointmentViaApi(page: Page, time: string): Promise<string
   // Zapisana wartosc, nie wyslana: utrata prefiksu po stronie serwera = czerwony test,
   // a nie ciche zaprzestanie sprzatania przez globalTeardown. Asercja miekka: test
   // jest czerwony, ale id wraca do wywolujacego i trafia do sprzatania w afterEach.
-  expect.soft(created.notes,'zapisane notes bez znacznika [E2E] — teardown nie usunie wizyty').toBe(e2eNotes('kalendarz API'));
+  expect.soft(created.notes, 'zapisane notes bez znacznika [E2E] — teardown nie usunie wizyty').toBe(e2eNotes('kalendarz API'));
   return created.id;
 }
 
@@ -165,7 +165,7 @@ test.describe('Flow 4: Appointment System', () => {
     // Miekko: blad jednej wizyty nie przerywa anulowania kolejnych.
     for (const id of ids) {
       const res = await page.request.delete(`/api/appointments/${id}`, { headers });
-      expect.soft(res.status(),`sprzatanie: anulowanie wizyty ${id}: ${await res.text()}`).toBe(200);
+      expect.soft(res.status(), `sprzatanie: anulowanie wizyty ${id}: ${await res.text()}`).toBe(200);
     }
   });
 
