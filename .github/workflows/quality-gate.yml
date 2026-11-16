@@ -129,6 +129,14 @@ jobs:
           PLAYWRIGHT_TIMEOUT: 15000
           ALLOW_PAYMENT_SIMULATION: "1"
 
+      # Strażnik RLS drugi raz, po ostatnim kroku z bazą (#194 Z1): RLS zdjęte
+      # W TRAKCIE joba (push w dowolnej postaci) = czerwony job. `!cancelled()`:
+      # krok biegnie też po wcześniejszej porażce (nie jest pomijany), a sam
+      # niczego nie maskuje — porażka wcześniejszego kroku zostaje porażką joba.
+      - name: RLS guard (end of job)
+        if: ${{ !cancelled() }}
+        run: pnpm exec tsx scripts/db-rls-guard.ts
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -203,6 +211,11 @@ jobs:
         # VERCEL=1 i handler ją ignoruje z błędem w logu).
         env:
           ALLOW_PAYMENT_SIMULATION: "1"
+
+      # Strażnik RLS drugi raz, po ostatnim kroku z bazą (#194 Z1) — jak w e2e-smoke.
+      - name: RLS guard (end of job)
+        if: ${{ !cancelled() }}
+        run: pnpm exec tsx scripts/db-rls-guard.ts
 
       - uses: actions/upload-artifact@v4
         if: always()
