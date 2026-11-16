@@ -66,7 +66,13 @@ export async function notifyWaitingList(
     errors: 0,
   };
 
+  // Jedno źródło salonu, jak w accept/decline: każde zapytanie poniżej ma
+  // jawny warunek salonu (kontrakt raw() w repository.ts).
+  const salonId = params.salonId;
+
   try {
+    const gate = forSalon(salonId);
+
     // Build conditions for matching waiting list entries:
     // - Same salon (required)
     // - Not already notified (notifiedAt is null)
@@ -87,8 +93,6 @@ export async function notifyWaitingList(
         )
       : isNull(waitingList.preferredEmployeeId);
 
-    const gate = forSalon(params.salonId);
-
     const entries = await gate.raw((tx) =>
       tx
         .select({
@@ -99,7 +103,7 @@ export async function notifyWaitingList(
         .innerJoin(clients, eq(waitingList.clientId, clients.id))
         .where(
           and(
-            eq(waitingList.salonId, params.salonId),
+            eq(waitingList.salonId, salonId),
             isNull(waitingList.notifiedAt),
             isNull(waitingList.accepted),
             serviceCondition,
@@ -109,11 +113,11 @@ export async function notifyWaitingList(
     );
 
     if (entries.length === 0) {
-      logger.debug("No matching waiting list entries for freed slot", { salonId: params.salonId });
+      logger.debug("No matching waiting list entries for freed slot", { salonId });
       return result;
     }
 
-    logger.info("Found matching waiting list entries for freed slot", { count: entries.length, salonId: params.salonId });
+    logger.info("Found matching waiting list entries for freed slot", { count: entries.length, salonId });
 
     // Format the freed slot details for notification messages
     const formattedDate = params.startTime.toLocaleDateString("pl-PL", {
@@ -130,7 +134,7 @@ export async function notifyWaitingList(
 
     for (const row of entries) {
       const clientName = `${row.client.firstName} ${row.client.lastName}`;
-      const bookingLink = `${appUrl}/salons/${params.salonId}/book`;
+      const bookingLink = `${appUrl}/salons/${salonId}/book`;
 
       // Build the notification message in Polish
       const message =
@@ -166,10 +170,10 @@ export async function notifyWaitingList(
               data: {
                 type: "waiting_list_notification",
                 waitingListId: row.entry.id,
-                salonId: params.salonId,
+                salonId,
                 url: "/client/waiting-list",
               },
-              salonId: params.salonId,
+              salonId,
               clientId: row.client.id,
             });
             if (pushResult.success) {
@@ -200,7 +204,7 @@ export async function notifyWaitingList(
             .where(
               and(
                 eq(appointments.clientId, clientId),
-                eq(appointments.salonId, params.salonId),
+                eq(appointments.salonId, salonId),
                 eq(appointments.serviceId, serviceId),
                 not(eq(appointments.status, "cancelled"))
               )
@@ -229,7 +233,7 @@ export async function notifyWaitingList(
               existingAppointmentId: existingApptId,
               acceptToken,
             })
-            .where(and(eq(waitingList.id, entryId), eq(waitingList.salonId, gate.salonId)))
+            .where(and(eq(waitingList.id, entryId), eq(waitingList.salonId, salonId)))
         );
         result.notified++;
       } catch (updateErr) {
