@@ -15,6 +15,7 @@ import {
   appointments,
   notifications,
 } from "@/lib/schema";
+import { getSalonModules } from "@/lib/server/modules";
 import { forSalon } from "@/lib/server/repository";
 import { resolveWaitingListToken } from "@/lib/server/system";
 import { SMS_TIME_ZONE } from "@/lib/sms";
@@ -72,10 +73,14 @@ interface NotifyWaitingListResult {
  * notified or accepted/declined yet. For each match it sends a push
  * notification with the freed slot details.
  *
+ * Moduł listy oczekujących wyłączony w salonie (albo błąd odczytu ustawień)
+ * = brak odczytu wpisów i brak wysyłki.
+ *
  * Kanał SMS jest wstrzymany do czasu #221 (`smsCount` zostaje w wyniku, = 0).
  * Wpis jest oznaczany (`notifiedAt`, `acceptToken`, `offered*`) TYLKO gdy
- * wiadomość faktycznie dotarła (push `success`). Inaczej wpis zostaje
- * nietknięty i wraca przy następnym zwolnionym terminie — bez błędu w wyniku.
+ * wiadomość została przyjęta przez dostawcę (push `success`). Inaczej wpis
+ * zostaje nietknięty i wraca przy następnym zwolnionym terminie — bez błędu
+ * w wyniku.
  */
 export async function notifyWaitingList(
   params: NotifyWaitingListParams
@@ -92,6 +97,14 @@ export async function notifyWaitingList(
   const salonId = params.salonId;
 
   try {
+    // Przełącznik modułu salonu przed jakimkolwiek odczytem wpisów. Błąd
+    // odczytu ustawień daje stan domyślny, w którym moduł jest wyłączony.
+    const modules = await getSalonModules(salonId);
+    if (!modules.waitingList) {
+      logger.debug("Waiting list module disabled for salon", { salonId });
+      return result;
+    }
+
     const gate = forSalon(salonId);
 
     // Build conditions for matching waiting list entries:
