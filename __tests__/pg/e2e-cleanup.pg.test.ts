@@ -50,32 +50,36 @@ async function appt(salonId: string, employeeId: string, fields: { notes?: strin
   return row!.id;
 }
 
+// Dane i połączenie wspólne dla CAŁEGO pliku (oba describe niżej): hooki na poziomie
+// pliku, nie w pierwszym describe — inaczej jego afterAll usuwa salony i zamyka
+// połączenie, zanim ruszy describe pracowników (CONNECTION_ENDED).
+beforeAll(async () => {
+  if (!h) return;
+  const db = h.db;
+  await db.insert(user).values(USERS.map((id) => ({ id, name: "IT T3 e2ec", email: `${id}@example.invalid` })));
+  const [a] = await db.insert(salons).values({ name: `IT T3 e2ec A ${RUN}`, ownerId: USER_A }).returning();
+  const [b] = await db.insert(salons).values({ name: `IT T3 e2ec B ${RUN}`, ownerId: USER_B }).returning();
+  salonA = a!.id;
+  salonB = b!.id;
+  const [ea] = await db.insert(employees).values({ salonId: salonA, firstName: "IT", lastName: "A" }).returning();
+  const [eb] = await db.insert(employees).values({ salonId: salonB, firstName: "IT", lastName: "B" }).returning();
+  empA = ea!.id;
+  empB = eb!.id;
+});
+
+afterAll(async () => {
+  if (!h) return;
+  try {
+    // Po właścicielach, nie po zmiennych salonA/salonB: sprząta też salon
+    // utworzony przed awarią beforeAll w połowie (zmienna jeszcze pusta).
+    await h.db.delete(salons).where(inArray(salons.ownerId, USERS));
+    await h.db.delete(user).where(inArray(user.id, USERS));
+  } finally {
+    await h.end();
+  }
+});
+
 describe.skipIf(!h)("purgeE2eAppointments (pg)", () => {
-  beforeAll(async () => {
-    const db = h!.db;
-    await db.insert(user).values(USERS.map((id) => ({ id, name: "IT T3 e2ec", email: `${id}@example.invalid` })));
-    const [a] = await db.insert(salons).values({ name: `IT T3 e2ec A ${RUN}`, ownerId: USER_A }).returning();
-    const [b] = await db.insert(salons).values({ name: `IT T3 e2ec B ${RUN}`, ownerId: USER_B }).returning();
-    salonA = a!.id;
-    salonB = b!.id;
-    const [ea] = await db.insert(employees).values({ salonId: salonA, firstName: "IT", lastName: "A" }).returning();
-    const [eb] = await db.insert(employees).values({ salonId: salonB, firstName: "IT", lastName: "B" }).returning();
-    empA = ea!.id;
-    empB = eb!.id;
-  });
-
-  afterAll(async () => {
-    if (!h) return;
-    try {
-      // Po właścicielach, nie po zmiennych salonA/salonB: sprząta też salon
-      // utworzony przed awarią beforeAll w połowie (zmienna jeszcze pusta).
-      await h.db.delete(salons).where(inArray(salons.ownerId, USERS));
-      await h.db.delete(user).where(inArray(user.id, USERS));
-    } finally {
-      await h.end();
-    }
-  });
-
   it("usuwa tylko oznaczone wizyty podanego salonu, z kaskadą deposit_payments; reszta zostaje", async () => {
     const markedNotes = await appt(salonA, empA, { notes: `${E2E_MARKER} kalendarz API` });
     const markedGuest = await appt(salonA, empA, { guestName: `${E2E_MARKER} Gosc` });
@@ -115,7 +119,7 @@ describe.skipIf(!h)("purgeE2eAppointments (pg)", () => {
   });
 });
 
-// #199: pracownicy E2E. Te same salony co wyżej (describe biegną po kolei w jednym pliku).
+// #199: pracownicy E2E. Te same salony z beforeAll pliku (describe biegną po kolei).
 describe.skipIf(!h)("purgeE2eEmployees (pg)", () => {
   async function emp(salonId: string, firstName: string, lastName: string) {
     const [row] = await h!.db.insert(employees).values({ salonId, firstName, lastName }).returning({ id: employees.id });
