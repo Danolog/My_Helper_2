@@ -182,6 +182,7 @@ jobs:
           AI_MONTHLY_IMAGE_LIMIT: ${{ vars.AI_MONTHLY_IMAGE_LIMIT }}
           ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
           TRUSTED_PROXIES: ${{ vars.TRUSTED_PROXIES }}
+          AUTH_RATE_LIMIT_STORE: ${{ vars.AUTH_RATE_LIMIT_STORE }}
         run: |
           out="$(infra/gcp/run-deploy.sh deploy)"
           echo "$out"

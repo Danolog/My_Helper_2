@@ -234,7 +234,7 @@ describe("licznik konta: rezerwacja próby", () => {
     expect(execute).toHaveBeenCalledTimes(1);
     const { sql } = queryOf(execute.mock.calls[0]!);
     expect(sql).toMatch(/delete from\s+"?auth_rate_limit"?/i);
-    expect(sql).not.toMatch(/limit/i);
+    expect(sql).not.toMatch(/\blimit\s+\d/i);
   });
 });
 

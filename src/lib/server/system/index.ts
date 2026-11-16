@@ -21,3 +21,4 @@ export {
 export type { SalonContext, SalonContextResolution, SalonRole } from "./session";
 export { cleanupExpiredTemporaryAccess } from "./cron";
 export { checkDatabase, pingDatabase } from "./health";
+export { clearSignInFailures, consumeAuthRateLimit, reserveAccountSignInAttempt } from "./auth-throttle";

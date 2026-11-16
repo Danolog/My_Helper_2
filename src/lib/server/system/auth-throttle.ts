@@ -1,0 +1,224 @@
+/**
+ * Wyjście systemowe (#193): liczniki limitu prób logowania w tabeli
+ * `auth_rate_limit`, wspólne dla wszystkich instancji aplikacji. Używane tylko
+ * w trybie `AUTH_RATE_LIMIT_STORE=database` (fabryka `@/lib/auth-rate-limit-options`).
+ *
+ * Dwa liczniki w jednej tabeli, rozdzielone kluczem (`@/lib/auth-throttle-keys`,
+ * HMAC z osobnymi etykietami; w tabeli nie ma adresu IP ani e-maila):
+ *
+ * 1. Licznik adresu (`consumeAuthRateLimit`) — magazyn limitu Better Auth
+ *    (`rateLimit.customStorage`). Ścieżki wrażliwe (reguły specjalne biblioteki:
+ *    logowanie, rejestracja, zmiana hasła i e-maila, reset hasła, weryfikacja)
+ *    liczy baza jednym atomowym UPSERT; pozostałe ścieżki (np. odczyt sesji)
+ *    liczy pamięć procesu — bez zapytań do bazy przy każdym żądaniu.
+ *
+ * 2. Licznik konta (`reserveAccountSignInAttempt`, `clearSignInFailures`) —
+ *    każda próba logowania e-mailem rezerwuje miejsce PRZED sprawdzeniem hasła
+ *    jednym atomowym UPSERT; ponad próg w oknie → blokada stała. Zerowanie
+ *    (usunięcie wiersza) tylko po udanym logowaniu, po odmowie „e-mail
+ *    niezweryfikowany" (hasło było poprawne) i po resecie hasła.
+ *
+ *    Rezerwacja, po której nie przyszło zerowanie (wyjątek, przerwane żądanie,
+ *    padnięty proces), zostaje w liczniku jak porażka. To zamierzone — nie
+ *    zmieniać na fail-open.
+ *
+ * Fail-closed: błąd bazy przy liczeniu = odmowa. Logi zawierają wyłącznie
+ * ścieżkę albo nazwę operacji i nazwę błędu — nigdy adres, e-mail ani klucz.
+ */
+import { sql } from "drizzle-orm";
+import { logger } from "@/lib/logger";
+import { accountThrottleKey, ipThrottleKey } from "@/lib/auth-throttle-keys";
+import { dbSystem } from "./db-system";
+
+const ACCOUNT_WINDOW_SEC = 15 * 60;
+const ACCOUNT_MAX_ATTEMPTS = 10;
+const ACCOUNT_BLOCK_SEC = 15 * 60;
+
+const RETENTION_DELETE_LIMIT = 100;
+const MEMORY_MAX_ENTRIES = 100_000;
+
+let cachedSecret: string | undefined;
+
+/** Sekret auth czytany raz; brak → wyjątek (łapany niżej jako odmowa). */
+function getSecret(): string {
+  if (cachedSecret === undefined) {
+    const secret = process.env.BETTER_AUTH_SECRET;
+    if (!secret) throw new Error("BETTER_AUTH_SECRET is not set");
+    cachedSecret = secret;
+  }
+  return cachedSecret;
+}
+
+function errorName(err: unknown): string {
+  return err instanceof Error ? err.name : "UnknownError";
+}
+
+/** Ścieżka z klucza biblioteki `<ip>|<ścieżka>` — po OSTATNIM „|” (IPv6 ma „:”). */
+function pathOfLibraryKey(libraryKey: string): string {
+  return libraryKey.slice(libraryKey.lastIndexOf("|") + 1);
+}
+
+/** Te same ścieżki co reguły specjalne Better Auth (rate-limiter, 1.7.x). */
+function isSensitivePath(path: string): boolean {
+  return (
+    path.startsWith("/sign-in") ||
+    path.startsWith("/sign-up") ||
+    path.startsWith("/change-password") ||
+    path.startsWith("/change-email") ||
+    path === "/request-password-reset" ||
+    path === "/send-verification-email" ||
+    path.startsWith("/forget-password") ||
+    path === "/email-otp/send-verification-otp" ||
+    path === "/email-otp/request-password-reset"
+  );
+}
+
+function secondsUntil(ms: number, now: number): number {
+  return Math.max(1, Math.ceil((ms - now) / 1000));
+}
+
+// ── Licznik w pamięci procesu dla ścieżek niewrażliwych (semantyka jak magazyn
+//    pamięciowy biblioteki: okno od ostatniego dozwolonego żądania). ──────────
+
+const memory = new Map<string, { count: number; lastRequest: number; expiresAt: number }>();
+
+function pruneMemory(now: number): void {
+  for (const [k, e] of memory) if (now >= e.expiresAt) memory.delete(k);
+  if (memory.size <= MEMORY_MAX_ENTRIES) return;
+  let overflow = memory.size - MEMORY_MAX_ENTRIES;
+  for (const k of memory.keys()) {
+    memory.delete(k);
+    if (--overflow <= 0) break;
+  }
+}
+
+function consumeInMemory(libraryKey: string, rule: { window: number; max: number }) {
+  const now = Date.now();
+  pruneMemory(now);
+  const windowMs = rule.window * 1000;
+  const entry = memory.get(libraryKey);
+  const data = entry && now < entry.expiresAt ? entry : undefined;
+  if (data && now - data.lastRequest < windowMs && data.count >= rule.max) {
+    return { allowed: false, retryAfter: Math.ceil((data.lastRequest + windowMs - now) / 1000) };
+  }
+  const count = !data || now - data.lastRequest >= windowMs ? 1 : data.count + 1;
+  memory.set(libraryKey, { count, lastRequest: now, expiresAt: now + windowMs });
+  return { allowed: true, retryAfter: null };
+}
+
+type CounterRow = { count: number; window_start: Date | string; blocked_until: Date | string | null };
+
+function firstRow(result: unknown): CounterRow | undefined {
+  return (result as ArrayLike<CounterRow> | undefined)?.[0];
+}
+
+/**
+ * Magazyn limitu adresu dla Better Auth (`rateLimit.customStorage.consume`).
+ * Ścieżka wrażliwa → atomowy UPSERT w bazie, potem ograniczone kasowanie
+ * wierszy starszych niż 24 h (osobna instrukcja; jej błąd nie zmienia wyniku).
+ */
+export async function consumeAuthRateLimit(
+  key: string,
+  rule: { window: number; max: number },
+): Promise<{ allowed: boolean; retryAfter: number | null }> {
+  const path = pathOfLibraryKey(key);
+  if (!isSensitivePath(path)) return consumeInMemory(key, rule);
+
+  let row: CounterRow | undefined;
+  try {
+    const hashed = ipThrottleKey(key, getSecret());
+    const result = await dbSystem.execute(sql`
+      INSERT INTO auth_rate_limit (key, count, window_start, updated_at)
+      VALUES (${hashed}, 1, now(), now())
+      ON CONFLICT (key) DO UPDATE SET
+        count = CASE WHEN auth_rate_limit.window_start <= now() - make_interval(secs => ${rule.window})
+                     THEN 1 ELSE auth_rate_limit.count + 1 END,
+        window_start = CASE WHEN auth_rate_limit.window_start <= now() - make_interval(secs => ${rule.window})
+                     THEN now() ELSE auth_rate_limit.window_start END,
+        updated_at = now()
+      RETURNING count, window_start, blocked_until`);
+    row = firstRow(result);
+    if (!row) throw new Error("auth rate limit upsert returned no row");
+  } catch (err) {
+    logger.error("auth rate limit store error", { path, error: errorName(err) });
+    return { allowed: false, retryAfter: rule.window };
+  }
+
+  try {
+    await dbSystem.execute(sql`
+      DELETE FROM auth_rate_limit WHERE ctid IN (
+        SELECT ctid FROM auth_rate_limit
+        WHERE updated_at < now() - interval '24 hours'
+        LIMIT ${sql.raw(String(RETENTION_DELETE_LIMIT))} FOR UPDATE SKIP LOCKED)`);
+  } catch (err) {
+    logger.error("auth rate limit retention error", { error: errorName(err) });
+  }
+
+  if (Number(row.count) <= rule.max) return { allowed: true, retryAfter: null };
+  const windowEnd = new Date(row.window_start).getTime() + rule.window * 1000;
+  return { allowed: false, retryAfter: secondsUntil(windowEnd, Date.now()) };
+}
+
+/**
+ * Rezerwacja próby logowania na konto — jeden atomowy UPSERT przed sprawdzeniem hasła:
+ * - trwająca blokada → bez zmiany licznika, odmowa;
+ * - blokada minęła albo okno wygasło → nowe okno od tej próby;
+ * - inaczej licznik +1; przekroczenie progu ustawia blokadę stałą, odmowa.
+ * Błąd albo brak wiersza → odmowa (fail-closed).
+ */
+export async function reserveAccountSignInAttempt(
+  email: string,
+): Promise<{ allowed: boolean; retryAfter: number | null }> {
+  try {
+    const hashed = accountThrottleKey(email, getSecret());
+    const result = await dbSystem.execute(sql`
+      INSERT INTO auth_rate_limit (key, count, window_start, blocked_until, updated_at)
+      VALUES (${hashed}, 1, now(), NULL, now())
+      ON CONFLICT (key) DO UPDATE SET
+        count = CASE
+          WHEN auth_rate_limit.blocked_until > now() THEN auth_rate_limit.count
+          WHEN auth_rate_limit.blocked_until IS NOT NULL
+            OR auth_rate_limit.window_start <= now() - make_interval(secs => ${ACCOUNT_WINDOW_SEC}) THEN 1
+          ELSE auth_rate_limit.count + 1 END,
+        window_start = CASE
+          WHEN auth_rate_limit.blocked_until > now() THEN auth_rate_limit.window_start
+          WHEN auth_rate_limit.blocked_until IS NOT NULL
+            OR auth_rate_limit.window_start <= now() - make_interval(secs => ${ACCOUNT_WINDOW_SEC}) THEN now()
+          ELSE auth_rate_limit.window_start END,
+        blocked_until = CASE
+          WHEN auth_rate_limit.blocked_until > now() THEN auth_rate_limit.blocked_until
+          WHEN auth_rate_limit.blocked_until IS NOT NULL
+            OR auth_rate_limit.window_start <= now() - make_interval(secs => ${ACCOUNT_WINDOW_SEC}) THEN NULL
+          WHEN auth_rate_limit.count + 1 > ${ACCOUNT_MAX_ATTEMPTS}
+            THEN now() + make_interval(secs => ${ACCOUNT_BLOCK_SEC})
+          ELSE NULL END,
+        updated_at = now()
+      RETURNING count, window_start, blocked_until`);
+    const row = firstRow(result);
+    if (!row) throw new Error("account throttle upsert returned no row");
+    if (row.blocked_until !== null) {
+      const until = new Date(row.blocked_until).getTime();
+      const now = Date.now();
+      if (until > now) return { allowed: false, retryAfter: secondsUntil(until, now) };
+    }
+    return { allowed: true, retryAfter: null };
+  } catch (err) {
+    logger.error("auth rate limit store error", { path: "/sign-in/email", error: errorName(err) });
+    return { allowed: false, retryAfter: ACCOUNT_BLOCK_SEC };
+  }
+}
+
+/**
+ * Zerowanie licznika konta (usunięcie wiersza). Wyjście kasujące dane (L7).
+ * Błąd → log nazwy błędu; nie blokuje udanego logowania ani resetu hasła.
+ */
+export async function clearSignInFailures(email: string): Promise<{ cleared: boolean }> {
+  try {
+    const hashed = accountThrottleKey(email, getSecret());
+    await dbSystem.execute(sql`DELETE FROM auth_rate_limit WHERE key = ${hashed}`);
+    return { cleared: true };
+  } catch (err) {
+    logger.error("auth rate limit clear error", { error: errorName(err) });
+    return { cleared: false };
+  }
+}

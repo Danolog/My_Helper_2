@@ -211,6 +211,43 @@ describe("SignInButton", () => {
     });
   });
 
+  it("429: ogólny komunikat z linkiem do resetu hasła, bez treści z serwera", async () => {
+    mockSignInEmail.mockResolvedValue({
+      error: { status: 429, message: "Too many requests. Please try again later." },
+    });
+
+    render(<SignInButton />);
+
+    await user.type(screen.getByLabelText("Email"), "jan@example.com");
+    await user.type(screen.getByLabelText("Haslo"), "password123");
+    await user.click(screen.getByRole("button", { name: "Zaloguj sie" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Zbyt wiele prob logowania");
+    expect(screen.getByRole("link", { name: "zresetuj haslo" })).toHaveAttribute("href", "/forgot-password");
+    expect(screen.queryByText(/Too many requests/)).not.toBeInTheDocument();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it("429: komunikat znika przy kolejnej próbie z innym wynikiem", async () => {
+    mockSignInEmail
+      .mockResolvedValueOnce({ error: { status: 429, message: "x" } })
+      .mockResolvedValueOnce({ error: { status: 401, message: "Invalid credentials" } });
+
+    render(<SignInButton />);
+
+    await user.type(screen.getByLabelText("Email"), "jan@example.com");
+    await user.type(screen.getByLabelText("Haslo"), "password123");
+    await user.click(screen.getByRole("button", { name: "Zaloguj sie" }));
+    await screen.findByRole("alert");
+
+    await user.click(screen.getByRole("button", { name: "Zaloguj sie" }));
+    await waitFor(() => {
+      expect(screen.getByText("Invalid credentials")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("shows generic error on exception", async () => {
     mockSignInEmail.mockRejectedValue(new Error("Network error"));
 

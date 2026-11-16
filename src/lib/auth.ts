@@ -4,6 +4,8 @@ import { authAdapter } from "./server/system/auth-adapter"
 import { logger } from "./logger"
 import { isEmailConfigured, sendPasswordResetEmail, sendVerificationEmail } from "./email"
 import { getAuthIpAddressOptions } from "./trusted-proxies"
+import { getAuthRateLimitStore } from "./auth-rate-limit-mode"
+import { buildAuthRateLimitOptions } from "./auth-rate-limit-options"
 
 /**
  * Kontekst logu dla zdarzeń „wysłano link resetu hasła / weryfikacji e-mail".
@@ -36,10 +38,17 @@ function authLinkLogContext(
  *   (VERCEL=1): `x-real-ip` ustawia Vercel Proxy. Poza Vercelem domyślnie
  *   tylko X-Forwarded-For.
  *
- * `advanced.trustedProxyHeaders` zostaje celowo WYŁĄCZONE (przegląd Ryana
+ * `advanced.trustedProxyHeaders` zostaje celowo WYŁĄCZONE (przegląd CRCO
  * #17, b2): nie mamy dowodu, że LB nadpisuje X-Forwarded-Host od klienta.
  */
 const ipAddressOptions = getAuthIpAddressOptions()
+
+/**
+ * Magazyn limitu prób logowania (AUTH_RATE_LIMIT_STORE): brak zmiennej →
+ * konfiguracja biblioteki bez zmian; `database` → liczniki w bazie i limit na
+ * konto (src/lib/auth-rate-limit-options.ts). Zła wartość → błąd przy starcie.
+ */
+const rateLimitOptions = buildAuthRateLimitOptions(getAuthRateLimitStore(process.env))
 
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
@@ -54,6 +63,8 @@ export const auth = betterAuth({
   advanced: {
     ipAddress: ipAddressOptions,
   },
+  ...("rateLimit" in rateLimitOptions ? { rateLimit: rateLimitOptions.rateLimit } : {}),
+  ...("hooks" in rateLimitOptions ? { hooks: rateLimitOptions.hooks } : {}),
   session: {
     /**
      * Session expires after 15 minutes of inactivity.
@@ -95,6 +106,7 @@ export const auth = betterAuth({
       logger.info("Password reset requested", authLinkLogContext(user, "resetUrl", url))
       await sendPasswordResetEmail({ to: user.email, url })
     },
+    ...("onPasswordReset" in rateLimitOptions ? { onPasswordReset: rateLimitOptions.onPasswordReset } : {}),
   },
   emailVerification: {
     sendOnSignUp: true,

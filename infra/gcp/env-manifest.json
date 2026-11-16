@@ -20,6 +20,11 @@
       "class": "ci-only",
       "note": "Tylko serwer E2E w CI. Nigdy na hostingu (bramka lib/hosting ignoruje ją na Vercelu i Cloud Run)."
     },
+    "AUTH_RATE_LIMIT_STORE": {
+      "class": "var",
+      "required": false,
+      "note": "Brak zmiennej = memory. Dozwolone wyłącznie memory albo database; inna wartość (także pusta) zatrzymuje start."
+    },
     "BETTER_AUTH_SECRET": {
       "class": "secret",
       "secretName": "better-auth-secret",

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index, uniqueIndex, uuid, jsonb, integer, numeric, check } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, index, uniqueIndex, uuid, jsonb, integer, numeric, check, customType } from "drizzle-orm/pg-core";
 
 // IMPORTANT! ID fields should ALWAYS use UUID types, EXCEPT the BetterAuth tables.
 
@@ -83,6 +83,31 @@ export const verification = pgTable("verification", {
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
 });
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
+
+/**
+ * Liczniki limitu prób logowania (tryb AUTH_RATE_LIMIT_STORE=database).
+ * `key` to HMAC (32 B) — bez adresu IP i e-maila jawnym tekstem. Bez salon_id
+ * i bez RLS: tabela systemowa, dostęp wyłącznie przez wyjście
+ * `src/lib/server/system/auth-throttle.ts` (surowy SQL na puli systemowej);
+ * rola aplikacji nie ma uprawnień (REVOKE w migracji).
+ */
+export const authRateLimitTable = pgTable(
+  "auth_rate_limit",
+  {
+    key: bytea("key").primaryKey(),
+    count: integer("count").notNull(),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    blockedUntil: timestamp("blocked_until", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("auth_rate_limit_updated_at_idx").on(table.updatedAt)]
+);
 
 // Salons table - main business entity
 export const salons = pgTable(
