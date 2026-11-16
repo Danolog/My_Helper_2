@@ -15,8 +15,9 @@
 --    sesji (STABLE), a wyrażenie ograniczenia musi być IMMUTABLE.
 --    Styk (10:00–11:00 i 11:00–12:00) nie jest kolizją: '[)' — jak w kodzie.
 --
--- Przed zastosowaniem na każdej bazie (produkcja: słowo Darka) wszystkie trzy
--- zapytania muszą zwrócić 0 — inaczej ADD CONSTRAINT się nie powiedzie:
+-- Przed zastosowaniem na każdej bazie (produkcja: słowo Darka) uruchomić
+-- drizzle/checks/0009_appointments_no_overlap_preflight.sql (tylko odczyt).
+-- Wszystkie trzy liczby muszą wynosić 0 — inaczej ADD CONSTRAINT się nie powiedzie:
 --   SELECT count(*) FROM appointments WHERE end_time <= start_time;
 --   SELECT count(*) FROM time_blocks WHERE end_time <= start_time;
 --   SELECT count(*) FROM appointments a JOIN appointments b

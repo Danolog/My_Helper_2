@@ -72,6 +72,38 @@ describe("migracja 0009 — EXCLUDE appointments_no_overlap", () => {
     }
   });
 
+  it("zapytanie kontrolne obok migracji: tylko odczyt, liczy oba CHECK i nakładające się pary", () => {
+    const preflightFile = "checks/0009_appointments_no_overlap_preflight.sql";
+    expect(sql).toContain(`drizzle/${preflightFile}`);
+    const pre = read(preflightFile)
+      .split("\n")
+      .filter((l) => !l.trimStart().startsWith("--"))
+      .join("\n");
+    expect(pre).not.toMatch(/\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|TRUNCATE|GRANT)\b/i);
+    // Dwa zapytania: podsumowanie (liczby) i lista szczegółowa — każde z kompletem warunków.
+    const queries = pre.split(";").map((q) => q.trim()).filter(Boolean);
+    expect(queries).toHaveLength(2);
+    for (const q of queries) {
+      expect(q).toContain("FROM appointments WHERE end_time <= start_time");
+      expect(q).toContain("FROM time_blocks WHERE end_time <= start_time");
+      // para nakładająca się = to samo, co odrzuci EXCLUDE: pracownik, [start, end), bez cancelled
+      for (const cond of [
+        "a.employee_id = b.employee_id",
+        "a.status <> 'cancelled'",
+        "b.status <> 'cancelled'",
+        "a.start_time < b.end_time",
+        "a.end_time > b.start_time",
+      ]) {
+        expect(q).toContain(cond);
+      }
+    }
+  });
+
+  it("zapytanie kontrolne nie jest w dzienniku migracji", () => {
+    const journal = json("meta/_journal.json") as { entries: { tag: string }[] };
+    expect(journal.entries.some((e) => e.tag.includes("preflight"))).toBe(false);
+  });
+
   it("w pliku są tylko cztery polecenia (bez DROP/DELETE)", () => {
     expect(statements).toHaveLength(4);
     expect(statements.join("\n")).not.toMatch(/\b(DROP|DELETE|TRUNCATE|UPDATE)\b/i);
