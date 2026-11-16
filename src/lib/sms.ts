@@ -1,7 +1,7 @@
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { maskPhoneNumber, normalizePolishPhoneNumber } from "@/lib/phone";
 import { notifications } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { isTestPhoneNumber } from "@/lib/test-phone";
 
 export interface SmsMessage {
@@ -104,22 +104,27 @@ async function sendViaSmsapi(
 /**
  * Save an SMS notification to the notifications table (audit trail).
  * Returns the id of the created notification, if any.
+ *
+ * Zapis przez bramę salonu wiadomości (#193): własna, krótka transakcja —
+ * wołający nie może trzymać otwartej transakcji `forSalon` w trakcie wysyłki.
  */
 async function saveNotification(
   msg: SmsMessage,
   status: "sent" | "failed"
 ): Promise<string | undefined> {
-  const [notification] = await db
-    .insert(notifications)
-    .values({
-      salonId: msg.salonId,
-      clientId: msg.clientId || null,
-      type: "sms",
-      message: msg.message,
-      status,
-      ...(status === "sent" ? { sentAt: new Date() } : {}),
-    })
-    .returning();
+  const [notification] = await forSalon(msg.salonId).raw((tx) =>
+    tx
+      .insert(notifications)
+      .values({
+        salonId: msg.salonId,
+        clientId: msg.clientId || null,
+        type: "sms",
+        message: msg.message,
+        status,
+        ...(status === "sent" ? { sentAt: new Date() } : {}),
+      })
+      .returning()
+  );
 
   return notification?.id;
 }

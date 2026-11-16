@@ -15,6 +15,15 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// #193 P5a-1: biblioteka zapisuje przez forSalon(salonId).raw — brama deleguje
+// do zmockowanego `db`, więc asercje na zapisie zostają bez zmian.
+vi.mock("@/lib/server/repository", async () => {
+  const { db } = await import("@/lib/db");
+  return {
+    forSalon: (salonId: string) => ({ salonId, raw: (fn: (tx: unknown) => unknown) => fn(db) }),
+  };
+});
+
 const { mockDbValues } = vi.hoisted(() => {
   const returning = vi.fn().mockResolvedValue([{ id: "notif-1" }]);
   const mockDbValues = vi.fn().mockReturnValue({ returning });

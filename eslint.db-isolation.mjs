@@ -155,11 +155,6 @@ export const P5_FILES = [
   "src/app/api/reminders/appointment/route.ts",
   "src/app/api/seed/route.ts",
   "src/app/api/subscription-plans/route.ts",
-  "src/lib/email.ts",
-  "src/lib/notification-settings.ts",
-  "src/lib/push.ts",
-  "src/lib/sms.ts",
-  "src/lib/waiting-list.ts",
 ];
 
 /** P6: przełączenie puli (dziś bez plików). */

@@ -25,7 +25,9 @@
  * - Fail-closed konfiguracji: tsconfig wczytany bez błędów, alias `@/` rozwiązuje się do rejestru.
  *
  * Kontrakt: PR, który dodaje lub usuwa importera wyjścia, aktualizuje tę migawkę i uzasadnia
- * w opisie, skąd pochodzą `userId`/`salonId`. Zmianę migawki akceptuje CTO, CRCO do wglądu.
+ * w opisie, skąd pochodzą `userId`/`salonId`. Dwa poziomy akceptacji:
+ * - wyjścia kasujące dane (osobne asercje „lista DOKŁADNIE”): zmianę akceptują CTO i CRCO;
+ * - pozostałe wyjścia: zmianę akceptuje CTO, CRCO do wglądu.
  * Zakres: wyłącznie `src/` (bez plików testów).
  */
 import fs from "node:fs";
@@ -50,6 +52,9 @@ const CONTRACT =
   "zmiana importerów wyjść rejestru systemowego (#193 L7): zaktualizuj SNAPSHOT" +
   " (dla wyjść kasujących dane także osobną listę DOKŁADNIE) i w opisie PR podaj, skąd pochodzą" +
   " userId/salonId w nowym miejscu; zmianę akceptuje CTO, CRCO do wglądu";
+const DATA_DELETING_CONTRACT =
+  "zmiana importerów wyjścia kasującego dane (#193 L7): zaktualizuj SNAPSHOT i listę DOKŁADNIE," +
+  " w opisie PR podaj, skąd pochodzą userId/salonId w nowym miejscu; zmianę akceptują CTO i CRCO";
 const INTERMEDIATE_CONTRACT =
   "zmiana listy modułów pośrednich rejestru systemowego (#193 L7): zaktualizuj INTERMEDIATE_MODULES" +
   " i SNAPSHOT, w opisie PR podaj, po co nowy moduł re-eksportuje wyjście; zmianę akceptuje CTO, CRCO do wglądu";
@@ -64,6 +69,9 @@ const SNAPSHOT: Record<string, string[]> = {
   "db-system.ts:dbSystem": [],
   "health.ts:checkDatabase": ["src/app/api/diagnostics/route.ts"],
   "health.ts:pingDatabase": ["src/app/api/health/route.ts"],
+  "notifications.ts:deleteUndeliverablePushSubscriptions": ["src/lib/push.ts"],
+  "notifications.ts:getPushSubscriptionsForUser": ["src/lib/push.ts"],
+  "waiting-list.ts:resolveWaitingListToken": ["src/lib/waiting-list.ts"],
   "session.ts:getActiveTemporaryAccess": [
     "src/app/api/temporary-access/check/route.ts",
     "src/lib/temporary-access.ts",
@@ -307,16 +315,22 @@ describe("L7: importerzy wyjść rejestru systemowego (checker TS, src/)", () =>
   });
 
   it("session.ts:revokeSalonGrantsForUser (kasuje dane): lista DOKŁADNIE dzisiejsza", () => {
-    expect(a.importers["session.ts:revokeSalonGrantsForUser"], `wyjście kasujące dane — ${CONTRACT}`).toEqual([
+    expect(a.importers["session.ts:revokeSalonGrantsForUser"], DATA_DELETING_CONTRACT).toEqual([
       "src/app/api/employees/[id]/link-account/route.ts",
       "src/lib/temporary-access.ts",
     ]);
   });
 
   it("cron.ts:cleanupExpiredTemporaryAccess (kasuje dane): lista DOKŁADNIE dzisiejsza", () => {
-    expect(a.importers["cron.ts:cleanupExpiredTemporaryAccess"], `wyjście kasujące dane — ${CONTRACT}`).toEqual([
+    expect(a.importers["cron.ts:cleanupExpiredTemporaryAccess"], DATA_DELETING_CONTRACT).toEqual([
       "src/app/api/cron/cleanup-temporary-access/route.ts",
       "src/lib/temporary-access.ts",
+    ]);
+  });
+
+  it("notifications.ts:deleteUndeliverablePushSubscriptions (kasuje dane): lista DOKŁADNIE — tylko push.ts", () => {
+    expect(a.importers["notifications.ts:deleteUndeliverablePushSubscriptions"], DATA_DELETING_CONTRACT).toEqual([
+      "src/lib/push.ts",
     ]);
   });
 

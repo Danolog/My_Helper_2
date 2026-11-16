@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 
+// #193 P5a-1: biblioteka zapisuje przez forSalon(salonId).raw — brama deleguje
+// do zmockowanego `db`, więc asercje na zapisie zostają bez zmian.
+vi.mock("@/lib/server/repository", async () => {
+  const { db } = await import("@/lib/db");
+  return {
+    forSalon: (salonId: string) => ({ salonId, raw: (fn: (tx: unknown) => unknown) => fn(db) }),
+  };
+});
+
 // Use vi.hoisted for mock variables
 const { mockDbReturning, mockDbValues, mockDbInsertInto } = vi.hoisted(() => {
   const mockDbReturning = vi.fn();
