@@ -22,14 +22,13 @@
     "check": "pnpm lint && pnpm typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "setup": "npx tsx scripts/setup.ts",
     "env:check": "node -e \"require('./src/lib/env.ts').checkEnv()\" || echo 'Run with tsx: npx tsx -e \"import { checkEnv } from './src/lib/env'; checkEnv();\"'",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push",
+    "db:push": "drizzle-kit push && tsx scripts/db-schema-guard.ts",
     "db:studio": "drizzle-kit studio",
-    "db:dev": "drizzle-kit push",
-    "db:reset": "drizzle-kit drop && drizzle-kit push",
+    "db:dev": "drizzle-kit push && tsx scripts/db-schema-guard.ts",
+    "db:reset": "tsx scripts/db-reset-local.ts",
     "db:seed:test": "npx tsx scripts/seed-test.ts"
   },
   "dependencies": {

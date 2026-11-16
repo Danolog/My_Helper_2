@@ -207,11 +207,13 @@ pnpm run start        # Start production server
 pnpm run lint         # Run ESLint
 pnpm run db:generate  # Generate database migrations
 pnpm run db:migrate   # Run database migrations
-pnpm run db:push      # Push schema changes to database
+pnpm run db:push      # Push schema changes (ONLY after db:migrate; ends with the schema guard)
 pnpm run db:studio    # Open Drizzle Studio (database GUI)
-pnpm run db:dev       # Push schema for development
-pnpm run db:reset     # Reset database (drop all tables)
+pnpm run db:dev       # Same as db:push (after db:migrate)
+pnpm run db:reset     # Recreate local DB: DROP/CREATE (pos_dev or pos_reset_test) → migrate → push → guard
 ```
+
+Bazę od zera buduje `pnpm db:migrate` (`pnpm db:reset` i `init.sh` robią to same); `db:push` tylko po migracjach — sam push nie zakłada ograniczenia `appointments_no_overlap` ani ról i polityk RLS. Strażnik `scripts/db-schema-guard.ts` (koniec `db:push`/`db:dev`/`db:reset` i `pnpm test:pg`) pada, gdy go brak.
 
 ## 📖 Pages Overview
 
