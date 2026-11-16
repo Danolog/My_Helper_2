@@ -19,7 +19,7 @@ export const EXPECTED_SEED_USERS = [
 
 export type SeedUserRow = { id: string; email: string; email_verified: boolean; role: string | null };
 export type SeedAccountRow = { user_id: string; provider_id: string; has_password: boolean };
-export type SeedPlanRow = { slug: string; name: string; price_monthly: string; is_active: boolean };
+export type SeedPlanRow = { slug: string; name: string; price_monthly: string; is_active: boolean; features_json: unknown };
 
 export type SeedRows = {
   users: readonly SeedUserRow[];
@@ -32,7 +32,20 @@ export const VERIFY_SEED_USERS_SQL =
 export const VERIFY_SEED_ACCOUNTS_SQL =
   "select user_id, provider_id, (password is not null) as has_password from account " +
   "where user_id in ('test-owner-user-id-00001', 'test-client-user-id-00001')";
-export const VERIFY_SEED_PLANS_SQL = "select slug, name, price_monthly::text as price_monthly, is_active from subscription_plans";
+export const VERIFY_SEED_PLANS_SQL = "select slug, name, price_monthly::text as price_monthly, is_active, features_json from subscription_plans";
+
+/**
+ * Lista funkcji dokładnie jak w kodzie: te same pozycje, ta sama kolejność, bez dodatkowych.
+ * Seed wstawia plany z ON CONFLICT DO NOTHING, więc ponowny seed nie wyrówna listy po zmianie
+ * `PLAN_FEATURES` — rozjazd wykrywa tylko ta kontrola.
+ */
+function sameFeatures(stored: unknown, expected: readonly string[]): boolean {
+  return (
+    Array.isArray(stored) &&
+    stored.length === expected.length &&
+    stored.every((f, i) => f === expected[i])
+  );
+}
 
 export function checkSeedRows(rows: SeedRows): { ok: boolean; problems: string[] } {
   const problems: string[] = [];
@@ -67,6 +80,7 @@ export function checkSeedRows(rows: SeedRows): { ok: boolean; problems: string[]
     if (p.is_active !== true) problems.push(`plan ${exp.slug}: nieaktywny`);
     if (p.name !== exp.name) problems.push(`plan ${exp.slug}: nazwa niezgodna`);
     if (Number(p.price_monthly) !== Number(exp.priceMonthly)) problems.push(`plan ${exp.slug}: cena niezgodna`);
+    if (!sameFeatures(p.features_json, exp.featuresJson)) problems.push(`plan ${exp.slug}: funkcje niezgodne`);
   }
 
   return { ok: problems.length === 0, problems };

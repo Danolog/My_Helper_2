@@ -57,10 +57,10 @@ describe("checkSeedRows", () => {
     ["zła cena", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "basic" ? { ...p, price_monthly: "59.00" } : p)) }), /plan basic: cena niezgodna/],
     ["zła nazwa", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "pro" ? { ...p, name: "Premium" } : p)) }), /plan pro: nazwa niezgodna/],
     // Przy ON CONFLICT DO NOTHING ponowny seed nie wyrównuje listy funkcji — wykrywa to tylko ta kontrola.
-    ["brak funkcji", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "basic" ? { ...p, features_json: p.features_json.slice(0, -1) } : p)) }), /plan basic: funkcje niezgodne/],
-    ["funkcja dodatkowa", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "pro" ? { ...p, features_json: [...p.features_json, "funkcja-obca"] } : p)) }), /plan pro: funkcje niezgodne/],
-    ["zmieniona kolejność funkcji", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "pro" ? { ...p, features_json: [...p.features_json].reverse() } : p)) }), /plan pro: funkcje niezgodne/],
-    ["funkcje nie są tablicą", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "basic" ? { ...p, features_json: null as unknown as string[] } : p)) }), /plan basic: funkcje niezgodne/],
+    ["brak funkcji", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "basic" ? { ...p, features_json: (p.features_json as string[]).slice(0, -1) } : p)) }), /plan basic: funkcje niezgodne/],
+    ["funkcja dodatkowa", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "pro" ? { ...p, features_json: [...(p.features_json as string[]), "funkcja-obca"] } : p)) }), /plan pro: funkcje niezgodne/],
+    ["zmieniona kolejność funkcji", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "pro" ? { ...p, features_json: [...(p.features_json as string[])].reverse() } : p)) }), /plan pro: funkcje niezgodne/],
+    ["funkcje nie są tablicą", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "basic" ? { ...p, features_json: null } : p)) }), /plan basic: funkcje niezgodne/],
   ];
 
   it("plany mają po co najmniej 2 różne funkcje (przypadek kolejności ma sens)", () => {
