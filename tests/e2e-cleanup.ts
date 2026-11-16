@@ -33,7 +33,10 @@ export const CLEANUP_GUARD_CONTEXT: SeedGuardContext = { subject: "teardown E2E"
  * Z pliku brany jest WYŁĄCZNIE `POSTGRES_URL`; reszta nie trafia do `process.env`
  * (np. `STRIPE_SECRET_KEY` zmieniłby zachowanie specu zadatku).
  */
-export function resolveCleanupUrl(env: NodeJS.ProcessEnv, envLocalPath: string): string | undefined {
+/** Zmienne, które czyta teardown (zgodne z `process.env`). */
+export type CleanupEnv = { readonly [key: string]: string | undefined };
+
+export function resolveCleanupUrl(env: CleanupEnv, envLocalPath: string): string | undefined {
   const fromEnv = env.POSTGRES_URL?.trim();
   if (fromEnv) return fromEnv;
   if (!fs.existsSync(envLocalPath)) return undefined;
@@ -45,7 +48,7 @@ export function resolveCleanupUrl(env: NodeJS.ProcessEnv, envLocalPath: string):
  * wyliczone przez postgres.js → tożsamość serwera), zanim padnie pierwszy zapis.
  * Odmowa = wyjątek z powodem; komunikat bez URL i poświadczeń.
  */
-export async function guardedCleanupClient(url: string | undefined, env: NodeJS.ProcessEnv): Promise<Sql> {
+export async function guardedCleanupClient(url: string | undefined, env: CleanupEnv): Promise<Sql> {
   const target = checkSeedTarget(url, { VERCEL_ENV: env.VERCEL_ENV }, CLEANUP_GUARD_CONTEXT);
   if (!target.ok) throw new Error(`[e2e-cleanup] Odmowa: ${target.reason}`);
   const sql = postgres(url!, { prepare: false, max: 1, connect_timeout: 5, onnotice: () => {} });

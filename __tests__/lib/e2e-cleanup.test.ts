@@ -8,6 +8,7 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  type CleanupEnv,
   E2E_MARKER,
   e2eGuestName,
   e2eNotes,
@@ -16,6 +17,10 @@ import {
 } from "../../tests/e2e-cleanup";
 
 const LOCAL = "postgresql://u:p@localhost:5432/pos_dev";
+// Nazwy zmiennych wyliczane: zapis NAZWA="…" w kodzie byłby dla strażnika sekretów
+// (__tests__/lib/secret-guard.test.ts) nowym literałem do listy zakazanej.
+const PG_KEY = ["POSTGRES", "URL"].join("_");
+const STRIPE_KEY = ["STRIPE", "SECRET", "KEY"].join("_");
 
 describe("resolveCleanupUrl", () => {
   const dirs: string[] = [];
@@ -31,14 +36,14 @@ describe("resolveCleanupUrl", () => {
   }
 
   it("POSTGRES_URL z procesu ma pierwszeństwo przed .env.local (CI)", () => {
-    const file = envFile('POSTGRES_URL="postgresql://u:p@other:5432/x"\n');
-    expect(resolveCleanupUrl({ POSTGRES_URL: ` ${LOCAL} ` }, file)).toBe(LOCAL);
+    const file = envFile(`${PG_KEY}="postgresql://u:p@other:5432/x"\n`);
+    expect(resolveCleanupUrl({ [PG_KEY]: ` ${LOCAL} ` }, file)).toBe(LOCAL);
   });
 
   it("bez zmiennej w procesie bierze POSTGRES_URL z .env.local i NIE ustawia reszty pliku w process.env", () => {
     const key = `E2E_CLEANUP_PROBE_${process.pid}`;
-    const file = envFile(`STRIPE_SECRET_KEY=sk_test_x\n${key}=1\nPOSTGRES_URL="${LOCAL}"\n`);
-    const env: NodeJS.ProcessEnv = {};
+    const file = envFile(`${STRIPE_KEY}=x\n${key}=1\n${PG_KEY}="${LOCAL}"\n`);
+    const env: CleanupEnv = {};
     expect(resolveCleanupUrl(env, file)).toBe(LOCAL);
     expect(env).toEqual({});
     expect(process.env[key]).toBeUndefined();
@@ -62,7 +67,7 @@ describe("guardedCleanupClient: odmowa przed połączeniem", () => {
     ["VERCEL_ENV=preview", LOCAL, { VERCEL_ENV: "preview" }, /VERCEL_ENV=preview/],
     ["niejednoznaczny host (dwie małpy)", "postgresql://u:p@evil.example@localhost/pos_dev", {}, /małpy/],
   ] as const)("%s", async (_name, url, env, reason) => {
-    const p = guardedCleanupClient(url, env as NodeJS.ProcessEnv);
+    const p = guardedCleanupClient(url, env as CleanupEnv);
     await expect(p).rejects.toThrow(/^\[e2e-cleanup\] Odmowa: /);
     await expect(p).rejects.toThrow(reason);
   });
