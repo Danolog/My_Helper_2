@@ -1109,6 +1109,7 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
     ["F2 słowa run/uses/services w nazwie kroku", QG, QG_TC, "      - name: run typecheck (uses services)\n        run: pnpm typecheck\n"],
     ["F3 komentarz końcowy z run:", QG, QG_TC, "      - run: pnpm typecheck # potem run: lint\n"],
     ["F4 komentarz końcowy z „, run:”", QG, QG_TC, "      - run: pnpm typecheck # tsc, run: bez emit\n"],
+    ["F4b komentarz końcowy z „, run:” po wartości flow", QG, QG_TC, `${QG_TC}      - uses: actions/upload-artifact@v4\n        with: { name: x, path: y } # x, run: z\n`],
     ["F6 blok run: | z linią echo 'services: x'", QG, QG_TC, "      - name: t\n        run: |\n          echo 'services: none'\n          pnpm typecheck\n"],
     ["F6b blok run: | z linią zawierającą „, run:” i „{run:”", QG, QG_TC, "      - name: t\n        run: |\n          echo 'a, run: b {run: c}'\n          pnpm typecheck\n"],
     ["F6c blok run: | z linią zaczynającą się od „services:” (heredoc)", QG, QG_TC, "      - name: t\n        run: |\n          cat > /dev/null <<'EOF'\n          services: none\n          run: none\n          EOF\n          pnpm typecheck\n"],
