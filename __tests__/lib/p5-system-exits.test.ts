@@ -3,8 +3,8 @@
  *
  * Czerwone do PR partii: trasy z listy P5 importują dziś `@/lib/db` wprost.
  * Po P5a/b żadna z nich nie dotyka puli: crony i powiadomienia wołają wyjścia
- * z rejestru `@/lib/server/system` (moduły notifications / deposits-cleanup /
- * plans / seed). `reminders/appointment` — forSalon albo system/ (do ustalenia
+ * z rejestru `@/lib/server/system` (moduły notifications / deposits-cleanup;
+ * plans / seed wracają w P5b). `reminders/appointment` — forSalon albo system/ (do ustalenia
  * w PR na podstawie źródła salonId), więc tu tylko zakaz `@/lib/db`.
  * `register-subscription` to P5c (po P1c) — poza tym plikiem.
  *
@@ -32,8 +32,6 @@ const SYSTEM_ROUTES: Array<[string, string]> = [
   ["src/app/api/notifications/birthday/route.ts", "notifications"],
   ["src/app/api/notifications/low-stock/route.ts", "notifications"],
   ["src/app/api/notifications/we-miss-you/route.ts", "notifications"],
-  ["src/app/api/subscription-plans/route.ts", "plans"],
-  ["src/app/api/seed/route.ts", "seed"],
 ];
 const SALON_OR_SYSTEM_ROUTES = ["src/app/api/reminders/appointment/route.ts"];
 
