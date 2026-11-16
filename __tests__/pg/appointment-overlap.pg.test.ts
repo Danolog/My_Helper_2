@@ -28,6 +28,8 @@ import { POST as bookPackage } from "@/app/api/appointments/book-package/route";
 import { POST as createAppointment } from "@/app/api/appointments/route";
 import { APPOINTMENT_NO_OVERLAP_CONSTRAINT, isAppointmentOverlapViolation } from "@/lib/appointment-overlap";
 import { appointments, clients, employees, promotions, salons, services, timeBlocks, user } from "@/lib/schema";
+// Godzina `hh:mm` w dniu `day` (UTC) marca 2099 r.; dzień spoza 1–31 = wyjątek (CI @ cf2ee2e: 2099-03-32).
+import { at, dayRange } from "./pg-dates";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
 
@@ -80,9 +82,6 @@ let clientId = "";
 let serviceId = "";
 let service2Id = "";
 let promotionId = "";
-
-/** Godzina `hh:mm` w dniu `day` (UTC) marca 2099 r. — każdy test na osobnym dniu. */
-const at = (day: number, hhmm: string) => `2099-03-${String(day).padStart(2, "0")}T${hhmm}:00.000Z`;
 
 const owner = () => ({ salonId, role: "owner" as const, employeeId: null, userId: USER_ID });
 
@@ -157,6 +156,7 @@ async function insertAppt(start: string, end: string, extra: Partial<typeof appo
 
 /** Aktywne (nieanulowane) wizyty pracownika w danym dniu, posortowane po starcie. */
 async function activeOnDay(day: number, emp = employeeId) {
+  const { from, to } = dayRange(day);
   const rows = await h!.db
     .select({ startTime: appointments.startTime, endTime: appointments.endTime, status: appointments.status })
     .from(appointments)
@@ -164,8 +164,8 @@ async function activeOnDay(day: number, emp = employeeId) {
       and(
         eq(appointments.salonId, salonId),
         eq(appointments.employeeId, emp),
-        gte(appointments.startTime, new Date(at(day, "00:00"))),
-        lt(appointments.startTime, new Date(at(day + 1, "00:00")))
+        gte(appointments.startTime, from),
+        lt(appointments.startTime, to)
       )
     );
   return rows
@@ -397,30 +397,30 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
     });
 
     it("pakiet na styk z istniejącą wizytą → 201, obie wizyty pakietu zapisane", async () => {
-      await insertAppt(at(30, "11:15"), at(30, "12:00"));
-      const res = await book(at(30, "10:00"));
+      await insertAppt(at(25, "11:15"), at(25, "12:00"));
+      const res = await book(at(25, "10:00"));
       expect(res.status, res.body.error).toBe(201);
-      expect(await activeOnDay(30)).toEqual([
-        `${at(30, "10:00")}–${at(30, "10:30")}`,
-        `${at(30, "10:30")}–${at(30, "11:15")}`,
-        `${at(30, "11:15")}–${at(30, "12:00")}`,
+      expect(await activeOnDay(25)).toEqual([
+        `${at(25, "10:00")}–${at(25, "10:30")}`,
+        `${at(25, "10:30")}–${at(25, "11:15")}`,
+        `${at(25, "11:15")}–${at(25, "12:00")}`,
       ]);
     });
 
     it("pakiet nachodzący na wizytę → 409, żadna wizyta pakietu nie zapisana", async () => {
-      await insertAppt(at(31, "11:00"), at(31, "12:00"));
-      const res = await book(at(31, "10:00"));
+      await insertAppt(at(26, "11:00"), at(26, "12:00"));
+      const res = await book(at(26, "10:00"));
       expect(res.status).toBe(409);
       expect(res.body.error).toBe(MSG);
-      expect(await activeOnDay(31)).toEqual([`${at(31, "11:00")}–${at(31, "12:00")}`]);
+      expect(await activeOnDay(26)).toEqual([`${at(26, "11:00")}–${at(26, "12:00")}`]);
     });
 
     it("wyścig: dwa pakiety równolegle na ten sam termin → jeden 201, drugi 409, bez połowicznego pakietu", async () => {
-      const results = await Promise.all([book(at(32, "10:00")), book(at(32, "10:00"))]);
+      const results = await Promise.all([book(at(27, "10:00")), book(at(27, "10:00"))]);
       expect(statuses(results)).toEqual([201, 409]);
-      expect(await activeOnDay(32)).toEqual([
-        `${at(32, "10:00")}–${at(32, "10:30")}`,
-        `${at(32, "10:30")}–${at(32, "11:15")}`,
+      expect(await activeOnDay(27)).toEqual([
+        `${at(27, "10:00")}–${at(27, "10:30")}`,
+        `${at(27, "10:30")}–${at(27, "11:15")}`,
       ]);
     });
   });
