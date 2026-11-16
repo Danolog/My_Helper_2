@@ -10,9 +10,12 @@
  * - `notifications/low-stock` GET/POST (duplikat z salonu B nie blokuje A;
  *   duplikat z A blokuje).
  *
+ * Podgląd `reminders/appointment` GET `?salonId=A` przez `forSalon`: tylko wizyty A.
+ *
  * Trasy przez wyjścia `system/` (pula systemowa):
  * - `reminders/appointment` POST `?salonId=A`: wysyłka i `reminder_sent_at`
- *   tylko dla wizyt A; bez `salonId` — oba salony;
+ *   tylko dla wizyt A; bez `salonId` — oba salony; wizyta A z klientem
+ *   salonu B pominięta bez SMS i bez danych klienta B, z linią logu (liczba);
  * - `cron/sms-reminders`: flaga `reminder_1h_sent_at` na wizytach obu salonów.
  *
  * Wysyłka (SMS, plan, AI) zmockowana. Trasy bez `salonId` i crony działają na
@@ -33,6 +36,7 @@ import * as lowStock from "@/app/api/notifications/low-stock/route";
 import * as weMissYou from "@/app/api/notifications/we-miss-you/route";
 import * as smsCron from "@/app/api/cron/sms-reminders/route";
 import * as reminders from "@/app/api/reminders/appointment/route";
+import { logger } from "@/lib/logger";
 import { appointments, clients, employees, notifications, products, salons, services, user } from "@/lib/schema";
 import { createMockRequest, parseResponse } from "../api/helpers";
 
@@ -85,6 +89,8 @@ const ids = {
   remindB: "",
   soonA: "",
   soonB: "",
+  /** Wizyta salonu A za 3 h z klientem salonu B (niezgodny klient w złączeniu). */
+  mismatchA: "",
 };
 
 const post = (path: string, body: unknown) =>
@@ -181,6 +187,7 @@ suite("P5a-2: trasy z sekretem crona — salony A i B, prawdziwy Postgres", () =
     ids.remindB = await appointment(ids.salonB, ids.empB, ids.svcB, ids.apptClientB, 180);
     ids.soonA = await appointment(ids.salonA, ids.empA, ids.svcA, ids.apptClientA, 60);
     ids.soonB = await appointment(ids.salonB, ids.empB, ids.svcB, ids.apptClientB, 60);
+    ids.mismatchA = await appointment(ids.salonA, ids.empA, ids.svcA, ids.apptClientB, 180);
   });
 
   afterAll(async () => {
@@ -199,6 +206,7 @@ suite("P5a-2: trasy z sekretem crona — salony A i B, prawdziwy Postgres", () =
     ctl.sendSms.mockResolvedValue({ success: true });
     ctl.sendReminderSms.mockReset();
     ctl.sendReminderSms.mockResolvedValue({ success: true });
+    vi.mocked(logger.warn).mockClear();
   });
 
   // ------------------------------------------------------------ forSalon: odczyt
@@ -281,6 +289,22 @@ suite("P5a-2: trasy z sekretem crona — salony A i B, prawdziwy Postgres", () =
 
   // ------------------------------------------------------------ system/: przypomnienia
 
+  it("reminders/appointment GET ?salonId=A: podgląd przez bramę salonu — tylko wizyty A", async () => {
+    const { status, body } = await parseResponse(await reminders.GET(get(`/api/reminders/appointment?salonId=${ids.salonA}`)));
+    expect(status, JSON.stringify(body)).toBe(200);
+    const text = JSON.stringify(body);
+    expect(text).toContain(ids.remindA);
+    expect(text).not.toContain(ids.remindB);
+    expect(text).not.toContain(ids.soonB);
+    expect(text).not.toContain(ids.salonB);
+    // Wizyta A z klientem salonu B: wiersz jest, dane klienta B nie.
+    const appts = (body as { data: { appointments: Array<Record<string, unknown>> } }).data.appointments;
+    const mismatch = appts.filter((a) => a.id === ids.mismatchA);
+    expect(mismatch).toHaveLength(1);
+    expect(mismatch[0]!.clientName).toBeNull();
+    expect(mismatch[0]!.clientPhone).toBeNull();
+  });
+
   it("reminders/appointment POST ?salonId=A: SMS i reminder_sent_at tylko dla wizyt A", async () => {
     const { status, body } = await parseResponse(await reminders.POST(postNoBody(`/api/reminders/appointment?salonId=${ids.salonA}`)));
     expect(status, JSON.stringify(body)).toBe(200);
@@ -290,6 +314,30 @@ suite("P5a-2: trasy z sekretem crona — salony A i B, prawdziwy Postgres", () =
     const flags = await appointmentFlags([ids.remindA, ids.remindB]);
     expect(flags[ids.remindA]!.reminderSentAt).not.toBeNull();
     expect(flags[ids.remindB]!.reminderSentAt).toBeNull();
+  });
+
+  // Po poprzednim przypadku wizyty A z klientem A są oznaczone; w oknie A zostaje
+  // tylko wizyta z klientem salonu B (i ewentualnie cudze wiersze bazy spoza testu).
+  it("reminders/appointment POST ?salonId=A: wizyta A z klientem salonu B → pominięta bez SMS, bez danych klienta B, log liczby", async () => {
+    const { status, body } = await parseResponse<{ data: { results: Array<Record<string, unknown>> } }>(
+      await reminders.POST(postNoBody(`/api/reminders/appointment?salonId=${ids.salonA}`))
+    );
+    expect(status, JSON.stringify(body)).toBe(200);
+    const mine = body.data.results.filter((r) => r.appointmentId === ids.mismatchA);
+    expect(mine).toEqual([
+      { appointmentId: ids.mismatchA, clientName: "Nieznany", success: false, error: "Brak numeru telefonu klienta" },
+    ]);
+    expect(ctl.sendSms).not.toHaveBeenCalled();
+    // Klient B („Ewa B”) nie trafia do odpowiedzi.
+    expect(JSON.stringify(body)).not.toContain("Ewa");
+    const flags = await appointmentFlags([ids.mismatchA]);
+    expect(flags[ids.mismatchA]!.reminderSentAt).toBeNull();
+    // Log pominiętych: jedna linia z rodzajem i liczbą (≥ 1 — baza może mieć inne takie wizyty).
+    const warns = vi.mocked(logger.warn).mock.calls.filter((c) => (c[1] as { reminder?: string } | undefined)?.reminder === "sms24h");
+    expect(warns).toHaveLength(1);
+    const ctx = warns[0]![1] as { reminder: string; skipped: number };
+    expect(Object.keys(ctx).sort()).toEqual(["reminder", "skipped"]);
+    expect(ctx.skipped).toBeGreaterThanOrEqual(1);
   });
 
   it("reminders/appointment POST bez salonId: wizyty obu salonów (cron)", async () => {
