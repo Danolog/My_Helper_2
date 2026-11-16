@@ -39,16 +39,25 @@ const CRON_EXPORTS = ["cleanupExpiredTemporaryAccess"];
 const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
 /** #193 P5a-1: subskrypcje push po stronie wysyłki (decyzja CTO 3d / 3d-KOREKTA). */
 const NOTIFICATIONS_EXPORTS = ["deleteUndeliverablePushSubscriptions", "getPushSubscriptionsForUser"];
+/** #193 P5a-1: token oferty listy oczekujących → wpis i salon (decyzja CTO 4). */
+const WAITING_LIST_EXPORTS = ["resolveWaitingListToken"];
 /** Pliki re-eksportowane przez rejestr `index.ts` w całości. */
-const REGISTRY_SOURCES = ["session.ts", "cron.ts", "health.ts", "notifications.ts"];
+const REGISTRY_SOURCES = ["session.ts", "cron.ts", "health.ts", "notifications.ts", "waiting-list.ts"];
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts": ["authAdapter"],
   "cron.ts": CRON_EXPORTS,
   "db-system.ts": ["dbSystem"],
   "health.ts": HEALTH_EXPORTS,
-  "index.ts": [...SESSION_EXPORTS, ...CRON_EXPORTS, ...HEALTH_EXPORTS, ...NOTIFICATIONS_EXPORTS].sort(),
+  "index.ts": [
+    ...SESSION_EXPORTS,
+    ...CRON_EXPORTS,
+    ...HEALTH_EXPORTS,
+    ...NOTIFICATIONS_EXPORTS,
+    ...WAITING_LIST_EXPORTS,
+  ].sort(),
   "notifications.ts": NOTIFICATIONS_EXPORTS,
   "session.ts": SESSION_EXPORTS,
+  "waiting-list.ts": WAITING_LIST_EXPORTS,
 };
 
 /** Zamknięta lista wyjątków od Z7/W2 (Ethan 16.11). */

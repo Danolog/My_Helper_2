@@ -102,6 +102,16 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+// #193 P5a-1: biblioteka idzie przez forSalon(params.salonId).raw — mock
+// deleguje do mocka `db` powyżej, więc asercje zostają bez zmian.
+vi.mock("@/lib/server/repository", async () => {
+  const { db } = await import("@/lib/db");
+  return {
+    forSalon: (salonId: string) => ({ salonId, raw: (fn: (tx: unknown) => unknown) => fn(db) }),
+  };
+});
+vi.mock("@/lib/server/system", () => ({ resolveWaitingListToken: vi.fn() }));
+
 const mockSendPush = vi.fn();
 vi.mock("@/lib/push", () => ({
   sendPushNotification: (...args: unknown[]) => mockSendPush(...args),

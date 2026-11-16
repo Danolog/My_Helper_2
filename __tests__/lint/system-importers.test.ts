@@ -71,6 +71,7 @@ const SNAPSHOT: Record<string, string[]> = {
   "health.ts:pingDatabase": ["src/app/api/health/route.ts"],
   "notifications.ts:deleteUndeliverablePushSubscriptions": ["src/lib/push.ts"],
   "notifications.ts:getPushSubscriptionsForUser": ["src/lib/push.ts"],
+  "waiting-list.ts:resolveWaitingListToken": ["src/lib/waiting-list.ts"],
   "session.ts:getActiveTemporaryAccess": [
     "src/app/api/temporary-access/check/route.ts",
     "src/lib/temporary-access.ts",

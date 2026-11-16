@@ -141,7 +141,6 @@ const BASELINE: Record<string, readonly string[]> = {
     "src/app/api/reminders/appointment/route.ts",
     "src/app/api/seed/route.ts",
     "src/app/api/subscription-plans/route.ts",
-    "src/lib/waiting-list.ts",
   ],
   P6_FILES: [],
 };
