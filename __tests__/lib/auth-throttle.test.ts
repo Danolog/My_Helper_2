@@ -10,7 +10,7 @@
  * i treść logów.
  */
 import { PgDialect } from "drizzle-orm/pg-core";
-import type { SQL } from "drizzle-orm";
+import { DrizzleQueryError, type SQL } from "drizzle-orm";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { accountThrottleKey, ipThrottleKey } from "@/lib/auth-throttle-keys";
 
@@ -306,4 +306,42 @@ describe("logi: bez adresu IP, adresu e-mail i klucza", () => {
     expect(consumeLog).toBeDefined();
     expect(consumeLog![1]).toEqual({ path: "/sign-in/email", error: "PostgresError" });
   });
+
+  it("DrizzleQueryError (bez własnego name) → w logu nazwa klasy, bez zapytania, parametrów i przyczyny", async () => {
+    const cause = pgError(`cause ${EMAIL}`);
+    execute.mockRejectedValue(new DrizzleQueryError("select $1", ["203.0.113.7", EMAIL], cause));
+    await t.consumeAuthRateLimit(IP_KEY, RULE_IN);
+    await t.reserveAccountSignInAttempt(EMAIL);
+
+    const storeLogs = logger.error.mock.calls.filter((c) => String(c[0]) === "auth rate limit store error");
+    expect(storeLogs).toHaveLength(2);
+    for (const c of storeLogs) expect(c[1]).toEqual({ path: "/sign-in/email", error: "DrizzleQueryError" });
+    const text = JSON.stringify(logger.error.mock.calls);
+    for (const f of ["203.0.113.7", EMAIL, "select $1", "cause"]) expect(text).not.toContain(f);
+  });
+
+  it("własna klasa błędu bez name → nazwa klasy; błąd z własnym name → to name", async () => {
+    class ThrottleProbeError extends Error {}
+    execute.mockRejectedValueOnce(new ThrottleProbeError("x"));
+    await t.reserveAccountSignInAttempt(EMAIL);
+    execute.mockRejectedValueOnce(Object.assign(new Error("x"), { name: "CustomName" }));
+    await t.reserveAccountSignInAttempt(EMAIL);
+    execute.mockRejectedValueOnce(new Error("x"));
+    await t.reserveAccountSignInAttempt(EMAIL);
+    expect(logger.error.mock.calls.map((c) => (c[1] as { error: string }).error)).toEqual([
+      "ThrottleProbeError",
+      "CustomName",
+      "Error",
+    ]);
+  });
+
+  it.each([["napis"], [42], [null], [undefined], [{ name: "PostgresError" }]])(
+    "odrzucenie wartością niebędącą Error (%s) → \"UnknownError\"",
+    async (value) => {
+      execute.mockRejectedValueOnce(value);
+      expect(await t.reserveAccountSignInAttempt(EMAIL)).toEqual({ allowed: false, retryAfter: 900 });
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      expect(logger.error.mock.calls[0]![1]).toEqual({ path: "/sign-in/email", error: "UnknownError" });
+    },
+  );
 });
