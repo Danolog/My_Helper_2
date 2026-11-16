@@ -51,16 +51,64 @@ interface ResendResponse {
 }
 
 /**
- * Odpowiedź dostawcy spoza 2xx. Komunikat to sam kod ze statusem HTTP —
- * tekst z odpowiedzi dostawcy nie trafia ani do komunikatu, ani do logu.
+ * Typy błędów dostawcy dopuszczone do kodu błędu wysyłki. Przepisane dosłownie
+ * ze strony https://resend.com/docs/api-reference/errors (odczyt 16.11.2026).
+ * Zmiana listy wymaga recenzji CRCO. Nazwa pola z typem w treści odpowiedzi
+ * (`name`) jest założeniem — przy innym kształcie odpowiedzi wynik to "other".
+ */
+export const PROVIDER_ERROR_TYPES = [
+  "application_error",
+  "concurrent_idempotent_requests",
+  "daily_quota_exceeded",
+  "dns_lookup_failed",
+  "email_above_quota",
+  "forge_not_enabled",
+  "forge_unavailable",
+  "invalid_attachment",
+  "invalid_idempotency_key",
+  "invalid_idempotent_request",
+  "invalid_parameter",
+  "invalid_permission",
+  "method_not_allowed",
+  "missing_api_key",
+  "missing_required_field",
+  "missing_required_parameter",
+  "monthly_quota_exceeded",
+  "not_found",
+  "rate_limit_exceeded",
+  "resource_locked",
+  "restricted_api_key",
+  "return_path_unavailable",
+  "service_unavailable",
+  "suspended_api_key",
+  "validation_error",
+] as const;
+
+export type ProviderErrorType = (typeof PROVIDER_ERROR_TYPES)[number] | "other";
+
+/** Typ z listy przy dokładnej równości; każda inna wartość (także nie-string) → "other". */
+function providerErrorType(name: unknown): ProviderErrorType {
+  if (typeof name !== "string") return "other";
+  for (const known of PROVIDER_ERROR_TYPES) {
+    if (name === known) return known;
+  }
+  return "other";
+}
+
+/**
+ * Odpowiedź dostawcy spoza 2xx. Komunikat to sam kod ze statusem HTTP i typem
+ * z listy (albo "other") — tekst z odpowiedzi dostawcy nie trafia ani do
+ * komunikatu, ani do logu.
  */
 export class EmailProviderError extends Error {
   readonly status: number;
+  readonly providerType: ProviderErrorType;
 
-  constructor(status: number) {
-    super(`provider_http_${status}`);
+  constructor(status: number, providerType: ProviderErrorType) {
+    super(`provider_http_${status}_${providerType}`);
     this.name = "EmailProviderError";
     this.status = status;
+    this.providerType = providerType;
   }
 }
 
@@ -90,7 +138,14 @@ async function sendViaResend(apiKey: string, msg: EmailMessage): Promise<void> {
   });
 
   if (!response.ok) {
-    throw new EmailProviderError(response.status);
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      // Non-JSON response body → typ "other"
+    }
+    const name = body && typeof body === "object" ? (body as { name?: unknown }).name : undefined;
+    throw new EmailProviderError(response.status, providerErrorType(name));
   }
 
   let data: ResendResponse | null = null;
