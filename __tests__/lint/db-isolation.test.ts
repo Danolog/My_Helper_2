@@ -47,15 +47,8 @@ const LISTED_ROUTE_WITH_ID = "src/app/api/appointments/[id]/complete/route.ts";
  * przeniesienie między partiami = decyzja Ethana, osobny commit.
  */
 const BASELINE: Record<string, readonly string[]> = {
-  P0_FILES: [
-    "src/app/api/diagnostics/route.ts",
-    "src/app/api/health/route.ts",
-    "src/lib/auth.ts",
-    "src/lib/get-user-salon.ts",
-    "src/lib/salon-context.ts",
-    "src/lib/session.ts",
-    "src/lib/temporary-access.ts",
-  ],
+  // P0b (#193): wszystkie 7 pozycji zdjęte — zapytania w src/lib/server/system/**.
+  P0_FILES: [],
   P1_FILES: [
     "src/app/api/appointments/route.ts",
     "src/app/api/deposits/create-session/route.ts",
@@ -279,6 +272,16 @@ describe("wymaganie (1) Ethana: własny klient puli tylko w src/lib/db.ts i syst
     expect(await isolationErrors(DB_SYSTEM_FORMS[0]![1], "src/lib/server/system/db-system.ts")).toHaveLength(0);
   }, 30_000);
 
+  // P0b (decyzja Ethana 16.11): do P6 `dbSystem` to re-eksport `db`, więc wyjątek `db`
+  // ma wyłącznie dosłowny plik db-system.ts. Reszta system/** — nadal zakaz.
+  it("P0b: import db w system/db-system.ts → bez błędu; w każdym innym pliku system/** → błąd", async () => {
+    const reexport = 'import { db } from "@/lib/db";\nexport const dbSystem: typeof db = db;';
+    expect(await isolationErrors(reexport, "src/lib/server/system/db-system.ts")).toHaveLength(0);
+    for (const file of [SYSTEM_FILE, "src/lib/server/system/session.ts", "src/lib/server/system/auth-adapter.ts", "src/lib/server/system/sub/db-system.ts"]) {
+      for (const [, code] of DB_IMPORT_FORMS) expect(await isolationErrors(code, file), `${file}: ${code}`).toHaveLength(1);
+    }
+  }, 60_000);
+
   it("żaden plik w src/ poza dozwolonymi (i testami) nie importuje klienta puli", () => {
     const re = new RegExp(DB_CLIENT_IMPORT_SOURCE_REGEX);
     const allowed = new Set<string>(DB_CLIENT_ALLOWED_FILES);
@@ -445,7 +448,7 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
         : rel === "src/lib/db.ts"
           ? [DB, SYS, T]
           : rel === "src/lib/server/system/db-system.ts"
-            ? [DB, T]
+            ? [T] // P0b: do P6 re-eksport `db` (decyzja Ethana 16.11), więc `db: false` tylko tutaj
             : listed.has(rel)
               ? [SYS, CLIENT, T]
               : inSystem
