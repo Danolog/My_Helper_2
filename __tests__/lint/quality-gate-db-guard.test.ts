@@ -1100,6 +1100,8 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
     ["I10: defaults.run.shell workflow z db:push", EP, "\njobs:\n", "\ndefaults:\n  run:\n    shell: sh -c 'pnpm db:push && bash {0}'\n\njobs:\n", /push/],
     ["I10: shell: jako blok złożony (drizzle-kit i push w osobnych liniach)", EP, EP_INSTALL, `${EP_INSTALL}      - run: pnpm exec playwright --version\n        shell: >-\n          sh -c 'drizzle-kit\n          push; sh {0}'\n`, /push/],
     ["POSTGRES_URL przez $GITHUB_ENV w kroku", EP, EP_INSTALL, `${EP_INSTALL}      - run: echo "POSTGRES_URL=postgresql://u:p@db.example:5432/x" >> "$GITHUB_ENV"\n`, /nowy job z bazą.*e2e-production/],
+    // Escape w cudzysłowie: w tekście nie ma „POSTGRES_URL”, w drzewie YAML jest — łapie tylko warstwa YAML.
+    ["POSTGRES_URL poza jobs: (env workflow, escape w wartości)", EP, "\njobs:\n", '\nenv:\n  DB: "${{ secrets.POSTGRES\\u005fURL }}"\n\njobs:\n', /YAML: POSTGRES_URL poza jobs/],
   ])("A %s → porażka", (_n, file, find, repl, re) => {
     expect(fileViolations(file, edited(file, find, repl), FILES).join("\n")).toMatch(re);
   });
@@ -1148,5 +1150,30 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
   it("niezmiennik nadal widzi klucz w wielowierszowym flow (kontynuacja „x: 1, run: …”)", () => {
     const wf = "name: x\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: pnpm typecheck\n      - uses: actions/upload-artifact@v4\n        with: {\n          x: 1, run: pnpm db:sync }\n";
     expect(keyInvariantViolations("x.yml", wf).join()).toMatch(/kluczy run w pliku/);
+  });
+
+  // Tekst „run:” w wielowierszowym cudzysłowie (parser liniowy i tekst go liczą, drzewo YAML nie)
+  // równoważy liczbowo prawdziwy klucz w kontynuacji flow. Bez śledzenia kontynuacji flow
+  // wszystkie trzy strony dają tę samą liczbę i te same linie — rozjazd znika.
+  it("niezmiennik widzi klucz w kontynuacji flow także, gdy liczby kluczy się bilansują", () => {
+    const wf = edited(EP, EP_INSTALL, `${EP_INSTALL}      - name: "a\n          run: b"\n        uses: actions/upload-artifact@v4\n        with: { name: x,\n          path: y, run: z }\n`);
+    const line = wf.split("\n").indexOf("          path: y, run: z }") + 1;
+    const msg = keyInvariantViolations(EP, wf).join("\n");
+    expect(msg).toMatch(/kluczy run w pliku .*, w drzewie YAML/);
+    expect(msg).toContain(`nierozpoznane: linia ${line}: path: y, run: z }`);
+  });
+
+  // Równa liczba kluczy po każdej stronie, ale różne linie: parser liniowy liczy „run:” po
+  // niełamliwej spacji w cudzysłowie (\s), tekst go nie widzi; tekst i drzewo widzą run w flow,
+  // parser nie. Porównanie samych liczb by to przepuściło — niezmiennik porównuje linie.
+  it("niezmiennik porównuje linie, nie same liczby (równe liczby, różne linie)", () => {
+    const wf = edited(EP, EP_INSTALL, `${EP_INSTALL}      - name: "a\n           run: b"\n        uses: actions/upload-artifact@v4\n        with: { name: x, run: y }\n`);
+    const ls = wf.split("\n");
+    const flow = ls.indexOf("        with: { name: x, run: y }") + 1;
+    const nbsp = ls.indexOf("           run: b\"") + 1;
+    const msg = keyInvariantViolations(EP, wf).join("\n");
+    expect(msg).toMatch(/kluczy run w pliku (\d+), rozpoznanych przez parser \1, w drzewie YAML \1;/);
+    expect(msg).toContain(`nierozpoznane: linia ${flow}: with: { name: x, run: y }`);
+    expect(msg).toContain(`rozpoznane przez parser, a niewidoczne jako klucz: linia ${nbsp}: run: b"`);
   });
 });
