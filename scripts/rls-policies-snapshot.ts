@@ -13,7 +13,7 @@
  * `SNAPSHOT_ALLOWED_DATABASES` (te same co reset lokalny). Tylko odczyt katalogu.
  * Na początku wypisuje nazwę bazy i liczbę wpisów dziennika migracji.
  *
- *   POSTGRES_URL=postgresql://…@localhost:5432/pos_reset_test pnpm exec tsx scripts/rls-policies-snapshot.ts
+ * Użycie: `pnpm exec tsx scripts/rls-policies-snapshot.ts` z POSTGRES_URL lokalnej bazy z listy.
  *
  * Komunikaty bez adresu bazy i danych logowania.
  */
