@@ -9,7 +9,9 @@
  * Test tylko CZYTA katalog. Sonda (widok z grantem) powstaje w transakcji, która jest
  * wycofywana — test niczego trwale nie zmienia i nie uruchamia `db:*` ani seeda.
  *
- *   INTEGRATION_POSTGRES_URL=postgresql://…@localhost:5432/pos_dev pnpm test:pg -- __tests__/pg/views-privileges.pg.test.ts
+ * Sam ten plik (`pnpm test:pg -- <plik>` nie zawęża przebiegu — biegną wszystkie testy pg):
+ *
+ *   INTEGRATION_POSTGRES_URL=postgresql://…@localhost:5432/pos_dev pnpm exec vitest run --config vitest.pg.config.ts __tests__/pg/views-privileges.pg.test.ts
  *
  * Wymaga bazy po `pnpm db:migrate` (rola `myhelper_app` z migracji 0005).
  */
