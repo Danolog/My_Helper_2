@@ -73,9 +73,13 @@ describe("authAdapter: dbSystem + dokładnie 4 tabele auth", () => {
 
   it.each([["salons"]])("model spoza 4 tabel (%s) → błąd schematu adaptera, bez zapytania", async (model) => {
     const a = await adapter();
-    await expect(a.findOne({ model, where: [{ field: "id", value: "x" }] })).rejects.toThrow(
-      /was not found in the schema object/
+    // Wynik zbierany bez rzucania, żeby najpierw sprawdzić, czy zapytanie w ogóle poszło.
+    const outcome = await a.findOne({ model, where: [{ field: "id", value: "x" }] }).then(
+      (value) => ({ status: "fulfilled" as const, value, error: undefined as unknown }),
+      (error: unknown) => ({ status: "rejected" as const, value: undefined as unknown, error })
     );
-    expect(calls).not.toContain("dbSystem.select");
+    expect(calls, "adapter wykonał zapytanie poza 4 tabelami auth").not.toContain("dbSystem.select");
+    expect(outcome.status).toBe("rejected");
+    expect(String(outcome.error)).toMatch(/was not found in the schema object/);
   });
 });
