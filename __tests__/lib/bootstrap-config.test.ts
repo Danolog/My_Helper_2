@@ -757,6 +757,9 @@ esac
 `,
     );
     sh("sleep", `echo x >> "$REC/sleeps"\n`);
+    // #202: mktemp bez szablonu na macOS ignoruje TMPDIR (plik ląduje w systemowym katalogu
+    // tymczasowym, poza leftovers()). Fałszywy mktemp tworzy plik albo katalog (-d) zawsze w $TMPDIR świata.
+    sh("mktemp", `if [ "\${1:-}" = -d ]; then exec /usr/bin/mktemp -d "$TMPDIR/tmp.XXXXXXXXXX"; fi\nexec /usr/bin/mktemp "$TMPDIR/tmp.XXXXXXXXXX"\n`);
     const env = (extra: Record<string, string> = {}) => ({
       NODE_ENV: "test" as const, PATH: `${bin}:${process.env.PATH}`, REC: rec, TMPDIR: tmp, HOME: home, ...extra,
     });
