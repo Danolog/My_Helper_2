@@ -159,6 +159,11 @@ export async function notifyWaitingList(
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
+    // Konto klienta po e-mailu: jeden odczyt na e-mail w tym przebiegu. Mapa
+    // żyje tylko w pamięci tego wywołania — następny zwolniony termin czyta
+    // konto od nowa (konto założone później też dostanie powiadomienie).
+    const linkedUserIdByEmail = new Map<string, string | null>();
+
     for (const row of entries) {
       const clientName = `${row.client.firstName} ${row.client.lastName}`;
       const bookingLink = `${appUrl}/salons/${salonId}/book`;
@@ -176,7 +181,12 @@ export async function notifyWaitingList(
       // Push na konto klienta (findVerifiedLinkedUserId: tylko zweryfikowany e-mail).
       if (row.client.email) {
         try {
-          const linkedUserId = await findVerifiedLinkedUserId(gate, row.client.email);
+          const email = row.client.email;
+          let linkedUserId = linkedUserIdByEmail.get(email);
+          if (linkedUserId === undefined) {
+            linkedUserId = await findVerifiedLinkedUserId(gate, email);
+            linkedUserIdByEmail.set(email, linkedUserId);
+          }
 
           if (linkedUserId) {
             const pushResult = await sendPushNotification(linkedUserId, {
