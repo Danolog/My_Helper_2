@@ -221,7 +221,10 @@ export async function notifyWaitingList(
             }
           }
         } catch (err) {
-          logger.warn("Waiting list push notification failed", { clientId: row.client.id, error: err });
+          logger.warn("Waiting list push notification failed", {
+            clientId: row.client.id,
+            errorName: err instanceof Error ? err.name : typeof err,
+          });
           // Push failures are non-critical; do not increment errors
         }
       }
@@ -295,7 +298,9 @@ export async function notifyWaitingList(
       errors: result.errors,
     });
   } catch (error) {
-    logger.error("Failed to notify waiting list", { error });
+    logger.error("Failed to notify waiting list", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
     result.errors++;
   }
 
