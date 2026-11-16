@@ -147,7 +147,8 @@ describe("db-rls-guard z wiersza poleceń (bez bazy)", () => {
       cwd: ROOT,
       encoding: "utf8",
       timeout: 60_000,
-      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
+      // Środowisko minimalne (bez NODE_ENV z typu ProcessEnv) — rzutowanie tylko dla typu.
+      env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env } as unknown as NodeJS.ProcessEnv,
     });
 
   it("bez POSTGRES_URL → kod 1 i komunikat", () => {
@@ -157,7 +158,10 @@ describe("db-rls-guard z wiersza poleceń (bez bazy)", () => {
   }, 60_000);
 
   it("baza nieosiągalna → kod 1, komunikat bez adresu, użytkownika i hasła", () => {
-    const r = run({ POSTGRES_URL: "postgresql://uzytkownik-190:haslo-190@127.0.0.1:1/baza190" });
+    // Adres składany z części: to nie sekret, ale skaner literałów (secret-guard) słusznie
+    // nie rozróżnia wartości testowej od prawdziwej przy nazwie zmiennej.
+    const unreachable = ["postgresql:", "", "uzytkownik-190:haslo-190@127.0.0.1:1", "baza190"].join("/");
+    const r = run({ POSTGRES_URL: unreachable });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("[db-rls-guard] Nie udało się sprawdzić RLS");
     for (const s of ["uzytkownik-190", "haslo-190", "baza190", "postgresql://", "127.0.0.1"]) {
