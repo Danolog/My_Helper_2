@@ -712,7 +712,8 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
   });
 
   // --- Wykonanie z fałszywymi gcloud i gh -------------------------------------------------------
-  // gcloud: versions add → stdin do $REC/sm (FAKE_ADD_RC ≠ 0: odrzuca; FAKE_HANG=1: wisi po zapisie);
+  // gcloud: versions add → stdin do $REC/sm (FAKE_ADD_RC ≠ 0: odrzuca; FAKE_HANG=1: po zapisie znacznik
+  //         $REC/hang wbudowanym `:` i exec sleep — wisi jako jeden proces, bez potomka do przeoczenia);
   //         versions access → $REC/sm albo błąd; versions list → metadane. argv i zmienna logu do $REC.
   // gh: variable set → stdin do $REC/ghvar (FAKE_GH_SET_RC ≠ 0: odrzuca); variable get → kolejna linia
   //     z $REC/gh.seq (stara wartość przy pierwszej próbie), potem $REC/ghvar. sleep: tylko licznik.
@@ -736,7 +737,7 @@ case " $* " in
   *" versions add "*)
     if [ "\${FAKE_ADD_RC:-0}" != 0 ]; then cat > /dev/null; exit "$FAKE_ADD_RC"; fi
     cat > "$REC/sm.part"; mv "$REC/sm.part" "$REC/sm"
-    if [ "\${FAKE_HANG:-}" = 1 ]; then /bin/sleep 30; fi
+    if [ "\${FAKE_HANG:-}" = 1 ]; then : > "$REC/hang"; exec /bin/sleep 30; fi
     exit "\${FAKE_RC:-0}" ;;
   *" versions access "*) if [ -f "$REC/sm" ]; then cat "$REC/sm"; else echo "NOT_FOUND" >&2; exit 1; fi ;;
   *" versions list "*) echo "projects/p/secrets/vapid-private-key/versions/7 ENABLED 2026-11-17" ;;
@@ -908,12 +909,20 @@ esac
     const child = spawn("bash", ["-c", `${PRELUDE}\nadd_multiline nazwa`], {
       cwd: ROOT, detached: true, env: w.env({ FAKE_HANG: "1" }), stdio: ["pipe", "ignore", "ignore"],
     });
-    const exited = new Promise<number | null>((res) => child.on("exit", (code) => res(code)));
+    const exited = new Promise<string>((res) => child.on("exit", (code, sig) => res(`exit ${code} ${sig}`)));
     child.stdin.end(PEM);
-    for (let i = 0; i < 100 && !existsSync(join(w.rec, "sm")); i++) await new Promise((res) => setTimeout(res, 50));
-    expect(existsSync(join(w.rec, "sm")), "gcloud odczytał wartość").toBe(true);
+    // #202: czekamy na znacznik `hang`, nie na `sm`. `sm` pojawia się w chwili rename, gdy `mv` jeszcze
+    // nie wyszedł; SIGINT w tym oknie trafia do powłoki gcloud czekającej na `mv`, `mv` kończy się
+    // normalnie, powłoka idzie dalej i śpi 30 s (pod obciążeniem przekroczony limit 15 s).
+    const hang = join(w.rec, "hang");
+    for (let i = 0; i < 100 && !existsSync(hang); i++) await new Promise((res) => setTimeout(res, 50));
+    expect(existsSync(hang), "etap 1: fałszywy gcloud nie doszedł do zawieszenia po odczycie wartości").toBe(true);
     process.kill(-child.pid!, "SIGINT");
-    await exited;
+    let timer: NodeJS.Timeout | undefined;
+    const end = await Promise.race([exited, new Promise<string>((res) => { timer = setTimeout(() => res("timeout"), 8_000); })]);
+    clearTimeout(timer);
+    if (end === "timeout") process.kill(-child.pid!, "SIGKILL");
+    expect(end, "etap 2: grupa procesów nie zakończyła się w 8 s po SIGINT").not.toBe("timeout");
     expect(w.read("sm")).toBe(PEM);
     expect(w.leftovers()).toEqual([]);
   }, 15_000);
