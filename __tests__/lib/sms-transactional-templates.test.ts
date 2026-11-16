@@ -65,6 +65,7 @@ const TEMPLATES: Record<string, (mod: typeof sms) => Promise<sms.SmsResult>> = {
       serviceName: "Strzyzenie",
       appointmentDate: DATE,
       employeeName: "Anna Nowak",
+      salonName: "Salon Uroda",
       salonId: SALON_ID,
       clientId: "client-1",
     }),

@@ -116,6 +116,7 @@ vi.mock("@/lib/schema", () => ({
   clients: { id: "clients.id" },
   services: { id: "services.id" },
   employees: { id: "employees.id" },
+  salons: { id: "salons.id" },
 }));
 
 vi.mock("@/lib/sms", () => ({
@@ -124,6 +125,7 @@ vi.mock("@/lib/sms", () => ({
 
 import { confirmDepositPayment } from "@/lib/deposit-confirmation";
 import { logger } from "@/lib/logger";
+import { eq } from "drizzle-orm";
 
 function queueSelect(...results: unknown[][]) {
   selectQueue.push(...results);
@@ -218,7 +220,8 @@ describe("confirmDepositPayment", () => {
         { id: "client-1", phone: "+48111222333", firstName: "Jan", lastName: "Kowalski" },
       ],
       /* pracownik */ [{ id: "emp-1", firstName: "Ewa", lastName: "Nowak" }],
-      /* usluga */ [{ id: "svc-1", name: "Strzyzenie" }]
+      /* usluga */ [{ id: "svc-1", name: "Strzyzenie" }],
+      /* salon */ [{ id: "salon-1", name: "Salon Uroda" }]
     );
     txReturningQueue.push([updatedPayment], [confirmedAppointment]);
 
@@ -250,9 +253,43 @@ describe("confirmDepositPayment", () => {
         currency: "PLN",
         serviceName: "Strzyzenie",
         employeeName: "Ewa Nowak",
+        salonName: "Salon Uroda",
         salonId: "salon-1",
       })
     );
+  });
+
+  it("nazwa salonu czytana po salonId płatności i przekazana do SMS", async () => {
+    queueSelect(
+      [pendingPayment],
+      [{ id: "client-1", phone: "+48111222333", firstName: "Jan", lastName: "Kowalski" }],
+      [{ id: "emp-1", firstName: "Ewa", lastName: "Nowak" }],
+      [{ id: "svc-1", name: "Strzyzenie" }],
+      [{ id: "salon-1", name: "Salon Uroda" }]
+    );
+    txReturningQueue.push([updatedPayment], [confirmedAppointment]);
+
+    await confirmDepositPayment("dp-1");
+
+    expect(eq).toHaveBeenCalledWith("salons.id", "salon-1");
+    expect(mockSendSms.mock.calls[0]![0]).toMatchObject({ salonName: "Salon Uroda" });
+  });
+
+  it("brak wiersza salonu => SMS wysłany z salonName null, potwierdzenie OK", async () => {
+    queueSelect(
+      [pendingPayment],
+      [{ id: "client-1", phone: "+48111222333", firstName: "Jan", lastName: "Kowalski" }],
+      [{ id: "emp-1", firstName: "Ewa", lastName: "Nowak" }],
+      [{ id: "svc-1", name: "Strzyzenie" }]
+      // brak wiersza salonu
+    );
+    txReturningQueue.push([updatedPayment], [confirmedAppointment]);
+
+    const result = await confirmDepositPayment("dp-1");
+
+    expect(result).toMatchObject({ success: true, smsSent: true });
+    expect(mockSendSms).toHaveBeenCalledTimes(1);
+    expect(mockSendSms.mock.calls[0]![0]).toHaveProperty("salonName", null);
   });
 
   const failedPayment = { ...pendingPayment, status: "failed" };
