@@ -297,10 +297,14 @@ describe("db:reset — przebieg (L1, Leo): każdy krok na resetowanej bazie", ()
   });
 
   /** Klient postgres.js na niby: localhost, serwer bez neon.* (domyślnie), `busy` innych połączeń. */
-  function fakeAdmin(busy = 0, probeRows: unknown[] = [{ database: "postgres", neon_settings: 0 }]) {
+  function fakeAdmin(
+    busy = 0,
+    probeRows: unknown[] = [{ database: "postgres", neon_settings: 0 }],
+    options: { host: string[]; path: string | undefined } = { host: ["localhost"], path: undefined },
+  ) {
     const unsafe = vi.fn(async (q: string) => (q.includes("neon") ? probeRows : []));
     const tag = vi.fn(async () => [{ n: busy }]);
-    const sql = Object.assign(tag, { unsafe, end: vi.fn(async () => {}), options: { host: ["localhost"], path: undefined } });
+    const sql = Object.assign(tag, { unsafe, end: vi.fn(async () => {}), options });
     return { sql, unsafe, tag };
   }
 
@@ -349,6 +353,25 @@ describe("db:reset — przebieg (L1, Leo): każdy krok na resetowanej bazie", ()
     expect(admin.tag).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
     expect(err.mock.calls.flat().join(" ")).toContain("serwer ma ustawienia neon.*");
+  });
+
+  // Ethan do c16a7fd: checkSeedClientOptions na kliencie admina stoi przed sondą i DROP.
+  it.each([
+    ["host Neon w opcjach klienta", { host: ["ep-x.eu-central-1.aws.neon.tech"], path: undefined }],
+    ["host spoza localhost", { host: ["db.example.com"], path: undefined }],
+    ["localhost obok obcego hosta", { host: ["localhost", "db.example.com"], path: undefined }],
+    ["gniazdo unix (options.path)", { host: ["localhost"], path: "/tmp/.s.PGSQL.5432" }],
+  ])("klient admina: %s → rc 1, bez sondy, DROP/CREATE i kroków", async (_n, options) => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { d, spawn, admin } = deps(fakeAdmin(0, undefined, options));
+    expect(await resetMain(["pos_reset_test"], { POSTGRES_URL: LOCAL }, d)).toBe(1);
+    expect(admin.unsafe).not.toHaveBeenCalled();
+    expect(admin.tag).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(admin.sql.end).toHaveBeenCalled();
+    const out = err.mock.calls.flat().join(" ");
+    expect(out).toContain("[db-reset] db:reset odmawia:");
+    expect(out).not.toMatch(/pw-x9|dev_user/);
   });
 
   it("inne połączenia z bazą: odmowa, bez DROP i bez kroków", async () => {
@@ -441,6 +464,26 @@ describe("db:push — tylko pusta baza (#188 pkt 2, decyzja D2)", () => {
       vi.spyOn(console, "error").mockImplementation(() => {});
       const connect = vi.fn((_u: string) => fakeGateSql({ public_tables: 45, drizzle_schema: true }) as never);
       expect(await pushGateMain({ POSTGRES_URL: LOCAL }, connect)).toBe(1);
+    });
+
+    // Ethan do c16a7fd: gałąź błędu — zapytanie odrzucone (np. brak połączenia).
+    it.each([
+      ["błąd z kodem", "ECONNREFUSED", " (ECONNREFUSED)"],
+      ["błąd bez kodu", undefined, ""],
+    ])("zapytanie bramki odrzuca (%s) → rc 1, end wywołane, stderr bez adresu i danych logowania", async (_n, code, suffix) => {
+      const err = vi.spyOn(console, "error").mockImplementation(() => {});
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      // Treść błędu jak z sterownika: z adresem, użytkownikiem i hasłem — nie może trafić na stderr.
+      const leak = new Error(`connect failed for ${LOCAL} (user dev_user)`);
+      const sql = { unsafe: vi.fn(async () => Promise.reject(Object.assign(leak, code ? { code } : {}))), end: vi.fn(async () => {}) };
+      const connect = vi.fn((_u: string) => sql as never);
+      expect(await pushGateMain({ POSTGRES_URL: LOCAL }, connect)).toBe(1);
+      expect(sql.unsafe).toHaveBeenCalledWith(PUSH_GATE_SQL);
+      expect(sql.end).toHaveBeenCalledTimes(1);
+      expect(warn).not.toHaveBeenCalled();
+      const out = err.mock.calls.flat().join(" ");
+      expect(out).toBe(`[db-push-gate] db:push odmawia: nie udało się sprawdzić bazy${suffix}`);
+      expect(out).not.toMatch(/pw-x9|dev_user|localhost|5432|connect failed/);
     });
 
     it("niepoprawny adres → odmowa bez połączenia", async () => {
