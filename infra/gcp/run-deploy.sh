@@ -115,10 +115,12 @@ while read -r env_name secret_name is_required; do
   # Najnowsza wersja (to na nią wskazuje alias `latest`) i jej stan. `versions
   # list` kończy się kodem 0 także dla sekretu bez wersji (puste wyjście), więc
   # brak wersji nie jest rozpoznawany po tekście błędu (K-1b, jak secret_has_version
-  # w bootstrap.sh): kod ≠ 0 = błąd odczytu → stop.
+  # w bootstrap.sh): kod ≠ 0 = błąd odczytu → stop. Przyczyna (pierwsze linie
+  # stderr gcloud — metadane, bez wartości sekretów) idzie do operatora (K-1c).
   if ! state="$("${GC[@]}" secrets versions list "$secret_name" --sort-by=~createTime --limit=1 \
-    --format='value(state)' 2>/dev/null)"; then
+    --format='value(state)' 2>"$workdir/list.err")"; then
     echo "error: cannot read versions of secret $secret_name — stop" >&2
+    sed -n '1,3s/^/  cause: /p' "$workdir/list.err" >&2
     exit 2
   fi
   if [[ -z "$state" ]]; then

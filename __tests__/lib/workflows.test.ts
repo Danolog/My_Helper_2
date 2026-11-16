@@ -384,6 +384,7 @@ case "$*" in
     case "$st" in
       DENIED) echo "ERROR: (gcloud.secrets.versions.list) PERMISSION_DENIED: denied" >&2; exit 1 ;;
       NOTFOUNDTEXT) echo "ERROR: (gcloud.secrets.versions.list) NOT_FOUND: Secret [$sec] not found" >&2; exit 1 ;;
+      MULTILINE) printf 'err-line-1\\nerr-line-2\\nerr-line-3\\nerr-line-4\\n' >&2; exit 1 ;;
       ""|EMPTY) exit 0 ;;
     esac
     hist=$(printf '%s\\n' "$st" | tr '>' '\\n')
@@ -486,6 +487,15 @@ exit 0
     const r = deploy(`${REQUIRED},cron-secret=NOTFOUNDTEXT`);
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("cannot read versions of secret cron-secret");
+    expect(r.stderr).toContain("  cause: ERROR: (gcloud.secrets.versions.list) NOT_FOUND: Secret [cron-secret] not found");
+    expect(r.run).toBeUndefined();
+  });
+
+  it("K-1c: błąd odczytu → pierwsze 3 linie stderr gcloud z prefiksem, dalsze pominięte, kod 2", () => {
+    const r = deploy(`${REQUIRED},smsapi-token=MULTILINE`);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("  cause: err-line-1\n  cause: err-line-2\n  cause: err-line-3\n");
+    expect(r.stderr).not.toContain("err-line-4");
     expect(r.run).toBeUndefined();
   });
 
@@ -526,6 +536,8 @@ exit 0
     const r = deploy(`${REQUIRED},smsapi-token=DENIED`);
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/cannot read versions of secret smsapi-token/);
+    // K-1c: przyczyna z gcloud widoczna dla operatora (pierwsza linia stderr).
+    expect(r.stderr).toContain("  cause: ERROR: (gcloud.secrets.versions.list) PERMISSION_DENIED: denied");
     expect(r.run).toBeUndefined();
   });
 

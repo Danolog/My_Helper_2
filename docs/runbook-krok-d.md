@@ -328,16 +328,27 @@ wartość nagłówka trafia na ekran i do logu plikowego gcloud
 
 ## 5. D-5 — wartości sekretów (sesja główna)
 
-Zasada (N2, Ryan, K-1b): wartość sekretu trafia do gcloud **wyłącznie przez
-stdin** (`--data-file=-`), zawsze przez `tr -d '\r\n'` (końce wierszy z pliku
-albo panelu dostawcy nie stają się częścią sekretu) i bez lokalnego logu gcloud
-(`CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`) — wszystko to robi funkcja `add` niżej,
-innej drogi nie używać. Nigdy wartość w wierszu polecenia, nigdy `echo WARTOŚĆ`,
-nigdy `--data-file=ŚCIEŻKA`. Plik z wartością od dostawcy usuwać po dodaniu wersji.
+Zasada (N2, Ryan, K-1b; K-1c): zawsze bez lokalnego logu gcloud
+(`CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`), nigdy wartość w wierszu polecenia,
+nigdy `echo WARTOŚĆ`. Dwie drogi, innych nie używać:
+- **sekret jednowierszowy** (klucze API, tokeny, hasła — wszystkie sekrety
+  z dzisiejszego manifestu): funkcja `add` — wartość **wyłącznie przez stdin**
+  (`--data-file=-`), przez `tr -d '\r\n'` (końce wierszy z pliku albo panelu
+  dostawcy nie stają się częścią sekretu);
+- **sekret wielowierszowy** (PEM, JSON — końce wierszy są częścią wartości,
+  `tr` by je zepsuł): funkcja `add_multiline` — `--data-file` z pliku
+  tymczasowego (`mktemp`, poza repo), **bez** `tr`; plik usuwany zaraz po
+  wywołaniu gcloud, także przy błędzie.
+
+Plik z wartością od dostawcy usuwać po dodaniu wersji.
 
 ```bash
 P=my-helper-2-488419
 add() { tr -d '\r\n' | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
+add_multiline() { local rc=0; CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file="$2" || rc=$?; rm -P "$2"; return "$rc"; }
+# Użycie add_multiline (dziś żaden sekret z manifestu tego nie wymaga):
+#   f="$(mktemp)"; chmod 600 "$f"   # zapis wartości z panelu dostawcy do "$f"
+#   add_multiline NAZWA "$f"        # plik usunięty zaraz po gcloud
 
 # Generowane lokalnie:
 openssl rand -base64 48 | add better-auth-secret
