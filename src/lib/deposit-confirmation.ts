@@ -8,6 +8,7 @@ import {
   clients,
   services,
   employees,
+  salons,
 } from "@/lib/schema";
 import { sendPaymentConfirmationSms } from "@/lib/sms";
 
@@ -302,6 +303,12 @@ export async function confirmDepositPayment(
           }
         }
 
+        // Nazwa salonu do treści SMS; brak wiersza → SMS bez nazwy salonu
+        const [salon] = await db
+          .select({ name: salons.name })
+          .from(salons)
+          .where(eq(salons.id, payment.salonId));
+
         const smsResult = await sendPaymentConfirmationSms({
           clientPhone: recipientPhone,
           clientName: recipientName,
@@ -312,6 +319,7 @@ export async function confirmDepositPayment(
           employeeName: employee
             ? `${employee.firstName} ${employee.lastName}`
             : "pracownik",
+          salonName: salon?.name ?? null,
           salonId: payment.salonId,
           ...(recipientClientId ? { clientId: recipientClientId } : {}),
         });

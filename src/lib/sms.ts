@@ -287,6 +287,8 @@ export async function sendBookingConfirmationSms(params: {
 
 /**
  * Send a payment confirmation SMS to the client after a deposit payment.
+ * `salonName`: null, pusty napis albo same spacje → treść bez fragmentu
+ * „w <salon>” (zachowanie sprzed dodania nazwy).
  */
 export async function sendPaymentConfirmationSms(params: {
   clientPhone: string;
@@ -296,6 +298,7 @@ export async function sendPaymentConfirmationSms(params: {
   serviceName: string;
   appointmentDate: Date;
   employeeName: string;
+  salonName: string | null;
   salonId: string;
   clientId?: string;
 }): Promise<SmsResult> {
@@ -308,8 +311,11 @@ export async function sendPaymentConfirmationSms(params: {
     minute: "2-digit",
   });
 
+  const salonName = params.salonName?.trim();
+  const salonPart = salonName ? ` w ${salonName}` : "";
+
   const message =
-    `Potwierdzenie platnosci: ${params.clientName}, zadatek ${params.amount.toFixed(2)} ${params.currency} za usluge "${params.serviceName}" u ${params.employeeName} dnia ${formattedDate} zostal przyjety. Dziekujemy!`;
+    `Potwierdzenie platnosci: ${params.clientName}, zadatek ${params.amount.toFixed(2)} ${params.currency} za usluge "${params.serviceName}" u ${params.employeeName}${salonPart} dnia ${formattedDate} zostal przyjety. Dziekujemy!`;
 
   return sendSms({
     to: params.clientPhone,
