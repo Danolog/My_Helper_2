@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { eq, and, isNull, or, not } from "drizzle-orm";
-import { appointmentConflictWhere, isAppointmentOverlapViolation } from "@/lib/appointment-overlap";
+import { appointmentConflictWhere, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
 import { db } from "@/lib/db";
 import {
   checkBookingWithoutDeposit,
@@ -294,7 +294,16 @@ export async function acceptEarlierSlot(
 
   const offeredStart = new Date(entry.offeredStartTime);
   const offeredEnd = new Date(entry.offeredEndTime);
-  const employeeId = entry.offeredEmployeeId || entry.preferredEmployeeId;
+  // #168 pkt 4 (decyzja Olivera, wariant A): oferta dotyczy terminu zwolnionego
+  // u KONKRETNEGO pracownika (notifyWaitingList zapisuje go razem z tokenem).
+  // Puste offeredEmployeeId = pracownik usunięty po wysłaniu oferty (FK ON
+  // DELETE SET NULL) — oferta nieważna: odmowa, nic nie zapisane, wpis bez
+  // zmian. Bez przejścia na preferredEmployeeId (ta osoba mogła w tym czasie
+  // nie pracować) i bez przesuwania wizyty bez sprawdzenia kolizji.
+  if (!entry.offeredEmployeeId) {
+    return { success: false, message: "Proponowany termin nie jest juz dostepny" };
+  }
+  const employeeId = entry.offeredEmployeeId;
 
   // Przedział pusty/odwrócony nie trafiłby w warunek kolizji (#165) — odmowa,
   // nic nie zapisane, wpis bez zmian.
@@ -314,24 +323,22 @@ export async function acceptEarlierSlot(
   // zapisie wizyty, półotwarta [start, end). Przenoszona wizyta klienta nie
   // koliduje sama ze sobą. Przy kolizji nic nie zapisujemy — wpis zostaje
   // nierozstrzygnięty (accepted = null).
-  if (employeeId) {
-    const overlapping = await db
-      .select({ id: appointments.id })
-      .from(appointments)
-      .where(
-        appointmentConflictWhere({
-          salonId: entry.salonId,
-          employeeId,
-          start: offeredStart,
-          end: offeredEnd,
-          excludeId: entry.existingAppointmentId,
-        })
-      )
-      .limit(1);
+  const overlapping = await db
+    .select({ id: appointments.id })
+    .from(appointments)
+    .where(
+      appointmentConflictWhere({
+        salonId: entry.salonId,
+        employeeId,
+        start: offeredStart,
+        end: offeredEnd,
+        excludeId: entry.existingAppointmentId,
+      })
+    )
+    .limit(1);
 
-    if (overlapping.length > 0) {
-      return { success: false, message: "Termin jest juz zajety" };
-    }
+  if (overlapping.length > 0) {
+    return { success: false, message: "Termin jest juz zajety" };
   }
 
   let appointmentId: string;
@@ -362,7 +369,8 @@ export async function acceptEarlierSlot(
 
   // 7. Move existing appointment or create a new one
   // #171: każdy zapis poniżej to jedno polecenie; jeśli równoległy zapis
-  // zajął termin po kroku 6, EXCLUDE w bazie odrzuca je (23P01) — odmowa jak
+  // zajął termin po kroku 6, EXCLUDE w bazie odrzuca je (23P01, albo 40P01
+  // przy sprawdzaniu ograniczenia) — odmowa jak
   // przy kolizji, nic nie zapisane, wpis nierozstrzygnięty.
   try {
     if (entry.existingAppointmentId) {
@@ -380,7 +388,7 @@ export async function acceptEarlierSlot(
           .set({
             startTime: offeredStart,
             endTime: offeredEnd,
-            employeeId: employeeId || existingAppt.employeeId,
+            employeeId,
             notes: `${existingAppt.notes || ""} [Przeniesiony z listy oczekujacych]`.trim(),
           })
           .where(eq(appointments.id, entry.existingAppointmentId));
@@ -399,7 +407,7 @@ export async function acceptEarlierSlot(
           .values({
             salonId: entry.salonId,
             clientId: entry.clientId,
-            employeeId: employeeId as string,
+            employeeId,
             serviceId: entry.serviceId,
             startTime: offeredStart,
             endTime: offeredEnd,
@@ -418,7 +426,7 @@ export async function acceptEarlierSlot(
         .values({
           salonId: entry.salonId,
           clientId: entry.clientId,
-          employeeId: employeeId as string,
+          employeeId,
           serviceId: entry.serviceId,
           startTime: offeredStart,
           endTime: offeredEnd,
@@ -429,9 +437,13 @@ export async function acceptEarlierSlot(
       appointmentId = newAppt!.id;
     }
   } catch (error) {
-    if (isAppointmentOverlapViolation(error)) {
+    if (isAppointmentSlotTaken(error)) {
       return { success: false, message: "Termin jest juz zajety" };
     }
+    logger.error("acceptEarlierSlot: zapis wizyty odrzucony przez baze", {
+      waitingListId,
+      code: dbErrorCode(error),
+    });
     throw error;
   }
 

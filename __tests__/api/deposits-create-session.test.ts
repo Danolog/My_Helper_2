@@ -20,6 +20,7 @@ import {
   createChainMock,
 } from "./helpers";
 import { sqlMatches } from "./sql-predicate";
+import { deadlock, wrapped } from "./deadlock-fixture";
 
 // Zod 4's z.string().uuid() enforces RFC 4122 version/variant nibbles, so the
 // simple TEST_IDS placeholders (all-1s etc.) do not pass — use valid v4 UUIDs.
@@ -424,6 +425,19 @@ describe("POST /api/deposits/create-session — kolizja półotwarta (#165)", ()
     expect((await createSession(makeRequest())).status).toBe(201);
   });
 
+  // Q8 (#168): urlop jednego pracownika nie blokuje rezerwacji u innego.
+  it("blokada INNEGO pracownika w tym samym terminie → 201, wizyta i płatność zapisane", async () => {
+    prime([], [{ ...block("10:00", "11:00"), employee_id: "22222222-2222-4222-8222-999999999999" }]);
+    expect((await createSession(makeRequest())).status).toBe(201);
+    expect(mockDbInsert).toHaveBeenCalledTimes(2);
+  });
+
+  it("kontrast Q8: ta sama blokada u wybranego pracownika → 409, nic nie zapisane", async () => {
+    prime([], [block("10:00", "11:00")]);
+    expect((await createSession(makeRequest())).status).toBe(409);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
   function rejectingInsert(cause: Record<string, unknown>) {
     const chain = createChainMock([]) as Record<string, unknown>;
     chain.then = (_res: unknown, reject: (e: unknown) => unknown) =>
@@ -445,6 +459,42 @@ describe("POST /api/deposits/create-session — kolizja półotwarta (#165)", ()
     prime([]);
     rejectingInsert({ code: "23514", constraint_name: "appointments_end_after_start" });
     expect((await createSession(makeRequest())).status).toBe(500);
+  });
+
+  /** Spy na logger.error (prawdziwy albo zamockowany moduł) — 500 ma trafić do logu z kodem błędu. */
+  async function spyLoggerError() {
+    const { logger } = await import("@/lib/logger");
+    return vi.spyOn(logger, "error");
+  }
+
+  /** Zapis wizyty odrzucony błędem `err` (kształt Drizzle); zwraca status i treść. */
+  async function depositRejected(err: Error) {
+    prime([]);
+    const chain = createChainMock([]) as Record<string, unknown>;
+    chain.then = (_res: unknown, reject: (e: unknown) => unknown) => reject(err);
+    mockDbInsert.mockReset();
+    mockDbInsert.mockReturnValueOnce(chain);
+    const res = await createSession(makeRequest());
+    return { status: res.status, body: (await res.json()) as { error?: string } };
+  }
+
+  it("zadatek: 40P01 przy sprawdzaniu EXCLUDE (zakleszczenie, db71a43) → 409 z komunikatem kolizji", async () => {
+    const { status, body } = await depositRejected(wrapped(deadlock()));
+    expect(status).toBe(409);
+    expect(body.error).toBe("Wybrany termin jest juz zajety. Wybierz inny termin.");
+    expect(mockDbInsert).toHaveBeenCalledTimes(1); // płatność zadatku nie zapisana
+  });
+
+  it.each([
+    ["40P01 bez kontekstu", "40P01", deadlock(null)],
+    ["40P01 innej relacji", "40P01", deadlock('while checking exclusion constraint on tuple (1,2) in relation "payments"')],
+    ["40001 z kontekstem EXCLUDE", "40001", { ...deadlock(), code: "40001" }],
+  ])("zadatek: %s → 500, w logu kod błędu", async (_n, code, cause) => {
+    const spy = await spyLoggerError();
+    const { status } = await depositRejected(wrapped(cause));
+    expect(status).toBe(500);
+    expect(spy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ code }));
+    spy.mockRestore();
   });
 
   it("endTime = startTime → 400, bez zapytań o kolizje i zapisu", async () => {

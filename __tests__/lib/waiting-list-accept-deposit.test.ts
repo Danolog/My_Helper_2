@@ -31,7 +31,8 @@ function entry(extra: Record<string, unknown> = {}) {
     clientId: "client-1",
     serviceId: "service-1",
     preferredEmployeeId: null,
-    offeredEmployeeId: null,
+    // #168 pkt 4: oferta zawsze z pracownikiem (bez niego jest nieważna)
+    offeredEmployeeId: "e-1",
     existingAppointmentId: null,
     acceptToken: "tok",
     accepted: null,
@@ -46,6 +47,7 @@ beforeEach(() => {
   h.select.mockReset();
   h.insert.mockReset();
   h.update.mockReset();
+  h.select.mockReturnValue(createChainMock([])); // kolizje: termin wolny
   h.insert.mockReturnValue(createChainMock([{ id: "apt-new" }]));
   h.update.mockReturnValue(createChainMock([]));
 });
@@ -81,6 +83,7 @@ describe("acceptEarlierSlot — zadatek (#63)", () => {
   it("istniejąca wizyta anulowana → nowa wizyta też podlega regule", async () => {
     h.select
       .mockReturnValueOnce(createChainMock([entry({ existingAppointmentId: "apt-old" })]))
+      .mockReturnValueOnce(createChainMock([])) // kolizje
       .mockReturnValueOnce(createChainMock([{ id: "apt-old", status: "cancelled", startTime: FUTURE_START }]));
     h.calc.mockResolvedValue({ ok: true, required: true, amount: 40, serviceName: "X" });
 
@@ -93,6 +96,7 @@ describe("acceptEarlierSlot — zadatek (#63)", () => {
   it("przeniesienie istniejącej (aktywnej) wizyty → bez sprawdzania zadatku, sukces", async () => {
     h.select
       .mockReturnValueOnce(createChainMock([entry({ existingAppointmentId: "apt-old" })]))
+      .mockReturnValueOnce(createChainMock([])) // kolizje
       .mockReturnValueOnce(
         createChainMock([{ id: "apt-old", status: "scheduled", startTime: new Date(), notes: null, employeeId: "e-1" }])
       );

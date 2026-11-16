@@ -8,6 +8,7 @@
  * `sqlMatches`), więc wynik zależy od znaczenia predykatu.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { deadlock } from "../api/deadlock-fixture";
 import { createChainMock } from "../api/helpers";
 import { sqlMatches } from "../api/sql-predicate";
 
@@ -248,5 +249,41 @@ describe("acceptEarlierSlot — wyścig odrzucony przez bazę (#171)", () => {
 
     await expect(acceptEarlierSlot("wl-1", "tok")).rejects.toThrow("Failed query");
     expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it("nowa wizyta: 40P01 przy sprawdzaniu EXCLUDE (zakleszczenie, db71a43) → odmowa jak przy kolizji", async () => {
+    h.select.mockReturnValueOnce(createChainMock([entry()])).mockReturnValueOnce(filteringChain([]));
+    h.insert.mockReturnValue(rejecting(deadlock()));
+
+    expect(await acceptEarlierSlot("wl-1", "tok")).toEqual({ success: false, message: "Termin jest juz zajety" });
+    expect(h.update).not.toHaveBeenCalled(); // accepted zostaje null
+  });
+
+  it("przeniesienie: 40P01 przy sprawdzaniu EXCLUDE → odmowa, wpis nierozstrzygnięty", async () => {
+    h.select
+      .mockReturnValueOnce(createChainMock([entry({ existingAppointmentId: "apt-old" })]))
+      .mockReturnValueOnce(filteringChain([]))
+      .mockReturnValueOnce(
+        createChainMock([{ id: "apt-old", status: "scheduled", startTime: START, notes: null, employeeId: EMPLOYEE }])
+      );
+    h.update.mockReturnValueOnce(rejecting(deadlock()));
+
+    expect(await acceptEarlierSlot("wl-1", "tok")).toEqual({ success: false, message: "Termin jest juz zajety" });
+    expect(h.update).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["40P01 bez kontekstu", "40P01", deadlock(null)],
+    ["40001 z kontekstem EXCLUDE", "40001", { ...deadlock(), code: "40001" }],
+  ])("%s → rzuca dalej (500 w trasie), w logu kod błędu", async (_n, code, cause) => {
+    const { logger } = await import("@/lib/logger");
+    const spy = vi.spyOn(logger, "error");
+    h.select.mockReturnValueOnce(createChainMock([entry()])).mockReturnValueOnce(filteringChain([]));
+    h.insert.mockReturnValue(rejecting(cause));
+
+    await expect(acceptEarlierSlot("wl-1", "tok")).rejects.toThrow("Failed query");
+    expect(spy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ code, waitingListId: "wl-1" }));
+    expect(h.update).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });
