@@ -530,7 +530,7 @@ describe("sendAppointmentReminderSms", () => {
     expect(insertedValues.message).toContain("Przypomnienie");
   });
 
-  it("should include booking link in the message", async () => {
+  it("does not include a booking link in the message", async () => {
     await sendAppointmentReminderSms({
       clientPhone: "+48123456789",
       clientName: "Jan",
@@ -542,7 +542,8 @@ describe("sendAppointmentReminderSms", () => {
     });
 
     const insertedValues = mockDbValues.mock.calls[0]![0];
-    expect(insertedValues.message).toContain("/salons/salon-1/book");
+    expect(insertedValues.message).not.toContain("/book");
+    expect(insertedValues.message).not.toMatch(/https?:\/\//);
   });
 });
 
