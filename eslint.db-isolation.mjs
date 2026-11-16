@@ -23,12 +23,23 @@ export const DB_IMPORT_SOURCE_REGEX = "^(@/lib/db|(\\.{1,2}/)+(.*/)?db)(\\.[cm]?
 /** Ścieżka importu puli systemowej (dowolna forma kończąca się na `db-system`). */
 export const DB_SYSTEM_IMPORT_SOURCE_REGEX = "(^|/)db-system(\\.[cm]?[jt]s)?$";
 
+/** Sterownik/klient Postgresa — własny klient puli (wymaganie (1) Ethana do #206). */
+export const DB_CLIENT_IMPORT_SOURCE_REGEX =
+  "^(postgres|pg|drizzle-orm/(postgres-js|node-postgres|neon-[^/]+)|@neondatabase/serverless)(/.*)?$";
+
 const DB_MESSAGE =
   "Surowy `db` omija izolację salonu (#193). Dane salonu: forSalon(salonId) z @/lib/server/repository; " +
   "wyjście systemowe: nazwana funkcja z @/lib/server/system/*.";
 
 const DB_SYSTEM_MESSAGE =
   "Pula systemowa jest dostępna tylko w src/lib/server/system/** — wołaj nazwaną funkcję z @/lib/server/system/* (#193).";
+
+const DB_CLIENT_MESSAGE =
+  "Własny klient puli Postgresa tylko w src/lib/db.ts i src/lib/server/system/db-system.ts (#193). " +
+  "Dane salonu: forSalon(salonId) z @/lib/server/repository; wyjście systemowe: nazwana funkcja z @/lib/server/system/*.";
+
+const DB_EXPORT_MESSAGE =
+  "Plik z wyjątkiem dla `db` nie wystawia puli dalej (#193): bez eksportu wartości `db` (eksport typu dozwolony).";
 
 /** Pliki objęte regułami izolacji. */
 export const DB_ISOLATION_FILES = ["src/**/*.{ts,tsx,js,jsx,mjs,cjs}"];
@@ -41,6 +52,9 @@ export const DB_ISOLATION_PERMANENT = ["src/lib/server/repository.ts"];
 
 /** Pula systemowa wolna tylko tu. */
 export const DB_SYSTEM_ALLOWED_FILES = ["src/lib/server/system/**"];
+
+/** Jedyne pliki, które tworzą klienta puli (`postgres` + `drizzle-orm/postgres-js`). */
+export const DB_CLIENT_ALLOWED_FILES = ["src/lib/db.ts", "src/lib/server/system/db-system.ts"];
 
 /**
  * Dług przejściowy (Z3) — wynik reguły bez listy (73 pliki na b3a5faf),
@@ -161,11 +175,31 @@ export function literalGlob(path) {
   return path.replace(/[[\]*?{}()!+@]/g, (c) => `\\${c}`);
 }
 
-function restrictedSources({ db, dbSystem }) {
+function restrictedSources({ db, dbSystem, client }) {
   const sources = [];
   if (db) sources.push([DB_IMPORT_SOURCE_REGEX, DB_MESSAGE]);
   if (dbSystem) sources.push([DB_SYSTEM_IMPORT_SOURCE_REGEX, DB_SYSTEM_MESSAGE]);
+  if (client) sources.push([DB_CLIENT_IMPORT_SOURCE_REGEX, DB_CLIENT_MESSAGE]);
   return sources;
+}
+
+/** esquery: literał /…/ w selektorze nie może zawierać znaku „/” — zapis \x2F. */
+const esq = (src) => src.replaceAll("/", "\\x2F");
+
+/**
+ * Wymaganie (2) Ethana do #206: plik z wyjątkiem dla `db` nie wystawia wartości
+ * `db` dalej (re-eksport, eksport nazwany, `export const x = db`, `export default db`).
+ * Eksport typu (`export type …`, `export type { … } from`) przechodzi.
+ */
+export function exportDbSelectors() {
+  const re = esq(DB_IMPORT_SOURCE_REGEX);
+  return [
+    `ExportNamedDeclaration[exportKind!='type'][source.value=/${re}/]`,
+    `ExportAllDeclaration[exportKind!='type'][source.value=/${re}/]`,
+    "ExportNamedDeclaration[exportKind!='type'] > ExportSpecifier[exportKind!='type'][local.name='db']",
+    "ExportNamedDeclaration > VariableDeclaration > VariableDeclarator[init.name='db']",
+    "ExportDefaultDeclaration[declaration.name='db']",
+  ].map((selector) => ({ selector, message: DB_EXPORT_MESSAGE }));
 }
 
 /** Opcje `no-restricted-imports` (statyczne importy, `import *`, re-eksporty). */
@@ -173,14 +207,18 @@ export function restrictedImportsOptions(which) {
   return { patterns: restrictedSources(which).map(([regex, message]) => ({ regex, message })) };
 }
 
-/** Selektory `no-restricted-syntax` dla `import()` i `require()` z literałem albo szablonem bez wyrażeń. */
+/**
+ * Selektory `no-restricted-syntax` dla `import()` i `require()` z literałem albo
+ * szablonem bez wyrażeń oraz dla TS `import x = require("…")` (core
+ * `no-restricted-imports` tej formy nie widzi).
+ */
 export function isolationSyntaxSelectors(which) {
   const sources = restrictedSources(which);
   const out = [];
   for (const [src, message] of sources) {
-    // esquery: literał /…/ w selektorze nie może zawierać znaku „/” — zapis \x2F.
-    const re = src.replaceAll("/", "\\x2F");
+    const re = esq(src);
     out.push(
+      { selector: `TSExternalModuleReference > Literal[value=/${re}/]`, message },
       { selector: `ImportExpression[source.value=/${re}/]`, message },
       { selector: `ImportExpression > TemplateLiteral[expressions.length=0] > TemplateElement[value.raw=/${re}/]`, message },
       { selector: `CallExpression[callee.name='require'][arguments.0.value=/${re}/]`, message },
@@ -205,26 +243,41 @@ export function dbIsolationRules(which, otherSyntax = []) {
   const imports = restrictedImportsOptions(which);
   return {
     "no-restricted-imports": imports.patterns.length > 0 ? ["error", imports] : "off",
-    "no-restricted-syntax": ["error", ...otherSyntax, ...isolationSyntaxSelectors(which)],
+    "no-restricted-syntax": [
+      "error",
+      ...otherSyntax,
+      ...isolationSyntaxSelectors(which),
+      ...(which.exportDb ? exportDbSelectors() : []),
+    ],
   };
 }
 
 /**
  * Bloki flat config. Kolejność ma znaczenie (późniejszy wygrywa):
- * 1. cały `src/` — zakaz `db` i `db-system`;
+ * 1. cały `src/` — zakaz `db`, `db-system` i własnego klienta puli;
  * 2. `server/system/**` — wolno `db-system`;
- * 3. wyjątki stałe i dług przejściowy — wolno `db`, nadal nie wolno `db-system`;
- * 4. testy w `src/` — bez zakazów izolacji (same `otherSyntax`).
+ * 3. wyjątki stałe i dług przejściowy — wolno `db`, ale bez wystawiania go
+ *    dalej; nadal nie wolno `db-system` ani własnego klienta;
+ * 4. `src/lib/db.ts` i `system/db-system.ts` — jedyne miejsca klienta puli;
+ * 5. testy w `src/` — bez zakazów importu, ale z zakazem wystawiania `db` dalej.
  */
 export function dbIsolationConfig(otherSyntax = []) {
   const blocks = [
-    { files: DB_ISOLATION_FILES, rules: dbIsolationRules({ db: true, dbSystem: true }, otherSyntax) },
-    { files: DB_SYSTEM_ALLOWED_FILES, rules: dbIsolationRules({ db: true, dbSystem: false }, otherSyntax) },
+    { files: DB_ISOLATION_FILES, rules: dbIsolationRules({ db: true, dbSystem: true, client: true }, otherSyntax) },
+    { files: DB_SYSTEM_ALLOWED_FILES, rules: dbIsolationRules({ db: true, dbSystem: false, client: true }, otherSyntax) },
     {
       files: [...DB_ISOLATION_PERMANENT, ...DB_ISOLATION_TRANSITIONAL].map(literalGlob),
-      rules: dbIsolationRules({ db: false, dbSystem: true }, otherSyntax),
+      rules: dbIsolationRules({ db: false, dbSystem: true, client: true, exportDb: true }, otherSyntax),
     },
-    { files: DB_ISOLATION_TEST_FILES, rules: dbIsolationRules({ db: false, dbSystem: false }, otherSyntax) },
+    ...DB_CLIENT_ALLOWED_FILES.map((file) => ({
+      files: [literalGlob(file)],
+      rules: dbIsolationRules({ db: true, dbSystem: !file.startsWith("src/lib/server/system/"), client: false }, otherSyntax),
+    })),
+    // Testy w src/ biorą db, ale nie wystawiają go kodowi produkcyjnemu (uwaga Ryana do #206).
+    {
+      files: DB_ISOLATION_TEST_FILES,
+      rules: dbIsolationRules({ db: false, dbSystem: false, client: false, exportDb: true }, otherSyntax),
+    },
   ];
   return blocks.filter((b) => b.files.length > 0);
 }

@@ -15,13 +15,20 @@ import fs from "node:fs";
 import path from "node:path";
 import { ESLint, type Linter } from "eslint";
 import { beforeAll, describe, expect, it } from "vitest";
+import config, { D1_SELECTORS } from "../../eslint.config.mjs";
 import {
+  DB_CLIENT_ALLOWED_FILES,
+  DB_CLIENT_IMPORT_SOURCE_REGEX,
   DB_IMPORT_SOURCE_REGEX,
+  DB_ISOLATION_FILES,
   DB_ISOLATION_PARTITIONS,
   DB_ISOLATION_PERMANENT,
   DB_ISOLATION_RULES,
+  DB_ISOLATION_TEST_FILES,
   DB_ISOLATION_TRANSITIONAL,
+  DB_SYSTEM_ALLOWED_FILES,
   DB_SYSTEM_IMPORT_SOURCE_REGEX,
+  dbIsolationConfig,
 } from "../../eslint.db-isolation.mjs";
 
 const ROOT = path.resolve(__dirname, "../..");
@@ -139,14 +146,21 @@ async function isolationErrors(code: string, file: string) {
   );
 }
 
-const DB_FORMS: [string, string][] = [
-  ["alias", 'import { db } from "@/lib/db";\nexport const x = db;'],
-  ["względny", 'import { db } from "../../../lib/db";\nexport const x = db;'],
-  ["względny z rozszerzeniem", 'import { db } from "../../../lib/db.ts";\nexport const x = db;'],
+/** Formy importu `db` bez wystawiania go dalej (dozwolone w pliku z listy). */
+const DB_IMPORT_FORMS: [string, string][] = [
+  ["alias", 'import { db } from "@/lib/db";\nexport const x = db.select;'],
+  ["względny", 'import { db } from "../../../lib/db";\nexport const x = db.select;'],
+  ["względny z rozszerzeniem", 'import { db } from "../../../lib/db.ts";\nexport const x = db.select;'],
   ["import *", 'import * as d from "@/lib/db";\nexport const x = d;'],
   ["import()", 'export async function f() { return (await import("@/lib/db")).db; }'],
   ["import() z szablonem", "export async function f() { return (await import(`@/lib/db`)).db; }"],
   ["require()", 'export const x = require("@/lib/db").db;'],
+  // pkt 5 Olivera: TS `import x = require()` — core no-restricted-imports tej formy nie widzi.
+  ["import x = require()", 'import d = require("@/lib/db");\nexport const x = d;'],
+];
+
+const DB_FORMS: [string, string][] = [
+  ...DB_IMPORT_FORMS,
   ["re-eksport", 'export { db } from "@/lib/db";'],
   ["re-eksport *", 'export * from "../../../lib/db";'],
 ];
@@ -157,6 +171,22 @@ const DB_SYSTEM_FORMS: [string, string][] = [
   ["import()", 'export async function f() { return import("@/lib/server/system/db-system"); }'],
   ["require()", 'export const x = require("./server/system/db-system");'],
   ["re-eksport", 'export { dbSystem } from "@/lib/server/system/db-system";'],
+  ["import x = require()", 'import s = require("@/lib/server/system/db-system");\nexport const x = s;'],
+];
+
+/** Wymaganie (1) Ethana: własny klient puli (sterownik + adapter drizzle). */
+const CLIENT_FORMS: [string, string][] = [
+  ["postgres", 'import postgres from "postgres";\nexport const c = postgres;'],
+  ["drizzle-orm/postgres-js", 'import { drizzle } from "drizzle-orm/postgres-js";\nexport const d = drizzle;'],
+  ["drizzle-orm/postgres-js/migrator", 'import { migrate } from "drizzle-orm/postgres-js/migrator";\nexport const m = migrate;'],
+  ["pg", 'import { Pool } from "pg";\nexport const P = Pool;'],
+  ["drizzle-orm/node-postgres", 'import { drizzle } from "drizzle-orm/node-postgres";\nexport const d = drizzle;'],
+  ["drizzle-orm/neon-http", 'import { drizzle } from "drizzle-orm/neon-http";\nexport const d = drizzle;'],
+  ["@neondatabase/serverless", 'import { neon } from "@neondatabase/serverless";\nexport const n = neon;'],
+  ["import(postgres)", 'export async function f() { return import("postgres"); }'],
+  ["require(pg)", 'export const x = require("pg");'],
+  ["import x = require(postgres)", 'import p = require("postgres");\nexport const x = p;'],
+  ["re-eksport", 'export { drizzle } from "drizzle-orm/postgres-js";'],
 ];
 
 describe("Z2: każda forma importu puli daje błąd poza listą", () => {
@@ -191,10 +221,15 @@ describe("Z2: każda forma importu puli daje błąd poza listą", () => {
     ["plik z listy przejściowej", LISTED_ROUTE],
     ["plik z listy z [id] w ścieżce", LISTED_ROUTE_WITH_ID],
     ["wyjątek stały (repository)", "src/lib/server/repository.ts"],
-    ["test w src/", "src/lib/__p0a-probe__.test.ts"],
-  ])("%s: import db → bez błędu izolacji", async (_n, file) => {
-    for (const [, code] of DB_FORMS) {
+  ])("%s: import db (bez wystawiania dalej) → bez błędu izolacji", async (_n, file) => {
+    for (const [, code] of DB_IMPORT_FORMS) {
       expect(await isolationErrors(code, file), code).toHaveLength(0);
+    }
+  }, 60_000);
+
+  it("test w src/: każda forma importu db, db-system i klienta puli → bez błędu izolacji", async () => {
+    for (const [, code] of [...DB_IMPORT_FORMS, ...DB_SYSTEM_FORMS, ...CLIENT_FORMS]) {
+      expect(await isolationErrors(code, "src/lib/__p0a-probe__.test.ts"), code).toHaveLength(0);
     }
   }, 60_000);
 
@@ -202,10 +237,81 @@ describe("Z2: każda forma importu puli daje błąd poza listą", () => {
     ['import { forSalon } from "@/lib/server/repository";\nexport const x = forSalon;'],
     ['import x from "./dbx";\nexport default x;'],
     ['import { schema } from "@/lib/db-schema";\nexport const y = schema;'],
-    ['import x from "drizzle-orm/postgres-js";\nexport default x;'],
+    ['import { sql } from "drizzle-orm";\nexport const y = sql;'],
+    ['import { pgTable } from "drizzle-orm/pg-core";\nexport const y = pgTable;'],
+    ['import x from "postgres-array";\nexport default x;'],
+    ['import x from "./pg";\nexport default x;'],
   ])("inne importy → bez błędu: %s", async (code) => {
     expect(await isolationErrors(code, NEW_ROUTE)).toHaveLength(0);
   }, 30_000);
+});
+
+describe("wymaganie (1) Ethana: własny klient puli tylko w src/lib/db.ts i system/db-system.ts", () => {
+  it.each(CLIENT_FORMS)("%s — nowa trasa, nowy plik src/lib, system/**, plik z listy → błąd", async (_n, code) => {
+    for (const file of [NEW_ROUTE, NEW_LIB, SYSTEM_FILE, LISTED_ROUTE, "src/lib/server/repository.ts"]) {
+      expect(await isolationErrors(code, file), file).toHaveLength(1);
+    }
+  }, 60_000);
+
+  it.each(DB_CLIENT_ALLOWED_FILES.map((f: string) => [f]))("%s: klient puli → bez błędu (kontrola fałszywej czerwieni)", async (file) => {
+    for (const [, code] of CLIENT_FORMS) {
+      expect(await isolationErrors(code, file), code).toHaveLength(0);
+    }
+  }, 60_000);
+
+  it("src/lib/db.ts w obecnej treści → bez błędu izolacji; db nadal zakazane w nim jak w src/", async () => {
+    expect(await isolationErrors(fs.readFileSync(path.join(ROOT, "src/lib/db.ts"), "utf8"), "src/lib/db.ts")).toHaveLength(0);
+    expect(await isolationErrors(DB_FORMS[0]![1], "src/lib/db.ts")).toHaveLength(1);
+    expect(await isolationErrors(DB_SYSTEM_FORMS[0]![1], "src/lib/db.ts")).toHaveLength(1);
+    expect(await isolationErrors(DB_SYSTEM_FORMS[0]![1], "src/lib/server/system/db-system.ts")).toHaveLength(0);
+  }, 30_000);
+
+  it("żaden plik w src/ poza dozwolonymi (i testami) nie importuje klienta puli", () => {
+    const re = new RegExp(DB_CLIENT_IMPORT_SOURCE_REGEX);
+    const allowed = new Set<string>(DB_CLIENT_ALLOWED_FILES);
+    const hits = walk(path.join(ROOT, "src"))
+      .map((abs) => path.relative(ROOT, abs).split(path.sep).join("/"))
+      .filter((rel) => !allowed.has(rel) && !/\.(test|spec)\.tsx?$/.test(rel))
+      .filter((rel) => importSources(fs.readFileSync(path.join(ROOT, rel), "utf8")).some((s) => re.test(s)));
+    expect(hits).toEqual([]);
+  });
+});
+
+describe("wymaganie (2) Ethana: plik z wyjątkiem dla db nie wystawia wartości db", () => {
+  const IMPORT = 'import { db } from "@/lib/db";\n';
+  it.each([
+    ["re-eksport nazwany", 'export { db } from "@/lib/db";'],
+    ["re-eksport pod inną nazwą", 'export { db as pool } from "../../../lib/db";'],
+    ["re-eksport *", 'export * from "@/lib/db";'],
+    ["export { db }", `${IMPORT}export { db };`],
+    ["export { db as pool }", `${IMPORT}export { db as pool };`],
+    ["export const pool = db", `${IMPORT}export const pool = db;`],
+    ["export default db", `${IMPORT}export default db;`],
+  ])("%s → błąd w pliku z listy, w wyjątku stałym i w teście w src/", async (_n, code) => {
+    for (const file of [LISTED_ROUTE, LISTED_ROUTE_WITH_ID, "src/lib/server/repository.ts", "src/lib/__p0a-probe__.test.ts", "src/app/__p0a-probe__.spec.tsx"]) {
+      expect((await isolationErrors(code, file)).length, file).toBeGreaterThan(0);
+    }
+  }, 60_000);
+
+  it.each([
+    ["export type = typeof db", `${IMPORT}export type Tx = typeof db;`],
+    ["export type { … } from db", 'export type { Db } from "@/lib/db";'],
+    ["export { type db }", `import { type db } from "@/lib/db";\nexport { type db };`],
+    ["eksport innej wartości", `${IMPORT}export const rows = () => db.select;`],
+  ])("%s → bez błędu (eksport typu albo nie-db)", async (_n, code) => {
+    expect(await isolationErrors(code, LISTED_ROUTE)).toHaveLength(0);
+  }, 30_000);
+
+  it("pliki z list (prawdziwa treść) → 0 błędów izolacji", async () => {
+    // lintText, nie lintFiles: ścieżki z `[id]` lintFiles potraktowałby jak glob.
+    const bad: string[] = [];
+    for (const file of [...DB_ISOLATION_TRANSITIONAL, ...DB_ISOLATION_PERMANENT, ...DB_CLIENT_ALLOWED_FILES]) {
+      const p = path.join(ROOT, file);
+      if (!fs.existsSync(p)) continue; // system/db-system.ts powstaje w P0b
+      for (const m of await isolationErrors(fs.readFileSync(p, "utf8"), file)) bad.push(`${file}:${m.line} ${m.message.slice(0, 60)}`);
+    }
+    expect(bad).toEqual([]);
+  }, 120_000);
 });
 
 describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
@@ -226,8 +332,8 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
       const syn = cfg.rules?.["no-restricted-syntax"];
       expect(levelNum(level(imp))).toBe(2);
       expect(levelNum(level(syn))).toBe(2);
-      expect(regexes(imp)).toEqual([DB_IMPORT_SOURCE_REGEX, DB_SYSTEM_IMPORT_SOURCE_REGEX]);
-      for (const re of [DB_IMPORT_SOURCE_REGEX, DB_SYSTEM_IMPORT_SOURCE_REGEX]) {
+      expect(regexes(imp)).toEqual([DB_IMPORT_SOURCE_REGEX, DB_SYSTEM_IMPORT_SOURCE_REGEX, DB_CLIENT_IMPORT_SOURCE_REGEX]);
+      for (const re of [DB_IMPORT_SOURCE_REGEX, DB_SYSTEM_IMPORT_SOURCE_REGEX, DB_CLIENT_IMPORT_SOURCE_REGEX]) {
         expect(selectors(syn)).toContain(`ImportExpression[source.value=/${sel(re)}/]`);
         expect(selectors(syn)).toContain(`CallExpression[callee.name='require'][arguments.0.value=/${sel(re)}/]`);
       }
@@ -240,15 +346,73 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
   it("plik z listy: db wyłączone tylko dla niego, db-system nadal error; nowy plik obok — error", async () => {
     const listed = (await eslint.calculateConfigForFile(path.join(ROOT, LISTED_ROUTE_WITH_ID))) as Linter.Config;
     expect(levelNum(level(listed.rules?.["no-restricted-imports"]))).toBe(2);
-    expect(regexes(listed.rules?.["no-restricted-imports"])).toEqual([DB_SYSTEM_IMPORT_SOURCE_REGEX]);
+    expect(regexes(listed.rules?.["no-restricted-imports"])).toEqual([DB_SYSTEM_IMPORT_SOURCE_REGEX, DB_CLIENT_IMPORT_SOURCE_REGEX]);
     expect(selectors(listed.rules?.["no-restricted-syntax"])).not.toContain(sel(DB_IMPORT_SOURCE_REGEX));
     expect(selectors(listed.rules?.["no-restricted-syntax"])).toContain("MemberExpression[property.name=/^(params|detail)$/]");
 
     const sibling = (await eslint.calculateConfigForFile(
       path.join(ROOT, "src/app/api/appointments/[id]/complete/__p0a-probe__.ts")
     )) as Linter.Config;
-    expect(regexes(sibling.rules?.["no-restricted-imports"])).toEqual([DB_IMPORT_SOURCE_REGEX, DB_SYSTEM_IMPORT_SOURCE_REGEX]);
+    expect(regexes(sibling.rules?.["no-restricted-imports"])).toEqual([
+      DB_IMPORT_SOURCE_REGEX,
+      DB_SYSTEM_IMPORT_SOURCE_REGEX,
+      DB_CLIENT_IMPORT_SOURCE_REGEX,
+    ]);
   }, 30_000);
+
+  // B2 (Leo do eb25a47): późniejszy blok z własną regułą dla innego katalogu
+  // zastępuje opcje — sprawdzamy KAŻDY plik w src/, nie tylko ścieżki próbne.
+  it("każdy plik w src/: poziom i wzorce z konfiguracji wynikowej zgodne z jego klasą", async () => {
+    const listed = new Set<string>([...DB_ISOLATION_TRANSITIONAL, ...DB_ISOLATION_PERMANENT]);
+    const D1 = "MemberExpression[property.name=/^(params|detail)$/]";
+    const EXPORT_DB = "ExportDefaultDeclaration[declaration.name='db']";
+    const [DB, SYS, CLIENT] = [DB_IMPORT_SOURCE_REGEX, DB_SYSTEM_IMPORT_SOURCE_REGEX, DB_CLIENT_IMPORT_SOURCE_REGEX];
+    const bad: string[] = [];
+    const files = walk(path.join(ROOT, "src"));
+    expect(files.length).toBeGreaterThan(100);
+    for (const abs of files) {
+      const rel = path.relative(ROOT, abs).split(path.sep).join("/");
+      const cfg = (await eslint.calculateConfigForFile(abs)) as Linter.Config;
+      const imp = cfg.rules?.["no-restricted-imports"];
+      const syn = cfg.rules?.["no-restricted-syntax"];
+      const isTest = /\.(test|spec)\.tsx?$/.test(rel);
+      const inSystem = rel.startsWith("src/lib/server/system/");
+      const want = isTest
+        ? []
+        : rel === "src/lib/db.ts"
+          ? [DB, SYS]
+          : rel === "src/lib/server/system/db-system.ts"
+            ? [DB]
+            : listed.has(rel)
+              ? [SYS, CLIENT]
+              : inSystem
+                ? [DB, CLIENT]
+                : [DB, SYS, CLIENT];
+      const got = levelNum(level(imp)) === 2 ? regexes(imp) : [];
+      if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(`${rel}: no-restricted-imports ${JSON.stringify(got)}`);
+      const s = levelNum(level(syn)) === 2 ? selectors(syn) : "";
+      for (const re of [DB, SYS, CLIENT]) {
+        const forms = [
+          `ImportExpression[source.value=/${sel(re)}/]`,
+          `CallExpression[callee.name='require'][arguments.0.value=/${sel(re)}/]`,
+          `TSExternalModuleReference > Literal[value=/${sel(re)}/]`,
+        ].map((f) => s.includes(f));
+        if (want.includes(re) ? forms.includes(false) : forms.includes(true)) bad.push(`${rel}: no-restricted-syntax ${re}`);
+      }
+      if (s.includes(EXPORT_DB) !== (isTest || listed.has(rel))) bad.push(`${rel}: zakaz eksportu db ${s.includes(EXPORT_DB)}`);
+      if (!s.includes(D1)) bad.push(`${rel}: brak D1`);
+    }
+    expect(bad).toEqual([]);
+  }, 300_000);
+
+  it("bloki izolacji są ostatnie w konfiguracji; żaden inny blok nie ustawia reguł izolacji", () => {
+    const iso = dbIsolationConfig(D1_SELECTORS);
+    const all = config as Linter.Config[];
+    expect(all.slice(-iso.length)).toEqual(iso);
+    for (const block of all.slice(0, -iso.length)) {
+      for (const r of DB_ISOLATION_RULES) expect(block.rules?.[r], r).toBeUndefined();
+    }
+  });
 
   it("nieużyte dyrektywy eslint-disable są błędem (Z5)", async () => {
     const cfg = (await eslint.calculateConfigForFile(path.join(ROOT, NEW_ROUTE))) as Linter.Config;
@@ -256,12 +420,27 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
   }, 30_000);
 });
 
+/** Źródła importów w tekście (from, import(), require(), także `import x = require()`). */
+function importSources(text: string): string[] {
+  return [...text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)["'`]([^"'`]+)["'`]/g)].map((m) => m[1]!);
+}
+
 /** Czy tekst pliku nadal importuje surowe `db` (dowolna forma z Z2). */
 function importsDb(text: string): boolean {
   const re = new RegExp(DB_IMPORT_SOURCE_REGEX);
-  const sources = [...text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)["'`]([^"'`]+)["'`]/g)].map((m) => m[1]!);
-  return sources.some((s) => re.test(s));
+  return importSources(text).some((s) => re.test(s));
 }
+
+describe("B1 (Leo do eb25a47): stałe zbiory plików przypięte", () => {
+  it("wyjątek stały, pula systemowa, testy i zakres reguły — dokładne brzmienie", () => {
+    // Dopisanie pliku do wyjątków stałych omijałoby zasadę „lista tylko maleje”.
+    expect(DB_ISOLATION_PERMANENT).toEqual(["src/lib/server/repository.ts"]);
+    expect(DB_SYSTEM_ALLOWED_FILES).toEqual(["src/lib/server/system/**"]);
+    expect(DB_ISOLATION_TEST_FILES).toEqual(["src/**/*.test.{ts,tsx}", "src/**/*.spec.{ts,tsx}"]);
+    expect(DB_ISOLATION_FILES).toEqual(["src/**/*.{ts,tsx,js,jsx,mjs,cjs}"]);
+    expect(DB_CLIENT_ALLOWED_FILES).toEqual(["src/lib/db.ts", "src/lib/server/system/db-system.ts"]);
+  });
+});
 
 describe("Z4: lista przejściowa ⊆ BASELINE (suma i per partia), każda pozycja żywa", () => {
   const partitions = DB_ISOLATION_PARTITIONS as Record<string, readonly string[]>;
