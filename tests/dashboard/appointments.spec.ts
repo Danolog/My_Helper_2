@@ -1,5 +1,5 @@
-import { test, expect, type Page } from '../fixtures';
 import { e2eNotes } from '../e2e-cleanup';
+import { test, expect, type Page } from '../fixtures';
 
 // ---------------------------------------------------------------------------
 // Helpers

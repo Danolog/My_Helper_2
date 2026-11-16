@@ -1,6 +1,6 @@
 import { TEST_PHONE } from '../../src/lib/test-phone';
-import { test, expect } from '../fixtures';
 import { e2eGuestName } from '../e2e-cleanup';
+import { test, expect } from '../fixtures';
 import type { Browser, Page } from '@playwright/test';
 
 // Rezerwacja z zadatkiem w oknie happy hours, gdy happy hours sa zamrozone
