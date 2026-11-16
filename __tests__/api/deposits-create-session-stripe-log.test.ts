@@ -1,0 +1,194 @@
+/**
+ * Luka D (P1 logi, zakres Ryana T3): POST /api/deposits/create-session przy
+ * błędzie Stripe Checkout loguje tylko tożsamość błędu i pola Stripe bez
+ * wartości — nigdy `message` (Stripe wkleja tam e-mail gościa z
+ * `customer_email`) ani params Drizzle (ten sam catch łapie zapis cs_ po
+ * udanej sesji).
+ *
+ * PRAWDZIWY logger, bez mocka (mock pomija redakcję) — szpieg na
+ * console.error, oba tryby loggera: production (JSON) i development (obiekt →
+ * util.inspect na pełną głębokość). `isProduction` jest stałą modułu
+ * loggera, więc trasa jest importowana na nowo po `vi.resetModules()` —
+ * dlatego osobny plik, nie blok w deposits-create-session.test.ts (tamtejsze
+ * szpiegi na `logger` trzymają instancję z importu statycznego).
+ * Mutant M3 (powrót do `stripeError.message`) → czerwone.
+ */
+import { inspect } from "node:util";
+import { DrizzleQueryError } from "drizzle-orm";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createChainMock, createMockRequest } from "./helpers";
+
+const SALON_UUID = "11111111-1111-4111-8111-111111111111";
+const EMPLOYEE_UUID = "22222222-2222-4222-8222-222222222222";
+const SERVICE_UUID = "44444444-4444-4444-8444-444444444444";
+const APPOINTMENT_UUID = "66666666-6666-4666-8666-666666666666";
+const DEPOSIT_PAYMENT_UUID = "77777777-7777-4777-8777-777777777777";
+
+const SENTINEL_EMAIL = "wartownik@test.invalid";
+const SENTINEL_NAME = "Wartownik-Imie";
+const SENTINEL_PHONE = "+48600111222";
+const SENTINEL_NOTE = "WARTOWNIK-NOTATKA";
+
+const mockDbSelect = vi.fn();
+const mockDbInsert = vi.fn();
+const mockDbUpdate = vi.fn();
+const mockDbDelete = vi.fn();
+const mockTx = {
+  select: (...a: unknown[]) => mockDbSelect(...a),
+  insert: (...a: unknown[]) => mockDbInsert(...a),
+  update: (...a: unknown[]) => mockDbUpdate(...a),
+  delete: (...a: unknown[]) => mockDbDelete(...a),
+};
+vi.mock("@/lib/db", () => ({
+  db: { ...mockTx, transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx) },
+}));
+
+// Gość bez konta: e-mail do Checkout pochodzi z ciała żądania.
+vi.mock("@/lib/session", () => ({ getOptionalSession: vi.fn().mockResolvedValue(null) }));
+vi.mock("@/lib/rate-limit", () => ({
+  strictRateLimit: { check: vi.fn().mockReturnValue({ success: true, remaining: 4, reset: 60000 }) },
+  getClientIp: vi.fn().mockReturnValue("127.0.0.1"),
+}));
+vi.mock("@/lib/deposit-calculation", () => ({
+  calculateExpectedDeposit: vi.fn().mockResolvedValue({ ok: true, required: true, amount: 50, serviceName: "Strzyzenie" }),
+}));
+vi.mock("@/lib/salon-context", () => ({ getSalonContext: vi.fn().mockResolvedValue(null) }));
+vi.mock("@/lib/salon-refs", () => ({ assertSalonRefs: vi.fn().mockResolvedValue(null) }));
+
+const mockSessionsCreate = vi.fn();
+vi.mock("@/lib/stripe", () => ({
+  isStripeConfigured: () => true,
+  getStripe: () => ({ checkout: { sessions: { create: (...a: unknown[]) => mockSessionsCreate(...a) } } }),
+}));
+
+const guestBody = {
+  salonId: SALON_UUID,
+  employeeId: EMPLOYEE_UUID,
+  serviceId: SERVICE_UUID,
+  startTime: "2026-08-01T10:00:00.000Z",
+  endTime: "2026-08-01T11:00:00.000Z",
+  depositAmount: 50,
+  paymentMethod: "stripe",
+  guestName: SENTINEL_NAME,
+  guestPhone: SENTINEL_PHONE,
+  guestEmail: SENTINEL_EMAIL,
+  notes: SENTINEL_NOTE,
+};
+
+/** Kształt StripeInvalidRequestError z SDK stripe (bez importu SDK). */
+class StripeInvalidRequestError extends Error {
+  type = "invalid_request_error";
+  code = "email_invalid";
+  param = "customer_email";
+  requestId = "req_test_123";
+  raw = { message: `Invalid email address: ${SENTINEL_EMAIL}` };
+  constructor() {
+    super(`Invalid email address: ${SENTINEL_EMAIL}`);
+    this.name = "StripeInvalidRequestError";
+  }
+}
+
+function primeDb() {
+  mockDbSelect.mockReturnValueOnce(createChainMock([])).mockReturnValueOnce(createChainMock([]));
+  mockDbInsert
+    .mockReturnValueOnce(createChainMock([{ id: APPOINTMENT_UUID, salonId: SALON_UUID, status: "scheduled" }]))
+    .mockReturnValueOnce(createChainMock([{ id: DEPOSIT_PAYMENT_UUID, appointmentId: APPOINTMENT_UUID, status: "pending" }]));
+  mockDbUpdate.mockReturnValue(createChainMock([]));
+  mockDbDelete.mockReturnValue(createChainMock([]));
+}
+
+/** Trasa z loggerem w danym trybie; zwraca status i całe wyjście console.error. */
+async function runInMode(mode: "production" | "development") {
+  vi.stubEnv("NODE_ENV", mode);
+  vi.resetModules();
+  const { POST } = await import("@/app/api/deposits/create-session/route");
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const res = await POST(
+      createMockRequest("http://localhost:3000/api/deposits/create-session", { method: "POST", body: guestBody })
+    );
+    const out = spy.mock.calls
+      .map((args) => args.map((a) => (typeof a === "string" ? a : inspect(a, { depth: null }))).join(" "))
+      .join("\n");
+    return { status: res.status, out };
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+function expectNoSentinels(out: string) {
+  for (const s of [SENTINEL_EMAIL, SENTINEL_NAME, SENTINEL_PHONE, SENTINEL_NOTE]) {
+    expect(out, s).not.toContain(s);
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  primeDb();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe.each(["production", "development"] as const)("luka D, logger w trybie %s", (mode) => {
+  it("Stripe odrzuca e-mail → 502, wizyta usunięta; w logu type/code/param/requestId i identyfikatory, bez e-maila", async () => {
+    mockSessionsCreate.mockRejectedValue(new StripeInvalidRequestError());
+    const { status, out } = await runInMode(mode);
+
+    expect(status).toBe(502);
+    expect(mockDbDelete).toHaveBeenCalledTimes(1);
+    // Do Stripe e-mail idzie (to nie jest luka), do logu — nie.
+    expect(mockSessionsCreate).toHaveBeenCalledWith(expect.objectContaining({ customer_email: SENTINEL_EMAIL }));
+    expect(out).toContain("Stripe Checkout session creation failed for deposit");
+    expectNoSentinels(out);
+    expect(out).not.toContain("Invalid email address");
+    for (const v of [
+      "StripeInvalidRequestError",
+      "invalid_request_error",
+      "email_invalid",
+      "customer_email",
+      "req_test_123",
+      APPOINTMENT_UUID,
+      DEPOSIT_PAYMENT_UUID,
+    ]) {
+      expect(out, v).toContain(v);
+    }
+  });
+
+  it("zapis cs_ po udanej sesji rzuca DrizzleQueryError z danymi gościa → 502; w logu nazwa i kod, bez params/detail/zapytania", async () => {
+    mockSessionsCreate.mockResolvedValue({ id: "cs_test_123", url: "https://checkout.stripe.com/c/pay/cs_test_123" });
+    const pgCause = Object.assign(new Error(`value too long for type: ${SENTINEL_NAME}`), {
+      code: "22001",
+      detail: `Key (phone)=(${SENTINEL_PHONE})`,
+    });
+    const err = new DrizzleQueryError(
+      "update deposit_payments set stripe_payment_intent_id = $1",
+      [SENTINEL_NAME, SENTINEL_PHONE, SENTINEL_EMAIL],
+      pgCause
+    );
+    const failing = createChainMock([]) as Record<string, unknown>;
+    failing.then = (_res: unknown, reject: (e: unknown) => unknown) => reject(err);
+    mockDbUpdate.mockReset();
+    mockDbUpdate.mockReturnValueOnce(failing);
+
+    const { status, out } = await runInMode(mode);
+
+    expect(status).toBe(502);
+    expectNoSentinels(out);
+    for (const s of ["params", "Key (phone)", "update deposit_payments", "value too long"]) {
+      expect(out, s).not.toContain(s);
+    }
+    expect(out).toContain("DrizzleQueryError");
+    expect(out).toContain("22001");
+  });
+});
+
+it("rzucony napis zamiast błędu (bez pól Stripe) → 502, w logu tylko errorName, bez treści", async () => {
+  mockSessionsCreate.mockRejectedValue(`Invalid email address: ${SENTINEL_EMAIL}`);
+  const { status, out } = await runInMode("production");
+  expect(status).toBe(502);
+  expectNoSentinels(out);
+  expect(out).toContain('"errorName":"string"');
+  expect(out).not.toContain("stripeType");
+});
