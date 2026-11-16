@@ -89,6 +89,9 @@ export const MODULES: readonly ModuleDef[] = [
     defaultEnabled: false,
   },
   {
+    // Zdjęcie `hardOff` dopiero po spełnieniu obu warunków: zamknięte #215
+    // oraz zapis zgody marketingowej przechowuje jej pochodzenie (źródło,
+    // osoba zapisująca, wersja treści) i ma najwyżej jedną aktywną zgodę na kanał.
     key: "newsletters",
     label: "Newslettery",
     description: "Wysyłka wiadomości marketingowych do bazy klientów.",
