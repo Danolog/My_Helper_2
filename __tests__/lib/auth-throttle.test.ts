@@ -145,6 +145,31 @@ describe("podział ścieżek: wrażliwe → baza, pozostałe → pamięć proces
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("pamięć: sprzątanie zamortyzowane — 2000 wywołań nie robi 2000 pełnych przebiegów mapy", async () => {
+    const proto = Map.prototype as unknown as Record<symbol, () => IterableIterator<unknown>>;
+    const fullScans = vi.spyOn(proto, Symbol.iterator);
+    try {
+      const rule = { window: 10, max: 100 };
+      for (let i = 0; i < 2000; i++) {
+        await t.consumeAuthRateLimit(`198.51.${(i >> 8) & 255}.${i & 255}|/get-session`, rule);
+        if (i % 100 === 0) vi.setSystemTime(at(i / 10));
+      }
+      expect(fullScans.mock.calls.length).toBeLessThanOrEqual(10);
+    } finally {
+      fullScans.mockRestore();
+    }
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("pamięć: wygasły wpis nie jest liczony, nawet zanim przyjdzie pełne sprzątanie", async () => {
+    const key = "198.51.100.12|/get-session";
+    const rule = { window: 10, max: 1 };
+    expect((await t.consumeAuthRateLimit(key, rule)).allowed).toBe(true);
+    expect((await t.consumeAuthRateLimit(key, rule)).allowed).toBe(false);
+    vi.setSystemTime(at(11));
+    expect((await t.consumeAuthRateLimit(key, rule)).allowed).toBe(true);
+  });
+
   it("pamięć: różne adresy liczą się osobno", async () => {
     const rule = { window: 10, max: 1 };
     expect((await t.consumeAuthRateLimit("198.51.100.10|/get-session", rule)).allowed).toBe(true);
