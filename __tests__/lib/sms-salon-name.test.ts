@@ -204,7 +204,11 @@ describe("nazwa salonu w każdym z trzech szablonów", () => {
     expect(message).not.toMatch(/ {2}/);
   });
 
-  it.each(NAMES)("%s: nazwa na granicy limitu → cała treść w podstawowej tabeli GSM-7, ≤ 306 znaków", async (t) => {
+  // Sprawdza, że nazwa salonu po przygotowaniu nie wprowadza do treści znaków
+  // spoza podstawowej tabeli GSM-7 — przy dacie i pozostałych polach bez
+  // takich znaków (DATE, BASE). NIE gwarantuje, że każda treść SMS jest
+  // w GSM-7: polskie daty i pozostałe pola obejmuje #231.
+  it.each(NAMES)("%s: nazwa salonu (także na granicy limitu) nie wprowadza znaków spoza podstawowego GSM-7, treść ≤ 306 znaków", async (t) => {
     for (const name of [EXACT_40, LONG_41, "Zakład Łucja Żółć 💇‍♀️"]) {
       mockFetch.mockClear();
       const message = await messageFor(t, name);
