@@ -38,6 +38,14 @@ const h = await vi.hoisted(async () => (await import("./pg-harness")).createInte
 const dbRef = vi.hoisted(() => ({ current: undefined as unknown }));
 vi.mock("@/lib/db", () => ({
   get db() {
+    if (!h) throw new Error("INTEGRATION_POSTGRES_URL not set");
+    return h.db;
+  },
+}));
+// `db-system.ts` kopiuje `db` do stałej przy załadowaniu modułu (`export const dbSystem = db`),
+// więc podmiana klienta musi być na `dbSystem` — getter czytany przy każdym zapytaniu wyjścia.
+vi.mock("@/lib/server/system/db-system", () => ({
+  get dbSystem() {
     if (dbRef.current) return dbRef.current;
     if (!h) throw new Error("INTEGRATION_POSTGRES_URL not set");
     return h.db;
@@ -322,23 +330,73 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
         await client.end({ timeout: 0 });
         throw new Error(`Odmowa: ${clientTarget.reason}`);
       }
-      const server = await verifySeedServerIdentities([client], HARNESS_GUARD_CONTEXT);
-      if (!server.ok) throw new Error(`Odmowa: ${server.reason}`);
-
-      const { auth } = makeAuth();
-      dbRef.current = drizzle(client, { schema });
+      const ip = trackIp(nextIp());
+      const ip2 = trackIp(nextIp());
+      const e1 = trackEmail(email("down"));
+      const e2 = trackEmail(email("down2"));
+      const touched = [
+        ipThrottleKey(`${ip}|/sign-in/email`, SECRET),
+        ipThrottleKey(`${ip2}|/sign-in/email`, SECRET),
+        accountThrottleKey(e1, SECRET),
+        accountThrottleKey(e2, SECRET),
+      ];
       try {
-        const res = await post(auth, "/sign-in/email", { email: email("down"), password: WRONG }, nextIp());
+        const server = await verifySeedServerIdentities([client], HARNESS_GUARD_CONTEXT);
+        if (!server.ok) throw new Error(`Odmowa: ${server.reason}`);
+
+        // Warunek wstępny 1: przez ten klient tabela naprawdę nie istnieje (błąd bazy 42P01).
+        await expect(client.unsafe("SELECT count(*) FROM auth_rate_limit")).rejects.toMatchObject({ code: "42P01" });
+
+        const down = drizzle(client, { schema });
+        const downExecute = vi.spyOn(down, "execute");
+        const { auth } = makeAuth();
+        dbRef.current = down;
+
+        const res = await post(auth, "/sign-in/email", { email: e1, password: WRONG }, ip);
+        // Warunek wstępny 2: zapytanie wyjścia poszło przez niedostępny klient i skończyło się błędem.
+        expect(downExecute).toHaveBeenCalled();
+        // Kod błędu bazy wprost albo w `cause` (drizzle może opakować błąd sterownika).
+        const pgCode = (err: unknown) =>
+          (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code;
+        for (const r of downExecute.mock.results) {
+          expect(r.type).toBe("return");
+          const err = await Promise.resolve(r.value).then(
+            () => null,
+            (x: unknown) => x,
+          );
+          expect(err, "zapytanie przez niedostępny klient nie zwróciło błędu").not.toBeNull();
+          expect(pgCode(err)).toBe("42P01");
+        }
+
         expect(res.status).toBe(429);
-        expect(await reserveAccountSignInAttempt(email("down"))).toEqual({ allowed: false, retryAfter: 900 });
+        // Każdy licznik osobno (429 z logowania daje którykolwiek z nich):
+        // licznik adresu → odmowa z retryAfter = okno reguły; licznik konta → odmowa 900 s.
+        expect(await consumeAuthRateLimit(`${ip2}|/sign-in/email`, IN_RULE)).toEqual({
+          allowed: false,
+          retryAfter: IN_RULE.window,
+        });
+        expect(await reserveAccountSignInAttempt(e2)).toEqual({ allowed: false, retryAfter: 900 });
         const session = await auth.handler(
-          new Request(`${BASE}/api/auth/get-session`, { headers: { "x-forwarded-for": nextIp() } }),
+          new Request(`${BASE}/api/auth/get-session`, { headers: { "x-forwarded-for": trackIp(nextIp()) } }),
         );
         expect(session.status).toBe(200);
+        // Log: sama ścieżka i nazwa klasy błędu (sterownika albo opakowania drizzle).
         const errorLogs = logger.error.mock.calls.map((c) => c[1]);
-        expect(errorLogs).toContainEqual({ path: "/sign-in/email", error: "PostgresError" });
+        expect(errorLogs).toContainEqual({
+          path: "/sign-in/email",
+          error: expect.stringMatching(/^(PostgresError|DrizzleQueryError)$/),
+        });
+        // W4: żadne wywołanie loggera w tym teście nie zawiera adresu, e-maila ani klucza.
+        const allCalls = JSON.stringify(Object.values(logger).flatMap((fn) => fn.mock.calls));
+        const forbidden = [ip, ip2, e1, e2, ...touched.flatMap((k) => [k.toString("hex"), k.toString("base64"), JSON.stringify(k)])];
+        for (const f of forbidden) expect(allCalls, "log zawiera dane testu").not.toContain(f);
+
+        // Nic nie trafiło do działającej tabeli.
+        dbRef.current = undefined;
+        for (const k of touched) expect(await rowByKey(k)).toBeUndefined();
       } finally {
         dbRef.current = undefined;
+        for (const k of touched) await h!.observer.unsafe("DELETE FROM auth_rate_limit WHERE key = $1", [k]);
         await client.end({ timeout: 5 });
       }
     });
