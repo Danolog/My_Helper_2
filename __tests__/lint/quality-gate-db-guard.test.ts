@@ -17,9 +17,15 @@
  * kształt nagłówka joba, plik z `jobs:` bez rozpoznanych jobów, kroki w innym stylu
  * wcięć niż w repo, nieznany kształt polecenia pnpm czy wskaźnika bloku — wyjątek,
  * nigdy ciche przepuszczenie.
+ *
+ * #201: dwie warstwy. (1) Drzewo YAML (js-yaml 4.3.2, schemat domyślny): składnia, push
+ * w każdej wartości (`shell:`, `defaults:`…), job z bazą po drzewie (także `$GITHUB_ENV`).
+ * (2) Niezmiennik krzyżowy tekst ↔ parser liniowy ↔ drzewo YAML z numerem i treścią linii.
+ * Kotwice i aliasy YAML nadal = porażka (sprawdzane na tekście).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { load } from "js-yaml";
 import { describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
@@ -117,9 +123,14 @@ function outsideJobs(wf: string): string {
 }
 
 function jobs(wf: string = WF): Map<string, string> {
+  return new Map(jobSpans(wf).map(([name, a, b]) => [name, wf.slice(a, b)]));
+}
+
+/** Joby jako [nazwa, początek, koniec) w znakach całego pliku — do numerów linii w komunikatach (#201). */
+function jobSpans(wf: string): Array<[string, number, number]> {
   const [s, e] = jobsSection(wf);
   const body = wf.slice(s, e);
-  const out = new Map<string, string>();
+  const out: Array<[string, number, number]> = [];
   const HEAD = /^ {2}["']?([A-Za-z0-9_-]+)["']?:[ \t]*(?:&\S+[ \t]*)?(?:#.*)?$/;
   // Każda linia na wcięciu 2 to nagłówek joba — inny kształt = porażka, nie sklejenie z poprzednim jobem.
   for (const l of body.split("\n")) {
@@ -130,7 +141,7 @@ function jobs(wf: string = WF): Map<string, string> {
   if (heads.length === 0) throw new Error("zero jobów pod jobs: — nieobsługiwany styl wcięć, przepisz workflow w stylu repo (job na wcięciu 2)");
   heads.forEach((m, i) => {
     const end = i + 1 < heads.length ? heads[i + 1]!.index : body.length;
-    out.set(m[1]!, body.slice(m.index, end));
+    out.push([m[1]!, s + m.index, s + end]);
   });
   return out;
 }
@@ -140,6 +151,7 @@ function jobs(wf: string = WF): Map<string, string> {
  * Fail-closed (#194, G2–G4 Ethana): `steps:` z wartością w tej samej linii (alias, flow),
  * pierwsza niepusta linia pod `steps:` inna niż `      - ` (np. kroki na wcięciu 4)
  * albo zero kroków = wyjątek. Job bez `steps:` dozwolony tylko z `uses:` joba.
+ * Dozwolony sam komentarz końcowy (`steps: # …`, #201 F9).
  */
 function steps(job: string): string[] {
   const c = code(job);
@@ -149,11 +161,13 @@ function steps(job: string): string[] {
     throw new Error(`job bez steps: i bez uses: joba: ${job.split("\n")[0]!.trim()}`);
   }
   const STYLE = "nieobsługiwany styl wcięć — przepisz job w stylu repo";
-  if (key[1]!.trim() !== "" || key[0] !== "    steps:") throw new Error(`${STYLE}: ${key[0].trim()}`);
-  const after = c.slice(c.indexOf("\n    steps:\n") + "\n    steps:\n".length);
+  const tail = key[1]!;
+  if (!key[0].startsWith("    steps:") || !(tail === "" || /^[ \t]+#/.test(tail))) throw new Error(`${STYLE}: ${key[0].trim()}`);
+  const rest = c.slice(key.index! + key[0].length);
+  const after = rest.slice(1);
   const first = after.split("\n").find((l) => l.trim() !== "");
   if (first === undefined || !/^ {6}- /.test(first)) throw new Error(`${STYLE}: pierwsza linia pod steps: ${first?.trim() ?? "(brak)"}`);
-  const out = c.slice(c.indexOf("\n    steps:\n")).split(/\n(?= {6}- )/).slice(1);
+  const out = rest.split(/\n(?= {6}- )/).slice(1);
   if (out.length === 0) throw new Error(`${STYLE}: job ze steps: i zerem rozpoznanych kroków`);
   return out;
 }
@@ -186,8 +200,8 @@ function runOf(step: string): string {
 }
 
 /**
- * Zamknięta gramatyka kroku w jobach z bazą (#194 Ethan O6–O10). Własny odczyt, bez
- * parsera YAML (w projekcie `yaml`/`js-yaml` są tylko przechodnie). Każda niepusta linia:
+ * Zamknięta gramatyka kroku w jobach z bazą (#194 Ethan O6–O10). Własny odczyt linii —
+ * pierwsza warstwa; drzewo YAML (js-yaml, #201) sprawdza osobno yamlViolations. Każda niepusta linia:
  * - pierwsza: `      - <klucz>: …` (krok w stylu flow `- {` = porażka);
  * - kolejne na wcięciu kroku (8): `<klucz>: …` z listy STEP_KEYS (klucz w cudzysłowie,
  *   `shell`, `working-directory`, `continue-on-error`, `id`… = porażka);
@@ -346,47 +360,252 @@ function anchorViolations(file: string, wf: string): string[] {
     .flatMap((l) => YAML_ANCHOR.filter(([, re]) => re.test(l)).map(([what]) => `${file}: ${what} YAML: ${l.trim()}`));
 }
 
-/**
- * Push po rozwinięciu skryptów package.json w każdym kroku każdego joba danego
- * workflow (nie tylko w jobach z bazą). Zwraca komunikaty z jobem i krokiem.
- */
-/**
- * Liczba wystąpień klucza YAML `key` w tekście (bez linii komentarza) w DOWOLNYM kształcie:
- * `key:`, `- key:`, `"key":`, `'key':`, `{ key:`, `, key:`.
- */
-function anyKeyCount(text: string, key: string): number {
-  const re = new RegExp(`(?:^[ \\t]*(?:-[ \\t]+)?|[{,][ \\t]*)["']?${key}["']?[ \\t]*:`, "gm");
-  return (code(text).match(re) ?? []).length;
+// --- Warstwa YAML (#201, decyzja Olivera: js-yaml 4.3.2, `load` ze schematem domyślnym) -----------
+
+type Y = unknown;
+const isMap = (v: Y): v is Record<string, Y> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Drzewo YAML pliku. Błąd składni albo brak mapy `jobs` = wyjątek. */
+function yamlTree(wf: string): Record<string, Y> {
+  const t = load(wf);
+  if (!isMap(t) || !isMap(t.jobs)) throw new Error("brak mapy jobs w drzewie YAML");
+  return t;
 }
 
-/** Klucz `run:` w kształcie, który czyta runOf. */
-const PARSED_RUN_KEY = /^(\s*(?:- )?)run:/m;
+/** Wszystkie węzły drzewa ze ścieżką; klucz mapy też jest wpisem (ścieżka `….{klucz}`). */
+function walk(v: Y, path: string, out: Array<[string, Y]> = []): Array<[string, Y]> {
+  out.push([path, v]);
+  if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${path}[${i}]`, out));
+  else if (isMap(v))
+    for (const [k, x] of Object.entries(v)) {
+      out.push([`${path}.{klucz}`, k]);
+      walk(x, `${path}.${k}`, out);
+    }
+  return out;
+}
+
+/** Liczba kluczy `key` w całym drzewie YAML (na każdym poziomie). */
+function yamlKeyCount(tree: Y, key: string): number {
+  return walk(tree, "").filter(([p, v]) => p.endsWith(".{klucz}") && v === key).length;
+}
+
+const mentionsPgUrl = (v: Y) => walk(v, "").some(([, x]) => typeof x === "string" && /\bPOSTGRES_URL\b/.test(x));
 
 /**
- * NIEZMIENNIKI KRZYŻOWE na plik (#194 runda 5, decyzja Olivera — główny mechanizm):
- * każde wystąpienie klucza w tekście, w dowolnym kształcie, musi być przypisane do
- * miejsca, które parser faktycznie rozpoznał i sprawdził. Rozjazd = „nieobsługiwany
- * kształt” (klucz w cudzysłowie, flow, krok na innym wcięciu, klucz poza jobem…).
- * - `run`: kroki, z których runOf wyciągnął polecenie (sprawdzane listą/zakazem push);
- * - `uses`: `uses:` joba (wcięcie 4) i `uses:` kroku (`      - uses:` / `        uses:`);
- * - `services` / `container`: klucz joba na wcięciu 4 (sprawdzany przez dbReasons);
- * - `POSTGRES_URL`: wewnątrz jobów (dbReasons); poza jobami osobno = porażka.
+ * Sprawdzenia na drzewie YAML (#201) — niezależne od kształtu tekstu (jawny klucz `?`, escape,
+ * tag, blok złożony, `shell:`, `defaults:`):
+ * - plik musi się parsować (inaczej GitHub też go odrzuci);
+ * - push (`isPush`) w KAŻDEJ wartości i kluczu drzewa (I10: `shell:`, `defaults.run.shell`, `with:`…);
+ * - `run` każdego kroku po rozwinięciu skryptów package.json;
+ * - job z bazą: `services`, `container` albo `POSTGRES_URL` gdziekolwiek w jobie (env, `$GITHUB_ENV`
+ *   w poleceniu…) — tylko para e2e-smoke/e2e-full w quality-gate.yml;
+ * - `POSTGRES_URL` poza `jobs:` — zakazane.
+ */
+function yamlViolations(file: string, wf: string): string[] {
+  let tree: Record<string, Y>;
+  try {
+    tree = yamlTree(wf);
+  } catch (e) {
+    return [`${file}: plik nie parsuje się jako YAML (GitHub też go odrzuci): ${(e as Error).message.split("\n")[0]}`];
+  }
+  const out: string[] = [];
+  for (const [p, v] of walk(tree, "")) {
+    if (typeof v === "string" && isPush(v)) out.push(`${file}: YAML: push w ${p || "(korzeń)"}: ${v}`);
+  }
+  for (const [name, job] of Object.entries(tree.jobs as Record<string, Y>)) {
+    const st = isMap(job) && Array.isArray(job.steps) ? (job.steps as Y[]) : [];
+    st.forEach((s, i) => {
+      if (isMap(s) && typeof s.run === "string" && isPush(expandScripts(s.run, PKG.scripts))) {
+        out.push(`${file}: YAML: ${name}, krok ${i + 1}: push po rozwinięciu skryptów: ${s.run}`);
+      }
+    });
+    if (file === QG && DB_JOBS.includes(name)) continue;
+    const reasons = isMap(job)
+      ? [...("services" in job ? ["services"] : []), ...("container" in job ? ["container"] : []), ...(mentionsPgUrl(job) ? ["POSTGRES_URL"] : [])]
+      : [];
+    if (reasons.length) out.push(`${file}: YAML: nowy job z bazą: dodaj go do testu i strażników: ${name} (${reasons.join(", ")})`);
+  }
+  const outside = Object.fromEntries(Object.entries(tree).filter(([k]) => k !== "jobs"));
+  if (mentionsPgUrl(outside)) out.push(`${file}: YAML: POSTGRES_URL poza jobs: — zakazane`);
+  return out;
+}
+
+// --- Niezmiennik krzyżowy: tekst ↔ parser liniowy ↔ drzewo YAML ---------------------------------
+
+/** Komentarz końcowy YAML (`#` po białym znaku, poza cudzysłowem) odcięty. */
+function stripTrailingComment(s: string): string {
+  let q: string | null = null;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]!;
+    if (q) {
+      if (ch === q) q = null;
+    } else if (ch === '"' || ch === "'") q = ch;
+    else if (ch === "#" && (i === 0 || /\s/.test(s[i - 1]!))) return s.slice(0, i).trimEnd();
+  }
+  return s;
+}
+
+/** Bilans nawiasów flow (`{[` minus `}]`) poza cudzysłowem. */
+function bracketDelta(s: string): number {
+  let q: string | null = null;
+  let d = 0;
+  for (const ch of s) {
+    if (q) {
+      if (ch === q) q = null;
+    } else if (ch === '"' || ch === "'") q = ch;
+    else if (ch === "{" || ch === "[") d++;
+    else if (ch === "}" || ch === "]") d--;
+  }
+  return d;
+}
+
+/** `klucz: wartość` na początku tekstu (klucz zwykły albo w cudzysłowie); grupa 1 = wartość. */
+const KEY_VALUE = /^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s"'#{[,?:|>][^#]*?)[ \t]*:(?:[ \t]+(.*))?$/;
+
+/**
+ * Odczyt linii pliku pod niezmiennik: dla każdej linii, czy jest treścią bloku skalarnego
+ * (`run: |`, `path: |`… — tekst, nie klucze), linią komentarza, oraz tekst do szukania kluczy:
+ * `rest` (po wcięciu i `- `, bez komentarza końcowego) i `flow` (fragment w stylu flow — tylko
+ * w pozycji wartości albo kontynuacja otwartego flow z poprzednich linii).
+ */
+type LineScan = { skip: boolean; rest: string; flow: string };
+function scanLines(wf: string): LineScan[] {
+  let block = -1;
+  let depth = 0;
+  return wf.split("\n").map((line) => {
+    const indent = line.length - line.trimStart().length;
+    if (line.trim() === "") return { skip: true, rest: "", flow: "" };
+    if (block >= 0) {
+      if (indent > block) return { skip: true, rest: "", flow: "" };
+      block = -1;
+    }
+    if (line.trim().startsWith("#")) return { skip: true, rest: "", flow: "" };
+    const lead = line.match(/^[ \t]*(?:-[ \t]+)*/)![0];
+    const rest = stripTrailingComment(line.slice(lead.length));
+    let flow = "";
+    if (depth > 0 || /^[{[,]/.test(rest)) flow = rest;
+    else if (BLOCK_INDICATOR.test(rest)) block = lead.length;
+    else {
+      const value = rest.match(KEY_VALUE)?.[1] ?? "";
+      if (/^[{[]/.test(value)) flow = value;
+      else if (BLOCK_INDICATOR.test(value)) block = lead.length;
+    }
+    depth = Math.max(0, depth + bracketDelta(flow));
+    return { skip: false, rest, flow };
+  });
+}
+
+const INVARIANT_KEYS = ["run", "uses", "services", "container", "POSTGRES_URL"] as const;
+type InvariantKey = (typeof INVARIANT_KEYS)[number];
+
+/**
+ * Linie (od 0), w których klucz `key` WIDAĆ w tekście: na początku linii (`key:`, `- key:`,
+ * `"key":`, `'key':`) albo w flow (`{ key:`, `, key:`, `[ key:`) — jedna pozycja na wystąpienie.
+ * Komentarze, komentarze końcowe i treść bloków skalarnych to tekst, nie klucze (#201 F4–F6, F10).
+ */
+function rawKeyLines(scan: LineScan[], key: InvariantKey): number[] {
+  const K = `["']?${key}["']?[ \\t]*:`;
+  const atStart = new RegExp(`^${K}`);
+  const inFlow = new RegExp(`[{,[][ \\t]*${K}`, "g");
+  return scan.flatMap((l, i) => {
+    if (l.skip) return [];
+    const n = (atStart.test(l.rest) ? 1 : 0) + (l.flow.match(inFlow) ?? []).length;
+    return new Array<number>(n).fill(i);
+  });
+}
+
+/**
+ * Linie (od 0), w których klucz rozpoznał parser liniowy — miejsca faktycznie sprawdzane:
+ * - `run`: pierwszy `run:` kroku (runOf) oraz `defaults: run:` workflow/joba POZA quality-gate.yml
+ *   (#201 F7; push w `shell:` sprawdza warstwa YAML; w quality-gate.yml `defaults:` zakazane);
+ * - `uses`: `uses:` joba (wcięcie 4) i pierwszy `uses:` kroku (`      - uses:` / `        uses:`);
+ * - `services` / `container`: klucz joba na wcięciu 4; `POSTGRES_URL`: klucz wewnątrz joba.
+ */
+function parsedKeyLines(file: string, wf: string, scan: LineScan[]): Record<InvariantKey, number[]> {
+  const out: Record<InvariantKey, number[]> = { run: [], uses: [], services: [], container: [], POSTGRES_URL: [] };
+  const all = wf.split("\n");
+  const live = (i: number) => !scan[i]!.skip;
+  for (const [, a, b] of jobSpans(wf)) {
+    const body = wf.slice(a, b);
+    const first = wf.slice(0, a).split("\n").length - 1;
+    const raw = body.split("\n");
+    raw.forEach((l, j) => {
+      if (!live(first + j)) return;
+      if (/^ {4}uses:/.test(l)) out.uses.push(first + j);
+      if (/^ {4}services:/.test(l)) out.services.push(first + j);
+      if (/^ {4}container:/.test(l)) out.container.push(first + j);
+      if (/^\s+POSTGRES_URL:/.test(l)) out.POSTGRES_URL.push(first + j);
+    });
+    // Linie kroków (z code(), bez komentarzy) przypisane do linii pliku po kolei.
+    let p = 0;
+    for (const s of steps(body)) {
+      const ls = s.split("\n");
+      const at = ls.map((l) => {
+        while (p < raw.length && raw[p] !== l) p++;
+        return first + p++;
+      });
+      const r = ls.findIndex((l, k) => live(at[k]!) && /^\s*(?:- )?run:/.test(l));
+      if (r >= 0) out.run.push(at[r]!);
+      const u = ls.findIndex((l, k) => live(at[k]!) && /^(?: {6}- | {8})uses:/.test(l));
+      if (u >= 0) out.uses.push(at[u]!);
+    }
+  }
+  if (file !== QG) {
+    all.forEach((l, i) => {
+      const d = l.match(/^( {4})?defaults:[ \t]*$/);
+      if (!d || !live(i)) return;
+      const j = all.findIndex((_x, k) => k > i && live(k));
+      if (j >= 0 && new RegExp(`^${d[1] ?? ""} {2}run:[ \\t]*$`).test(all[j]!)) out.run.push(j);
+    });
+  }
+  return out;
+}
+
+/** Elementy `a` bez elementów `b` (multizbiór). */
+function minus(a: number[], b: number[]): number[] {
+  const rest = [...b];
+  return a.filter((x) => {
+    const k = rest.indexOf(x);
+    if (k < 0) return true;
+    rest.splice(k, 1);
+    return false;
+  });
+}
+
+/**
+ * NIEZMIENNIKI KRZYŻOWE na plik (#194 runda 5; #201 — trzy strony). Dla każdego klucza
+ * run/uses/services/container/POSTGRES_URL muszą się zgadzać:
+ * 1. linie, w których klucz widać w tekście (rawKeyLines),
+ * 2. linie rozpoznane przez parser liniowy (parsedKeyLines) — co do linii,
+ * 3. liczba kluczy w drzewie YAML (js-yaml) — wychwytuje klucze niewidoczne w tekście
+ *    (jawny klucz `?`, escape `"run"`, tag `!!str run`).
+ * Rozjazd = „nieobsługiwany kształt”, z numerem i treścią każdej nierozpoznanej linii.
+ * Błąd składni YAML zgłasza yamlViolations (tu pomijamy stronę 3).
  */
 function keyInvariantViolations(file: string, wf: string): string[] {
-  const js = [...jobs(wf)];
-  const parsed: Record<string, number> = { run: 0, uses: 0, services: 0, container: 0, POSTGRES_URL: 0 };
-  for (const [, body] of js) {
-    const c = code(body);
-    const st = steps(body);
-    parsed.run! += st.filter((s) => PARSED_RUN_KEY.test(s)).length;
-    parsed.uses! += (c.match(/^ {4}uses:/gm) ?? []).length + st.filter((s) => /^(?: {6}- | {8})uses:/m.test(s)).length;
-    parsed.services! += (c.match(/^ {4}services:/gm) ?? []).length;
-    parsed.container! += (c.match(/^ {4}container:/gm) ?? []).length;
-    parsed.POSTGRES_URL! += (c.match(/^\s+POSTGRES_URL:/gm) ?? []).length;
+  const lines = wf.split("\n");
+  const scan = scanLines(wf);
+  const parsed = parsedKeyLines(file, wf, scan);
+  let tree: Y;
+  try {
+    tree = load(wf);
+  } catch {
+    tree = undefined;
   }
-  return Object.entries(parsed).flatMap(([key, n]) => {
-    const found = anyKeyCount(wf, key);
-    return found === n ? [] : [`${file}: nieobsługiwany kształt — kluczy ${key} w pliku ${found}, rozpoznanych przez parser ${n}`];
+  const show = (xs: number[]) => xs.map((i) => `linia ${i + 1}: ${lines[i]!.trim()}`).join("; ");
+  return INVARIANT_KEYS.flatMap((key) => {
+    const raw = rawKeyLines(scan, key);
+    const p = parsed[key];
+    const y = tree === undefined ? undefined : yamlKeyCount(tree, key);
+    const unrec = minus(raw, p);
+    const unseen = minus(p, raw);
+    if (unrec.length === 0 && unseen.length === 0 && (y === undefined || y === raw.length)) return [];
+    let msg = `${file}: nieobsługiwany kształt — kluczy ${key} w pliku ${raw.length}, rozpoznanych przez parser ${p.length}`;
+    if (y !== undefined) msg += `, w drzewie YAML ${y}`;
+    if (unrec.length) msg += `; nierozpoznane: ${show(unrec)}`;
+    if (unseen.length) msg += `; rozpoznane przez parser, a niewidoczne jako klucz: ${show(unseen)}`;
+    if (y !== undefined && y > raw.length) msg += "; klucz w drzewie YAML bez śladu w tekście (jawny klucz `?`, escape, tag) — przepisz w stylu repo";
+    return [msg];
   });
 }
 
@@ -397,6 +616,28 @@ function pushViolations(wf: string, scripts: Record<string, string>): string[] {
       return cmd && isPush(expandScripts(cmd, scripts)) ? [`${stepLabel(name, s, i)}: push w poleceniu: ${cmd}`] : [];
     }),
   );
+}
+
+/**
+ * Wszystkie sprawdzenia jednego pliku workflow naraz (#201): wynik to lista naruszeń, a wyjątek
+ * parsera to też naruszenie (fail-closed). Używane przez sondy obejść i poprawnych edycji.
+ */
+function fileViolations(file: string, wf: string, files: string[]): string[] {
+  const checks: Array<() => string[]> = [
+    () => pushViolations(wf, PKG.scripts),
+    () => dbJobViolations(file, wf),
+    () => jobUsesViolations(file, wf, files),
+    () => keyInvariantViolations(file, wf),
+    () => anchorViolations(file, wf),
+    () => yamlViolations(file, wf),
+  ];
+  return checks.flatMap((c) => {
+    try {
+      return c();
+    } catch (e) {
+      return [`${file}: wyjątek parsera: ${(e as Error).message}`];
+    }
+  });
 }
 
 const PG_JOBS = [...jobs()].filter(([, body]) => dbReasons(body).length > 0);
@@ -427,6 +668,10 @@ describe("wszystkie pliki .github/workflows: bez push, bez baz poza parą, bez k
 
   it.each(WORKFLOWS)("%s: bez kotwic, aliasów i kluczy scalania YAML", (f, wf) => {
     expect(anchorViolations(f, wf)).toEqual([]);
+  });
+
+  it.each(WORKFLOWS)("%s: warstwa YAML (#201) — parsuje się; bez push w żadnej wartości; bez baz poza parą", (f, wf) => {
+    expect(yamlViolations(f, wf)).toEqual([]);
   });
 });
 
@@ -712,7 +957,6 @@ describe("joby z bazą, uses: joba, kotwice YAML (#194 runda 4)", () => {
 
   it.each([
     ["steps: ze spacją na końcu", "    steps: \n      - run: pnpm db:push\n"],
-    ["steps: z komentarzem", "    steps: # kroki\n      - run: pnpm db:push\n"],
     ["steps: we flow", "    steps: [ {run: pnpm db:push} ]\n"],
     ["\"steps\": w cudzysłowie", "    \"steps\":\n      - run: pnpm db:push\n"],
   ])("runda 5 (A): %s → wyjątek", (_n, st) => {
@@ -826,5 +1070,110 @@ describe("schemaViolations — drizzle-kit tylko jako `drizzle-kit migrate` (E12
     ["tsx a.ts && pnpm db:push", ["db:push"]],
   ])("%j → %j", (text, expected) => {
     expect(schemaViolations(text)).toEqual(expected);
+  });
+});
+
+/**
+ * #201: sondy na PRAWDZIWYCH plikach workflow (edycja w pamięci, pliki na dysku bez zmian).
+ * Grupa A — obejścia, które po #194 przechodziły: test ma padać.
+ * Grupa B — poprawne edycje (sondy Leo z recenzji #194), które dawały fałszywy alarm: test ma przechodzić.
+ */
+describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
+  const FILES = WORKFLOWS.map(([f]) => f);
+  const EP = "e2e-production.yml";
+  const EP_INSTALL = "      - run: pnpm install --frozen-lockfile\n";
+  const QG_TC = "      - run: pnpm typecheck\n";
+  const edited = (file: string, find: string, repl: string): string => {
+    const wf = WORKFLOWS.find(([f]) => f === file)![1];
+    expect(wf.split(find).length - 1, `kotwica sondy w ${file}: ${find}`).toBe(1);
+    return wf.replace(find, repl);
+  };
+  const I7 = `${EP_INSTALL}      - name: x\n        ? run\n        : pnpm db:push\n`;
+  const I8 = `${EP_INSTALL}      - name: x\n        "r\\u0075n": pnpm db:push\n`;
+
+  it.each([
+    ["I7: jawny klucz `? run` z push", EP, EP_INSTALL, I7, /push/],
+    ["I7: jawny klucz `? run` — rozjazd niezmiennika", EP, EP_INSTALL, I7, /kluczy run w pliku/],
+    ["I8: klucz z escape `\"r\\u0075n\":` z push", EP, EP_INSTALL, I8, /push/],
+    ["I8: klucz z escape — rozjazd niezmiennika", EP, EP_INSTALL, I8, /kluczy run w pliku/],
+    ["I10: shell: kroku z drizzle-kit push", EP, EP_INSTALL, `${EP_INSTALL}      - run: pnpm exec playwright --version\n        shell: sh -c 'drizzle-kit push; sh {0}'\n`, /push/],
+    ["I10: defaults.run.shell workflow z db:push", EP, "\njobs:\n", "\ndefaults:\n  run:\n    shell: sh -c 'pnpm db:push && bash {0}'\n\njobs:\n", /push/],
+    ["I10: shell: jako blok złożony (drizzle-kit i push w osobnych liniach)", EP, EP_INSTALL, `${EP_INSTALL}      - run: pnpm exec playwright --version\n        shell: >-\n          sh -c 'drizzle-kit\n          push; sh {0}'\n`, /push/],
+    ["POSTGRES_URL przez $GITHUB_ENV w kroku", EP, EP_INSTALL, `${EP_INSTALL}      - run: echo "POSTGRES_URL=$DB_URL" >> "$GITHUB_ENV"\n`, /nowy job z bazą.*e2e-production/],
+    // Escape w cudzysłowie: w tekście nie ma „POSTGRES_URL”, w drzewie YAML jest — łapie tylko warstwa YAML.
+    ["POSTGRES_URL poza jobs: (env workflow, escape w wartości)", EP, "\njobs:\n", '\nenv:\n  DB: "${{ secrets.POSTGRES\\u005fURL }}"\n\njobs:\n', /YAML: POSTGRES_URL poza jobs/],
+  ])("A %s → porażka", (_n, file, find, repl, re) => {
+    expect(fileViolations(file, edited(file, find, repl), FILES).join("\n")).toMatch(re);
+  });
+
+  it.each([
+    ["F1 krok cache (uses + with)", QG, QG_TC, `${QG_TC}\n      - name: Cache\n        uses: actions/cache@v4\n        with:\n          path: .next/cache\n          key: next-\${{ runner.os }}\n`],
+    ["F2 słowa run/uses/services w nazwie kroku", QG, QG_TC, "      - name: run typecheck (uses services)\n        run: pnpm typecheck\n"],
+    ["F3 komentarz końcowy z run:", QG, QG_TC, "      - run: pnpm typecheck # potem run: lint\n"],
+    ["F4 komentarz końcowy z „, run:”", QG, QG_TC, "      - run: pnpm typecheck # tsc, run: bez emit\n"],
+    ["F4b komentarz końcowy z „, run:” po wartości flow", QG, QG_TC, `${QG_TC}      - uses: actions/upload-artifact@v4\n        with: { name: x, path: y } # x, run: z\n`],
+    ["F6 blok run: | z linią echo 'services: x'", QG, QG_TC, "      - name: t\n        run: |\n          echo 'services: none'\n          pnpm typecheck\n"],
+    ["F6b blok run: | z linią zawierającą „, run:” i „{run:”", QG, QG_TC, "      - name: t\n        run: |\n          echo 'a, run: b {run: c}'\n          pnpm typecheck\n"],
+    ["F6c blok run: | z linią zaczynającą się od „services:” (heredoc)", QG, QG_TC, "      - name: t\n        run: |\n          cat > /dev/null <<'EOF'\n          services: none\n          run: none\n          EOF\n          pnpm typecheck\n"],
+    ["F7 defaults: run: w e2e-production.yml", EP, "\njobs:\n", "\ndefaults:\n  run:\n    shell: bash\n\njobs:\n"],
+    ["F8 env workflow bez POSTGRES_URL", QG, "\njobs:\n", "\nenv:\n  NODE_VERSION: '22'\n\njobs:\n"],
+    ["F9 steps: z komentarzem końcowym", QG, "    name: TypeScript Check\n    runs-on: ubuntu-latest\n    steps:\n", "    name: TypeScript Check\n    runs-on: ubuntu-latest\n    steps: # tsc\n"],
+  ])("B %s → bez naruszeń", (_n, file, find, repl) => {
+    expect(fileViolations(file, edited(file, find, repl), FILES)).toEqual([]);
+  });
+
+  it.each([
+    ["F5 nazwa kroku z „, uses:” (w cudzysłowie — jedyny poprawny YAML)", QG, QG_TC, "      - name: \"Typecheck, uses: tsc\"\n        run: pnpm typecheck\n"],
+    ["F10 wartość with: z „{run:” (w cudzysłowie — jedyny poprawny YAML)", QG, QG_TC, `${QG_TC}      - uses: actions/upload-artifact@v4\n        with:\n          name: x\n          path: "a/{run: 1}"\n`],
+  ])("B %s → bez naruszeń", (_n, file, find, repl) => {
+    expect(fileViolations(file, edited(file, find, repl), FILES)).toEqual([]);
+  });
+
+  // F5 i F10 dosłownie z sondy Leo to niepoprawny YAML (plain scalar z „: ” w kontekście blokowym) —
+  // GitHub odrzuca taki plik. Test pada czytelnym komunikatem składni, nie rozjazdem niezmiennika
+  // (decyzja Olivera, #201).
+  it.each([
+    ["F5 dosłownie", QG_TC, "      - name: Typecheck, uses: tsc\n        run: pnpm typecheck\n"],
+    ["F10 dosłownie", QG_TC, `${QG_TC}      - uses: actions/upload-artifact@v4\n        with:\n          name: x\n          path: a/{run: 1}\n`],
+  ])("B %s (niepoprawny YAML) → jedno naruszenie: plik nie parsuje się jako YAML", (_n, find, repl) => {
+    const v = fileViolations(QG, edited(QG, find, repl), FILES);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toMatch(/nie parsuje się jako YAML/);
+  });
+
+  it("komunikat niezmiennika wskazuje numer i treść nierozpoznanej linii", () => {
+    const wf = edited(EP, EP_INSTALL, `${EP_INSTALL}      - { run: pnpm exec playwright --version }\n`);
+    const line = wf.split("\n").findIndex((l) => l === "      - { run: pnpm exec playwright --version }") + 1;
+    expect(keyInvariantViolations(EP, wf).join("\n")).toContain(`nierozpoznane: linia ${line}: - { run: pnpm exec playwright --version }`);
+  });
+
+  it("niezmiennik nadal widzi klucz w wielowierszowym flow (kontynuacja „x: 1, run: …”)", () => {
+    const wf = "name: x\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: pnpm typecheck\n      - uses: actions/upload-artifact@v4\n        with: {\n          x: 1, run: pnpm db:sync }\n";
+    expect(keyInvariantViolations("x.yml", wf).join()).toMatch(/kluczy run w pliku/);
+  });
+
+  // Tekst „run:” w wielowierszowym cudzysłowie (parser liniowy i tekst go liczą, drzewo YAML nie)
+  // równoważy liczbowo prawdziwy klucz w kontynuacji flow. Bez śledzenia kontynuacji flow
+  // wszystkie trzy strony dają tę samą liczbę i te same linie — rozjazd znika.
+  it("niezmiennik widzi klucz w kontynuacji flow także, gdy liczby kluczy się bilansują", () => {
+    const wf = edited(EP, EP_INSTALL, `${EP_INSTALL}      - name: "a\n          run: b"\n        uses: actions/upload-artifact@v4\n        with: { name: x,\n          path: y, run: z }\n`);
+    const line = wf.split("\n").indexOf("          path: y, run: z }") + 1;
+    const msg = keyInvariantViolations(EP, wf).join("\n");
+    expect(msg).toMatch(/kluczy run w pliku .*, w drzewie YAML/);
+    expect(msg).toContain(`nierozpoznane: linia ${line}: path: y, run: z }`);
+  });
+
+  // Równa liczba kluczy po każdej stronie, ale różne linie: parser liniowy liczy „run:” po
+  // niełamliwej spacji w cudzysłowie (\s), tekst go nie widzi; tekst i drzewo widzą run w flow,
+  // parser nie. Porównanie samych liczb by to przepuściło — niezmiennik porównuje linie.
+  it("niezmiennik porównuje linie, nie same liczby (równe liczby, różne linie)", () => {
+    const wf = edited(EP, EP_INSTALL, `${EP_INSTALL}      - name: "a\n           run: b"\n        uses: actions/upload-artifact@v4\n        with: { name: x, run: y }\n`);
+    const ls = wf.split("\n");
+    const flow = ls.indexOf("        with: { name: x, run: y }") + 1;
+    const nbsp = ls.indexOf("           run: b\"") + 1;
+    const msg = keyInvariantViolations(EP, wf).join("\n");
+    expect(msg).toMatch(/kluczy run w pliku (\d+), rozpoznanych przez parser \1, w drzewie YAML \1;/);
+    expect(msg).toContain(`nierozpoznane: linia ${flow}: with: { name: x, run: y }`);
+    expect(msg).toContain(`rozpoznane przez parser, a niewidoczne jako klucz: linia ${nbsp}: run: b"`);
   });
 });
