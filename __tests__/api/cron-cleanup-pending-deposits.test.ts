@@ -38,6 +38,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+// Tylko moduł sesji: auth-middleware (bramka CRON_SECRET) zostaje prawdziwy.
+// Bez tego prawdziwe auth.ts ładuje adapter z jawnym schematem tabel auth,
+// których nie ma w częściowym mocku schematu poniżej.
+vi.mock("@/lib/auth", () => ({ auth: { api: { getSession: vi.fn() } } }));
+
 vi.mock("@/lib/schema", () => ({
   depositPayments: {
     id: "id",

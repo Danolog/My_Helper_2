@@ -25,6 +25,7 @@ const m = await vi.hoisted(async () =>
 vi.mock("next/headers", () => ({ headers: vi.fn().mockResolvedValue(new Headers()) }));
 vi.mock("@/lib/auth", () => ({ auth: { api: { getSession: m.getSession } } }));
 vi.mock("@/lib/db", () => ({ db: m.db }));
+vi.mock("@/lib/server/system/db-system", () => ({ dbSystem: m.dbSystem }));
 vi.mock("@/lib/temporary-access", () => ({ hasTemporaryAccess: m.hasTemporaryAccess }));
 
 const SERVICE = "11111111-1111-4111-8111-111111111111";

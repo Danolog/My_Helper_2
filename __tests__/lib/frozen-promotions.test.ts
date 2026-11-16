@@ -30,7 +30,15 @@ const m = await vi.hoisted(async () =>
 
 vi.mock("next/headers", () => ({ headers: vi.fn().mockResolvedValue(new Headers()) }));
 vi.mock("@/lib/auth", () => ({ auth: { api: { getSession: m.getSession } } }));
-vi.mock("@/lib/db", () => ({ db: m.db }));
+// Dług P1a: deposit-calculation czyta surowym db poza forSalon; lokalny select znika w P1a.
+// Własna kolejka wyników ustawiana w teście (nie ctxRows uprzęży); bez niej — głośny błąd.
+const local = vi.hoisted(() => ({
+  select: vi.fn((..._args: unknown[]): unknown => {
+    throw new Error("frozen-promotions: lokalny select bez kolejki wyników w teście");
+  }),
+}));
+vi.mock("@/lib/db", () => ({ db: { ...m.db, select: (...args: unknown[]) => local.select(...args) } }));
+vi.mock("@/lib/server/system/db-system", () => ({ dbSystem: m.dbSystem }));
 vi.mock("@/lib/temporary-access", () => ({ hasTemporaryAccess: m.hasTemporaryAccess }));
 vi.mock("@/lib/auth-middleware", () => ({
   requireAuth: vi.fn().mockResolvedValue({ user: { id: "owner-a" } }),
@@ -215,7 +223,7 @@ describe("zadatek liczony przez serwer — bez rabatu happy hours", () => {
   it("rezerwacja w oknie happy hours → zadatek od pełnej ceny, bez zapytania o promocje", async () => {
     // Kolejka wyników db.select(): usługa, a gdyby trasa zapytała — promocja -50%.
     const results: unknown[][] = [[service], [happyHours]];
-    const select = vi.spyOn(m.db, "select").mockImplementation((() => {
+    const select = vi.spyOn(local, "select").mockImplementation((() => {
       const rows = results.shift() ?? [];
       const chain: Record<string, unknown> = {
         from: () => chain,
@@ -224,7 +232,7 @@ describe("zadatek liczony przez serwer — bez rabatu happy hours", () => {
         then: (resolve: (r: unknown[]) => unknown) => Promise.resolve(rows).then(resolve),
       };
       return chain;
-    }) as unknown as typeof m.db.select);
+    }) as unknown as typeof local.select);
 
     try {
       const result = await calculateExpectedDeposit({
