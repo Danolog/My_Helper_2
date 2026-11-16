@@ -1,13 +1,19 @@
 /**
- * Wyjście systemowe (#193 P5a-1): subskrypcje push użytkownika po stronie
- * wysyłki. Subskrypcja należy do użytkownika, nie do salonu, więc nie idzie
- * przez `forSalon`. Strona użytkownika (subscribe/unsubscribe) to osobna partia.
+ * Wyjścia systemowe powiadomień.
+ *
+ * - #193 P5a-1: subskrypcje push użytkownika po stronie wysyłki. Subskrypcja
+ *   należy do użytkownika, nie do salonu, więc nie idzie przez `forSalon`.
+ *   Strona użytkownika (subscribe/unsubscribe) to osobna partia.
+ * - #193 P5a-2: crony przypomnień (push 1h, push 24h, SMS 1h). Działają na
+ *   wszystkich salonach (sekret crona, bez sesji): wybór wizyt w oknie czasu,
+ *   oznaczenie flagi „wysłane” po id z wyboru, podgląd stanu. Zapytania 1:1
+ *   z dawnych tras; wysyłka zostaje w trasie, poza tym modułem.
  *
  * Każda nowa funkcja tutaj zmienia migawkę `system/` (R-Z1) i migawkę
  * importerów L7, więc jest widoczna w diffie i w recenzji.
  */
-import { and, eq, inArray } from "drizzle-orm";
-import { pushSubscriptions } from "@/lib/schema";
+import { and, eq, gte, inArray, isNull, lte, not } from "drizzle-orm";
+import { appointments, clients, employees, pushSubscriptions, salons, services } from "@/lib/schema";
 import { dbSystem } from "./db-system";
 
 /** Subskrypcja w kształcie potrzebnym do wysyłki (bez innych kolumn). */
@@ -53,4 +59,175 @@ export async function deleteUndeliverablePushSubscriptions(
     .returning({ id: pushSubscriptions.id });
 
   return deleted.length;
+}
+
+// ------------------------------------------------------------ crony przypomnień (P5a-2)
+
+/** Rodzaj przypomnienia crona = flaga „wysłane” na wizycie. */
+export type CronReminderKind = "push1h" | "push24h" | "sms1h";
+
+/** Okno startu wizyty, w którym cron wysyła przypomnienie. */
+export type ReminderWindow = { from: Date; to: Date };
+
+/** Kolumna flagi „wysłane” dla rodzaju przypomnienia (bez zmiany względem dawnych tras). */
+function sentFlag(kind: CronReminderKind) {
+  switch (kind) {
+    case "push1h":
+      return appointments.reminderPush1hSentAt;
+    case "push24h":
+      return appointments.reminderPushSentAt;
+    case "sms1h":
+      return appointments.reminder1hSentAt;
+  }
+}
+
+/** Warunek wyboru: start w oknie, wizyta aktywna, przypomnienie jeszcze nie wysłane. */
+function dueCondition(kind: CronReminderKind, window: ReminderWindow) {
+  return and(
+    gte(appointments.startTime, window.from),
+    lte(appointments.startTime, window.to),
+    not(inArray(appointments.status, ["cancelled", "completed", "no_show"])),
+    isNull(sentFlag(kind))
+  );
+}
+
+/** Wizyta do przypomnienia push (kolumny jak w dawnych trasach push 1h / 24h). */
+export type PushReminderCandidate = {
+  appointmentId: string;
+  appointmentStartTime: Date;
+  salonId: string;
+  salonName: string;
+  clientId: string;
+  clientFirstName: string;
+  clientLastName: string;
+  bookedByUserId: string | null;
+  employeeFirstName: string;
+  employeeLastName: string;
+  serviceName: string | null;
+};
+
+/** Wizyty w oknie bez wysłanego przypomnienia push danego rodzaju, najwyżej `limit`. */
+export async function findDuePushReminders(
+  kind: "push1h" | "push24h",
+  window: ReminderWindow,
+  limit: number
+): Promise<PushReminderCandidate[]> {
+  return dbSystem
+    .select({
+      appointmentId: appointments.id,
+      appointmentStartTime: appointments.startTime,
+      salonId: appointments.salonId,
+      salonName: salons.name,
+      clientId: clients.id,
+      clientFirstName: clients.firstName,
+      clientLastName: clients.lastName,
+      bookedByUserId: appointments.bookedByUserId,
+      employeeFirstName: employees.firstName,
+      employeeLastName: employees.lastName,
+      serviceName: services.name,
+    })
+    .from(appointments)
+    .innerJoin(clients, eq(appointments.clientId, clients.id))
+    .innerJoin(employees, eq(appointments.employeeId, employees.id))
+    .innerJoin(salons, eq(appointments.salonId, salons.id))
+    .leftJoin(services, eq(appointments.serviceId, services.id))
+    .where(dueCondition(kind, window))
+    .limit(limit);
+}
+
+/** Wizyta do przypomnienia SMS 1h (kolumny jak w dawnej trasie sms-reminders). */
+export type SmsReminderCandidate = {
+  appointmentId: string;
+  appointmentStartTime: Date;
+  salonId: string;
+  salonName: string;
+  clientId: string;
+  clientFirstName: string;
+  clientLastName: string;
+  clientPhone: string | null;
+  employeeFirstName: string;
+  employeeLastName: string;
+  serviceName: string | null;
+};
+
+/** Wizyty w oknie bez wysłanego przypomnienia SMS 1h, najwyżej `limit`. */
+export async function findDueSmsReminders(window: ReminderWindow, limit: number): Promise<SmsReminderCandidate[]> {
+  return dbSystem
+    .select({
+      appointmentId: appointments.id,
+      appointmentStartTime: appointments.startTime,
+      salonId: appointments.salonId,
+      salonName: salons.name,
+      clientId: clients.id,
+      clientFirstName: clients.firstName,
+      clientLastName: clients.lastName,
+      clientPhone: clients.phone,
+      employeeFirstName: employees.firstName,
+      employeeLastName: employees.lastName,
+      serviceName: services.name,
+    })
+    .from(appointments)
+    .innerJoin(clients, eq(appointments.clientId, clients.id))
+    .innerJoin(employees, eq(appointments.employeeId, employees.id))
+    .innerJoin(salons, eq(appointments.salonId, salons.id))
+    .leftJoin(services, eq(appointments.serviceId, services.id))
+    .where(dueCondition("sms1h", window))
+    .limit(limit);
+}
+
+/**
+ * Ustawia flagę „wysłane” danego rodzaju na wizytach o podanych id (z wyboru
+ * tego samego przebiegu crona). Pusta lista = no-op bez zapytania.
+ */
+export async function markCronRemindersSent(kind: CronReminderKind, appointmentIds: string[]): Promise<void> {
+  if (appointmentIds.length === 0) return;
+  const now = new Date();
+  const set =
+    kind === "push1h"
+      ? { reminderPush1hSentAt: now }
+      : kind === "push24h"
+        ? { reminderPushSentAt: now }
+        : { reminder1hSentAt: now };
+  await dbSystem.update(appointments).set(set).where(inArray(appointments.id, appointmentIds));
+}
+
+/** Którzy z podanych użytkowników mają choć jedną subskrypcję push. Pusta lista = [] bez zapytania. */
+export async function getUserIdsWithPushSubscriptions(userIds: string[]): Promise<string[]> {
+  if (userIds.length === 0) return [];
+  const rows = await dbSystem
+    .select({ userId: pushSubscriptions.userId })
+    .from(pushSubscriptions)
+    .where(inArray(pushSubscriptions.userId, userIds))
+    .groupBy(pushSubscriptions.userId);
+  return rows.map((row) => row.userId);
+}
+
+/** Wizyta oczekująca na przypomnienie (podgląd `?status=1`). */
+export type PendingCronReminder = {
+  appointmentId: string;
+  startTime: Date;
+  status: string;
+  bookedByUserId: string | null;
+};
+
+/** Podgląd: wszystkie wizyty w oknie bez wysłanego przypomnienia danego rodzaju. */
+export async function getPendingCronReminders(
+  kind: CronReminderKind,
+  window: ReminderWindow
+): Promise<PendingCronReminder[]> {
+  return dbSystem
+    .select({
+      appointmentId: appointments.id,
+      startTime: appointments.startTime,
+      status: appointments.status,
+      bookedByUserId: appointments.bookedByUserId,
+    })
+    .from(appointments)
+    .where(dueCondition(kind, window));
+}
+
+/** Podgląd: liczba wszystkich subskrypcji push (jak dawny odczyt id w trasach push). */
+export async function countPushSubscriptions(): Promise<number> {
+  const rows = await dbSystem.select({ id: pushSubscriptions.id }).from(pushSubscriptions);
+  return rows.length;
 }

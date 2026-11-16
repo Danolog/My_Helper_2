@@ -38,7 +38,17 @@ const SESSION_EXPORTS = [
 const CRON_EXPORTS = ["cleanupExpiredTemporaryAccess"];
 const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
 /** #193 P5a-1: subskrypcje push po stronie wysyłki (decyzja CTO 3d / 3d-KOREKTA). */
-const NOTIFICATIONS_EXPORTS = ["deleteUndeliverablePushSubscriptions", "getPushSubscriptionsForUser"];
+const NOTIFICATIONS_EXPORTS = [
+  // #193 P5a-2: crony przypomnień push 1h / 24h i SMS 1h (cross-salon, sekret crona).
+  "countPushSubscriptions",
+  "deleteUndeliverablePushSubscriptions",
+  "findDuePushReminders",
+  "findDueSmsReminders",
+  "getPendingCronReminders",
+  "getPushSubscriptionsForUser",
+  "getUserIdsWithPushSubscriptions",
+  "markCronRemindersSent",
+];
 /** #193 P5a-1: token oferty listy oczekujących → wpis i salon (decyzja CTO 4). */
 const WAITING_LIST_EXPORTS = ["resolveWaitingListToken"];
 /** #193 P5a-2: cron martwych rezerwacji z zadatkiem (decyzja CTO D2: lista DOKŁADNIE w L7). */

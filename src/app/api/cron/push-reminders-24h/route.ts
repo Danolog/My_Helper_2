@@ -1,18 +1,15 @@
 import { NextResponse } from "next/server";
-import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
-// ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { sendAppointmentReminder24hPush } from "@/lib/push";
+// #193 P5a-2: trasa systemowa (requireCronSecret, cross-salon) — wyjścia z rejestru system/
 import {
-  appointments,
-  clients,
-  employees,
-  services,
-  salons,
-  pushSubscriptions,
-} from "@/lib/schema";
+  countPushSubscriptions,
+  findDuePushReminders,
+  getPendingCronReminders,
+  getUserIdsWithPushSubscriptions,
+  markCronRemindersSent,
+} from "@/lib/server/system";
 
 // Wysyłka push w pętli może trwać — bez tego domyślny timeout ucina cron w połowie
 export const maxDuration = 300;
@@ -54,36 +51,11 @@ export async function POST(request: Request) {
     });
 
     // Find appointments in the window that haven't received a 24h push reminder
-    const upcomingAppointments = await db
-      .select({
-        appointmentId: appointments.id,
-        appointmentStartTime: appointments.startTime,
-        salonId: appointments.salonId,
-        salonName: salons.name,
-        clientId: clients.id,
-        clientFirstName: clients.firstName,
-        clientLastName: clients.lastName,
-        bookedByUserId: appointments.bookedByUserId,
-        employeeFirstName: employees.firstName,
-        employeeLastName: employees.lastName,
-        serviceName: services.name,
-      })
-      .from(appointments)
-      .innerJoin(clients, eq(appointments.clientId, clients.id))
-      .innerJoin(employees, eq(appointments.employeeId, employees.id))
-      .innerJoin(salons, eq(appointments.salonId, salons.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(
-        and(
-          gte(appointments.startTime, windowStart),
-          lte(appointments.startTime, windowEnd),
-          not(
-            inArray(appointments.status, ["cancelled", "completed", "no_show"])
-          ),
-          isNull(appointments.reminderPushSentAt)
-        )
-      )
-      .limit(BATCH_LIMIT);
+    const upcomingAppointments = await findDuePushReminders(
+      "push24h",
+      { from: windowStart, to: windowEnd },
+      BATCH_LIMIT
+    );
 
     logger.info("Appointments found for 24h push reminder", {
       count: upcomingAppointments.length,
@@ -92,17 +64,10 @@ export async function POST(request: Request) {
     // Oznacz jako wysłane PRZED pętlą wysyłki. Jeśli funkcja padnie w trakcie,
     // zgubione przypomnienie jest tańsze niż niezapisane flagi -> kolejne
     // uruchomienie wysyła duplikaty do wszystkich już powiadomionych.
-    if (upcomingAppointments.length > 0) {
-      await db
-        .update(appointments)
-        .set({ reminderPushSentAt: new Date() })
-        .where(
-          inArray(
-            appointments.id,
-            upcomingAppointments.map((a) => a.appointmentId)
-          )
-        );
-    }
+    await markCronRemindersSent(
+      "push24h",
+      upcomingAppointments.map((a) => a.appointmentId)
+    );
 
     const results: Array<{
       appointmentId: string;
@@ -123,17 +88,7 @@ export async function POST(request: Request) {
     ];
 
     // Batch-fetch which users have push subscriptions (single query instead of N)
-    const usersWithSubs = new Set<string>();
-    if (userIds.length > 0) {
-      const subsRows = await db
-        .select({ userId: pushSubscriptions.userId })
-        .from(pushSubscriptions)
-        .where(inArray(pushSubscriptions.userId, userIds))
-        .groupBy(pushSubscriptions.userId);
-      for (const row of subsRows) {
-        usersWithSubs.add(row.userId);
-      }
-    }
+    const usersWithSubs = new Set<string>(await getUserIdsWithPushSubscriptions(userIds));
 
     for (const appt of upcomingAppointments) {
       const clientName = `${appt.clientFirstName} ${appt.clientLastName}`;
@@ -265,29 +220,10 @@ export async function GET(request: Request) {
     const windowStart = new Date(now.getTime() + 20 * 60 * 60 * 1000);
     const windowEnd = new Date(now.getTime() + 28 * 60 * 60 * 1000);
 
-    const pendingReminders = await db
-      .select({
-        appointmentId: appointments.id,
-        startTime: appointments.startTime,
-        status: appointments.status,
-        bookedByUserId: appointments.bookedByUserId,
-      })
-      .from(appointments)
-      .where(
-        and(
-          gte(appointments.startTime, windowStart),
-          lte(appointments.startTime, windowEnd),
-          not(
-            inArray(appointments.status, ["cancelled", "completed", "no_show"])
-          ),
-          isNull(appointments.reminderPushSentAt)
-        )
-      );
+    const pendingReminders = await getPendingCronReminders("push24h", { from: windowStart, to: windowEnd });
 
     // Count total push subscriptions
-    const totalSubs = await db
-      .select({ id: pushSubscriptions.id })
-      .from(pushSubscriptions);
+    const totalPushSubscriptions = await countPushSubscriptions();
 
     return NextResponse.json({
       success: true,
@@ -298,7 +234,7 @@ export async function GET(request: Request) {
           to: windowEnd.toISOString(),
         },
         pendingReminders: pendingReminders.length,
-        totalPushSubscriptions: totalSubs.length,
+        totalPushSubscriptions,
         appointments: pendingReminders.map((a) => ({
           id: a.appointmentId,
           startTime: a.startTime,

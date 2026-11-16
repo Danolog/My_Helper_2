@@ -23,7 +23,23 @@ export { cleanupExpiredTemporaryAccess } from "./cron";
 export { checkDatabase, pingDatabase } from "./health";
 export { cleanupStaleDepositBookings } from "./deposits-cleanup";
 export type { StaleDepositCleanupResult } from "./deposits-cleanup";
-export { deleteUndeliverablePushSubscriptions, getPushSubscriptionsForUser } from "./notifications";
-export type { PushSubscriptionForSend } from "./notifications";
+export {
+  countPushSubscriptions,
+  deleteUndeliverablePushSubscriptions,
+  findDuePushReminders,
+  findDueSmsReminders,
+  getPendingCronReminders,
+  getPushSubscriptionsForUser,
+  getUserIdsWithPushSubscriptions,
+  markCronRemindersSent,
+} from "./notifications";
+export type {
+  CronReminderKind,
+  PendingCronReminder,
+  PushReminderCandidate,
+  PushSubscriptionForSend,
+  ReminderWindow,
+  SmsReminderCandidate,
+} from "./notifications";
 export { resolveWaitingListToken } from "./waiting-list";
 export type { WaitingListTokenTarget } from "./waiting-list";

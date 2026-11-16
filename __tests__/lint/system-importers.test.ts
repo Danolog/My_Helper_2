@@ -71,8 +71,31 @@ const SNAPSHOT: Record<string, string[]> = {
   "deposits-cleanup.ts:cleanupStaleDepositBookings": ["src/app/api/cron/cleanup-pending-deposits/route.ts"],
   "health.ts:checkDatabase": ["src/app/api/diagnostics/route.ts"],
   "health.ts:pingDatabase": ["src/app/api/health/route.ts"],
+  "notifications.ts:countPushSubscriptions": [
+    "src/app/api/cron/push-reminders-24h/route.ts",
+    "src/app/api/cron/push-reminders/route.ts",
+  ],
   "notifications.ts:deleteUndeliverablePushSubscriptions": ["src/lib/push.ts"],
+  "notifications.ts:findDuePushReminders": [
+    "src/app/api/cron/push-reminders-24h/route.ts",
+    "src/app/api/cron/push-reminders/route.ts",
+  ],
+  "notifications.ts:findDueSmsReminders": ["src/app/api/cron/sms-reminders/route.ts"],
+  "notifications.ts:getPendingCronReminders": [
+    "src/app/api/cron/push-reminders-24h/route.ts",
+    "src/app/api/cron/push-reminders/route.ts",
+    "src/app/api/cron/sms-reminders/route.ts",
+  ],
   "notifications.ts:getPushSubscriptionsForUser": ["src/lib/push.ts"],
+  "notifications.ts:getUserIdsWithPushSubscriptions": [
+    "src/app/api/cron/push-reminders-24h/route.ts",
+    "src/app/api/cron/push-reminders/route.ts",
+  ],
+  "notifications.ts:markCronRemindersSent": [
+    "src/app/api/cron/push-reminders-24h/route.ts",
+    "src/app/api/cron/push-reminders/route.ts",
+    "src/app/api/cron/sms-reminders/route.ts",
+  ],
   "waiting-list.ts:resolveWaitingListToken": ["src/lib/waiting-list.ts"],
   "session.ts:getActiveTemporaryAccess": [
     "src/app/api/temporary-access/check/route.ts",
