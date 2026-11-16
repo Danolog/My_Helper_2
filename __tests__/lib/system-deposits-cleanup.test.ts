@@ -3,15 +3,15 @@
  * `src/lib/server/system/deposits-cleanup.ts` (plik zadatków: zapis
  * deposit_payments i anulowanie wizyt, recenzja także CTO).
  *
- * Czerwone do PR P5a-2:
- * - moduł `system/deposits-cleanup.ts` nie istnieje (ładowany dynamicznie, żeby
- *   brak modułu był czerwienią testów, a nie błędem typecheck całego pliku);
- * - trasa liczy sama na `@/lib/db` zamiast wołać wyjście z rejestru.
+ * - Moduł ładowany dynamicznie (brak modułu = czerwień testów, nie błąd
+ *   typecheck całego pliku); trasa woła wyjście z rejestru.
+ * - Wybór i zmiana w jednym poleceniu: warunki strażników i progu sprawdzane
+ *   na renderowanym SQL; liczniki = wiersze RETURNING (dokładne mapowanie).
+ *   Zachowanie na bazie (niezmiennik, wyścig): __tests__/pg/deposits-cleanup.pg.test.ts.
  *
  * Pule są rozróżnione jawnie: `@/lib/db` (pula żądań) rzuca przy każdym użyciu,
- * `@/lib/server/system/db-system` to osobny fałszywy klient. Zachowanie trasy
- * (bramka CRON_SECRET, komunikaty, liczniki) bez zmian względem
- * __tests__/api/cron-cleanup-pending-deposits.test.ts.
+ * `@/lib/server/system/db-system` to osobny fałszywy klient. Bramka
+ * CRON_SECRET i komunikaty trasy bez zmian.
  */
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,18 +31,24 @@ const requestPool = vi.hoisted(
 );
 vi.mock("@/lib/db", () => ({ db: requestPool }));
 
-const sys = vi.hoisted(() => {
-  const selectWhere = vi.fn();
-  const txUpdateWhere = vi.fn().mockResolvedValue(undefined);
-  const txUpdateSet = vi.fn((..._a: unknown[]) => ({ where: txUpdateWhere }));
-  const txUpdate = vi.fn((..._a: unknown[]) => ({ set: txUpdateSet }));
-  const transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn({ update: txUpdate }));
-  const select = vi.fn((..._a: unknown[]) => ({ from: () => ({ innerJoin: () => ({ where: selectWhere }) }) }));
-  return { selectWhere, txUpdate, txUpdateSet, txUpdateWhere, transaction, select };
-});
-vi.mock("@/lib/server/system/db-system", () => ({
-  dbSystem: { select: sys.select, transaction: sys.transaction },
+// Pula systemowa: `transaction` podaje prawdziwy budowniczy drizzle (`pg-proxy`),
+// który zapisuje renderowany SQL i parametry; wiersze RETURNING ze skryptu testu.
+const sys = vi.hoisted(() => ({
+  captured: [] as Array<{ sql: string; params: unknown[] }>,
+  rows: [] as Array<[RegExp, unknown[][]]>,
+  transaction: vi.fn(),
+  select: vi.fn(),
 }));
+vi.mock("@/lib/server/system/db-system", async () => {
+  const { drizzle } = await import("drizzle-orm/pg-proxy");
+  const tx = drizzle(async (sql: string, params: unknown[]) => {
+    sys.captured.push({ sql, params });
+    const hit = sys.rows.find(([re]) => re.test(sql));
+    return { rows: hit ? hit[1] : [] };
+  });
+  sys.transaction.mockImplementation(async (fn: (t: unknown) => unknown) => fn(tx));
+  return { dbSystem: { select: sys.select, transaction: sys.transaction } };
+});
 
 const registry = vi.hoisted(() => ({ cleanupStaleDepositBookings: vi.fn() }));
 vi.mock("@/lib/server/system", () => registry);
@@ -68,37 +74,86 @@ const cronRequest = (method: "GET" | "POST", secret: string | null = SECRET) =>
 beforeEach(() => {
   vi.clearAllMocks();
   process.env.CRON_SECRET = SECRET;
-  sys.selectWhere.mockResolvedValue([]);
+  sys.captured.length = 0;
+  sys.rows = [];
 });
 
+/** Parametr `$n` stojący po `fragment` w SQL zapytania. */
+function paramAfter(q: { sql: string; params: unknown[] }, fragment: string): unknown {
+  const i = q.sql.indexOf(fragment);
+  expect(i, `${fragment} w: ${q.sql}`).toBeGreaterThanOrEqual(0);
+  const m = /^\$(\d+)/.exec(q.sql.slice(i + fragment.length));
+  expect(m, `parametr po ${fragment}`).not.toBeNull();
+  return q.params[Number(m![1]) - 1];
+}
+
 describe("system/deposits-cleanup.ts: cleanupStaleDepositBookings (P5a)", () => {
-  it("nic do zrobienia → zera, bez transakcji, tylko pula systemowa", async () => {
+  it("jedna transakcja na dbSystem, dwa polecenia: najpierw płatności, potem wizyty; bez osobnego odczytu", async () => {
     const cleanup = await loadCleanup();
-    await expect(cleanup()).resolves.toEqual({ cancelledAppointments: 0, failedPayments: 0 });
-    expect(sys.select).toHaveBeenCalledTimes(1);
-    expect(sys.transaction).not.toHaveBeenCalled();
+    await cleanup();
+    expect(sys.transaction).toHaveBeenCalledTimes(1);
+    expect(sys.select).not.toHaveBeenCalled();
+    expect(sys.captured.map((q) => q.sql.slice(0, 30))).toEqual([
+      expect.stringMatching(/^update "deposit_payments" set/),
+      expect.stringMatching(/^update "appointments" set/),
+    ]);
   });
 
-  it("martwe rezerwacje → jedna transakcja na dbSystem: płatności pending → failed, potem wizyty", async () => {
-    sys.selectWhere.mockResolvedValue([
-      { paymentId: "p1", paymentStatus: "pending", appointmentId: "a1" },
-      { paymentId: "p2", paymentStatus: "failed", appointmentId: "a2" },
-      { paymentId: "p3", paymentStatus: "failed", appointmentId: "a2" },
-    ]);
+  it("liczniki = wiersze RETURNING obu poleceń (dokładne mapowanie)", async () => {
+    sys.rows = [
+      [/^update "deposit_payments"/, [["p1"]]],
+      [/^update "appointments"/, [["a1"], ["a2"]]],
+    ];
     const cleanup = await loadCleanup();
     await expect(cleanup()).resolves.toEqual({ cancelledAppointments: 2, failedPayments: 1 });
-    expect(sys.transaction).toHaveBeenCalledTimes(1);
-    expect(sys.txUpdate).toHaveBeenCalledTimes(2);
-    expect(sys.txUpdateSet.mock.calls[0]![0]).toEqual({ status: "failed" });
-    expect(sys.txUpdateSet.mock.calls[1]![0]).toMatchObject({ status: "cancelled" });
   });
 
-  it("same płatności failed → bez aktualizacji płatności, tylko wizyty", async () => {
-    sys.selectWhere.mockResolvedValue([{ paymentId: "p2", paymentStatus: "failed", appointmentId: "a2" }]);
+  it("nic nie zmienione → 0 i 0", async () => {
     const cleanup = await loadCleanup();
-    await expect(cleanup()).resolves.toEqual({ cancelledAppointments: 1, failedPayments: 0 });
-    expect(sys.txUpdate).toHaveBeenCalledTimes(1);
-    expect(sys.txUpdateSet.mock.calls[0]![0]).toMatchObject({ status: "cancelled" });
+    await expect(cleanup()).resolves.toEqual({ cancelledAppointments: 0, failedPayments: 0 });
+  });
+
+  it("polecenie płatności: strażnik pending, wiek, wizyta scheduled bez wpłaty i bez żywej płatności", async () => {
+    const cleanup = await loadCleanup();
+    await cleanup();
+    const q = sys.captured[0]!;
+    expect(q.sql).toMatch(/set "status" = \$1/);
+    expect(q.params[0]).toBe("failed");
+    expect(paramAfter(q, `"deposit_payments"."status" = `)).toBe("pending");
+    expect(q.sql).toContain(`"deposit_payments"."created_at" < $`);
+    expect(paramAfter(q, `"appointments"."status" = `)).toBe("scheduled");
+    expect(paramAfter(q, `"appointments"."deposit_paid" = `)).toBe(false);
+    expect(q.sql).toMatch(/not exists \(select 1 from "deposit_payments" "other_payment"/);
+    expect(q.sql).toContain(`"other_payment"."appointment_id" = "appointments"."id"`);
+    expect(q.sql).toContain(`"other_payment"."created_at" >= $`);
+    expect(q.sql).toMatch(/"other_payment"\."status" not in \(\$\d+, \$\d+\)/);
+    expect(q.sql).toMatch(/returning "id"$/);
+  });
+
+  it("polecenie wizyt: scheduled, bez wpłaty, istnieje płatność, brak żywej (status <> failed albo młodsza)", async () => {
+    const cleanup = await loadCleanup();
+    await cleanup();
+    const q = sys.captured[1]!;
+    expect(paramAfter(q, `"appointments"."status" = `)).toBe("scheduled");
+    expect(paramAfter(q, `"appointments"."deposit_paid" = `)).toBe(false);
+    expect(q.sql).toContain(`and exists (select 1 from "deposit_payments" where "deposit_payments"."appointment_id" = "appointments"."id")`);
+    expect(q.sql).toContain(`not exists (select 1 from "deposit_payments" "other_payment"`);
+    expect(paramAfter(q, `"other_payment"."status" <> `)).toBe("failed");
+    expect(q.sql).toContain(`"other_payment"."created_at" >= $`);
+    expect(q.sql).toMatch(/returning "id"$/);
+  });
+
+  it("ten sam próg w obu poleceniach (45 min)", async () => {
+    const before = Date.now();
+    const cleanup = await loadCleanup();
+    await cleanup();
+    const cutoffs = [
+      paramAfter(sys.captured[0]!, `"deposit_payments"."created_at" < `),
+      paramAfter(sys.captured[0]!, `"other_payment"."created_at" >= `),
+      paramAfter(sys.captured[1]!, `"other_payment"."created_at" >= `),
+    ].map((v) => new Date(v as string).getTime());
+    expect(new Set(cutoffs).size).toBe(1);
+    expect(Math.abs(before - 45 * 60_000 - cutoffs[0]!)).toBeLessThan(5_000);
   });
 });
 
