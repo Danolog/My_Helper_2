@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { eq, and, isNull, or, not } from "drizzle-orm";
-import { appointmentConflictWhere, isAppointmentOverlapViolation } from "@/lib/appointment-overlap";
+import { appointmentConflictWhere, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
 import { db } from "@/lib/db";
 import {
   checkBookingWithoutDeposit,
@@ -369,7 +369,8 @@ export async function acceptEarlierSlot(
 
   // 7. Move existing appointment or create a new one
   // #171: każdy zapis poniżej to jedno polecenie; jeśli równoległy zapis
-  // zajął termin po kroku 6, EXCLUDE w bazie odrzuca je (23P01) — odmowa jak
+  // zajął termin po kroku 6, EXCLUDE w bazie odrzuca je (23P01, albo 40P01
+  // przy sprawdzaniu ograniczenia) — odmowa jak
   // przy kolizji, nic nie zapisane, wpis nierozstrzygnięty.
   try {
     if (entry.existingAppointmentId) {
@@ -436,9 +437,13 @@ export async function acceptEarlierSlot(
       appointmentId = newAppt!.id;
     }
   } catch (error) {
-    if (isAppointmentOverlapViolation(error)) {
+    if (isAppointmentSlotTaken(error)) {
       return { success: false, message: "Termin jest juz zajety" };
     }
+    logger.error("acceptEarlierSlot: zapis wizyty odrzucony przez baze", {
+      waitingListId,
+      code: dbErrorCode(error),
+    });
     throw error;
   }
 

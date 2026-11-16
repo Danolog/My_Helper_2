@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST as bookPackage } from "@/app/api/appointments/book-package/route";
 import { createMockRequest, parseResponse, TEST_IDS } from "./helpers";
 import { sqlMatches } from "./sql-predicate";
+import { deadlock, wrapped } from "./deadlock-fixture";
 
 /**
  * Moduł `complexPromotions` jest zamrożony (B2) i trasa odpowiada 404 zanim
@@ -427,6 +428,41 @@ describe("POST /api/appointments/book-package — kolizja półotwarta (#165)", 
     });
     const { status } = await parseResponse(await bookPackage(request()));
     expect(status).toBe(500);
+  });
+
+  /** Spy na logger.error (prawdziwy albo zamockowany moduł) — 500 ma trafić do logu z kodem błędu. */
+  async function spyLoggerError() {
+    const { logger } = await import("@/lib/logger");
+    return vi.spyOn(logger, "error");
+  }
+
+  /** Druga wizyta pakietu odrzucona przez bazę; pierwsza już zapisana w transakcji (wycofanej). */
+  async function bookPackageRejected(err: unknown) {
+    txQueue.push([], []);
+    let calls = 0;
+    mockInsertValues.mockImplementation(() => {
+      calls += 1;
+      if (calls === 2) throw err;
+    });
+    return parseResponse(await bookPackage(request()));
+  }
+
+  it("pakiet: 40P01 przy sprawdzaniu EXCLUDE (zakleszczenie, db71a43) → 409 z komunikatem kolizji", async () => {
+    const { status, body } = await bookPackageRejected(wrapped(deadlock()));
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+  });
+
+  it.each([
+    ["40P01 bez kontekstu", "40P01", deadlock(null)],
+    ["40P01 innej relacji", "40P01", deadlock('while checking exclusion constraint on tuple (1,2) in relation "payments"')],
+    ["40001 z kontekstem EXCLUDE", "40001", { ...deadlock(), code: "40001" }],
+  ])("pakiet: %s → 500, w logu kod błędu", async (_n, code, cause) => {
+    const spy = await spyLoggerError();
+    const { status } = await bookPackageRejected(wrapped(cause));
+    expect(status).toBe(500);
+    expect(spy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ code }));
+    spy.mockRestore();
   });
 
   it("blokada czasu nachodząca o 1 minutę → 409", async () => {

@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { parseBody, updateAppointmentSchema } from "@/lib/api-validation";
-import { appointmentConflictWhere, isAppointmentOverlapViolation, overlapsRange } from "@/lib/appointment-overlap";
+import {
+  appointmentConflictWhere,
+  dbErrorCode,
+  isAppointmentSlotTaken,
+  overlapsRange,
+} from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // `db` pozostaje dla efektow ubocznych anulacji (forfeit zadatku, notyfikacja,
 // nazwa salonu do waiting-list) — to NIE jest brama zasobu [id], ktora pilnuje
@@ -296,14 +301,15 @@ export async function PUT(
       message: "Appointment rescheduled successfully",
     });
   } catch (error) {
-    // #171: równoległy zapis zajął termin (EXCLUDE w bazie) — ta sama kolizja.
-    if (isAppointmentOverlapViolation(error)) {
+    // #171: równoległy zapis zajął termin (EXCLUDE w bazie: 23P01 albo 40P01
+    // przy jego sprawdzaniu, przeniesienia „na krzyż”) — ta sama kolizja.
+    if (isAppointmentSlotTaken(error)) {
       return NextResponse.json(
         { success: false, error: "Termin koliduje z istniejaca wizyta. Wybierz inna godzine" },
         { status: 409 }
       );
     }
-    logger.error("[Appointments API] Database error", { error: error });
+    logger.error("[Appointments API] Database error", { error, code: dbErrorCode(error) });
     return NextResponse.json(
       { success: false, error: "Failed to update appointment" },
       { status: 500 }
