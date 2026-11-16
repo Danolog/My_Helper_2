@@ -41,16 +41,25 @@ const CLIENT_EMAIL = "osoba.b@example.com";
 // Konta w bazie (tabela "user")
 let users: Array<Record<string, unknown>> = [];
 
-const entryRow = {
-  entry: { id: "wl-1" },
-  client: {
-    id: "client-b",
-    firstName: "Barbara",
-    lastName: "Bielska",
-    phone: null,
-    email: CLIENT_EMAIL,
-  },
-};
+// Kontakt klienta wpisu (ustawiany per test)
+let clientPhone: string | null = null;
+let clientEmail: string | null = CLIENT_EMAIL;
+
+// Wartości przekazane do db.update(...).set(...)
+const updates: Array<Record<string, unknown>> = [];
+
+function entryRow() {
+  return {
+    entry: { id: "wl-1" },
+    client: {
+      id: "client-b",
+      firstName: "Barbara",
+      lastName: "Bielska",
+      phone: clientPhone,
+      email: clientEmail,
+    },
+  };
+}
 
 /** Ewaluacja warunku na wierszu konta: kolumna "user.x" -> row.x. Warunki "other" nie dotycza tabeli user. */
 function matches(row: Record<string, unknown>, cond: Cond | undefined): boolean {
@@ -72,7 +81,7 @@ function selectChain() {
   c.where = (w: Cond) => ((where = w), c);
   c.limit = () => c;
   c.then = (resolve: (v: unknown[]) => unknown) => {
-    if (tableName === "waitingList") return resolve([entryRow]);
+    if (tableName === "waitingList") return resolve([entryRow()]);
     if (tableName === "user") {
       return resolve(users.filter((u) => matches(u, where)).map((u) => ({ id: u.id })));
     }
@@ -86,7 +95,7 @@ vi.mock("@/lib/db", () => ({
     select: () => selectChain(),
     update: () => {
       const c: Record<string, unknown> = {};
-      c.set = () => c;
+      c.set = (values: Record<string, unknown>) => (updates.push(values), c);
       c.where = () => Promise.resolve([]);
       return c;
     },
@@ -97,7 +106,10 @@ const mockSendPush = vi.fn();
 vi.mock("@/lib/push", () => ({
   sendPushNotification: (...args: unknown[]) => mockSendPush(...args),
 }));
-vi.mock("@/lib/sms", () => ({ sendSms: vi.fn() }));
+const mockSendSms = vi.fn();
+vi.mock("@/lib/sms", () => ({
+  sendSms: (...args: unknown[]) => mockSendSms(...args),
+}));
 vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -118,17 +130,22 @@ const params = {
 describe("notifyWaitingList — push tylko na konto ze zweryfikowanym e-mailem klienta", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    updates.length = 0;
+    clientPhone = null;
+    clientEmail = CLIENT_EMAIL;
     mockSendPush.mockResolvedValue({ success: true });
+    mockSendSms.mockResolvedValue({ success: true });
   });
 
-  it("niezweryfikowane konto z e-mailem klienta NIE dostaje pusha", async () => {
+  it("niezweryfikowane konto z e-mailem klienta NIE dostaje pusha (wpis nietknięty)", async () => {
     users = [{ id: "intruz", email: CLIENT_EMAIL, emailVerified: false }];
 
     const result = await notifyWaitingList(params);
 
     expect(mockSendPush).not.toHaveBeenCalled();
     expect(result.pushCount).toBe(0);
-    expect(result.notified).toBe(1);
+    expect(result.notified).toBe(0);
+    expect(updates).toHaveLength(0);
   });
 
   it("zweryfikowane konto z e-mailem klienta dostaje push", async () => {
@@ -147,5 +164,89 @@ describe("notifyWaitingList — push tylko na konto ze zweryfikowanym e-mailem k
     await notifyWaitingList(params);
 
     expect(mockSendPush).not.toHaveBeenCalled();
+  });
+});
+
+describe("notifyWaitingList — kanał SMS wstrzymany, wpis oznaczany po dostarczeniu (Refs #221)", () => {
+  const VERIFIED = [{ id: "wlasciciel", email: CLIENT_EMAIL, emailVerified: true }];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    updates.length = 0;
+    clientPhone = null;
+    clientEmail = CLIENT_EMAIL;
+    mockSendPush.mockResolvedValue({ success: true });
+    mockSendSms.mockResolvedValue({ success: true });
+  });
+
+  it("(a) wpis z telefonem i kontem: sendSms 0 razy, smsCount 0", async () => {
+    clientPhone = "+48512345678";
+    users = VERIFIED;
+
+    const result = await notifyWaitingList(params);
+
+    expect(mockSendSms).not.toHaveBeenCalled();
+    expect(result.smsCount).toBe(0);
+    expect(result.pushCount).toBe(1);
+  });
+
+  it("(a) wpis tylko z telefonem (bez e-maila): sendSms 0 razy, wpis nietknięty, bez błędu", async () => {
+    clientPhone = "+48512345678";
+    clientEmail = null;
+    users = VERIFIED;
+
+    const result = await notifyWaitingList(params);
+
+    expect(mockSendSms).not.toHaveBeenCalled();
+    expect(updates).toHaveLength(0);
+    expect(result).toEqual({ notified: 0, smsCount: 0, pushCount: 0, errors: 0 });
+  });
+
+  it("(b) push dostarczony: pola oferty ustawione, notified +1", async () => {
+    users = VERIFIED;
+    const withEmployee = { ...params, employeeId: "emp-1" };
+
+    const result = await notifyWaitingList(withEmployee);
+
+    expect(updates).toHaveLength(1);
+    const set = updates[0]!;
+    expect(set.notifiedAt).toBeInstanceOf(Date);
+    expect(set.acceptToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(set.offeredStartTime).toBe(withEmployee.startTime);
+    expect(set.offeredEndTime).toBe(withEmployee.endTime);
+    expect(set.offeredEmployeeId).toBe("emp-1");
+    expect(set).toHaveProperty("existingAppointmentId", null);
+    expect(result).toEqual({ notified: 1, smsCount: 0, pushCount: 1, errors: 0 });
+  });
+
+  it("(c) push niedostarczony (success: false): wpis nietknięty, notified i errors bez zmian", async () => {
+    users = VERIFIED;
+    mockSendPush.mockResolvedValue({ success: false, sent: 0, failed: 0, error: "No subscriptions" });
+
+    const result = await notifyWaitingList(params);
+
+    expect(mockSendPush).toHaveBeenCalledTimes(1);
+    expect(updates).toHaveLength(0);
+    expect(result).toEqual({ notified: 0, smsCount: 0, pushCount: 0, errors: 0 });
+  });
+
+  it("(c) push rzuca wyjątek: wpis nietknięty, notified i errors bez zmian", async () => {
+    users = VERIFIED;
+    mockSendPush.mockRejectedValue(new Error("push down"));
+
+    const result = await notifyWaitingList(params);
+
+    expect(updates).toHaveLength(0);
+    expect(result).toEqual({ notified: 0, smsCount: 0, pushCount: 0, errors: 0 });
+  });
+
+  it("(c) brak konta: wpis nietknięty, notified i errors bez zmian", async () => {
+    users = [];
+
+    const result = await notifyWaitingList(params);
+
+    expect(mockSendPush).not.toHaveBeenCalled();
+    expect(updates).toHaveLength(0);
+    expect(result).toEqual({ notified: 0, smsCount: 0, pushCount: 0, errors: 0 });
   });
 });

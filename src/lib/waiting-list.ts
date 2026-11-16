@@ -16,7 +16,6 @@ import {
   appointments,
   notifications,
 } from "@/lib/schema";
-import { sendSms } from "@/lib/sms";
 
 interface NotifyWaitingListParams {
   salonId: string;
@@ -41,8 +40,13 @@ interface NotifyWaitingListResult {
  *
  * Called when an appointment is cancelled. Finds matching waiting list entries
  * (same salon, optionally same service/employee/date) that have not been
- * notified or accepted/declined yet. For each match it sends an SMS and a push
- * notification with the freed slot details and updates `notifiedAt`.
+ * notified or accepted/declined yet. For each match it sends a push
+ * notification with the freed slot details.
+ *
+ * Kanał SMS jest wstrzymany do czasu #221 (`smsCount` zostaje w wyniku, = 0).
+ * Wpis jest oznaczany (`notifiedAt`, `acceptToken`, `offered*`) TYLKO gdy
+ * wiadomość faktycznie dotarła (push `success`). Inaczej wpis zostaje
+ * nietknięty i wraca przy następnym zwolnionym terminie — bez błędu w wyniku.
  */
 export async function notifyWaitingList(
   params: NotifyWaitingListParams
@@ -123,25 +127,8 @@ export async function notifyWaitingList(
         `${formattedDate} o ${formattedTime}. ` +
         `Zarezerwuj teraz: ${bookingLink}`;
 
-      // Send SMS if the client has a phone number
-      if (row.client.phone) {
-        try {
-          const smsResult = await sendSms({
-            to: row.client.phone,
-            message,
-            salonId: params.salonId,
-            clientId: row.client.id,
-          });
-          if (smsResult.success) {
-            result.smsCount++;
-          } else {
-            result.errors++;
-          }
-        } catch (err) {
-          logger.error("Waiting list SMS notification failed", { clientId: row.client.id, error: err });
-          result.errors++;
-        }
-      }
+      // Kanał SMS wstrzymany do #221 — brak wywołania sendSms.
+      let delivered = false;
 
       // Send push notification if the client has a linked user account.
       // We look up the user by email to find the userId for push delivery —
@@ -172,12 +159,18 @@ export async function notifyWaitingList(
             });
             if (pushResult.success) {
               result.pushCount++;
+              delivered = true;
             }
           }
         } catch (err) {
           logger.warn("Waiting list push notification failed", { clientId: row.client.id, error: err });
           // Push failures are non-critical; do not increment errors
         }
+      }
+
+      // Nic nie dotarło: wpis zostaje nietknięty (notifiedAt/acceptToken/offered* = null).
+      if (!delivered) {
+        continue;
       }
 
       // Find client's existing appointment for same service to link it
