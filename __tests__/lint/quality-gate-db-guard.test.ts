@@ -554,7 +554,7 @@ function parsedKeyLines(file: string, wf: string, scan: LineScan[]): Record<Inva
     all.forEach((l, i) => {
       const d = l.match(/^( {4})?defaults:[ \t]*$/);
       if (!d || !live(i)) return;
-      const j = all.findIndex((x, k) => k > i && live(k));
+      const j = all.findIndex((_x, k) => k > i && live(k));
       if (j >= 0 && new RegExp(`^${d[1] ?? ""} {2}run:[ \\t]*$`).test(all[j]!)) out.run.push(j);
     });
   }
@@ -1099,7 +1099,7 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
     ["I10: shell: kroku z drizzle-kit push", EP, EP_INSTALL, `${EP_INSTALL}      - run: pnpm exec playwright --version\n        shell: sh -c 'drizzle-kit push; sh {0}'\n`, /push/],
     ["I10: defaults.run.shell workflow z db:push", EP, "\njobs:\n", "\ndefaults:\n  run:\n    shell: sh -c 'pnpm db:push && bash {0}'\n\njobs:\n", /push/],
     ["I10: shell: jako blok złożony (drizzle-kit i push w osobnych liniach)", EP, EP_INSTALL, `${EP_INSTALL}      - run: pnpm exec playwright --version\n        shell: >-\n          sh -c 'drizzle-kit\n          push; sh {0}'\n`, /push/],
-    ["POSTGRES_URL przez $GITHUB_ENV w kroku", EP, EP_INSTALL, `${EP_INSTALL}      - run: echo "POSTGRES_URL=postgresql://u:p@db.example:5432/x" >> "$GITHUB_ENV"\n`, /nowy job z bazą.*e2e-production/],
+    ["POSTGRES_URL przez $GITHUB_ENV w kroku", EP, EP_INSTALL, `${EP_INSTALL}      - run: echo "POSTGRES_URL=$DB_URL" >> "$GITHUB_ENV"\n`, /nowy job z bazą.*e2e-production/],
     // Escape w cudzysłowie: w tekście nie ma „POSTGRES_URL”, w drzewie YAML jest — łapie tylko warstwa YAML.
     ["POSTGRES_URL poza jobs: (env workflow, escape w wartości)", EP, "\njobs:\n", '\nenv:\n  DB: "${{ secrets.POSTGRES\\u005fURL }}"\n\njobs:\n', /YAML: POSTGRES_URL poza jobs/],
   ])("A %s → porażka", (_n, file, find, repl, re) => {
