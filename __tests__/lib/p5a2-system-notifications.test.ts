@@ -8,8 +8,10 @@
  * → zapytanie ma warunek `"appointments"."salon_id" = salonId`, bez salonId →
  * bez warunku salonu (oba salony). Odczyt kończy się przed wysyłką SMS.
  *
- * `dbSystem` to prawdziwy budowniczy zapytań drizzle (`pg-proxy`) zapisujący
- * SQL i parametry; pula `db` i brama salonu rzucają przy użyciu.
+ * Podgląd (GET) czyta jednego salonu przez bramę `forSalon(salonId).raw`.
+ *
+ * `dbSystem` i transakcja bramy to prawdziwe budowniczy zapytań drizzle
+ * (`pg-proxy`) zapisujące SQL i parametry osobno; pula `db` rzuca przy użyciu.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockRequest, parseResponse } from "../api/helpers";
@@ -28,6 +30,9 @@ const h = vi.hoisted(() => {
   return {
     throwingPool,
     captured: [] as Array<{ sql: string; params: unknown[] }>,
+    /** Zapytania w transakcji bramy salonu i salonId każdego wywołania `forSalon`. */
+    gateCaptured: [] as Array<{ sql: string; params: unknown[] }>,
+    forSalonCalls: [] as string[],
     rows: [] as Array<[RegExp, unknown[][]]>,
     sendSms: vi.fn(),
     sendReminderSms: vi.fn(),
@@ -39,7 +44,20 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/db", () => ({ db: h.throwingPool("db") }));
-vi.mock("@/lib/server/repository", () => ({ forSalon: () => h.throwingPool("forSalon") }));
+// Brama salonu: `raw` dostaje budowniczego pg-proxy zapisującego SQL osobno od puli systemowej.
+vi.mock("@/lib/server/repository", async () => {
+  const { drizzle } = await import("drizzle-orm/pg-proxy");
+  const tx = drizzle(async (sql: string, params: unknown[]) => {
+    h.gateCaptured.push({ sql, params });
+    return { rows: [] };
+  });
+  return {
+    forSalon: (salonId: string) => {
+      h.forSalonCalls.push(salonId);
+      return { salonId, raw: <T,>(fn: (t: typeof tx) => Promise<T>) => fn(tx) };
+    },
+  };
+});
 vi.mock("@/lib/server/system/db-system", async () => {
   const { drizzle } = await import("drizzle-orm/pg-proxy");
   return {
@@ -86,6 +104,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.CRON_SECRET = SECRET;
   h.captured.length = 0;
+  h.gateCaptured.length = 0;
+  h.forSalonCalls.length = 0;
   h.queriesAtSend.length = 0;
   h.rows = [];
   h.sendSms.mockResolvedValue({ success: true });
@@ -167,6 +187,8 @@ describe("reminders/appointment: filtr salonu wołającego crona (decyzja A)", (
     const res = await call();
     expect(res.status).toBe(400);
     expect(h.captured).toEqual([]);
+    expect(h.forSalonCalls).toEqual([]);
+    expect(h.gateCaptured).toEqual([]);
   });
 
   it("POST z salonId → odczyt z warunkiem salonu, wysyłka po odczycie, potem oznaczenie", async () => {
@@ -189,11 +211,67 @@ describe("reminders/appointment: filtr salonu wołającego crona (decyzja A)", (
     expect(h.captured[0]!.sql).toMatch(/"appointments"\."salon_id" = "salons"\."id"/);
   });
 
-  it("GET z salonId → podgląd z warunkiem salonu", async () => {
+  it("GET z salonId → podgląd przez bramę salonu (forSalon), z warunkiem salonu; pula systemowa nieużyta", async () => {
     const { status } = await parseResponse(await reminders.GET(req(`/api/reminders/appointment?salonId=${SALON_A}`, "GET")));
     expect(status).toBe(200);
-    expect(h.captured).toHaveLength(1);
-    const sel = h.captured[0]!;
+    expect(h.forSalonCalls).toEqual([SALON_A]);
+    expect(h.captured).toEqual([]);
+    expect(h.gateCaptured).toHaveLength(1);
+    const sel = h.gateCaptured[0]!;
     expect(salonParamIndexes(sel).some((n) => sel.params[n - 1] === SALON_A), sel.sql).toBe(true);
+  });
+});
+
+/**
+ * Złączenia wyboru przypomnień: każda tabela złączona z wizytą (klient, pracownik,
+ * usługa) ma w `ON` warunek `<tabela>.salon_id = appointments.salon_id`; salon jest
+ * złączony po `appointments.salon_id = salons.id` (tabela `salons` nie ma `salon_id`).
+ * Jedna asercja sprawdza wszystkie cztery warunki, więc usunięcie dowolnego z nich
+ * daje czerwony wynik tego samego testu.
+ */
+const JOINED = ["clients", "employees", "services"] as const;
+
+/** Treść `ON` złączenia tabeli (do następnego złączenia albo `where`). */
+function joinOn(sql: string, table: string): string | null {
+  const m = sql.match(new RegExp(`join "${table}" on (.*?)(?= (?:left |inner )?join | where | limit |$)`));
+  return m ? m[1]! : null;
+}
+
+function joinSalonConditions(sql: string) {
+  const out: Record<string, boolean> = {};
+  for (const t of JOINED) {
+    const on = joinOn(sql, t) ?? "";
+    out[t] = new RegExp(
+      `"${t}"\\."salon_id" = "appointments"\\."salon_id"|"appointments"\\."salon_id" = "${t}"\\."salon_id"`
+    ).test(on);
+  }
+  out.salons = /"appointments"\."salon_id" = "salons"\."id"|"salons"\."id" = "appointments"\."salon_id"/.test(
+    joinOn(sql, "salons") ?? ""
+  );
+  return out;
+}
+
+const ALL_TRUE = { clients: true, employees: true, services: true, salons: true };
+
+describe("wyjścia przypomnień: jawny warunek salonu w złączeniach", () => {
+  it.each([
+    ["push 1h (findDuePushReminders)", () => push1h.POST(req("/api/cron/x", "POST"))],
+    ["push 24h (findDuePushReminders)", () => push24h.POST(req("/api/cron/x", "POST"))],
+    ["SMS 1h (findDueSmsReminders)", () => smsReminders.POST(req("/api/cron/sms-reminders", "POST"))],
+    ["SMS 24h (findDueAppointmentReminders)", () => reminders.POST(req("/api/reminders/appointment", "POST"))],
+  ] as const)("%s: każde złączenie z warunkiem salonu", async (_n, call) => {
+    const res = await call();
+    expect(res.status).toBe(200);
+    const sel = h.captured[0]!;
+    expect(sel.sql).toMatch(/^select .* from "appointments"/);
+    expect(joinSalonConditions(sel.sql), sel.sql).toEqual(ALL_TRUE);
+  });
+
+  it("podgląd SMS 24h (GET przez bramę): każde złączenie z warunkiem salonu", async () => {
+    const res = await reminders.GET(req(`/api/reminders/appointment?salonId=${SALON_A}`, "GET"));
+    expect(res.status).toBe(200);
+    const sel = h.gateCaptured[0]!;
+    expect(sel, "podgląd ma iść przez bramę salonu").toBeDefined();
+    expect(joinSalonConditions(sel.sql), sel.sql).toEqual(ALL_TRUE);
   });
 });
