@@ -26,8 +26,9 @@
  * --password=; wypisać hasło; secretAccessor na projekcie; --data-file w
  * etapie secrets; describe bez sprawdzania (brak idempotencji).
  */
-import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { createECDH } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -631,70 +632,460 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
   const RUNBOOK = readFileSync(join(ROOT, "docs/runbook-krok-d.md"), "utf8");
   const d5 = RUNBOOK.slice(RUNBOOK.indexOf("## 5. D-5"), RUNBOOK.indexOf("## 6. D-6"));
   const block = d5.slice(d5.indexOf("```bash"), d5.indexOf("```", d5.indexOf("```bash") + 3));
-  const lines = block.split("\n").filter((l) => !l.trim().startsWith("#"));
+  const lines = block.split("\n");
 
-  it("funkcja add: tr -d '\\r\\n' → gcloud z CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 i --data-file=-", () => {
-    expect(block).toContain(
-      `add() { tr -d '\\r\\n' | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }`,
-    );
+  // --- Statyka bloku D-5 -------------------------------------------------------------------
+  const ADD_LINE = `add() { local v; v="$(tr -d '\\r\\n')"; [ -n "$v" ] || { echo "error: empty value for $1 — gcloud not called" >&2; return 1; }; printf '%s' "$v" | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }`;
+  const ADD_MULTILINE_LINE = `add_multiline() { local v; v="$(cat; printf x)"; v="\${v%x}"; [ -n "$v" ] || { echo "error: empty value for $1 — gcloud not called" >&2; return 1; }; printf '%s' "$v" | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }`;
+
+  it("funkcje add i add_multiline: pusta wartość → kod 1 bez gcloud; wartość przez wbudowany printf na stdin gcloud bez logu plikowego (K-1d B1)", () => {
+    expect(block).toContain(ADD_LINE);
+    expect(block).toContain(ADD_MULTILINE_LINE);
+    const fn = lines.find((l) => l.startsWith("add_multiline() {"))!;
+    expect(fn).not.toMatch(/\btr\b/);
+    expect(d5).not.toMatch(/mktemp/);
   });
 
-  it("jedyne `secrets versions add` to funkcje add i add_multiline; --data-file=ŚCIEŻKA tylko w add_multiline; bez starego tr -d '\\n'", () => {
+  it("blok D-5 zaczyna się od `set +x; set -o pipefail` (K-1d B1, Ethan N1)", () => {
+    expect(lines.find((l) => l.trim() !== "" && !l.startsWith("```"))).toBe("set +x; set -o pipefail");
+  });
+
+  it("jedyne `secrets versions add` to funkcje add i add_multiline; żadnego --data-file=ŚCIEŻKA ani starego tr -d '\\n'", () => {
     const adds = lines.filter((l) => l.includes("secrets versions add"));
     expect(adds).toHaveLength(2);
     expect(adds[0]).toMatch(/^add\(\) \{/);
     expect(adds[1]).toMatch(/^add_multiline\(\) \{/);
-    const withPath = lines.filter((l) => /--data-file=(?!-)/.test(l));
-    expect(withPath).toEqual([adds[1]]);
+    expect(block).not.toMatch(/--data-file=(?!-)/);
     expect(block).not.toContain("tr -d '\\n'");
   });
 
-  // K-1c: wielowierszowe (PEM, JSON) bez tr, z pliku tymczasowego usuwanego zaraz po gcloud.
-  it("funkcja add_multiline: bez tr, bez logu plikowego, --data-file z pliku, plik usuwany zaraz po gcloud (także przy błędzie)", () => {
-    expect(block).toContain(
-      `add_multiline() { local rc=0; CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file="$2" || rc=$?; rm -P "$2"; return "$rc"; }`,
-    );
-    const fn = lines.find((l) => l.startsWith("add_multiline() {"))!;
-    expect(fn).not.toMatch(/\btr\b/);
-    expect(fn).not.toMatch(/&&\s*rm/);
-    expect(d5).toMatch(/mktemp/);
+  // K-1d (Ryan): w D-5 żadnego zapisu wartości na dysk (TMPDIR, plik z kluczem, tee),
+  // żadnego pobierania z npm bez wersji (npx), a rm oryginału tylko po udanym add (&&).
+  it("D-5: bez zapisu do $TMPDIR ani do pliku, bez npx; rm oryginału wyłącznie po `&&` udanego add", () => {
+    expect(d5).not.toMatch(/TMPDIR/);
+    expect(d5).not.toMatch(/vapid\.json/);
+    expect(d5).not.toMatch(/\bnpx\b/);
+    expect(d5).not.toMatch(/\btee\b/);
+    // Przekierowanie wyjścia do pliku: `>`/`>>` niepoprzedzone cyfrą deskryptora ani `&`, nie `>(…)` ani `>&N`.
+    for (const l of lines) expect(l, l).not.toMatch(/(^|[^0-9&>])>>?\s*(?![(&])\S/);
+    const rms = lines.filter((l) => /\brm\b/.test(l));
+    expect(rms.length).toBeGreaterThanOrEqual(2);
+    for (const l of rms) expect(l, l).toMatch(/^add [a-z-]+ < ("[^"]+") && rm \1$/);
   });
 
-  it("add_multiline wykonane: plik tymczasowy usunięty po sukcesie i po błędzie gcloud; zawartość wielowierszowa nietknięta", () => {
-    const fn = lines.find((l) => l.startsWith("add_multiline() {"))!;
-    const bin = join(DIR, `rb-bin-${n++}`);
-    spawnSync("mkdir", ["-p", bin]);
-    const seen = join(DIR, `rb-seen-${n++}`);
-    // Fałszywy gcloud: kopiuje plik z --data-file i kończy się kodem z FAKE_RC.
-    writeFileSync(
-      join(bin, "gcloud"),
-      `#!/bin/sh\nprintf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" > "$SEEN.env"\nfor a in "$@"; do case "$a" in --data-file=*) cat "\${a#--data-file=}" > "$SEEN";; esac; done\nexit "\${FAKE_RC:-0}"\n`,
+  it("D-5: uwagi w prozie — katalog repo, bash albo zsh, bez `set -x`, brak komentarzy w bloku (zsh bez interactivecomments)", () => {
+    expect(d5).toContain("z katalogu repo");
+    expect(d5).toContain("w **bash albo zsh**");
+    expect(d5).toMatch(/\*\*bez\s+`set -x`\*\*/);
+    expect(d5).toMatch(/interactivecomments/);
+    expect(d5).toMatch(/komentarz wykonuje\s+się jako polecenie/);
+    expect(d5).toMatch(/`resend-api-key`, `smsapi-token`, `upstash-redis-rest-token`, `google-client-secret`/);
+    expect(d5).toContain('`add_multiline NAZWA < "$HOME/secure/NAZWA.pem"`');
+  });
+
+  const vapidAt = lines.findIndex((l) => l.startsWith("node -e") && l.includes("generateVAPIDKeys"));
+  const VAPID = lines.slice(vapidAt, vapidAt + 4).join("\n");
+  const PRELUDE = block.slice(block.indexOf("\n") + 1, block.indexOf("\nopenssl rand") + 1);
+  const BODY = block.slice(block.indexOf("\n") + 1);
+
+  it("D-5 VAPID: jedno wywołanie node z web-push z repo; prywatny ze stdout do add, publiczny przez deskryptor 3 do gh; potem vapid_check i metadane", () => {
+    expect(vapidAt).toBeGreaterThanOrEqual(0);
+    expect(lines.filter((l) => /generateVAPIDKeys|web-push/.test(l))).toHaveLength(1);
+    expect(lines[vapidAt]).toContain('require("web-push").generateVAPIDKeys()');
+    expect(lines[vapidAt + 1]).toBe("  3> >(gh variable set NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp) \\");
+    expect(lines[vapidAt + 2]).toBe("  | add vapid-private-key");
+    expect(lines[vapidAt + 3]).toBe("vapid_check");
+    expect(lines[vapidAt + 4]).toBe(
+      "gcloud --project=$P secrets versions list vapid-private-key --sort-by=~createTime --limit=1 --format='value(name,state,createTime)'",
     );
-    chmodSync(join(bin, "gcloud"), 0o755);
-    // rm -P (BSD) nie wszędzie istnieje: fałszywy rm usuwa plik zwykłym rm.
-    writeFileSync(join(bin, "rm"), '#!/bin/sh\n[ "$1" = "-P" ] && shift\nexec /bin/rm -f "$@"\n');
-    chmodSync(join(bin, "rm"), 0o755);
-    const pem = "-----BEGIN PRIVATE KEY-----\nAAAA\nBBBB\n-----END PRIVATE KEY-----\n";
-    for (const rc of ["0", "1"]) {
-      const f = join(DIR, `rb-tmp-${n++}`);
-      writeFileSync(f, pem);
-      const r = spawnSync("bash", ["-c", `P=p-123; ${fn}\nadd_multiline nazwa "$1"`, "x", f], {
-        encoding: "utf8",
-        env: { NODE_ENV: "test", PATH: `${bin}:${process.env.PATH}`, SEEN: seen, FAKE_RC: rc },
+    expect(lines.some((l) => /^gh variable get/.test(l))).toBe(false);
+  });
+
+  it("vapid_check: jedyny odczyt wartości (versions access) idzie potokiem do node; w zmiennej tylko klucz publiczny; reguła „powtórz cały blok”", () => {
+    const access = lines.filter((l) => l.includes("versions access"));
+    expect(access).toHaveLength(1);
+    expect(access[0]).toMatch(
+      /^ {4}sm="\$\(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=\$P secrets versions access latest --secret=vapid-private-key \| node -e '[^']*createECDH\("prime256v1"\)[^']*getPublicKey\(\)[^']*'\)" \|\| sm=""$/,
+    );
+    expect(d5).toContain("powtarza się CAŁY blok VAPID");
+    expect(d5).toContain("D-6 (wdrożenie) dopiero po „VAPID: para OK”");
+  });
+
+  // --- Wykonanie z fałszywymi gcloud i gh -------------------------------------------------------
+  // gcloud: versions add → stdin do $REC/sm (FAKE_ADD_RC ≠ 0: odrzuca; FAKE_HANG=1: wisi po zapisie);
+  //         versions access → $REC/sm albo błąd; versions list → metadane. argv i zmienna logu do $REC.
+  // gh: variable set → stdin do $REC/ghvar (FAKE_GH_SET_RC ≠ 0: odrzuca); variable get → kolejna linia
+  //     z $REC/gh.seq (stara wartość przy pierwszej próbie), potem $REC/ghvar. sleep: tylko licznik.
+  const SHELLS = ["bash", ...(existsSync("/bin/zsh") ? ["/bin/zsh"] : [])];
+  const world = () => {
+    const root = join(DIR, `w-${n++}`);
+    const bin = join(root, "bin");
+    const tmp = join(root, "tmp");
+    const home = join(root, "home");
+    const rec = join(root, "rec");
+    for (const d of [bin, tmp, home, rec]) mkdirSync(d, { recursive: true });
+    const sh = (name: string, body: string) => {
+      writeFileSync(join(bin, name), `#!/bin/sh\n${body}`);
+      chmodSync(join(bin, name), 0o755);
+    };
+    sh(
+      "gcloud",
+      `for a in "$@"; do printf '%s\\n' "$a"; done >> "$REC/gcloud.argv"
+printf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" >> "$REC/gcloud.env"
+case " $* " in
+  *" versions add "*)
+    if [ "\${FAKE_ADD_RC:-0}" != 0 ]; then cat > /dev/null; exit "$FAKE_ADD_RC"; fi
+    cat > "$REC/sm.part"; mv "$REC/sm.part" "$REC/sm"
+    if [ "\${FAKE_HANG:-}" = 1 ]; then /bin/sleep 30; fi
+    exit "\${FAKE_RC:-0}" ;;
+  *" versions access "*) if [ -f "$REC/sm" ]; then cat "$REC/sm"; else echo "NOT_FOUND" >&2; exit 1; fi ;;
+  *" versions list "*) echo "projects/p/secrets/vapid-private-key/versions/7 ENABLED 2026-11-17" ;;
+esac
+`,
+    );
+    sh(
+      "gh",
+      `for a in "$@"; do printf '%s\\n' "$a"; done >> "$REC/gh.argv"
+case "$2" in
+  set) cat > "$REC/gh.part"; if [ "\${FAKE_GH_SET_RC:-0}" != 0 ]; then rm -f "$REC/gh.part"; exit "$FAKE_GH_SET_RC"; fi; mv "$REC/gh.part" "$REC/ghvar" ;;
+  get)
+    if [ "\${FAKE_GH_GET_RC:-0}" != 0 ]; then exit "$FAKE_GH_GET_RC"; fi
+    if [ -s "$REC/gh.seq" ]; then head -n 1 "$REC/gh.seq"; tail -n +2 "$REC/gh.seq" > "$REC/gh.seq2"; mv "$REC/gh.seq2" "$REC/gh.seq"
+    elif [ -f "$REC/ghvar" ]; then cat "$REC/ghvar"; else exit 1; fi ;;
+esac
+`,
+    );
+    sh("sleep", `echo x >> "$REC/sleeps"\n`);
+    const env = (extra: Record<string, string> = {}) => ({
+      NODE_ENV: "test" as const, PATH: `${bin}:${process.env.PATH}`, REC: rec, TMPDIR: tmp, HOME: home, ...extra,
+    });
+    const read = (f: string) => (existsSync(join(rec, f)) ? readFileSync(join(rec, f), "utf8") : "");
+    const run = (shell: string, script: string, extra: Record<string, string> = {}, input?: string) =>
+      spawnSync(shell, ["-c", script], { encoding: "utf8", cwd: ROOT, input, env: env(extra) });
+    const leftovers = () => [tmp, home].flatMap((d) => readdirSync(d).map((f) => join(d, f)));
+    return { bin, rec, sh, env, read, run, leftovers, write: (f: string, s: string) => writeFileSync(join(rec, f), s) };
+  };
+  const keypair = () => {
+    const e = createECDH("prime256v1");
+    e.generateKeys();
+    return { priv: e.getPrivateKey().toString("base64url"), pub: e.getPublicKey().toString("base64url") };
+  };
+  const PEM = "-----BEGIN PRIVATE KEY-----\r\nAAAA\nBBBB\n-----END PRIVATE KEY-----\n";
+
+  describe.each(SHELLS)("powłoka %s", (shell) => {
+    it.each([
+      ["add", ""],
+      ["add", "\r\n"],
+      ["add_multiline", ""],
+    ])("%s z pustą wartością (%j) → kod 1, komunikat z nazwą, gcloud niewywołany (K-1d B1)", (fn, input) => {
+      const w = world();
+      const r = w.run(shell, `${PRELUDE}\n${fn} nazwa-sekretu`, {}, input);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("error: empty value for nazwa-sekretu — gcloud not called");
+      expect(w.read("gcloud.argv")).toBe("");
+    });
+
+    it("add: wartość bez końców wierszy na stdin gcloud, z wyłączonym logiem plikowym", () => {
+      const w = world();
+      const r = w.run(shell, `${PRELUDE}\nadd nazwa`, {}, "abc-123\r\n");
+      expect(r.status, r.stderr).toBe(0);
+      expect(w.read("sm")).toBe("abc-123");
+      expect(w.read("gcloud.env").trim()).toBe("1");
+      expect(w.read("gcloud.argv").split("\n")).toEqual(expect.arrayContaining(["versions", "add", "nazwa", "--data-file=-"]));
+    });
+
+    // N1 (Ethan): xtrace włączony przed wklejeniem — `set +x` w pierwszej linii bloku wyłącza go,
+    // zanim wartość trafi do zmiennej lokalnej (przypisanie i printf byłyby inaczej śledzone na stderr).
+    it.each(["add", "add_multiline"])("%s pod `set -x` włączonym przed blokiem: wartość nie trafia na stderr (Ethan N1)", (fn) => {
+      const w = world();
+      const value = "WARTOSC-TESTOWA-123";
+      const r = w.run(shell, `set -x\n${PRELUDE}\n${fn} nazwa`, {}, `${value}\n`);
+      expect(r.status, r.stderr).toBe(0);
+      expect(w.read("sm")).toContain(value);
+      expect(r.stderr, "xtrace był włączony").toContain("set +x");
+      expect(r.stdout + r.stderr).not.toContain(value);
+    });
+
+    it("VAPID cały blok pod `set -x` włączonym przed blokiem: prywatny nie trafia na stderr (Ethan N1)", () => {
+      const w = world();
+      const r = w.run(shell, `set -x\n${PRELUDE}\n${VAPID}`);
+      expect(r.status, r.stderr).toBe(0);
+      const priv = w.read("sm");
+      expect(priv).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(r.stderr, "xtrace był włączony").toContain("set +x");
+      expect(r.stdout + r.stderr).not.toContain(priv);
+    });
+
+    it.each(["0", "1"])("add_multiline (gcloud rc=%s): treść wielowierszowa bajt w bajt, kod gcloud zachowany, nic na dysku", (rc) => {
+      const w = world();
+      const r = w.run(shell, `${PRELUDE}\nadd_multiline nazwa`, { FAKE_RC: rc }, PEM);
+      expect(r.status).toBe(Number(rc));
+      expect(w.read("sm")).toBe(PEM);
+      expect(w.read("gcloud.env").trim()).toBe("1");
+      expect(w.leftovers()).toEqual([]);
+    });
+
+    it("VAPID cały blok: para pasuje, „VAPID: para OK”, prywatny tylko na stdin gcloud; nic na dysku ani na ekranie", () => {
+      const w = world();
+      const r = w.run(shell, `${PRELUDE}\n${VAPID}`);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain("VAPID: para OK");
+      const priv = w.read("sm");
+      const pub = w.read("ghvar");
+      expect(priv).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(pub).toMatch(/^[A-Za-z0-9_-]{87}$/);
+      const e = createECDH("prime256v1");
+      e.setPrivateKey(Buffer.from(priv, "base64url"));
+      expect(e.getPublicKey().toString("base64url"), "para kluczy").toBe(pub);
+      expect(new Set(w.read("gcloud.env").trim().split("\n"))).toEqual(new Set(["1"]));
+      for (const f of ["gcloud.argv", "gh.argv", "ghvar"]) expect(w.read(f), f).not.toContain(priv);
+      expect(r.stdout + r.stderr).not.toContain(priv);
+      expect(w.leftovers()).toEqual([]);
+    });
+
+    it("VAPID: node bez wyjścia (np. poza katalogiem repo) → kod ≠ 0, gcloud niewywołany (K-1d B1)", () => {
+      const w = world();
+      w.sh("node", "exit 1\n");
+      const r = w.run(shell, `${PRELUDE}\n${VAPID.split("\nvapid_check")[0]}`);
+      expect(r.status).not.toBe(0);
+      expect(w.read("gcloud.argv")).toBe("");
+    });
+
+    it("VAPID: node z uciętym wyjściem i kodem 1 → kod potoku ≠ 0 dzięki pipefail (K-1d B1)", () => {
+      const w = world();
+      w.sh("node", "printf 'uciete'\nexit 1\n");
+      const r = w.run(shell, `${PRELUDE}\n${VAPID.split("\nvapid_check")[0]}`);
+      expect(r.status).not.toBe(0);
+    });
+
+    it("vapid_check: stara wartość w gh przy pierwszej próbie, potem zgodna → „para OK” po jednym odczekaniu", () => {
+      const w = world();
+      const k = keypair();
+      w.write("sm", k.priv);
+      w.write("ghvar", k.pub);
+      w.write("gh.seq", `${keypair().pub}\n`);
+      const r = w.run(shell, `${PRELUDE}\nvapid_check`);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toContain("VAPID: para OK");
+      expect(w.read("sleeps")).toBe("x\n");
+      expect(r.stdout + r.stderr).not.toContain(k.priv);
+    });
+
+    it.each([
+      ["inny klucz publiczny w gh", (w: ReturnType<typeof world>, k: { priv: string; pub: string }) => { w.write("sm", k.priv); w.write("ghvar", keypair().pub); }, {}],
+      ["brak wersji prywatnej", (w: ReturnType<typeof world>, k: { priv: string; pub: string }) => { w.write("ghvar", k.pub); }, {}],
+      ["gh variable get z błędem", (w: ReturnType<typeof world>, k: { priv: string; pub: string }) => { w.write("sm", k.priv); w.write("ghvar", k.pub); }, { FAKE_GH_GET_RC: "1" }],
+      ["brak obu stron (puste = puste to nie para)", () => {}, {}],
+    ])("vapid_check: %s → „VAPID: ROZJAZD”, kod 1 po 10 próbach", (_n, setup, extra) => {
+      const w = world();
+      const k = keypair();
+      setup(w, k);
+      const r = w.run(shell, `${PRELUDE}\nvapid_check`, extra as Record<string, string>);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("VAPID: ROZJAZD — powtórz CAŁY blok VAPID");
+      expect(r.stdout).not.toContain("para OK");
+      expect(w.read("sleeps")).toBe("x\n".repeat(10));
+      expect(r.stdout + r.stderr).not.toContain(k.priv);
+    });
+
+    it.each([
+      ["gcloud odrzuca nową wersję, gh ustawia nowy publiczny (stara para w SM)", { FAKE_ADD_RC: "1" }],
+      ["gh odrzuca nowy publiczny, gcloud zapisuje nowy prywatny (stary publiczny w gh)", { FAKE_GH_SET_RC: "1" }],
+    ])("VAPID cały blok, rozjazd: %s → „VAPID: ROZJAZD”, kod ≠ 0", (_n, extra) => {
+      const w = world();
+      const old = keypair();
+      w.write("sm", old.priv);
+      w.write("ghvar", old.pub);
+      const r = w.run(shell, `${PRELUDE}\n${VAPID}`, extra);
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain("VAPID: ROZJAZD");
+      expect(r.stdout).not.toContain("para OK");
+    });
+  });
+
+  it("add_multiline przerwane Ctrl-C (SIGINT do grupy) w trakcie gcloud → nic nie zostaje na dysku", async () => {
+    const w = world();
+    const child = spawn("bash", ["-c", `${PRELUDE}\nadd_multiline nazwa`], {
+      cwd: ROOT, detached: true, env: w.env({ FAKE_HANG: "1" }), stdio: ["pipe", "ignore", "ignore"],
+    });
+    const exited = new Promise<number | null>((res) => child.on("exit", (code) => res(code)));
+    child.stdin.end(PEM);
+    for (let i = 0; i < 100 && !existsSync(join(w.rec, "sm")); i++) await new Promise((res) => setTimeout(res, 50));
+    expect(existsSync(join(w.rec, "sm")), "gcloud odczytał wartość").toBe(true);
+    process.kill(-child.pid!, "SIGINT");
+    await exited;
+    expect(w.read("sm")).toBe(PEM);
+    expect(w.leftovers()).toEqual([]);
+  }, 15_000);
+
+  // Z1 (Ethan): interaktywny zsh Darka ma `interactivecomments` wyłączone — `#` nie zaczyna komentarza
+  // nawet na początku linii. Cały blok przez stdin do `zsh -f -i` (czyta linia po linii jak przy wpisywaniu).
+  it.skipIf(!existsSync("/bin/zsh"))(
+    "cały blok D-5 w interaktywnym `zsh -f -i` (interactivecomments wyłączone): bez błędów i obcych poleceń, „VAPID: para OK” (Ethan Z1)",
+    () => {
+      const w = world();
+      const secure = join(w.env().HOME, "secure");
+      mkdirSync(secure);
+      writeFileSync(join(secure, "stripe-secret-key"), "wartosc-stripe-1\n");
+      writeFileSync(join(secure, "stripe-webhook-secret"), "wartosc-stripe-2\n");
+      const r = spawnSync("/bin/zsh", ["-f", "-i"], {
+        encoding: "utf8", cwd: ROOT, env: w.env({ PS1: "", PROMPT: "" }),
+        input: `[[ -o interactivecomments ]] || echo INTERACTIVECOMMENTS-OFF\n${BODY}`,
       });
-      expect(r.status, rc).toBe(Number(rc));
-      expect(existsSync(f), `plik po rc=${rc}`).toBe(false);
-      expect(readFileSync(seen, "utf8")).toBe(pem);
-      expect(readFileSync(`${seen}.env`, "utf8").trim()).toBe("1");
-    }
+      const out = r.stdout + r.stderr;
+      expect(r.stdout, "warunek testu: opcja wyłączona").toContain("INTERACTIVECOMMENTS-OFF");
+      // Ethan Z1: cztery wzorce z recenzji; plus „no such file” (komentarz z `<` wykonany jako przekierowanie, :388 @483cff3).
+      for (const bad of ["command not found", "parse error", "no matches found", "unknown", "no such file"]) expect(out, out).not.toContain(bad);
+      expect(r.stdout, out).toContain("VAPID: para OK");
+      expect(readdirSync(secure), "oryginały usunięte po udanym add").toEqual([]);
+      const argv = w.read("gcloud.argv").split("\n");
+      for (const name of ["better-auth-secret", "cron-secret", "vapid-private-key", "stripe-secret-key", "stripe-webhook-secret"]) {
+        expect(argv, name).toContain(name);
+      }
+      expect(w.read("sm")).toBe("wartosc-stripe-2");
+      expect(out).not.toContain("wartosc-stripe");
+    },
+    30_000,
+  );
+
+  it("D-5: rm -P nie jest przedstawiany jako wymazanie; oryginał od dostawcy usuwa człowiek", () => {
+    expect(block).not.toMatch(/\brm -P\b/);
+    expect(d5).toContain("`rm -P` na APFS");
+    expect(d5).toMatch(/nie gwarantuje nadpisania danych/);
+    expect(d5).toMatch(/Plik od dostawcy \(oryginał[^)]*\) usuwa człowiek/);
   });
 
   it("każdy sekret dodawany przez add — ze strumienia albo z pliku na stdin", () => {
     const uses = lines.filter((l) => /(^|\| *)add [a-z]/.test(l));
     expect(uses.length).toBeGreaterThanOrEqual(5);
-    for (const l of uses) expect(l).toMatch(/\| add [a-z-]+\s*$|^add [a-z-]+ < "[^"]+"(\s+#.*)?$/);
+    for (const l of uses) expect(l).toMatch(/\| add [a-z-]+\s*$|^add [a-z-]+ < ("[^"]+") && rm \1$/);
     expect(uses.map((l) => l.match(/add ([a-z-]+)/)![1])).toEqual(
       expect.arrayContaining(["better-auth-secret", "cron-secret", "vapid-private-key", "stripe-secret-key", "stripe-webhook-secret"]),
     );
   });
+});
+
+// Z1/N1 (Ethan, K-1d) + zakres Olivera, rozszerzone w K-1e: KAŻDY płot kodu runbooka kroku D
+// (```bash, ```sh, ```zsh, płot bez języka i każdy inny) jest blokiem do wklejenia w interaktywnym zsh
+// bez `interactivecomments` — chyba że stoi na jawnej liście wyjątków niżej (nie-powłoka).
+// Zero komentarzy (objaśnienia w prozie); bloki dotykające sekretów zaczynają się od `set +x`.
+describe("G-D2: płoty kodu runbooka kroku D — bez komentarzy, `set +x` przy sekretach (Z1, N1, K-1e)", () => {
+  const RUNBOOK = readFileSync(join(ROOT, "docs/runbook-krok-d.md"), "utf8");
+  const FENCES = [...RUNBOOK.matchAll(/^```([^\n`]*)\n([\s\S]*?)^```$/gm)].map((m) => ({
+    lang: (m[1] ?? "").trim(),
+    body: m[2] ?? "",
+    first: (m[2] ?? "").split("\n")[0] ?? "",
+  }));
+  // Jawna lista wyjątków: płoty, które NIE są poleceniami powłoki (język + dokładna pierwsza linia).
+  const NOT_SHELL = [
+    { lang: "", first: "assertion.repository_id == '1152153440' &&", why: "warunek atrybutów WIF (CEL) dla --wif-condition-file, sekcja 3.8" },
+    { lang: "sql", first: "SELECT rolname, rolcanlogin, rolbypassrls, rolsuper FROM pg_roles", why: "zapytanie wpisywane w psql, D-7" },
+  ];
+  const isException = (f: { lang: string; first: string }) => NOT_SHELL.some((e) => e.lang === f.lang && e.first === f.first);
+  const SHELL = FENCES.filter((f) => !isException(f));
+  const SECRET_TRIGGER = /secrets versions|PGPASSWORD|Authorization:|gh secret set|--flags-file|--data-file|password|access-token/i;
+
+  it.each(NOT_SHELL.map((e) => [e.why, e]))("wyjątek (%s) występuje dokładnie raz, z tym językiem i tą pierwszą linią", (_why, e) => {
+    expect(FENCES.filter((f) => f.lang === e.lang && f.first === e.first)).toHaveLength(1);
+  });
+
+  it("płotów do wklejenia (wszystkie poza wyjątkami) jest co najmniej 12; płoty liczone bez względu na język", () => {
+    expect(FENCES.length).toBe(SHELL.length + NOT_SHELL.length);
+    expect(SHELL.length).toBeGreaterThanOrEqual(12);
+  });
+
+  it.each(SHELL.map((f, i) => [i, f.lang || "bez języka", f.first.slice(0, 50), f.body]))(
+    "płot %i (%s, %s): żadna linia nie zaczyna się od `#` ani nie ma ` #` w środku",
+    (_i, _lang, _first, body) => {
+      for (const l of String(body).split("\n")) {
+        expect(l, l).not.toMatch(/^\s*#/);
+        expect(l, l).not.toMatch(/\s#/);
+      }
+    },
+  );
+
+  it("płoty dotykające sekretów zaczynają się od `set +x` (Secret Manager, hasło, Authorization, gh secret set, --flags-file, --data-file, access-token)", () => {
+    const touching = SHELL.filter((f) => SECRET_TRIGGER.test(f.body));
+    expect(touching.length).toBeGreaterThanOrEqual(4);
+    for (const f of touching) expect(f.first, f.body).toMatch(/^set \+x(;|$)/);
+  });
+
+  it.each([
+    "gh secret set X --env production-gcp < plik",
+    "gcloud scheduler jobs update http j --flags-file=<(printf x)",
+    "gcloud secrets versions add s --data-file=-",
+    "PGPASSWORD=x psql",
+    "postgres-admin-password",
+    "gcloud auth print-access-token",
+    "Authorization: Bearer x",
+  ])("wyzwalacz sekretu obejmuje: %s", (l) => {
+    expect(l).toMatch(SECRET_TRIGGER);
+  });
+
+  // K-1e pkt 3: zasady ogólne zgodne z D-5 — żadnego dopuszczenia ścieżki pliku w --data-file.
+  it("`--data-file=ŚCIEŻKA` występuje wyłącznie jako zakaz („nigdy”); zasady ogólne bez „pliku spoza repo”", () => {
+    const at = [...RUNBOOK.matchAll(/--data-file=ŚCIEŻKA/g)].map((m) => m.index ?? 0);
+    expect(at.length).toBeGreaterThanOrEqual(2);
+    for (const i of at) expect(RUNBOOK.slice(Math.max(0, i - 7), i)).toBe("nigdy `");
+    const s0 = RUNBOOK.slice(RUNBOOK.indexOf("## 0. Zasady"), RUNBOOK.indexOf("## 1. Przed startem"));
+    expect(s0).not.toMatch(/plik\s+spoza\s+repo/);
+    expect(s0).toMatch(/Wyłącznie strumień do `--data-file=-`/);
+  });
+
+  // K-1e pkt 4: §9 — proxy do bazy nie zostaje w tle.
+  const s9 = RUNBOOK.slice(RUNBOOK.indexOf("## 9. Dostęp administracyjny"), RUNBOOK.indexOf("## 10."));
+  const B9 = s9.slice(s9.indexOf("```bash\n") + 8, s9.indexOf("\n```", s9.indexOf("```bash\n")));
+
+  it("§9: ostatnia linia bloku to `kill %1`", () => {
+    const ls = B9.split("\n");
+    expect(ls[0]).toBe("set +x");
+    expect(ls[ls.length - 1]).toBe("kill %1");
+    expect(ls.filter((l) => l.endsWith(" &"))).toHaveLength(1);
+  });
+
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  it.each(["bash", ...(existsSync("/bin/zsh") ? ["/bin/zsh"] : [])])(
+    "§9 wykonany w %s z fałszywymi cloud-sql-proxy, gcloud i psql: po wyjściu z psql proxy nie żyje; hasło tylko w środowisku psql",
+    async (shell) => {
+      const root = join(DIR, `s9-${n++}`);
+      const bin = join(root, "bin");
+      const rec = join(root, "rec");
+      for (const d of [bin, rec]) mkdirSync(d, { recursive: true });
+      const sh = (name: string, body: string) => {
+        writeFileSync(join(bin, name), `#!/bin/sh\n${body}`);
+        chmodSync(join(bin, name), 0o755);
+      };
+      sh("cloud-sql-proxy", `echo $$ > "$REC/proxy.pid"\nexec /bin/sleep 30\n`);
+      sh("gcloud", `printf '%s' haslo-testowe-9\n`);
+      sh(
+        "psql",
+        `i=0; while [ ! -s "$REC/proxy.pid" ] && [ $i -lt 50 ]; do /bin/sleep 0.1; i=$((i+1)); done
+printf '%s' "$PGPASSWORD" > "$REC/psql.env"
+for a in "$@"; do printf '%s\\n' "$a"; done > "$REC/psql.argv"
+`,
+      );
+      const r = spawnSync(shell, ["-c", B9], {
+        encoding: "utf8", cwd: ROOT, env: { NODE_ENV: "test" as const, PATH: `${bin}:${process.env.PATH}`, REC: rec, HOME: root },
+      });
+      const pid = Number(readFileSync(join(rec, "proxy.pid"), "utf8").trim());
+      try {
+        expect(r.status, r.stderr).toBe(0);
+        expect(readFileSync(join(rec, "psql.env"), "utf8")).toBe("haslo-testowe-9");
+        expect(readFileSync(join(rec, "psql.argv"), "utf8")).not.toContain("haslo-testowe-9");
+        expect(r.stdout + r.stderr).not.toContain("haslo-testowe-9");
+        for (let i = 0; i < 40 && alive(pid); i++) await new Promise((res) => setTimeout(res, 50));
+        expect(alive(pid), "proxy żyje po bloku").toBe(false);
+      } finally {
+        if (alive(pid)) process.kill(pid, "SIGKILL");
+      }
+    },
+    15_000,
+  );
 });

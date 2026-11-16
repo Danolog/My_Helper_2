@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
+import Stripe from "stripe";
 import { parseBody, depositCreateSessionSchema } from "@/lib/api-validation";
 import {
   appointmentConflictWhere,
@@ -19,12 +20,40 @@ import {
 import { hostingPlatform } from "@/lib/hosting";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
+import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
 import { assertSalonRefs } from "@/lib/salon-refs";
 import { timeBlocks } from "@/lib/schema";
 import { appointments, depositPayments } from "@/lib/schema";
 import { getOptionalSession } from "@/lib/session";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
+
+/**
+ * Pola błędu Stripe bez wartości — WYŁĄCZNIE dla błędów SDK Stripe
+ * (`Stripe.errors.StripeError`); inny obiekt z polem `code` (np. błąd bazy) nic
+ * tu nie dokłada, jego tożsamość daje `toErrorIdentity`.
+ * - `stripeType` = `rawType` z API (np. invalid_request_error). W SDK `type`
+ *   to nazwa klasy (dubluje errorName), więc nie jest używane.
+ * - `stripeCode` (np. email_invalid), `stripeParam` (NAZWA pola, np.
+ *   customer_email — nigdy wartość), `stripeRequestId` (req_…).
+ * Tylko napisy; `message`, `raw`, `headers`, `detail` celowo pominięte —
+ * message może zawierać e-mail gościa.
+ */
+function stripeErrorFields(error: unknown): {
+  stripeType?: string;
+  stripeCode?: string;
+  stripeParam?: string;
+  stripeRequestId?: string;
+} {
+  if (!(error instanceof Stripe.errors.StripeError)) return {};
+  const { rawType, code, param, requestId } = error as { rawType?: unknown; code?: unknown; param?: unknown; requestId?: unknown };
+  return {
+    ...(typeof rawType === "string" ? { stripeType: rawType } : {}),
+    ...(typeof code === "string" ? { stripeCode: code } : {}),
+    ...(typeof param === "string" ? { stripeParam: param } : {}),
+    ...(typeof requestId === "string" ? { stripeRequestId: requestId } : {}),
+  };
+}
 
 /**
  * POST /api/deposits/create-session
@@ -431,9 +460,14 @@ export async function POST(request: Request) {
         // Do NOT fall back to the dev simulation when Stripe is configured —
         // in production the appointment would stay unpayable and block the
         // slot. Clean up (cascade also removes the depositPayments row).
+        // Luka D (P1 logi, Ryan): message błędu Stripe może zawierać e-mail
+        // gościa (customer_email), a ten catch łapie też błąd zapisu Drizzle
+        // (params). Do logu tylko tożsamość błędu i pola Stripe bez wartości.
         logger.error("Stripe Checkout session creation failed for deposit", {
-          error: stripeError instanceof Error ? stripeError.message : stripeError,
+          ...toErrorIdentity(stripeError),
+          ...stripeErrorFields(stripeError),
           appointmentId: newAppointment.id,
+          depositPaymentId: depositPayment.id,
         });
         await db.delete(appointments).where(eq(appointments.id, newAppointment.id));
         return NextResponse.json(
