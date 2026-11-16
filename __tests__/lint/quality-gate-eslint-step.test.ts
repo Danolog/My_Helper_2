@@ -1,7 +1,9 @@
 /**
  * Bramka CI uruchamia ESLint (`pnpm lint`) w jobie „TypeScript Check”.
  * Krok pada na błędach ESLint; ostrzeżenia nie blokują (brak --max-warnings).
- * Test pada, gdy krok zniknie, zostanie wyciszony albo przeniesiony poza job.
+ * Test pada, gdy krok zniknie, zostanie wyciszony (na kroku albo na jobie),
+ * przeniesiony poza job, gdy skrypt lint przestanie być dokładnie `eslint .`
+ * albo job zmieni nazwę „TypeScript Check” (wymagany check ochrony main).
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -33,7 +35,6 @@ describe("quality-gate.yml: krok ESLint", () => {
   const tc = job("typecheck");
 
   it("job typecheck istnieje i ma dokładnie jeden krok `pnpm lint`, po instalacji zależności", () => {
-    expect(tc).toContain("name: TypeScript Check");
     const runs = steps(tc).map(runOf);
     expect(runs.filter((r) => r === "pnpm lint")).toHaveLength(1);
     expect(runs.indexOf("pnpm lint")).toBeGreaterThan(runs.indexOf("pnpm install --frozen-lockfile"));
@@ -46,8 +47,19 @@ describe("quality-gate.yml: krok ESLint", () => {
     expect(tc).not.toMatch(/continue-on-error/);
   });
 
-  it("skrypt lint: eslint bez --max-warnings — błędy blokują, ostrzeżenia nie", () => {
-    expect(PKG.scripts.lint).toMatch(/^eslint\b/);
-    expect(PKG.scripts.lint).not.toMatch(/--max-warnings|--quiet|\|\||;/);
+  it("skrypt lint dokładnie `eslint .` — całe repo, bez --rule/--max-warnings/--quiet (błędy blokują, ostrzeżenia nie)", () => {
+    expect(PKG.scripts.lint).toBe("eslint .");
+  });
+
+  it("job typecheck nie jest wyciszony ani pomijany: bez `if:` i continue-on-error na poziomie joba", () => {
+    // Pominięty job GitHub liczy jak zaliczony wymagany check — `if:` na jobie zdjąłby lint z bramki.
+    const head = tc.slice(0, tc.indexOf("\n    steps:\n"));
+    expect(head).not.toMatch(/^ {4}if:/m);
+    expect(head).not.toMatch(/^ {4}continue-on-error:/m);
+    expect(steps(tc).filter((s) => /^\s*if:/m.test(s))).toEqual([]);
+  });
+
+  it("nazwa joba bez zmian: „TypeScript Check” (wymagany check ochrony main)", () => {
+    expect(tc).toMatch(/^ {4}name: TypeScript Check\s*$/m);
   });
 });
