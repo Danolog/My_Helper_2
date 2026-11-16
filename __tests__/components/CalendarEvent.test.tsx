@@ -1,4 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CalendarEventComponent } from "@/components/calendar/calendar-event";
 import type { CalendarEvent } from "@/types/calendar";
@@ -374,5 +375,91 @@ describe("CalendarEventComponent", () => {
 
     const element = container.firstChild as HTMLElement;
     expect(element.style.backgroundColor).toBe("#ff0000");
+  });
+
+  // #164 - keyboard on the inner complete/cancel buttons must not open details
+  describe("keyboard (#164)", () => {
+    function renderWithActions(status: CalendarEvent["appointment"]["status"] = "scheduled") {
+      const event = createMockEvent({ appointmentOverrides: { status } });
+      render(
+        <CalendarEventComponent
+          event={event}
+          onDragStart={mockOnDragStart}
+          onDragEnd={mockOnDragEnd}
+          onClick={mockOnClick}
+          onCancel={mockOnCancel}
+          onComplete={mockOnComplete}
+        />
+      );
+      return event;
+    }
+
+    it.each([
+      ["Enter", "{Enter}"],
+      ["Space", " "],
+    ])("%s on the complete button opens the complete dialog, not details", async (_name, key) => {
+      const user = userEvent.setup();
+      const event = renderWithActions();
+
+      screen.getByTestId("complete-event-btn").focus();
+      await user.keyboard(key);
+
+      expect(mockOnComplete).toHaveBeenCalledTimes(1);
+      expect(mockOnComplete).toHaveBeenCalledWith(event);
+      expect(mockOnCancel).not.toHaveBeenCalled();
+      expect(mockOnClick).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["Enter", "{Enter}"],
+      ["Space", " "],
+    ])("%s on the cancel button opens the cancel dialog, not details", async (_name, key) => {
+      const user = userEvent.setup();
+      const event = renderWithActions();
+
+      screen.getByTestId("cancel-event-btn").focus();
+      await user.keyboard(key);
+
+      expect(mockOnCancel).toHaveBeenCalledTimes(1);
+      expect(mockOnCancel).toHaveBeenCalledWith(event);
+      expect(mockOnComplete).not.toHaveBeenCalled();
+      expect(mockOnClick).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["Enter", "{Enter}"],
+      ["Space", " "],
+    ])("%s on the event itself still opens details", async (_name, key) => {
+      const user = userEvent.setup();
+      const event = renderWithActions();
+
+      screen.getByRole("button", { name: /Strzyzenie damskie, 10:00-11:00/ }).focus();
+      await user.keyboard(key);
+
+      expect(mockOnClick).toHaveBeenCalledTimes(1);
+      expect(mockOnClick).toHaveBeenCalledWith(event);
+      expect(mockOnCancel).not.toHaveBeenCalled();
+      expect(mockOnComplete).not.toHaveBeenCalled();
+    });
+
+    it("other keys on the event do nothing", async () => {
+      const user = userEvent.setup();
+      renderWithActions();
+
+      screen.getByRole("button", { name: /Strzyzenie damskie, 10:00-11:00/ }).focus();
+      await user.keyboard("{Escape}a");
+
+      expect(mockOnClick).not.toHaveBeenCalled();
+    });
+
+    it("Enter on a cancelled event (no action buttons) opens details", async () => {
+      const user = userEvent.setup();
+      const event = renderWithActions("cancelled");
+
+      screen.getByRole("button", { name: /Anulowana/ }).focus();
+      await user.keyboard("{Enter}");
+
+      expect(mockOnClick).toHaveBeenCalledWith(event);
+    });
   });
 });

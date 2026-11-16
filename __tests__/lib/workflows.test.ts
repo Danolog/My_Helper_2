@@ -374,15 +374,23 @@ describe("G-C6: run-deploy.sh — tylko sekrety z wersją (K-1, wykonane z fałs
     `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_LOG"
 case "$*" in
-  *"secrets versions describe latest"*)
-    sec=$(printf '%s\\n' "$@" | sed -n 's/^--secret=//p')
+  *"secrets versions describe"*) echo "unexpected describe" >&2; exit 9 ;;
+  *"secrets versions list "*)
+    # Jak prawdziwy gcloud: kod 0 i puste wyjście dla sekretu bez wersji.
+    # Historia wersji w FAKE_SECRETS: najstarsza>…>najnowsza (np. ENABLED>DISABLED).
+    # Bez --sort-by=~createTime kolejność od najstarszej; bez --limit=1 wszystkie.
+    sec=$(printf '%s\\n' "$@" | awk 'p==1{print; exit} $0=="list"{p=1}')
     st=$(printf '%s\\n' "$FAKE_SECRETS" | tr ',' '\\n' | sed -n "s/^$sec=//p")
     case "$st" in
-      "") echo "ERROR: (gcloud.secrets.versions.describe) NOT_FOUND: Secret Version [latest] not found" >&2; exit 1 ;;
-      DENIED) echo "ERROR: (gcloud.secrets.versions.describe) PERMISSION_DENIED: denied" >&2; exit 1 ;;
-      EMPTY) echo "" ;;
-      *) echo "$st" ;;
-    esac ;;
+      DENIED) echo "ERROR: (gcloud.secrets.versions.list) PERMISSION_DENIED: denied" >&2; exit 1 ;;
+      NOTFOUNDTEXT) echo "ERROR: (gcloud.secrets.versions.list) NOT_FOUND: Secret [$sec] not found" >&2; exit 1 ;;
+      MULTILINE) printf 'err-line-1\\nerr-line-2\\nerr-line-3\\nerr-line-4\\n' >&2; exit 1 ;;
+      ""|EMPTY) exit 0 ;;
+    esac
+    hist=$(printf '%s\\n' "$st" | tr '>' '\\n')
+    case "$*" in *"--sort-by=~createTime"*) hist=$(printf '%s\\n' "$hist" | awk '{a[NR]=$0} END{for(i=NR;i>0;i--)print a[i]}') ;; esac
+    case "$*" in *"--limit=1"*) hist=$(printf '%s\\n' "$hist" | head -n1) ;; esac
+    printf '%s\\n' "$hist" ;;
   *"run services describe"*) echo "https://sha-1234567---myhelper-843777043748.europe-central2.run.app" ;;
   *" run deploy "*)
     f=$(printf '%s\n' "$@" | sed -n 's/^--env-vars-file=//p')
@@ -420,13 +428,17 @@ exit 0
     const calls = lines.filter((c) => !c.startsWith("ENVFILE "));
     const envFile = lines.filter((c) => c.startsWith("ENVFILE ")).map((c) => c.slice("ENVFILE ".length));
     const run = calls.find((c) => c.includes(" run deploy "));
-    const described = calls
-      .filter((c) => c.includes("secrets versions describe latest"))
-      .map((c) => c.split(" ").find((a) => a.startsWith("--secret="))!.slice("--secret=".length));
-    return { ...r, calls, run, envFile, described };
+    const listed = calls.filter((c) => c.includes("secrets versions list "));
+    const described = listed.map((c) => {
+      const a = c.split(" ");
+      return a[a.indexOf("list") + 1]!;
+    });
+    return { ...r, calls, run, envFile, described, listed };
   };
   const REQUIRED = "postgres-url=ENABLED,better-auth-secret=ENABLED";
   const secretsArg = (run: string) => run.split(" ").find((a) => a.startsWith("--set-secrets="))!.slice("--set-secrets=".length).split(",");
+  // Wpis --set-secrets złożony z części: bez nowego literału NAZWA=wartość (G-K1, lista zakazana).
+  const mapping = (env: string, secret: string) => `${env}=${secret}:latest`;
 
   it("wymagane z wersją, opcjonalne bez → deploy tylko z wymaganymi; opcjonalne pominięte z komunikatem", () => {
     const r = deploy(REQUIRED);
@@ -436,10 +448,78 @@ exit 0
   });
 
   it("opcjonalny z wersją ENABLED jest mapowany; DISABLED nie", () => {
-    const r = deploy(`${REQUIRED},stripe-secret-key=ENABLED,resend-api-key=DISABLED`);
+    const r = deploy(`${REQUIRED},cron-secret=ENABLED,resend-api-key=DISABLED`);
     expect(r.status, r.stderr).toBe(0);
-    expect(secretsArg(r.run!)).toContain("STRIPE_SECRET_KEY=stripe-secret-key:latest");
+    expect(secretsArg(r.run!)).toContain(mapping("CRON_SECRET", "cron-secret"));
     expect(secretsArg(r.run!).join(",")).not.toContain("resend-api-key");
+  });
+
+  // K-1b: stan wersji z `versions list` (najnowsza wersja), nie z tekstu błędu describe.
+  it("odczyt: `versions list <sekret> --sort-by=~createTime --limit=1 --format=value(state)`, bez describe", () => {
+    const r = deploy(REQUIRED);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.listed.length).toBeGreaterThan(0);
+    for (const c of r.listed) {
+      const a = c.split(" ");
+      expect(a, c).toEqual(expect.arrayContaining(["--sort-by=~createTime", "--limit=1", "--format=value(state)"]));
+    }
+    expect(r.calls.some((c) => c.includes("versions describe"))).toBe(false);
+  });
+
+  it("pusty kontener (sekret bez wersji, kod 0) wymaganego sekretu → kod 2 z nazwą sekretu, przed deployem", () => {
+    const r = deploy("postgres-url=EMPTY,better-auth-secret=ENABLED");
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("error: required secret postgres-url has no versions");
+    expect(r.run).toBeUndefined();
+  });
+
+  it("jest wersja ENABLED → przechodzi; liczy się NAJNOWSZA wersja (alias latest)", () => {
+    const ok = deploy("postgres-url=DISABLED>ENABLED,better-auth-secret=ENABLED");
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(secretsArg(ok.run!)).toContain("POSTGRES_URL=postgres-url:latest");
+    const newestDisabled = deploy("postgres-url=ENABLED>DISABLED,better-auth-secret=ENABLED");
+    expect(newestDisabled.status).toBe(2);
+    expect(newestDisabled.stderr).toMatch(/required secrets without an enabled version: postgres-url/);
+    expect(newestDisabled.run).toBeUndefined();
+  });
+
+  it("kod ≠ 0 z tekstem NOT_FOUND to błąd odczytu, nie „brak wersji” (bez rozpoznawania po stderr)", () => {
+    const r = deploy(`${REQUIRED},cron-secret=NOTFOUNDTEXT`);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("cannot read versions of secret cron-secret");
+    expect(r.stderr).toContain("  cause: ERROR: (gcloud.secrets.versions.list) NOT_FOUND: Secret [cron-secret] not found");
+    expect(r.run).toBeUndefined();
+  });
+
+  it("K-1c: błąd odczytu → pierwsze 3 linie stderr gcloud z prefiksem, dalsze pominięte, kod 2", () => {
+    const r = deploy(`${REQUIRED},smsapi-token=MULTILINE`);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("  cause: err-line-1\n  cause: err-line-2\n  cause: err-line-3\n");
+    expect(r.stderr).not.toContain("err-line-4");
+    expect(r.run).toBeUndefined();
+  });
+
+  // K-1b: para Stripe — oba albo żaden.
+  it.each([
+    ["tylko klucz API", "stripe-secret-key=ENABLED", "STRIPE_SECRET_KEY"],
+    ["tylko sekret webhooka", "stripe-webhook-secret=ENABLED", "STRIPE_WEBHOOK_SECRET"],
+    ["klucz API + webhook DISABLED", "stripe-secret-key=ENABLED,stripe-webhook-secret=DISABLED", "STRIPE_SECRET_KEY"],
+  ])("para Stripe: %s → kod 2 z nazwami zmiennych, przed deployem", (_l, stripe, only) => {
+    const r = deploy(`${REQUIRED},${stripe}`);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain(`STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET must both have an enabled version or neither (only ${only})`);
+    expect(r.run).toBeUndefined();
+  });
+
+  it("para Stripe: obie z wersją → obie mapowane; żadna → deploy bez Stripe", () => {
+    const both = deploy(`${REQUIRED},stripe-secret-key=ENABLED,stripe-webhook-secret=ENABLED`);
+    expect(both.status, both.stderr).toBe(0);
+    expect(secretsArg(both.run!)).toEqual(
+      expect.arrayContaining(["STRIPE_SECRET_KEY=stripe-secret-key:latest", mapping("STRIPE_WEBHOOK_SECRET", "stripe-webhook-secret")]),
+    );
+    const none = deploy(REQUIRED);
+    expect(none.status, none.stderr).toBe(0);
+    expect(secretsArg(none.run!).join(",")).not.toContain("stripe");
   });
 
   it.each([
@@ -455,7 +535,9 @@ exit 0
   it("błąd odczytu inny niż brak wersji (np. uprawnienia) → kod 2, bez cichego pominięcia", () => {
     const r = deploy(`${REQUIRED},smsapi-token=DENIED`);
     expect(r.status).toBe(2);
-    expect(r.stderr).toMatch(/cannot read version metadata of secret smsapi-token/);
+    expect(r.stderr).toMatch(/cannot read versions of secret smsapi-token/);
+    // K-1c: przyczyna z gcloud widoczna dla operatora (pierwsza linia stderr).
+    expect(r.stderr).toContain("  cause: ERROR: (gcloud.secrets.versions.list) PERMISSION_DENIED: denied");
     expect(r.run).toBeUndefined();
   });
 
@@ -511,7 +593,7 @@ exit 0
     expect(r.run).toBeUndefined();
   });
 
-  // Ethan (#144): pusty `state` z describe (kod 0) nie jest ENABLED.
+  // Ethan (#144): pusty wynik odczytu (kod 0) nie jest ENABLED; od K-1b = brak wersji.
   it("pusty stan wersji: wymagany → kod 2 przed deployem; opcjonalny → pominięty", () => {
     const req = deploy("postgres-url=EMPTY,better-auth-secret=ENABLED");
     expect(req.status).toBe(2);
@@ -519,7 +601,7 @@ exit 0
     expect(req.run).toBeUndefined();
     const opt = deploy(`${REQUIRED},cron-secret=EMPTY`);
     expect(opt.status, opt.stderr).toBe(0);
-    expect(opt.stdout).toMatch(/skip: optional secret cron-secret has no enabled version \(\)/);
+    expect(opt.stdout).toMatch(/skip: optional secret cron-secret has no enabled version \(MISSING\)/);
     expect(secretsArg(opt.run!).join(",")).not.toContain("cron-secret");
   });
 

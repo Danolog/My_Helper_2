@@ -21,11 +21,13 @@
 # - klasa `secret` → --set-secrets NAZWA=<secretName>:latest (tylko nazwy,
 #   wartości są w Secret Manager i nigdy nie przechodzą przez ten skrypt).
 #   Mapowane są WYŁĄCZNIE sekrety, których najnowsza wersja ma stan ENABLED
-#   (odczyt metadanych `secrets versions describe latest`, bez wartości).
+#   (odczyt metadanych `secrets versions list --sort-by=~createTime --limit=1`,
+#   bez wartości; pusty wynik = brak wersji, kod ≠ 0 = błąd odczytu).
 #   Sekret `required: true` bez wersji → błąd PRZED `gcloud run deploy`;
 #   opcjonalny bez wersji → pominięty (moduł wyłącza się sam). Błąd odczytu
-#   inny niż „brak wersji” (np. brak uprawnień) → błąd, nigdy ciche pominięcie.
+#   (np. brak uprawnień) → błąd, nigdy ciche pominięcie.
 #   Żadnych wersji-zaślepek (K-1, decyzja Olivera).
+#   Para STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET: obie z wersją albo żadna (K-1b).
 # - klasa `var` → wartość z otoczenia procesu (workflow podaje ją z `vars.*`);
 #   `required: true` i brak wartości → błąd; opcjonalna i brak → pominięta.
 #   Wartości idą przez --env-vars-file (plik tymczasowy, usuwany przy wyjściu),
@@ -110,14 +112,22 @@ mapped=()
 missing_secrets=()
 while read -r env_name secret_name is_required; do
   [[ -n "$env_name" ]] || continue
-  if state="$("${GC[@]}" secrets versions describe latest --secret="$secret_name" \
-    --format='value(state)' 2>"$workdir/describe.err")"; then
-    :
-  elif grep -qiE 'NOT_FOUND|not found' "$workdir/describe.err"; then
-    state="MISSING"
-  else
-    echo "error: cannot read version metadata of secret $secret_name (not a missing version) — stop" >&2
+  # Najnowsza wersja (to na nią wskazuje alias `latest`) i jej stan. `versions
+  # list` kończy się kodem 0 także dla sekretu bez wersji (puste wyjście), więc
+  # brak wersji nie jest rozpoznawany po tekście błędu (K-1b, jak secret_has_version
+  # w bootstrap.sh): kod ≠ 0 = błąd odczytu → stop. Przyczyna (pierwsze linie
+  # stderr gcloud — metadane, bez wartości sekretów) idzie do operatora (K-1c).
+  if ! state="$("${GC[@]}" secrets versions list "$secret_name" --sort-by=~createTime --limit=1 \
+    --format='value(state)' 2>"$workdir/list.err")"; then
+    echo "error: cannot read versions of secret $secret_name — stop" >&2
+    sed -n '1,3s/^/  cause: /p' "$workdir/list.err" >&2
     exit 2
+  fi
+  if [[ -z "$state" ]]; then
+    state="MISSING"
+    if [[ "$is_required" == 1 ]]; then
+      echo "error: required secret $secret_name has no versions" >&2
+    fi
   fi
   if [[ "$state" == "ENABLED" ]]; then
     mapped+=("${env_name}=${secret_name}:latest")
@@ -133,6 +143,18 @@ if [[ ${#missing_secrets[@]} -gt 0 ]]; then
 fi
 if [[ ${#mapped[@]} -eq 0 ]]; then
   echo "error: no secrets to map" >&2
+  exit 2
+fi
+# Para Stripe (K-1b): klucz API i sekret webhooka — oba albo żaden. Ten sam
+# warunek sprawdza strażnik startu (infra/runtime/secret-guard.mjs).
+stripe_mapped=()
+for m in "${mapped[@]}"; do
+  case "${m%%=*}" in
+    STRIPE_SECRET_KEY | STRIPE_WEBHOOK_SECRET) stripe_mapped+=("${m%%=*}") ;;
+  esac
+done
+if [[ ${#stripe_mapped[@]} -eq 1 ]]; then
+  echo "error: STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET must both have an enabled version or neither (only ${stripe_mapped[0]}) — stop" >&2
   exit 2
 fi
 (IFS=,; printf '%s' "${mapped[*]}") >"$workdir/secrets.txt"

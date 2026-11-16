@@ -27,7 +27,7 @@
  * etapie secrets; describe bez sprawdzania (brak idempotencji).
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -68,6 +68,7 @@ writeFileSync(
   `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_LOG"
 case " $* " in *" sql users "*) printf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" >> "$FAKE_ENV" ;; esac
+case " $* " in *" versions add "*) printf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" >> "$FAKE_ENV_ADD" ;; esac
 for a in "$@"; do
   case "$a" in
     --flags-file=*) cat "\${a#--flags-file=}" >> "$FAKE_FLAGS" ;;
@@ -106,6 +107,8 @@ interface Run {
   flags: string;
   stdin: string;
   env: string[];
+  /** CLOUDSDK_CORE_DISABLE_FILE_LOGGING przy każdym `secrets versions add`. */
+  envAdd: string[];
 }
 
 interface Opts {
@@ -121,7 +124,8 @@ function bootstrap(args: string[], opts: Opts = {}): Run {
   const flags = join(DIR, `flags-${id}`);
   const stdin = join(DIR, `stdin-${id}`);
   const env = join(DIR, `env-${id}`);
-  for (const f of [log, flags, stdin, env]) writeFileSync(f, "");
+  const envAdd = join(DIR, `env-add-${id}`);
+  for (const f of [log, flags, stdin, env, envAdd]) writeFileSync(f, "");
   const r = spawnSync("bash", [SCRIPT, ...args], {
     encoding: "utf8",
     env: {
@@ -131,6 +135,7 @@ function bootstrap(args: string[], opts: Opts = {}): Run {
       FAKE_FLAGS: flags,
       FAKE_STDIN: stdin,
       FAKE_ENV: env,
+      FAKE_ENV_ADD: envAdd,
       ...(opts.exists ? { FAKE_EXISTS: "1" } : {}),
       ...(opts.usersExist ? { FAKE_USERS_EXIST: "1" } : {}),
       ...(opts.versionsError ? { FAKE_VERSIONS_ERROR: "1" } : {}),
@@ -146,6 +151,7 @@ function bootstrap(args: string[], opts: Opts = {}): Run {
     flags: readFileSync(flags, "utf8"),
     stdin: readFileSync(stdin, "utf8"),
     env: readFileSync(env, "utf8").split("\n").filter(Boolean),
+    envAdd: readFileSync(envAdd, "utf8").split("\n").filter(Boolean),
   };
 }
 
@@ -425,6 +431,14 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
     expect(SOURCE).toMatch(/CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "\$\{GC\[@\]\}" sql users/);
   });
 
+  // N2 (Ryan, K-1b): `secrets versions add` z hasłem w stdin też bez lokalnego logu gcloud.
+  it("N2: każde secrets versions add (postgres-url, postgres-admin-password) bez lokalnego logu gcloud", () => {
+    const adds = r.calls.filter((c) => c.includes("versions add"));
+    expect(adds).toHaveLength(2);
+    expect(r.envAdd).toEqual(["1", "1"]);
+    expect(SOURCE).toMatch(/CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "\$\{GC\[@\]\}" secrets versions add/);
+  });
+
   it("błąd odczytu wersji sekretu (≠ brak wersji) przerywa etap przed hasłem", () => {
     const e = bootstrap([...base("sql"), "--apply"], { versionsError: true });
     expect(e.status).toBe(2);
@@ -608,5 +622,79 @@ describe("G-D1: WIF", () => {
       expect(r.status).toBe(2);
       expect(r.calls).toEqual([]);
     }
+  });
+});
+
+// N2 (Ryan, K-1b): runbook D-5 — wartości sekretów wyłącznie przez stdin,
+// przez tr -d '\r\n' i bez lokalnego logu gcloud (jedna funkcja add).
+describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () => {
+  const RUNBOOK = readFileSync(join(ROOT, "docs/runbook-krok-d.md"), "utf8");
+  const d5 = RUNBOOK.slice(RUNBOOK.indexOf("## 5. D-5"), RUNBOOK.indexOf("## 6. D-6"));
+  const block = d5.slice(d5.indexOf("```bash"), d5.indexOf("```", d5.indexOf("```bash") + 3));
+  const lines = block.split("\n").filter((l) => !l.trim().startsWith("#"));
+
+  it("funkcja add: tr -d '\\r\\n' → gcloud z CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 i --data-file=-", () => {
+    expect(block).toContain(
+      `add() { tr -d '\\r\\n' | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }`,
+    );
+  });
+
+  it("jedyne `secrets versions add` to funkcje add i add_multiline; --data-file=ŚCIEŻKA tylko w add_multiline; bez starego tr -d '\\n'", () => {
+    const adds = lines.filter((l) => l.includes("secrets versions add"));
+    expect(adds).toHaveLength(2);
+    expect(adds[0]).toMatch(/^add\(\) \{/);
+    expect(adds[1]).toMatch(/^add_multiline\(\) \{/);
+    const withPath = lines.filter((l) => /--data-file=(?!-)/.test(l));
+    expect(withPath).toEqual([adds[1]]);
+    expect(block).not.toContain("tr -d '\\n'");
+  });
+
+  // K-1c: wielowierszowe (PEM, JSON) bez tr, z pliku tymczasowego usuwanego zaraz po gcloud.
+  it("funkcja add_multiline: bez tr, bez logu plikowego, --data-file z pliku, plik usuwany zaraz po gcloud (także przy błędzie)", () => {
+    expect(block).toContain(
+      `add_multiline() { local rc=0; CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file="$2" || rc=$?; rm -P "$2"; return "$rc"; }`,
+    );
+    const fn = lines.find((l) => l.startsWith("add_multiline() {"))!;
+    expect(fn).not.toMatch(/\btr\b/);
+    expect(fn).not.toMatch(/&&\s*rm/);
+    expect(d5).toMatch(/mktemp/);
+  });
+
+  it("add_multiline wykonane: plik tymczasowy usunięty po sukcesie i po błędzie gcloud; zawartość wielowierszowa nietknięta", () => {
+    const fn = lines.find((l) => l.startsWith("add_multiline() {"))!;
+    const bin = join(DIR, `rb-bin-${n++}`);
+    spawnSync("mkdir", ["-p", bin]);
+    const seen = join(DIR, `rb-seen-${n++}`);
+    // Fałszywy gcloud: kopiuje plik z --data-file i kończy się kodem z FAKE_RC.
+    writeFileSync(
+      join(bin, "gcloud"),
+      `#!/bin/sh\nprintf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" > "$SEEN.env"\nfor a in "$@"; do case "$a" in --data-file=*) cat "\${a#--data-file=}" > "$SEEN";; esac; done\nexit "\${FAKE_RC:-0}"\n`,
+    );
+    chmodSync(join(bin, "gcloud"), 0o755);
+    // rm -P (BSD) nie wszędzie istnieje: fałszywy rm usuwa plik zwykłym rm.
+    writeFileSync(join(bin, "rm"), '#!/bin/sh\n[ "$1" = "-P" ] && shift\nexec /bin/rm -f "$@"\n');
+    chmodSync(join(bin, "rm"), 0o755);
+    const pem = "-----BEGIN PRIVATE KEY-----\nAAAA\nBBBB\n-----END PRIVATE KEY-----\n";
+    for (const rc of ["0", "1"]) {
+      const f = join(DIR, `rb-tmp-${n++}`);
+      writeFileSync(f, pem);
+      const r = spawnSync("bash", ["-c", `P=p-123; ${fn}\nadd_multiline nazwa "$1"`, "x", f], {
+        encoding: "utf8",
+        env: { NODE_ENV: "test", PATH: `${bin}:${process.env.PATH}`, SEEN: seen, FAKE_RC: rc },
+      });
+      expect(r.status, rc).toBe(Number(rc));
+      expect(existsSync(f), `plik po rc=${rc}`).toBe(false);
+      expect(readFileSync(seen, "utf8")).toBe(pem);
+      expect(readFileSync(`${seen}.env`, "utf8").trim()).toBe("1");
+    }
+  });
+
+  it("każdy sekret dodawany przez add — ze strumienia albo z pliku na stdin", () => {
+    const uses = lines.filter((l) => /(^|\| *)add [a-z]/.test(l));
+    expect(uses.length).toBeGreaterThanOrEqual(5);
+    for (const l of uses) expect(l).toMatch(/\| add [a-z-]+\s*$|^add [a-z-]+ < "[^"]+"(\s+#.*)?$/);
+    expect(uses.map((l) => l.match(/add ([a-z-]+)/)![1])).toEqual(
+      expect.arrayContaining(["better-auth-secret", "cron-secret", "vapid-private-key", "stripe-secret-key", "stripe-webhook-secret"]),
+    );
   });
 });

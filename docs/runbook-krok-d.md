@@ -185,8 +185,8 @@ Tworzy:
 
 Hasła: generowane w pamięci procesu, do gcloud tylko przez `--flags-file`
 ze strumienia (`sql users create|set-password`) i `--data-file=-`
-(`secrets versions add`); nie są wypisywane. Wywołania `sql users …` idą
-z `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1` (B-1). Gdy sekret ma już wersję
+(`secrets versions add`); nie są wypisywane. Wywołania `sql users …` (B-1)
+i `secrets versions add` (N2, K-1b) idą z `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`. Gdy sekret ma już wersję
 ENABLED, etap pomija dany login (hasło bez zmian). Gdy wersji brak, a login
 istnieje (przerwany przebieg), hasło jest ustawiane od nowa (`set-password`) —
 stan sam się naprawia. **Błąd odczytu** wersji (sieć, uprawnienia — kod ≠ 0
@@ -319,19 +319,40 @@ Harmonogram 29 lutego (najbliższy 2028) + natychmiastowa pauza = job nigdy nie
 wystrzeli. Jeśli `describe` nie pokazuje nagłówka albo pokazuje dosłownie ścieżkę
 `/dev/fd/…` — stop, `scheduler.sh` nie może być użyty (zgłoszenie do Evy).
 
+**Tylko dla tej próby z fikcyjnym tokenem.** Dla prawdziwych zadań `mh-*`
+(nagłówek z prawdziwym `CRON_SECRET`) nie używać `describe` ani `list` z
+`--format` obejmującym `httpTarget.headers`, ani bez zawężonego `--format`:
+wartość nagłówka trafia na ekran i do logu plikowego gcloud
+(`~/.config/gcloud/logs`) — #143 pkt 2. Stan prawdziwych zadań sprawdza
+`scheduler.sh --check` albo `--format='value(name,state)'` jak w sekcji 8.
+
 ## 5. D-5 — wartości sekretów (sesja główna)
 
-Zasada: generator albo plik spoza repo → strumień → `--data-file=-`. Nigdy wartość
-w wierszu polecenia, nigdy `echo WARTOŚĆ`. Plik z wartością od dostawcy usuwać
-po dodaniu wersji.
+Zasada (N2, Ryan, K-1b; K-1c): zawsze bez lokalnego logu gcloud
+(`CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`), nigdy wartość w wierszu polecenia,
+nigdy `echo WARTOŚĆ`. Dwie drogi, innych nie używać:
+- **sekret jednowierszowy** (klucze API, tokeny, hasła — wszystkie sekrety
+  z dzisiejszego manifestu): funkcja `add` — wartość **wyłącznie przez stdin**
+  (`--data-file=-`), przez `tr -d '\r\n'` (końce wierszy z pliku albo panelu
+  dostawcy nie stają się częścią sekretu);
+- **sekret wielowierszowy** (PEM, JSON — końce wierszy są częścią wartości,
+  `tr` by je zepsuł): funkcja `add_multiline` — `--data-file` z pliku
+  tymczasowego (`mktemp`, poza repo), **bez** `tr`; plik usuwany zaraz po
+  wywołaniu gcloud, także przy błędzie.
+
+Plik z wartością od dostawcy usuwać po dodaniu wersji.
 
 ```bash
 P=my-helper-2-488419
-add() { gcloud --project=$P secrets versions add "$1" --data-file=-; }
+add() { tr -d '\r\n' | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
+add_multiline() { local rc=0; CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file="$2" || rc=$?; rm -P "$2"; return "$rc"; }
+# Użycie add_multiline (dziś żaden sekret z manifestu tego nie wymaga):
+#   f="$(mktemp)"; chmod 600 "$f"   # zapis wartości z panelu dostawcy do "$f"
+#   add_multiline NAZWA "$f"        # plik usunięty zaraz po gcloud
 
 # Generowane lokalnie:
-openssl rand -base64 48 | tr -d '\n' | add better-auth-secret
-openssl rand -hex 32 | tr -d '\n' | add cron-secret
+openssl rand -base64 48 | add better-auth-secret
+openssl rand -hex 32 | add cron-secret
 # VAPID: prywatny do Secret Manager, publiczny do zmiennej NEXT_PUBLIC_VAPID_PUBLIC_KEY (D-6).
 npx --yes web-push generate-vapid-keys --json > "$TMPDIR/vapid.json"
 node -e 'process.stdout.write(require(process.argv[1]).privateKey)' "$TMPDIR/vapid.json" | add vapid-private-key
@@ -340,11 +361,18 @@ node -e 'process.stdout.write(require(process.argv[1]).publicKey)' "$TMPDIR/vapi
 rm -P "$TMPDIR/vapid.json"
 
 # Od dostawców (plik zapisany z panelu dostawcy, poza repo):
-gcloud --project=$P secrets versions add stripe-secret-key --data-file="$HOME/secure/stripe-secret-key"
+add stripe-secret-key < "$HOME/secure/stripe-secret-key"
 rm -P "$HOME/secure/stripe-secret-key"
-# … analogicznie: stripe-webhook-secret, resend-api-key, smsapi-token,
+add stripe-webhook-secret < "$HOME/secure/stripe-webhook-secret"   # para Stripe: oba albo żaden (K-1b)
+rm -P "$HOME/secure/stripe-webhook-secret"
+# … analogicznie: resend-api-key, smsapi-token,
 #    upstash-redis-rest-token, google-client-secret (openrouter-api-key: od K-1 poza Secret Manager)
 ```
+
+**Para Stripe (K-1b):** `stripe-secret-key` i `stripe-webhook-secret` dodawać
+razem albo wcale. Tylko jeden z wersją → `run-deploy.sh` przerywa wdrożenie
+(kod 2, nazwy obu zmiennych), a strażnik startu (`infra/runtime/secret-guard.mjs`)
+odmawia startu z nazwą brakującej zmiennej.
 
 `postgres-url` i `postgres-admin-password` ustawia etap `sql` — w D-5 ich nie ruszać.
 
@@ -367,9 +395,11 @@ rm -P "$HOME/secure/stripe-secret-key"
 (`NAZWA=sekret:latest`). Cloud Run odrzuca rewizję, której sekret nie ma żadnej
 wersji. Od K-1: `required` w manifeście (wymagane: `postgres-url`,
 `better-auth-secret`); `run-deploy.sh` mapuje wyłącznie sekrety, których
-najnowsza wersja ma stan `ENABLED`; sekret wymagany bez wersji przerywa
-wdrożenie **przed** `gcloud run deploy`; błąd odczytu inny niż brak wersji
-(np. uprawnienia) też przerywa. Żadnych wersji-zaślepek. Webhook Stripe bez
+najnowsza wersja ma stan `ENABLED` (od K-1b odczyt `secrets versions list
+NAZWA --sort-by=~createTime --limit=1`: pusty wynik = brak wersji, bez
+rozpoznawania błędu po tekście); sekret wymagany bez wersji przerywa
+wdrożenie **przed** `gcloud run deploy` z nazwą sekretu; każdy błąd odczytu
+(np. uprawnienia, brak samego kontenera sekretu) też przerywa. Żadnych wersji-zaślepek. Webhook Stripe bez
 `stripe-webhook-secret` odrzuca każde żądanie (503) —
 `__tests__/api/stripe-webhook-no-secret.test.ts`.
 Sprawdzenie, że moduł bez sekretu wyłącza się sam: po K-1, przebieg z pustym
@@ -522,17 +552,28 @@ tworzy zadanie z harmonogramem zaparkowanym (29 lutego), od razu je wstrzymuje,
 odczytuje stan i dopiero wtedy ustawia właściwy harmonogram. Tryb domyślny
 nigdy nie wznawia. Kolejność obowiązkowa:
 
+`BASE_URL` = główny adres usługi `https://myhelper-843777043748.europe-central2.run.app`
+(bez ścieżki i bez taga rewizji). Inny host skrypt odrzuca przed pierwszym
+wywołaniem gcloud (#143 pkt 1).
+
 ```bash
-S='PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://…'
-env $S infra/gcp/scheduler.sh            # 1. utworzenie/aktualizacja — wszystko PAUSED
+S='PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://myhelper-843777043748.europe-central2.run.app'
+env $S infra/gcp/scheduler.sh            # 1. utworzenie/aktualizacja — wszystkie 5 zadań PAUSED
 env $S infra/gcp/scheduler.sh --check    # 2. dryf ENABLED→PAUSED oczekiwany, innego dryfu brak
-env $S infra/gcp/scheduler.sh --resume   # 3. dopiero po decyzji Darka
-env $S infra/gcp/scheduler.sh --check    # 4. kod 0
+# 3. dopiero po decyzji Darka — jawne nazwy (W-3); można wznowić część zadań:
+env $S infra/gcp/scheduler.sh --resume mh-sms-reminders mh-push-reminders \
+  mh-push-reminders-24h mh-cleanup-pending-deposits mh-cleanup-temporary-access
+env $S infra/gcp/scheduler.sh --check    # 4. kod 0 (wznowione zgodne z tabelą)
 gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-central2 --format='value(name,state)'
 ```
 
+Zadań jest 5 (tabela `JOBS` w `scheduler.sh`). `--resume` bez nazw, z nazwą
+spoza tabeli albo z zadaniem oznaczonym w tabeli jako `PAUSED` → błąd przed
+pierwszym wywołaniem gcloud.
+
 Włączenie harmonogramu = prawdziwe SMS-y i push do klientów salonów — decyzja Darka.
-Zadania `mh-notify-*` zostają `PAUSED` także po `--resume`.
+Zadania `mh-notify-*` (urodziny, niski stan magazynu, „tęsknimy”) nie są
+tworzone — wracają z R3-C.
 
 ## 8a. Znane zachowanie przyjęte świadomie
 
