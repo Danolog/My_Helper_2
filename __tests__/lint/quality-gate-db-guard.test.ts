@@ -399,6 +399,27 @@ function pushViolations(wf: string, scripts: Record<string, string>): string[] {
   );
 }
 
+/**
+ * Wszystkie sprawdzenia jednego pliku workflow naraz (#201): wynik to lista naruszeń, a wyjątek
+ * parsera to też naruszenie (fail-closed). Używane przez sondy obejść i poprawnych edycji.
+ */
+function fileViolations(file: string, wf: string, files: string[]): string[] {
+  const checks: Array<() => string[]> = [
+    () => pushViolations(wf, PKG.scripts),
+    () => dbJobViolations(file, wf),
+    () => jobUsesViolations(file, wf, files),
+    () => keyInvariantViolations(file, wf),
+    () => anchorViolations(file, wf),
+  ];
+  return checks.flatMap((c) => {
+    try {
+      return c();
+    } catch (e) {
+      return [`${file}: wyjątek parsera: ${(e as Error).message}`];
+    }
+  });
+}
+
 const PG_JOBS = [...jobs()].filter(([, body]) => dbReasons(body).length > 0);
 
 describe("wszystkie pliki .github/workflows: bez push, bez baz poza parą, bez kotwic (#194 runda 4)", () => {
@@ -826,5 +847,62 @@ describe("schemaViolations — drizzle-kit tylko jako `drizzle-kit migrate` (E12
     ["tsx a.ts && pnpm db:push", ["db:push"]],
   ])("%j → %j", (text, expected) => {
     expect(schemaViolations(text)).toEqual(expected);
+  });
+});
+
+/**
+ * #201: sondy na PRAWDZIWYCH plikach workflow (edycja w pamięci, pliki na dysku bez zmian).
+ * Grupa A — obejścia, które po #194 przechodziły: test ma padać.
+ * Grupa B — poprawne edycje (sondy Leo z recenzji #194), które dawały fałszywy alarm: test ma przechodzić.
+ */
+describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
+  const FILES = WORKFLOWS.map(([f]) => f);
+  const EP = "e2e-production.yml";
+  const EP_INSTALL = "      - run: pnpm install --frozen-lockfile\n";
+  const QG_TC = "      - run: pnpm typecheck\n";
+  const edited = (file: string, find: string, repl: string): string => {
+    const wf = WORKFLOWS.find(([f]) => f === file)![1];
+    expect(wf.split(find).length - 1, `kotwica sondy w ${file}: ${find}`).toBe(1);
+    return wf.replace(find, repl);
+  };
+  const I7 = `${EP_INSTALL}      - name: x\n        ? run\n        : pnpm db:push\n`;
+  const I8 = `${EP_INSTALL}      - name: x\n        "r\\u0075n": pnpm db:push\n`;
+
+  it.each([
+    ["I7: jawny klucz `? run` z push", EP, EP_INSTALL, I7, /push/],
+    ["I7: jawny klucz `? run` — rozjazd niezmiennika", EP, EP_INSTALL, I7, /kluczy run w pliku/],
+    ["I8: klucz z escape `\"r\\u0075n\":` z push", EP, EP_INSTALL, I8, /push/],
+    ["I8: klucz z escape — rozjazd niezmiennika", EP, EP_INSTALL, I8, /kluczy run w pliku/],
+    ["I10: shell: kroku z drizzle-kit push", EP, EP_INSTALL, `${EP_INSTALL}      - run: pnpm exec playwright --version\n        shell: sh -c 'drizzle-kit push; sh {0}'\n`, /push/],
+    ["I10: defaults.run.shell workflow z db:push", EP, "\njobs:\n", "\ndefaults:\n  run:\n    shell: sh -c 'pnpm db:push && bash {0}'\n\njobs:\n", /push/],
+    ["I10: shell: jako blok złożony (drizzle-kit i push w osobnych liniach)", EP, EP_INSTALL, `${EP_INSTALL}      - run: pnpm exec playwright --version\n        shell: >-\n          sh -c 'drizzle-kit\n          push; sh {0}'\n`, /push/],
+    ["POSTGRES_URL przez $GITHUB_ENV w kroku", EP, EP_INSTALL, `${EP_INSTALL}      - run: echo "POSTGRES_URL=postgresql://u:p@db.example:5432/x" >> "$GITHUB_ENV"\n`, /nowy job z bazą.*e2e-production/],
+  ])("A %s → porażka", (_n, file, find, repl, re) => {
+    expect(fileViolations(file, edited(file, find, repl), FILES).join("\n")).toMatch(re);
+  });
+
+  it.each([
+    ["F1 krok cache (uses + with)", QG, QG_TC, `${QG_TC}\n      - name: Cache\n        uses: actions/cache@v4\n        with:\n          path: .next/cache\n          key: next-\${{ runner.os }}\n`],
+    ["F2 słowa run/uses/services w nazwie kroku", QG, QG_TC, "      - name: run typecheck (uses services)\n        run: pnpm typecheck\n"],
+    ["F3 komentarz końcowy z run:", QG, QG_TC, "      - run: pnpm typecheck # potem run: lint\n"],
+    ["F4 komentarz końcowy z „, run:”", QG, QG_TC, "      - run: pnpm typecheck # tsc, run: bez emit\n"],
+    ["F6 blok run: | z linią echo 'services: x'", QG, QG_TC, "      - name: t\n        run: |\n          echo 'services: none'\n          pnpm typecheck\n"],
+    ["F6b blok run: | z linią zawierającą „, run:” i „{run:”", QG, QG_TC, "      - name: t\n        run: |\n          echo 'a, run: b {run: c}'\n          pnpm typecheck\n"],
+    ["F7 defaults: run: w e2e-production.yml", EP, "\njobs:\n", "\ndefaults:\n  run:\n    shell: bash\n\njobs:\n"],
+    ["F8 env workflow bez POSTGRES_URL", QG, "\njobs:\n", "\nenv:\n  NODE_VERSION: '22'\n\njobs:\n"],
+    ["F9 steps: z komentarzem końcowym", QG, "    name: TypeScript Check\n    runs-on: ubuntu-latest\n    steps:\n", "    name: TypeScript Check\n    runs-on: ubuntu-latest\n    steps: # tsc\n"],
+  ])("B %s → bez naruszeń", (_n, file, find, repl) => {
+    expect(fileViolations(file, edited(file, find, repl), FILES)).toEqual([]);
+  });
+
+  it("komunikat niezmiennika wskazuje numer i treść nierozpoznanej linii", () => {
+    const wf = edited(EP, EP_INSTALL, `${EP_INSTALL}      - { run: pnpm exec playwright --version }\n`);
+    const line = wf.split("\n").findIndex((l) => l === "      - { run: pnpm exec playwright --version }") + 1;
+    expect(keyInvariantViolations(EP, wf).join("\n")).toContain(`nierozpoznane: linia ${line}: - { run: pnpm exec playwright --version }`);
+  });
+
+  it("niezmiennik nadal widzi klucz w wielowierszowym flow (kontynuacja „x: 1, run: …”)", () => {
+    const wf = "name: x\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: pnpm typecheck\n      - uses: actions/upload-artifact@v4\n        with: {\n          x: 1, run: pnpm db:sync }\n";
+    expect(keyInvariantViolations("x.yml", wf).join()).toMatch(/kluczy run w pliku/);
   });
 });
