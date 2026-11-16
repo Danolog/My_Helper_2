@@ -676,6 +676,7 @@ function fileViolations(file: string, wf: string, files: string[]): string[] {
  */
 const PG_IMAGE = "pgvector/pgvector:pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782";
 const IMAGE_MSG = "zmianę obrazu (tag lub digest) akceptują CTO i CRCO (#193)";
+const SERVICES_MSG = "dodatkową usługę akceptują CTO i CRCO (#193)";
 
 /** Czym wartość `image` różni się od PG_IMAGE (do komunikatu); "" = równa dosłownie. */
 function imageDiff(v: Y): string {
@@ -691,8 +692,8 @@ function imageDiff(v: Y): string {
 }
 
 /**
- * W quality-gate.yml każdy job z DB_JOBS: `services.postgres.image` dosłownie równe PG_IMAGE,
- * bez `container:` (job biegłby w obrazie spoza przypięcia). Inne pliki: bez zmian (tam job
+ * W quality-gate.yml każdy job z DB_JOBS: `services:` z dokładnie jedną usługą `postgres`,
+ * `services.postgres.image` dosłownie równe PG_IMAGE, bez `container:` (job biegłby w obrazie spoza przypięcia). Inne pliki: bez zmian (tam job
  * z bazą i tak jest naruszeniem dbJobViolations). Drzewo YAML z #201; błąd składni zgłasza
  * yamlViolations (tu pomijamy, jak niezmiennik krzyżowy).
  */
@@ -709,6 +710,10 @@ function dbImageViolations(file: string, wf: string): string[] {
     if (!isMap(job)) return [`${file}: ${name}: brak joba z bazą — ${IMAGE_MSG}`];
     const out: string[] = [];
     if ("container" in job) out.push(`${file}: ${name}: container: w jobie z bazą — zakazany; ${IMAGE_MSG}`);
+    const services = isMap(job.services) ? Object.keys(job.services) : [];
+    if (services.length !== 1 || services[0] !== "postgres") {
+      out.push(`${file}: ${name}: services: [${services.join(", ")}] — oczekiwana dokładnie jedna usługa „postgres”; ${SERVICES_MSG}`);
+    }
     const pg = isMap(job.services) ? job.services.postgres : undefined;
     const diff = imageDiff(isMap(pg) ? pg.image : undefined);
     if (diff) out.push(`${file}: ${name}: services.postgres.image — ${diff}; ${IMAGE_MSG}`);
@@ -718,7 +723,12 @@ function dbImageViolations(file: string, wf: string): string[] {
 
 // --- Jedna baza w CI (#193 P0c-1, pkt 8; P0c-2 W-b: także PG*) -----------------------------------
 
-const DB_URL_KEY_TEXT = /POSTGRES_URL|DATABASE_URL/i;
+/**
+ * Nazwa zmiennej bazy w tekście (podciąg, bez względu na wielkość liter; także nazwy pochodne
+ * typu `MY_POSTGRES_URL`): adres albo PG* (P0c-2 W-b — obowiązuje każdą regułę opartą na liście
+ * kluczy bazy, w tym zapis do `$GITHUB_ENV`).
+ */
+const DB_URL_KEY_TEXT = new RegExp(DB_ENV_KEYS.join("|"), "i");
 
 /** Dopuszczenie: [job, nazwa kroku, klucz]. */
 type SameDbCase = [string, string, string];
@@ -740,7 +750,7 @@ const ONE_DB = "w CI jedna baza; nowe dopuszczenie akceptuje CTO (#193)";
  *   DB_ENV_KEYS = naruszenie, chyba że to SAME_DB_ALLOWED: ten job, ten krok, ten klucz i wartość
  *   równa `POSTGRES_URL` joba. Inna wartość (inna baza, inny host, wyrażenie `${{ … }}`), inny krok
  *   albo inny job = naruszenie;
- * - krok, którego `run` pisze do `$GITHUB_ENV` cokolwiek z nazwą zmiennej bazy = naruszenie bez
+ * - krok, którego `run` pisze do `$GITHUB_ENV` cokolwiek z nazwą zmiennej bazy (adres albo PG*) = naruszenie bez
  *   względu na wartość.
  * Błąd składni YAML zgłasza yamlViolations — tu wtedy wyjątek (fail-closed).
  */
@@ -888,18 +898,58 @@ function writeForm(a: ts.Node): string | null {
   return null;
 }
 
-/** Funkcje, którym wolno podać `process.env` jako argument: importy z modułów lokalnych i funkcje z pliku. */
-function localFunctions(sf: ts.SourceFile): Set<string> {
-  const out = new Set<string>();
+/** Funkcja lokalna: moduł (null = ten plik) i nazwa deklaracji w nim. */
+type LocalFn = { module: string | null; name: string };
+
+/**
+ * Funkcje, którym wolno podać `process.env` jako argument: funkcje zadeklarowane w pliku
+ * (`function f`) i nazwane importy z modułów lokalnych (`./`, `../`). Import domyślny i
+ * przestrzeń nazw nie wchodzą (fail-closed: nie wiadomo, która deklaracja).
+ */
+function localFunctions(sf: ts.SourceFile): Map<string, LocalFn> {
+  const out = new Map<string, LocalFn>();
   for (const st of sf.statements) {
-    if (ts.isFunctionDeclaration(st) && st.name) out.add(st.name.text);
+    if (ts.isFunctionDeclaration(st) && st.name) out.set(st.name.text, { module: null, name: st.name.text });
     const spec = ts.isImportDeclaration(st) ? literal(st.moduleSpecifier) : null;
     if (spec === null || !/^\.\.?\//.test(spec) || !ts.isImportDeclaration(st) || !st.importClause || st.importClause.isTypeOnly) continue;
-    if (st.importClause.name) out.add(st.importClause.name.text);
     const b = st.importClause.namedBindings;
-    if (b && ts.isNamedImports(b)) for (const el of b.elements) if (!el.isTypeOnly) out.add(el.name.text);
+    if (b && ts.isNamedImports(b)) for (const el of b.elements) if (!el.isTypeOnly) out.set(el.name.text, { module: spec, name: (el.propertyName ?? el.name).text });
   }
   return out;
+}
+
+/** Pliki zestawu Playwrighta po identyfikatorze (do odczytu deklaracji funkcji lokalnych). */
+const PW_SOURCES = [PW_SRC, SETUP_SRC, TEARDOWN_SRC, CLEANUP_SRC];
+const posixJoin = (from: string, spec: string) => {
+  const parts = from.split("/").slice(0, -1);
+  for (const p of spec.split("/")) {
+    if (p === "..") parts.pop();
+    else if (p !== ".") parts.push(p);
+  }
+  return `${parts.join("/")}.ts`;
+};
+
+/**
+ * Parametr na pozycji `pos` funkcji `fn.name` (w tym pliku albo w module lokalnym z zestawu)
+ * ma typ dokładnie `CleanupEnv`; inaczej powód. Deklaracja tylko jako `function` (jedna);
+ * moduł spoza zestawu, brak deklaracji, parametr reszty albo inny typ = naruszenie (fail-closed).
+ */
+function cleanupEnvParamProblem(fromId: string, fromSf: ts.SourceFile, fn: LocalFn, pos: number, textOf: (id: string) => string): string | null {
+  let sf = fromSf;
+  if (fn.module !== null) {
+    const id = posixJoin(fromId, fn.module);
+    if (!PW_SOURCES.some((s) => s.id === id)) return `moduł ${fn.module} spoza skanowanego zestawu`;
+    sf = tsSource(id, textOf(id));
+  }
+  const decls = sf.statements.filter((s): s is ts.FunctionDeclaration => ts.isFunctionDeclaration(s) && s.name?.text === fn.name);
+  if (decls.length !== 1) return `deklaracji funkcji ${fn.name}: ${decls.length}`;
+  const p = decls[0]!.parameters[pos];
+  if (!p || p.dotDotDotToken) return `funkcja ${fn.name} bez zwykłego parametru na pozycji ${pos}`;
+  const t = p.type;
+  if (!t || !ts.isTypeReferenceNode(t) || !ts.isIdentifier(t.typeName) || t.typeName.text !== "CleanupEnv" || t.typeArguments) {
+    return `parametr ${pos} funkcji ${fn.name} ma typ ${t ? t.getText() : "(brak)"} zamiast CleanupEnv`;
+  }
+  return null;
 }
 
 /**
@@ -911,12 +961,13 @@ function localFunctions(sf: ts.SourceFile): Set<string> {
  * - moduł z rodziny dotenv (`dotenv`, `dotenv/*`, `dotenv-*`, `@dotenvx/*`) — zawsze;
  * - `process.loadEnvFile` (wywołanie albo wartość);
  * - `process.env` inaczej niż (a) odczyt `process.env.X` / `process.env["X"]` albo (b) bezpośredni
- *   argument wywołania funkcji lokalnej (import z modułu lokalnego albo funkcja z pliku).
+ *   argument wywołania funkcji lokalnej (nazwany import z modułu lokalnego albo funkcja z pliku),
+ *   której parametr na tej pozycji ma typ `CleanupEnv` (cleanupEnvParamProblem).
  *   Każda inna forma = naruszenie: zapis, `delete`, `++`/`--`, przypisanie złożone, destrukturyzacja,
  *   `process.env = …`, argument `Object.assign`/`Object.defineProperty`/`Reflect.*`, alias;
  * - `process` jako wartość (alias, `const { env } = process`, argument), klucz `process[…]` nie-literał.
  */
-function pwFileViolations(e: ScanEntry, text: string = e.src.text): string[] {
+function pwFileViolations(e: ScanEntry, text: string = e.src.text, textOf: (id: string) => string = (id) => PW_SOURCES.find((s) => s.id === id)!.text): string[] {
   const at = e.role === "konfiguracja" ? e.src.id : `${e.src.id} [${e.role}]`;
   const out: string[] = [];
   const sf = tsSource(e.src.id, text);
@@ -966,7 +1017,12 @@ function pwFileViolations(e: ScanEntry, text: string = e.src.text): string[] {
           if (w) env(`${w}: ${ep.parent.getText()}`);
         } else if (ts.isCallExpression(ep) && ep.arguments.some((a) => a === eChild)) {
           const callee = ep.expression;
-          if (!ts.isIdentifier(callee) || !locals.has(callee.text)) env(`argument wywołania ${callee.getText()}(…) — dozwolone tylko funkcje lokalne (import z modułu lokalnego, funkcja z pliku)`);
+          const fn = ts.isIdentifier(callee) ? locals.get(callee.text) : undefined;
+          if (!fn) env(`argument wywołania ${callee.getText()}(…) — dozwolone tylko funkcje lokalne (import z modułu lokalnego, funkcja z pliku)`);
+          else {
+            const why = cleanupEnvParamProblem(e.src.id, sf, fn, ep.arguments.indexOf(eChild as ts.Expression), textOf);
+            if (why) env(`argument wywołania ${callee.getText()}(…) — parametr musi mieć typ CleanupEnv: ${why}`);
+          }
         } else if (ts.isBinaryExpression(ep) && ep.left === eChild && ep.operatorToken.kind === ts.SyntaxKind.EqualsToken) env(`przypisanie całego process.env: ${ep.getText()}`);
         else if (ts.isDeleteExpression(ep)) env(`delete: ${ep.getText()}`);
         else env(`process.env jako wartość (alias): ${ep.getText()}`);
@@ -1022,7 +1078,8 @@ function cleanupEnvViolations(text: string = CLEANUP_SRC.text): string[] {
 /** Cały zestaw Playwrighta, z jednym plikiem podmienionym przez sondę (id z PW_SCAN). */
 function pwSetViolations(id?: string, text?: string): string[] {
   const t = (s: Source) => (s.id === id && text !== undefined ? text : s.text);
-  return [...PW_SCAN.flatMap((e) => pwFileViolations(e, t(e.src))), ...pwGlobalPathViolations(t(PW_SRC)), ...cleanupEnvViolations(t(CLEANUP_SRC))];
+  const textOf = (fid: string) => t(PW_SOURCES.find((s) => s.id === fid)!);
+  return [...PW_SCAN.flatMap((e) => pwFileViolations(e, t(e.src), textOf)), ...pwGlobalPathViolations(t(PW_SRC)), ...cleanupEnvViolations(t(CLEANUP_SRC))];
 }
 
 /** Treść obiektu `webServer: { … }` (bez klamer). Inny kształt niż jeden literał obiektu = wyjątek. */
@@ -1359,10 +1416,17 @@ describe("joby z bazą, uses: joba, kotwice YAML (#194 runda 4)", () => {
     const stepEnv = "name: x\njobs:\n  e2e-extra:\n    steps:\n      - run: pnpm test:pg\n        env:\n          POSTGRES_URL: x\n";
     expect(dbJobViolations(QG, stepEnv).join("\n")).toMatch(/nowy job z bazą.*POSTGRES_URL/);
     expect(dbJobViolations(QG, wf("e2e-extra", ""))).toEqual([]);
-    expect(dbJobViolations(QG, wf("e2e-extra", "    env:\n      INTEGRATION_POSTGRES_URL: y\n")).join()).toMatch(/nowy job z bazą: dodaj go do testu i strażników: e2e-extra \(INTEGRATION_POSTGRES_URL w env\)/);
+    expect(dbJobViolations(QG, wf("e2e-extra", "    env:\n      INTEGRATION_POSTGRES_URL_X: y\n"))).toEqual([]);
     expect(dbJobViolations(QG, wf("e2e-smoke", "    services:\n      db:\n        image: postgres:18\n"))).toEqual([]);
     expect(dbJobViolations("inny.yml", wf("e2e-smoke", "    services:\n      db:\n        image: postgres:18\n"))).toHaveLength(1);
   });
+
+  it.each([["INTEGRATION_POSTGRES_URL"], ["DATABASE_URL"], ["PGHOST"]])(
+    "#193 P0c-2 (obok asercji #194): %s w env joba bez services: → job z bazą",
+    (k) => {
+      expect(dbJobViolations(QG, wf("e2e-extra", `    env:\n      ${k}: y\n`)).join("\n")).toContain(`nowy job z bazą: dodaj go do testu i strażników: e2e-extra (${k} w env)`);
+    },
+  );
 
   it("runda 5 (1): plik z jobs: i zerem jobów na wcięciu 2 (np. całość na wcięciu 4) → wyjątek", () => {
     const g4 = "name: x\non:\n    push:\njobs:\n    db:\n        runs-on: ubuntu-latest\n        steps:\n            - run: pnpm db:push\n";
@@ -1793,6 +1857,13 @@ describe("joby z bazą po kluczach bazy: adres i PG* także bez services: (#193 
     expect(v[0]).toMatch(re);
   });
 
+  it("PG* przez $GITHUB_ENV: krok `echo \"PGHOST=…\" >> $GITHUB_ENV` w e2e-smoke → dokładnie jedno nowe naruszenie", () => {
+    const SEED = "      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Verify seed data";
+    const v = newOneDb(SEED, `      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Switch host\n        run: echo "PGHOST=db.example" >> $GITHUB_ENV\n\n      - name: Verify seed data`);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toMatch(/^quality-gate\.yml: e2e-smoke, krok \d+ \(Switch host\): zapis zmiennej bazy do \$GITHUB_ENV — /);
+  });
+
   it("hasło w treści polecenia (PGPASSWORD=… psql w kroku weryfikacji seeda) to nie klucz env → bez naruszeń jednej bazy", () => {
     expect(code(WF)).toMatch(/^ {10}PGPASSWORD=\S+ psql /m);
     expect(oneDbScan(QG, WF).violations).toEqual([]);
@@ -1822,6 +1893,18 @@ describe("obraz bazy przypięty po skrócie w obu jobach z bazą (#193 P0c-2, W-
     expect(v).toHaveLength(1);
     expect(v[0]).toBe(`quality-gate.yml: ${why}${IMAGE_MSG}`);
     expect(fileViolations(QG, wf, WORKFLOWS.map(([f]) => f))).toContain(v[0]);
+  });
+
+  const SVC = "    timeout-minutes: 10\n    services:\n";
+  it.each([
+    ["druga usługa z obrazem bazy (e2e-smoke)", SVC, `${SVC}      db2:\n        image: ${PG_IMAGE}\n`, "[db2, postgres]", 1],
+    ["druga usługa z dowolnym obrazem — redis (e2e-smoke)", SVC, `${SVC}      redis:\n        image: redis:7\n`, "[redis, postgres]", 1],
+    ["usługa przemianowana z postgres (e2e-smoke)", `${SVC}      postgres:\n`, `${SVC}      db:\n`, "[db]", 2],
+  ])("services: %s → naruszenie z komunikatem akceptacji dodatkowej usługi", (_n, find, repl, keys, count) => {
+    const wf = edited(wfSource(QG), find, repl);
+    const v = dbImageViolations(QG, wf);
+    expect(v).toHaveLength(count);
+    expect(v).toContain(`quality-gate.yml: e2e-smoke: services: ${keys} — oczekiwana dokładnie jedna usługa „postgres”; ${SERVICES_MSG}`);
   });
 });
 
@@ -1912,6 +1995,11 @@ describe("Playwright: parser TypeScript — importy, dotenv, loadEnvFile, proces
     ["process.env: destrukturyzacja jako cel przypisania", td("[process.env.POSTGRES_URL] = ['x'];"), [`${T}: ${W}przypisanie przez destrukturyzację`]],
     ["process.env: klucz nie-literał", td("const key = 'POSTGRES_URL';\n  process.env[key] = 'x';"), [`${T}: ${W}klucz nie-literał`]],
     ["process.env: argument funkcji spoza lokalnych (alias Reflect.set)", td("const set = Reflect.set;\n  set(process.env, 'POSTGRES_URL', 'x');"), [`${T}: ${W}argument wywołania set(…)`]],
+    // process.env jako argument: tylko funkcja lokalna z parametrem typu CleanupEnv
+    ["parametr resolveCleanupUrl (poz. 0) typu NodeJS.ProcessEnv", [CLEANUP_SRC, "export function resolveCleanupUrl(env: CleanupEnv,", "export function resolveCleanupUrl(env: NodeJS.ProcessEnv,"], [`${T}: ${W}argument wywołania resolveCleanupUrl(…) — parametr musi mieć typ CleanupEnv: parametr 0 funkcji resolveCleanupUrl ma typ NodeJS.ProcessEnv zamiast CleanupEnv`]],
+    ["parametr guardedCleanupClient (poz. 1) typu NodeJS.ProcessEnv", [CLEANUP_SRC, "url: string | undefined, env: CleanupEnv)", "url: string | undefined, env: NodeJS.ProcessEnv)"], [`${T}: ${W}argument wywołania guardedCleanupClient(…) — parametr musi mieć typ CleanupEnv: parametr 1 funkcji guardedCleanupClient ma typ NodeJS.ProcessEnv zamiast CleanupEnv`]],
+    ["funkcja z pliku z parametrem NodeJS.ProcessEnv", [TEARDOWN_SRC, TD_IMP, `${TD_IMP}function leak(e: NodeJS.ProcessEnv) { return e; }\nvoid leak(process.env);\n`], [`${T}: ${W}argument wywołania leak(…) — parametr musi mieć typ CleanupEnv: parametr 0 funkcji leak ma typ NodeJS.ProcessEnv zamiast CleanupEnv`]],
+    ["alias funkcji lokalnej (const f = resolveCleanupUrl)", td("const f = resolveCleanupUrl;\n  void f(process.env, '.env.test');"), [`${T}: ${W}argument wywołania f(…) — dozwolone tylko funkcje lokalne`]],
     // CleanupEnv tylko do odczytu
     ["CleanupEnv z sygnaturą indeksu bez readonly", [CLEANUP_SRC, CL_ENV, "export type CleanupEnv = { [key: string]: string | undefined };"], ["tests/e2e-cleanup.ts: CleanupEnv nie jest tylko do odczytu — składowe bez readonly"]],
     ["CleanupEnv z dodatkową właściwością bez readonly", [CLEANUP_SRC, CL_ENV, "export type CleanupEnv = { readonly [key: string]: string | undefined; POSTGRES_URL?: string };"], ["tests/e2e-cleanup.ts: CleanupEnv nie jest tylko do odczytu — składowe bez readonly: POSTGRES_URL?: string"]],
