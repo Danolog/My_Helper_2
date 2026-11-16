@@ -63,6 +63,9 @@ nul
 !scripts/db-reset-local.ts
 !scripts/db-push-gate.ts
 !scripts/db-url-guard.ts
+# #193: generator i migawka polityk RLS (strażnik porównuje bazę z migawką)
+!scripts/rls-policies-snapshot.ts
+!scripts/rls-policies.snapshot.json
 # zapytania kontrolne przed migracjami (tylko odczyt), np. 0009-precheck.sql
 !/scripts/sql/
 /scripts/sql/*
