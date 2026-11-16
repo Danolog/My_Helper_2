@@ -1111,6 +1111,7 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
     ["F4 komentarz końcowy z „, run:”", QG, QG_TC, "      - run: pnpm typecheck # tsc, run: bez emit\n"],
     ["F6 blok run: | z linią echo 'services: x'", QG, QG_TC, "      - name: t\n        run: |\n          echo 'services: none'\n          pnpm typecheck\n"],
     ["F6b blok run: | z linią zawierającą „, run:” i „{run:”", QG, QG_TC, "      - name: t\n        run: |\n          echo 'a, run: b {run: c}'\n          pnpm typecheck\n"],
+    ["F6c blok run: | z linią zaczynającą się od „services:” (heredoc)", QG, QG_TC, "      - name: t\n        run: |\n          cat > /dev/null <<'EOF'\n          services: none\n          run: none\n          EOF\n          pnpm typecheck\n"],
     ["F7 defaults: run: w e2e-production.yml", EP, "\njobs:\n", "\ndefaults:\n  run:\n    shell: bash\n\njobs:\n"],
     ["F8 env workflow bez POSTGRES_URL", QG, "\njobs:\n", "\nenv:\n  NODE_VERSION: '22'\n\njobs:\n"],
     ["F9 steps: z komentarzem końcowym", QG, "    name: TypeScript Check\n    runs-on: ubuntu-latest\n    steps:\n", "    name: TypeScript Check\n    runs-on: ubuntu-latest\n    steps: # tsc\n"],
