@@ -965,30 +965,127 @@ esac
   });
 });
 
-// Z1/N1 (Ethan, K-1d) + zakres Olivera: każdy blok ```bash``` runbooka kroku D jest do wklejenia
-// w interaktywnym zsh bez `interactivecomments` — zero komentarzy (objaśnienia w prozie);
-// bloki dotykające sekretów zaczynają się od `set +x` (xtrace nie wypisze wartości).
-describe("G-D2: bloki ```bash``` runbooka kroku D — bez komentarzy, `set +x` przy sekretach (Z1, N1)", () => {
+// Z1/N1 (Ethan, K-1d) + zakres Olivera, rozszerzone w K-1e: KAŻDY płot kodu runbooka kroku D
+// (```bash, ```sh, ```zsh, płot bez języka i każdy inny) jest blokiem do wklejenia w interaktywnym zsh
+// bez `interactivecomments` — chyba że stoi na jawnej liście wyjątków niżej (nie-powłoka).
+// Zero komentarzy (objaśnienia w prozie); bloki dotykające sekretów zaczynają się od `set +x`.
+describe("G-D2: płoty kodu runbooka kroku D — bez komentarzy, `set +x` przy sekretach (Z1, N1, K-1e)", () => {
   const RUNBOOK = readFileSync(join(ROOT, "docs/runbook-krok-d.md"), "utf8");
-  const BLOCKS = [...RUNBOOK.matchAll(/^```bash\n([\s\S]*?)^```$/gm)].map((m) => m[1] ?? "");
+  const FENCES = [...RUNBOOK.matchAll(/^```([^\n`]*)\n([\s\S]*?)^```$/gm)].map((m) => ({
+    lang: (m[1] ?? "").trim(),
+    body: m[2] ?? "",
+    first: (m[2] ?? "").split("\n")[0] ?? "",
+  }));
+  // Jawna lista wyjątków: płoty, które NIE są poleceniami powłoki (język + dokładna pierwsza linia).
+  const NOT_SHELL = [
+    { lang: "", first: "assertion.repository_id == '1152153440' &&", why: "warunek atrybutów WIF (CEL) dla --wif-condition-file, sekcja 3.8" },
+    { lang: "sql", first: "SELECT rolname, rolcanlogin, rolbypassrls, rolsuper FROM pg_roles", why: "zapytanie wpisywane w psql, D-7" },
+  ];
+  const isException = (f: { lang: string; first: string }) => NOT_SHELL.some((e) => e.lang === f.lang && e.first === f.first);
+  const SHELL = FENCES.filter((f) => !isException(f));
+  const SECRET_TRIGGER = /secrets versions|PGPASSWORD|Authorization:|gh secret set|--flags-file|--data-file|password|access-token/i;
 
-  it("bloków do wklejenia jest co najmniej 12", () => {
-    expect(BLOCKS.length).toBeGreaterThanOrEqual(12);
+  it.each(NOT_SHELL.map((e) => [e.why, e]))("wyjątek (%s) występuje dokładnie raz, z tym językiem i tą pierwszą linią", (_why, e) => {
+    expect(FENCES.filter((f) => f.lang === e.lang && f.first === e.first)).toHaveLength(1);
   });
 
-  it.each(BLOCKS.map((b, i) => [i, (b.split("\n")[0] ?? "").slice(0, 50), b]))(
-    "blok %i (%s): żadna linia nie zaczyna się od `#` ani nie ma ` #` w środku",
-    (_i, _first, b) => {
-      for (const l of String(b).split("\n")) {
+  it("płotów do wklejenia (wszystkie poza wyjątkami) jest co najmniej 12; płoty liczone bez względu na język", () => {
+    expect(FENCES.length).toBe(SHELL.length + NOT_SHELL.length);
+    expect(SHELL.length).toBeGreaterThanOrEqual(12);
+  });
+
+  it.each(SHELL.map((f, i) => [i, f.lang || "bez języka", f.first.slice(0, 50), f.body]))(
+    "płot %i (%s, %s): żadna linia nie zaczyna się od `#` ani nie ma ` #` w środku",
+    (_i, _lang, _first, body) => {
+      for (const l of String(body).split("\n")) {
         expect(l, l).not.toMatch(/^\s*#/);
         expect(l, l).not.toMatch(/\s#/);
       }
     },
   );
 
-  it("bloki dotykające sekretów (Secret Manager, hasło, nagłówek Authorization) zaczynają się od `set +x`", () => {
-    const touching = BLOCKS.filter((b) => /secrets versions|PGPASSWORD|Authorization:/.test(b));
+  it("płoty dotykające sekretów zaczynają się od `set +x` (Secret Manager, hasło, Authorization, gh secret set, --flags-file, --data-file, access-token)", () => {
+    const touching = SHELL.filter((f) => SECRET_TRIGGER.test(f.body));
     expect(touching.length).toBeGreaterThanOrEqual(4);
-    for (const b of touching) expect(b.split("\n")[0], b).toMatch(/^set \+x(;|$)/);
+    for (const f of touching) expect(f.first, f.body).toMatch(/^set \+x(;|$)/);
   });
+
+  it.each([
+    "gh secret set X --env production-gcp < plik",
+    "gcloud scheduler jobs update http j --flags-file=<(printf x)",
+    "gcloud secrets versions add s --data-file=-",
+    "PGPASSWORD=x psql",
+    "postgres-admin-password",
+    "gcloud auth print-access-token",
+    "Authorization: Bearer x",
+  ])("wyzwalacz sekretu obejmuje: %s", (l) => {
+    expect(l).toMatch(SECRET_TRIGGER);
+  });
+
+  // K-1e pkt 3: zasady ogólne zgodne z D-5 — żadnego dopuszczenia ścieżki pliku w --data-file.
+  it("`--data-file=ŚCIEŻKA` występuje wyłącznie jako zakaz („nigdy”); zasady ogólne bez „pliku spoza repo”", () => {
+    const at = [...RUNBOOK.matchAll(/--data-file=ŚCIEŻKA/g)].map((m) => m.index ?? 0);
+    expect(at.length).toBeGreaterThanOrEqual(2);
+    for (const i of at) expect(RUNBOOK.slice(Math.max(0, i - 7), i)).toBe("nigdy `");
+    const s0 = RUNBOOK.slice(RUNBOOK.indexOf("## 0. Zasady"), RUNBOOK.indexOf("## 1. Przed startem"));
+    expect(s0).not.toMatch(/plik\s+spoza\s+repo/);
+    expect(s0).toMatch(/Wyłącznie strumień do `--data-file=-`/);
+  });
+
+  // K-1e pkt 4: §9 — proxy do bazy nie zostaje w tle.
+  const s9 = RUNBOOK.slice(RUNBOOK.indexOf("## 9. Dostęp administracyjny"), RUNBOOK.indexOf("## 10."));
+  const B9 = s9.slice(s9.indexOf("```bash\n") + 8, s9.indexOf("\n```", s9.indexOf("```bash\n")));
+
+  it("§9: ostatnia linia bloku to `kill %1`", () => {
+    const ls = B9.split("\n");
+    expect(ls[0]).toBe("set +x");
+    expect(ls[ls.length - 1]).toBe("kill %1");
+    expect(ls.filter((l) => l.endsWith(" &"))).toHaveLength(1);
+  });
+
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  it.each(["bash", ...(existsSync("/bin/zsh") ? ["/bin/zsh"] : [])])(
+    "§9 wykonany w %s z fałszywymi cloud-sql-proxy, gcloud i psql: po wyjściu z psql proxy nie żyje; hasło tylko w środowisku psql",
+    async (shell) => {
+      const root = join(DIR, `s9-${n++}`);
+      const bin = join(root, "bin");
+      const rec = join(root, "rec");
+      for (const d of [bin, rec]) mkdirSync(d, { recursive: true });
+      const sh = (name: string, body: string) => {
+        writeFileSync(join(bin, name), `#!/bin/sh\n${body}`);
+        chmodSync(join(bin, name), 0o755);
+      };
+      sh("cloud-sql-proxy", `echo $$ > "$REC/proxy.pid"\nexec /bin/sleep 30\n`);
+      sh("gcloud", `printf '%s' haslo-testowe-9\n`);
+      sh(
+        "psql",
+        `i=0; while [ ! -s "$REC/proxy.pid" ] && [ $i -lt 50 ]; do /bin/sleep 0.1; i=$((i+1)); done
+printf '%s' "$PGPASSWORD" > "$REC/psql.env"
+for a in "$@"; do printf '%s\\n' "$a"; done > "$REC/psql.argv"
+`,
+      );
+      const r = spawnSync(shell, ["-c", B9], {
+        encoding: "utf8", cwd: ROOT, env: { NODE_ENV: "test" as const, PATH: `${bin}:${process.env.PATH}`, REC: rec, HOME: root },
+      });
+      const pid = Number(readFileSync(join(rec, "proxy.pid"), "utf8").trim());
+      try {
+        expect(r.status, r.stderr).toBe(0);
+        expect(readFileSync(join(rec, "psql.env"), "utf8")).toBe("haslo-testowe-9");
+        expect(readFileSync(join(rec, "psql.argv"), "utf8")).not.toContain("haslo-testowe-9");
+        expect(r.stdout + r.stderr).not.toContain("haslo-testowe-9");
+        for (let i = 0; i < 40 && alive(pid); i++) await new Promise((res) => setTimeout(res, 50));
+        expect(alive(pid), "proxy żyje po bloku").toBe(false);
+      } finally {
+        if (alive(pid)) process.kill(pid, "SIGKILL");
+      }
+    },
+    15_000,
+  );
 });
