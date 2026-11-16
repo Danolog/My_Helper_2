@@ -7,8 +7,9 @@
  * i stare „Gosc E2E” bez prefiksu) zostają. Bezpiecznik w transakcji: zmiana
  * liczby wizyt bez znacznika = ROLLBACK i błąd.
  *
- * Dane: użytkownik `it-t3-e2ec-…` (prefiks z notatki sprzątania w pg-harness.ts),
- * dwa salony z pracownikiem; wszystko kaskadą z salonów w `afterAll`.
+ * Dane: dwóch użytkowników `it-t3-e2ec-…` (prefiks z notatki sprzątania w pg-harness.ts),
+ * każdy z jednym salonem i pracownikiem; `afterAll` usuwa salony po właścicielach
+ * (kaskada wizyt/pracowników), potem użytkowników — także po awarii `beforeAll`.
  * Uruchomienie: `INTEGRATION_POSTGRES_URL=postgresql://…@localhost:5432/pos_dev pnpm test:pg`.
  */
 import { randomUUID } from "node:crypto";
@@ -20,7 +21,10 @@ import { E2E_MARKER, purgeE2eAppointments } from "../../tests/e2e-cleanup";
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
 
 const RUN = randomUUID().slice(0, 8);
-const USER_ID = `it-t3-e2ec-${RUN}`;
+// Osobny właściciel na salon: salons_owner_id_uq — jeden salon na właściciela.
+const USER_A = `it-t3-e2ec-${RUN}-a`;
+const USER_B = `it-t3-e2ec-${RUN}-b`;
+const USERS = [USER_A, USER_B];
 let salonA = "";
 let salonB = "";
 let empA = "";
@@ -48,9 +52,9 @@ async function appt(salonId: string, employeeId: string, fields: { notes?: strin
 describe.skipIf(!h)("purgeE2eAppointments (pg)", () => {
   beforeAll(async () => {
     const db = h!.db;
-    await db.insert(user).values({ id: USER_ID, name: "IT T3 e2ec", email: `${USER_ID}@example.invalid` });
-    const [a] = await db.insert(salons).values({ name: `IT T3 e2ec A ${RUN}`, ownerId: USER_ID }).returning();
-    const [b] = await db.insert(salons).values({ name: `IT T3 e2ec B ${RUN}`, ownerId: USER_ID }).returning();
+    await db.insert(user).values(USERS.map((id) => ({ id, name: "IT T3 e2ec", email: `${id}@example.invalid` })));
+    const [a] = await db.insert(salons).values({ name: `IT T3 e2ec A ${RUN}`, ownerId: USER_A }).returning();
+    const [b] = await db.insert(salons).values({ name: `IT T3 e2ec B ${RUN}`, ownerId: USER_B }).returning();
     salonA = a!.id;
     salonB = b!.id;
     const [ea] = await db.insert(employees).values({ salonId: salonA, firstName: "IT", lastName: "A" }).returning();
@@ -62,9 +66,10 @@ describe.skipIf(!h)("purgeE2eAppointments (pg)", () => {
   afterAll(async () => {
     if (!h) return;
     try {
-      const ids = [salonA, salonB].filter(Boolean);
-      if (ids.length) await h.db.delete(salons).where(inArray(salons.id, ids));
-      await h.db.delete(user).where(eq(user.id, USER_ID));
+      // Po właścicielach, nie po zmiennych salonA/salonB: sprząta też salon
+      // utworzony przed awarią beforeAll w połowie (zmienna jeszcze pusta).
+      await h.db.delete(salons).where(inArray(salons.ownerId, USERS));
+      await h.db.delete(user).where(inArray(user.id, USERS));
     } finally {
       await h.end();
     }
