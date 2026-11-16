@@ -632,7 +632,7 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
   const RUNBOOK = readFileSync(join(ROOT, "docs/runbook-krok-d.md"), "utf8");
   const d5 = RUNBOOK.slice(RUNBOOK.indexOf("## 5. D-5"), RUNBOOK.indexOf("## 6. D-6"));
   const block = d5.slice(d5.indexOf("```bash"), d5.indexOf("```", d5.indexOf("```bash") + 3));
-  const lines = block.split("\n").filter((l) => !l.trim().startsWith("#"));
+  const lines = block.split("\n");
 
   // --- Statyka bloku D-5 -------------------------------------------------------------------
   const ADD_LINE = `add() { local v; v="$(tr -d '\\r\\n')"; [ -n "$v" ] || { echo "error: empty value for $1 — gcloud not called" >&2; return 1; }; printf '%s' "$v" | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }`;
@@ -646,8 +646,8 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
     expect(d5).not.toMatch(/mktemp/);
   });
 
-  it("blok D-5 zaczyna się od `set -o pipefail` (K-1d B1)", () => {
-    expect(lines.find((l) => l.trim() !== "" && !l.startsWith("```"))).toBe("set -o pipefail");
+  it("blok D-5 zaczyna się od `set +x; set -o pipefail` (K-1d B1, Ethan N1)", () => {
+    expect(lines.find((l) => l.trim() !== "" && !l.startsWith("```"))).toBe("set +x; set -o pipefail");
   });
 
   it("jedyne `secrets versions add` to funkcje add i add_multiline; żadnego --data-file=ŚCIEŻKA ani starego tr -d '\\n'", () => {
@@ -673,15 +673,20 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
     for (const l of rms) expect(l, l).toMatch(/^add [a-z-]+ < ("[^"]+") && rm \1$/);
   });
 
-  it("D-5: komentarze tylko w osobnych liniach (wklejenie do interaktywnego zsh); uwagi: katalog repo, bash albo zsh", () => {
-    for (const l of lines) expect(l, l).not.toMatch(/\s#/);
+  it("D-5: uwagi w prozie — katalog repo, bash albo zsh, bez `set -x`, brak komentarzy w bloku (zsh bez interactivecomments)", () => {
     expect(d5).toContain("z katalogu repo");
     expect(d5).toContain("w **bash albo zsh**");
+    expect(d5).toMatch(/\*\*bez\s+`set -x`\*\*/);
+    expect(d5).toMatch(/interactivecomments/);
+    expect(d5).toMatch(/komentarz wykonuje\s+się jako polecenie/);
+    expect(d5).toMatch(/`resend-api-key`, `smsapi-token`, `upstash-redis-rest-token`, `google-client-secret`/);
+    expect(d5).toContain('`add_multiline NAZWA < "$HOME/secure/NAZWA.pem"`');
   });
 
   const vapidAt = lines.findIndex((l) => l.startsWith("node -e") && l.includes("generateVAPIDKeys"));
   const VAPID = lines.slice(vapidAt, vapidAt + 4).join("\n");
-  const PRELUDE = block.slice(block.indexOf("\n") + 1, block.indexOf("# Generowane lokalnie:"));
+  const PRELUDE = block.slice(block.indexOf("\n") + 1, block.indexOf("\nopenssl rand") + 1);
+  const BODY = block.slice(block.indexOf("\n") + 1);
 
   it("D-5 VAPID: jedno wywołanie node z web-push z repo; prywatny ze stdout do add, publiczny przez deskryptor 3 do gh; potem vapid_check i metadane", () => {
     expect(vapidAt).toBeGreaterThanOrEqual(0);
@@ -789,6 +794,28 @@ esac
       expect(w.read("gcloud.argv").split("\n")).toEqual(expect.arrayContaining(["versions", "add", "nazwa", "--data-file=-"]));
     });
 
+    // N1 (Ethan): xtrace włączony przed wklejeniem — `set +x` w pierwszej linii bloku wyłącza go,
+    // zanim wartość trafi do zmiennej lokalnej (przypisanie i printf byłyby inaczej śledzone na stderr).
+    it.each(["add", "add_multiline"])("%s pod `set -x` włączonym przed blokiem: wartość nie trafia na stderr (Ethan N1)", (fn) => {
+      const w = world();
+      const value = "WARTOSC-TESTOWA-123";
+      const r = w.run(shell, `set -x\n${PRELUDE}\n${fn} nazwa`, {}, `${value}\n`);
+      expect(r.status, r.stderr).toBe(0);
+      expect(w.read("sm")).toContain(value);
+      expect(r.stderr, "xtrace był włączony").toContain("set +x");
+      expect(r.stdout + r.stderr).not.toContain(value);
+    });
+
+    it("VAPID cały blok pod `set -x` włączonym przed blokiem: prywatny nie trafia na stderr (Ethan N1)", () => {
+      const w = world();
+      const r = w.run(shell, `set -x\n${PRELUDE}\n${VAPID}`);
+      expect(r.status, r.stderr).toBe(0);
+      const priv = w.read("sm");
+      expect(priv).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(r.stderr, "xtrace był włączony").toContain("set +x");
+      expect(r.stdout + r.stderr).not.toContain(priv);
+    });
+
     it.each(["0", "1"])("add_multiline (gcloud rc=%s): treść wielowierszowa bajt w bajt, kod gcloud zachowany, nic na dysku", (rc) => {
       const w = world();
       const r = w.run(shell, `${PRELUDE}\nadd_multiline nazwa`, { FAKE_RC: rc }, PEM);
@@ -891,6 +918,36 @@ esac
     expect(w.leftovers()).toEqual([]);
   }, 15_000);
 
+  // Z1 (Ethan): interaktywny zsh Darka ma `interactivecomments` wyłączone — `#` nie zaczyna komentarza
+  // nawet na początku linii. Cały blok przez stdin do `zsh -f -i` (czyta linia po linii jak przy wpisywaniu).
+  it.skipIf(!existsSync("/bin/zsh"))(
+    "cały blok D-5 w interaktywnym `zsh -f -i` (interactivecomments wyłączone): bez błędów i obcych poleceń, „VAPID: para OK” (Ethan Z1)",
+    () => {
+      const w = world();
+      const secure = join(w.env().HOME, "secure");
+      mkdirSync(secure);
+      writeFileSync(join(secure, "stripe-secret-key"), "wartosc-stripe-1\n");
+      writeFileSync(join(secure, "stripe-webhook-secret"), "wartosc-stripe-2\n");
+      const r = spawnSync("/bin/zsh", ["-f", "-i"], {
+        encoding: "utf8", cwd: ROOT, env: w.env({ PS1: "", PROMPT: "" }),
+        input: `[[ -o interactivecomments ]] || echo INTERACTIVECOMMENTS-OFF\n${BODY}`,
+      });
+      const out = r.stdout + r.stderr;
+      expect(r.stdout, "warunek testu: opcja wyłączona").toContain("INTERACTIVECOMMENTS-OFF");
+      // Ethan Z1: cztery wzorce z recenzji; plus „no such file” (komentarz z `<` wykonany jako przekierowanie, :388 @483cff3).
+      for (const bad of ["command not found", "parse error", "no matches found", "unknown", "no such file"]) expect(out, out).not.toContain(bad);
+      expect(r.stdout, out).toContain("VAPID: para OK");
+      expect(readdirSync(secure), "oryginały usunięte po udanym add").toEqual([]);
+      const argv = w.read("gcloud.argv").split("\n");
+      for (const name of ["better-auth-secret", "cron-secret", "vapid-private-key", "stripe-secret-key", "stripe-webhook-secret"]) {
+        expect(argv, name).toContain(name);
+      }
+      expect(w.read("sm")).toBe("wartosc-stripe-2");
+      expect(out).not.toContain("wartosc-stripe");
+    },
+    30_000,
+  );
+
   it("D-5: rm -P nie jest przedstawiany jako wymazanie; oryginał od dostawcy usuwa człowiek", () => {
     expect(block).not.toMatch(/\brm -P\b/);
     expect(d5).toContain("`rm -P` na APFS");
@@ -901,9 +958,37 @@ esac
   it("każdy sekret dodawany przez add — ze strumienia albo z pliku na stdin", () => {
     const uses = lines.filter((l) => /(^|\| *)add [a-z]/.test(l));
     expect(uses.length).toBeGreaterThanOrEqual(5);
-    for (const l of uses) expect(l).toMatch(/\| add [a-z-]+\s*$|^add [a-z-]+ < ("[^"]+") && rm \1(\s+#.*)?$/);
+    for (const l of uses) expect(l).toMatch(/\| add [a-z-]+\s*$|^add [a-z-]+ < ("[^"]+") && rm \1$/);
     expect(uses.map((l) => l.match(/add ([a-z-]+)/)![1])).toEqual(
       expect.arrayContaining(["better-auth-secret", "cron-secret", "vapid-private-key", "stripe-secret-key", "stripe-webhook-secret"]),
     );
+  });
+});
+
+// Z1/N1 (Ethan, K-1d) + zakres Olivera: każdy blok ```bash``` runbooka kroku D jest do wklejenia
+// w interaktywnym zsh bez `interactivecomments` — zero komentarzy (objaśnienia w prozie);
+// bloki dotykające sekretów zaczynają się od `set +x` (xtrace nie wypisze wartości).
+describe("G-D2: bloki ```bash``` runbooka kroku D — bez komentarzy, `set +x` przy sekretach (Z1, N1)", () => {
+  const RUNBOOK = readFileSync(join(ROOT, "docs/runbook-krok-d.md"), "utf8");
+  const BLOCKS = [...RUNBOOK.matchAll(/^```bash\n([\s\S]*?)^```$/gm)].map((m) => m[1] ?? "");
+
+  it("bloków do wklejenia jest co najmniej 12", () => {
+    expect(BLOCKS.length).toBeGreaterThanOrEqual(12);
+  });
+
+  it.each(BLOCKS.map((b, i) => [i, (b.split("\n")[0] ?? "").slice(0, 50), b]))(
+    "blok %i (%s): żadna linia nie zaczyna się od `#` ani nie ma ` #` w środku",
+    (_i, _first, b) => {
+      for (const l of String(b).split("\n")) {
+        expect(l, l).not.toMatch(/^\s*#/);
+        expect(l, l).not.toMatch(/\s#/);
+      }
+    },
+  );
+
+  it("bloki dotykające sekretów (Secret Manager, hasło, nagłówek Authorization) zaczynają się od `set +x`", () => {
+    const touching = BLOCKS.filter((b) => /secrets versions|PGPASSWORD|Authorization:/.test(b));
+    expect(touching.length).toBeGreaterThanOrEqual(4);
+    for (const b of touching) expect(b.split("\n")[0], b).toMatch(/^set \+x(;|$)/);
   });
 });

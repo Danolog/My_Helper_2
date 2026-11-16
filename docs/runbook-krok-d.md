@@ -62,10 +62,10 @@ workflow wdrożenia potrzebuje obu.
 **Etap `sql` nie rusza bez B-1** (Ryan 6899923012): wersja skryptu musi
 wywoływać `sql users create|set-password` z `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`
 (inaczej hasła bazy lądują jawnym tekstem w `~/.config/gcloud/logs/`).
-Sprawdzenie przed etapem:
+Sprawdzenie przed etapem (oczekiwany wynik: `1`):
 
 ```bash
-grep -c 'CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC\[@\]}" sql users' infra/gcp/bootstrap.sh   # = 1
+grep -c 'CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC\[@\]}" sql users' infra/gcp/bootstrap.sh
 ```
 
 | # | Etap | Polecenie | Odczyt stanu po etapie (oczekiwany wynik) |
@@ -200,6 +200,7 @@ Bootstrap **nie tworzy ról NOLOGIN**. `myhelper_app` tworzy migracja 0005.
 Odczyt stanu po etapie:
 
 ```bash
+set +x
 P=my-helper-2-488419
 gcloud --project=$P sql instances describe myhelper-pg --format='yaml(databaseVersion,settings.edition,settings.tier,settings.availabilityType,settings.dataDiskSizeGb,settings.storageAutoResizeLimit,settings.backupConfiguration,settings.maintenanceWindow,settings.ipConfiguration.sslMode,settings.ipConfiguration.authorizedNetworks,settings.deletionProtectionEnabled)'
 gcloud --project=$P sql databases list --instance=myhelper-pg --format='value(name)'
@@ -297,6 +298,7 @@ Cel: potwierdzić, że nagłówek z `--flags-file=<(…)` trafia do joba Schedul
 zanim prawdziwy `CRON_SECRET` trafi do `infra/gcp/scheduler.sh`. Token jest fikcyjny.
 
 ```bash
+set +x
 P=my-helper-2-488419; R=europe-central2; J=mh-flagsfile-probe
 gcloud --project=$P scheduler jobs create http $J --location=$R \
   --schedule='0 0 29 2 *' --time-zone=Europe/Warsaw \
@@ -347,9 +349,17 @@ bezpiecznym wymazaniem; ochroną jest szyfrowanie dysku (FileVault) i jak
 najkrótszy czas życia pliku, nie flaga `rm`.
 
 Blok uruchamiać **z katalogu repo** (VAPID bierze `web-push` z `node_modules`),
-w **bash albo zsh** — w `sh` nie zadziała (`local`, `pipefail`, `>(…)`).
-Komentarze stoją w osobnych liniach (wklejenie do interaktywnego zsh bez
-`interactivecomments` nie może dostać `#` w środku polecenia).
+w **bash albo zsh** — w `sh` nie zadziała (`local`, `pipefail`, `>(…)`) — i **bez
+`set -x`**: wartości są w zmiennych lokalnych funkcji, więc śledzenie poleceń
+wypisałoby je na ekran; dlatego blok zaczyna się od `set +x`.
+**Blok nie ma ani jednej linii komentarza** (K-1d, Ethan Z1, Ryan): w
+interaktywnym zsh z wyłączonym `interactivecomments` (domyślnie, tak jak u
+Darka) `#` nie zaczyna komentarza nawet na początku linii — komentarz wykonuje
+się jako polecenie (`command not found: #`, po `;` uruchamia kolejne polecenie,
+`parse error`, wykonane przekierowania i backticki). Wszystkie objaśnienia stoją
+w prozie nad blokiem i pod nim. `setopt interactivecomments` w pierwszej linii
+bloku nie pomaga (przy wklejeniu bufor jest parsowany w całości przed
+wykonaniem).
 
 **Pusta wartość (K-1d, Ethan B1):** `add` i `add_multiline` czytają stdin do
 zmiennej lokalnej i przy pustej wartości kończą się kodem 1 **bez wywołania
@@ -362,20 +372,32 @@ błąd generatora w potoku (np. `node` poza katalogiem repo) daje kod ≠ 0 poto
 1 s porównuje klucz publiczny wyliczony (ECDH P-256) z klucza prywatnego
 z Secret Managera ze zmienną w GitHub. Klucz prywatny płynie wyłącznie potokiem
 `gcloud secrets versions access` → stdin `node` (bez ekranu, pliku, argumentów
-i zmiennej powłoki); do zmiennej trafia tylko wyliczony klucz publiczny (jawny).
+i zmiennej powłoki); w zmiennej `sm` jest wyłącznie wyliczony klucz publiczny (jawny).
 Wynik „VAPID: para OK” albo „VAPID: ROZJAZD”. **Przy ROZJAZD albo jakimkolwiek
 błędzie w bloku VAPID powtarza się CAŁY blok VAPID** (nowa para nadpisuje obie
 strony), nigdy jedną linię. D-6 (wdrożenie) dopiero po „VAPID: para OK”.
 
+Kolejność w bloku:
+1. ustawienia i funkcje: `set +x; set -o pipefail`, `P`, `add`, `add_multiline`, `vapid_check`;
+2. generowane lokalnie: `better-auth-secret`, `cron-secret` (`openssl rand`);
+3. **blok VAPID** — od `node -e …` do `vapid_check` włącznie, przy błędzie
+   powtarzany w całości: jedna para z jednego wywołania node, bez pliku i bez
+   klucza prywatnego na ekranie ani w argumentach; prywatny: stdout node → `add`
+   (stdin gcloud); publiczny (jawny): deskryptor 3 → `gh variable set` (stdin)
+   dla D-6; potem metadane najnowszej wersji `vapid-private-key` (bez wartości);
+4. od dostawców (plik zapisany z panelu dostawcy, poza repo): `stripe-secret-key`
+   i `stripe-webhook-secret` — para Stripe: oba albo żaden (K-1b); `&& rm`
+   (Ryan, K-1d): nieudane `add` (kod ≠ 0) nie kasuje oryginału — wartość do
+   ponowienia zostaje.
+
 ```bash
-set -o pipefail
+set +x; set -o pipefail
 P=my-helper-2-488419
 add() { local v; v="$(tr -d '\r\n')"; [ -n "$v" ] || { echo "error: empty value for $1 — gcloud not called" >&2; return 1; }; printf '%s' "$v" | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
 add_multiline() { local v; v="$(cat; printf x)"; v="${v%x}"; [ -n "$v" ] || { echo "error: empty value for $1 — gcloud not called" >&2; return 1; }; printf '%s' "$v" | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
 vapid_check() {
   local i sm gh
   for i in 1 2 3 4 5 6 7 8 9 10; do
-    # Prywatny tylko w potoku gcloud → node; w zmiennej sm jest wyłącznie wyliczony klucz publiczny.
     sm="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions access latest --secret=vapid-private-key | node -e 'let s="";process.stdin.on("data",function(d){s+=d}).on("end",function(){try{const e=require("crypto").createECDH("prime256v1");e.setPrivateKey(Buffer.from(s,"base64url"));process.stdout.write(e.getPublicKey().toString("base64url"))}catch(x){process.exit(1)}})')" || sm=""
     gh="$(gh variable get NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp)" || gh=""
     if [ -n "$sm" ] && [ "$sm" = "$gh" ]; then echo "VAPID: para OK"; return 0; fi
@@ -384,31 +406,25 @@ vapid_check() {
   echo "VAPID: ROZJAZD — powtórz CAŁY blok VAPID; D-6 dopiero po 'VAPID: para OK'" >&2
   return 1
 }
-# Użycie add_multiline (dziś żaden sekret z manifestu tego nie wymaga); potem człowiek usuwa oryginał:
-#   add_multiline NAZWA < "$HOME/secure/NAZWA.pem"
 
-# Generowane lokalnie:
 openssl rand -base64 48 | add better-auth-secret
 openssl rand -hex 32 | add cron-secret
 
-# VAPID (K-1d) — CAŁY blok do vapid_check włącznie, przy błędzie powtarzany w całości.
-# Jedna para z jednego wywołania node, bez pliku i bez klucza prywatnego na ekranie ani w argumentach.
-# Prywatny: stdout node → add (stdin gcloud). Publiczny (jawny): deskryptor 3 → gh variable set (stdin) dla D-6.
 node -e 'const k=require("web-push").generateVAPIDKeys(); require("fs").writeSync(3, k.publicKey); process.stdout.write(k.privateKey)' \
   3> >(gh variable set NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp) \
   | add vapid-private-key
 vapid_check
-# Metadane najnowszej wersji (bez wartości):
 gcloud --project=$P secrets versions list vapid-private-key --sort-by=~createTime --limit=1 --format='value(name,state,createTime)'
 
-# Od dostawców (plik zapisany z panelu dostawcy, poza repo; oryginał usuwa człowiek po dodaniu wersji).
-# `&& rm` (Ryan, K-1d): nieudane add (kod ≠ 0) nie kasuje oryginału — wartość do ponowienia zostaje.
 add stripe-secret-key < "$HOME/secure/stripe-secret-key" && rm "$HOME/secure/stripe-secret-key"
-# Para Stripe: oba albo żaden (K-1b).
 add stripe-webhook-secret < "$HOME/secure/stripe-webhook-secret" && rm "$HOME/secure/stripe-webhook-secret"
-# … analogicznie: resend-api-key, smsapi-token,
-#    upstash-redis-rest-token, google-client-secret (openrouter-api-key: od K-1 poza Secret Manager)
 ```
+
+Pozostałe sekrety od dostawców — analogicznie jak Stripe (`add NAZWA < "PLIK" && rm "PLIK"`):
+`resend-api-key`, `smsapi-token`, `upstash-redis-rest-token`, `google-client-secret`
+(`openrouter-api-key`: od K-1 poza Secret Manager). Sekret wielowierszowy (dziś
+żaden z manifestu tego nie wymaga): `add_multiline NAZWA < "$HOME/secure/NAZWA.pem"`,
+potem człowiek usuwa oryginał.
 
 **Para Stripe (K-1b):** `stripe-secret-key` i `stripe-webhook-secret` dodawać
 razem albo wcale. Tylko jeden z wersją → `run-deploy.sh` przerywa wdrożenie
@@ -458,13 +474,15 @@ gh variable set GCP_REGION --env $E --body europe-central2
 gh variable set AR_REPO --env $E --body myhelper
 gh variable set CLOUD_RUN_SERVICE --env $E --body myhelper
 gh variable set SQL_INSTANCE --env $E --body myhelper-pg
-gh variable set DB_POOL_MAX --env $E --body 4          # max_connections 25 na db-f1-micro (Ethan)
+gh variable set DB_POOL_MAX --env $E --body 4
 gh variable set GCP_RUNTIME_SA --env $E --body myhelper-runtime@my-helper-2-488419.iam.gserviceaccount.com
 gh variable set GCP_DEPLOY_SA --env $E --body myhelper-deploy@my-helper-2-488419.iam.gserviceaccount.com
 gh variable set GCP_WIF_PROVIDER --env $E --body "$(…wartość wypisana przez etap wif…)"
 gh variable set ADMIN_EMAILS --env $E < "$HOME/secure/admin-emails"
-# … pozostałe zmienne klasy `var` z infra/gcp/env-manifest.json
 ```
+
+`DB_POOL_MAX=4`: `max_connections` 25 na `db-f1-micro` (Ethan). Pozostałe zmienne
+klasy `var` z `infra/gcp/env-manifest.json` — analogicznie.
 
 - `GCS_PUBLIC_BASE_URL` — **pusta** na start. Od K-1 jedno źródło
   (`vars.GCS_PUBLIC_BASE_URL`) dla build-argu obrazu i zmiennej usługi.
@@ -493,11 +511,12 @@ Ochrona środowiska `production-gcp` (ustawia sesja główna, Oliver 19:5x):
 
 Zatwierdzenie oczekującego wdrożenia (`pending_deployments`) wykonuje
 **wyłącznie sesja główna**, po sygnale Olivera „Gotowe do wdrożenia: <sha>”,
-i tylko gdy sha przebiegu = sha z sygnału:
+i tylko gdy sha przebiegu = sha z sygnału (pierwsze polecenie bloku wypisuje sha
+przebiegu — ma być równe `<sha>` z sygnału):
 
 ```bash
 RUN=<id przebiegu>
-gh api repos/Danolog/My_Helper_2/actions/runs/$RUN --jq .head_sha     # = <sha> z sygnału
+gh api repos/Danolog/My_Helper_2/actions/runs/$RUN --jq .head_sha
 ENV_ID=$(gh api repos/Danolog/My_Helper_2/actions/runs/$RUN/pending_deployments --jq '.[0].environment.id')
 gh api -X POST repos/Danolog/My_Helper_2/actions/runs/$RUN/pending_deployments \
   -F "environment_ids[]=$ENV_ID" -f state=approved -f comment="Gotowe do wdrożenia: <sha>"
@@ -509,11 +528,12 @@ w repo — P3 po becie.
 **Dwa przebiegi** (decyzja: pierwszy z migracjami na pustej bazie; warunek 4
 Ryana). Bez migracji pierwsza rewizja wstałaby na bazie bez tabel.
 
+Kolejność w bloku: 1. pierwszy przebieg — migracje od zera na pustej bazie;
+2. drugi przebieg — bez migracji, musi być zielony (warunek 4).
+
 ```bash
-# 1. pierwszy przebieg — migracje od zera na pustej bazie
 gh workflow run deploy-cloud-run.yml --ref main -f run_migrations=true
 gh run watch "$(gh run list --workflow=deploy-cloud-run.yml --limit=1 --json databaseId -q '.[0].databaseId')"
-# 2. drugi przebieg — bez migracji, musi być zielony (warunek 4)
 gh workflow run deploy-cloud-run.yml --ref main -f run_migrations=false
 gh run watch "$(gh run list --workflow=deploy-cloud-run.yml --limit=1 --json databaseId -q '.[0].databaseId')"
 ```
@@ -597,14 +617,18 @@ nigdy nie wznawia. Kolejność obowiązkowa:
 (bez ścieżki i bez taga rewizji). Inny host skrypt odrzuca przed pierwszym
 wywołaniem gcloud (#143 pkt 1).
 
+Kolejność w bloku: 1. utworzenie/aktualizacja — wszystkie 5 zadań `PAUSED`;
+2. `--check`: dryf ENABLED→PAUSED oczekiwany, innego dryfu brak; 3. `--resume`
+dopiero po decyzji Darka — jawne nazwy (W-3), można wznowić część zadań;
+4. `--check`: kod 0 (wznowione zgodne z tabelą); 5. lista zadań ze stanem.
+
 ```bash
 S='PROJECT_ID=my-helper-2-488419 REGION=europe-central2 BASE_URL=https://myhelper-843777043748.europe-central2.run.app'
-env $S infra/gcp/scheduler.sh            # 1. utworzenie/aktualizacja — wszystkie 5 zadań PAUSED
-env $S infra/gcp/scheduler.sh --check    # 2. dryf ENABLED→PAUSED oczekiwany, innego dryfu brak
-# 3. dopiero po decyzji Darka — jawne nazwy (W-3); można wznowić część zadań:
+env $S infra/gcp/scheduler.sh
+env $S infra/gcp/scheduler.sh --check
 env $S infra/gcp/scheduler.sh --resume mh-sms-reminders mh-push-reminders \
   mh-push-reminders-24h mh-cleanup-pending-deposits mh-cleanup-temporary-access
-env $S infra/gcp/scheduler.sh --check    # 4. kod 0 (wznowione zgodne z tabelą)
+env $S infra/gcp/scheduler.sh --check
 gcloud --project=my-helper-2-488419 scheduler jobs list --location=europe-central2 --format='value(name,state)'
 ```
 
@@ -628,6 +652,7 @@ Wyłącznie przez `cloud-sql-proxy` z kontem sesji głównej (bez autoryzowanych
 sieci, bez publicznego dostępu hasłem):
 
 ```bash
+set +x
 cloud-sql-proxy --port 6543 my-helper-2-488419:europe-central2:myhelper-pg &
 PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=my-helper-2-488419 secrets versions access latest --secret=postgres-admin-password)" \
   psql "host=127.0.0.1 port=6543 user=postgres dbname=myhelper sslmode=disable"
