@@ -16,7 +16,7 @@
 --    Styk (10:00–11:00 i 11:00–12:00) nie jest kolizją: '[)' — jak w kodzie.
 --
 -- Przed zastosowaniem na każdej bazie (produkcja: słowo Darka) uruchomić
--- drizzle/checks/0009_appointments_no_overlap_preflight.sql (tylko odczyt).
+-- scripts/sql/0009-precheck.sql (tylko odczyt, BEGIN READ ONLY).
 -- Wszystkie trzy liczby muszą wynosić 0 — inaczej ADD CONSTRAINT się nie powiedzie:
 --   SELECT count(*) FROM appointments WHERE end_time <= start_time;
 --   SELECT count(*) FROM time_blocks WHERE end_time <= start_time;
@@ -36,6 +36,9 @@
 --   ALTER TABLE "time_blocks" DROP CONSTRAINT "time_blocks_end_after_start";
 --   ALTER TABLE "appointments" DROP CONSTRAINT "appointments_end_after_start";
 --   (rozszerzenie btree_gist zostaje — nieszkodliwe, może go używać coś innego)
+--   Ręczne wycofanie nie usuwa wpisu 0009 z drizzle.__drizzle_migrations, więc ponowne
+--   db:migrate NIE zastosuje 0009 jeszcze raz. Ponowne włączenie ograniczeń = nowa
+--   migracja albo (świadomie) usunięcie tego wpisu z dziennika.
 CREATE EXTENSION IF NOT EXISTS btree_gist;--> statement-breakpoint
 ALTER TABLE "appointments" ADD CONSTRAINT "appointments_end_after_start" CHECK ("appointments"."end_time" > "appointments"."start_time");--> statement-breakpoint
 ALTER TABLE "time_blocks" ADD CONSTRAINT "time_blocks_end_after_start" CHECK ("time_blocks"."end_time" > "time_blocks"."start_time");--> statement-breakpoint

@@ -226,6 +226,22 @@ describe("acceptEarlierSlot — wyścig odrzucony przez bazę (#171)", () => {
     expect(h.update).toHaveBeenCalledTimes(1); // tylko próba przeniesienia, wpis bez zmian
   });
 
+  it("istniejąca wizyta anulowana, więc nowa: 23P01 przy INSERT → odmowa, wpis nierozstrzygnięty", async () => {
+    h.select
+      .mockReturnValueOnce(createChainMock([entry({ existingAppointmentId: "apt-old" })]))
+      .mockReturnValueOnce(filteringChain([]))
+      .mockReturnValueOnce(
+        createChainMock([{ id: "apt-old", status: "cancelled", startTime: START, notes: null, employeeId: EMPLOYEE }])
+      );
+    h.insert.mockReturnValue(rejecting(OVERLAP));
+
+    const res = await acceptEarlierSlot("wl-1", "tok");
+
+    expect(res).toEqual({ success: false, message: "Termin jest juz zajety" });
+    expect(h.insert).toHaveBeenCalledTimes(1); // gałąź „anulowana → nowa wizyta”
+    expect(h.update).not.toHaveBeenCalled(); // anulowanej nie ruszamy, accepted zostaje null
+  });
+
   it("inny błąd zapisu nie jest połykany (rzuca dalej)", async () => {
     h.select.mockReturnValueOnce(createChainMock([entry()])).mockReturnValueOnce(filteringChain([]));
     h.insert.mockReturnValue(rejecting({ code: "23514", constraint_name: "appointments_end_after_start" }));
