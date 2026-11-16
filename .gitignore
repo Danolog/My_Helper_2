@@ -86,3 +86,6 @@ memory/
 # Katalog roboczy agentow (pliki tymczasowe, nie commitowac)
 scratchpad/
 /test-results.json
+
+# Plik generowany lokalnie przez next dev (nie commitowac)
+/AGENTS.md
