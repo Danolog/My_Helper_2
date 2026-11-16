@@ -73,7 +73,8 @@ if (process.env.FAKE_FAIL_VERB === verb) { process.stderr.write("ERROR: PERMISSI
 // D-8: gcloud cytuje samą wartość (bez słów Authorization/Bearer) w komunikacie błędu.
 if (process.env.FAKE_ECHO_TOKEN_VERB === verb && ffText) {
   const tok = (ffText.match(/Bearer ([^"]*)"/) || [])[1] || "";
-  process.stderr.write("ERROR: INVALID_ARGUMENT: header value [" + tok + "] rejected\\nhint: check the job definition\\n");
+  // Druga linia: nagłówek ze skróconą wartością — filtr tokenu jej nie złapie, filtr nagłówka tak.
+  process.stderr.write("ERROR: INVALID_ARGUMENT: header value [" + tok + "] rejected\\n  Authorization: \\"Bearer " + tok.slice(0, 8) + "...\\"\\nhint: check the job definition\\n");
   process.exit(1);
 }
 const job = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
@@ -475,6 +476,8 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
       expect(r.status).toBe(1);
       expect(r.stdout + r.stderr).not.toContain(TOKEN);
       expect(r.stderr).not.toContain("INVALID_ARGUMENT");
+      expect(r.stderr).not.toContain(TOKEN.slice(0, 8));
+      expect(r.stderr).not.toMatch(/authorization|bearer/i);
       expect(r.stderr).toContain("hint: check the job definition");
       expect(r.stderr).toContain(`failed for ${TABLE[0]!.name}`);
     },
