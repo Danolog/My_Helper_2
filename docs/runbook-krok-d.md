@@ -356,18 +356,18 @@ add_multiline() { CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secre
 # Generowane lokalnie:
 openssl rand -base64 48 | add better-auth-secret
 openssl rand -hex 32 | add cron-secret
-# VAPID: prywatny do Secret Manager, publiczny do zmiennej NEXT_PUBLIC_VAPID_PUBLIC_KEY (D-6).
-npx --yes web-push generate-vapid-keys --json > "$TMPDIR/vapid.json"
-node -e 'process.stdout.write(require(process.argv[1]).privateKey)' "$TMPDIR/vapid.json" | add vapid-private-key
-node -e 'process.stdout.write(require(process.argv[1]).publicKey)' "$TMPDIR/vapid.json" \
-  | gh variable set NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp
-rm "$TMPDIR/vapid.json"
+# VAPID (K-1d): jedna para z jednego wywołania node (z katalogu repo — web-push z node_modules),
+# bez pliku i bez klucza prywatnego na ekranie ani w argumentach. Prywatny: stdout node → add
+# (stdin gcloud). Publiczny (wartość jawna): deskryptor 3 → gh variable set (stdin) dla D-6.
+node -e 'const k=require("web-push").generateVAPIDKeys(); require("fs").writeSync(3, k.publicKey); process.stdout.write(k.privateKey)' \
+  3> >(gh variable set NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp) \
+  | add vapid-private-key
+gh variable get NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp   # klucz publiczny ustawiony (jawny)
 
-# Od dostawców (plik zapisany z panelu dostawcy, poza repo; oryginał usuwa człowiek po dodaniu wersji):
-add stripe-secret-key < "$HOME/secure/stripe-secret-key"
-rm "$HOME/secure/stripe-secret-key"
-add stripe-webhook-secret < "$HOME/secure/stripe-webhook-secret"   # para Stripe: oba albo żaden (K-1b)
-rm "$HOME/secure/stripe-webhook-secret"
+# Od dostawców (plik zapisany z panelu dostawcy, poza repo; oryginał usuwa człowiek po dodaniu wersji).
+# `&& rm` (Ryan, K-1d): nieudane add (kod ≠ 0) nie kasuje oryginału — wartość do ponowienia zostaje.
+add stripe-secret-key < "$HOME/secure/stripe-secret-key" && rm "$HOME/secure/stripe-secret-key"
+add stripe-webhook-secret < "$HOME/secure/stripe-webhook-secret" && rm "$HOME/secure/stripe-webhook-secret"   # para Stripe: oba albo żaden (K-1b)
 # … analogicznie: resend-api-key, smsapi-token,
 #    upstash-redis-rest-token, google-client-secret (openrouter-api-key: od K-1 poza Secret Manager)
 ```

@@ -27,6 +27,7 @@
  * etapie secrets; describe bez sprawdzania (brak idempotencji).
  */
 import { spawn, spawnSync } from "node:child_process";
+import { createECDH } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -658,6 +659,74 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
     expect(d5).not.toMatch(/mktemp/);
   });
 
+  // K-1d (Ryan): w D-5 żadnego zapisu wartości na dysk (TMPDIR, plik z kluczem, tee),
+  // żadnego pobierania z npm bez wersji (npx), a rm oryginału tylko po udanym add (&&).
+  it("D-5: bez zapisu do $TMPDIR ani do pliku, bez npx; rm oryginału wyłącznie po `&&` udanego add", () => {
+    expect(d5).not.toMatch(/TMPDIR/);
+    expect(d5).not.toMatch(/vapid\.json/);
+    expect(d5).not.toMatch(/\bnpx\b/);
+    expect(d5).not.toMatch(/\btee\b/);
+    // Przekierowanie wyjścia do pliku: `>`/`>>` niepoprzedzone cyfrą deskryptora ani `&`, nie `>(…)`.
+    for (const l of lines) expect(l, l).not.toMatch(/(^|[^0-9&>])>>?\s*(?!\()\S/);
+    const rms = lines.filter((l) => /\brm\b/.test(l));
+    expect(rms.length).toBeGreaterThanOrEqual(2);
+    for (const l of rms) expect(l, l).toMatch(/^add [a-z-]+ < ("[^"]+") && rm \1(\s+#.*)?$/);
+  });
+
+  it("D-5 VAPID: jedno wywołanie node z web-push z repo; prywatny ze stdout do add, publiczny przez deskryptor 3 do gh", () => {
+    const i = lines.findIndex((l) => l.startsWith("node -e") && l.includes("generateVAPIDKeys"));
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(lines.filter((l) => /generateVAPIDKeys|web-push/.test(l))).toHaveLength(1);
+    expect(lines[i]).toContain('require("web-push").generateVAPIDKeys()');
+    expect(lines[i + 1]).toBe("  3> >(gh variable set NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp) \\");
+    expect(lines[i + 2]).toBe("  | add vapid-private-key");
+  });
+
+  it("D-5 VAPID wykonane: para pasuje, prywatny tylko na stdin gcloud, publiczny tylko na stdin gh; nic na dysku ani na ekranie", () => {
+    const i = lines.findIndex((l) => l.startsWith("node -e") && l.includes("generateVAPIDKeys"));
+    const snippet = lines.slice(i, i + 3).join("\n");
+    const addFn = lines.find((l) => l.startsWith("add() {"))!;
+    const root = join(DIR, `vapid-${n++}`);
+    const bin = join(root, "bin");
+    const tmp = join(root, "tmp");
+    const home = join(root, "home");
+    const rec = join(root, "rec");
+    for (const d of [bin, tmp, home, rec]) mkdirSync(d, { recursive: true });
+    // Fałszywe gcloud i gh: argv (jedna linia na argument), stdin i zmienna logu plikowego do $REC.
+    for (const tool of ["gcloud", "gh"]) {
+      writeFileSync(
+        join(bin, tool),
+        `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a"; done > "$REC/${tool}.argv"\nprintf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" > "$REC/${tool}.env"\ncat > "$REC/${tool}.part"\nmv "$REC/${tool}.part" "$REC/${tool}.stdin"\n`,
+      );
+      chmodSync(join(bin, tool), 0o755);
+    }
+    const r = spawnSync("bash", ["-c", `P=p-123; ${addFn}\n${snippet}\nwait`], {
+      encoding: "utf8",
+      cwd: ROOT,
+      env: { NODE_ENV: "test", PATH: `${bin}:${process.env.PATH}`, REC: rec, TMPDIR: tmp, HOME: home },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    // gh działa w podstawieniu procesu (asynchronicznie) — czekamy na jego zapis.
+    for (let k = 0; k < 100 && !existsSync(join(rec, "gh.stdin")); k++) spawnSync("sleep", ["0.05"]);
+    const priv = readFileSync(join(rec, "gcloud.stdin"), "utf8");
+    const pub = readFileSync(join(rec, "gh.stdin"), "utf8");
+    expect(priv).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(pub).toMatch(/^[A-Za-z0-9_-]{87}$/);
+    const ecdh = createECDH("prime256v1");
+    ecdh.setPrivateKey(Buffer.from(priv, "base64url"));
+    expect(ecdh.getPublicKey().toString("base64url"), "para kluczy").toBe(pub);
+    const gcloudArgv = readFileSync(join(rec, "gcloud.argv"), "utf8");
+    expect(gcloudArgv.split("\n")).toEqual(expect.arrayContaining(["secrets", "versions", "add", "vapid-private-key", "--data-file=-"]));
+    expect(readFileSync(join(rec, "gcloud.env"), "utf8").trim()).toBe("1");
+    expect(readFileSync(join(rec, "gh.argv"), "utf8").split("\n")).toEqual(
+      expect.arrayContaining(["variable", "set", "NEXT_PUBLIC_VAPID_PUBLIC_KEY", "--env", "production-gcp"]),
+    );
+    for (const f of ["gcloud.argv", "gh.argv", "gh.stdin"]) expect(readFileSync(join(rec, f), "utf8"), f).not.toContain(priv);
+    expect(r.stdout + r.stderr).not.toContain(priv);
+    expect(readdirSync(tmp)).toEqual([]);
+    expect(readdirSync(home)).toEqual([]);
+  });
+
   it("D-5: rm -P nie jest przedstawiany jako wymazanie; oryginał od dostawcy usuwa człowiek", () => {
     expect(block).not.toMatch(/\brm -P\b/);
     expect(d5).toContain("`rm -P` na APFS");
@@ -715,7 +784,7 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
   it("każdy sekret dodawany przez add — ze strumienia albo z pliku na stdin", () => {
     const uses = lines.filter((l) => /(^|\| *)add [a-z]/.test(l));
     expect(uses.length).toBeGreaterThanOrEqual(5);
-    for (const l of uses) expect(l).toMatch(/\| add [a-z-]+\s*$|^add [a-z-]+ < "[^"]+"(\s+#.*)?$/);
+    for (const l of uses) expect(l).toMatch(/\| add [a-z-]+\s*$|^add [a-z-]+ < ("[^"]+") && rm \1(\s+#.*)?$/);
     expect(uses.map((l) => l.match(/add ([a-z-]+)/)![1])).toEqual(
       expect.arrayContaining(["better-auth-secret", "cron-secret", "vapid-private-key", "stripe-secret-key", "stripe-webhook-secret"]),
     );
