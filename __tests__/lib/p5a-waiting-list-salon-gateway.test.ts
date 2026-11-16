@@ -311,6 +311,14 @@ describe("jawny warunek salonu w każdym zapytaniu raw (kontrakt repository.ts)"
   /** Czy warunek zawiera `"<tabela>"."salon_id" = $n` z parametrem `salon`. */
   function salonCond(chain: ChainT | undefined, table: string, salon: string): boolean {
     const w = (chain?.where as ReturnType<typeof vi.fn> | undefined)?.mock.calls[0]?.[0];
+    return condHasSalon(w, table, salon);
+  }
+  /** Czy warunek złączenia (drugi argument `innerJoin`) zawiera `"<tabela>"."salon_id" = $n` z `salon`. */
+  function joinSalonCond(chain: ChainT | undefined, table: string, salon: string): boolean {
+    const w = (chain?.innerJoin as ReturnType<typeof vi.fn> | undefined)?.mock.calls[0]?.[1];
+    return condHasSalon(w, table, salon);
+  }
+  function condHasSalon(w: unknown, table: string, salon: string): boolean {
     if (!w) return false;
     const q = render(w);
     const re = new RegExp(`"${table}"\\."salon_id" = \\$(\\d+)`, "g");
@@ -408,6 +416,25 @@ describe("jawny warunek salonu w każdym zapytaniu raw (kontrakt repository.ts)"
 
     expect(w.updates).toHaveLength(1);
     expect(salonCond(w.updates[0], "waiting_list", SALON_A), "update notifiedAt").toBe(true);
+  });
+
+  it("notify: złączenie klientów z warunkiem clients.salon_id = salon bramy", async () => {
+    const entriesRead = createChainMock([]);
+    h.tx.select.mockReturnValueOnce(entriesRead);
+
+    await notifyWaitingList({
+      salonId: SALON_A,
+      serviceId: null,
+      employeeId: null,
+      startTime: START,
+      endTime: END,
+      serviceName: "U",
+      employeeName: "E",
+      salonName: "S",
+    });
+
+    expect(salonCond(entriesRead, "waiting_list", SALON_A), "odczyt wpisów").toBe(true);
+    expect(joinSalonCond(entriesRead, "clients", SALON_A), "złączenie klientów").toBe(true);
   });
 });
 
