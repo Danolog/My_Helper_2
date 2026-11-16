@@ -7,7 +7,7 @@
  * Mock bazy ewaluuje warunki eq() na fikstura kont, wiec test sprawdza
  * zachowanie (kto dostaje push), a nie tylko ksztalt zapytania.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 type Cond =
   | { kind: "eq"; col: string; val: unknown }
@@ -48,9 +48,16 @@ let clientEmail: string | null = CLIENT_EMAIL;
 // Wartości przekazane do db.update(...).set(...)
 const updates: Array<Record<string, unknown>> = [];
 
-function entryRow() {
+// Wpisy zwracane przez odczyt listy (id; ten sam klient) — domyślnie jeden.
+let entryIds: string[] = ["wl-1"];
+// Liczba odczytów tabeli kont w przebiegu.
+let userReads = 0;
+// Zapis oznaczenia wpisu kończy się błędem.
+let updateFails = false;
+
+function entryRow(id = "wl-1") {
   return {
-    entry: { id: "wl-1" },
+    entry: { id },
     client: {
       id: "client-b",
       firstName: "Barbara",
@@ -81,8 +88,9 @@ function selectChain() {
   c.where = (w: Cond) => ((where = w), c);
   c.limit = () => c;
   c.then = (resolve: (v: unknown[]) => unknown) => {
-    if (tableName === "waitingList") return resolve([entryRow()]);
+    if (tableName === "waitingList") return resolve(entryIds.map((id) => entryRow(id)));
     if (tableName === "user") {
+      userReads++;
       return resolve(users.filter((u) => matches(u, where)).map((u) => ({ id: u.id })));
     }
     return resolve([]);
@@ -96,7 +104,7 @@ vi.mock("@/lib/db", () => ({
     update: () => {
       const c: Record<string, unknown> = {};
       c.set = (values: Record<string, unknown>) => (updates.push(values), c);
-      c.where = () => Promise.resolve([]);
+      c.where = () => (updateFails ? Promise.reject(new Error("zapis odrzucony")) : Promise.resolve([]));
       return c;
     },
   },
@@ -125,6 +133,7 @@ vi.mock("@/lib/logger", () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
+import { logger } from "@/lib/logger";
 import { notifyWaitingList } from "@/lib/waiting-list";
 
 const params = {
@@ -259,5 +268,86 @@ describe("notifyWaitingList — kanał SMS wstrzymany, wpis oznaczany po dostarc
     expect(mockSendPush).not.toHaveBeenCalled();
     expect(updates).toHaveLength(0);
     expect(result).toEqual({ notified: 0, smsCount: 0, pushCount: 0, errors: 0 });
+  });
+});
+
+describe("notifyWaitingList — wyszukiwanie konta w przebiegu i nieudany zapis oznaczenia (#221)", () => {
+  const VERIFIED = [{ id: "wlasciciel", email: CLIENT_EMAIL, emailVerified: true }];
+
+  function reset() {
+    vi.clearAllMocks();
+    updates.length = 0;
+    entryIds = ["wl-1"];
+    userReads = 0;
+    updateFails = false;
+    clientPhone = null;
+    clientEmail = CLIENT_EMAIL;
+    mockSendPush.mockResolvedValue({ success: true });
+  }
+  beforeEach(reset);
+  afterEach(reset);
+
+  /** Wszystkie argumenty wywołań loggera jako tekst. */
+  function loggedText(): string {
+    const calls = Object.values(logger).flatMap((fn) => (fn as ReturnType<typeof vi.fn>).mock.calls);
+    return JSON.stringify(calls);
+  }
+
+  it("dwa wpisy tego samego klienta: jeden odczyt konta w przebiegu, push do obu", async () => {
+    entryIds = ["wl-1", "wl-2"];
+    users = VERIFIED;
+
+    const result = await notifyWaitingList(params);
+
+    expect(userReads).toBe(1);
+    expect(mockSendPush).toHaveBeenCalledTimes(2);
+    expect(mockSendPush.mock.calls.map((c) => c[0])).toEqual(["wlasciciel", "wlasciciel"]);
+    expect(result).toMatchObject({ notified: 2, pushCount: 2, errors: 0 });
+  });
+
+  it("brak konta w przebiegu 1, konto w przebiegu 2: następny przebieg czyta konto od nowa", async () => {
+    users = [];
+    const first = await notifyWaitingList(params);
+    expect(first).toMatchObject({ notified: 0, pushCount: 0 });
+    expect(userReads).toBe(1);
+
+    users = VERIFIED;
+    const second = await notifyWaitingList(params);
+
+    expect(userReads).toBe(2);
+    expect(mockSendPush).toHaveBeenCalledTimes(1);
+    expect(second).toMatchObject({ notified: 1, pushCount: 1, errors: 0 });
+  });
+
+  it("push przyjęty, zapis oznaczenia nieudany: errors 1, notified 0, jedna próba zapisu; następny termin wysyła ponownie", async () => {
+    users = VERIFIED;
+    updateFails = true;
+
+    const first = await notifyWaitingList(params);
+
+    expect(first).toEqual({ notified: 0, smsCount: 0, pushCount: 1, errors: 1 });
+    expect(updates).toHaveLength(1); // bez ponawiania zapisu
+
+    // Wpis został oczekujący — przy następnym zwolnionym terminie znów pasuje.
+    updateFails = false;
+    updates.length = 0;
+    const second = await notifyWaitingList(params);
+
+    expect(mockSendPush).toHaveBeenCalledTimes(2);
+    expect(second).toEqual({ notified: 1, smsCount: 0, pushCount: 1, errors: 0 });
+    expect(updates).toHaveLength(1);
+  });
+
+  it("log nieudanego zapisu: id wpisu i klasa błędu; żaden log bez e-maila i danych klienta", async () => {
+    users = VERIFIED;
+    updateFails = true;
+
+    await notifyWaitingList(params);
+
+    expect(logger.error).toHaveBeenCalledWith(expect.any(String), { entryId: "wl-1", errorName: "Error" });
+    const text = loggedText();
+    expect(text).not.toContain(CLIENT_EMAIL);
+    expect(text).not.toContain("Barbara");
+    expect(text).not.toContain("Bielska");
   });
 });
