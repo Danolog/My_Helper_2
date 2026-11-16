@@ -70,6 +70,13 @@ if (process.env.FAKE_ABORTED_VERB === verb) {
   }
 }
 if (process.env.FAKE_FAIL_VERB === verb) { process.stderr.write("ERROR: PERMISSION_DENIED\\n" + (ffText || "")); process.exit(1); }
+// D-8: gcloud cytuje samą wartość (bez słów Authorization/Bearer) w komunikacie błędu.
+if (process.env.FAKE_ECHO_TOKEN_VERB === verb && ffText) {
+  const tok = (ffText.match(/Bearer ([^"]*)"/) || [])[1] || "";
+  // Druga linia: nagłówek ze skróconą wartością — filtr tokenu jej nie złapie, filtr nagłówka tak.
+  process.stderr.write("ERROR: INVALID_ARGUMENT: header value [" + tok + "] rejected\\n  Authorization: \\"Bearer " + tok.slice(0, 8) + "...\\"\\nhint: check the job definition\\n");
+  process.exit(1);
+}
 const job = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : null;
 const save = (j) => fs.writeFileSync(file, JSON.stringify(j));
 // Jak prawdziwy gcloud: create/update http bez --format=none wypisują zasób zadania
@@ -230,6 +237,15 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     for (const job of TABLE) expect(w.state(job.name).state, job.name).toBe(job.state);
     const post = w.run(["--check"]);
     expect(post.status, post.stdout).toBe(0);
+  });
+
+  it("D-8: --resume (bez odczytu tokenu) — błąd gcloud widoczny na stderr (pusty TOKEN nie wycina wszystkiego)", () => {
+    const w = world();
+    expect(w.run([]).status).toBe(0);
+    const r = w.run(["--resume", "mh-cleanup-temporary-access"], { FAKE_FAIL_VERB: "resume" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("PERMISSION_DENIED");
+    expect(r.stderr).toContain("failed for mh-cleanup-temporary-access");
   });
 
   it("--resume jednej nazwy: wznowione tylko to zadanie, reszta PAUSED", () => {
@@ -449,6 +465,23 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     expect(w.count()).toBe(1);
     expect(r.stdout).not.toContain(`created ${name}`);
   });
+
+  it.each(["create", "update"])(
+    "D-8: gcloud cytuje token w stderr bez słów nagłówka (%s) → linia z tokenem odfiltrowana, reszta stderr widoczna",
+    (verb) => {
+      const w = world();
+      // update z nagłówkiem (--update-headers) dotyczy istniejącego zadania: najpierw zwykły przebieg.
+      if (verb === "update") expect(w.run([]).status).toBe(0);
+      const r = w.run([], { FAKE_ECHO_TOKEN_VERB: verb });
+      expect(r.status).toBe(1);
+      expect(r.stdout + r.stderr).not.toContain(TOKEN);
+      expect(r.stderr).not.toContain("INVALID_ARGUMENT");
+      expect(r.stderr).not.toContain(TOKEN.slice(0, 8));
+      expect(r.stderr).not.toMatch(/authorization|bearer/i);
+      expect(r.stderr).toContain("hint: check the job definition");
+      expect(r.stderr).toContain(`failed for ${TABLE[0]!.name}`);
+    },
+  );
 
   it("token z sekretu nigdy w argumentach gcloud ani na wyjściu", () => {
     const w = world();
