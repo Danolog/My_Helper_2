@@ -25,6 +25,26 @@ import { resolveWaitingListToken } from "@/lib/server/system";
 // osobnym poleceniem bez wspólnej transakcji (#171: błąd EXCLUDE dotyczy
 // jednego zapisu). Push i wyliczenie zadatku są wołane poza callbackiem bramy.
 
+type SalonGate = ReturnType<typeof forSalon>;
+
+/**
+ * Konto klienta do wysyłki push: JEDYNE miejsce odczytu tabeli kont w tym
+ * module. Tylko konto ze ZWERYFIKOWANYM e-mailem równym e-mailowi klienta
+ * (ta sama reguła co src/lib/client-match.ts) — konto założone na cudzy
+ * adres nie dostaje danych klienta, salonu, usługi, pracownika i terminu.
+ * null = brak takiego konta.
+ */
+async function findVerifiedLinkedUserId(gate: SalonGate, email: string): Promise<string | null> {
+  const [linkedUser] = await gate.raw((tx) =>
+    tx
+      .select({ id: user.id })
+      .from(user)
+      .where(and(eq(user.email, email), eq(user.emailVerified, true)))
+      .limit(1)
+  );
+  return linkedUser?.id ?? null;
+}
+
 interface NotifyWaitingListParams {
   salonId: string;
   serviceId: string | null;
@@ -149,24 +169,13 @@ export async function notifyWaitingList(
       // Kanał SMS wstrzymany do #221 — brak wywołania sendSms.
       let delivered = false;
 
-      // Send push notification if the client has a linked user account.
-      // We look up the user by email to find the userId for push delivery —
-      // ONLY accounts with a VERIFIED email (same rule as src/lib/client-match.ts):
-      // an account registered on someone else's address must not receive the
-      // client's name, salon, service, employee and time.
+      // Push na konto klienta (findVerifiedLinkedUserId: tylko zweryfikowany e-mail).
       if (row.client.email) {
         try {
-          const clientEmail = row.client.email;
-          const [linkedUser] = await gate.raw((tx) =>
-            tx
-              .select({ id: user.id })
-              .from(user)
-              .where(and(eq(user.email, clientEmail), eq(user.emailVerified, true)))
-              .limit(1)
-          );
+          const linkedUserId = await findVerifiedLinkedUserId(gate, row.client.email);
 
-          if (linkedUser) {
-            const pushResult = await sendPushNotification(linkedUser.id, {
+          if (linkedUserId) {
+            const pushResult = await sendPushNotification(linkedUserId, {
               title: "Zwolnil sie termin!",
               body: message,
               tag: `waiting-list-${row.entry.id}`,
