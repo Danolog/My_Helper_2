@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import Stripe from "stripe";
 // ADR-001 sekcja 4: webhook Stripe — kontekst salonu z danych zdarzenia, nie z sesji; świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { confirmDepositPayment } from "@/lib/deposit-confirmation";
 import { logger } from "@/lib/logger";

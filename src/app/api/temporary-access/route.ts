@@ -3,7 +3,6 @@ import { eq, and, gt, lt } from "drizzle-orm";
 import { validateBody, temporaryAccessSchema } from "@/lib/api-validation";
 // ADR-001: temporary_access nie ma salon_id (zawężenie po granted_by = właściciel
 // salonu z sesji) — świadomie surowe db, warunki salonu jawnie w WHERE.
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { requireSalonStaff, type SalonContext } from "@/lib/salon-context";

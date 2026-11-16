@@ -9,7 +9,6 @@ import {
   overlapsRange,
 } from "@/lib/appointment-overlap";
 // ADR-001 sekcja 4: publiczna ścieżka rezerwacji gościa (brak sesji właściciela salonu) — świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { calculateExpectedDeposit } from "@/lib/deposit-calculation";
 import {

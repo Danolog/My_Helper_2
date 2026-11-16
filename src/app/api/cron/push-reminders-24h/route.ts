@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
 // ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { sendAppointmentReminder24hPush } from "@/lib/push";

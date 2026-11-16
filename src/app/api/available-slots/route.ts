@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { eq, and, gte, lt, not } from "drizzle-orm";
 import { rangesOverlap } from "@/lib/appointment-overlap";
 // ADR-001 R2b: świadomie publiczny endpoint bookingu (bez auth, bez sesji salonu) — świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";

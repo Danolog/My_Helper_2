@@ -6,7 +6,6 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
 // ADR-001 R2b grupa B: transakcja domykająca wizytę czyta `salons` (polityka RLS po
 // owner_id) — czeka na akcesor forOwner; brama zasobu [id] idzie przez forSalon.
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { resolveModules } from "@/lib/features";
 import { logger } from "@/lib/logger";

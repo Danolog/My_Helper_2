@@ -3,7 +3,6 @@ import { eq, sql, and, isNotNull, inArray, like } from "drizzle-orm";
 import { isValidUuid, validateBody, birthdayNotificationSchema } from "@/lib/api-validation";
 import { requireCronSecret } from "@/lib/auth-middleware";
 // ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { clients, notifications, salons } from "@/lib/schema";

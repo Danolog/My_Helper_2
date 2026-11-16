@@ -13,7 +13,6 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // test izolacji. Pelna migracja na repo + kontekst RLS tych zapisow = R2.
 // Pod RLS (rola myhelper_app) te zapytania wymagaja wlasnego kontekstu salonu;
 // sciezka pozytywna DELETE z zadatkiem nie jest pokryta testem R1 (zob. raport).
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { refundAppointmentDeposits, type AppointmentDepositsRefund } from "@/lib/refund";

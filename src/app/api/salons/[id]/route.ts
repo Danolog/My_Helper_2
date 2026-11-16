@@ -6,7 +6,6 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001: GET to ścieżka publiczna (katalog salonu przez unstable_cache, bez sesji
 // salonu — ryzyko 4.4 ADR), a lookup własności w PUT musi widzieć także cudzy salon
 // (404 vs 403) — te fragmenty świadomie na surowym db. UPDATE w PUT idzie przez forSalon.
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";

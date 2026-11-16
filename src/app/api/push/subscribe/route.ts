@@ -3,7 +3,6 @@ import { eq, and } from "drizzle-orm";
 import { validateBody, pushSubscribeSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
