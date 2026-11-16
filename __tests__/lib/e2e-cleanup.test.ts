@@ -1,6 +1,7 @@
 // @vitest-environment node
 /**
- * Teardown E2E (#175), część bez bazy: skąd bierze adres i kiedy odmawia.
+ * Teardown E2E (#175, #199), część bez bazy: skąd bierze adres, kiedy pomija
+ * sprzątanie (lista hostów i baz) i kiedy odmawia.
  * Usuwanie po znaczniku na prawdziwym Postgresie: `__tests__/pg/e2e-cleanup.pg.test.ts`.
  */
 import * as fs from "fs";
@@ -9,7 +10,9 @@ import * as path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   type CleanupEnv,
+  decideCleanupTarget,
   E2E_MARKER,
+  e2eEmployeeFirstName,
   e2eGuestName,
   e2eNotes,
   guardedCleanupClient,
@@ -80,6 +83,46 @@ describe("guardedCleanupClient: odmowa przed połączeniem", () => {
   });
 });
 
+describe("decideCleanupTarget: lista hostów i baz (decyzja bez połączenia)", () => {
+  it.each([
+    ["lokalny Docker / CI", LOCAL],
+    ["127.0.0.1", "postgresql://u:p@127.0.0.1:5432/pos_dev"],
+    ["schemat postgres://, host wielkimi literami", "postgres://u:p@LOCALHOST:5432/pos_dev"],
+    ["z sslmode", "postgresql://u:p@localhost:5432/pos_dev?sslmode=disable"],
+  ])("sprząta: %s", (_name, url) => {
+    expect(decideCleanupTarget(url)).toEqual({ run: true });
+  });
+
+  it.each([
+    ["brak adresu", undefined, /brak POSTGRES_URL/],
+    ["pusty adres", "  ", /brak POSTGRES_URL/],
+    ["nieczytelny adres", "nie-adres", /nieczytelny/],
+    ["inny schemat", "mysql://u:p@localhost:3306/pos_dev", /postgres\(ql\)/],
+    ["host zdalny", "postgresql://u:p@db.example.com:5432/pos_dev", /host spoza listy \(localhost, 127\.0\.0\.1\)/],
+    ["Neon", "postgresql://u:p@ep-x.eu-central-1.aws.neon.tech/pos_dev", /host spoza listy/],
+    ["host podobny do localhost", "postgresql://u:p@localhost.example.com:5432/pos_dev", /host spoza listy/],
+    ["baza spoza listy (kopia zapasowa)", "postgresql://u:p@localhost:5432/pos_dev_bak_1116", /baza spoza listy \(pos_dev\)/],
+    ["baza spoza listy (inna)", "postgresql://u:p@localhost:5432/pos_prod", /baza spoza listy/],
+    ["bez nazwy bazy", "postgresql://u:p@localhost:5432", /baza spoza listy/],
+  ])("pomija: %s", (_name, url, reason) => {
+    const d = decideCleanupTarget(url);
+    expect(d.run).toBe(false);
+    expect(d.run === false && d.reason).toMatch(/^sprzątanie E2E pominięte: /);
+    expect(d.run === false && d.reason).toMatch(reason);
+  });
+
+  it("powód pominięcia nie zawiera adresu, hosta, bazy ani danych logowania", () => {
+    for (const url of [
+      "postgresql://tajny_user:tajne_haslo@tajny-host.example.com:5432/pos_dev",
+      "postgresql://tajny_user:tajne_haslo@localhost:5432/tajna_baza",
+    ]) {
+      const d = decideCleanupTarget(url);
+      expect(d.run).toBe(false);
+      expect(JSON.stringify(d)).not.toMatch(/tajny_user|tajne_haslo|tajny-host|tajna_baza/);
+    }
+  });
+});
+
 describe("znacznik", () => {
   it("notes i imię gościa zaczynają się od [E2E]", () => {
     expect(E2E_MARKER).toBe("[E2E]");
@@ -87,5 +130,10 @@ describe("znacznik", () => {
     expect(e2eGuestName("Gosc")).toBe("[E2E] Gosc");
     // Imię gościa musi przejść walidację (min. 2 znaki po trim, src/lib/api-validation.ts).
     expect(e2eGuestName("Gosc").trim().length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("imię pracownika zaczyna się od [E2E] (#199)", () => {
+    expect(e2eEmployeeFirstName()).toBe("[E2E]");
+    expect(e2eEmployeeFirstName("Anna")).toBe("[E2E] Anna");
   });
 });

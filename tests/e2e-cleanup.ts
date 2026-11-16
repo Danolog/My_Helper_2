@@ -44,6 +44,53 @@ export function resolveCleanupUrl(env: CleanupEnv, envLocalPath: string): string
   return parseEnv(fs.readFileSync(envLocalPath, "utf8")).POSTGRES_URL?.trim() || undefined;
 }
 
+/** Hosty, na których teardown kasuje dane E2E: lokalny Docker i service container CI. */
+export const CLEANUP_ALLOWED_HOSTS: readonly string[] = ["localhost", "127.0.0.1"];
+
+/**
+ * Bazy, na których teardown kasuje dane E2E. Jawna lista, bez wzorców:
+ * `pos_dev` to baza z `docker-compose.yml` i z obu jobów E2E w
+ * `.github/workflows/quality-gate.yml` (`POSTGRES_DB: pos_dev`).
+ */
+export const CLEANUP_ALLOWED_DATABASES: readonly string[] = ["pos_dev"];
+
+export type CleanupDecision = { run: true } | { run: false; reason: string };
+
+/**
+ * Czy teardown ma w ogóle sprzątać (decyzja przed połączeniem, bez sieci).
+ * Poza listą hostów albo baz: pominięcie z powodem, bez DELETE i bez błędu.
+ * Powód nie zawiera adresu, hosta, nazwy bazy ani danych logowania — tylko listy dozwolone.
+ * Cel z listy przechodzi dalej przez pełny strażnik (`guardedCleanupClient`), który
+ * przy czymkolwiek podejrzanym (np. niejednoznaczny host, Neon, inna baza po stronie
+ * serwera) rzuca błąd, więc przebieg jest czerwony.
+ */
+export function decideCleanupTarget(url: string | undefined): CleanupDecision {
+  const skip = (why: string): CleanupDecision => ({ run: false, reason: `sprzątanie E2E pominięte: ${why}` });
+  if (!url?.trim()) return skip("brak POSTGRES_URL");
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    return skip("POSTGRES_URL nieczytelny");
+  }
+  if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
+    return skip("POSTGRES_URL nie jest adresem postgres(ql)://");
+  }
+  if (!CLEANUP_ALLOWED_HOSTS.includes(parsed.hostname.toLowerCase())) {
+    return skip(`host spoza listy (${CLEANUP_ALLOWED_HOSTS.join(", ")})`);
+  }
+  let database: string;
+  try {
+    database = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
+  } catch {
+    return skip("nieczytelna nazwa bazy");
+  }
+  if (!CLEANUP_ALLOWED_DATABASES.includes(database)) {
+    return skip(`baza spoza listy (${CLEANUP_ALLOWED_DATABASES.join(", ")})`);
+  }
+  return { run: true };
+}
+
 /**
  * Klient postgres.js po trzech etapach strażnika seeda (napis URL → hosty
  * wyliczone przez postgres.js → tożsamość serwera), zanim padnie pierwszy zapis.

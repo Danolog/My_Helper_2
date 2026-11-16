@@ -1,5 +1,6 @@
 import * as path from 'path';
 import {
+  decideCleanupTarget,
   E2E_SALON_ID,
   guardedCleanupClient,
   purgeE2eAppointments,
@@ -18,9 +19,12 @@ import type { FullConfig } from '@playwright/test';
  *
  * Baza: ta, do której pisał serwer testów — `POSTGRES_URL` z procesu (CI ustawia
  * go w jobie), a bez niego z `.env.local` (stamtąd czyta go `next dev`/`next start`).
- * Strażnik `scripts/seed-host-guard.ts` (localhost/127.0.0.1, baza `pos_dev`,
- * nie Neon, nie `VERCEL_ENV=preview/production`); każdy inny cel = odmowa
- * i czerwony przebieg, nie cichy skip.
+ * Dwa progi:
+ *  1. `decideCleanupTarget`: host i nazwa bazy z jawnych list (localhost/127.0.0.1,
+ *     `pos_dev`). Poza listą = pominięcie z komunikatem, bez DELETE i bez błędu.
+ *  2. Cel z listy przechodzi pełny strażnik `scripts/seed-host-guard.ts` (hosty
+ *     postgres.js, nie Neon, nie `VERCEL_ENV=preview/production`, baza po stronie
+ *     serwera); odmowa na tym etapie = czerwony przebieg, nie cichy skip.
  *
  * Połączenie idzie jako właściciel tabel, poza RLS (bez `forSalon`), więc
  * zakres wyznaczają wyłącznie: strażnik hosta, salon seeda (`E2E_SALON_ID`)
@@ -42,6 +46,11 @@ async function globalTeardown(config: FullConfig) {
 
   const projectDir = config.configFile ? path.dirname(config.configFile) : process.cwd();
   const url = resolveCleanupUrl(process.env, path.join(projectDir, '.env.local'));
+  const decision = decideCleanupTarget(url);
+  if (!decision.run) {
+    console.warn(`[global-teardown] ${decision.reason}`);
+    return;
+  }
   const sql = await guardedCleanupClient(url, process.env);
   try {
     const a = await purgeE2eAppointments(sql, [E2E_SALON_ID]);
