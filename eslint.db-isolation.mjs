@@ -62,6 +62,9 @@ export const DB_SYSTEM_ALLOWED_FILES = ["src/lib/server/system/**"];
 /** Jedyne pliki, które tworzą klienta puli (`postgres` + `drizzle-orm/postgres-js`). */
 export const DB_CLIENT_ALLOWED_FILES = ["src/lib/db.ts", "src/lib/server/system/db-system.ts"];
 
+/** Plik puli systemowej (do P6 re-eksport `db`, jedyny plik system/** z prawem do `db`). */
+const DB_SYSTEM_FILE = "src/lib/server/system/db-system.ts";
+
 /**
  * Dług przejściowy (Z3) — wynik reguły bez listy (73 pliki na b3a5faf),
  * podzielony na tablice per partia #193 (decyzja Olivera, P0a pkt 3).
@@ -71,15 +74,7 @@ export const DB_CLIENT_ALLOWED_FILES = ["src/lib/db.ts", "src/lib/server/system/
  * session.ts → P0 i subscription.ts → P1 (decyzja Ethana).
  */
 /** P0b: ustalanie salonu z sesji (w tym requireAdmin), health/diagnostics, adapter Better Auth. */
-export const P0_FILES = [
-  "src/app/api/diagnostics/route.ts",
-  "src/app/api/health/route.ts",
-  "src/lib/auth.ts",
-  "src/lib/get-user-salon.ts",
-  "src/lib/salon-context.ts",
-  "src/lib/session.ts",
-  "src/lib/temporary-access.ts",
-];
+export const P0_FILES = [];
 
 /** P1a/b/c: płatności (zadatki, subskrypcje, webhook Stripe). */
 export const P1_FILES = [
@@ -281,10 +276,17 @@ export function dbIsolationConfig(otherSyntax = []) {
       files: [...DB_ISOLATION_PERMANENT, ...DB_ISOLATION_TRANSITIONAL].map(literalGlob),
       rules: dbIsolationRules({ db: false, dbSystem: true, client: true, testFile: true, exportDb: true }, otherSyntax),
     },
+    // P0b (decyzja Ethana 16.11): do P6 `dbSystem` to re-eksport `db`, więc import `db`
+    // wolno WYŁĄCZNIE dosłownemu plikowi db-system.ts (P6: z powrotem `db: true`).
     ...DB_CLIENT_ALLOWED_FILES.map((file) => ({
       files: [literalGlob(file)],
       rules: dbIsolationRules(
-        { db: true, dbSystem: !file.startsWith("src/lib/server/system/"), client: false, testFile: true },
+        {
+          db: file !== DB_SYSTEM_FILE,
+          dbSystem: !file.startsWith("src/lib/server/system/"),
+          client: false,
+          testFile: true,
+        },
         otherSyntax,
       ),
     })),

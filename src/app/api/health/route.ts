@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { sql } from 'drizzle-orm';
-// ADR-001 sekcja 4: healthcheck systemowy (ping bazy, bez danych najemcy) — świadomie surowe db
-import { db } from '@/lib/db';
+// ADR-001 sekcja 4: healthcheck systemowy (ping bazy, bez danych najemcy) — wyjście systemowe #193
+import { pingDatabase } from '@/lib/server/system';
 import { logger } from "@/lib/logger";
 // Health checks must always reflect real-time system state — never cache
 export const dynamic = 'force-dynamic';
@@ -21,7 +20,7 @@ export async function GET() {
 
   try {
     // Test database connection with 5 second timeout
-    await withTimeout(db.execute(sql`SELECT 1 as connected`), 5000);
+    await withTimeout(pingDatabase(), 5000);
 
     const responseTime = Date.now() - startTime;
 

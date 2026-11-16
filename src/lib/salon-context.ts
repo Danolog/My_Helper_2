@@ -1,9 +1,7 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { resolveSalonContext, type SalonContext, type SalonRole } from "@/lib/server/system";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { employees, salons } from "@/lib/schema";
 import { hasTemporaryAccess } from "@/lib/temporary-access";
 
 /**
@@ -11,19 +9,12 @@ import { hasTemporaryAccess } from "@/lib/temporary-access";
  *
  * Rozszerza wzorzec get-user-salon.ts: oprócz właściciela (salons.ownerId)
  * rozpoznaje też AKTYWNEGO pracownika podpiętego kontem (employees.userId).
- * Surowe `db` jest tu OK — lib poza src/app/api (jak get-user-salon.ts);
+ * Zapytania kontekstu: wyjście systemowe `system/session.ts` (#193);
  * trasy API nadal używają forSalon(ctx.salonId) do dostępu do danych.
  */
 
-export type SalonRole = "owner" | "receptionist" | "employee";
-
-export interface SalonContext {
-  salonId: string;
-  role: SalonRole;
-  /** Rekord employees powiązany z kontem (null, gdy właściciel bez własnego rekordu). */
-  employeeId: string | null;
-  userId: string;
-}
+export { resolveSalonContext };
+export type { SalonContext, SalonContextResolution, SalonRole } from "@/lib/server/system";
 
 /**
  * Ustala kontekst salonu dla zalogowanego użytkownika:
@@ -42,81 +33,10 @@ export async function getSalonContext(): Promise<SalonContext | null> {
   return (await resolveSalonContext(session.user.id)).ctx;
 }
 
-export type SalonContextResolution =
-  | { ctx: SalonContext; reason?: undefined }
-  | { ctx: null; reason: "none" | "ambiguous" };
-
 /** Komunikat dla konta z kilkoma aktywnymi rekordami pracownika. */
 export const AMBIGUOUS_EMPLOYEE_ERROR =
   "Konto jest przypisane do kilku aktywnych rekordow pracownika - dostep wstrzymany. " +
   "Wlasciciel salonu musi odpiac konto od zbednego rekordu.";
-
-/**
- * Rdzeń getSalonContext dla znanego userId (bez ponownego pobierania sesji).
- *
- * Pracownik: pobieramy do 2 aktywnych rekordów. Więcej niż jeden = naruszenie
- * niezmiennika „konto -> najwyżej jeden pracownik" (link-account go pilnuje,
- * ale bez UNIQUE w bazie) => reason "ambiguous", brak kontekstu. Odmowa jest
- * bezpieczniejsza niż orderBy: każda kolejność wybiera salon za użytkownika
- * i może po cichu otworzyć dane salonu, z którym konto nie powinno już
- * pracować (np. stary rekord, którego nikt nie dezaktywował).
- */
-export async function resolveSalonContext(userId: string): Promise<SalonContextResolution> {
-
-  // 1. Salon właścicielski
-  const [salon] = await db
-    .select({ id: salons.id })
-    .from(salons)
-    .where(eq(salons.ownerId, userId))
-    .limit(1);
-
-  if (salon) {
-    const [ownEmployee] = await db
-      .select({ id: employees.id })
-      .from(employees)
-      .where(and(eq(employees.userId, userId), eq(employees.salonId, salon.id)))
-      .limit(1);
-
-    return {
-      ctx: {
-        salonId: salon.id,
-        role: "owner",
-        employeeId: ownEmployee?.id ?? null,
-        userId,
-      },
-    };
-  }
-
-  // 2. Aktywny pracownik podpięty kontem (nieaktywny NIE dostaje kontekstu)
-  const activeRecords = await db
-    .select({
-      id: employees.id,
-      salonId: employees.salonId,
-      role: employees.role,
-    })
-    .from(employees)
-    .where(and(eq(employees.userId, userId), eq(employees.isActive, true)))
-    .limit(2);
-
-  if (activeRecords.length > 1) return { ctx: null, reason: "ambiguous" };
-  const [employee] = activeRecords;
-  if (!employee) return { ctx: null, reason: "none" };
-
-  return {
-    ctx: {
-      salonId: employee.salonId,
-      // "owner" w employees.role to etykieta wizytówkowa — uprawnienia właściciela
-      // daje wyłącznie salons.ownerId (gałąź 1), więc tu mapujemy na "employee".
-      // "reception" to historyczna wartość zapisywana przez starszy formularz UI
-      role:
-        employee.role === "receptionist" || employee.role === "reception"
-          ? "receptionist"
-          : "employee",
-      employeeId: employee.id,
-      userId,
-    },
-  };
-}
 
 /**
  * Czy użytkownik w danym kontekście ma dostęp do funkcji `feature`?
