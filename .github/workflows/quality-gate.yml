@@ -88,14 +88,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Migracje NAJPIERW: 0005 tworzy role myhelper_app + polityki RLS, bez
-      # ktorych kazda transakcja forSalon (SET LOCAL ROLE) pada. db:push potem
-      # domyka ewentualny dryf schema.ts poza migracjami. (Przyczyna czerwonego
-      # E2E Full od 2026-06-18: push nie zaklada roli z 0005.)
+      # Schemat bazy WYLACZNIE z migracji: 0005 tworzy role myhelper_app i polityki
+      # RLS, bez ktorych kazda transakcja forSalon (SET LOCAL ROLE) pada. BEZ
+      # db:push po migracjach (#190): drizzle-kit push traktuje polityki z 0005
+      # jako dryf, wylacza RLS i usuwa polityki na 39 tabelach — baza w CI
+      # bylaby bez izolacji salonow. Straznik pada, gdy ktorejs tabeli z 0005
+      # brakuje RLS albo polityki z migracji (scripts/db-rls-guard.ts).
       - name: Run database migrations
         run: pnpm db:migrate
-      - name: Push database schema
-        run: pnpm db:push
+      - name: RLS guard (migration 0005)
+        run: pnpm exec tsx scripts/db-rls-guard.ts
 
       # T3: blokady subskrypcji na prawdziwym Postgresie (confirm ‖ webhook,
       # pg_locks, 40P01). Własne wiersze z unikalnymi id, sprzątane po teście;
@@ -175,14 +177,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Migracje NAJPIERW: 0005 tworzy role myhelper_app + polityki RLS, bez
-      # ktorych kazda transakcja forSalon (SET LOCAL ROLE) pada. db:push potem
-      # domyka ewentualny dryf schema.ts poza migracjami. (Przyczyna czerwonego
-      # E2E Full od 2026-06-18: push nie zaklada roli z 0005.)
+      # Schemat bazy WYLACZNIE z migracji: 0005 tworzy role myhelper_app i polityki
+      # RLS, bez ktorych kazda transakcja forSalon (SET LOCAL ROLE) pada. BEZ
+      # db:push po migracjach (#190): drizzle-kit push traktuje polityki z 0005
+      # jako dryf, wylacza RLS i usuwa polityki na 39 tabelach — baza w CI
+      # bylaby bez izolacji salonow. Straznik pada, gdy ktorejs tabeli z 0005
+      # brakuje RLS albo polityki z migracji (scripts/db-rls-guard.ts).
       - name: Run database migrations
         run: pnpm db:migrate
-      - name: Push database schema
-        run: pnpm db:push
+      - name: RLS guard (migration 0005)
+        run: pnpm exec tsx scripts/db-rls-guard.ts
 
       - name: Seed test data
         run: pnpm db:seed:test
