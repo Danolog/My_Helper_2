@@ -99,6 +99,9 @@ export const CalendarEventComponent = memo(function CalendarEventComponent({
   const isCompletable = status === "scheduled" || status === "confirmed";
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Only keys pressed on the event itself. Enter/Space on the inner complete/cancel
+    // buttons must keep their native click instead of opening details (#164).
+    if (e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       e.stopPropagation();
