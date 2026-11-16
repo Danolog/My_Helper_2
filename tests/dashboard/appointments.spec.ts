@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '../fixtures';
+import { e2eNotes } from '../e2e-cleanup';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -25,8 +26,9 @@ const APPOINTMENT_TIME = '19:00';
 // Wizyty zakladane przez API w testach widoku: Marta Nowak (bez grafiku —
 // POST go nie sprawdza), zeby nie wchodzic w terminy Ewy, ktore spec zadatku
 // (tests/client-portal/) bierze rownolegle jako "pierwszy wolny". Godziny
-// 08/10/12/14 z przerwa: kolizja w POST jest wlacznie z granica, wiec wizyty
-// stykajace sie (10-11 i 11-12) dawalyby 409.
+// 08/10/12/14 z przerwa: od #165 kolizja jest polotwarta [start, end), wiec
+// wizyty stykajace sie nie koliduja; przerwa zostaje, zeby wizyty nie lezaly
+// obok siebie na siatce (#175: wczesniejszy komentarz mowil o kolizji z granica).
 const API_EMPLOYEE_ID = '00000000-0000-4000-8000-e00000000002'; // Marta Nowak
 
 function tomorrowInWarsaw(): string {
@@ -88,11 +90,17 @@ async function createAppointmentViaApi(page: Page, time: string): Promise<string
     data: {
       salonId: SALON_ID, employeeId: API_EMPLOYEE_ID, clientId: SEED_CLIENT_ID, serviceId: SEED_SERVICE_ID,
       startTime: startIso, endTime: endIso,
+      // Znacznik #175: globalTeardown usuwa wiersz twardo (DELETE w aplikacji tylko anuluje).
+      notes: e2eNotes('kalendarz API'),
     },
   });
   const body = await res.text();
   expect(res.status(), `zalozenie wizyty przez API: ${body}`).toBe(201);
-  return (JSON.parse(body) as { data: { id: string } }).data.id;
+  const created = (JSON.parse(body) as { data: { id: string; notes: string | null } }).data;
+  // Zapisana wartosc, nie wyslana: utrata prefiksu po stronie serwera = czerwony test,
+  // a nie ciche zaprzestanie sprzatania przez globalTeardown.
+  expect(created.notes, 'zapisane notes bez znacznika [E2E] — teardown nie usunie wizyty').toBe(e2eNotes('kalendarz API'));
+  return created.id;
 }
 
 /** Naglowek widoku dnia (h2 w calendar-grid) dla dzis + offsetDays, sformatowany jak w aplikacji. */
@@ -145,7 +153,8 @@ test.describe('Flow 4: Appointment System', () => {
   test.use({ timezoneId: 'Europe/Warsaw' });
 
   // Sprzatanie: wizyty utworzone w tescie sa anulowane (DELETE = status
-  // "cancelled"; termin wraca do puli, kolizje pomijaja anulowane).
+  // "cancelled"; termin wraca do puli, kolizje pomijaja anulowane). Wiersze
+  // usuwa globalTeardown po znaczniku [E2E] w notes (#175, tests/e2e-cleanup.ts).
   let createdAppointmentIds: string[] = [];
   test.afterEach(async ({ page }) => {
     const ids = createdAppointmentIds;
@@ -214,6 +223,8 @@ test.describe('Flow 4: Appointment System', () => {
 
       await dialog.getByTestId('appointment-date-input').fill(date);
       await dialog.getByTestId('appointment-time-input').fill(APPOINTMENT_TIME);
+      // Znacznik #175 przez prawdziwe pole formularza: globalTeardown usuwa wizyte twardo.
+      await dialog.getByTestId('appointment-notes-input').fill(e2eNotes('formularz Nowa wizyta'));
 
       const saveBtn = dialog.getByTestId('save-appointment-btn');
       await expect(saveBtn).toBeEnabled({ timeout: 10000 });
@@ -237,9 +248,10 @@ test.describe('Flow 4: Appointment System', () => {
       const getRes = await page.request.get(`/api/appointments/${appointmentId}`);
       expect(getRes.status()).toBe(200);
       const saved = (await getRes.json()).data as {
-        clientId: string; serviceId: string; employeeId: string; startTime: string; endTime: string; status: string;
+        clientId: string; serviceId: string; employeeId: string; startTime: string; endTime: string; status: string; notes: string | null;
       };
       expect(saved).toMatchObject({
+        notes: e2eNotes('formularz Nowa wizyta'),
         clientId: SEED_CLIENT_ID,
         serviceId: SEED_SERVICE_ID,
         employeeId: SCHEDULED_EMPLOYEE_ID,
@@ -361,8 +373,8 @@ test.describe('Flow 4: Appointment System', () => {
     test('should stack an active appointment above a cancelled one in the same slot', { tag: '@full' }, async ({ page }) => {
       // Wlasna para (#164): anulowana C i aktywna A w tym samym terminie, bez
       // polegania na resztkach z poprzednich przebiegow. 18:00 u Marty zaklada
-      // tylko ten test; 17:00 nie, bo 16:00-17:00 z testu wyzej styka sie
-      // z granica (kolizja w POST jest wlacznie z granica) przy 2 workerach CI.
+      // tylko ten test (16:00-17:00 z testu wyzej nie koliduje: od #165 kolizja
+      // jest polotwarta [start, end); 18:00 zostawia odstep na siatce).
       // Resztki (anulowane C z poprzednich przebiegow) nie zmieniaja wyniku:
       // asercja dotyczy tylko warstw A i tej C, a anulowane sa zawsze pod aktywna.
       const cancelledId = await createAppointmentViaApi(page, '18:00');
