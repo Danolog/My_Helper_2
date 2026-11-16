@@ -89,7 +89,7 @@ const ids = {
   remindB: "",
   soonA: "",
   soonB: "",
-  /** Wizyta salonu A za 3 h z klientem salonu B (niezgodny klient w złączeniu). */
+  /** Wizyta salonu A za 5 h z klientem salonu B (niezgodny klient w złączeniu). */
   mismatchA: "",
 };
 
@@ -187,7 +187,8 @@ suite("P5a-2: trasy z sekretem crona — salony A i B, prawdziwy Postgres", () =
     ids.remindB = await appointment(ids.salonB, ids.empB, ids.svcB, ids.apptClientB, 180);
     ids.soonA = await appointment(ids.salonA, ids.empA, ids.svcA, ids.apptClientA, 60);
     ids.soonB = await appointment(ids.salonB, ids.empB, ids.svcB, ids.apptClientB, 60);
-    ids.mismatchA = await appointment(ids.salonA, ids.empA, ids.svcA, ids.apptClientB, 180);
+    // Za 5 h: w oknie 24h, poza oknem 1h, bez nakładania na wizyty pracownika A (60 i 180 min, po 30 min).
+    ids.mismatchA = await appointment(ids.salonA, ids.empA, ids.svcA, ids.apptClientB, 300);
   });
 
   afterAll(async () => {
