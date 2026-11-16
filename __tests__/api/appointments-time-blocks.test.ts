@@ -8,6 +8,9 @@
  * Pakiet i zadatek: appointments-book-package.test.ts, deposits-create-session.test.ts.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { PUT } from "@/app/api/appointments/[id]/route";
+import { POST } from "@/app/api/appointments/route";
+import { timeBlockConflictMessage } from "@/lib/time-block-conflict";
 import { createChainMock, createMockRequest, parseResponse } from "./helpers";
 import { sqlMatches } from "./sql-predicate";
 
@@ -89,10 +92,6 @@ vi.mock("@/lib/deposit-calculation", () => ({ calculateExpectedDeposit: (...a: u
 vi.mock("@/lib/sms", () => ({ sendBookingConfirmationSms: vi.fn() }));
 vi.mock("@/lib/waiting-list", () => ({ notifyWaitingList: vi.fn() }));
 vi.mock("@/lib/logger", () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
-
-import { PUT } from "@/app/api/appointments/[id]/route";
-import { POST } from "@/app/api/appointments/route";
-import { timeBlockConflictMessage } from "@/lib/time-block-conflict";
 
 const at = (hm: string) => new Date(`2026-12-01T${hm}:00.000Z`);
 const iso = (hm: string) => at(hm).toISOString();

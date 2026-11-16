@@ -7,6 +7,7 @@
  * przejścia na `preferredEmployeeId`.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { acceptEarlierSlot } from "@/lib/waiting-list";
 import { createChainMock } from "../api/helpers";
 
 const h = vi.hoisted(() => ({ select: vi.fn(), insert: vi.fn(), update: vi.fn(), calc: vi.fn() }));
@@ -21,8 +22,6 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/push", () => ({ sendPushNotification: vi.fn() }));
 vi.mock("@/lib/sms", () => ({ sendSms: vi.fn() }));
 vi.mock("@/lib/deposit-calculation", () => ({ calculateExpectedDeposit: (...a: unknown[]) => h.calc(...a) }));
-
-import { acceptEarlierSlot } from "@/lib/waiting-list";
 
 const START = new Date(Date.now() + 2 * 86_400_000);
 const END = new Date(START.getTime() + 3_600_000);

@@ -387,7 +387,7 @@ export async function acceptEarlierSlot(
           .set({
             startTime: offeredStart,
             endTime: offeredEnd,
-            employeeId: employeeId || existingAppt.employeeId,
+            employeeId,
             notes: `${existingAppt.notes || ""} [Przeniesiony z listy oczekujacych]`.trim(),
           })
           .where(eq(appointments.id, entry.existingAppointmentId));
@@ -406,7 +406,7 @@ export async function acceptEarlierSlot(
           .values({
             salonId: entry.salonId,
             clientId: entry.clientId,
-            employeeId: employeeId as string,
+            employeeId,
             serviceId: entry.serviceId,
             startTime: offeredStart,
             endTime: offeredEnd,
@@ -425,7 +425,7 @@ export async function acceptEarlierSlot(
         .values({
           salonId: entry.salonId,
           clientId: entry.clientId,
-          employeeId: employeeId as string,
+          employeeId,
           serviceId: entry.serviceId,
           startTime: offeredStart,
           endTime: offeredEnd,
