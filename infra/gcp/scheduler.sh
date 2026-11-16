@@ -174,7 +174,11 @@ gc_mutate() {
       err="$("${GC[@]}" "$@" --flags-file=<(auth_flags "$flags") 2>&1 >/dev/null)" && return 0
     fi
     if [[ "$err" != *ABORTED* ]]; then
-      printf '%s\n' "$err" | grep -viE 'authorization|bearer' >&2 || true
+      # Bez linii z nagłówkiem i bez linii z samą wartością tokenu (D-8: gcloud
+      # może zacytować wartość bez słów nagłówka). Pusty TOKEN (tryb bez
+      # odczytu sekretu) → grep -vF "" odrzuciłby wszystko, więc wtedy bez filtra.
+      printf '%s\n' "$err" | grep -viE 'authorization|bearer' \
+        | { if [[ -n "$TOKEN" ]]; then grep -vF -- "$TOKEN"; else cat; fi; } >&2 || true
       echo "error: $1 $2 $3 failed for $name — stop" >&2
       exit 1
     fi
