@@ -522,7 +522,7 @@ describe("Z4: lista przejściowa ⊆ BASELINE (suma i per partia), każda pozycj
     expect(extra, "pozycje spoza BASELINE — lista nie może rosnąć").toEqual([]);
   });
 
-  it.each(Object.keys(BASELINE).map((k) => [k]))("%s ⊆ BASELINE.%s (plik nie przeskakuje między tablicami)", (key) => {
+  it.each(Object.keys(BASELINE).map((k) => [k, k]))("%s ⊆ BASELINE.%s (plik nie przeskakuje między tablicami)", (key) => {
     const moved = (partitions[key] ?? []).filter((f) => !BASELINE[key]!.includes(f));
     expect(moved, "przeniesienie między partiami = decyzja Ethana i zmiana BASELINE w osobnym commicie").toEqual([]);
   });
