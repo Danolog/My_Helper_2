@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, inArray } from "drizzle-orm";
 import { validateBody, bookPackageSchema } from "@/lib/api-validation";
-import { appointmentConflictWhere, overlapsRange } from "@/lib/appointment-overlap";
+import { appointmentConflictWhere, isAppointmentOverlapViolation, overlapsRange } from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { depositGuardResponse } from "@/lib/deposit-guard";
 import { getUserSalonId } from "@/lib/get-user-salon";
@@ -262,6 +262,14 @@ export async function POST(request: Request) {
       },
     }, { status: 201 });
   } catch (error) {
+    // #171: równoległy zapis zajął termin (EXCLUDE w bazie); transakcja pakietu
+    // wycofana w całości — żadna wizyta pakietu nie zostaje.
+    if (isAppointmentOverlapViolation(error)) {
+      return NextResponse.json(
+        { success: false, error: "Termin koliduje z istniejaca wizyta. Wybierz inna godzine" },
+        { status: 409 }
+      );
+    }
     logger.error("[Package Booking API] Error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to book package" },
