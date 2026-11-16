@@ -156,8 +156,8 @@ const DB_IMPORT_FORMS: [string, string][] = [
   ["import()", 'export async function f() { return (await import("@/lib/db")).db; }'],
   ["import() z szablonem", "export async function f() { return (await import(`@/lib/db`)).db; }"],
   ["require()", 'export const x = require("@/lib/db").db;'],
-  // pkt 5 Olivera: TS `import x = require()` — core no-restricted-imports tej formy nie widzi.
-  ["import x = require()", 'import d = require("@/lib/db");\nexport const x = d;'],
+  // pkt 5 Olivera: TS `import x = require()` — łapie ją sama no-restricted-imports (osobny test niżej).
+  ["import x = require()",'import d = require("@/lib/db");\nexport const x = d;'],
 ];
 
 const DB_FORMS: [string, string][] = [
@@ -189,6 +189,18 @@ const CLIENT_FORMS: [string, string][] = [
   ["import x = require(postgres)", 'import p = require("postgres");\nexport const x = p;'],
   ["re-eksport", 'export { drizzle } from "drizzle-orm/postgres-js";'],
 ];
+
+describe("pkt 5 Olivera: TS `import x = require()` łapie sama no-restricted-imports", () => {
+  it.each([
+    ["db", 'import d = require("@/lib/db");\nexport const x = d;'],
+    ["db-system", 'import s = require("@/lib/server/system/db-system");\nexport const x = s;'],
+    ["klient puli", 'import p = require("postgres");\nexport const x = p;'],
+    ["plik testowy", 'import t = require("./__p0a-helper__.test");\nexport const x = t;'],
+  ])("%s → dokładnie 1 błąd, z reguły no-restricted-imports (bez osobnego selektora)", async (_n, code) => {
+    const errors = await isolationErrors(code, NEW_ROUTE);
+    expect(errors.map((m) => m.ruleId)).toEqual(["no-restricted-imports"]);
+  }, 30_000);
+});
 
 describe("Z2: każda forma importu puli daje błąd poza listą", () => {
   it.each(DB_FORMS)("db, %s — nowa trasa → błąd", async (_n, code) => {
@@ -446,7 +458,6 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
         const forms = [
           `ImportExpression[source.value=/${sel(re)}/]`,
           `CallExpression[callee.name='require'][arguments.0.value=/${sel(re)}/]`,
-          `TSExternalModuleReference > Literal[value=/${sel(re)}/]`,
         ].map((f) => s.includes(f));
         if (want.includes(re) ? forms.includes(false) : forms.includes(true)) bad.push(`${rel}: no-restricted-syntax ${re}`);
       }

@@ -216,8 +216,8 @@ export function restrictedImportsOptions(which) {
 
 /**
  * Selektory `no-restricted-syntax` dla `import()` i `require()` z literałem albo
- * szablonem bez wyrażeń oraz dla TS `import x = require("…")` (core
- * `no-restricted-imports` tej formy nie widzi).
+ * szablonem bez wyrażeń. TS `import x = require("…")` łapie sama reguła
+ * `no-restricted-imports` (dowód w teście), więc osobnego selektora nie ma.
  */
 export function isolationSyntaxSelectors(which) {
   const sources = restrictedSources(which);
@@ -225,7 +225,6 @@ export function isolationSyntaxSelectors(which) {
   for (const [src, message] of sources) {
     const re = esq(src);
     out.push(
-      { selector: `TSExternalModuleReference > Literal[value=/${re}/]`, message },
       { selector: `ImportExpression[source.value=/${re}/]`, message },
       { selector: `ImportExpression > TemplateLiteral[expressions.length=0] > TemplateElement[value.raw=/${re}/]`, message },
       { selector: `CallExpression[callee.name='require'][arguments.0.value=/${re}/]`, message },
