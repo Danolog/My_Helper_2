@@ -12,6 +12,78 @@ const NEW_EMPLOYEE = {
   role: 'employee',
 };
 
+/** Salon wlasciciela z seeda (scripts/seed-test.ts). */
+const SEED_SALON_ID = '00000000-0000-4000-8000-000000000001';
+/** Usluga z seeda (scripts/seed-test.ts): "Strzyzenie damskie". */
+const SEED_SERVICE_ID = '00000000-0000-4000-8000-5e0000000001';
+
+type EmployeeDetail = { id: string; firstName: string; lastName: string; isActive: boolean; serviceIds: string[] };
+
+async function csrfHeaders(page: Page): Promise<Record<string, string>> {
+  const token = (await page.context().cookies()).find((c) => c.name === 'csrf-token')?.value ?? '';
+  return { 'x-csrf-token': decodeURIComponent(token) };
+}
+
+/**
+ * Wlasny pracownik testu edycji: znaleziony po stalym nazwisku albo zalozony raz
+ * (API nie ma DELETE pracownika, wiec stala nazwa = brak przyrostu wierszy).
+ * Testy nie zmieniaja pracownikow z seeda, z ktorych korzystaja kalendarz i portal.
+ * Stan poczatkowy ustawiany przed testem i przywracany po nim: aktywny, bez uslug.
+ */
+async function ensureEditEmployee(page: Page, lastName: string): Promise<string> {
+  await page.goto('/dashboard', { waitUntil: 'domcontentloaded' }); // ciasteczko CSRF
+  const listRes = await page.request.get('/api/employees');
+  expect(listRes.status(), `lista pracownikow: ${await listRes.text()}`).toBe(200);
+  const list = (await listRes.json()).data as { id: string; firstName: string; lastName: string }[];
+  // startsWith: test edycji zmienia nazwisko ("Edycja" -> "Edycja-zmiana"); gdyby afterEach
+  // nie zdazyl przywrocic, kolejny przebieg znajdzie tego samego pracownika zamiast zakladac nowego.
+  let id = list.find((e) => e.firstName === 'E2E' && e.lastName.startsWith(lastName))?.id;
+  if (!id) {
+    const created = await page.request.post('/api/employees', {
+      headers: await csrfHeaders(page),
+      data: { salonId: SEED_SALON_ID, firstName: 'E2E', lastName },
+    });
+    expect(created.status(), `zalozenie pracownika: ${await created.text()}`).toBe(201);
+    id = ((await created.json()) as { data: { id: string } }).data.id;
+  }
+  await resetEditEmployee(page, id, lastName);
+  return id;
+}
+
+async function resetEditEmployee(page: Page, id: string, lastName: string) {
+  const res = await page.request.put(`/api/employees/${id}`, {
+    headers: await csrfHeaders(page),
+    data: { firstName: 'E2E', lastName, isActive: true, serviceIds: [] },
+  });
+  expect(res.status(), `reset pracownika ${id}: ${await res.text()}`).toBe(200);
+}
+
+async function getEmployee(page: Page, id: string): Promise<EmployeeDetail> {
+  const res = await page.request.get(`/api/employees/${id}`);
+  expect(res.status(), `odczyt pracownika ${id}: ${await res.text()}`).toBe(200);
+  return ((await res.json()) as { data: EmployeeDetail }).data;
+}
+
+/** Otwiera dialog edycji danego pracownika i czeka na zaladowane dane (nie spinner). */
+async function openEditDialog(page: Page, id: string) {
+  await page.getByTestId(`edit-employee-${id}`).click();
+  const dialog = page.getByRole('dialog', { name: 'Edytuj pracownika' });
+  await expect(dialog.locator('#edit-firstName')).toHaveValue('E2E', { timeout: 15000 });
+  return dialog;
+}
+
+/** Klik "Zapisz" + odpowiedz PUT tego pracownika; dialog zamyka sie dopiero po sukcesie. */
+async function saveEditDialog(page: Page, dialog: ReturnType<Page['getByRole']>, id: string) {
+  const putRes = page.waitForResponse(
+    (r) => r.request().method() === 'PUT' && new URL(r.url()).pathname === `/api/employees/${id}`
+  );
+  await dialog.getByRole('button', { name: 'Zapisz', exact: true }).click();
+  const res = await putRes;
+  expect(res.status(), `PUT /api/employees/${id}: ${await res.text()}`).toBe(200);
+  await expect(dialog).toBeHidden({ timeout: 10000 });
+  return res.request().postDataJSON() as { lastName: string; isActive: boolean; serviceIds: string[] };
+}
+
 async function navigateToEmployees(page: Page) {
   await page.goto('/dashboard/employees');
   // Wait for a specific interactive element to confirm the page is ready
@@ -74,69 +146,100 @@ test.describe('Flow 2: Employee Management', () => {
       ).toBeVisible({ timeout: 10000 });
     });
 
-    test('should edit an existing employee', { tag: '@full' }, async ({ page }) => {
-      await navigateToEmployees(page);
-
-      // Click edit on the first employee
-      const editButton = page.locator('[data-testid^="edit-employee-"]').first();
-      await editButton.click();
-
-      // Modify a field
-      const firstNameInput = page.locator('#edit-firstName');
-      if (await firstNameInput.isVisible()) {
-        await firstNameInput.clear();
-        await firstNameInput.fill('Edytowany');
-        await page.getByRole('button', { name: /zapisz/i }).click();
-        await expect(page.getByText('Edytowany')).toBeVisible({ timeout: 5000 });
-      }
-    });
-
     test('should navigate to employee schedule page', { tag: '@full' }, async ({ page }) => {
+      // Tylko odczyt: pracownik testu "E2E Uslugi" (ten sam co w tescie uslug, stan i tak resetowany).
+      // "Harmonogram" to link (Next Link), nie przycisk — stary test szukal roli button,
+      // nigdy go nie znajdowal, a `if (isVisible)` pomijal cala nawigacje.
+      const id = await ensureEditEmployee(page, 'Uslugi');
       await navigateToEmployees(page);
 
-      // Click schedule/harmonogram button
-      const scheduleBtn = page.getByRole('button', { name: /harmonogram/i }).first();
-      if (await scheduleBtn.isVisible()) {
-        await scheduleBtn.click();
-        await page.waitForURL('**/schedule**', { timeout: 5000 });
-        await expect(page).toHaveURL(/\/schedule/);
-      }
+      // Najglebszy div z przyciskiem edycji tego pracownika i linkiem = jego grupa przyciskow.
+      const actions = page
+        .locator('div')
+        .filter({ has: page.getByTestId(`edit-employee-${id}`) })
+        .filter({ has: page.getByRole('link', { name: /harmonogram/i }) })
+        .last();
+      const scheduleLink = actions.getByRole('link', { name: /harmonogram/i });
+      await expect(scheduleLink).toBeVisible();
+      await scheduleLink.click();
+      await page.waitForURL((url) => url.pathname === `/dashboard/employees/${id}/schedule`, { timeout: 15000 });
+      await expect(page.getByRole('heading', { level: 1, name: 'E2E Uslugi' })).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText(/Harmonogram pracy/)).toBeVisible();
     });
 
-    test('should assign services to employee', { tag: '@full' }, async ({ page }) => {
-      await navigateToEmployees(page);
+    test.describe('edycja wlasnego pracownika testu', () => {
+      let edited: { id: string; lastName: string } | null = null;
+      test.afterEach(async ({ page }) => {
+        const e = edited;
+        edited = null;
+        if (e) await resetEditEmployee(page, e.id, e.lastName);
+      });
 
-      // Open edit dialog
-      const editButton = page.locator('[data-testid^="edit-employee-"]').first();
-      await editButton.click();
+      test('should edit an existing employee', { tag: '@full' }, async ({ page }) => {
+        // Wlasny pracownik testu, nie pierwszy z listy: stary test zmienial nazwe
+        // pracownika z seeda na "Edytowany" bez przywrocenia.
+        const lastName = 'Edycja';
+        const id = await ensureEditEmployee(page, lastName);
+        edited = { id, lastName };
+        await navigateToEmployees(page);
 
-      // Wait for dialog to fully load (async fetch of employee data)
-      await page.locator('#edit-firstName').waitFor({ state: 'visible', timeout: 15000 });
+        const dialog = await openEditDialog(page, id);
+        const lastNameInput = dialog.locator('#edit-lastName');
+        await expect(lastNameInput).toHaveValue(lastName);
+        await lastNameInput.fill('Edycja-zmiana');
 
-      // Look for service checkboxes
-      const serviceCheckbox = page.locator('[id^="service-"]').first();
-      await serviceCheckbox.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
-      if (await serviceCheckbox.isVisible()) {
-        const isChecked = await serviceCheckbox.isChecked();
-        await serviceCheckbox.setChecked(!isChecked);
-        await page.getByRole('button', { name: /zapisz/i }).click();
-        await page.waitForLoadState('domcontentloaded');
-      }
-    });
+        const sent = await saveEditDialog(page, dialog, id);
+        expect(sent.lastName).toBe('Edycja-zmiana');
 
-    test('should toggle employee active status', { tag: '@full' }, async ({ page }) => {
-      await navigateToEmployees(page);
+        // Lista po odswiezeniu i baza.
+        await expect(page.getByText('E2E Edycja-zmiana', { exact: true })).toBeVisible({ timeout: 10000 });
+        expect((await getEmployee(page, id)).lastName).toBe('Edycja-zmiana');
+      });
 
-      // Open edit dialog
-      const editButton = page.locator('[data-testid^="edit-employee-"]').first();
-      await editButton.click();
+      test('should assign services to employee', { tag: '@full' }, async ({ page }) => {
+        const lastName = 'Uslugi';
+        const id = await ensureEditEmployee(page, lastName);
+        edited = { id, lastName };
+        await navigateToEmployees(page);
 
-      const activeSwitch = page.locator('#edit-active');
-      if (await activeSwitch.isVisible()) {
+        const dialog = await openEditDialog(page, id);
+        const checkbox = dialog.locator(`[id="service-${SEED_SERVICE_ID}"]`);
+        await expect(checkbox, 'brak uslugi z seeda w dialogu').toBeVisible();
+        await expect(checkbox).not.toBeChecked();
+        await checkbox.click();
+        await expect(checkbox).toBeChecked();
+
+        const sent = await saveEditDialog(page, dialog, id);
+        expect(sent.serviceIds).toEqual([SEED_SERVICE_ID]);
+
+        // Stan zapisany w bazie i widoczny po ponownym otwarciu dialogu.
+        expect((await getEmployee(page, id)).serviceIds).toEqual([SEED_SERVICE_ID]);
+        const reopened = await openEditDialog(page, id);
+        await expect(reopened.locator(`[id="service-${SEED_SERVICE_ID}"]`)).toBeChecked();
+      });
+
+      test('should toggle employee active status', { tag: '@full' }, async ({ page }) => {
+        const lastName = 'Status';
+        const id = await ensureEditEmployee(page, lastName);
+        edited = { id, lastName };
+        await navigateToEmployees(page);
+
+        const dialog = await openEditDialog(page, id);
+        const activeSwitch = dialog.locator('#edit-active');
+        await expect(activeSwitch).toBeChecked();
         await activeSwitch.click();
-        await page.getByRole('button', { name: /zapisz/i }).click();
-        await page.waitForLoadState('domcontentloaded');
-      }
+        await expect(activeSwitch).not.toBeChecked();
+
+        const sent = await saveEditDialog(page, dialog, id);
+        expect(sent.isActive).toBe(false);
+
+        // Lista po odswiezeniu, baza i ponownie otwarty dialog.
+        const nameRow = page.getByText('E2E Status', { exact: true }).locator('..');
+        await expect(nameRow).toContainText('Nieaktywny');
+        expect((await getEmployee(page, id)).isActive).toBe(false);
+        const reopened = await openEditDialog(page, id);
+        await expect(reopened.locator('#edit-active')).not.toBeChecked();
+      });
     });
   });
 
