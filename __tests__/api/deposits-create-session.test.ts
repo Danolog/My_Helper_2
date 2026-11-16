@@ -424,6 +424,29 @@ describe("POST /api/deposits/create-session — kolizja półotwarta (#165)", ()
     expect((await createSession(makeRequest())).status).toBe(201);
   });
 
+  function rejectingInsert(cause: Record<string, unknown>) {
+    const chain = createChainMock([]) as Record<string, unknown>;
+    chain.then = (_res: unknown, reject: (e: unknown) => unknown) =>
+      reject(Object.assign(new Error("Failed query"), { cause: Object.assign(new Error("db"), cause) }));
+    mockDbInsert.mockReset();
+    mockDbInsert.mockReturnValueOnce(chain);
+  }
+
+  it("#171: baza odrzuca wizytę (23P01, wyścig) → 409 z dotychczasowym komunikatem, bez płatności", async () => {
+    prime([]);
+    rejectingInsert({ code: "23P01", constraint_name: "appointments_no_overlap" });
+    const res = await createSession(makeRequest());
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("Wybrany termin jest juz zajety. Wybierz inny termin.");
+    expect(mockDbInsert).toHaveBeenCalledTimes(1); // płatność zadatku nie zapisana
+  });
+
+  it("#171: inny błąd zapisu wizyty → 500", async () => {
+    prime([]);
+    rejectingInsert({ code: "23514", constraint_name: "appointments_end_after_start" });
+    expect((await createSession(makeRequest())).status).toBe(500);
+  });
+
   it("endTime = startTime → 400, bez zapytań o kolizje i zapisu", async () => {
     const res = await createSession(makeRequest({ ...validBody, endTime: validBody.startTime }));
     expect(res.status).toBe(400);

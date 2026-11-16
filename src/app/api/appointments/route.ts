@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lte, lt, gt, sql } from "drizzle-orm";
 import { parseBody, createAppointmentSchema } from "@/lib/api-validation";
-import { appointmentConflictWhere, overlapsRange } from "@/lib/appointment-overlap";
+import { appointmentConflictWhere, isAppointmentOverlapViolation, overlapsRange } from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 R2b: POST to świadomie publiczny booking (gość bez sesji salonu) — świadomie surowe db; GET idzie przez forSalon
 // eslint-disable-next-line no-restricted-imports
@@ -527,6 +527,14 @@ export async function POST(request: Request) {
       data: newAppointment,
     }, { status: 201 });
   } catch (error) {
+    // #171: równoległy zapis zajął termin między sprawdzeniem a INSERT —
+    // EXCLUDE w bazie odrzucił drugi; dla klienta to ta sama kolizja.
+    if (isAppointmentOverlapViolation(error)) {
+      return NextResponse.json(
+        { success: false, error: "Termin koliduje z istniejaca wizyta. Wybierz inna godzine" },
+        { status: 409 }
+      );
+    }
     logger.error("[Appointments API] Database error", { error: error });
     return NextResponse.json(
       { success: false, error: "Failed to create appointment" },

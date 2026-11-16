@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index, uniqueIndex, uuid, jsonb, integer, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, index, uniqueIndex, uuid, jsonb, integer, numeric, check } from "drizzle-orm/pg-core";
 
 // IMPORTANT! ID fields should ALWAYS use UUID types, EXCEPT the BetterAuth tables.
 
@@ -272,6 +272,10 @@ export const appointments = pgTable(
     index("appointments_variant_id_idx").on(table.variantId),
     // Overlap detection (kolizje wizyt) filtruje po startTime ORAZ endTime
     index("appointments_end_time_idx").on(table.endTime),
+    // #171: koniec po początku — przedział pusty/odwrócony omijałby kolizję.
+    // Obok niego w bazie EXCLUDE "appointments_no_overlap" (gist, tsrange '[)',
+    // bez cancelled) — Drizzle nie wyraża EXCLUDE, jest tylko w drizzle/0009.
+    check("appointments_end_after_start", sql`${table.endTime} > ${table.startTime}`),
   ]
 );
 
@@ -292,6 +296,8 @@ export const timeBlocks = pgTable(
   (table) => [
     index("time_blocks_employee_id_idx").on(table.employeeId),
     index("time_blocks_start_time_idx").on(table.startTime),
+    // #171: jak w appointments — pusta blokada nigdy nie trafia w kolizję.
+    check("time_blocks_end_after_start", sql`${table.endTime} > ${table.startTime}`),
   ]
 );
 
