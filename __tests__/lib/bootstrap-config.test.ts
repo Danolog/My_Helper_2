@@ -669,7 +669,10 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
   // FAKE_HANG=1 → po odczycie wisi (przerwanie w trakcie gcloud).
   const multilineWorld = () => {
     const root = join(DIR, `rb-${n++}`);
-    const [bin, tmp, home, cwd] = ["bin", "tmp", "home", "cwd"].map((d) => join(root, d));
+    const bin = join(root, "bin");
+    const tmp = join(root, "tmp");
+    const home = join(root, "home");
+    const cwd = join(root, "cwd");
     for (const d of [bin, tmp, home, cwd]) mkdirSync(d, { recursive: true });
     const seen = join(root, "seen");
     writeFileSync(
