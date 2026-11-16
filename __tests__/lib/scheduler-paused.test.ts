@@ -17,7 +17,7 @@
  *    nagłówek (rotacja); token nigdy w argumentach ani na wyjściu;
  *  - BASE_URL wyłącznie główny adres usługi (#143 pkt 1);
  *  - bez zadań mh-notify-* (Oliver, do R3-C).
- * Mutacje (wynik w PR): scratchpad/eva/k3b-mut.py.
+ * Mutacje (wynik w PR): scratchpad/eva/k3b-mut.py, k3c-mut.py, k3e-mut.py.
  */
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -372,14 +372,41 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     expect(r.stdout + r.stderr).not.toContain(TOKEN);
   });
 
+  // Dwa odrzucenia = trzy próby: także drugie i kolejne ponowienie niesie nagłówek.
   it("ABORTED przy create: każda próba z nagłówkiem w pliku flag (strumień tworzony od nowa)", () => {
     const w = world();
-    const r = w.run([], { FAKE_ABORTED_VERB: "create", FAKE_ABORTED_TIMES: "1" });
+    const r = w.run([], { FAKE_ABORTED_VERB: "create", FAKE_ABORTED_TIMES: "2" });
     expect(r.status, r.stderr).toBe(0);
     const creates = w.entries().filter((e) => verbOf(e.a) === "create http" && nameOf(e.a) === TABLE[0]!.name);
-    expect(creates).toHaveLength(2);
+    expect(creates).toHaveLength(3);
     for (const e of creates) expect(e.ff).toBe(`--headers:\n  Authorization: "Bearer ${TOKEN}"\n`);
     expect(r.stdout + r.stderr).not.toContain(TOKEN);
+  });
+
+  it("ABORTED przy update istniejącego zadania (rotacja): każda próba z --update-headers", () => {
+    const w = world();
+    expect(w.run([]).status).toBe(0);
+    const before = w.entries().length;
+    const r = w.run([], { FAKE_ABORTED_VERB: "update", FAKE_ABORTED_TIMES: "2" });
+    expect(r.status, r.stderr).toBe(0);
+    const updates = w.entries().slice(before).filter((e) => verbOf(e.a) === "update http" && nameOf(e.a) === TABLE[0]!.name);
+    expect(updates).toHaveLength(3);
+    for (const e of updates) expect(e.ff).toBe(`--update-headers:\n  Authorization: "Bearer ${TOKEN}"\n`);
+    expect(r.stdout + r.stderr).not.toContain(TOKEN);
+  });
+
+  // Po wyczerpaniu prób na kroku, po którym nic już nie sprawdza skutku
+  // (update właściwego harmonogramu): stop, a nie przejście do kolejnych zadań.
+  it("ABORTED bez końca przy update → kod 1, zadanie niezgłoszone jako utworzone, następne nie powstają", () => {
+    const w = world();
+    const r = w.run([], { FAKE_ABORTED_VERB: "update", FAKE_ABORTED_TIMES: "inf" });
+    const name = TABLE[0]!.name;
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(`error: ${name}: Scheduler still rejects changes (ABORTED)`);
+    expect(w.sleeps()).toEqual([10, 20, 40, 60, 60]);
+    expect(w.count()).toBe(1);
+    expect(r.stdout).not.toContain(`created ${name}`);
+    expect(w.calls().filter((c) => verbOf(c) === "create http")).toHaveLength(1);
   });
 
   it("ABORTED bez końca → kod ≠ 0 z nazwą zadania po 10, 20, 40, 60, 60 s; dalej nic; ponowny przebieg kończy pracę", () => {
@@ -409,6 +436,18 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     expect(r.stderr).toContain(`failed for ${TABLE[0]!.name}`);
     expect(r.stderr).toContain("PERMISSION_DENIED");
     expect(r.stdout + r.stderr).not.toContain(TOKEN);
+  });
+
+  it("inny błąd niż ABORTED przy update (bez kontroli stanu po nim) → kod 1, stop, następne zadania nie powstają", () => {
+    const w = world();
+    const r = w.run([], { FAKE_FAIL_VERB: "update" });
+    const name = TABLE[0]!.name;
+    expect(r.status).toBe(1);
+    expect(w.sleeps()).toEqual([]);
+    expect(r.stderr).toContain(`failed for ${name}`);
+    expect(w.calls().filter((c) => verbOf(c) === "update http")).toHaveLength(1);
+    expect(w.count()).toBe(1);
+    expect(r.stdout).not.toContain(`created ${name}`);
   });
 
   it("token z sekretu nigdy w argumentach gcloud ani na wyjściu", () => {
