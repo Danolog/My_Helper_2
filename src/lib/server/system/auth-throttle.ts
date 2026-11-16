@@ -36,6 +36,8 @@ const ACCOUNT_BLOCK_SEC = 15 * 60;
 
 const RETENTION_DELETE_LIMIT = 100;
 const MEMORY_MAX_ENTRIES = 100_000;
+/** Pełne sprzątanie mapy co tyle wywołań (albo po przekroczeniu MEMORY_MAX_ENTRIES). */
+const MEMORY_SWEEP_EVERY = 1_000;
 
 let cachedSecret: string | undefined;
 
@@ -81,8 +83,21 @@ function secondsUntil(ms: number, now: number): number {
 //    pamięciowy biblioteki: okno od ostatniego dozwolonego żądania). ──────────
 
 const memory = new Map<string, { count: number; lastRequest: number; expiresAt: number }>();
+let callsSinceSweep = 0;
 
+/**
+ * Sprzątanie zamortyzowane: wygasły wpis jest pomijany przy odczycie (consumeInMemory),
+ * a pełny przebieg mapy idzie co MEMORY_SWEEP_EVERY wywołań albo gdy mapa przekroczy
+ * MEMORY_MAX_ENTRIES — nie przy każdym żądaniu (odczyt sesji to najczęstsze żądanie).
+ *
+ * Po przekroczeniu limitu wypierane są najdawniej dodane klucze. Zalew żądań z wielu
+ * różnych adresów może więc wyzerować czyjś licznik — dotyczy to WYŁĄCZNIE ścieżek
+ * niewrażliwych (np. odczyt sesji); ścieżki wrażliwe i licznik konta liczy baza.
+ * Ocena, czy to wystarcza: CTO (przegląd tego PR).
+ */
 function pruneMemory(now: number): void {
+  if (++callsSinceSweep < MEMORY_SWEEP_EVERY && memory.size <= MEMORY_MAX_ENTRIES) return;
+  callsSinceSweep = 0;
   for (const [k, e] of memory) if (now >= e.expiresAt) memory.delete(k);
   if (memory.size <= MEMORY_MAX_ENTRIES) return;
   let overflow = memory.size - MEMORY_MAX_ENTRIES;
