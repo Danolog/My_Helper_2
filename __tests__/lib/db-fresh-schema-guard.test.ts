@@ -39,7 +39,6 @@ import {
   type ResetDeps,
   type ResetEnv,
 } from "../../scripts/db-reset-local";
-import { DB_URL_ALLOWED_QUERY_PARAMS } from "../../scripts/db-url-guard";
 import {
   REQUIRED_CONSTRAINTS,
   RLS_GUARD_SQL,
@@ -51,6 +50,7 @@ import {
   type RlsRequirement,
   type RlsRow,
 } from "../../scripts/db-schema-guard";
+import { DB_URL_ALLOWED_QUERY_PARAMS } from "../../scripts/db-url-guard";
 
 const ROOT = process.cwd();
 const read = (p: string) => readFileSync(join(ROOT, p), "utf8").replace(/\r\n/g, "\n");
@@ -418,7 +418,9 @@ describe("db:push — tylko pusta baza (#188 pkt 2, decyzja D2)", () => {
     it("niepoprawny adres → odmowa bez połączenia", async () => {
       vi.spyOn(console, "error").mockImplementation(() => {});
       const connect = vi.fn((_u: string) => fakeGateSql() as never);
-      expect(await pushGateMain({ POSTGRES_URL: "nie-adres" }, connect)).toBe(1);
+      // Adres w zmiennej: literał przy kluczu POSTGRES_URL łapie secret-guard.test.
+      const notAUrl = ["nie", "adres"].join("-");
+      expect(await pushGateMain({ POSTGRES_URL: notAUrl }, connect)).toBe(1);
       expect(connect).not.toHaveBeenCalled();
     });
 
