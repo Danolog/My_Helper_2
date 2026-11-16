@@ -129,15 +129,28 @@ describe.each([
     vi.clearAllMocks();
   });
 
-  it.each([
-    ["cancelled listed first", [cancelled, active]],
-    ["cancelled listed last", [active, cancelled]],
-  ])("active event is stacked above the cancelled one (%s)", (_order, events) => {
-    const { container } = renderGrid(events);
+  // Every non-cancelled status must sit above a cancelled event in the same slot,
+  // not just "scheduled" - a confirmed visit replacing a cancelled one is the common case.
+  const ACTIVE_STATUSES: CalendarEvent["appointment"]["status"][] = [
+    "scheduled",
+    "confirmed",
+    "completed",
+    "no_show",
+  ];
 
-    expect(zIndexOf(layerOf(active.id, container))).toBeGreaterThan(
-      zIndexOf(layerOf(cancelled.id, container))
-    );
+  describe.each(ACTIVE_STATUSES)("active status %s", (status) => {
+    const activeWithStatus = makeEvent(`ev-active-${status}`, status, `Strzyzenie ${status}`);
+
+    it.each([
+      ["cancelled listed first", [cancelled, activeWithStatus]],
+      ["cancelled listed last", [activeWithStatus, cancelled]],
+    ])("active event is stacked above the cancelled one (%s)", (_order, events) => {
+      const { container } = renderGrid(events);
+
+      expect(zIndexOf(layerOf(activeWithStatus.id, container))).toBeGreaterThan(
+        zIndexOf(layerOf(cancelled.id, container))
+      );
+    });
   });
 
   it("cancelled event stays rendered and greyed out", () => {
