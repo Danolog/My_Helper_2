@@ -4,8 +4,10 @@
  * `drizzle-kit push` po `db:migrate` wyłącza RLS i usuwa polityki na 39 tabelach
  * (pomiar #190), więc testy pg i E2E w CI szłyby na bazie bez izolacji salonów.
  * Ten test pada, gdy:
- * - push wróci w którymkolwiek jobie z Postgresem — wprost albo przez skrypt
- *   z package.json (rozwijany rekurencyjnie; #194 Z1, mutant W5 Leo);
+ * - w jobie z Postgresem pojawi się polecenie spoza LISTY DOZWOLONYCH (linie run:,
+ *   także z bloków YAML o dowolnym wskaźniku; skrypty package.json z nazwą i treścią),
+ *   albo drizzle-kit wywołany inaczej niż `drizzle-kit migrate` — wprost albo przez
+ *   skrypt rozwijany rekurencyjnie (#194: W5, W5c Leo, E12 Ethana, decyzja Olivera);
  * - strażnik `scripts/db-rls-guard.ts` zniknie, zostanie wyciszony albo przesunięty:
  *   musi stać zaraz po `db:migrate` ORAZ jako ostatni krok z `run:` w jobie
  *   (po Playwrightcie, `if: ${{ !cancelled() }}`), tak żeby RLS zdjęte w trakcie
@@ -20,7 +22,33 @@ const WF = readFileSync(join(ROOT, ".github/workflows/quality-gate.yml"), "utf8"
 const PKG = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> };
 const GUARD_RUN = "pnpm exec tsx scripts/db-rls-guard.ts";
 const FINAL_IF = "${{ !cancelled() }}";
-/** Zakazane w rozwiniętym poleceniu kroku joba z bazą (Oliver, #194 Z1). */
+/**
+ * Lista DOZWOLONYCH skryptów package.json w jobach z bazą (Oliver, #194): nazwa →
+ * dokładna treść. Każdy inny skrypt (także nowy alias) = porażka testu; zmiana
+ * treści któregoś z nich (np. dopięty push) też.
+ */
+const ALLOWED_DB_JOB_SCRIPTS: Record<string, string> = {
+  "db:migrate": "drizzle-kit migrate", // jedyna droga schematu
+  "test:pg": "vitest run --config vitest.pg.config.ts", // testy na prawdziwym Postgresie
+  "db:seed:test": "npx tsx scripts/seed-test.ts", // dane testowe E2E (bez DDL)
+  "build:ci": "next build", // build bez migracji
+};
+
+/**
+ * Lista DOZWOLONYCH linii poleceń w krokach jobów z bazą. Każda linia `run:` (także
+ * z bloku) musi w całości pasować do jednego wzorca — operator powłoki (`&&`, `;`,
+ * `||`), nieznane polecenie albo nieznany skrypt = porażka testu.
+ */
+const ALLOWED_DB_JOB_LINES: Array<[string, RegExp]> = [
+  ["instalacja zależności", /^pnpm install --frozen-lockfile$/],
+  ["skrypt z listy dozwolonych", new RegExp(`^pnpm (?:${Object.keys(ALLOWED_DB_JOB_SCRIPTS).join("|")})$`)],
+  ["strażnik RLS", /^pnpm exec tsx scripts\/db-rls-guard\.ts$/],
+  ["instalacja przeglądarki", /^pnpm exec playwright install --with-deps chromium$/],
+  ["testy E2E", /^pnpm exec playwright test --grep @(?:smoke|full) --workers=\d+ --retries=\d+$/],
+  ["odczyt seeda (tylko SELECT)", /^PGPASSWORD=\S+ psql -h localhost -U dev_user -d pos_dev -c "SELECT [^;]*;"$/],
+];
+
+/** Push w tekście (testy samego rozwijania skryptów); w jobach obowiązuje lista dozwolonych. */
 const PUSH = /drizzle-kit\s+push|\bdb:push\b|\bdb:dev\b/;
 
 /** Bez linii komentarza YAML — komentarz o db:push nie jest krokiem. */
@@ -48,13 +76,46 @@ function steps(job: string): string[] {
   return s.split(/\n(?= {6}- )/).slice(1);
 }
 
-/** Polecenie kroku: jednoliniowe `run: x` albo blok `run: |` (wszystkie linie). */
+/** Wskaźnik bloku YAML: `|` albo `>` z dowolnym chomping (`-`/`+`) i wcięciem (cyfra). */
+const BLOCK_INDICATOR = /^[|>][-+0-9]*$/;
+
+/**
+ * Polecenie kroku: jednoliniowe `run: x` albo blok YAML (`run: |`, `|-`, `|+`, `>`,
+ * `>-`, `>+`, `|2`, `>2-`, …) — wtedy wszystkie linie bloku, czyli linie wcięte
+ * głębiej niż klucz `run:`. Wartość zaczynająca się od `|` lub `>`, która nie jest
+ * wskaźnikiem bloku, albo pusty blok = wyjątek (porażka testu, nie przepuszczenie;
+ * #194 Z1 Leo, W5c).
+ */
 function runOf(step: string): string {
-  const m = step.match(/^\s*(?:- )?run:\s*(.*)$/m);
+  const m = step.match(/^(\s*(?:- )?)run:[ \t]*(.*)$/m);
   if (!m) return "";
-  if (m[1]!.trim() !== "|" && m[1]!.trim() !== ">-" && m[1]!.trim() !== ">") return m[1]!.trim();
-  const after = step.slice(step.indexOf(m[0]) + m[0].length).split("\n").slice(1);
-  return after.filter((l) => /^ {10}/.test(l)).map((l) => l.trim()).join("\n");
+  const value = m[2]!.trim();
+  if (!/^[|>]/.test(value)) return value;
+  if (!BLOCK_INDICATOR.test(value)) throw new Error(`nieznany wskaźnik bloku YAML w run: ${value}`);
+  const keyIndent = m[1]!.length;
+  const lines: string[] = [];
+  for (const l of step.slice(step.indexOf(m[0]) + m[0].length).split("\n").slice(1)) {
+    if (l.trim() === "") continue;
+    if (l.length - l.trimStart().length <= keyIndent) break;
+    lines.push(l.trim());
+  }
+  if (lines.length === 0) throw new Error(`pusty blok run: ${value}`);
+  return lines.join("\n");
+}
+
+/**
+ * Lista DOZWOLONYCH (E12 Ethana, N1 Leo): jedyne dopuszczalne wywołanie drizzle-kit
+ * w jobach z bazą to dokładnie `drizzle-kit migrate` — bez przyrostka wersji
+ * (`drizzle-kit@latest`), bez `push`/`drop`/`up`/innych. Do tego zakaz `db:push`
+ * i `db:dev` (na wypadek wywołania przez inną nazwę). Zwraca listę naruszeń.
+ */
+function schemaViolations(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/drizzle-kit(\S*)(?:\s+(\S+))?/g)) {
+    if (m[1] !== "" || m[2] !== "migrate") out.push(m[0]);
+  }
+  for (const m of text.matchAll(/\bdb:(?:push|dev)\b/g)) out.push(m[0]);
+  return out;
 }
 
 /**
@@ -95,11 +156,29 @@ describe("quality-gate.yml: baza CI tylko z migracji + strażnik RLS (#190)", ()
     expect(code(WF)).not.toMatch(/\bdb:push\b|\bdb:dev\b|drizzle-kit\s+push/);
   });
 
-  it.each(PG_JOBS)("%s: żaden krok — także przez skrypty package.json — nie uruchamia push (drizzle-kit push, db:push, db:dev)", (_name, body) => {
+  it.each(PG_JOBS)("%s: każda linia run: pasuje do listy dozwolonych poleceń", (_name, body) => {
     for (const s of steps(body)) {
       const cmd = runOf(s);
       if (!cmd) continue;
-      expect(expandScripts(cmd, PKG.scripts), cmd).not.toMatch(PUSH);
+      for (const line of cmd.split("\n")) {
+        const hit = ALLOWED_DB_JOB_LINES.find(([, re]) => re.test(line));
+        expect(hit, `polecenie spoza listy dozwolonych: ${line}`).toBeDefined();
+      }
+    }
+  });
+
+  it("skrypty z listy dozwolonych mają w package.json dokładnie oczekiwaną treść (a ta tylko `drizzle-kit migrate`)", () => {
+    for (const [name, body] of Object.entries(ALLOWED_DB_JOB_SCRIPTS)) {
+      expect(PKG.scripts[name], name).toBe(body);
+      expect(schemaViolations(expandScripts(`pnpm ${name}`, PKG.scripts)), name).toEqual([]);
+    }
+  });
+
+  it.each(PG_JOBS)("%s: każdy krok — także przez skrypty package.json — woła drizzle-kit wyłącznie jako `drizzle-kit migrate`", (_name, body) => {
+    for (const s of steps(body)) {
+      const cmd = runOf(s);
+      if (!cmd) continue;
+      expect(schemaViolations(expandScripts(cmd, PKG.scripts)), cmd).toEqual([]);
     }
   });
 
@@ -190,8 +269,38 @@ describe("expandScripts — rozwijanie skryptów package.json", () => {
     expect(expandScripts("pnpm check", PKG.scripts)).not.toMatch(PUSH);
   });
 
-  it("blok `run: |` jest czytany w całości", () => {
-    const step = "      - name: x\n        run: |\n          echo a\n          pnpm db:sync\n";
-    expect(runOf(step)).toBe("echo a\npnpm db:sync");
+  it.each([["|"], ["|-"], ["|+"], [">"], [">-"], [">+"], ["|2"], [">2-"], ["|+2"]])(
+    "blok `run: %s` jest czytany w całości (pnpm db:sync wykryty)",
+    (ind) => {
+      const step = `      - name: x\n        run: ${ind}\n          echo a\n\n          pnpm db:sync\n        env:\n          X: "1"\n`;
+      expect(runOf(step)).toBe("echo a\npnpm db:sync");
+      expect(PUSH.test(expandScripts(runOf(step), scripts))).toBe(true);
+    },
+  );
+
+  it.each([["|x"], [">>"], ["|-|"], ["| #"]])("nieznany wskaźnik bloku `run: %s` → wyjątek", (ind) => {
+    expect(() => runOf(`      - name: x\n        run: ${ind}\n          pnpm db:sync\n`)).toThrow(/wskaźnik bloku/);
+  });
+
+  it("pusty blok → wyjątek; jednoliniowe run: bez zmian", () => {
+    expect(() => runOf("      - name: x\n        run: |-\n      - name: y\n")).toThrow(/pusty blok/);
+    expect(runOf("      - run: pnpm db:migrate\n")).toBe("pnpm db:migrate");
+  });
+});
+
+describe("schemaViolations — drizzle-kit tylko jako `drizzle-kit migrate` (E12, N1)", () => {
+  it.each([
+    ["drizzle-kit migrate", []],
+    ["npx drizzle-kit migrate", []],
+    ["drizzle-kit push", ["drizzle-kit push"]],
+    ["npx drizzle-kit@latest push", ["drizzle-kit@latest push"]],
+    ["pnpm dlx drizzle-kit@0.31.0 migrate", ["drizzle-kit@0.31.0 migrate"]],
+    ["drizzle-kit drop", ["drizzle-kit drop"]],
+    ["drizzle-kit up", ["drizzle-kit up"]],
+    ["drizzle-kit", ["drizzle-kit"]],
+    ["pnpm db:dev", ["db:dev"]],
+    ["tsx a.ts && pnpm db:push", ["db:push"]],
+  ])("%j → %j", (text, expected) => {
+    expect(schemaViolations(text)).toEqual(expected);
   });
 });
