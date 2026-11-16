@@ -117,7 +117,8 @@ vi.mock("@/lib/push", () => ({
   sendPushNotification: (...args: unknown[]) => mockSendPush(...args),
 }));
 const mockSendSms = vi.fn();
-vi.mock("@/lib/sms", () => ({
+vi.mock("@/lib/sms", async (importOriginal) => ({
+  SMS_TIME_ZONE: (await importOriginal<typeof import("@/lib/sms")>()).SMS_TIME_ZONE,
   sendSms: (...args: unknown[]) => mockSendSms(...args),
 }));
 vi.mock("@/lib/logger", () => ({

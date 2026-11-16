@@ -17,6 +17,7 @@ import {
 } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { resolveWaitingListToken } from "@/lib/server/system";
+import { SMS_TIME_ZONE } from "@/lib/sms";
 
 // #193 P5a-1 (decyzja CTO 4): bez puli `db`. notifyWaitingList działa w
 // forSalon(params.salonId); accept/decline ustalają salon wyłącznie przez
@@ -142,13 +143,16 @@ export async function notifyWaitingList(
 
     logger.info("Found matching waiting list entries for freed slot", { count: entries.length, salonId });
 
-    // Format the freed slot details for notification messages
+    // Data i godzina terminu w czasie warszawskim (SMS_TIME_ZONE), niezależnie
+    // od strefy procesu; jedna wartość dla każdego kanału.
     const formattedDate = params.startTime.toLocaleDateString("pl-PL", {
+      timeZone: SMS_TIME_ZONE,
       weekday: "long",
       day: "numeric",
       month: "long",
     });
     const formattedTime = params.startTime.toLocaleTimeString("pl-PL", {
+      timeZone: SMS_TIME_ZONE,
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -506,7 +510,7 @@ export async function acceptEarlierSlot(
         salonId,
         clientId: entry.clientId,
         type: "sms",
-        message: `Klient zaakceptowal wczesniejszy termin z listy oczekujacych. Wizyta ${appointmentId} przeniesiona na ${offeredStart.toLocaleString("pl-PL")}.`,
+        message: `Klient zaakceptowal wczesniejszy termin z listy oczekujacych. Wizyta ${appointmentId} przeniesiona na ${offeredStart.toLocaleString("pl-PL", { timeZone: SMS_TIME_ZONE })}.`,
         status: "sent",
       })
     );
