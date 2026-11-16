@@ -13,6 +13,14 @@ import { isLocalBaseURL } from './global-setup';
  * nie Neon, nie `VERCEL_ENV=preview/production`); każdy inny cel = odmowa
  * i czerwony przebieg, nie cichy skip.
  *
+ * Połączenie idzie jako właściciel tabel, poza RLS (bez `forSalon`), więc
+ * zakres wyznaczają wyłącznie: strażnik hosta, salon seeda (`E2E_SALON_ID`)
+ * i znacznik `[E2E]`. Ręczna wizyta w lokalnej bazie z notatką od `[E2E]`
+ * też zniknie.
+ *
+ * Dwa równoległe procesy Playwright na jednej bazie nie są wspierane:
+ * teardown pierwszego usuwa oznaczone wizyty drugiego, który jeszcze biegnie.
+ *
  * Zdalny `BASE_URL` (testy @production): teardown pominięty, tamte testy nie
  * zakładają wizyt, a lokalna baza nie jest bazą testowanego serwera.
  */

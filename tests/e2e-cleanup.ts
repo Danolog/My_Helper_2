@@ -81,10 +81,20 @@ export type PurgeResult = { deleted: number; untouchedBefore: number; untouchedA
  * Usuwa wizyty ze znacznikiem w podanych salonach, w jednej transakcji.
  * Zależne wiersze znikają kaskadą FK (`deposit_payments`, `appointment_materials`,
  * `treatment_history`, `product_usage`, `employee_commissions`, `fiscal_receipts`).
+ * Cztery FK mają `on delete set null` — te wiersze zostają z pustym odnośnikiem:
+ * opinie (`reviews.appointment_id`), lista oczekujących
+ * (`waiting_list.existing_appointment_id`), transakcje lojalnościowe
+ * (`loyalty_transactions.appointment_id`), faktury (`invoices.appointment_id`).
  *
  * Bezpiecznik niezależny od filtra DELETE: przed i po usunięciu liczy wizyty
  * BEZ znacznika w całej tabeli. Jeśli liczba się zmieni (np. ktoś zgubi filtr
  * znacznika), transakcja jest wycofywana i funkcja rzuca błąd.
+ * Granica: bezpiecznik pilnuje tylko filtra znacznika. Utraty zakresu salonu
+ * (usunięcie oznaczonych wizyt innego salonu) nie wykrywa — pilnuje go
+ * wyłącznie asercja testu `__tests__/pg/e2e-cleanup.pg.test.ts`.
+ *
+ * Znacznik dotyczy treści, nie pochodzenia: ręcznie umówiona wizyta w lokalnej
+ * bazie z notatką albo imieniem gościa zaczynającym się od `[E2E]` też zniknie.
  */
 export async function purgeE2eAppointments(sql: Sql, salonIds: readonly string[]): Promise<PurgeResult> {
   if (salonIds.length === 0) throw new Error("[e2e-cleanup] brak salonów do sprzątania");

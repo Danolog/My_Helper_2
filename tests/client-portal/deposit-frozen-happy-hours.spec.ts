@@ -31,9 +31,9 @@ const SALON_ID = '00000000-0000-4000-8000-000000000001';
 const SERVICE_ID = '00000000-0000-4000-8000-5e0000000004';
 const EMPLOYEE_ID = '00000000-0000-4000-8000-e00000000003';
 const FULL_PRICE_DEPOSIT = 60; // 30% z 200 PLN
-const HAPPY_HOURS_DEPOSIT = 30;
+const HAPPY_HOURS_DEPOSIT = 30; // 30% z 100 PLN (200 PLN - 50%) — kwota, ktorej NIE wolno przyjac
 // Znacznik #175 w imieniu goscia: po nim globalTeardown rozpoznaje wizyty E2E.
-const GUEST_NAME = e2eGuestName('Gosc'); // 30% z 100 PLN (200 PLN - 50%) — kwota, ktorej NIE wolno przyjac
+const GUEST_NAME = e2eGuestName('Gosc');
 
 type CreateSessionJson = { success: boolean; data?: { simulated?: boolean; paymentUrl?: string; appointmentId?: string; amount?: number }; error?: string; details?: unknown };
 
@@ -95,8 +95,15 @@ async function cancelAsOwner(browser: Browser, baseURL: string, appointmentIds: 
     await page.goto('/dashboard', { waitUntil: 'domcontentloaded' }); // ustawia ciasteczka CSRF
     const token = (await context.cookies()).find((c) => c.name === 'csrf-token')?.value ?? '';
     for (const id of appointmentIds) {
+      // Zapisane imie goscia ma miec znacznik [E2E] — inaczej globalTeardown cicho przestalby sprzatac.
+      // Odczyt przed anulowaniem, asercja po nim: czerwien nie pomija anulowania.
+      const got = await page.request.get(`/api/appointments/${id}`);
+      const gotBody = await got.text();
       const res = await page.request.delete(`/api/appointments/${id}`, { headers: { 'x-csrf-token': decodeURIComponent(token) } });
       expect(res.status(), `sprzatanie: anulowanie wizyty ${id}: ${await res.text()}`).toBe(200);
+      expect(got.status(), `odczyt wizyty ${id}: ${gotBody}`).toBe(200);
+      const saved = JSON.parse(gotBody) as { data: { guestName: string | null } };
+      expect(saved.data.guestName, 'zapisany guest_name bez znacznika [E2E] — teardown nie usunie wizyty').toBe(GUEST_NAME);
     }
   } finally {
     await context.close();

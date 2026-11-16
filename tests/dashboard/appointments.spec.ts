@@ -96,7 +96,11 @@ async function createAppointmentViaApi(page: Page, time: string): Promise<string
   });
   const body = await res.text();
   expect(res.status(), `zalozenie wizyty przez API: ${body}`).toBe(201);
-  return (JSON.parse(body) as { data: { id: string } }).data.id;
+  const created = (JSON.parse(body) as { data: { id: string; notes: string | null } }).data;
+  // Zapisana wartosc, nie wyslana: utrata prefiksu po stronie serwera = czerwony test,
+  // a nie ciche zaprzestanie sprzatania przez globalTeardown.
+  expect(created.notes, 'zapisane notes bez znacznika [E2E] — teardown nie usunie wizyty').toBe(e2eNotes('kalendarz API'));
+  return created.id;
 }
 
 /** Naglowek widoku dnia (h2 w calendar-grid) dla dzis + offsetDays, sformatowany jak w aplikacji. */
