@@ -75,17 +75,22 @@ const guestBody = {
   notes: SENTINEL_NOTE,
 };
 
-/** Kształt StripeInvalidRequestError z SDK stripe (bez importu SDK). */
-class StripeInvalidRequestError extends Error {
-  type = "invalid_request_error";
-  code = "email_invalid";
-  param = "customer_email";
-  requestId = "req_test_123";
-  raw = { message: `Invalid email address: ${SENTINEL_EMAIL}` };
-  constructor() {
-    super(`Invalid email address: ${SENTINEL_EMAIL}`);
-    this.name = "StripeInvalidRequestError";
-  }
+/**
+ * Prawdziwa klasa błędu z SDK stripe (uwaga Ethana do #191): w SDK `type` to
+ * nazwa klasy, a typ z API leży w `rawType` — atrapa z `type =
+ * "invalid_request_error"` ukryła, że trasa logowała nazwę klasy jako typ.
+ * Importowana PO `vi.resetModules()` (w `runInMode`), żeby `instanceof` w
+ * trasie widział tę samą klasę.
+ */
+async function stripeInvalidEmail() {
+  const { default: Stripe } = await import("stripe");
+  return new Stripe.errors.StripeInvalidRequestError({
+    type: "invalid_request_error",
+    message: `Invalid email address: ${SENTINEL_EMAIL}`,
+    code: "email_invalid",
+    param: "customer_email",
+    requestId: "req_test_123",
+  } as never);
 }
 
 function primeDb() {
@@ -98,10 +103,11 @@ function primeDb() {
 }
 
 /** Trasa z loggerem w danym trybie; zwraca status i całe wyjście console.error. */
-async function runInMode(mode: "production" | "development") {
+async function runInMode(mode: "production" | "development", prepare?: () => Promise<void>) {
   vi.stubEnv("NODE_ENV", mode);
   vi.resetModules();
   const { POST } = await import("@/app/api/deposits/create-session/route");
+  await prepare?.();
   const spy = vi.spyOn(console, "error").mockImplementation(() => {});
   try {
     const res = await POST(
@@ -133,8 +139,9 @@ afterEach(() => {
 
 describe.each(["production", "development"] as const)("luka D, logger w trybie %s", (mode) => {
   it("Stripe odrzuca e-mail → 502, wizyta usunięta; w logu type/code/param/requestId i identyfikatory, bez e-maila", async () => {
-    mockSessionsCreate.mockRejectedValue(new StripeInvalidRequestError());
-    const { status, out } = await runInMode(mode);
+    const { status, out } = await runInMode(mode, async () => {
+      mockSessionsCreate.mockRejectedValue(await stripeInvalidEmail());
+    });
 
     expect(status).toBe(502);
     expect(mockDbDelete).toHaveBeenCalledTimes(1);
@@ -181,6 +188,28 @@ describe.each(["production", "development"] as const)("luka D, logger w trybie %
     }
     expect(out).toContain("DrizzleQueryError");
     expect(out).toContain("22001");
+    // Pola Stripe tylko dla błędów SDK Stripe — błąd bazy z `code` ich nie dostaje.
+    expect(out).not.toMatch(/stripe(Type|Code|Param|RequestId)/);
+  });
+
+  it("stripeType = rawType z API, nie nazwa klasy z SDK", async () => {
+    const { out } = await runInMode(mode, async () => {
+      mockSessionsCreate.mockRejectedValue(await stripeInvalidEmail());
+    });
+    expect(out).toMatch(/stripeType["']?:\s*["']invalid_request_error["']/);
+    expect(out).not.toMatch(/stripeType["']?:\s*["']StripeInvalidRequestError["']/);
+    expect(out).toMatch(/stripeCode["']?:\s*["']email_invalid["']/);
+    expect(out).toMatch(/stripeParam["']?:\s*["']customer_email["']/);
+  });
+
+  it("obiekt spoza SDK Stripe z polami type/code/param → bez pól stripe* w logu", async () => {
+    mockSessionsCreate.mockRejectedValue(
+      Object.assign(new Error("boom"), { type: "invalid_request_error", code: "email_invalid", param: "customer_email", requestId: "req_x" })
+    );
+    const { status, out } = await runInMode(mode);
+    expect(status).toBe(502);
+    expect(out).not.toMatch(/stripe(Type|Code|Param|RequestId)/);
+    expect(out).toContain("email_invalid"); // errorCode z toErrorIdentity zostaje
   });
 });
 

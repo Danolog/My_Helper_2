@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
+import Stripe from "stripe";
 import { parseBody, depositCreateSessionSchema } from "@/lib/api-validation";
 import {
   appointmentConflictWhere,
@@ -28,10 +29,15 @@ import { getOptionalSession } from "@/lib/session";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 
 /**
- * Pola błędu Stripe bez wartości: `type` (np. invalid_request_error), `code`
- * (np. email_invalid), `param` (NAZWA pola, np. customer_email), `requestId`
- * (req_…, do zgłoszenia w Stripe). Tylko napisy; `message`, `raw`, `headers`
- * celowo pominięte — message może zawierać e-mail gościa.
+ * Pola błędu Stripe bez wartości — WYŁĄCZNIE dla błędów SDK Stripe
+ * (`Stripe.errors.StripeError`); inny obiekt z polem `code` (np. błąd bazy) nic
+ * tu nie dokłada, jego tożsamość daje `toErrorIdentity`.
+ * - `stripeType` = `rawType` z API (np. invalid_request_error). W SDK `type`
+ *   to nazwa klasy (dubluje errorName), więc nie jest używane.
+ * - `stripeCode` (np. email_invalid), `stripeParam` (NAZWA pola, np.
+ *   customer_email — nigdy wartość), `stripeRequestId` (req_…).
+ * Tylko napisy; `message`, `raw`, `headers`, `detail` celowo pominięte —
+ * message może zawierać e-mail gościa.
  */
 function stripeErrorFields(error: unknown): {
   stripeType?: string;
@@ -39,10 +45,10 @@ function stripeErrorFields(error: unknown): {
   stripeParam?: string;
   stripeRequestId?: string;
 } {
-  if (!error || typeof error !== "object") return {};
-  const { type, code, param, requestId } = error as Record<string, unknown>;
+  if (!(error instanceof Stripe.errors.StripeError)) return {};
+  const { rawType, code, param, requestId } = error as { rawType?: unknown; code?: unknown; param?: unknown; requestId?: unknown };
   return {
-    ...(typeof type === "string" ? { stripeType: type } : {}),
+    ...(typeof rawType === "string" ? { stripeType: rawType } : {}),
     ...(typeof code === "string" ? { stripeCode: code } : {}),
     ...(typeof param === "string" ? { stripeParam: param } : {}),
     ...(typeof requestId === "string" ? { stripeRequestId: requestId } : {}),
