@@ -3,8 +3,9 @@
  *
  * Jawny schemat obejmuje WYŁĄCZNIE 4 tabele auth. Adapter nie sięga do żadnej
  * innej tabeli — model spoza tej listy kończy się błędem adaptera (test).
- * Skróty haseł i tokeny sesji nie są czytelne dla zapytań ścieżki żądania;
- * w P6 pula żądań traci granty na account/session/verification.
+ * Do P6 pula systemowa i pula żądań to ta sama rola bazy: zawężenie dotyczy dziś
+ * wyłącznie schematu tego adaptera, nie uprawnień w bazie. Odebranie puli żądań
+ * grantów na account/session/verification to dług do P6 (#193, lista kontrolna P6).
  *
  * Wyjątek od Z7/W2 z zamkniętej listy (Ethan 16.11). Importuje go wyłącznie
  * `src/lib/auth.ts` (test skanu importów); nie wychodzi przez `system/index.ts`.
