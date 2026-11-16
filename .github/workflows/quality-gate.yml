@@ -28,6 +28,11 @@ jobs:
 
       - run: pnpm typecheck
 
+      # ESLint: krok pada tylko na błędach (eslint bez --max-warnings);
+      # ostrzeżenia są widoczne w logu, ale nie blokują.
+      - name: ESLint
+        run: pnpm lint
+
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
