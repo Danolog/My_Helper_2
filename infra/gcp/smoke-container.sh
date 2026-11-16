@@ -7,7 +7,8 @@
 # 1. W1 (K-1b, strażnik sekretów w register()): kontener „jak na Cloud Run”
 #    (K_SERVICE + NODE_ENV=production) z BETTER_AUTH_SECRET równym wartości
 #    testowej jawnej w repozytorium → kontener MUSI się zakończyć kodem 1,
-#    a log MUSI zawierać nazwę zmiennej i NIE MOŻE zawierać wartości ani jej
+#    a log MUSI zawierać komunikat strażnika („secret-guard: odmowa startu”,
+#    K-1c) i nazwę zmiennej, i NIE MOŻE zawierać wartości ani jej
 #    skrótu. Sprawdzane PRZED jakimkolwiek /api/health.
 # 2. Kontrola W1: ten sam tryb Cloud Run z losową wartością i jednorazową
 #    bazą (pgvector w sieci --internal, bez portu na hoście, losowe hasło)
@@ -71,6 +72,7 @@ guard_exit="$(docker inspect -f '{{.State.ExitCode}}' "$guard_name")"
 guard_log="$(docker logs "$guard_name" 2>&1 || true)"
 w1_fail=""
 [[ "$guard_exit" == "1" ]] || w1_fail+=" exit code [$guard_exit], expected [1];"
+[[ "$guard_log" == *"secret-guard: odmowa startu"* ]] || w1_fail+=" log lacks the secret-guard refusal message;"
 [[ "$guard_log" == *BETTER_AUTH_SECRET* ]] || w1_fail+=" log lacks the variable name BETTER_AUTH_SECRET;"
 [[ "$guard_log" != *"$w1_value"* ]] || w1_fail+=" log contains the secret value;"
 [[ "$guard_log" != *"$w1_sha"* ]] || w1_fail+=" log contains the secret hash;"

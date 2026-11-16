@@ -27,7 +27,7 @@
  * etapie secrets; describe bez sprawdzania (brak idempotencji).
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -639,12 +639,54 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
     );
   });
 
-  it("jedyne `secrets versions add` to funkcja add; żadnego --data-file=ŚCIEŻKA ani starego tr -d '\\n'", () => {
+  it("jedyne `secrets versions add` to funkcje add i add_multiline; --data-file=ŚCIEŻKA tylko w add_multiline; bez starego tr -d '\\n'", () => {
     const adds = lines.filter((l) => l.includes("secrets versions add"));
-    expect(adds).toHaveLength(1);
+    expect(adds).toHaveLength(2);
     expect(adds[0]).toMatch(/^add\(\) \{/);
-    expect(block).not.toMatch(/--data-file=(?!-)/);
+    expect(adds[1]).toMatch(/^add_multiline\(\) \{/);
+    const withPath = lines.filter((l) => /--data-file=(?!-)/.test(l));
+    expect(withPath).toEqual([adds[1]]);
     expect(block).not.toContain("tr -d '\\n'");
+  });
+
+  // K-1c: wielowierszowe (PEM, JSON) bez tr, z pliku tymczasowego usuwanego zaraz po gcloud.
+  it("funkcja add_multiline: bez tr, bez logu plikowego, --data-file z pliku, plik usuwany zaraz po gcloud (także przy błędzie)", () => {
+    expect(block).toContain(
+      `add_multiline() { local rc=0; CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file="$2" || rc=$?; rm -P "$2"; return "$rc"; }`,
+    );
+    const fn = lines.find((l) => l.startsWith("add_multiline() {"))!;
+    expect(fn).not.toMatch(/\btr\b/);
+    expect(fn).not.toMatch(/&&\s*rm/);
+    expect(d5).toMatch(/mktemp/);
+  });
+
+  it("add_multiline wykonane: plik tymczasowy usunięty po sukcesie i po błędzie gcloud; zawartość wielowierszowa nietknięta", () => {
+    const fn = lines.find((l) => l.startsWith("add_multiline() {"))!;
+    const bin = join(DIR, `rb-bin-${n++}`);
+    spawnSync("mkdir", ["-p", bin]);
+    const seen = join(DIR, `rb-seen-${n++}`);
+    // Fałszywy gcloud: kopiuje plik z --data-file i kończy się kodem z FAKE_RC.
+    writeFileSync(
+      join(bin, "gcloud"),
+      `#!/bin/sh\nprintf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" > "$SEEN.env"\nfor a in "$@"; do case "$a" in --data-file=*) cat "\${a#--data-file=}" > "$SEEN";; esac; done\nexit "\${FAKE_RC:-0}"\n`,
+    );
+    chmodSync(join(bin, "gcloud"), 0o755);
+    // rm -P (BSD) nie wszędzie istnieje: fałszywy rm usuwa plik zwykłym rm.
+    writeFileSync(join(bin, "rm"), '#!/bin/sh\n[ "$1" = "-P" ] && shift\nexec /bin/rm -f "$@"\n');
+    chmodSync(join(bin, "rm"), 0o755);
+    const pem = "-----BEGIN PRIVATE KEY-----\nAAAA\nBBBB\n-----END PRIVATE KEY-----\n";
+    for (const rc of ["0", "1"]) {
+      const f = join(DIR, `rb-tmp-${n++}`);
+      writeFileSync(f, pem);
+      const r = spawnSync("bash", ["-c", `P=p-123; ${fn}\nadd_multiline nazwa "$1"`, "x", f], {
+        encoding: "utf8",
+        env: { NODE_ENV: "test", PATH: `${bin}:${process.env.PATH}`, SEEN: seen, FAKE_RC: rc },
+      });
+      expect(r.status, rc).toBe(Number(rc));
+      expect(existsSync(f), `plik po rc=${rc}`).toBe(false);
+      expect(readFileSync(seen, "utf8")).toBe(pem);
+      expect(readFileSync(`${seen}.env`, "utf8").trim()).toBe("1");
+    }
   });
 
   it("każdy sekret dodawany przez add — ze strumienia albo z pliku na stdin", () => {

@@ -15,7 +15,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { FORBIDDEN_SHA256, sha256Hex } from "../../infra/runtime/secret-guard.mjs";
+import { FORBIDDEN_SHA256, SECRET_GUARD_MESSAGE, sha256Hex } from "../../infra/runtime/secret-guard.mjs";
 
 const ROOT = process.cwd();
 const SCRIPT = join(ROOT, "infra/gcp/smoke-container.sh");
@@ -70,6 +70,7 @@ case "$cmd" in
         leak) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "$msg (BETTER_AUTH_SECRET) $secret" > "$S/$name.log" ;;
         hash) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "$msg (BETTER_AUTH_SECRET) $FAKE_W1_SHA" > "$S/$name.log" ;;
         noname) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "$msg" > "$S/$name.log" ;;
+        nomsg) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "fatal: BETTER_AUTH_SECRET" > "$S/$name.log" ;;
         *) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "$msg (BETTER_AUTH_SECRET)" > "$S/$name.log" ;;
       esac
     fi
@@ -138,6 +139,12 @@ function smoke(extra: Record<string, string> = {}) {
 const firstHealth = (calls: string[]) => calls.findIndex((c) => c.startsWith("curl ") || /-probe$/.test(c));
 
 describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
+  it("K-1c: wymagany w logu prefiks = początek komunikatu strażnika (SECRET_GUARD_MESSAGE)", () => {
+    const prefix = SOURCE.match(/\[\[ "\$guard_log" == \*"([^"]+)"\* \]\]/)?.[1];
+    expect(prefix).toBe("secret-guard: odmowa startu");
+    expect(SECRET_GUARD_MESSAGE.startsWith(prefix!)).toBe(true);
+  });
+
   it("wartość W1 w skrypcie jest literałem BETTER_AUTH_SECRET ze skrótem na liście zakazanej", () => {
     expect(W1_VALUE).not.toBe("");
     expect(FORBIDDEN_SHA256.has(sha256Hex(W1_VALUE))).toBe(true);
@@ -196,6 +203,8 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     ["wartość w logu", "leak", /log contains the secret value/],
     ["skrót w logu", "hash", /log contains the secret hash/],
     ["log bez nazwy zmiennej", "noname", /log lacks the variable name BETTER_AUTH_SECRET/],
+    // K-1c: kod 1 + nazwa zmiennej bez komunikatu strażnika (inny błąd startu) to nie dowód W1.
+    ["log bez komunikatu strażnika", "nomsg", /log lacks the secret-guard refusal message/],
   ])("W1: %s → kod 1, bez żadnego /api/health; wartość nie trafia na wyjście", (_l, mode, msg) => {
     const r = smoke({ FAKE_GUARD: mode });
     expect(r.status).toBe(1);
