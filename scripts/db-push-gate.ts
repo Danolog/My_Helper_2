@@ -18,6 +18,7 @@
  * Tylko odczyt katalogu. Komunikaty bez adresu bazy i danych logowania.
  */
 import postgres from "postgres";
+import { queryParamsRefusal } from "./db-url-guard";
 
 /** Stan bazy: liczba tabel w public i obecność schematu `drizzle` (dziennik migracji drizzle-kit). */
 export const PUSH_GATE_SQL =
@@ -56,13 +57,37 @@ export async function runPushGate(sql: Pick<postgres.Sql, "unsafe">): Promise<Pu
   return decidePush(rows[0]);
 }
 
-async function main(): Promise<number> {
-  const url = process.env.POSTGRES_URL?.trim();
+type GateSql = Pick<postgres.Sql, "unsafe" | "end">;
+
+const defaultConnect = (url: string): GateSql =>
+  postgres(url, { max: 1, prepare: false, connect_timeout: 5, onnotice: () => {} });
+
+/**
+ * Cała bramka. Przed połączeniem ta sama odmowa parametrów zapytania co w
+ * db:reset (`db-url-guard`): bramka łączy się przez postgres.js, a push przez
+ * sterownik pg, który bierze host z `?host=` — bez tej odmowy bramka mogłaby
+ * ocenić pustą bazę A, a push zdjąć RLS z bazy B (uwaga Leo do ff8d306).
+ */
+export async function pushGateMain(
+  env: Record<string, string | undefined>,
+  connect: (url: string) => GateSql = defaultConnect,
+): Promise<number> {
+  const url = env.POSTGRES_URL?.trim();
   if (!url) {
     console.error("[db-push-gate] POSTGRES_URL jest wymagany");
     return 1;
   }
-  const sql = postgres(url, { max: 1, prepare: false, connect_timeout: 5, onnotice: () => {} });
+  let refusal: string | null;
+  try {
+    refusal = queryParamsRefusal(url, "db:push");
+  } catch {
+    refusal = "db:push odmawia: POSTGRES_URL nie jest poprawnym adresem";
+  }
+  if (refusal) {
+    console.error(`[db-push-gate] ${refusal}`);
+    return 1;
+  }
+  const sql = connect(url);
   try {
     const result = await runPushGate(sql);
     if (!result.ok) {
@@ -82,5 +107,5 @@ async function main(): Promise<number> {
 }
 
 if (process.argv[1]?.endsWith("db-push-gate.ts")) {
-  void main().then((code) => process.exit(code));
+  void pushGateMain(process.env).then((code) => process.exit(code));
 }

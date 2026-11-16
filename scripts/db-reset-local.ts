@@ -29,6 +29,7 @@
  */
 import { spawnSync } from "node:child_process";
 import postgres from "postgres";
+import { DB_URL_ALLOWED_QUERY_PARAMS, queryParamsRefusal } from "./db-url-guard";
 import { SEED_SERVER_PROBE_SQL, checkSeedClientOptions, checkSeedTarget } from "./seed-host-guard";
 
 /** Jedyne bazy, które `db:reset` może skasować i założyć od nowa. */
@@ -41,8 +42,8 @@ export const RESET_STEPS: readonly (readonly string[])[] = [
   ["pnpm", "exec", "tsx", "scripts/db-schema-guard.ts"],
 ];
 
-/** Jedyny parametr zapytania dopuszczony w POSTGRES_URL (B2). */
-export const RESET_ALLOWED_QUERY_PARAMS = ["sslmode"] as const;
+/** Jedyny parametr zapytania dopuszczony w POSTGRES_URL (B2) — wspólny z bramką push. */
+export const RESET_ALLOWED_QUERY_PARAMS = DB_URL_ALLOWED_QUERY_PARAMS;
 
 export type ResetPlan =
   | { ok: true; database: string; targetUrl: string; adminUrl: string }
@@ -55,13 +56,6 @@ function withDatabase(url: string, database: string): string {
   u.search = "";
   u.hash = "";
   return u.toString();
-}
-
-/** Nazwy parametrów zapytania spoza `RESET_ALLOWED_QUERY_PARAMS` (bez wartości). */
-function disallowedQueryParams(url: string): string[] {
-  const allowed = new Set<string>(RESET_ALLOWED_QUERY_PARAMS);
-  const names = [...new URL(url).searchParams.keys()];
-  return [...new Set(names.filter((n) => !allowed.has(n.toLowerCase())))];
 }
 
 /** Czysta decyzja: którą bazę i pod jakim adresem resetujemy (bez łączenia się). */
@@ -81,14 +75,8 @@ export function planReset(
   const target = checkSeedTarget(connectionString, env, { subject: "db:reset" });
   if (!target.ok) return { ok: false, reason: `db:reset odmawia: ${target.reason}` };
   const url = connectionString!.trim();
-  const extra = disallowedQueryParams(url);
-  if (extra.length > 0) {
-    const shown = extra.map((n) => (/^[A-Za-z0-9_.-]{1,40}$/.test(n) ? n : "<nieprawidłowa nazwa>")).join(", ");
-    return {
-      ok: false,
-      reason: `db:reset odmawia: POSTGRES_URL ma parametry zapytania spoza listy (${shown}); dozwolony tylko ${RESET_ALLOWED_QUERY_PARAMS.join(", ")}`,
-    };
-  }
+  const refusal = queryParamsRefusal(url, "db:reset");
+  if (refusal) return { ok: false, reason: refusal };
   return { ok: true, database, targetUrl: withDatabase(url, database), adminUrl: withDatabase(url, "postgres") };
 }
 

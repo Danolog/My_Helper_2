@@ -7,7 +7,9 @@
  *   lista tabel z RLS wyprowadzona z pliku migracji 0005;
  * - `db:reset` (`scripts/db-reset-local.ts`): baza z twardej listy, host lokalny,
  *   bez parametrów zapytania poza sslmode (B2), kroki migrate → strażnik, BEZ push
- *   i bez `drizzle-kit drop`;
+ *   i bez `drizzle-kit drop`; odmowa po sondzie neon.* (L8);
+ * - bramka `db:push`: tylko pusta baza; ta sama odmowa parametrów zapytania co
+ *   w resecie (`scripts/db-url-guard.ts`), przed połączeniem;
  * - `package.json`: nie ma martwego `setup`, każdy `scripts/*.ts` istnieje;
  * - `init.sh`: migrate + strażnik, bez push, bez wyciszania błędów;
  * - CI (`quality-gate.yml`): każdy job z bazą robi `db:migrate` (a `db:push`,
@@ -24,10 +26,12 @@ import {
   PUSH_REFUSED_MIGRATED,
   PUSH_REFUSED_NOT_EMPTY,
   decidePush,
+  pushGateMain,
   runPushGate,
 } from "../../scripts/db-push-gate";
 import {
   RESET_ALLOWED_DATABASES,
+  RESET_ALLOWED_QUERY_PARAMS,
   RESET_DEFAULT_DATABASE,
   RESET_STEPS,
   planReset,
@@ -35,6 +39,7 @@ import {
   type ResetDeps,
   type ResetEnv,
 } from "../../scripts/db-reset-local";
+import { DB_URL_ALLOWED_QUERY_PARAMS } from "../../scripts/db-url-guard";
 import {
   REQUIRED_CONSTRAINTS,
   RLS_GUARD_SQL,
@@ -263,9 +268,9 @@ describe("db:reset — przebieg (L1, Leo): każdy krok na resetowanej bazie", ()
     vi.restoreAllMocks();
   });
 
-  /** Klient postgres.js na niby: localhost, serwer bez neon.*, 0 innych połączeń. */
-  function fakeAdmin(busy = 0) {
-    const unsafe = vi.fn(async (q: string) => (q.includes("neon") ? [{ database: "postgres", neon_settings: 0 }] : []));
+  /** Klient postgres.js na niby: localhost, serwer bez neon.* (domyślnie), `busy` innych połączeń. */
+  function fakeAdmin(busy = 0, probeRows: unknown[] = [{ database: "postgres", neon_settings: 0 }]) {
+    const unsafe = vi.fn(async (q: string) => (q.includes("neon") ? probeRows : []));
     const tag = vi.fn(async () => [{ n: busy }]);
     const sql = Object.assign(tag, { unsafe, end: vi.fn(async () => {}), options: { host: ["localhost"], path: undefined } });
     return { sql, unsafe, tag };
@@ -300,6 +305,22 @@ describe("db:reset — przebieg (L1, Leo): każdy krok na resetowanej bazie", ()
     expect(rc).toBe(1);
     expect(connect).not.toHaveBeenCalled();
     expect(spawn).not.toHaveBeenCalled();
+  });
+
+  // L8 (Leo): druga warstwa po kontroli hosta — serwer z ustawieniami neon.*
+  // albo sonda bez wyniku → odmowa przed DROP.
+  it.each([
+    ["serwer z ustawieniami neon.*", [{ database: "postgres", neon_settings: 1 }]],
+    ["sonda bez wiersza", []],
+  ])("%s: odmowa, bez DROP i bez kroków", async (_n, probeRows) => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { d, spawn, admin } = deps(fakeAdmin(0, probeRows));
+    expect(await resetMain(["pos_reset_test"], { POSTGRES_URL: LOCAL }, d)).toBe(1);
+    expect(admin.unsafe).toHaveBeenCalledWith(expect.stringContaining("neon"));
+    expect(admin.unsafe).not.toHaveBeenCalledWith(expect.stringMatching(/^(DROP|CREATE)/));
+    expect(admin.tag).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(err.mock.calls.flat().join(" ")).toContain("serwer ma ustawienia neon.*");
   });
 
   it("inne połączenia z bazą: odmowa, bez DROP i bez kroków", async () => {
@@ -353,6 +374,63 @@ describe("db:push — tylko pusta baza (#188 pkt 2, decyzja D2)", () => {
     const unsafe = vi.fn(async () => [{ public_tables: 0, drizzle_schema: false }]);
     expect((await runPushGate({ unsafe } as never)).ok).toBe(true);
     expect(unsafe).toHaveBeenCalledWith(PUSH_GATE_SQL);
+  });
+
+  describe("adres bramki = adres pusha (uwaga Leo do ff8d306: ?host= w sterowniku pg)", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    function fakeGateSql(row: unknown = { public_tables: 0, drizzle_schema: false }) {
+      return { unsafe: vi.fn(async () => [row]), end: vi.fn(async () => {}) };
+    }
+
+    it.each([
+      ["host w ?host=", `${LOCAL}?host=ep-x.eu-central-1.aws.neon.tech`, "host"],
+      ["HOST wielkimi literami", `${LOCAL}?HOST=db.example.com`, "HOST"],
+      ["hostaddr", `${LOCAL}?hostaddr=10.0.0.5`, "hostaddr"],
+      ["sslmode + host", `${LOCAL}?sslmode=disable&host=db.example.com`, "host"],
+    ])("%s → odmowa PRZED połączeniem, nazwa parametru bez wartości", async (_n, url, name) => {
+      const err = vi.spyOn(console, "error").mockImplementation(() => {});
+      const connect = vi.fn((_u: string) => fakeGateSql() as never);
+      expect(await pushGateMain({ POSTGRES_URL: url }, connect)).toBe(1);
+      expect(connect).not.toHaveBeenCalled();
+      const out = err.mock.calls.flat().join(" ");
+      expect(out).toContain(`db:push odmawia: POSTGRES_URL ma parametry zapytania spoza listy (${name})`);
+      expect(out).not.toMatch(/neon\.tech|example\.com|10\.0\.0\.5|pw-x9/);
+    });
+
+    it("sam sslmode na pustej bazie → bramka łączy się z tym adresem i przepuszcza", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const sql = fakeGateSql();
+      const connect = vi.fn((_u: string) => sql as never);
+      expect(await pushGateMain({ POSTGRES_URL: `${LOCAL}?sslmode=disable` }, connect)).toBe(0);
+      expect(connect).toHaveBeenCalledWith(`${LOCAL}?sslmode=disable`);
+      expect(sql.end).toHaveBeenCalled();
+    });
+
+    it("zmigrowana baza → rc 1 (bramka przez pushGateMain)", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const connect = vi.fn((_u: string) => fakeGateSql({ public_tables: 45, drizzle_schema: true }) as never);
+      expect(await pushGateMain({ POSTGRES_URL: LOCAL }, connect)).toBe(1);
+    });
+
+    it("niepoprawny adres → odmowa bez połączenia", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const connect = vi.fn((_u: string) => fakeGateSql() as never);
+      expect(await pushGateMain({ POSTGRES_URL: "nie-adres" }, connect)).toBe(1);
+      expect(connect).not.toHaveBeenCalled();
+    });
+
+    it("reset i bramka używają tej samej funkcji z db-url-guard (nie kopii)", () => {
+      for (const f of ["scripts/db-reset-local.ts", "scripts/db-push-gate.ts"]) {
+        const src = read(f);
+        expect(src, f).toMatch(/import \{[^}]*queryParamsRefusal[^}]*\} from "\.\/db-url-guard"/);
+        expect(src, f).not.toMatch(/searchParams/);
+      }
+      expect(RESET_ALLOWED_QUERY_PARAMS).toBe(DB_URL_ALLOWED_QUERY_PARAMS);
+      expect(DB_URL_ALLOWED_QUERY_PARAMS).toEqual(["sslmode"]);
+    });
   });
 
   it("db:push i db:dev: najpierw bramka, potem push; strażnik schematu NIE stoi po pushu", () => {
