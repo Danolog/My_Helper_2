@@ -100,7 +100,10 @@ export async function notifyWaitingList(
           client: clients,
         })
         .from(waitingList)
-        .innerJoin(clients, eq(waitingList.clientId, clients.id))
+        .innerJoin(
+          clients,
+          and(eq(waitingList.clientId, clients.id), eq(clients.salonId, salonId))
+        )
         .where(
           and(
             eq(waitingList.salonId, salonId),
