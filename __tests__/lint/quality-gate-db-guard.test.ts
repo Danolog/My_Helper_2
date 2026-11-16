@@ -349,7 +349,7 @@ function dbReasons(body: string): string[] {
 /** Job z bazą poza parą {e2e-smoke, e2e-full} z quality-gate.yml (w każdym pliku workflow). */
 function dbJobViolations(file: string, wf: string): string[] {
   // Klucz bazy poza sekcją jobs: (env workflow, przed albo po jobach) trafia do KAŻDEGO joba —
-  // zakazane w każdym pliku (G1/G5, C Ethana; #193 P0c-2: każdy klucz z DB_ENV_KEYS).
+  // zakazane w każdym pliku (G1/G5, C CTO; #193 P0c-2: każdy klucz z DB_ENV_KEYS).
   const top = dbKeyLines(code(outsideJobs(wf)), "\\s*").map((k) => `${file}: ${k} poza jobs: (env workflow) — zakazane`);
   return top.concat([...jobs(wf)].flatMap(([name, body]) => {
     if (file === QG && DB_JOBS.includes(name)) return [];
