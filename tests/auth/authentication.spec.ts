@@ -1,3 +1,4 @@
+import { failedLoginEmail } from '../failed-login-email';
 import { test, expect, type Page } from '../fixtures';
 
 // ---------------------------------------------------------------------------
@@ -194,7 +195,7 @@ test.describe('Flow 1: Authentication', () => {
   test.describe('Error path', () => {
     test('should show error for invalid credentials', { tag: '@smoke' }, async ({ page }) => {
       await page.goto('/login');
-      await fillLoginForm(page, 'wrong@example.com', 'WrongPass123!');
+      await fillLoginForm(page, failedLoginEmail(), 'WrongPass123!');
       // Click submit button (hydration already confirmed by fillLoginForm)
       await page.locator('button[type="submit"]').click();
       // Should display an error message — sanitized to Polish:
@@ -211,7 +212,11 @@ test.describe('Flow 1: Authentication', () => {
     // pilnuje, ze sam limit w aplikacji nadal dziala: z JEDNEGO adresu czwarta
     // proba logowania w ciagu 10 s dostaje 429 (Better Auth: 3 proby / 10 s).
     test('should rate-limit repeated sign-in attempts from one client', { tag: '@full' }, async ({ request, baseURL }) => {
-      test.skip(!process.env.CI, 'Better Auth wlacza limit tylko w buildzie produkcyjnym (CI: pnpm start)');
+      // Tryb "database" magazynu limitu wlacza limit niezaleznie od NODE_ENV — wtedy test biegnie tez lokalnie.
+      test.skip(
+        !process.env.CI && process.env.AUTH_RATE_LIMIT_STORE !== 'database',
+        'Better Auth wlacza limit tylko w buildzie produkcyjnym (CI: pnpm start) albo w trybie AUTH_RATE_LIMIT_STORE=database'
+      );
       // Nie bijemy limitu logowania na zdalnym wdrozeniu (produkcja, preview):
       // strażnik ma sens tylko na lokalnym serwerze z CI.
       const targetHost = new URL(baseURL ?? 'http://localhost:3000').hostname;
@@ -223,7 +228,7 @@ test.describe('Flow 1: Authentication', () => {
       const statuses: number[] = [];
       for (let attempt = 0; attempt < 4; attempt += 1) {
         const response = await request.post('/api/auth/sign-in/email', {
-          data: { email: 'wrong@example.com', password: 'WrongPass123!' },
+          data: { email: failedLoginEmail(), password: 'WrongPass123!' },
           // Jak przegladarka: zadanie z ciasteczkami bez naglowka Origin Better Auth odrzuca (403).
           headers: { Origin: baseURL ?? 'http://localhost:3000' },
         });
