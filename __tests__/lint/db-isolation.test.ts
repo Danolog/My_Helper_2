@@ -19,6 +19,7 @@ import config, { D1_SELECTORS } from "../../eslint.config.mjs";
 import {
   DB_CLIENT_ALLOWED_FILES,
   DB_CLIENT_IMPORT_SOURCE_REGEX,
+  TEST_FILE_IMPORT_SOURCE_REGEX,
   DB_IMPORT_SOURCE_REGEX,
   DB_ISOLATION_FILES,
   DB_ISOLATION_PARTITIONS,
@@ -314,6 +315,41 @@ describe("wymaganie (2) Ethana: plik z wyjątkiem dla db nie wystawia wartości 
   }, 120_000);
 });
 
+describe("uwaga Ryana: kod produkcyjny nie importuje plików testowych z src/", () => {
+  const TEST_IMPORTS: [string, string][] = [
+    ["import z .test", 'import { h } from "./__p0a-helper__.test";\nexport const x = h;'],
+    ["import z .spec.tsx", 'import { h } from "@/app/__p0a-helper__.spec.tsx";\nexport const x = h;'],
+    ["re-eksport z .test", 'export * from "../lib/__p0a-helper__.test";'],
+    ["import()", 'export async function f() { return import("./__p0a-helper__.test"); }'],
+    ["require()", 'export const x = require("./__p0a-helper__.spec");'],
+    ["import x = require()", 'import t = require("./__p0a-helper__.test");\nexport const x = t;'],
+  ];
+
+  it.each(TEST_IMPORTS)("%s — nowa trasa, src/lib, system/**, plik z listy, db.ts → błąd", async (_n, code) => {
+    for (const file of [NEW_ROUTE, NEW_LIB, SYSTEM_FILE, LISTED_ROUTE, "src/lib/db.ts"]) {
+      expect(await isolationErrors(code, file), file).toHaveLength(1);
+    }
+  }, 60_000);
+
+  it.each([
+    ["test importuje test", 'import { h } from "./__p0a-helper__.test";\nexport const x = h;', "src/lib/__p0a-probe__.test.ts"],
+    ["test-utils (nie plik testowy)", 'import { h } from "./test-utils";\nexport const x = h;', NEW_LIB],
+    ["latest/contest (nie plik testowy)", 'import { a } from "./latest";\nimport { b } from "./contest";\nexport const x = [a, b];', NEW_LIB],
+    ["testing-library", 'import { render } from "@testing-library/react";\nexport const x = render;', NEW_LIB],
+  ])("%s → bez błędu", async (_n, code, file) => {
+    expect(await isolationErrors(code, file)).toHaveLength(0);
+  }, 30_000);
+
+  it("żaden plik produkcyjny w src/ nie importuje pliku testowego", () => {
+    const re = new RegExp(TEST_FILE_IMPORT_SOURCE_REGEX);
+    const hits = walk(path.join(ROOT, "src"))
+      .map((abs) => path.relative(ROOT, abs).split(path.sep).join("/"))
+      .filter((rel) => !/\.(test|spec)\.tsx?$/.test(rel))
+      .filter((rel) => importSources(fs.readFileSync(path.join(ROOT, rel), "utf8")).some((s) => re.test(s)));
+    expect(hits).toEqual([]);
+  });
+});
+
 describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
   type RuleEntry = Linter.RuleEntry | undefined;
   const level = (e: RuleEntry) => (Array.isArray(e) ? e[0] : e);
@@ -332,8 +368,9 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
       const syn = cfg.rules?.["no-restricted-syntax"];
       expect(levelNum(level(imp))).toBe(2);
       expect(levelNum(level(syn))).toBe(2);
-      expect(regexes(imp)).toEqual([DB_IMPORT_SOURCE_REGEX, DB_SYSTEM_IMPORT_SOURCE_REGEX, DB_CLIENT_IMPORT_SOURCE_REGEX]);
-      for (const re of [DB_IMPORT_SOURCE_REGEX, DB_SYSTEM_IMPORT_SOURCE_REGEX, DB_CLIENT_IMPORT_SOURCE_REGEX]) {
+      const all = [DB_IMPORT_SOURCE_REGEX, DB_SYSTEM_IMPORT_SOURCE_REGEX, DB_CLIENT_IMPORT_SOURCE_REGEX, TEST_FILE_IMPORT_SOURCE_REGEX];
+      expect(regexes(imp)).toEqual(all);
+      for (const re of all) {
         expect(selectors(syn)).toContain(`ImportExpression[source.value=/${sel(re)}/]`);
         expect(selectors(syn)).toContain(`CallExpression[callee.name='require'][arguments.0.value=/${sel(re)}/]`);
       }
@@ -346,8 +383,16 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
   it("plik z listy: db wyłączone tylko dla niego, db-system nadal error; nowy plik obok — error", async () => {
     const listed = (await eslint.calculateConfigForFile(path.join(ROOT, LISTED_ROUTE_WITH_ID))) as Linter.Config;
     expect(levelNum(level(listed.rules?.["no-restricted-imports"]))).toBe(2);
-    expect(regexes(listed.rules?.["no-restricted-imports"])).toEqual([DB_SYSTEM_IMPORT_SOURCE_REGEX, DB_CLIENT_IMPORT_SOURCE_REGEX]);
-    expect(selectors(listed.rules?.["no-restricted-syntax"])).not.toContain(sel(DB_IMPORT_SOURCE_REGEX));
+    expect(regexes(listed.rules?.["no-restricted-imports"])).toEqual([
+      DB_SYSTEM_IMPORT_SOURCE_REGEX,
+      DB_CLIENT_IMPORT_SOURCE_REGEX,
+      TEST_FILE_IMPORT_SOURCE_REGEX,
+    ]);
+    // Źródło db zostaje w selektorach eksportu (wymaganie (2)), ale nie w selektorach importu.
+    expect(selectors(listed.rules?.["no-restricted-syntax"])).not.toContain(`ImportExpression[source.value=/${sel(DB_IMPORT_SOURCE_REGEX)}/]`);
+    expect(selectors(listed.rules?.["no-restricted-syntax"])).not.toContain(
+      `CallExpression[callee.name='require'][arguments.0.value=/${sel(DB_IMPORT_SOURCE_REGEX)}/]`
+    );
     expect(selectors(listed.rules?.["no-restricted-syntax"])).toContain("MemberExpression[property.name=/^(params|detail)$/]");
 
     const sibling = (await eslint.calculateConfigForFile(
@@ -357,6 +402,7 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
       DB_IMPORT_SOURCE_REGEX,
       DB_SYSTEM_IMPORT_SOURCE_REGEX,
       DB_CLIENT_IMPORT_SOURCE_REGEX,
+      TEST_FILE_IMPORT_SOURCE_REGEX,
     ]);
   }, 30_000);
 
@@ -366,7 +412,12 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
     const listed = new Set<string>([...DB_ISOLATION_TRANSITIONAL, ...DB_ISOLATION_PERMANENT]);
     const D1 = "MemberExpression[property.name=/^(params|detail)$/]";
     const EXPORT_DB = "ExportDefaultDeclaration[declaration.name='db']";
-    const [DB, SYS, CLIENT] = [DB_IMPORT_SOURCE_REGEX, DB_SYSTEM_IMPORT_SOURCE_REGEX, DB_CLIENT_IMPORT_SOURCE_REGEX];
+    const [DB, SYS, CLIENT, T] = [
+      DB_IMPORT_SOURCE_REGEX,
+      DB_SYSTEM_IMPORT_SOURCE_REGEX,
+      DB_CLIENT_IMPORT_SOURCE_REGEX,
+      TEST_FILE_IMPORT_SOURCE_REGEX,
+    ];
     const bad: string[] = [];
     const files = walk(path.join(ROOT, "src"));
     expect(files.length).toBeGreaterThan(100);
@@ -380,18 +431,18 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
       const want = isTest
         ? []
         : rel === "src/lib/db.ts"
-          ? [DB, SYS]
+          ? [DB, SYS, T]
           : rel === "src/lib/server/system/db-system.ts"
-            ? [DB]
+            ? [DB, T]
             : listed.has(rel)
-              ? [SYS, CLIENT]
+              ? [SYS, CLIENT, T]
               : inSystem
-                ? [DB, CLIENT]
-                : [DB, SYS, CLIENT];
+                ? [DB, CLIENT, T]
+                : [DB, SYS, CLIENT, T];
       const got = levelNum(level(imp)) === 2 ? regexes(imp) : [];
       if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(`${rel}: no-restricted-imports ${JSON.stringify(got)}`);
       const s = levelNum(level(syn)) === 2 ? selectors(syn) : "";
-      for (const re of [DB, SYS, CLIENT]) {
+      for (const re of [DB, SYS, CLIENT, T]) {
         const forms = [
           `ImportExpression[source.value=/${sel(re)}/]`,
           `CallExpression[callee.name='require'][arguments.0.value=/${sel(re)}/]`,
