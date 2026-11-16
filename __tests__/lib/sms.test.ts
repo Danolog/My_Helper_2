@@ -608,6 +608,7 @@ describe("sendPaymentConfirmationSms", () => {
       serviceName: "Strzyzenie",
       appointmentDate: new Date("2024-01-15T14:00:00"),
       employeeName: "Anna",
+      salonName: "Salon Uroda",
       salonId: "salon-1",
       clientId: "client-1",
     });
@@ -618,5 +619,46 @@ describe("sendPaymentConfirmationSms", () => {
     expect(insertedValues.message).toContain("PLN");
     expect(insertedValues.message).toContain("Jan Kowalski");
     expect(insertedValues.message).toContain("Potwierdzenie platnosci");
+  });
+
+  const paymentParams = {
+    clientPhone: "+48123456789",
+    clientName: "Jan Kowalski",
+    amount: 50.0,
+    currency: "PLN",
+    serviceName: "Strzyzenie",
+    appointmentDate: new Date("2024-01-15T14:00:00"),
+    employeeName: "Anna Nowak",
+    salonId: "salon-1",
+    clientId: "client-1",
+  };
+
+  it("treść zawiera nazwę salonu", async () => {
+    const result = await sendPaymentConfirmationSms({ ...paymentParams, salonName: "Salon Uroda" });
+
+    expect(result.success).toBe(true);
+    const message = mockDbValues.mock.calls[0]![0].message as string;
+    expect(message).toContain('za usluge "Strzyzenie" u Anna Nowak w Salon Uroda dnia ');
+  });
+
+  it.each([
+    ["null", null],
+    ["pusty napis", ""],
+    ["same spacje", "   "],
+  ])("brak nazwy salonu (%s) → treść bez fragmentu o salonie, bez „undefined”/„null”", async (_label, salonName) => {
+    const result = await sendPaymentConfirmationSms({ ...paymentParams, salonName });
+
+    expect(result.success).toBe(true);
+    const message = mockDbValues.mock.calls[0]![0].message as string;
+    expect(message).toContain('za usluge "Strzyzenie" u Anna Nowak dnia ');
+    expect(message).not.toMatch(/undefined|null/);
+    expect(message).not.toMatch(/ w {1,}dnia/);
+  });
+
+  it("nazwa salonu jest przycinana ze spacji na brzegach", async () => {
+    await sendPaymentConfirmationSms({ ...paymentParams, salonName: "  Salon Uroda  " });
+
+    const message = mockDbValues.mock.calls[0]![0].message as string;
+    expect(message).toContain("u Anna Nowak w Salon Uroda dnia ");
   });
 });

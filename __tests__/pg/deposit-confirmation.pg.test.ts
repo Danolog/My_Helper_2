@@ -233,7 +233,7 @@ suite("confirmDepositPayment — prawdziwy Postgres", () => {
     expect(appointment.status).toBe("confirmed");
     expect(appointment.depositPaid).toBe(true);
     expect(smsMock).toHaveBeenCalledTimes(1);
-    expect(smsMock.mock.calls[0]![0]).toMatchObject({ clientPhone: "+48500600700", amount: 50, salonId });
+    expect(smsMock.mock.calls[0]![0]).toMatchObject({ clientPhone: "+48500600700", amount: 50, salonId, salonName: `IT T3 dep ${RUN}` });
   });
 
   it("bez paymentIntentId istniejący identyfikator zostaje", async () => {
