@@ -274,6 +274,13 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       ]);
     });
 
+    it("wyścig: dwie równoległe rezerwacje tego samego terminu → dokładnie jedna 201, druga 409", async () => {
+      const results = await Promise.all([post(at(6, "10:00"), at(6, "11:00")), post(at(6, "10:00"), at(6, "11:00"))]);
+      expect(statuses(results)).toEqual([201, 409]);
+      expect(results.find((r) => r.status === 409)!.body.error).toBe(MSG);
+      expect(await activeOnDay(6)).toEqual([`${at(6, "10:00")}–${at(6, "11:00")}`]);
+    });
+
     it("wyścig: 6 równoległych rezerwacji tego samego terminu → jedna 201, pięć 409, żadnej 500", async () => {
       const results = await Promise.all(Array.from({ length: 6 }, () => post(at(5, "10:00"), at(5, "11:00"))));
       expect(statuses(results)).toEqual([201, 409, 409, 409, 409, 409]);
