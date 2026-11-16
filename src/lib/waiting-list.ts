@@ -263,7 +263,14 @@ export async function notifyWaitingList(
         );
         result.notified++;
       } catch (updateErr) {
-        logger.error("Failed to update notifiedAt for waiting list entry", { entryId: row.entry.id, error: updateErr });
+        // Wiadomość przyjęta przez dostawcę, ale zapis oznaczenia się nie
+        // udał: błąd w wyniku, bez ponawiania zapisu. Wpis zostaje oczekujący,
+        // więc przy następnym zwolnionym terminie klient może dostać kolejną
+        // wiadomość (z nowym terminem). Log bez danych klienta.
+        logger.error("Failed to update notifiedAt for waiting list entry", {
+          entryId: row.entry.id,
+          errorName: updateErr instanceof Error ? updateErr.name : typeof updateErr,
+        });
         result.errors++;
       }
     }
