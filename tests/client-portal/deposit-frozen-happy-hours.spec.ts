@@ -96,14 +96,19 @@ async function cancelAsOwner(browser: Browser, baseURL: string, appointmentIds: 
     const token = (await context.cookies()).find((c) => c.name === 'csrf-token')?.value ?? '';
     for (const id of appointmentIds) {
       // Zapisane imie goscia ma miec znacznik [E2E] — inaczej globalTeardown cicho przestalby sprzatac.
-      // Odczyt przed anulowaniem, asercja po nim: czerwien nie pomija anulowania.
+      // Wszystkie asercje miekkie: test jest czerwony, ale petla anuluje kazde id do konca.
       const got = await page.request.get(`/api/appointments/${id}`);
       const gotBody = await got.text();
       const res = await page.request.delete(`/api/appointments/${id}`, { headers: { 'x-csrf-token': decodeURIComponent(token) } });
-      expect(res.status(), `sprzatanie: anulowanie wizyty ${id}: ${await res.text()}`).toBe(200);
-      expect(got.status(), `odczyt wizyty ${id}: ${gotBody}`).toBe(200);
-      const saved = JSON.parse(gotBody) as { data: { guestName: string | null } };
-      expect(saved.data.guestName, 'zapisany guest_name bez znacznika [E2E] — teardown nie usunie wizyty').toBe(GUEST_NAME);
+      expect.soft(res.status(), `sprzatanie: anulowanie wizyty ${id}: ${await res.text()}`).toBe(200);
+      expect.soft(got.status(), `odczyt wizyty ${id}: ${gotBody}`).toBe(200);
+      let savedGuestName: string | null | undefined;
+      try {
+        savedGuestName = (JSON.parse(gotBody) as { data?: { guestName?: string | null } }).data?.guestName;
+      } catch {
+        savedGuestName = undefined; // odpowiedz nie-JSON: status wyzej juz czerwony
+      }
+      expect.soft(savedGuestName, `zapisany guest_name wizyty ${id} bez znacznika [E2E] — teardown nie usunie wizyty`).toBe(GUEST_NAME);
     }
   } finally {
     await context.close();
