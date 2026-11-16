@@ -220,7 +220,7 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
  * Strefa czasowa daty i godziny w treści SMS (#232): zawsze czas warszawski,
  * niezależnie od strefy procesu.
  */
-const SMS_TIME_ZONE = "Europe/Warsaw";
+export const SMS_TIME_ZONE = "Europe/Warsaw";
 
 /** Podstawowa tabela GSM 03.38 bez znaków sterujących (LF, CR, ESC). */
 const GSM7_BASIC = new Set(

@@ -6,7 +6,7 @@ import { requireCronSecret } from "@/lib/auth-middleware";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { appointments, clients, salons, services, employees } from "@/lib/schema";
-import { sendSms } from "@/lib/sms";
+import { SMS_TIME_ZONE, sendSms } from "@/lib/sms";
 /**
  * POST /api/reminders/appointment
  *
@@ -108,14 +108,16 @@ export async function POST(request: Request) {
         continue;
       }
 
-      // Format appointment date in Polish
+      // Format appointment date in Polish, always Warsaw time (#234)
       const formattedDate = appt.startTime.toLocaleDateString("pl-PL", {
+        timeZone: SMS_TIME_ZONE,
         weekday: "long",
         day: "numeric",
         month: "long",
         year: "numeric",
       });
       const formattedTime = appt.startTime.toLocaleTimeString("pl-PL", {
+        timeZone: SMS_TIME_ZONE,
         hour: "2-digit",
         minute: "2-digit",
       });
