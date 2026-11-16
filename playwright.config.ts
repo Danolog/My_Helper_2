@@ -10,6 +10,8 @@ export default defineConfig({
   retries: isCI ? 1 : 2,
   workers: isCI ? 1 : 2,
   globalSetup: './tests/global-setup.ts',
+  // #175: twarde usunięcie wizyt E2E ze znacznikiem [E2E] (tylko lokalna pos_dev / baza CI).
+  globalTeardown: './tests/global-teardown.ts',
   reporter: [['html'], ['json', { outputFile: 'test-results.json' }]],
   use: {
     baseURL,
