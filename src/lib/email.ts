@@ -1,4 +1,5 @@
 import { logger } from "@/lib/logger";
+import { toErrorIdentity } from "@/lib/safe-error";
 import { notifications } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
@@ -50,6 +51,25 @@ interface ResendResponse {
 }
 
 /**
+ * Odpowiedź dostawcy spoza 2xx. Komunikat to sam kod ze statusem HTTP —
+ * tekst z odpowiedzi dostawcy nie trafia ani do komunikatu, ani do logu.
+ */
+export class EmailProviderError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`provider_http_${status}`);
+    this.name = "EmailProviderError";
+    this.status = status;
+  }
+}
+
+/** Kod nieudanej wysyłki do logu i do `result.error`. */
+function sendFailureReason(error: unknown): string {
+  return error instanceof EmailProviderError ? error.message : "send_failed";
+}
+
+/**
  * Send a single email through the Resend REST API.
  * Throws on non-2xx HTTP statuses and network failures.
  */
@@ -69,18 +89,15 @@ async function sendViaResend(apiKey: string, msg: EmailMessage): Promise<void> {
     }),
   });
 
+  if (!response.ok) {
+    throw new EmailProviderError(response.status);
+  }
+
   let data: ResendResponse | null = null;
   try {
     data = (await response.json()) as ResendResponse;
   } catch {
-    // Non-JSON response body - fall through to the HTTP status check
-  }
-
-  if (!response.ok) {
-    const detail = data?.message
-      ? `${response.status} - ${data.message}`
-      : `HTTP ${response.status}`;
-    throw new Error(`Resend error: ${detail}`);
+    // Non-JSON response body - the message id is optional
   }
 
   logger.info("Email sent via Resend", { to: maskEmailAddress(msg.to), messageId: data?.id });
@@ -146,8 +163,8 @@ export async function sendEmail(msg: EmailMessage): Promise<EmailResult> {
     await saveFailedNotification(msg);
     return {
       success: false,
-      // Wynik trafia do logów wywołujących (newsletter, faktura) — bez pełnego adresu.
-      error: `Invalid email address: ${maskEmailAddress(msg.to)}`,
+      // Wynik trafia do logów wywołujących (newsletter, faktura) — sam kod.
+      error: "invalid_address",
     };
   }
 
@@ -172,13 +189,19 @@ export async function sendEmail(msg: EmailMessage): Promise<EmailResult> {
       notificationId,
     };
   } catch (error) {
-    logger.error("Failed to send email", { error, to: maskEmailAddress(msg.to) });
+    // Log i wynik bez treści błędu: kod, nazwa klasy i kod błędu.
+    const reason = sendFailureReason(error);
+    logger.error("Failed to send email", {
+      reason,
+      ...toErrorIdentity(error),
+      to: maskEmailAddress(msg.to),
+    });
 
     await saveFailedNotification(msg);
 
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: reason,
     };
   }
 }
