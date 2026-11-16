@@ -25,7 +25,7 @@
  * Fail-closed: błąd bazy przy liczeniu = odmowa. Logi zawierają wyłącznie
  * ścieżkę albo nazwę operacji i nazwę błędu — nigdy adres, e-mail ani klucz.
  */
-import { sql } from "drizzle-orm";
+import { DrizzleQueryError, sql } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 import { accountThrottleKey, ipThrottleKey } from "@/lib/auth-throttle-keys";
 import { dbSystem } from "./db-system";
@@ -51,8 +51,16 @@ function getSecret(): string {
   return cachedSecret;
 }
 
+/**
+ * Sama nazwa klasy błędu do logu — nigdy message, params ani cause (message
+ * DrizzleQueryError zawiera parametry zapytania). DrizzleQueryError nie ustawia
+ * `name` (dziedziczy "Error"), więc rozpoznawany jawnie — nazwa konstruktora
+ * nie przetrwałaby minifikacji; inne klasy bez własnego `name` → nazwa konstruktora.
+ */
 function errorName(err: unknown): string {
-  return err instanceof Error ? err.name : "UnknownError";
+  if (!(err instanceof Error)) return "UnknownError";
+  if (err instanceof DrizzleQueryError) return "DrizzleQueryError";
+  return err.name === "Error" && err.constructor?.name ? err.constructor.name : err.name;
 }
 
 /** Ścieżka z klucza biblioteki `<ip>|<ścieżka>` — po OSTATNIM „|” (IPv6 ma „:”). */
