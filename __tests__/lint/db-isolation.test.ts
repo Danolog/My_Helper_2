@@ -44,17 +44,22 @@ const SYSTEM_FILE = "src/lib/server/system/__p0a-probe__.ts";
  * P6 (lista pusta): LISTED_ROUTE → DB_ISOLATION_PERMANENT[0], a przypadki
  * LISTED_ROUTE_WITH_ID zastępuje test literalGlob na ścieżce z [id].
  */
-function listedFile(label: string, pick: (f: string) => boolean): string {
-  const file = (DB_ISOLATION_TRANSITIONAL as readonly string[]).find(pick);
-  if (file === undefined) throw new Error(`${label}: brak pozycji na DB_ISOLATION_TRANSITIONAL`);
-  if (!(DB_ISOLATION_TRANSITIONAL as readonly string[]).includes(file)) {
-    throw new Error(`${label}: ${file} nie należy do DB_ISOLATION_TRANSITIONAL`);
+function listedFile(label: string, pick: (f: string) => boolean, kind: string): string {
+  const list = DB_ISOLATION_TRANSITIONAL as readonly string[];
+  if (list.length === 0) {
+    throw new Error(
+      `${label}: lista przejściowa pusta (P6: LISTED_ROUTE → DB_ISOLATION_PERMANENT[0], ` +
+        "przypadki z [id] → test literalGlob, lista kontrolna P6 pkt 11)",
+    );
   }
+  const file = list.find(pick);
+  if (file === undefined) throw new Error(`${label}: na DB_ISOLATION_TRANSITIONAL brak pozycji ${kind}`);
+  if (!list.includes(file)) throw new Error(`${label}: ${file} nie należy do DB_ISOLATION_TRANSITIONAL`);
   if (!fs.existsSync(path.join(ROOT, file))) throw new Error(`${label}: ${file} nie istnieje na dysku`);
   return file;
 }
-const LISTED_ROUTE = listedFile("LISTED_ROUTE", (f) => !f.includes("["));
-const LISTED_ROUTE_WITH_ID = listedFile("LISTED_ROUTE_WITH_ID", (f) => f.includes("["));
+const LISTED_ROUTE = listedFile("LISTED_ROUTE", (f) => !f.includes("["), "bez „[”");
+const LISTED_ROUTE_WITH_ID = listedFile("LISTED_ROUTE_WITH_ID", (f) => f.includes("["), "z „[”");
 
 /**
  * Zamrożony stan długu z wyniku reguły bez listy (Z3, 73 pliki na b3a5faf),
