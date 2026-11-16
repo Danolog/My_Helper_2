@@ -266,6 +266,16 @@ test.describe('Flow 4: Appointment System', () => {
       // Wszyscy: nadal widoczna
       await selectOption(page, 'employee-filter', /^Wszyscy pracownicy$/);
       await expect(event).toBeVisible();
+
+      // Widok tygodnia: kolumny to dni, nie pracownicy, wiec wizyte chowa tylko
+      // filtr wizyt (w widoku dnia znika razem z kolumna pracownika — sam filtr
+      // wizyt byl tam nieobserwowalny, mutant przezywal; pomiar run-105c).
+      await viewButtons(page).week.click();
+      await expect(event).toBeVisible();
+      await selectOption(page, 'employee-filter', /^Ewa Zadatkowa$/);
+      await expect(event).toHaveCount(0);
+      await selectOption(page, 'employee-filter', /^Wszyscy pracownicy$/);
+      await expect(event).toBeVisible();
     });
 
     test('should switch between day and week view', { tag: '@full' }, async ({ page }) => {
