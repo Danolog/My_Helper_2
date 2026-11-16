@@ -12,6 +12,11 @@
  *   musi stać zaraz po `db:migrate` ORAZ jako ostatni krok z `run:` w jobie
  *   (po Playwrightcie, `if: ${{ !cancelled() }}`), tak żeby RLS zdjęte w trakcie
  *   joba w dowolnej postaci dawało czerwony job.
+ *
+ * Zasada (#194 runda 5, Oliver): CZEGO TEST NIE UMIE SPARSOWAĆ, TO PORAŻKA. Nieznany
+ * kształt nagłówka joba, plik z `jobs:` bez rozpoznanych jobów, kroki w innym stylu
+ * wcięć niż w repo, nieznany kształt polecenia pnpm czy wskaźnika bloku — wyjątek,
+ * nigdy ciche przepuszczenie.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -92,10 +97,28 @@ const code = (s: string) =>
     .join("\n");
 
 /** Joby najwyższego poziomu: nazwa → treść (wcięcie 2 spacje pod `jobs:`). Domyślnie quality-gate.yml. */
-function jobs(wf: string = WF): Map<string, string> {
+/**
+ * Sekcja `jobs:` w tekście workflow: od linii po `jobs:` do pierwszej niepustej linii
+ * (nie komentarza) na wcięciu 0 — klucz najwyższego poziomu PO jobach (np. `env:`) nie
+ * jest treścią ostatniego joba (#194 runda 5, Ethan C). [start, end) w znakach.
+ */
+function jobsSection(wf: string): [number, number] {
   const at = wf.indexOf("\njobs:\n");
   if (at < 0) throw new Error("brak klucza jobs: w workflow");
-  const body = wf.slice(at + 7);
+  const start = at + 7;
+  const m = /^[^\s#]/m.exec(wf.slice(start));
+  return [start, m ? start + m.index : wf.length];
+}
+
+/** Tekst workflow poza sekcją `jobs:` (przed i po). */
+function outsideJobs(wf: string): string {
+  const [s, e] = jobsSection(wf);
+  return wf.slice(0, s) + "\n" + wf.slice(e);
+}
+
+function jobs(wf: string = WF): Map<string, string> {
+  const [s, e] = jobsSection(wf);
+  const body = wf.slice(s, e);
   const out = new Map<string, string>();
   const HEAD = /^ {2}["']?([A-Za-z0-9_-]+)["']?:[ \t]*(?:&\S+[ \t]*)?(?:#.*)?$/;
   // Każda linia na wcięciu 2 to nagłówek joba — inny kształt = porażka, nie sklejenie z poprzednim jobem.
@@ -103,6 +126,8 @@ function jobs(wf: string = WF): Map<string, string> {
     if (/^ {2}\S/.test(l) && !l.trim().startsWith("#") && !HEAD.test(l)) throw new Error(`nieznany kształt nagłówka joba: ${l.trim()}`);
   }
   const heads = [...body.matchAll(new RegExp(HEAD.source, "gm"))];
+  // Zero rozpoznanych jobów (np. plik w całości na wcięciu 4) = porażka, nie „wszystko przechodzi na pusto”.
+  if (heads.length === 0) throw new Error("zero jobów pod jobs: — nieobsługiwany styl wcięć, przepisz workflow w stylu repo (job na wcięciu 2)");
   heads.forEach((m, i) => {
     const end = i + 1 < heads.length ? heads[i + 1]!.index : body.length;
     out.set(m[1]!, body.slice(m.index, end));
@@ -110,12 +135,27 @@ function jobs(wf: string = WF): Map<string, string> {
   return out;
 }
 
-/** Kroki joba (każdy zaczyna się od `      - ` pod `    steps:`), bez komentarzy. */
+/**
+ * Kroki joba (każdy zaczyna się od `      - ` pod `    steps:`), bez komentarzy.
+ * Fail-closed (#194, G2–G4 Ethana): `steps:` z wartością w tej samej linii (alias, flow),
+ * pierwsza niepusta linia pod `steps:` inna niż `      - ` (np. kroki na wcięciu 4)
+ * albo zero kroków = wyjątek. Job bez `steps:` dozwolony tylko z `uses:` joba.
+ */
 function steps(job: string): string[] {
-  const at = job.indexOf("\n    steps:\n");
-  if (at < 0) return [];
-  const s = code(job.slice(at));
-  return s.split(/\n(?= {6}- )/).slice(1);
+  const c = code(job);
+  const key = c.match(/^ {4}["']?steps["']?[ \t]*:(.*)$/m);
+  if (!key) {
+    if (/^ {4}["']?uses["']?\s*:/m.test(c)) return [];
+    throw new Error(`job bez steps: i bez uses: joba: ${job.split("\n")[0]!.trim()}`);
+  }
+  const STYLE = "nieobsługiwany styl wcięć — przepisz job w stylu repo";
+  if (key[1]!.trim() !== "" || key[0] !== "    steps:") throw new Error(`${STYLE}: ${key[0].trim()}`);
+  const after = c.slice(c.indexOf("\n    steps:\n") + "\n    steps:\n".length);
+  const first = after.split("\n").find((l) => l.trim() !== "");
+  if (first === undefined || !/^ {6}- /.test(first)) throw new Error(`${STYLE}: pierwsza linia pod steps: ${first?.trim() ?? "(brak)"}`);
+  const out = c.slice(c.indexOf("\n    steps:\n")).split(/\n(?= {6}- )/).slice(1);
+  if (out.length === 0) throw new Error(`${STYLE}: job ze steps: i zerem rozpoznanych kroków`);
+  return out;
 }
 
 /** Wskaźnik bloku YAML: `|` albo `>` z dowolnym chomping (`-`/`+`) i wcięciem (cyfra). */
@@ -264,11 +304,14 @@ function dbReasons(body: string): string[] {
 
 /** Job z bazą poza parą {e2e-smoke, e2e-full} z quality-gate.yml (w każdym pliku workflow). */
 function dbJobViolations(file: string, wf: string): string[] {
-  return [...jobs(wf)].flatMap(([name, body]) => {
+  // POSTGRES_URL poza sekcją jobs: (env workflow, przed albo po jobach) trafia do KAŻDEGO joba —
+  // zakazane w każdym pliku (G1/G5, C Ethana).
+  const top = /^\s*["']?POSTGRES_URL["']?\s*:/m.test(code(outsideJobs(wf))) ? [`${file}: POSTGRES_URL poza jobs: (env workflow) — zakazane`] : [];
+  return top.concat([...jobs(wf)].flatMap(([name, body]) => {
     if (file === QG && DB_JOBS.includes(name)) return [];
     const reasons = dbReasons(body);
     return reasons.length ? [`${file}: nowy job z bazą: dodaj go do testu i strażników: ${name} (${reasons.join(", ")})`] : [];
-  });
+  }));
 }
 
 /**
@@ -307,6 +350,46 @@ function anchorViolations(file: string, wf: string): string[] {
  * Push po rozwinięciu skryptów package.json w każdym kroku każdego joba danego
  * workflow (nie tylko w jobach z bazą). Zwraca komunikaty z jobem i krokiem.
  */
+/**
+ * Liczba wystąpień klucza YAML `key` w tekście (bez linii komentarza) w DOWOLNYM kształcie:
+ * `key:`, `- key:`, `"key":`, `'key':`, `{ key:`, `, key:`.
+ */
+function anyKeyCount(text: string, key: string): number {
+  const re = new RegExp(`(?:^[ \\t]*(?:-[ \\t]+)?|[{,][ \\t]*)["']?${key}["']?[ \\t]*:`, "gm");
+  return (code(text).match(re) ?? []).length;
+}
+
+/** Klucz `run:` w kształcie, który czyta runOf. */
+const PARSED_RUN_KEY = /^(\s*(?:- )?)run:/m;
+
+/**
+ * NIEZMIENNIKI KRZYŻOWE na plik (#194 runda 5, decyzja Olivera — główny mechanizm):
+ * każde wystąpienie klucza w tekście, w dowolnym kształcie, musi być przypisane do
+ * miejsca, które parser faktycznie rozpoznał i sprawdził. Rozjazd = „nieobsługiwany
+ * kształt” (klucz w cudzysłowie, flow, krok na innym wcięciu, klucz poza jobem…).
+ * - `run`: kroki, z których runOf wyciągnął polecenie (sprawdzane listą/zakazem push);
+ * - `uses`: `uses:` joba (wcięcie 4) i `uses:` kroku (`      - uses:` / `        uses:`);
+ * - `services` / `container`: klucz joba na wcięciu 4 (sprawdzany przez dbReasons);
+ * - `POSTGRES_URL`: wewnątrz jobów (dbReasons); poza jobami osobno = porażka.
+ */
+function keyInvariantViolations(file: string, wf: string): string[] {
+  const js = [...jobs(wf)];
+  const parsed: Record<string, number> = { run: 0, uses: 0, services: 0, container: 0, POSTGRES_URL: 0 };
+  for (const [, body] of js) {
+    const c = code(body);
+    const st = steps(body);
+    parsed.run! += st.filter((s) => PARSED_RUN_KEY.test(s)).length;
+    parsed.uses! += (c.match(/^ {4}uses:/gm) ?? []).length + st.filter((s) => /^(?: {6}- | {8})uses:/m.test(s)).length;
+    parsed.services! += (c.match(/^ {4}services:/gm) ?? []).length;
+    parsed.container! += (c.match(/^ {4}container:/gm) ?? []).length;
+    parsed.POSTGRES_URL! += (c.match(/^\s+POSTGRES_URL:/gm) ?? []).length;
+  }
+  return Object.entries(parsed).flatMap(([key, n]) => {
+    const found = anyKeyCount(wf, key);
+    return found === n ? [] : [`${file}: nieobsługiwany kształt — kluczy ${key} w pliku ${found}, rozpoznanych przez parser ${n}`];
+  });
+}
+
 function pushViolations(wf: string, scripts: Record<string, string>): string[] {
   return [...jobs(wf)].flatMap(([name, body]) =>
     steps(body).flatMap((s, i) => {
@@ -336,6 +419,10 @@ describe("wszystkie pliki .github/workflows: bez push, bez baz poza parą, bez k
 
   it.each(WORKFLOWS)("%s: uses: na poziomie joba tylko do lokalnego pliku workflow (w quality-gate.yml wcale)", (f, wf) => {
     expect(jobUsesViolations(f, wf, files)).toEqual([]);
+  });
+
+  it.each(WORKFLOWS)("%s: niezmiennik krzyżowy — każdy klucz run/uses/services/container/POSTGRES_URL rozpoznany przez parser", (f, wf) => {
+    expect(keyInvariantViolations(f, wf)).toEqual([]);
   });
 
   it.each(WORKFLOWS)("%s: bez kotwic, aliasów i kluczy scalania YAML", (f, wf) => {
@@ -605,6 +692,78 @@ describe("joby z bazą, uses: joba, kotwice YAML (#194 runda 4)", () => {
     expect(dbJobViolations(QG, wf("e2e-extra", "    env:\n      INTEGRATION_POSTGRES_URL_X: y\n"))).toEqual([]);
     expect(dbJobViolations(QG, wf("e2e-smoke", "    services:\n      db:\n        image: postgres:18\n"))).toEqual([]);
     expect(dbJobViolations("inny.yml", wf("e2e-smoke", "    services:\n      db:\n        image: postgres:18\n"))).toHaveLength(1);
+  });
+
+  it("runda 5 (1): plik z jobs: i zerem jobów na wcięciu 2 (np. całość na wcięciu 4) → wyjątek", () => {
+    const g4 = "name: x\non:\n    push:\njobs:\n    db:\n        runs-on: ubuntu-latest\n        steps:\n            - run: pnpm db:push\n";
+    expect(() => jobs(g4)).toThrow(/zero jobów pod jobs:/);
+    expect(() => pushViolations(g4, PKG.scripts)).toThrow(/zero jobów/);
+  });
+
+  it.each([
+    ["kroki z myślnikiem na wcięciu 4", "  db:\n    runs-on: x\n    steps:\n    - uses: actions/checkout@v4\n    - run: pnpm db:push\n"],
+    ["kroki na wcięciu 8", "  db:\n    runs-on: x\n    steps:\n        - run: pnpm db:push\n"],
+    ["steps: jako alias", "  db:\n    runs-on: x\n    steps: *s\n"],
+    ["steps: we flow", "  db:\n    runs-on: x\n    steps: [{ run: pnpm db:push }]\n"],
+    ["steps: puste", "  db:\n    runs-on: x\n    steps:\n"],
+  ])("runda 5 (2): %s → wyjątek „nieobsługiwany styl wcięć”", (_n, job) => {
+    expect(() => pushViolations(`name: x\njobs:\n${job}`, PKG.scripts)).toThrow(/nieobsługiwany styl wcięć — przepisz job w stylu repo/);
+  });
+
+  it.each([
+    ["steps: ze spacją na końcu", "    steps: \n      - run: pnpm db:push\n"],
+    ["steps: z komentarzem", "    steps: # kroki\n      - run: pnpm db:push\n"],
+    ["steps: we flow", "    steps: [ {run: pnpm db:push} ]\n"],
+    ["\"steps\": w cudzysłowie", "    \"steps\":\n      - run: pnpm db:push\n"],
+  ])("runda 5 (A): %s → wyjątek", (_n, st) => {
+    expect(() => pushViolations(`name: x\njobs:\n  db:\n    runs-on: x\n${st}`, PKG.scripts)).toThrow(/nieobsługiwany styl wcięć/);
+  });
+
+  it.each([
+    ["\"run\" w cudzysłowie jako pierwszy klucz", "      - \"run\": pnpm db:sync\n"],
+    ["krok flow", "      - { run: pnpm db:sync }\n"],
+    ["'run' w cudzysłowie jako drugi klucz", "      - name: x\n        'run': pnpm db:sync\n"],
+    ["drugi run: w kroku", "      - run: pnpm typecheck\n        run: pnpm db:sync\n"],
+  ])("runda 5 (B): %s → niezmiennik krzyżowy run: „nieobsługiwany kształt”", (_n, step) => {
+    const wf = `name: x\njobs:\n  typecheck:\n    runs-on: x\n    steps:\n      - run: pnpm typecheck\n${step}`;
+    expect(keyInvariantViolations("x.yml", wf).join()).toMatch(/nieobsługiwany kształt — kluczy run/);
+  });
+
+  it.each([
+    ["uses w cudzysłowie w kroku", "uses", "      - \"uses\": org/x@v1\n"],
+    ["uses we flow", "uses", "      - { uses: org/x@v1 }\n"],
+    ["services pod krokiem (wcięcie 8)", "services", "      - run: pnpm test:pg\n        services:\n          db:\n            image: x\n"],
+    ["container w cudzysłowie", "container", "    \"container\": postgres:18\n"],
+    ["POSTGRES_URL w cudzysłowie", "POSTGRES_URL", "      - run: pnpm test:pg\n        env:\n          \"POSTGRES_URL\": x\n"],
+  ])("runda 5 niezmiennik: %s → rozjazd kluczy %s", (_n, key, extra) => {
+    const wf = `name: x\njobs:\n  a:\n    runs-on: x\n${extra.startsWith("    \"") ? extra : ""}    steps:\n      - run: pnpm typecheck\n${extra.startsWith("    \"") ? "" : extra}`;
+    expect(keyInvariantViolations("x.yml", wf).join()).toMatch(new RegExp(`kluczy ${key} w pliku`));
+  });
+
+  it("runda 5 niezmiennik: poprawny plik → bez rozjazdu; POSTGRES_URL poza jobami → rozjazd", () => {
+    const ok = "name: x\njobs:\n  a:\n    runs-on: x\n    services:\n      pg:\n        image: x\n    env:\n      POSTGRES_URL: x\n    steps:\n      - uses: actions/checkout@v4\n      - name: y\n        uses: actions/setup-node@v4\n      - run: pnpm test:pg\n  b:\n    uses: ./.github/workflows/b.yml\n";
+    expect(keyInvariantViolations("x.yml", ok)).toEqual([]);
+    expect(keyInvariantViolations("x.yml", ok + "env:\n  POSTGRES_URL: x\n").join()).toMatch(/kluczy POSTGRES_URL/);
+  });
+
+  it("runda 5 (C): env z POSTGRES_URL PO jobach nie jest treścią ostatniego joba; porażka także, gdy ostatni job z pary", () => {
+    const wf = "name: x\njobs:\n  e2e-full:\n    services:\n      postgres:\n        image: x\n    steps:\n      - run: pnpm test:pg\nenv:\n  POSTGRES_URL: postgresql://u:p@db.example:5432/x\n";
+    expect(jobs(wf).get("e2e-full")).not.toMatch(/POSTGRES_URL/);
+    expect(dbJobViolations(QG, wf).join()).toMatch(/POSTGRES_URL poza jobs:/);
+    // komentarz na wcięciu 0 wewnątrz jobs: nie kończy sekcji
+    expect([...jobs("name: x\njobs:\n  a:\n    x: 1\n# k\n  b:\n    y: 2\n").keys()]).toEqual(["a", "b"]);
+  });
+
+  it("runda 5 (2): job bez steps: tylko z uses: joba; inaczej wyjątek", () => {
+    expect(pushViolations("name: x\njobs:\n  e2e:\n    uses: ./.github/workflows/e2e-production.yml\n", PKG.scripts)).toEqual([]);
+    expect(() => pushViolations("name: x\njobs:\n  e2e:\n    runs-on: x\n", PKG.scripts)).toThrow(/bez steps: i bez uses:/);
+  });
+
+  it("runda 5 (3): POSTGRES_URL przed jobs: (env workflow) → porażka w każdym pliku, także quality-gate.yml", () => {
+    const wfEnv = "name: x\nenv:\n  POSTGRES_URL: postgresql://u:p@db.example:5432/x\njobs:\n  a:\n    steps:\n      - run: pnpm test:pg\n";
+    expect(dbJobViolations("inny.yml", wfEnv).join()).toMatch(/POSTGRES_URL poza jobs:/);
+    expect(dbJobViolations(QG, wfEnv).join()).toMatch(/POSTGRES_URL poza jobs:/);
+    expect(dbJobViolations(QG, wfEnv.replace("POSTGRES_URL", "OTHER_URL"))).toEqual([]);
   });
 
   it("nagłówek joba z komentarzem/kotwicą rozpoznany; inny kształt na wcięciu 2 → wyjątek", () => {
