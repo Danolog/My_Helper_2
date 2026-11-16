@@ -89,6 +89,9 @@ export const MODULES: readonly ModuleDef[] = [
     defaultEnabled: false,
   },
   {
+    // Zdjęcie `hardOff` dopiero po spełnieniu obu warunków: zamknięte #215
+    // oraz zapis zgody marketingowej przechowuje jej pochodzenie (źródło,
+    // osoba zapisująca, wersja treści) i ma najwyżej jedną aktywną zgodę na kanał.
     key: "newsletters",
     label: "Newslettery",
     description: "Wysyłka wiadomości marketingowych do bazy klientów.",
@@ -158,6 +161,8 @@ export const MODULES: readonly ModuleDef[] = [
     // Cały moduł push: przełącznik „Powiadomienia Push” i panel subskrypcji
     // w interfejsie, trasy /api/push/* oraz crony przypomnień push
     // (na starcie przypominamy tylko SMS-em).
+    // Zdjęcie `hardOff` dopiero po zamknięciu #221 (tam ustalana jest treść
+    // powiadomienia listy oczekujących).
     key: "pushNotifications",
     label: "Powiadomienia push",
     description: "Przypomnienia push o wizytach dla klientów z kontem.",
