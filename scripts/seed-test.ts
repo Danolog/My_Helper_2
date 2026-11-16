@@ -11,7 +11,6 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { hashPassword } from "better-auth/crypto";
-import { PLAN_FEATURES } from "../src/lib/plan-features";
 import {
   user,
   account,
@@ -21,7 +20,6 @@ import {
   services,
   serviceCategories,
   clients,
-  subscriptionPlans,
   employeeServices,
   workSchedules,
   promotions,
@@ -33,6 +31,7 @@ import {
   checkSeedTarget,
   SEED_SERVER_PROBE_SQL,
 } from "./seed-host-guard";
+import { seedPlans } from "./seed-plans";
 
 const connectionString = process.env.POSTGRES_URL;
 const target = checkSeedTarget(connectionString, { VERCEL_ENV: process.env.VERCEL_ENV });
@@ -337,42 +336,10 @@ async function seed() {
 
   console.log("[seed-test] Created 2 clients");
 
-  // 7. Create subscription plans (needed for registration flow)
-  const planData = [
-    {
-      id: "00000000-0000-4000-8000-a10000000001",
-      name: "Basic",
-      slug: "basic",
-      priceMonthly: "49.00",
-      featuresJson: [...PLAN_FEATURES.basic],
-    },
-    {
-      id: "00000000-0000-4000-8000-a10000000002",
-      name: "Pro",
-      slug: "pro",
-      priceMonthly: "149.00",
-      featuresJson: [...PLAN_FEATURES.pro],
-    },
-  ];
+  // 7. Plany Basic i Pro (rejestracja) — z PLANS i PLAN_FEATURES, idempotentnie po slug (./seed-plans).
+  await seedPlans(db);
 
-  for (const plan of planData) {
-    await db
-      .insert(subscriptionPlans)
-      .values({
-        id: plan.id,
-        name: plan.name,
-        slug: plan.slug,
-        priceMonthly: plan.priceMonthly,
-        featuresJson: plan.featuresJson,
-        isActive: true,
-      })
-      .onConflictDoUpdate({
-        target: subscriptionPlans.slug,
-        set: { name: plan.name, priceMonthly: plan.priceMonthly, featuresJson: plan.featuresJson, isActive: true },
-      });
-  }
-
-  console.log("[seed-test] Created 2 subscription plans (Basic + Pro)");
+  console.log("[seed-test] Ensured 2 subscription plans (Basic + Pro)");
 
   // 8. Zadatek + promocje zamrozone (E2E). Osobny pracownik i usluga, zeby
   // rezerwacje testu nie kolidowaly z innymi testami kalendarza.

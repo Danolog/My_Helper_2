@@ -310,7 +310,8 @@ describe("prawda w marketingu", () => {
     const CONSUMERS: Array<[file: string, call: RegExp]> = [
       ["src/app/api/subscription-plans/route.ts", /\bfeaturesFor\(|PLAN_FEATURES\.(basic|pro)/],
       ["src/app/api/subscriptions/current/route.ts", /\bfeaturesFor\(/],
-      ["scripts/seed-test.ts", /PLAN_FEATURES\.(basic|pro)/],
+      // Seed zapisuje plany przez scripts/seed-plans.ts (seed-test.ts tylko woła seedPlans — pilnuje __tests__/lib/seed-plans.test.ts).
+      ["scripts/seed-plans.ts", /PLAN_FEATURES\[slug\]|PLAN_FEATURES\.(basic|pro)/],
       ["src/app/(site)/dla-salonow/_components/DlaSalonowPricing.tsx", /\bplanHighlights\(/],
       ["src/app/(site)/pricing/page.tsx", /\bplanComparison\(/],
       ["src/components/dashboard/create-salon-prompt.tsx", /\bplanHighlights\(/],
