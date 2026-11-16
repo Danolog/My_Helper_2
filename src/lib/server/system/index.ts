@@ -26,14 +26,19 @@ export type { StaleDepositCleanupResult } from "./deposits-cleanup";
 export {
   countPushSubscriptions,
   deleteUndeliverablePushSubscriptions,
+  findDueAppointmentReminders,
   findDuePushReminders,
   findDueSmsReminders,
+  getAppointmentReminderPreview,
   getPendingCronReminders,
   getPushSubscriptionsForUser,
   getUserIdsWithPushSubscriptions,
+  markAppointmentRemindersSent,
   markCronRemindersSent,
 } from "./notifications";
 export type {
+  AppointmentReminderCandidate,
+  AppointmentReminderPreviewRow,
   CronReminderKind,
   PendingCronReminder,
   PushReminderCandidate,

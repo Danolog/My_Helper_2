@@ -42,11 +42,15 @@ const NOTIFICATIONS_EXPORTS = [
   // #193 P5a-2: crony przypomnień push 1h / 24h i SMS 1h (cross-salon, sekret crona).
   "countPushSubscriptions",
   "deleteUndeliverablePushSubscriptions",
+  // #193 P5a-2: przypomnienia SMS 24h (reminders/appointment).
+  "findDueAppointmentReminders",
   "findDuePushReminders",
   "findDueSmsReminders",
+  "getAppointmentReminderPreview",
   "getPendingCronReminders",
   "getPushSubscriptionsForUser",
   "getUserIdsWithPushSubscriptions",
+  "markAppointmentRemindersSent",
   "markCronRemindersSent",
 ];
 /** #193 P5a-1: token oferty listy oczekujących → wpis i salon (decyzja CTO 4). */

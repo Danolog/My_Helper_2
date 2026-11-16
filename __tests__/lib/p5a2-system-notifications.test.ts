@@ -159,6 +159,8 @@ describe("reminders/appointment: filtr salonu wołającego crona (decyzja A)", (
 
   it.each([
     ["POST", () => reminders.POST(req("/api/reminders/appointment?salonId=abc", "POST"))],
+    // Podany, ale pusty salonId nie może zamienić filtra jednego salonu w przebieg po wszystkich.
+    ["POST z pustym salonId", () => reminders.POST(req("/api/reminders/appointment?salonId=", "POST"))],
     ["GET", () => reminders.GET(req("/api/reminders/appointment?salonId=abc", "GET"))],
     ["GET bez salonId", () => reminders.GET(req("/api/reminders/appointment", "GET"))],
   ] as const)("%s ze złym albo brakującym salonId → 400 bez zapytania", async (_n, call) => {
@@ -182,7 +184,9 @@ describe("reminders/appointment: filtr salonu wołającego crona (decyzja A)", (
     const { status } = await parseResponse(await reminders.POST(req("/api/reminders/appointment", "POST")));
     expect(status).toBe(200);
     expect(h.captured).toHaveLength(1);
-    expect(h.captured[0]!.sql).not.toMatch(/"appointments"\."salon_id" = /);
+    // Join po `"appointments"."salon_id" = "salons"."id"` zostaje; brak tylko warunku z parametrem.
+    expect(h.captured[0]!.sql).not.toMatch(/"appointments"\."salon_id" = \$\d+/);
+    expect(h.captured[0]!.sql).toMatch(/"appointments"\."salon_id" = "salons"\."id"/);
   });
 
   it("GET z salonId → podgląd z warunkiem salonu", async () => {

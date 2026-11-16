@@ -76,11 +76,13 @@ const SNAPSHOT: Record<string, string[]> = {
     "src/app/api/cron/push-reminders/route.ts",
   ],
   "notifications.ts:deleteUndeliverablePushSubscriptions": ["src/lib/push.ts"],
+  "notifications.ts:findDueAppointmentReminders": ["src/app/api/reminders/appointment/route.ts"],
   "notifications.ts:findDuePushReminders": [
     "src/app/api/cron/push-reminders-24h/route.ts",
     "src/app/api/cron/push-reminders/route.ts",
   ],
   "notifications.ts:findDueSmsReminders": ["src/app/api/cron/sms-reminders/route.ts"],
+  "notifications.ts:getAppointmentReminderPreview": ["src/app/api/reminders/appointment/route.ts"],
   "notifications.ts:getPendingCronReminders": [
     "src/app/api/cron/push-reminders-24h/route.ts",
     "src/app/api/cron/push-reminders/route.ts",
@@ -91,6 +93,7 @@ const SNAPSHOT: Record<string, string[]> = {
     "src/app/api/cron/push-reminders-24h/route.ts",
     "src/app/api/cron/push-reminders/route.ts",
   ],
+  "notifications.ts:markAppointmentRemindersSent": ["src/app/api/reminders/appointment/route.ts"],
   "notifications.ts:markCronRemindersSent": [
     "src/app/api/cron/push-reminders-24h/route.ts",
     "src/app/api/cron/push-reminders/route.ts",
