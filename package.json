@@ -25,9 +25,9 @@
     "env:check": "node -e \"require('./src/lib/env.ts').checkEnv()\" || echo 'Run with tsx: npx tsx -e \"import { checkEnv } from './src/lib/env'; checkEnv();\"'",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push && tsx scripts/db-schema-guard.ts",
+    "db:push": "tsx scripts/db-push-gate.ts && drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "db:dev": "drizzle-kit push && tsx scripts/db-schema-guard.ts",
+    "db:dev": "tsx scripts/db-push-gate.ts && drizzle-kit push",
     "db:reset": "tsx scripts/db-reset-local.ts",
     "db:seed:test": "npx tsx scripts/seed-test.ts"
   },

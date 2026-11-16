@@ -1,32 +1,50 @@
 // @vitest-environment node
 /**
- * #180: świeża baza tylko przez `db:migrate`, strażnik ograniczeń z 0009.
+ * #180/#188: świeża baza tylko przez `db:migrate`; strażnik ograniczeń z 0009
+ * i RLS z 0005.
  *
- * - strażnik (`scripts/db-schema-guard.ts`): decyzja i zapytanie tylko do odczytu;
+ * - strażnik (`scripts/db-schema-guard.ts`): decyzja, zapytania tylko do odczytu,
+ *   lista tabel z RLS wyprowadzona z pliku migracji 0005;
  * - `db:reset` (`scripts/db-reset-local.ts`): baza z twardej listy, host lokalny,
- *   kolejność migrate → push → strażnik, bez `drizzle-kit drop`;
- * - `package.json`: `db:push`/`db:dev` kończą się strażnikiem, nie ma martwego
- *   `setup`, każdy skrypt `scripts/*.ts` wołany z package.json istnieje;
- * - `init.sh`: migrate przed push, bez wyciszania błędów;
- * - CI (`quality-gate.yml`): każdy `db:push` po `db:migrate`, z POSTGRES_URL —
- *   strażnik na końcu `db:push` przechodzi;
+ *   bez parametrów zapytania poza sslmode (B2), kroki migrate → strażnik, BEZ push
+ *   i bez `drizzle-kit drop`;
+ * - `package.json`: nie ma martwego `setup`, każdy `scripts/*.ts` istnieje;
+ * - `init.sh`: migrate + strażnik, bez push, bez wyciszania błędów;
+ * - CI (`quality-gate.yml`): każdy job z bazą robi `db:migrate` (a `db:push`,
+ *   jeśli jeszcze jest, stoi po nim) z lokalnym POSTGRES_URL;
  * - README: zdanie o budowaniu bazy, bez fałszywego „drop all tables”.
  * Bez połączenia z bazą (prawdziwa baza: `__tests__/pg/schema-constraints.pg.test.ts`).
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  PUSH_GATE_SQL,
+  PUSH_PROTOTYPE_WARNING,
+  PUSH_REFUSED_MIGRATED,
+  PUSH_REFUSED_NOT_EMPTY,
+  decidePush,
+  runPushGate,
+} from "../../scripts/db-push-gate";
 import {
   RESET_ALLOWED_DATABASES,
   RESET_DEFAULT_DATABASE,
   RESET_STEPS,
   planReset,
+  resetMain,
+  type ResetDeps,
+  type ResetEnv,
 } from "../../scripts/db-reset-local";
 import {
   REQUIRED_CONSTRAINTS,
+  RLS_GUARD_SQL,
   SCHEMA_GUARD_SQL,
-  checkSchemaConstraints,
+  checkSchema,
+  loadRlsRequirements,
+  parseRlsRequirements,
   runSchemaGuard,
+  type RlsRequirement,
+  type RlsRow,
 } from "../../scripts/db-schema-guard";
 
 const ROOT = process.cwd();
@@ -35,26 +53,53 @@ const PKG = JSON.parse(read("package.json")) as { scripts: Record<string, string
 const INIT = read("init.sh");
 const QG = read(".github/workflows/quality-gate.yml");
 const README = read("README.md");
-const GUARD_CMD = "tsx scripts/db-schema-guard.ts";
 const LOCAL = "postgresql://dev_user:pw-x9@localhost:5432/pos_dev";
 
-describe("strażnik schematu — decyzja", () => {
-  it("komplet trzech ograniczeń 0009 → ok", () => {
+const RLS = loadRlsRequirements();
+const fullRls = (): RlsRow[] => RLS.map((r) => ({ table: r.table, rls: true, policies: [r.policy] }));
+
+describe("strażnik — lista RLS z migracji 0005", () => {
+  it("39 tabel: 26 bezpośrednich + 12 pośrednich z tenant_isolation, salons z tenant_self", () => {
+    expect(RLS).toHaveLength(39);
+    expect(RLS.filter((r) => r.policy === "tenant_isolation")).toHaveLength(38);
+    expect(RLS).toContainEqual({ table: "salons", policy: "tenant_self" });
+    for (const t of ["appointments", "deposit_payments", "clients", "ai_generated_media", "time_blocks", "loyalty_transactions"]) {
+      expect(RLS).toContainEqual({ table: t, policy: "tenant_isolation" });
+    }
+  });
+
+  it("tabela dopisana do direct_tables w pliku → jest na liście (nic na sztywno)", () => {
+    const sql = read("drizzle/0005_rls_tenant_isolation.sql").replace("'ai_generated_media'", "'ai_generated_media','nowa_tabela'");
+    expect(parseRlsRequirements(sql)).toContainEqual({ table: "nowa_tabela", policy: "tenant_isolation" });
+  });
+
+  it.each([
+    ["bez direct_tables", (s: string) => s.replace("direct_tables text[]", "tabele text[]")],
+    ["bez indirect_map", (s: string) => s.replace("indirect_map text[][]", "mapa text[][]")],
+    ["bez jawnego CREATE POLICY", (s: string) => s.replace(/^CREATE POLICY tenant_self ON salons/m, "-- usunięte")],
+  ])("zmieniony format pliku (%s) → głośny błąd, nie pusta lista", (_n, mutate) => {
+    expect(() => parseRlsRequirements(mutate(read("drizzle/0005_rls_tenant_isolation.sql")))).toThrow(/0005/);
+  });
+});
+
+describe("strażnik — decyzja", () => {
+  it("komplet ograniczeń 0009 i RLS 0005 → ok", () => {
     expect(REQUIRED_CONSTRAINTS).toEqual([
       "appointments_no_overlap",
       "appointments_end_after_start",
       "time_blocks_end_after_start",
     ]);
-    expect(checkSchemaConstraints([...REQUIRED_CONSTRAINTS, "inne_ograniczenie"])).toEqual({ ok: true });
+    expect(checkSchema([...REQUIRED_CONSTRAINTS, "inne"], fullRls(), RLS)).toEqual({ ok: true });
   });
 
-  it("brak EXCLUDE (baza zbudowana pushem) → odmowa z nazwą i instrukcją db:migrate", () => {
-    const r = checkSchemaConstraints(["appointments_end_after_start", "time_blocks_end_after_start"]);
+  it("brak EXCLUDE (baza zbudowana pushem) → odmowa z nazwą i instrukcją", () => {
+    const r = checkSchema(["appointments_end_after_start", "time_blocks_end_after_start"], fullRls(), RLS);
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.missing).toEqual(["appointments_no_overlap"]);
     expect(r.message).toBe(
-      "Brak appointments_no_overlap — baza zbudowana bez db:migrate. Uruchom pnpm db:migrate (nie samo db:push); od zera: pnpm db:reset."
+      "Brak appointments_no_overlap — baza zbudowana bez db:migrate albo po nim nadpisana przez db:push. " +
+        "Odbuduj: pnpm db:reset (lokalnie) albo pnpm db:migrate na pustej bazie."
     );
   });
 
@@ -63,26 +108,70 @@ describe("strażnik schematu — decyzja", () => {
     ["brak CHECK blokad", ["appointments_no_overlap", "appointments_end_after_start"], ["time_blocks_end_after_start"]],
     ["pusta baza", [], [...REQUIRED_CONSTRAINTS]],
   ])("%s → odmowa z listą braków", (_n, present, missing) => {
-    const r = checkSchemaConstraints(present);
+    const r = checkSchema(present, fullRls(), RLS);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.missing).toEqual(missing);
   });
 
   it("nazwa podobna (prefiks) nie zastępuje ograniczenia", () => {
-    expect(checkSchemaConstraints(["appointments_no_overlap_old", "appointments_end_after_start", "time_blocks_end_after_start"]).ok).toBe(false);
-  });
-
-  it("zapytanie tylko do odczytu, o wszystkie trzy nazwy", () => {
-    expect(SCHEMA_GUARD_SQL).toMatch(/^select conname from pg_constraint where conname in \(/);
-    expect(SCHEMA_GUARD_SQL).not.toMatch(/;|\b(insert|update|delete|drop|alter|create|truncate|grant)\b/i);
-    for (const n of REQUIRED_CONSTRAINTS) expect(SCHEMA_GUARD_SQL).toContain(`'${n}'`);
-  });
-
-  it("runSchemaGuard: wynik zapytania → decyzja", async () => {
-    const unsafe = vi.fn().mockResolvedValue([{ conname: "appointments_end_after_start" }]);
-    const r = await runSchemaGuard({ unsafe } as never);
-    expect(unsafe).toHaveBeenCalledWith(SCHEMA_GUARD_SQL);
+    const r = checkSchema(["appointments_no_overlap_old", "appointments_end_after_start", "time_blocks_end_after_start"], fullRls(), RLS);
     expect(r.ok).toBe(false);
+  });
+
+  it("push po migracjach (RLS zdjęte na wszystkich 39) → odmowa z liczbą tabel", () => {
+    const rows = RLS.map((r) => ({ table: r.table, rls: false, policies: [] }));
+    const r = checkSchema([...REQUIRED_CONSTRAINTS], rows, RLS);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.missing).toHaveLength(40);
+    expect(r.message).toMatch(
+      /^RLS z 0005 niekompletne na 39 tabelach: .* i 34 więcej; RLS włączone na 0 tabelach, plik migracji wymaga 39 — /
+    );
+  });
+
+  it("D3: liczba tabel z włączonym RLS mniejsza niż w pliku → osobny wpis z liczbami", () => {
+    const rows = fullRls().map((x) => (x.table === "appointments" ? { ...x, rls: false } : x));
+    const r = checkSchema([...REQUIRED_CONSTRAINTS], rows, RLS);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.missing).toContain("RLS włączone na 38 tabelach, plik migracji wymaga 39");
+  });
+
+  it("D3: dodatkowe tabele z RLS spoza pliku nie przeszkadzają", () => {
+    const rows = [...fullRls(), { table: "extra", rls: true, policies: [] }];
+    expect(checkSchema([...REQUIRED_CONSTRAINTS], rows, RLS)).toEqual({ ok: true });
+  });
+
+  it.each([
+    ["RLS wyłączone na appointments", (rows: RlsRow[]) => rows.map((x) => (x.table === "appointments" ? { ...x, rls: false } : x)), "appointments (RLS wyłączone)"],
+    ["brak polityki na deposit_payments", (rows: RlsRow[]) => rows.map((x) => (x.table === "deposit_payments" ? { ...x, policies: [] } : x)), "deposit_payments (brak polityki tenant_isolation)"],
+    ["salons z tenant_isolation zamiast tenant_self", (rows: RlsRow[]) => rows.map((x) => (x.table === "salons" ? { ...x, policies: ["tenant_isolation"] } : x)), "salons (brak polityki tenant_self)"],
+    ["brak tabeli clients", (rows: RlsRow[]) => rows.filter((x) => x.table !== "clients"), "clients (brak tabeli)"],
+  ])("%s → odmowa wskazująca tabelę", (_n, mutate, expected) => {
+    const r = checkSchema([...REQUIRED_CONSTRAINTS], mutate(fullRls()), RLS);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.missing[0]).toBe(expected);
+  });
+
+  it("zapytania tylko do odczytu katalogu", () => {
+    for (const q of [SCHEMA_GUARD_SQL, RLS_GUARD_SQL]) {
+      expect(q).toMatch(/^select /);
+      expect(q).not.toMatch(/;|\b(insert|update|delete|drop|alter|create|truncate|grant)\b/i);
+    }
+    for (const n of REQUIRED_CONSTRAINTS) expect(SCHEMA_GUARD_SQL).toContain(`'${n}'`);
+    expect(RLS_GUARD_SQL).toContain("relrowsecurity");
+    expect(RLS_GUARD_SQL).toContain("pg_policies");
+  });
+
+  it("runSchemaGuard: oba zapytania → decyzja", async () => {
+    const req: RlsRequirement[] = [{ table: "appointments", policy: "tenant_isolation" }];
+    const unsafe = vi.fn(async (q: string) =>
+      q === SCHEMA_GUARD_SQL
+        ? REQUIRED_CONSTRAINTS.map((conname) => ({ conname }))
+        : [{ table: "appointments", rls: true, policies: ["tenant_isolation"] }]
+    );
+    expect(await runSchemaGuard({ unsafe } as never, req)).toEqual({ ok: true });
+    expect(unsafe).toHaveBeenCalledWith(SCHEMA_GUARD_SQL);
+    expect(unsafe).toHaveBeenCalledWith(RLS_GUARD_SQL);
   });
 });
 
@@ -90,11 +179,10 @@ describe("db:reset — plan (bez połączenia)", () => {
   it("domyślnie pos_dev; lista twarda: pos_dev, pos_reset_test", () => {
     expect(RESET_DEFAULT_DATABASE).toBe("pos_dev");
     expect(RESET_ALLOWED_DATABASES).toEqual(["pos_dev", "pos_reset_test"]);
-    const p = planReset([], LOCAL);
-    expect(p).toMatchObject({ ok: true, database: "pos_dev" });
+    expect(planReset([], LOCAL)).toMatchObject({ ok: true, database: "pos_dev" });
   });
 
-  it("pos_reset_test: kroki dostają adres TEJ bazy, admin łączy się z bazą postgres, hasło zachowane", () => {
+  it("pos_reset_test: kroki dostają adres TEJ bazy, admin łączy się z bazą postgres", () => {
     const p = planReset(["pos_reset_test"], LOCAL);
     expect(p.ok).toBe(true);
     if (!p.ok) return;
@@ -102,7 +190,7 @@ describe("db:reset — plan (bez połączenia)", () => {
     expect(p.adminUrl).toBe("postgresql://dev_user:pw-x9@localhost:5432/postgres");
   });
 
-  it.each([["pos_prod"], ["postgres"], ["pos_dev2"], ["POS_DEV"], ["pos_dev\"; drop database x; --"], [""]])(
+  it.each([["pos_prod"], ["postgres"], ["pos_dev2"], ["POS_DEV"], ['pos_dev"; drop database x; --'], [""]])(
     "baza %j spoza listy → odmowa, bez adresu w komunikacie",
     (name) => {
       const p = planReset([name], LOCAL);
@@ -128,32 +216,160 @@ describe("db:reset — plan (bez połączenia)", () => {
     expect(planReset([], LOCAL, { VERCEL_ENV: "production" }).ok).toBe(false);
   });
 
-  it("kroki po założeniu bazy: migrate → push → strażnik, bez drizzle-kit drop", () => {
-    const flat = RESET_STEPS.map((s) => s.join(" "));
-    expect(flat).toEqual([
+  // B2 (Ethan): sterownik pg w drizzle-kit bierze host z `?host=`, a
+  // bezpieczniki oceniają adres jak postgres.js — localhost przeszedłby, pg
+  // połączyłby się z Neonem.
+  it.each([
+    ["host Neona w ?host=", `${LOCAL}?host=ep-x.eu-central-1.aws.neon.tech`, "host"],
+    ["HOST wielkimi literami", `${LOCAL}?HOST=db.example.com`, "HOST"],
+    ["hostaddr", `${LOCAL}?hostaddr=10.0.0.5`, "hostaddr"],
+    ["options", `${LOCAL}?options=-c%20role%3Dx`, "options"],
+    ["sslmode + host", `${LOCAL}?sslmode=disable&host=db.example.com`, "host"],
+  ])("%s → odmowa z nazwą parametru, bez wartości", (_n, url, name) => {
+    const p = planReset(["pos_dev"], url);
+    expect(p.ok).toBe(false);
+    if (p.ok) return;
+    expect(p.reason).toContain(`parametry zapytania spoza listy (${name})`);
+    expect(p.reason).not.toMatch(/neon\.tech|example\.com|10\.0\.0\.5|pw-x9/);
+  });
+
+  it("sam sslmode dopuszczony; adresy dla kroków i admina BEZ zapytania", () => {
+    const p = planReset(["pos_reset_test"], `${LOCAL}?sslmode=disable`);
+    expect(p.ok).toBe(true);
+    if (!p.ok) return;
+    expect(p.targetUrl).toBe("postgresql://dev_user:pw-x9@localhost:5432/pos_reset_test");
+    expect(p.adminUrl).toBe("postgresql://dev_user:pw-x9@localhost:5432/postgres");
+  });
+
+  it("kroki po założeniu bazy: migrate → strażnik; bez push i bez drizzle-kit drop", () => {
+    expect(RESET_STEPS.map((s) => s.join(" "))).toEqual([
       "pnpm exec drizzle-kit migrate",
-      "pnpm exec drizzle-kit push",
       "pnpm exec tsx scripts/db-schema-guard.ts",
     ]);
   });
 
-  it("skrypt resetu nie używa DROP … WITH (FORCE) i sprawdza inne połączenia", () => {
-    const src = read("scripts/db-reset-local.ts");
-    const code = src
+  it("skrypt resetu nie używa WITH (FORCE) i sprawdza inne połączenia", () => {
+    const code = read("scripts/db-reset-local.ts")
       .split("\n")
       .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
       .join("\n");
     expect(code).not.toMatch(/FORCE/i);
-    expect(src).toContain("pg_stat_activity");
+    expect(code).toContain("pg_stat_activity");
+  });
+});
+
+describe("db:reset — przebieg (L1, Leo): każdy krok na resetowanej bazie", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Klient postgres.js na niby: localhost, serwer bez neon.*, 0 innych połączeń. */
+  function fakeAdmin(busy = 0) {
+    const unsafe = vi.fn(async (q: string) => (q.includes("neon") ? [{ database: "postgres", neon_settings: 0 }] : []));
+    const tag = vi.fn(async () => [{ n: busy }]);
+    const sql = Object.assign(tag, { unsafe, end: vi.fn(async () => {}), options: { host: ["localhost"], path: undefined } });
+    return { sql, unsafe, tag };
+  }
+
+  function deps(admin = fakeAdmin(), status = 0) {
+    const spawn = vi.fn((_c: string, _a: readonly string[], _e: ResetEnv) => ({ status }));
+    const connect = vi.fn((_u: string) => admin.sql as never);
+    return { d: { connect, spawn } as ResetDeps, spawn, connect, admin };
+  }
+
+  it("pos_reset_test przy POSTGRES_URL na pos_dev: DROP/CREATE pos_reset_test, migrate i strażnik na pos_reset_test", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { d, spawn, connect, admin } = deps();
+    const rc = await resetMain(["pos_reset_test"], { POSTGRES_URL: LOCAL, PATH: "/bin" }, d);
+    expect(rc).toBe(0);
+    expect(connect).toHaveBeenCalledWith("postgresql://dev_user:pw-x9@localhost:5432/postgres");
+    expect(admin.unsafe).toHaveBeenCalledWith('DROP DATABASE IF EXISTS "pos_reset_test"');
+    expect(admin.unsafe).toHaveBeenCalledWith('CREATE DATABASE "pos_reset_test"');
+    expect(spawn).toHaveBeenCalledTimes(2);
+    for (const [cmd, args, env] of spawn.mock.calls) {
+      expect(env.POSTGRES_URL, `${cmd} ${args.join(" ")}`).toBe("postgresql://dev_user:pw-x9@localhost:5432/pos_reset_test");
+      expect(env.PATH).toBe("/bin");
+    }
+    expect(spawn.mock.calls.map(([c, a]) => [c, ...a].join(" "))).toEqual(RESET_STEPS.map((s) => s.join(" ")));
+  });
+
+  it("?host= w adresie: odmowa przed połączeniem i bez kroków", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { d, spawn, connect } = deps();
+    const rc = await resetMain(["pos_reset_test"], { POSTGRES_URL: `${LOCAL}?host=ep-x.neon.tech` }, d);
+    expect(rc).toBe(1);
+    expect(connect).not.toHaveBeenCalled();
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("inne połączenia z bazą: odmowa, bez DROP i bez kroków", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { d, spawn, admin } = deps(fakeAdmin(2));
+    expect(await resetMain([], { POSTGRES_URL: LOCAL }, d)).toBe(1);
+    expect(admin.unsafe).not.toHaveBeenCalledWith(expect.stringMatching(/^DROP/));
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("nieudany migrate: przerwanie, strażnik nie startuje, kod 1", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { d, spawn } = deps(fakeAdmin(), 1);
+    expect(await resetMain([], { POSTGRES_URL: LOCAL }, d)).toBe(1);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("db:push — tylko pusta baza (#188 pkt 2, decyzja D2)", () => {
+  it("pusta baza (0 tabel w public, brak schematu drizzle) → push dozwolony z ostrzeżeniem", () => {
+    expect(decidePush({ public_tables: 0, drizzle_schema: false })).toEqual({ ok: true, warning: PUSH_PROTOTYPE_WARNING });
+    expect(PUSH_PROTOTYPE_WARNING).toMatch(/^baza prototypowa: bez EXCLUDE z 0009 i bez RLS z 0005/);
+  });
+
+  it("baza z dziennikiem migracji → odmowa z instrukcją db:generate + db:migrate", () => {
+    expect(decidePush({ public_tables: 45, drizzle_schema: true })).toEqual({ ok: false, message: PUSH_REFUSED_MIGRATED });
+    expect(PUSH_REFUSED_MIGRATED).toContain("baza zarządzana migracjami — użyj `db:generate` + `db:migrate`");
+  });
+
+  it("sam schemat drizzle bez tabel w public → odmowa", () => {
+    expect(decidePush({ public_tables: 0, drizzle_schema: true }).ok).toBe(false);
+  });
+
+  it.each([[1], [45]])("%i tabel bez dziennika migracji → odmowa", (n) => {
+    expect(decidePush({ public_tables: n, drizzle_schema: false })).toEqual({ ok: false, message: PUSH_REFUSED_NOT_EMPTY });
+  });
+
+  it.each([[undefined], [{}], [{ public_tables: "0", drizzle_schema: false }], [{ public_tables: 0, drizzle_schema: null }], [{ public_tables: 0.5, drizzle_schema: false }]])(
+    "nieczytelny wynik %j → odmowa (fail closed)",
+    (row) => {
+      expect(decidePush(row).ok).toBe(false);
+    }
+  );
+
+  it("zapytanie tylko do odczytu katalogu: tabele public i schemat drizzle", async () => {
+    expect(PUSH_GATE_SQL).toMatch(/^select /);
+    expect(PUSH_GATE_SQL).not.toMatch(/;|\b(insert|update|delete|drop|alter|create|truncate|grant)\b/i);
+    expect(PUSH_GATE_SQL).toContain("n.nspname = 'public'");
+    expect(PUSH_GATE_SQL).toContain("nspname = 'drizzle'");
+    const unsafe = vi.fn(async () => [{ public_tables: 0, drizzle_schema: false }]);
+    expect((await runPushGate({ unsafe } as never)).ok).toBe(true);
+    expect(unsafe).toHaveBeenCalledWith(PUSH_GATE_SQL);
+  });
+
+  it("db:push i db:dev: najpierw bramka, potem push; strażnik schematu NIE stoi po pushu", () => {
+    for (const s of ["db:push", "db:dev"]) {
+      expect(PKG.scripts[s], s).toBe("tsx scripts/db-push-gate.ts && drizzle-kit push");
+    }
+  });
+
+  it("żaden inny skrypt package.json nie woła drizzle-kit push z pominięciem bramki", () => {
+    for (const [name, cmd] of Object.entries(PKG.scripts)) {
+      if (!/drizzle-kit\s+push/.test(cmd)) continue;
+      expect(cmd, name).toMatch(/^tsx scripts\/db-push-gate\.ts && drizzle-kit push$/);
+    }
   });
 });
 
 describe("package.json", () => {
-  it("db:push i db:dev: push, potem strażnik", () => {
-    expect(PKG.scripts["db:push"]).toBe(`drizzle-kit push && ${GUARD_CMD}`);
-    expect(PKG.scripts["db:dev"]).toBe(`drizzle-kit push && ${GUARD_CMD}`);
-  });
-
   it("db:reset przez db-reset-local; żaden skrypt nie woła drizzle-kit drop", () => {
     expect(PKG.scripts["db:reset"]).toBe("tsx scripts/db-reset-local.ts");
     for (const [name, cmd] of Object.entries(PKG.scripts)) {
@@ -174,41 +390,37 @@ describe("package.json", () => {
 });
 
 describe("init.sh", () => {
-  it("schemat przez migracje: db:migrate przed db:push, bez samego drizzle-kit push", () => {
-    expect(INIT).toContain("pnpm db:migrate && pnpm db:push");
-    expect(INIT).not.toMatch(/drizzle-kit push/);
+  it("schemat przez migracje i strażnika; bez push", () => {
+    expect(INIT).toContain("pnpm db:migrate && pnpm exec tsx scripts/db-schema-guard.ts");
+    expect(INIT).not.toMatch(/drizzle-kit push|db:push|db:dev/);
   });
 
   it("błąd bazy nie jest wyciszany i przerywa skrypt", () => {
-    const dbLines = INIT.split("\n").filter((l) => /db:(migrate|push)|drizzle-kit/.test(l));
+    const dbLines = INIT.split("\n").filter((l) => /db:migrate|db-schema-guard|drizzle-kit/.test(l));
     for (const l of dbLines) expect(l, l).not.toContain("2>/dev/null");
-    expect(INIT).toMatch(/if ! \{ pnpm db:migrate && pnpm db:push; \}; then\n[^\n]*\n\s+exit 1/);
+    expect(INIT).toMatch(/if ! \{ pnpm db:migrate && pnpm exec tsx scripts\/db-schema-guard\.ts; \}; then\n[^\n]*\n\s+exit 1/);
   });
 });
 
-describe("CI (quality-gate.yml): strażnik na końcu db:push przechodzi", () => {
-  // Każdy job z `pnpm db:push`: wcześniej `pnpm db:migrate` w tym samym jobie,
-  // a job ma POSTGRES_URL (strażnik czyta ten sam adres co drizzle-kit).
-  const jobs = QG.split(/\n {2}(?=[\w-]+:\n)/).filter((j) => j.includes("run: pnpm db:push"));
+describe("CI (quality-gate.yml): baza testów z migracji", () => {
+  const jobs = QG.split(/\n {2}(?=[\w-]+:\n)/).filter((j) => /run: pnpm (db:push|db:migrate|test:pg)/.test(j));
 
-  it("są joby z db:push (E2E Smoke i Full)", () => {
+  it("są joby z bazą", () => {
     expect(jobs.length).toBeGreaterThanOrEqual(2);
   });
 
-  it.each(jobs.map((j, i) => [i, j] as const))("job %i: db:migrate przed db:push, POSTGRES_URL ustawiony", (_i, job) => {
+  it.each(jobs.map((j, i) => [i, j] as const))("job %i: db:migrate, a db:push (jeśli jest) po nim; lokalny POSTGRES_URL", (_i, job) => {
     const migrate = job.indexOf("run: pnpm db:migrate");
     const push = job.indexOf("run: pnpm db:push");
     expect(migrate).toBeGreaterThan(-1);
-    expect(migrate).toBeLessThan(push);
+    if (push > -1) expect(migrate).toBeLessThan(push);
     expect(job).toMatch(/POSTGRES_URL: postgresql:\/\/[^\n]*@localhost:5432\/pos_dev/);
   });
 });
 
 describe("README", () => {
   it("zdanie o budowaniu bazy od zera, bez fałszywego „drop all tables”", () => {
-    expect(README).toContain(
-      "Bazę od zera buduje `pnpm db:migrate` (`pnpm db:reset` i `init.sh` robią to same); `db:push` tylko po migracjach"
-    );
+    expect(README).toContain("Bazę od zera buduje `pnpm db:migrate`");
     expect(README).not.toMatch(/drop all tables/i);
   });
 });

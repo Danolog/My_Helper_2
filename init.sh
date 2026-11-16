@@ -160,11 +160,11 @@ echo -e "${GREEN}✓ Dependencies installed${NC}"
 echo ""
 echo -e "${YELLOW}Checking database schema...${NC}"
 if [ -f "drizzle.config.ts" ] || [ -f "drizzle.config.js" ]; then
-    # #180: schemat zakładają MIGRACJE (0005: rola i RLS, 0009: EXCLUDE kolizji).
-    # Sam push na świeżej bazie ich nie tworzy. db:push po migracjach domyka dryf
-    # i kończy się strażnikiem scripts/db-schema-guard.ts. Bez wyciszania błędów.
+    # #180/#188: schemat zakładają WYŁĄCZNIE MIGRACJE (0005: rola i RLS,
+    # 0009: EXCLUDE kolizji). Bez pusha: push po migracjach zdejmuje RLS
+    # (39× DISABLE ROW LEVEL SECURITY). Strażnik sprawdza wynik. Bez wyciszania.
     echo -e "${YELLOW}Running database migrations...${NC}"
-    if ! { pnpm db:migrate && pnpm db:push; }; then
+    if ! { pnpm db:migrate && pnpm exec tsx scripts/db-schema-guard.ts; }; then
         echo -e "${RED}✗ Database setup failed — fix the error above (POSTGRES_URL, docker compose up -d) and rerun${NC}"
         exit 1
     fi

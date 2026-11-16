@@ -207,13 +207,13 @@ pnpm run start        # Start production server
 pnpm run lint         # Run ESLint
 pnpm run db:generate  # Generate database migrations
 pnpm run db:migrate   # Run database migrations
-pnpm run db:push      # Push schema changes (ONLY after db:migrate; ends with the schema guard)
+pnpm run db:push      # Prototype only: refused unless the DB is empty (no tables, no migration journal)
 pnpm run db:studio    # Open Drizzle Studio (database GUI)
-pnpm run db:dev       # Same as db:push (after db:migrate)
-pnpm run db:reset     # Recreate local DB: DROP/CREATE (pos_dev or pos_reset_test) → migrate → push → guard
+pnpm run db:dev       # Same as db:push
+pnpm run db:reset     # Recreate local DB: DROP/CREATE (pos_dev or pos_reset_test) → migrate → guard (no push)
 ```
 
-Bazę od zera buduje `pnpm db:migrate` (`pnpm db:reset` i `init.sh` robią to same); `db:push` tylko po migracjach — sam push nie zakłada ograniczenia `appointments_no_overlap` ani ról i polityk RLS. Strażnik `scripts/db-schema-guard.ts` (koniec `db:push`/`db:dev`/`db:reset` i `pnpm test:pg`) pada, gdy go brak.
+Bazę od zera buduje `pnpm db:migrate` (`pnpm db:reset` i `init.sh` robią to same), bez `db:push` po migracjach — push nie zna ograniczenia `appointments_no_overlap` ani polityk RLS z 0005 i na zmigrowanej bazie je zdejmuje, dlatego `db:push`/`db:dev` działają tylko na pustej bazie prototypowej, a na każdej innej odmawiają (zmiany schematu: `db:generate` + `db:migrate`). Strażnik `scripts/db-schema-guard.ts` (koniec `db:reset` i `init.sh`, oraz `pnpm test:pg`) pada, gdy brakuje EXCLUDE albo RLS.
 
 ## 📖 Pages Overview
 

@@ -5,21 +5,27 @@
  * nie kasuje tabel, tylko usuwa wybrany PLIK migracji z `drizzle/` (i wpis w
  * journalu), a sam push nie zakłada EXCLUDE z 0009 ani roli i polityk RLS z 0005.
  *
- * Teraz, w tej kolejności (jak CI w `quality-gate.yml`):
+ * Teraz, w tej kolejności:
  * 1. `DROP DATABASE` + `CREATE DATABASE` przez bazę serwisową `postgres` — ta sama
  *    świeża baza, na której startuje CI;
- * 2. `drizzle-kit migrate`; 3. `drizzle-kit push` (domyka dryf, po migracjach
- *    nic nie zmienia — pomiar #180); 4. strażnik `scripts/db-schema-guard.ts`.
+ * 2. `drizzle-kit migrate`; 3. strażnik `scripts/db-schema-guard.ts`.
+ * BEZ `drizzle-kit push` po migracjach: schema.ts nie zna polityk RLS z 0005, więc
+ * push na zmigrowanej bazie robi 39× DISABLE ROW LEVEL SECURITY i DROP POLICY
+ * (pomiar #188, decyzja Olivera). Push jest tylko dla pustej bazy prototypowej.
  *
  * Bezpieczniki:
  * - nazwa bazy wyłącznie z twardej listy `RESET_ALLOWED_DATABASES` (domyślnie
  *   `pos_dev`); kroki 2–4 dostają POSTGRES_URL wskazujący TĘ bazę;
  * - host z `POSTGRES_URL` przez `checkSeedTarget` + `checkSeedClientOptions`
  *   (tylko localhost/127.0.0.1, nigdy Neon), serwer bez ustawień `neon.*`;
+ * - adres bez parametrów zapytania poza `sslmode` (B2): sterownik pg w
+ *   drizzle-kit bierze `?host=` z zapytania i połączyłby się z innym hostem niż
+ *   ten, który sprawdzają bezpieczniki; kroki dostają adres w ogóle bez zapytania;
  * - inne połączenia z bazą (np. `pnpm dev`) → odmowa, bez `WITH (FORCE)`.
  * Komunikaty bez URL, użytkownika i hasła.
  *
- *   POSTGRES_URL=postgresql://<user>:<hasło>@localhost:5432/pos_dev pnpm db:reset [pos_dev|pos_reset_test]
+ * Użycie: `pnpm db:reset [pos_dev|pos_reset_test]` z POSTGRES_URL lokalnej bazy
+ * (host localhost, jak w docker-compose.yml).
  */
 import { spawnSync } from "node:child_process";
 import postgres from "postgres";
@@ -29,22 +35,33 @@ import { SEED_SERVER_PROBE_SQL, checkSeedClientOptions, checkSeedTarget } from "
 export const RESET_ALLOWED_DATABASES = ["pos_dev", "pos_reset_test"] as const;
 export const RESET_DEFAULT_DATABASE = "pos_dev";
 
-/** Kroki po założeniu pustej bazy — kolejność jest sednem #180 (migrate PRZED push). */
+/** Kroki po założeniu pustej bazy: same migracje i strażnik — bez push (#188). */
 export const RESET_STEPS: readonly (readonly string[])[] = [
   ["pnpm", "exec", "drizzle-kit", "migrate"],
-  ["pnpm", "exec", "drizzle-kit", "push"],
   ["pnpm", "exec", "tsx", "scripts/db-schema-guard.ts"],
 ];
+
+/** Jedyny parametr zapytania dopuszczony w POSTGRES_URL (B2). */
+export const RESET_ALLOWED_QUERY_PARAMS = ["sslmode"] as const;
 
 export type ResetPlan =
   | { ok: true; database: string; targetUrl: string; adminUrl: string }
   | { ok: false; reason: string };
 
-/** Ten sam serwer i dane logowania, inna baza (ścieżka URL). */
+/** Ten sam serwer i dane logowania, inna baza (ścieżka URL), BEZ zapytania i fragmentu. */
 function withDatabase(url: string, database: string): string {
   const u = new URL(url);
   u.pathname = `/${database}`;
+  u.search = "";
+  u.hash = "";
   return u.toString();
+}
+
+/** Nazwy parametrów zapytania spoza `RESET_ALLOWED_QUERY_PARAMS` (bez wartości). */
+function disallowedQueryParams(url: string): string[] {
+  const allowed = new Set<string>(RESET_ALLOWED_QUERY_PARAMS);
+  const names = [...new URL(url).searchParams.keys()];
+  return [...new Set(names.filter((n) => !allowed.has(n.toLowerCase())))];
 }
 
 /** Czysta decyzja: którą bazę i pod jakim adresem resetujemy (bez łączenia się). */
@@ -64,16 +81,47 @@ export function planReset(
   const target = checkSeedTarget(connectionString, env, { subject: "db:reset" });
   if (!target.ok) return { ok: false, reason: `db:reset odmawia: ${target.reason}` };
   const url = connectionString!.trim();
+  const extra = disallowedQueryParams(url);
+  if (extra.length > 0) {
+    const shown = extra.map((n) => (/^[A-Za-z0-9_.-]{1,40}$/.test(n) ? n : "<nieprawidłowa nazwa>")).join(", ");
+    return {
+      ok: false,
+      reason: `db:reset odmawia: POSTGRES_URL ma parametry zapytania spoza listy (${shown}); dozwolony tylko ${RESET_ALLOWED_QUERY_PARAMS.join(", ")}`,
+    };
+  }
   return { ok: true, database, targetUrl: withDatabase(url, database), adminUrl: withDatabase(url, "postgres") };
 }
 
-async function main(): Promise<number> {
-  const plan = planReset(process.argv.slice(2), process.env.POSTGRES_URL, { VERCEL_ENV: process.env.VERCEL_ENV });
+/** Zmienne środowiska przekazywane krokom resetu. */
+export type ResetEnv = Record<string, string | undefined>;
+
+/** Zależności `resetMain` — wstrzykiwane w testach (L1, Leo: bez prawdziwej bazy i procesów). */
+export interface ResetDeps {
+  connect: (url: string) => postgres.Sql;
+  spawn: (cmd: string, args: readonly string[], env: ResetEnv) => { status: number | null };
+}
+
+const defaultDeps: ResetDeps = {
+  connect: (url) => postgres(url, { max: 1, prepare: false, connect_timeout: 5, onnotice: () => {} }),
+  spawn: (cmd, args, env) => spawnSync(cmd, [...args], { stdio: "inherit", env: env as NodeJS.ProcessEnv }),
+};
+
+/**
+ * Cały reset. Każdy krok (migrate, strażnik) dostaje POSTGRES_URL = `plan.targetUrl`
+ * — NIGDY adres z otoczenia: inaczej reset skasowałby pos_reset_test, a migrował
+ * pos_dev (mutant L1, Leo).
+ */
+export async function resetMain(
+  argv: readonly string[],
+  env: ResetEnv,
+  deps: ResetDeps = defaultDeps,
+): Promise<number> {
+  const plan = planReset(argv, env.POSTGRES_URL, { VERCEL_ENV: env.VERCEL_ENV });
   if (!plan.ok) {
     console.error(`[db-reset] ${plan.reason}`);
     return 1;
   }
-  const admin = postgres(plan.adminUrl, { max: 1, prepare: false, connect_timeout: 5, onnotice: () => {} });
+  const admin = deps.connect(plan.adminUrl);
   try {
     const client = checkSeedClientOptions(admin.options, { subject: "db:reset" });
     if (!client.ok) {
@@ -108,7 +156,7 @@ async function main(): Promise<number> {
 
   for (const [cmd, ...rest] of RESET_STEPS) {
     console.log(`[db-reset] ${[cmd, ...rest].join(" ")}`);
-    const r = spawnSync(cmd!, rest, { stdio: "inherit", env: { ...process.env, POSTGRES_URL: plan.targetUrl } });
+    const r = deps.spawn(cmd!, rest, { ...env, POSTGRES_URL: plan.targetUrl });
     if (r.status !== 0) {
       console.error(`[db-reset] Krok nieudany: ${rest.join(" ")} (kod ${r.status ?? "?"})`);
       return 1;
@@ -118,5 +166,5 @@ async function main(): Promise<number> {
 }
 
 if (process.argv[1]?.endsWith("db-reset-local.ts")) {
-  void main().then((code) => process.exit(code));
+  void resetMain(process.argv.slice(2), process.env).then((code) => process.exit(code));
 }

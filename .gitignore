@@ -57,6 +57,7 @@ nul
 !scripts/seed-host-guard.ts
 !scripts/db-schema-guard.ts
 !scripts/db-reset-local.ts
+!scripts/db-push-gate.ts
 # zapytania kontrolne przed migracjami (tylko odczyt), np. 0009-precheck.sql
 !/scripts/sql/
 /scripts/sql/*
