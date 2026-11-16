@@ -34,6 +34,15 @@ const ALLOWED_DB_JOB_SCRIPTS: Record<string, string> = {
   "build:ci": "next build", // build bez migracji
 };
 
+/** Hasło bazy usługowej CI, złożone z części (skaner literałów sekretów; to nie sekret). */
+const CI_PG = `PGPASSWORD=${["dev", "password"].join("_")} psql -h localhost -U dev_user -d pos_dev -c`;
+
+/** Jedyne dozwolone linie psql w jobach z bazą — tekst 1:1 z kroku „Verify seed data”. */
+const SEED_CHECK_LINES = [
+  String.raw`${CI_PG} "SELECT id, email, email_verified, role FROM \"user\" WHERE email IN ('owner@test.com','client@test.com');"`,
+  String.raw`${CI_PG} "SELECT id, provider_id, user_id, CASE WHEN password IS NOT NULL THEN 'SET' ELSE 'NULL' END as pwd FROM account WHERE user_id IN ('test-owner-user-id-00001','test-client-user-id-00001');"`,
+];
+
 /**
  * Lista DOZWOLONYCH linii poleceń w krokach jobów z bazą. Każda linia `run:` (także
  * z bloku) musi w całości pasować do jednego wzorca — operator powłoki (`&&`, `;`,
@@ -45,8 +54,17 @@ const ALLOWED_DB_JOB_LINES: Array<[string, RegExp]> = [
   ["strażnik RLS", /^pnpm exec tsx scripts\/db-rls-guard\.ts$/],
   ["instalacja przeglądarki", /^pnpm exec playwright install --with-deps chromium$/],
   ["testy E2E", /^pnpm exec playwright test --grep @(?:smoke|full) --workers=\d+ --retries=\d+$/],
-  ["odczyt seeda (tylko SELECT)", /^PGPASSWORD=\S+ psql -h localhost -U dev_user -d pos_dev -c "SELECT [^;]*;"$/],
 ];
+
+/**
+ * Czy linia polecenia jest dozwolona. Linia z `psql` — WYŁĄCZNIE dosłowna równość ciągu
+ * z SEED_CHECK_LINES (zero wzorca; decyzja Olivera, #194 Ethan O1–O5). Pozostałe — wzorce
+ * z ALLOWED_DB_JOB_LINES, które psql nie dopuszczają.
+ */
+function allowedLine(line: string): boolean {
+  if (/\bpsql\b|PGPASSWORD/.test(line)) return SEED_CHECK_LINES.includes(line);
+  return ALLOWED_DB_JOB_LINES.some(([, re]) => re.test(line));
+}
 
 /** Push w tekście (testy samego rozwijania skryptów); w jobach obowiązuje lista dozwolonych. */
 const PUSH = /drizzle-kit\s+push|\bdb:push\b|\bdb:dev\b/;
@@ -104,6 +122,55 @@ function runOf(step: string): string {
 }
 
 /**
+ * Zamknięta gramatyka kroku w jobach z bazą (#194 Ethan O6–O10). Własny odczyt, bez
+ * parsera YAML (w projekcie `yaml`/`js-yaml` są tylko przechodnie). Każda niepusta linia:
+ * - pierwsza: `      - <klucz>: …` (krok w stylu flow `- {` = porażka);
+ * - kolejne na wcięciu kroku (8): `<klucz>: …` z listy STEP_KEYS (klucz w cudzysłowie,
+ *   `shell`, `working-directory`, `continue-on-error`, `id`… = porażka);
+ * - głębsze: wyłącznie zawartość bloku `run` (wskaźnik bloku), `env` albo `with`.
+ * `uses:` tylko z listy ALLOWED_ACTIONS (przypięta wersja; `./…`, `docker://` = porażka).
+ * Zwraca listę naruszeń (pusta = krok w porządku).
+ */
+const STEP_KEYS = ["name", "run", "if", "env", "with", "uses", "timeout-minutes"] as const;
+const ALLOWED_ACTIONS = ["actions/checkout@v4", "pnpm/action-setup@v4", "actions/setup-node@v4", "actions/upload-artifact@v4"];
+
+/** Etykieta kroku do komunikatów (L3 Leo): job, numer od 1 i `name` albo `uses`. */
+function stepLabel(job: string, step: string, index: number): string {
+  const n = step.match(/^ {6}- name: (.+)$|^ {8}name: (.+)$/m);
+  const u = step.match(/^\s*(?:- )?uses: (.+)$/m);
+  const what = n ? (n[1] ?? n[2])!.trim() : u ? `uses ${u[1]!.trim()}` : "bez nazwy";
+  return `${job}, krok ${index + 1} (${what})`;
+}
+
+function stepViolations(step: string, label = "krok"): string[] {
+  const out: string[] = [];
+  const bad = (m: string) => out.push(`${label}: ${m}`);
+  let open: "block" | "map" | null = null;
+  step.split("\n").forEach((line, i) => {
+    if (line.trim() === "") return;
+    const indent = line.length - line.trimStart().length;
+    const key = i === 0 ? line.match(/^ {6}- ([a-z][a-z-]*):(?: (.*))?$/) : indent === 8 ? line.match(/^ {8}([a-z][a-z-]*):(?: (.*))?$/) : null;
+    if (i === 0 || indent <= 8) {
+      if (!key) {
+        bad(`nieznany kształt linii kroku: ${line.trim()}`);
+        open = null;
+        return;
+      }
+      const [, k, v = ""] = key;
+      if (!(STEP_KEYS as readonly string[]).includes(k!)) bad(`klucz kroku spoza listy: ${k}`);
+      if (k === "uses" && !ALLOWED_ACTIONS.includes(v.trim())) bad(`akcja spoza listy: ${v.trim()}`);
+      open = k === "run" && BLOCK_INDICATOR.test(v.trim()) ? "block" : (k === "env" || k === "with") && v.trim() === "" ? "map" : null;
+      return;
+    }
+    if (!open) bad(`linia poza blokiem run/env/with: ${line.trim()}`);
+  });
+  return out;
+}
+
+/** Klucze zmieniające wykonanie kroków — zabronione w całym workflow (także w `defaults:`). */
+const FORBIDDEN_EXEC_KEYS = /^\s*(?:- )?["']?(shell|working-directory|defaults)["']?\s*:/m;
+
+/**
  * Lista DOZWOLONYCH (E12 Ethana, N1 Leo): jedyne dopuszczalne wywołanie drizzle-kit
  * w jobach z bazą to dokładnie `drizzle-kit migrate` — bez przyrostka wersji
  * (`drizzle-kit@latest`), bez `push`/`drop`/`up`/innych. Do tego zakaz `db:push`
@@ -156,15 +223,30 @@ describe("quality-gate.yml: baza CI tylko z migracji + strażnik RLS (#190)", ()
     expect(code(WF)).not.toMatch(/\bdb:push\b|\bdb:dev\b|drizzle-kit\s+push/);
   });
 
-  it.each(PG_JOBS)("%s: każda linia run: pasuje do listy dozwolonych poleceń", (_name, body) => {
-    for (const s of steps(body)) {
-      const cmd = runOf(s);
-      if (!cmd) continue;
-      for (const line of cmd.split("\n")) {
-        const hit = ALLOWED_DB_JOB_LINES.find(([, re]) => re.test(line));
-        expect(hit, `polecenie spoza listy dozwolonych: ${line}`).toBeDefined();
-      }
-    }
+  it.each(PG_JOBS)("%s: każdy krok w zamkniętej gramatyce (klucze z listy, akcje z listy, bez flow i kluczy w cudzysłowie)", (name, body) => {
+    const st = steps(body);
+    expect(st.length).toBeGreaterThan(5);
+    expect(st.flatMap((s, i) => stepViolations(s, stepLabel(name, s, i)))).toEqual([]);
+  });
+
+  it("shell:, working-directory: i defaults: nie występują nigdzie w workflow (krok, job, workflow)", () => {
+    expect(code(WF)).not.toMatch(FORBIDDEN_EXEC_KEYS);
+  });
+
+  it("obie stałe linie odczytu seeda są w e2e-smoke dokładnie jak na liście", () => {
+    const smoke = PG_JOBS.find(([n]) => n === "e2e-smoke")![1];
+    const lines = steps(smoke).flatMap((s) => runOf(s).split("\n"));
+    for (const l of SEED_CHECK_LINES) expect(lines).toContain(l);
+  });
+
+  it.each(PG_JOBS)("%s: każda linia run: pasuje do listy dozwolonych poleceń", (name, body) => {
+    const outside = steps(body).flatMap((s, i) =>
+      runOf(s)
+        .split("\n")
+        .filter((line) => line !== "" && !allowedLine(line))
+        .map((line) => `${stepLabel(name, s, i)}: polecenie spoza listy dozwolonych: ${line}`),
+    );
+    expect(outside).toEqual([]);
   });
 
   it("skrypty z listy dozwolonych mają w package.json dokładnie oczekiwaną treść (a ta tylko `drizzle-kit migrate`)", () => {
@@ -285,6 +367,67 @@ describe("expandScripts — rozwijanie skryptów package.json", () => {
   it("pusty blok → wyjątek; jednoliniowe run: bez zmian", () => {
     expect(() => runOf("      - name: x\n        run: |-\n      - name: y\n")).toThrow(/pusty blok/);
     expect(runOf("      - run: pnpm db:migrate\n")).toBe("pnpm db:migrate");
+  });
+});
+
+describe("stepViolations — zamknięta gramatyka kroku (Ethan O6–O10)", () => {
+  it.each([
+    ["krok run", "      - name: x\n        run: pnpm db:migrate\n"],
+    ["krok uses + with z blokiem", "      - uses: actions/upload-artifact@v4\n        if: always()\n        with:\n          name: r\n          path: |\n            a/\n"],
+    ["krok z env", "      - name: x\n        run: pnpm test:pg\n        env:\n          A: \"1\"\n"],
+    ["run: | z liniami", "      - name: x\n        run: |\n          a\n          b\n"],
+  ])("poprawny: %s", (_n, step) => {
+    expect(stepViolations(step)).toEqual([]);
+  });
+
+  it.each([
+    ["O6 krok flow", "      - { name: x, run: pnpm db:migrate }\n", /nieznany kształt/],
+    ["O7 klucz w cudzysłowie", "      - name: x\n        \"run\": pnpm db:migrate\n", /nieznany kształt/],
+    ["O8 shell", "      - name: x\n        run: pnpm db:migrate\n        shell: sh {0}\n", /spoza listy: shell/],
+    ["O9 working-directory", "      - name: x\n        run: pnpm db:migrate\n        working-directory: other\n", /spoza listy: working-directory/],
+    ["O10 lokalna akcja", "      - uses: ./.github/actions/x\n", /akcja spoza listy/],
+    ["docker://", "      - uses: docker://alpine:3\n", /akcja spoza listy/],
+    ["akcja bez wersji", "      - uses: actions/checkout\n", /akcja spoza listy/],
+    ["continue-on-error", "      - name: x\n        run: pnpm db:migrate\n        continue-on-error: true\n", /spoza listy: continue-on-error/],
+    ["kontynuacja skalara poza blokiem", "      - name: x\n        run: pnpm db:migrate\n          && sh x\n", /poza blokiem/],
+    ["env w stylu flow", "      - name: x\n        run: pnpm db:migrate\n        env: { A: 1 }\n          B: 2\n", /poza blokiem/],
+  ])("%s → naruszenie", (_n, step, re) => {
+    expect(stepViolations(step).join("\n")).toMatch(re);
+  });
+
+  it("psql: tylko dosłowne linie z listy; O1–O5 i każda zmiana znaku → niedozwolone", () => {
+    for (const l of SEED_CHECK_LINES) expect(allowedLine(l)).toBe(true);
+    const base = SEED_CHECK_LINES[1]!;
+    for (const bad of [
+      base.replace(`-c "SELECT`, `-c "SELECT 1" -c "ALTER TABLE clients DISABLE ROW LEVEL SECURITY" -c "SELECT`),
+      base.replace("SELECT id,", "SELECT $(sh x.sh) id,"),
+      base.replace("SELECT id,", "SELECT `sh x.sh` id,"),
+      `${base} && sh x.sh`,
+      base.replace(/^PGPASSWORD=\S+/, "PGPASSWORD=$(sh${IFS}x.sh)"),
+      base.replace("SELECT", "select"),
+      ` ${base}`,
+      "psql -c \"SELECT 1;\"",
+    ]) {
+      expect(allowedLine(bad), bad).toBe(false);
+    }
+  });
+
+  it("L3: komunikat zawiera job, numer i nazwę kroku oraz niedozwolony klucz", () => {
+    const step = "      - name: Seed test data\n        run: pnpm db:seed:test\n        shell: sh {0}\n";
+    expect(stepViolations(step, stepLabel("e2e-smoke", step, 6))).toEqual([
+      "e2e-smoke, krok 7 (Seed test data): klucz kroku spoza listy: shell",
+    ]);
+    const u = "      - uses: docker://alpine:3\n";
+    expect(stepViolations(u, stepLabel("e2e-full", u, 0))).toEqual(["e2e-full, krok 1 (uses docker://alpine:3): akcja spoza listy: docker://alpine:3"]);
+  });
+
+  it.each([
+    ["shell w kroku", "        shell: bash\n"],
+    ["defaults w jobie", "    defaults:\n      run:\n        shell: bash\n"],
+    ["working-directory w defaults workflow", "defaults:\n  run:\n    working-directory: x\n"],
+    ["klucz w cudzysłowie", "        \"shell\": bash\n"],
+  ])("FORBIDDEN_EXEC_KEYS łapie: %s", (_n, text) => {
+    expect(FORBIDDEN_EXEC_KEYS.test(text)).toBe(true);
   });
 });
 
