@@ -53,6 +53,7 @@ nul
 *.jpeg
 /scripts/*
 !scripts/generate-pwa-icons.ts
+!scripts/db-rls-guard.ts
 !scripts/seed-test.ts
 !scripts/seed-host-guard.ts
 # zapytania kontrolne przed migracjami (tylko odczyt), np. 0009-precheck.sql
