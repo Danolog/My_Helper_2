@@ -86,16 +86,32 @@ suite("widoki w public: tylko SELECT dla ról aplikacji (#193 P0c-1)", () => {
     expect(await viewWriteGrants(h!.observer)).toEqual([]);
   });
 
-  it.each([
-    ["widok z GRANT INSERT dla myhelper_app", `CREATE VIEW public.${PROBE} AS SELECT 1 AS x; GRANT INSERT ON public.${PROBE} TO myhelper_app`, `${PROBE} (v): myhelper_app INSERT`],
-    ["widok z GRANT UPDATE dla PUBLIC (droga pośrednia)", `CREATE VIEW public.${PROBE} AS SELECT 1 AS x; GRANT UPDATE ON public.${PROBE} TO PUBLIC`, `${PROBE} (v): myhelper_app UPDATE`],
-    ["widok zmaterializowany z GRANT TRUNCATE", `CREATE MATERIALIZED VIEW public.${PROBE} AS SELECT 1 AS x; GRANT TRUNCATE ON public.${PROBE} TO myhelper_app`, `${PROBE} (m): myhelper_app TRUNCATE`],
-  ])("sonda w transakcji: %s → naruszenie nazwane", async (_n, ddl, expected) => {
-    expect(await inRolledBackTx(ddl)).toContain(expected);
+  // Sondy uwzględniają domyślne uprawnienia schematu: nowy widok może dostać prawa z automatu,
+  // więc sondy z jawnym grantem i sonda kontrolna zaczynają od REVOKE ALL (decyzja Ethana 16.11).
+  const VIEW = `CREATE VIEW public.${PROBE} AS SELECT 1 AS x`;
+  const MVIEW = `CREATE MATERIALIZED VIEW public.${PROBE} AS SELECT 1 AS x`;
+  const REVOKE = `REVOKE ALL ON public.${PROBE} FROM myhelper_app, PUBLIC`;
+  /** Naruszenia tylko dla myhelper_app (rola logowania dochodzi w P6). */
+  const forApp = (v: string[]) => v.filter((x) => x.includes(": myhelper_app "));
+
+  it("sonda w transakcji: goły CREATE VIEW bez grantów → naruszenia INSERT/UPDATE/DELETE (domyślne uprawnienia schematu)", async () => {
+    expect(forApp(await inRolledBackTx(VIEW))).toEqual([
+      `${PROBE} (v): myhelper_app DELETE`,
+      `${PROBE} (v): myhelper_app INSERT`,
+      `${PROBE} (v): myhelper_app UPDATE`,
+    ]);
   });
 
-  it("widok z samym GRANT SELECT (w transakcji) → bez naruszeń", async () => {
-    expect(await inRolledBackTx(`CREATE VIEW public.${PROBE} AS SELECT 1 AS x; GRANT SELECT ON public.${PROBE} TO myhelper_app`)).toEqual([]);
+  it.each([
+    ["REVOKE ALL, potem GRANT INSERT dla myhelper_app", `${VIEW}; ${REVOKE}; GRANT INSERT ON public.${PROBE} TO myhelper_app`, [`${PROBE} (v): myhelper_app INSERT`]],
+    ["REVOKE ALL, potem GRANT UPDATE dla PUBLIC (droga pośrednia)", `${VIEW}; ${REVOKE}; GRANT UPDATE ON public.${PROBE} TO PUBLIC`, [`${PROBE} (v): myhelper_app UPDATE`]],
+    ["widok zmaterializowany: REVOKE ALL, potem GRANT TRUNCATE", `${MVIEW}; ${REVOKE}; GRANT TRUNCATE ON public.${PROBE} TO myhelper_app`, [`${PROBE} (m): myhelper_app TRUNCATE`]],
+  ])("sonda w transakcji: %s → dokładnie jawne naruszenie", async (_n, ddl, expected) => {
+    expect(forApp(await inRolledBackTx(ddl))).toEqual(expected);
+  });
+
+  it("sonda kontrolna w transakcji: CREATE VIEW, REVOKE ALL, GRANT SELECT → bez naruszeń", async () => {
+    expect(await inRolledBackTx(`${VIEW}; ${REVOKE}; GRANT SELECT ON public.${PROBE} TO myhelper_app`)).toEqual([]);
   });
 
   it("po wycofaniu sondy widoku nie ma (test nie zostawia śladu)", async () => {
