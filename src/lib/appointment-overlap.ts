@@ -85,21 +85,65 @@ export const APPOINTMENT_NO_OVERLAP_CONSTRAINT = "appointments_no_overlap";
 
 /** SQLSTATE `exclusion_violation`. */
 const EXCLUSION_VIOLATION = "23P01";
+/** SQLSTATE `deadlock_detected`. */
+const DEADLOCK_DETECTED = "40P01";
+
+type PgErrorShape = {
+  code?: unknown;
+  constraint_name?: unknown;
+  constraint?: unknown;
+  where?: unknown;
+  cause?: unknown;
+};
 
 /**
- * Czy błąd zapisu to naruszenie `appointments_no_overlap` (→ 409 w trasie).
- * Drizzle opakowuje błąd sterownika w `DrizzleQueryError` (`cause`); postgres.js
- * podaje nazwę w `constraint_name`, node-postgres w `constraint`. Inne
- * naruszenia (np. CHECK `appointments_end_after_start`) to nie kolizja — 500.
+ * Pierwszy obiekt z polem `code` w łańcuchu `cause` (Drizzle opakowuje błąd
+ * sterownika w `DrizzleQueryError`). Najwyżej 5 poziomów — cykl się nie zapętli.
  */
-export function isAppointmentOverlapViolation(error: unknown): boolean {
+function driverError(error: unknown): PgErrorShape | undefined {
   let current: unknown = error;
   for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
-    const e = current as { code?: unknown; constraint_name?: unknown; constraint?: unknown; cause?: unknown };
-    if (e.code === EXCLUSION_VIOLATION) {
-      return (e.constraint_name ?? e.constraint) === APPOINTMENT_NO_OVERLAP_CONSTRAINT;
-    }
+    const e = current as PgErrorShape;
+    if (typeof e.code === "string") return e;
     current = e.cause;
+  }
+  return undefined;
+}
+
+/** SQLSTATE błędu bazy (do logów przy 500), `undefined` dla błędów spoza bazy. */
+export function dbErrorCode(error: unknown): string | undefined {
+  return driverError(error)?.code as string | undefined;
+}
+
+/**
+ * Czy błąd zapisu wizyty oznacza „termin zajęty” (→ 409 w trasie):
+ *
+ * - 23P01 na `appointments_no_overlap` (#171) — równoległy zapis zajął termin.
+ *   postgres.js podaje nazwę w `constraint_name`, node-postgres w `constraint`.
+ * - 40P01 (zakleszczenie) przy SPRAWDZANIU tego ograniczenia: dwie transakcje
+ *   przenoszą wizyty „na krzyż” i każda czeka na wynik drugiej (main `db71a43`,
+ *   QG 43818105194). Baza wycofuje jedną — dla klienta to ta sama kolizja.
+ *   Rozpoznanie po CONTEXT (pole `where` w postgres.js i node-postgres):
+ *   „while checking exclusion constraint on tuple … in relation "appointments"”.
+ *   40P01 nie ma nazwy ograniczenia. Cloud SQL i Neon zwracają komunikaty po
+ *   angielsku; przy innym `lc_messages` wzorzec nie pasuje i trasa zwraca 500
+ *   (jak przed poprawką) — test pg na prawdziwym zakleszczeniu to wychwyci.
+ *
+ * Wszystko inne to 500: inne zakleszczenia (zadatek, subskrypcje mają własne
+ * blokady), 40001, CHECK `appointments_end_after_start` (23514). Bez ponawiania.
+ */
+export function isAppointmentSlotTaken(error: unknown): boolean {
+  const e = driverError(error);
+  if (!e) return false;
+  if (e.code === EXCLUSION_VIOLATION) {
+    return (e.constraint_name ?? e.constraint) === APPOINTMENT_NO_OVERLAP_CONSTRAINT;
+  }
+  if (e.code === DEADLOCK_DETECTED) {
+    return (
+      typeof e.where === "string" &&
+      e.where.includes("exclusion constraint") &&
+      e.where.includes('relation "appointments"')
+    );
   }
   return false;
 }

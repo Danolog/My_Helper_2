@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { parseBody, depositCreateSessionSchema } from "@/lib/api-validation";
-import { appointmentConflictWhere, isAppointmentOverlapViolation, overlapsRange } from "@/lib/appointment-overlap";
+import {
+  appointmentConflictWhere,
+  dbErrorCode,
+  isAppointmentSlotTaken,
+  overlapsRange,
+} from "@/lib/appointment-overlap";
 // ADR-001 sekcja 4: publiczna ścieżka rezerwacji gościa (brak sesji właściciela salonu) — świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
@@ -464,15 +469,16 @@ export async function POST(request: Request) {
       },
     }, { status: 201 });
   } catch (error) {
-    // #171: równoległy zapis zajął termin (EXCLUDE w bazie); transakcja
+    // #171: równoległy zapis zajął termin (EXCLUDE w bazie: 23P01 albo 40P01
+    // przy jego sprawdzaniu); transakcja
     // wizyta + płatność wycofana w całości, sesja Stripe nie powstała.
-    if (isAppointmentOverlapViolation(error)) {
+    if (isAppointmentSlotTaken(error)) {
       return NextResponse.json(
         { success: false, error: "Wybrany termin jest juz zajety. Wybierz inny termin." },
         { status: 409 }
       );
     }
-    logger.error("Deposit session creation failed", { error });
+    logger.error("Deposit session creation failed", { error, code: dbErrorCode(error) });
     return NextResponse.json(
       { success: false, error: "Failed to create deposit payment session" },
       { status: 500 }

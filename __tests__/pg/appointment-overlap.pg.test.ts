@@ -7,7 +7,9 @@
  *   `*_end_after_start` (23514) na appointments i time_blocks;
  * - wyścig: równoległe zapisy tego samego terminu — dokładnie jeden przechodzi,
  *   reszta 409 (nie 500) — przez POST, PUT i pakiet;
- * - PUT /api/appointments/[id] i POST /api/appointments/book-package.
+ * - PUT /api/appointments/[id] i POST /api/appointments/book-package;
+ * - zakleszczenie przy sprawdzaniu EXCLUDE (40P01, main `db71a43`): przepis na
+ *   pewne 40P01 + wyścigi w pętli (PUT, POST, pakiet, zadatek) — zero 500.
  *
  * Mocki: sesja i kontekst salonu (atrapy, sterowane per opis), limiter, SMS,
  * logger i bramka zamrożenia modułu pakietów. Baza, RLS (forSalon), walidacja,
@@ -22,11 +24,12 @@
  */
 import { randomUUID } from "node:crypto";
 import { and, eq, gte, lt } from "drizzle-orm";
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { PUT as updateAppointment } from "@/app/api/appointments/[id]/route";
 import { POST as bookPackage } from "@/app/api/appointments/book-package/route";
 import { POST as createAppointment } from "@/app/api/appointments/route";
-import { APPOINTMENT_NO_OVERLAP_CONSTRAINT, isAppointmentOverlapViolation } from "@/lib/appointment-overlap";
+import { POST as createDepositSession } from "@/app/api/deposits/create-session/route";
+import { APPOINTMENT_NO_OVERLAP_CONSTRAINT, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
 import { appointments, clients, employees, promotions, salons, services, timeBlocks, user } from "@/lib/schema";
 // Godzina `hh:mm` w dniu `day` (UTC) marca 2099 r.; dzień spoza 1–31 = wyjątek (CI @ cf2ee2e: 2099-03-32).
 import { at, dayRange } from "./pg-dates";
@@ -70,6 +73,24 @@ vi.mock("@/lib/rate-limit", () => {
 vi.mock("@/lib/sms", () => ({ sendBookingConfirmationSms: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+}));
+// Zadatek (wyścig create-session): kwotę podmieniamy tylko w testach zadatku,
+// poza nimi prawdziwe wyliczenie (strażnik zadatku POST zostaje prawdziwy).
+// Stripe nieskonfigurowany → symulacja (ALLOW_PAYMENT_SIMULATION w teście).
+const deposit = vi.hoisted(() => ({
+  override: null as null | { ok: true; required: true; amount: number; serviceName: string },
+}));
+vi.mock("@/lib/deposit-calculation", async (orig) => {
+  const real = await orig<typeof import("@/lib/deposit-calculation")>();
+  return {
+    ...real,
+    calculateExpectedDeposit: ((...a: Parameters<typeof real.calculateExpectedDeposit>) =>
+      deposit.override ? Promise.resolve(deposit.override) : real.calculateExpectedDeposit(...a)) as typeof real.calculateExpectedDeposit,
+  };
+});
+vi.mock("@/lib/stripe", async (orig) => ({
+  ...(await orig<typeof import("@/lib/stripe")>()),
+  isStripeConfigured: () => false,
 }));
 
 const RUN = randomUUID().slice(0, 8);
@@ -188,6 +209,64 @@ async function dbError(p: Promise<unknown>): Promise<{ code?: string; constraint
 
 const statuses = (rs: { status: number }[]) => rs.map((r) => r.status).sort();
 
+/** `hh:mm` = `base` + `minutes` (w obrębie doby). */
+function hhmm(base: string, minutes: number): string {
+  const [h0, m0] = base.split(":").map(Number);
+  const total = h0! * 60 + m0! + minutes;
+  if (total < 0 || total >= 24 * 60) throw new Error(`hhmm: ${base} + ${minutes} min poza dobą`);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+async function depositSession(start: string, end: string) {
+  const res = await createDepositSession(
+    new Request("http://localhost/api/deposits/create-session", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        salonId,
+        employeeId,
+        serviceId,
+        startTime: start,
+        endTime: end,
+        depositAmount: 50,
+        paymentMethod: "stripe",
+        guestName: "IT Gość",
+        guestPhone: "500600700",
+      }),
+    })
+  );
+  return { status: res.status, body: (await res.json()) as { success: boolean; error?: string } };
+}
+
+/**
+ * Wyścig w pętli: w każdej iteracji dwa równoległe zapisy tego samego terminu.
+ * Zakleszczenie przy sprawdzaniu EXCLUDE (40P01) zdarza się mniej więcej raz na
+ * ~15 par (main `db71a43`), więc pojedynczy wyścig to za mało. Zwraca iteracje,
+ * w których wynik nie był „jeden zwycięzca + 409 z komunikatem”.
+ */
+async function raceLoop(
+  n: number,
+  pair: (i: number) => Promise<{ status: number; body: { error?: string } }[]>,
+  win: number,
+  msg: string
+): Promise<string[]> {
+  const bad: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const rs = await pair(i);
+    const st = statuses(rs);
+    const loser = rs.find((r) => r.status === 409);
+    if (st[0] !== win || st[1] !== 409 || st.length !== 2 || loser?.body.error !== msg) {
+      bad.push(`#${i}: [${st.join(", ")}] ${rs.map((r) => r.body.error ?? "").join(" | ")}`);
+    }
+  }
+  return bad;
+}
+
+/** Aktywne wizyty dnia nie nachodzą na siebie (lista posortowana po starcie). */
+function noOverlaps(day: string[]): boolean {
+  return day.every((r, i) => i === 0 || day[i - 1]!.split("–")[1]! <= r.split("–")[0]!);
+}
+
 const suite = h ? describe : describe.skip;
 
 suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
@@ -297,7 +376,7 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       expect(err.constraint_name).toBe(APPOINTMENT_NO_OVERLAP_CONSTRAINT);
     });
 
-    it("EXCLUDE: isAppointmentOverlapViolation rozpoznaje błąd w kształcie z Drizzle", async () => {
+    it("EXCLUDE: isAppointmentSlotTaken rozpoznaje błąd w kształcie z Drizzle", async () => {
       await insertAppt(at(11, "10:00"), at(11, "11:00"));
       let caught: unknown;
       try {
@@ -305,7 +384,72 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       } catch (e) {
         caught = e;
       }
-      expect(isAppointmentOverlapViolation(caught)).toBe(true);
+      expect(isAppointmentSlotTaken(caught)).toBe(true);
+    });
+
+    // Deterministyczne zakleszczenie (przepis Olivera): dwie transakcje przenoszą
+    // wizyty „na krzyż” na terminy X i Y. A: a→X, B: b→Y, potem A: c→Y (czeka na
+    // B), B: d→X (czeka na A). Po deadlock_timeout baza wycofuje jedną z 40P01 i
+    // CONTEXT „while checking exclusion constraint … in relation "appointments"”.
+    // Test na PRAWDZIWYM obiekcie błędu sterownika: zmiana lc_messages albo
+    // wersji Postgresa (inny tekst/pole) czerwieni CI, zamiast po cichu dać 500.
+    it("prawdziwe zakleszczenie przy sprawdzaniu EXCLUDE → 40P01, isAppointmentSlotTaken = true", async () => {
+      const D = 16;
+      const a = await insertAppt(at(D, "06:00"), at(D, "07:00"));
+      const b = await insertAppt(at(D, "07:00"), at(D, "08:00"));
+      const c = await insertAppt(at(D, "08:00"), at(D, "09:00"));
+      const d = await insertAppt(at(D, "09:00"), at(D, "10:00"));
+      const X = { startTime: new Date(at(D, "12:00")), endTime: new Date(at(D, "13:00")) };
+      const Y = { startTime: new Date(at(D, "14:00")), endTime: new Date(at(D, "15:00")) };
+
+      const gate = () => {
+        let open = () => {};
+        const p = new Promise<void>((r) => (open = r));
+        return { p, open: () => open() };
+      };
+      const aMoved = gate();
+      const bMoved = gate();
+      type Tx = Parameters<Parameters<NonNullable<typeof h>["db"]["transaction"]>[0]>[0];
+      const move = (tx: Tx, id: string, slot: typeof X) =>
+        tx.update(appointments).set(slot).where(eq(appointments.id, id));
+
+      const txA = h!.db.transaction(async (tx) => {
+        try {
+          await move(tx, a.id, X);
+        } finally {
+          aMoved.open();
+        }
+        await bMoved.p;
+        await move(tx, c.id, Y); // czeka na B (b w Y, niezatwierdzone)
+      });
+      const txB = h!.db.transaction(async (tx) => {
+        await aMoved.p;
+        try {
+          await move(tx, b.id, Y);
+        } finally {
+          bMoved.open();
+        }
+        await move(tx, d.id, X); // czeka na A (a w X, niezatwierdzone) → zakleszczenie
+      });
+      const settled = await Promise.allSettled([txA, txB]);
+
+      const rejected = settled.filter((s): s is PromiseRejectedResult => s.status === "rejected");
+      expect(rejected, "dokładnie jedna transakcja wycofana").toHaveLength(1);
+      expect(settled.filter((s) => s.status === "fulfilled")).toHaveLength(1);
+      const err = rejected[0]!.reason;
+      let driver = err as { code?: string; where?: string; cause?: unknown };
+      while (!driver.code && driver.cause) driver = driver.cause as typeof driver;
+      const where = String(driver.where);
+      expect(dbErrorCode(err), `kod: ${driver.code}, where: ${where}`).toBe("40P01");
+      expect(where, "CONTEXT w polu `where` sterownika").toContain("exclusion constraint");
+      expect(where).toContain('relation "appointments"');
+      expect(isAppointmentSlotTaken(err), `where: ${where}`).toBe(true);
+
+      // Zwycięska transakcja zatwierdzona w całości: po jednej wizycie w X i Y.
+      const day = await activeOnDay(D);
+      expect(day.filter((r) => r.startsWith(at(D, "12:00")))).toHaveLength(1);
+      expect(day.filter((r) => r.startsWith(at(D, "14:00")))).toHaveLength(1);
+      expect(noOverlaps(day)).toBe(true);
     });
 
     it("EXCLUDE przepuszcza: styk, anulowaną i innego pracownika", async () => {
@@ -388,6 +532,80 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       const day = await activeOnDay(22);
       expect(day.filter((r) => r.startsWith(at(22, "11:00")))).toHaveLength(1);
     });
+
+    it("wyścig w pętli: 40 × dwie wizyty przenoszone równolegle → zero 500, w każdej iteracji jedna 200 i jedna 409", async () => {
+      // Źródła: dzień 18, co 20 min (a i b po 10 min); cele: dzień 19, co 15 min.
+      const bad = await raceLoop(
+        40,
+        async (i) => {
+          const a = await insertAppt(at(18, hhmm("06:00", i * 20)), at(18, hhmm("06:10", i * 20)));
+          const b = await insertAppt(at(18, hhmm("06:10", i * 20)), at(18, hhmm("06:20", i * 20)));
+          const target = { startTime: at(19, hhmm("06:00", i * 15)), endTime: at(19, hhmm("06:15", i * 15)) };
+          return Promise.all([put(a.id, target), put(b.id, target)]);
+        },
+        200,
+        MSG
+      );
+      expect(bad, bad.join("\n")).toEqual([]);
+      const day = await activeOnDay(19);
+      expect(day).toHaveLength(40);
+      expect(noOverlaps(day)).toBe(true);
+    }, 120_000);
+  });
+
+  describe("POST /api/appointments — wyścig w pętli (gość)", () => {
+    beforeEach(() => {
+      session.ctx = null;
+    });
+
+    it("40 × dwie równoległe rezerwacje tego samego terminu → zero 500, w każdej iteracji jedna 201 i jedna 409", async () => {
+      const bad = await raceLoop(
+        40,
+        (i) => {
+          const s = at(23, hhmm("06:00", i * 15));
+          const e = at(23, hhmm("06:15", i * 15));
+          return Promise.all([post(s, e), post(s, e)]);
+        },
+        201,
+        MSG
+      );
+      expect(bad, bad.join("\n")).toEqual([]);
+      const day = await activeOnDay(23);
+      expect(day).toHaveLength(40);
+      expect(noOverlaps(day)).toBe(true);
+    }, 120_000);
+  });
+
+  describe("POST /api/deposits/create-session — wyścig (gość, symulacja płatności)", () => {
+    const DEP_MSG = "Wybrany termin jest juz zajety. Wybierz inny termin.";
+    beforeEach(() => {
+      session.ctx = null;
+      deposit.override = { ok: true, required: true, amount: 50, serviceName: "IT Usługa 30" };
+      vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
+      vi.stubEnv("VERCEL", "");
+      vi.stubEnv("K_SERVICE", "");
+    });
+    afterEach(() => {
+      deposit.override = null;
+      vi.unstubAllEnvs();
+    });
+
+    it("10 × dwie równoległe sesje zadatku na ten sam termin → zero 500, w każdej iteracji jedna 201 i jedna 409", async () => {
+      const bad = await raceLoop(
+        10,
+        (i) => {
+          const s = at(28, hhmm("06:00", i * 15));
+          const e = at(28, hhmm("06:15", i * 15));
+          return Promise.all([depositSession(s, e), depositSession(s, e)]);
+        },
+        201,
+        DEP_MSG
+      );
+      expect(bad, bad.join("\n")).toEqual([]);
+      const day = await activeOnDay(28);
+      expect(day).toHaveLength(10);
+      expect(noOverlaps(day)).toBe(true);
+    }, 120_000);
   });
 
   describe("POST /api/appointments/book-package (właściciel, RLS)", () => {
@@ -423,5 +641,22 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
         `${at(27, "10:30")}–${at(27, "11:15")}`,
       ]);
     });
+
+    it("wyścig w pętli: 10 × dwa pakiety równolegle → zero 500, w każdej iteracji jeden 201 i jeden 409", async () => {
+      // Pakiet = 75 min; starty co 90 min od 05:00 (ostatni 18:30–19:45).
+      const bad = await raceLoop(
+        10,
+        (i) => {
+          const s = at(24, hhmm("05:00", i * 90));
+          return Promise.all([book(s), book(s)]);
+        },
+        201,
+        MSG
+      );
+      expect(bad, bad.join("\n")).toEqual([]);
+      const day = await activeOnDay(24);
+      expect(day).toHaveLength(20); // 10 pakietów × 2 wizyty, bez połowicznych
+      expect(noOverlaps(day)).toBe(true);
+    }, 120_000);
   });
 });

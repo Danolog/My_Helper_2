@@ -21,6 +21,7 @@ import {
   TEST_IDS,
 } from "./helpers";
 import { matchesPredicate } from "./predicate-tree";
+import { deadlock, wrapped } from "./deadlock-fixture";
 
 // -------------------------------------------------------
 // Mocks - must be declared before importing route handlers
@@ -2876,6 +2877,12 @@ const dbError = (code: string, constraint_name: string) =>
     cause: Object.assign(new Error("db"), { code, constraint_name }),
   });
 
+/** Spy na logger.error (prawdziwy albo zamockowany moduł) — 500 ma trafić do logu z kodem błędu. */
+async function spyLoggerError() {
+  const { logger } = await import("@/lib/logger");
+  return vi.spyOn(logger, "error");
+}
+
 describe("POST /api/appointments — wyścig odrzucony przez bazę (#171)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -2921,6 +2928,25 @@ describe("POST /api/appointments — wyścig odrzucony przez bazę (#171)", () =
     const { status } = await postRejected(new Error("connection reset"));
     expect(status).toBe(500);
   });
+
+  it("POST: 40P01 przy sprawdzaniu EXCLUDE (zakleszczenie, db71a43) → 409 z komunikatem kolizji", async () => {
+    const { status, body } = await postRejected(wrapped(deadlock()));
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+    expect(mockDbInsert).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["40P01 bez kontekstu", "40P01", deadlock(null)],
+    ["40P01 innej relacji", "40P01", deadlock('while checking exclusion constraint on tuple (1,2) in relation "payments"')],
+    ["40001 z kontekstem EXCLUDE", "40001", { ...deadlock(), code: "40001" }],
+  ])("POST: %s → 500, w logu kod błędu", async (_n, code, cause) => {
+    const spy = await spyLoggerError();
+    const { status } = await postRejected(wrapped(cause));
+    expect(status).toBe(500);
+    expect(spy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ code }));
+    spy.mockRestore();
+  });
 });
 
 describe("PUT /api/appointments/[id] — wyścig odrzucony przez bazę (#171)", () => {
@@ -2956,5 +2982,24 @@ describe("PUT /api/appointments/[id] — wyścig odrzucony przez bazę (#171)", 
   it("inny błąd bazy → 500", async () => {
     const { status } = await putRejected(dbError("23505", "appointments_pkey"));
     expect(status).toBe(500);
+  });
+
+  it("PUT: 40P01 przy sprawdzaniu EXCLUDE (zakleszczenie, db71a43) → 409 z komunikatem kolizji", async () => {
+    const { status, body } = await putRejected(wrapped(deadlock()));
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["40P01 bez kontekstu", "40P01", deadlock(null)],
+    ["40P01 innej relacji", "40P01", deadlock('while checking exclusion constraint on tuple (1,2) in relation "payments"')],
+    ["40001 z kontekstem EXCLUDE", "40001", { ...deadlock(), code: "40001" }],
+  ])("PUT: %s → 500, w logu kod błędu", async (_n, code, cause) => {
+    const spy = await spyLoggerError();
+    const { status } = await putRejected(wrapped(cause));
+    expect(status).toBe(500);
+    expect(spy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ code }));
+    spy.mockRestore();
   });
 });
