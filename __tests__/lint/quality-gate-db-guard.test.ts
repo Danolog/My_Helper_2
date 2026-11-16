@@ -13,7 +13,7 @@
  *   (po Playwrightcie, `if: ${{ !cancelled() }}`), tak żeby RLS zdjęte w trakcie
  *   joba w dowolnej postaci dawało czerwony job.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -66,8 +66,23 @@ function allowedLine(line: string): boolean {
   return ALLOWED_DB_JOB_LINES.some(([, re]) => re.test(line));
 }
 
-/** Push w tekście (testy samego rozwijania skryptów); w jobach obowiązuje lista dozwolonych. */
-const PUSH = /drizzle-kit\s+push|\bdb:push\b|\bdb:dev\b/;
+/**
+ * Push w tekście polecenia (po rozwinięciu skryptów), po TOKENACH (#194 runda 4, Oliver):
+ * w jednym poleceniu (między operatorami powłoki) token `drizzle-kit` — także ze ścieżką
+ * (`node_modules/.bin/drizzle-kit`) albo wersją (`drizzle-kit@latest`) — i dalej token
+ * `push` (np. `drizzle-kit --config x push --force`). Do tego nazwy `db:push…` i `db:dev`.
+ */
+function isPush(text: string): boolean {
+  const unq = (t: string) => t.replace(/^["']+|["']+$/g, "");
+  const viaKit = text.split(/[\n;&|()`]+/).some((seg) => {
+    const t = seg.trim().split(/\s+/).map(unq);
+    const i = t.findIndex((x) => /(?:^|\/)drizzle-kit(?:@\S*)?$/.test(x));
+    return i >= 0 && t.slice(i + 1).includes("push");
+  });
+  return viaKit || /\bdb:(?:push|dev)\b/.test(text);
+}
+
+const PUSH = { test: isPush };
 
 /** Bez linii komentarza YAML — komentarz o db:push nie jest krokiem. */
 const code = (s: string) =>
@@ -78,9 +93,16 @@ const code = (s: string) =>
 
 /** Joby najwyższego poziomu: nazwa → treść (wcięcie 2 spacje pod `jobs:`). Domyślnie quality-gate.yml. */
 function jobs(wf: string = WF): Map<string, string> {
-  const body = wf.slice(wf.indexOf("\njobs:\n") + 7);
+  const at = wf.indexOf("\njobs:\n");
+  if (at < 0) throw new Error("brak klucza jobs: w workflow");
+  const body = wf.slice(at + 7);
   const out = new Map<string, string>();
-  const heads = [...body.matchAll(/^ {2}([a-z0-9_-]+):\s*$/gm)];
+  const HEAD = /^ {2}["']?([A-Za-z0-9_-]+)["']?:[ \t]*(?:&\S+[ \t]*)?(?:#.*)?$/;
+  // Każda linia na wcięciu 2 to nagłówek joba — inny kształt = porażka, nie sklejenie z poprzednim jobem.
+  for (const l of body.split("\n")) {
+    if (/^ {2}\S/.test(l) && !l.trim().startsWith("#") && !HEAD.test(l)) throw new Error(`nieznany kształt nagłówka joba: ${l.trim()}`);
+  }
+  const heads = [...body.matchAll(new RegExp(HEAD.source, "gm"))];
   heads.forEach((m, i) => {
     const end = i + 1 < heads.length ? heads[i + 1]!.index : body.length;
     out.set(m[1]!, body.slice(m.index, end));
@@ -90,7 +112,9 @@ function jobs(wf: string = WF): Map<string, string> {
 
 /** Kroki joba (każdy zaczyna się od `      - ` pod `    steps:`), bez komentarzy. */
 function steps(job: string): string[] {
-  const s = code(job.slice(job.indexOf("\n    steps:\n")));
+  const at = job.indexOf("\n    steps:\n");
+  if (at < 0) return [];
+  const s = code(job.slice(at));
   return s.split(/\n(?= {6}- )/).slice(1);
 }
 
@@ -188,7 +212,7 @@ function schemaViolations(text: string): string[] {
 /**
  * Rozwinięcie polecenia przez skrypty package.json, rekurencyjnie: wynik to tekst
  * polecenia i treści wszystkich osiągalnych skryptów. Znane kształty (obecne w repo):
- * - `pnpm exec <polecenie…>` — polecenie zostaje w tekście (sprawdzane wprost);
+ * - `pnpm exec <polecenie…>` / `pnpm dlx <pakiet…>` — polecenie zostaje w tekście (sprawdzane wprost);
  * - `pnpm install [--flagi]`, `pnpm audit [--flagi]` (polecenia wbudowane pnpm);
  * - `pnpm <skrypt>` / `pnpm run <skrypt>` ze skryptem z package.json.
  * Każdy inny kształt (`pnpm -r …`, `pnpm --filter …`, `pnpm run -r …`, nieznany
@@ -200,7 +224,7 @@ function expandScripts(cmd: string, scripts: Record<string, string>, seen: strin
   if (/\b(?:npm\s+run|yarn)\b/.test(cmd)) throw new Error(`nieznany kształt (npm run / yarn): ${cmd}`);
   for (const m of cmd.matchAll(/\bpnpm\b((?:\s+[^\s&|;]+)*)/g)) {
     const [first, second] = m[1]!.trim().split(/\s+/);
-    if (first === "exec") continue;
+    if (first === "exec" || first === "dlx") continue;
     if ((first === "install" || first === "audit") && (second === undefined || second.startsWith("--"))) continue;
     const name = first === "run" ? second : first;
     if (!name || name.startsWith("-") || !Object.prototype.hasOwnProperty.call(scripts, name)) {
@@ -215,59 +239,68 @@ function expandScripts(cmd: string, scripts: Record<string, string>, seen: strin
 /** Jedyne joby, które mogą mieć bazę — objęte listą dozwolonych i strażnikami. */
 const DB_JOBS = ["e2e-full", "e2e-smoke"];
 
-/** Obraz Postgresa: `postgres` albo `pgvector` (z rejestrem/przestrzenią, tagiem, digestem). */
-const PG_IMAGE = /^(?:[\w.-]+\/)*(?:postgres|pgvector)(?::[\w.-]+)?(?:@sha256:[0-9a-f]+)?$/;
+const QG = "quality-gate.yml";
+
+/** WSZYSTKIE pliki workflow repo (nowy plik wchodzi do pętli automatycznie): [nazwa, treść]. */
+const WF_DIR = join(ROOT, ".github/workflows");
+const WORKFLOWS: Array<[string, string]> = readdirSync(WF_DIR)
+  .filter((f) => /\.ya?ml$/.test(f))
+  .sort()
+  .map((f) => [f, readFileSync(join(WF_DIR, f), "utf8")]);
 
 /**
- * Usługi joba z `services:`: [nazwa, obraz]. Rozpoznanie po obrazie, nie po nazwie
- * usługi (#194 runda 4, mutant R3 Leo: usługa `db:`). Linia na wcięciu usługi w innym
- * kształcie niż `<nazwa>:` (np. styl flow) albo usługa bez `image:` = obraz nieznany.
- */
-function servicesOf(body: string): Array<[string, string | undefined]> {
-  const at = body.indexOf("\n    services:\n");
-  if (at < 0) return [];
-  const out: Array<[string, string | undefined]> = [];
-  for (const line of code(body.slice(at + "\n    services:\n".length)).split("\n")) {
-    if (line.trim() === "") continue;
-    const indent = line.length - line.trimStart().length;
-    if (indent <= 4) break;
-    if (indent === 6) {
-      const n = line.match(/^ {6}([A-Za-z0-9_-]+):\s*$/);
-      out.push([n ? n[1]! : line.trim(), undefined]);
-    } else if (indent === 8 && out.length > 0) {
-      const img = line.match(/^ {8}image:\s*["']?([^"'\s]+)["']?\s*$/);
-      if (img) out[out.length - 1]![1] = img[1];
-    }
-  }
-  return out;
-}
-
-/**
- * Po czym job jest „jobem z bazą” (#194 runda 4, Leo): usługa z obrazem Postgresa
- * ALBO `POSTGRES_URL` w env joba lub kroku. Zwraca powody (pusta lista = job bez bazy).
+ * Po czym job jest „jobem z bazą” (#194 runda 4, Oliver + Leo): sam klucz `services:`
+ * albo `container:` na poziomie joba (bez rozpoznawania obrazów) ALBO `POSTGRES_URL`
+ * w env joba lub kroku. Zwraca powody (pusta lista = job bez bazy).
  */
 function dbReasons(body: string): string[] {
-  const out = servicesOf(body)
-    .filter(([, image]) => image !== undefined && PG_IMAGE.test(image))
-    .map(([svc, image]) => `usługa ${svc}, obraz ${image}`);
-  if (/^\s+["']?POSTGRES_URL["']?\s*:/m.test(code(body))) out.push("POSTGRES_URL w env");
+  const c = code(body);
+  const out: string[] = [];
+  if (/^ {4}["']?services["']?\s*:/m.test(c)) out.push("services:");
+  if (/^ {4}["']?container["']?\s*:/m.test(c)) out.push("container:");
+  if (/^\s+["']?POSTGRES_URL["']?\s*:/m.test(c)) out.push("POSTGRES_URL w env");
   return out;
 }
 
-/** Naruszenia poza DB_JOBS: job z bazą albo usługa o nierozpoznanym obrazie. */
-function jobServiceViolations(name: string, body: string): string[] {
-  if (DB_JOBS.includes(name)) return [];
-  const reasons = dbReasons(body);
-  const out = reasons.length ? [`nowy job z bazą: dodaj go do testu i strażników: ${name} (${reasons.join("; ")})`] : [];
-  for (const [svc, image] of servicesOf(body)) {
-    if (!image || !PG_IMAGE.test(image)) out.push(`usługa o nierozpoznanym obrazie w jobie ${name}: ${svc} (obraz ${image ?? "brak"})`);
-  }
-  return out;
+/** Job z bazą poza parą {e2e-smoke, e2e-full} z quality-gate.yml (w każdym pliku workflow). */
+function dbJobViolations(file: string, wf: string): string[] {
+  return [...jobs(wf)].flatMap(([name, body]) => {
+    if (file === QG && DB_JOBS.includes(name)) return [];
+    const reasons = dbReasons(body);
+    return reasons.length ? [`${file}: nowy job z bazą: dodaj go do testu i strażników: ${name} (${reasons.join(", ")})`] : [];
+  });
 }
 
-/** Naruszenia jobów z bazą w całym danym workflow (każdy job). */
-function dbJobViolations(wf: string): string[] {
-  return [...jobs(wf)].flatMap(([name, body]) => jobServiceViolations(name, body));
+/**
+ * `uses:` na poziomie joba (reusable workflow). W quality-gate.yml zabronione. W innych
+ * plikach tylko lokalny `./.github/workflows/<plik>.yml`, który jest w repo (a więc w pętli);
+ * workflow z innego repo albo nieistniejący plik = porażka.
+ */
+function jobUsesViolations(file: string, wf: string, files: string[]): string[] {
+  return [...jobs(wf)].flatMap(([name, body]) => {
+    const m = code(body).match(/^ {4}["']?uses["']?\s*:\s*["']?([^"'\s]+)/m);
+    if (!m) return [];
+    const local = m[1]!.match(/^\.\/\.github\/workflows\/([^/]+\.ya?ml)$/);
+    if (file === QG) return [`${file}: uses: na poziomie joba zabronione w quality-gate.yml: ${name} (${m[1]})`];
+    return local && files.includes(local[1]!) ? [] : [`${file}: uses: joba spoza plików workflow tego repo: ${name} (${m[1]})`];
+  });
+}
+
+/**
+ * Kotwice i aliasy YAML (`&nazwa`, `*nazwa` jako wartość/element, klucz scalania `<<:`).
+ * Dopasowanie składni YAML (po `klucz: ` albo `- ` na początku wartości, element flow),
+ * nie każdego `&`/`*` — `&&` w run:, globy (`*.png`, `**`) i `${x[*]}` nie są kotwicami.
+ */
+const YAML_ANCHOR: Array<[string, RegExp]> = [
+  ["kotwica", /^\s*(?:-\s+|["']?[^\s"'#-][^:#]*["']?:\s+)&[A-Za-z0-9_.-]+(?:\s|$)/],
+  ["alias", /^\s*(?:-\s+|["']?[^\s"'#-][^:#]*["']?:\s+)\*[A-Za-z0-9_.-]+\s*(?:#.*)?$/],
+  ["alias we flow", /[[{,]\s*\*[A-Za-z0-9_.-]+\s*[,\]}]/],
+  ["klucz scalania <<", /^\s*(?:-\s+)?["']?<<["']?\s*:/],
+];
+function anchorViolations(file: string, wf: string): string[] {
+  return code(wf)
+    .split("\n")
+    .flatMap((l) => YAML_ANCHOR.filter(([, re]) => re.test(l)).map(([what]) => `${file}: ${what} YAML: ${l.trim()}`));
 }
 
 /**
@@ -278,16 +311,41 @@ function pushViolations(wf: string, scripts: Record<string, string>): string[] {
   return [...jobs(wf)].flatMap(([name, body]) =>
     steps(body).flatMap((s, i) => {
       const cmd = runOf(s);
-      return cmd && PUSH.test(expandScripts(cmd, scripts)) ? [`${stepLabel(name, s, i)}: push w poleceniu: ${cmd}`] : [];
+      return cmd && isPush(expandScripts(cmd, scripts)) ? [`${stepLabel(name, s, i)}: push w poleceniu: ${cmd}`] : [];
     }),
   );
 }
 
 const PG_JOBS = [...jobs()].filter(([, body]) => dbReasons(body).length > 0);
 
+describe("wszystkie pliki .github/workflows: bez push, bez baz poza parą, bez kotwic (#194 runda 4)", () => {
+  const files = WORKFLOWS.map(([f]) => f);
+
+  it("pętla obejmuje każdy plik workflow (dziś co najmniej trzy, w tym quality-gate.yml)", () => {
+    expect(files).toContain(QG);
+    expect(files.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(WORKFLOWS)("%s: żaden krok — także przez skrypty package.json — nie robi drizzle-kit push / db:push / db:dev", (_f, wf) => {
+    expect(pushViolations(wf, PKG.scripts)).toEqual([]);
+  });
+
+  it.each(WORKFLOWS)("%s: brak jobów z bazą (services:/container:/POSTGRES_URL) poza parą e2e-smoke/e2e-full z quality-gate.yml", (f, wf) => {
+    expect(dbJobViolations(f, wf)).toEqual([]);
+  });
+
+  it.each(WORKFLOWS)("%s: uses: na poziomie joba tylko do lokalnego pliku workflow (w quality-gate.yml wcale)", (f, wf) => {
+    expect(jobUsesViolations(f, wf, files)).toEqual([]);
+  });
+
+  it.each(WORKFLOWS)("%s: bez kotwic, aliasów i kluczy scalania YAML", (f, wf) => {
+    expect(anchorViolations(f, wf)).toEqual([]);
+  });
+});
+
 describe("quality-gate.yml: baza CI tylko z migracji + strażnik RLS (#190)", () => {
-  it("joby z bazą (obraz usługi postgres/pgvector albo POSTGRES_URL w env) to dokładnie e2e-smoke i e2e-full; poza nimi brak usług o nierozpoznanym obrazie", () => {
-    expect(dbJobViolations(WF)).toEqual([]);
+  it("joby z bazą (services:/container:/POSTGRES_URL) to dokładnie e2e-smoke i e2e-full", () => {
+    expect(dbJobViolations(QG, WF)).toEqual([]);
     expect(PG_JOBS.map(([n]) => n).sort()).toEqual(DB_JOBS);
   });
 
@@ -423,9 +481,28 @@ describe("expandScripts — rozwijanie skryptów package.json", () => {
 
   it("realne package.json: pnpm db:push / db:dev / build / check rozwijają się bez wyjątku; push wykryty", () => {
     expect(expandScripts("pnpm db:push", PKG.scripts)).toMatch(/drizzle-kit\s+push/);
-    expect(expandScripts("pnpm db:dev", PKG.scripts)).toMatch(PUSH);
-    expect(expandScripts("pnpm build", PKG.scripts)).not.toMatch(PUSH);
-    expect(expandScripts("pnpm check", PKG.scripts)).not.toMatch(PUSH);
+    expect(isPush(expandScripts("pnpm db:dev", PKG.scripts))).toBe(true);
+    expect(isPush(expandScripts("pnpm build", PKG.scripts))).toBe(false);
+    expect(isPush(expandScripts("pnpm check", PKG.scripts))).toBe(false);
+  });
+
+  it.each([
+    ["pnpm exec drizzle-kit push", true],
+    ["pnpm dlx drizzle-kit@0.31.0 push", true],
+    ["npx drizzle-kit@latest push", true],
+    ["drizzle-kit push --force", true],
+    ["drizzle-kit --config drizzle.config.ts push", true],
+    ["node_modules/.bin/drizzle-kit push", true],
+    ["\"drizzle-kit\" 'push'", true],
+    ["tsx a.ts && drizzle-kit push", true],
+    ["pnpm db:push:force", true],
+    ["pnpm db:dev", true],
+    ["drizzle-kit migrate", false],
+    ["drizzle-kit migrate && docker push img", false],
+    ["docker push img", false],
+    ["git push origin main", false],
+  ])("isPush po tokenach: %j → %s", (text, push) => {
+    expect(isPush(text)).toBe(push);
   });
 
   it.each([["|"], ["|-"], ["|+"], [">"], [">-"], [">+"], ["|2"], [">2-"], ["|+2"]])(
@@ -508,26 +585,66 @@ describe("stepViolations — zamknięta gramatyka kroku (Ethan O6–O10)", () =>
   });
 });
 
-describe("jobServiceViolations — job z bazą poza e2e-smoke/e2e-full (#194 runda 4, R3 Leo)", () => {
-  const job = (extra: string) => `  e2e-extra:\n    name: x\n    runs-on: ubuntu-24.04\n${extra}    steps:\n      - run: pnpm test:pg\n`;
+describe("joby z bazą, uses: joba, kotwice YAML (#194 runda 4)", () => {
+  const wf = (name: string, extra: string) =>
+    `name: x\non: push\njobs:\n  ${name}:\n    name: x\n    runs-on: ubuntu-24.04\n${extra}    steps:\n      - run: pnpm test:pg\n`;
   it.each([
-    ["usługa db: z pgvector", "    services:\n      db:\n        image: pgvector/pgvector:pg18\n", /nowy job z bazą: dodaj go do testu i strażników: e2e-extra \(usługa db/],
-    ["usługa z postgres w cudzysłowie", "    services:\n      x:\n        image: 'postgres:18'\n", /nowy job z bazą.*e2e-extra/],
-    ["obraz z rejestru", "    services:\n      x:\n        image: docker.io/library/postgres:16-alpine\n", /nowy job z bazą/],
+    ["usługa db: z pgvector", "    services:\n      db:\n        image: pgvector/pgvector:pg18\n", /nowy job z bazą: dodaj go do testu i strażników: e2e-extra \(services:\)/],
+    ["usługa o dowolnym obrazie", "    services:\n      cache:\n        image: redis:7\n", /nowy job z bazą.*e2e-extra/],
+    ["services w cudzysłowie", "    \"services\":\n      db:\n        image: x\n", /nowy job z bazą/],
+    ["container: postgres", "    container: postgres:18\n", /nowy job z bazą.*\(container:\)/],
     ["POSTGRES_URL w env joba", "    env:\n      POSTGRES_URL: postgresql://localhost/x\n", /nowy job z bazą.*POSTGRES_URL w env/],
-    ["nierozpoznany obraz", "    services:\n      cache:\n        image: redis:7\n", /nierozpoznanym obrazie w jobie e2e-extra: cache \(obraz redis:7\)/],
-    ["usługa bez image", "    services:\n      db:\n        ports:\n          - 5432:5432\n", /nierozpoznanym obrazie.*obraz brak/],
-    ["usługa w stylu flow", "    services:\n      db: { image: postgres }\n", /nierozpoznanym obrazie/],
   ])("%s → porażka", (_n, extra, re) => {
-    expect(jobServiceViolations("e2e-extra", job(extra)).join("\n")).toMatch(re);
+    expect(dbJobViolations(QG, wf("e2e-extra", extra)).join("\n")).toMatch(re);
   });
 
-  it("POSTGRES_URL w env kroku → job z bazą; job bez bazy i usług → bez naruszeń; e2e-smoke/e2e-full zwolnione", () => {
-    const stepEnv = "  e2e-extra:\n    steps:\n      - run: pnpm test:pg\n        env:\n          POSTGRES_URL: x\n";
-    expect(jobServiceViolations("e2e-extra", stepEnv).join("\n")).toMatch(/nowy job z bazą.*POSTGRES_URL/);
-    expect(jobServiceViolations("e2e-extra", job(""))).toEqual([]);
-    expect(jobServiceViolations("e2e-extra", job("    env:\n      INTEGRATION_POSTGRES_URL_X: y\n"))).toEqual([]);
-    expect(jobServiceViolations("e2e-smoke", job("    services:\n      db:\n        image: postgres:18\n"))).toEqual([]);
+  it("POSTGRES_URL w env kroku → job z bazą; job bez bazy → bez naruszeń; para zwolniona tylko w quality-gate.yml", () => {
+    const stepEnv = "name: x\njobs:\n  e2e-extra:\n    steps:\n      - run: pnpm test:pg\n        env:\n          POSTGRES_URL: x\n";
+    expect(dbJobViolations(QG, stepEnv).join("\n")).toMatch(/nowy job z bazą.*POSTGRES_URL/);
+    expect(dbJobViolations(QG, wf("e2e-extra", ""))).toEqual([]);
+    expect(dbJobViolations(QG, wf("e2e-extra", "    env:\n      INTEGRATION_POSTGRES_URL_X: y\n"))).toEqual([]);
+    expect(dbJobViolations(QG, wf("e2e-smoke", "    services:\n      db:\n        image: postgres:18\n"))).toEqual([]);
+    expect(dbJobViolations("inny.yml", wf("e2e-smoke", "    services:\n      db:\n        image: postgres:18\n"))).toHaveLength(1);
+  });
+
+  it("nagłówek joba z komentarzem/kotwicą rozpoznany; inny kształt na wcięciu 2 → wyjątek", () => {
+    expect([...jobs("name: x\njobs:\n  a: # k\n    x: 1\n  b: &b\n    y: 2\n").keys()]).toEqual(["a", "b"]);
+    expect(() => jobs("name: x\njobs:\n  a:\n    x: 1\n  { b: 1 }\n")).toThrow(/nagłówka joba/);
+  });
+
+  it("uses: joba — w quality-gate.yml zawsze porażka; gdzie indziej tylko lokalny plik workflow z repo", () => {
+    const reuse = (u: string) => `name: x\njobs:\n  e2e:\n    needs: a\n    uses: ${u}\n    with:\n      base_url: x\n`;
+    expect(jobUsesViolations(QG, reuse("./.github/workflows/e2e-production.yml"), ["e2e-production.yml"]).join()).toMatch(/zabronione w quality-gate/);
+    expect(jobUsesViolations("d.yml", reuse("./.github/workflows/e2e-production.yml"), ["e2e-production.yml"])).toEqual([]);
+    expect(jobUsesViolations("d.yml", reuse("org/repo/.github/workflows/e2e.yml@v1"), ["e2e-production.yml"]).join()).toMatch(/spoza plików workflow/);
+    expect(jobUsesViolations("d.yml", reuse("./.github/workflows/brak.yml"), ["e2e-production.yml"]).join()).toMatch(/spoza plików workflow/);
+    // uses: w kroku (wcięcie 6/8) to nie jest uses: joba
+    expect(jobUsesViolations(QG, "name: x\njobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n", [])).toEqual([]);
+  });
+
+  it.each([
+    ["kotwica joba", "  e2e-full: &full\n"],
+    ["kotwica wartości", "    env: &env\n"],
+    ["kotwica elementu", "      - &step\n"],
+    ["alias jako wartość", "    env: *env\n"],
+    ["alias jako element", "      - *step\n"],
+    ["alias we flow", "    needs: [a, *b]\n"],
+    ["klucz scalania", "    <<: *full\n"],
+    ["klucz scalania w elemencie", "      - <<: *step\n"],
+  ])("kotwice YAML: %s → porażka", (_n, line) => {
+    expect(anchorViolations("x.yml", line)).not.toEqual([]);
+  });
+
+  it.each([
+    ["&& w run", "        run: pnpm a && pnpm b\n"],
+    ["&& na początku linii bloku", "          && pnpm b\n"],
+    ["glob w path", "            tests/.auth/*.png\n"],
+    ["glob ** w paths", "      - '**/*.ts'\n"],
+    ["glob ** bez cudzysłowu", "      - **/x\n"],
+    ["tablica bash", "          echo \"${missing[*]}\"\n"],
+    ["komentarz", "# &a *b <<: x\n"],
+  ])("nie kotwica: %s", (_n, line) => {
+    expect(anchorViolations("x.yml", line)).toEqual([]);
   });
 
   it("pnpm audit [--flagi] to polecenie wbudowane (bez wyjątku); pnpm audit fix nadal nieznany kształt", () => {
