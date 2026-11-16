@@ -364,7 +364,8 @@ describe("wyjścia przypomnień: log wizyt pominiętych przez warunek salonu", (
     expect(h.warn).toHaveBeenCalledTimes(1);
     const [msg, ctx] = h.warn.mock.calls[0]!;
     expect(typeof msg).toBe("string");
-    expect(ctx).toEqual({ reminder: kind, skipped: 3 });
+    // toStrictEqual: także klucz z wartością `undefined` (np. dopisane id) jest czerwony.
+    expect(ctx).toStrictEqual({ reminder: kind, skipped: 3 });
     const logged = JSON.stringify(h.warn.mock.calls);
     for (const v of ["appt-1", "c-1", "e-1", "s-1", "user-1", SALON_A, "Ala", "Nowak", "Ewa", "Kowal", "+48500100200", "Salon A"]) {
       expect(logged, v).not.toContain(v);
