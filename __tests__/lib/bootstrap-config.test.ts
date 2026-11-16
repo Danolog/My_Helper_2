@@ -26,8 +26,8 @@
  * --password=; wypisać hasło; secretAccessor na projekcie; --data-file w
  * etapie secrets; describe bez sprawdzania (brak idempotencji).
  */
-import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -639,55 +639,75 @@ describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () 
     );
   });
 
-  it("jedyne `secrets versions add` to funkcje add i add_multiline; --data-file=ŚCIEŻKA tylko w add_multiline; bez starego tr -d '\\n'", () => {
+  it("jedyne `secrets versions add` to funkcje add i add_multiline; żadnego --data-file=ŚCIEŻKA ani starego tr -d '\\n'", () => {
     const adds = lines.filter((l) => l.includes("secrets versions add"));
     expect(adds).toHaveLength(2);
     expect(adds[0]).toMatch(/^add\(\) \{/);
     expect(adds[1]).toMatch(/^add_multiline\(\) \{/);
-    const withPath = lines.filter((l) => /--data-file=(?!-)/.test(l));
-    expect(withPath).toEqual([adds[1]]);
+    expect(block).not.toMatch(/--data-file=(?!-)/);
     expect(block).not.toContain("tr -d '\\n'");
   });
 
-  // K-1c: wielowierszowe (PEM, JSON) bez tr, z pliku tymczasowego usuwanego zaraz po gcloud.
-  it("funkcja add_multiline: bez tr, bez logu plikowego, --data-file z pliku, plik usuwany zaraz po gcloud (także przy błędzie)", () => {
+  // K-1d (Ryan, Ethan do #177): wielowierszowe (PEM, JSON) bez tr, ze stdin, bez własnej kopii na dysku.
+  it("funkcja add_multiline: --data-file=- ze stdin, bez tr, bez logu plikowego, bez pliku tymczasowego", () => {
     expect(block).toContain(
-      `add_multiline() { local rc=0; CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file="$2" || rc=$?; rm -P "$2"; return "$rc"; }`,
+      `add_multiline() { CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }`,
     );
     const fn = lines.find((l) => l.startsWith("add_multiline() {"))!;
     expect(fn).not.toMatch(/\btr\b/);
-    expect(fn).not.toMatch(/&&\s*rm/);
-    expect(d5).toMatch(/mktemp/);
+    expect(d5).not.toMatch(/mktemp/);
   });
 
-  it("add_multiline wykonane: plik tymczasowy usunięty po sukcesie i po błędzie gcloud; zawartość wielowierszowa nietknięta", () => {
-    const fn = lines.find((l) => l.startsWith("add_multiline() {"))!;
-    const bin = join(DIR, `rb-bin-${n++}`);
-    spawnSync("mkdir", ["-p", bin]);
-    const seen = join(DIR, `rb-seen-${n++}`);
-    // Fałszywy gcloud: kopiuje plik z --data-file i kończy się kodem z FAKE_RC.
+  it("D-5: rm -P nie jest przedstawiany jako wymazanie; oryginał od dostawcy usuwa człowiek", () => {
+    expect(block).not.toMatch(/\brm -P\b/);
+    expect(d5).toContain("`rm -P` na APFS");
+    expect(d5).toMatch(/nie gwarantuje nadpisania danych/);
+    expect(d5).toMatch(/Plik od dostawcy \(oryginał[^)]*\) usuwa człowiek/);
+  });
+
+  // Fałszywy gcloud: zapisuje stdin (gdy --data-file=-) albo plik z --data-file do $SEEN, potem kod FAKE_RC;
+  // FAKE_HANG=1 → po odczycie wisi (przerwanie w trakcie gcloud).
+  const multilineWorld = () => {
+    const root = join(DIR, `rb-${n++}`);
+    const [bin, tmp, home, cwd] = ["bin", "tmp", "home", "cwd"].map((d) => join(root, d));
+    for (const d of [bin, tmp, home, cwd]) mkdirSync(d, { recursive: true });
+    const seen = join(root, "seen");
     writeFileSync(
       join(bin, "gcloud"),
-      `#!/bin/sh\nprintf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" > "$SEEN.env"\nfor a in "$@"; do case "$a" in --data-file=*) cat "\${a#--data-file=}" > "$SEEN";; esac; done\nexit "\${FAKE_RC:-0}"\n`,
+      `#!/bin/sh\nprintf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" > "$SEEN.env"\nfor a in "$@"; do case "$a" in --data-file=-) cat > "$SEEN.part";; --data-file=*) cat "\${a#--data-file=}" > "$SEEN.part";; esac; done\nmv "$SEEN.part" "$SEEN"\n[ "\${FAKE_HANG:-}" = 1 ] && sleep 30\nexit "\${FAKE_RC:-0}"\n`,
     );
     chmodSync(join(bin, "gcloud"), 0o755);
-    // rm -P (BSD) nie wszędzie istnieje: fałszywy rm usuwa plik zwykłym rm.
-    writeFileSync(join(bin, "rm"), '#!/bin/sh\n[ "$1" = "-P" ] && shift\nexec /bin/rm -f "$@"\n');
-    chmodSync(join(bin, "rm"), 0o755);
-    const pem = "-----BEGIN PRIVATE KEY-----\nAAAA\nBBBB\n-----END PRIVATE KEY-----\n";
-    for (const rc of ["0", "1"]) {
-      const f = join(DIR, `rb-tmp-${n++}`);
-      writeFileSync(f, pem);
-      const r = spawnSync("bash", ["-c", `P=p-123; ${fn}\nadd_multiline nazwa "$1"`, "x", f], {
-        encoding: "utf8",
-        env: { NODE_ENV: "test", PATH: `${bin}:${process.env.PATH}`, SEEN: seen, FAKE_RC: rc },
-      });
-      expect(r.status, rc).toBe(Number(rc));
-      expect(existsSync(f), `plik po rc=${rc}`).toBe(false);
-      expect(readFileSync(seen, "utf8")).toBe(pem);
-      expect(readFileSync(`${seen}.env`, "utf8").trim()).toBe("1");
-    }
+    const fn = lines.find((l) => l.startsWith("add_multiline() {"))!;
+    const args = ["-c", `P=p-123; ${fn}\nadd_multiline nazwa`];
+    const env = (extra: Record<string, string>) => ({
+      NODE_ENV: "test" as const, PATH: `${bin}:${process.env.PATH}`, SEEN: seen, TMPDIR: tmp, HOME: home, ...extra,
+    });
+    const leftovers = () => [tmp, home, cwd].flatMap((d) => readdirSync(d).map((f) => join(d, f)));
+    return { seen, cwd, args, env, leftovers };
+  };
+  const PEM = "-----BEGIN PRIVATE KEY-----\r\nAAAA\nBBBB\n-----END PRIVATE KEY-----\n";
+
+  it.each(["0", "1"])("add_multiline wykonane (gcloud rc=%s): treść wielowierszowa bajt w bajt, kod gcloud zachowany, nic na dysku", (rc) => {
+    const w = multilineWorld();
+    const r = spawnSync("bash", w.args, { encoding: "utf8", cwd: w.cwd, input: PEM, env: w.env({ FAKE_RC: rc }) });
+    expect(r.status).toBe(Number(rc));
+    expect(readFileSync(w.seen, "utf8")).toBe(PEM);
+    expect(readFileSync(`${w.seen}.env`, "utf8").trim()).toBe("1");
+    expect(w.leftovers()).toEqual([]);
   });
+
+  it("add_multiline przerwane Ctrl-C (SIGINT do grupy) w trakcie gcloud → nic nie zostaje na dysku", async () => {
+    const w = multilineWorld();
+    const child = spawn("bash", w.args, { cwd: w.cwd, detached: true, env: w.env({ FAKE_HANG: "1" }), stdio: ["pipe", "ignore", "ignore"] });
+    const exited = new Promise<number | null>((res) => child.on("exit", (code) => res(code)));
+    child.stdin.end(PEM);
+    for (let i = 0; i < 100 && !existsSync(w.seen); i++) await new Promise((res) => setTimeout(res, 50));
+    expect(existsSync(w.seen), "gcloud odczytał wartość").toBe(true);
+    process.kill(-child.pid!, "SIGINT");
+    await exited;
+    expect(readFileSync(w.seen, "utf8")).toBe(PEM);
+    expect(w.leftovers()).toEqual([]);
+  }, 15_000);
 
   it("każdy sekret dodawany przez add — ze strumienia albo z pliku na stdin", () => {
     const uses = lines.filter((l) => /(^|\| *)add [a-z]/.test(l));

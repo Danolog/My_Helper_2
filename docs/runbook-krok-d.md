@@ -328,27 +328,30 @@ wartość nagłówka trafia na ekran i do logu plikowego gcloud
 
 ## 5. D-5 — wartości sekretów (sesja główna)
 
-Zasada (N2, Ryan, K-1b; K-1c): zawsze bez lokalnego logu gcloud
+Zasada (N2, Ryan, K-1b; K-1c, K-1d): wartość sekretu trafia do gcloud
+**wyłącznie przez stdin** (`--data-file=-`), zawsze bez lokalnego logu gcloud
 (`CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`), nigdy wartość w wierszu polecenia,
-nigdy `echo WARTOŚĆ`. Dwie drogi, innych nie używać:
+nigdy `echo WARTOŚĆ`, nigdy `--data-file=ŚCIEŻKA`. Funkcje niżej nie tworzą
+żadnej kopii wartości na dysku (bez plików tymczasowych). Dwie drogi, innych nie używać:
 - **sekret jednowierszowy** (klucze API, tokeny, hasła — wszystkie sekrety
-  z dzisiejszego manifestu): funkcja `add` — wartość **wyłącznie przez stdin**
-  (`--data-file=-`), przez `tr -d '\r\n'` (końce wierszy z pliku albo panelu
-  dostawcy nie stają się częścią sekretu);
+  z dzisiejszego manifestu): funkcja `add`, przez `tr -d '\r\n'` (końce
+  wierszy z pliku albo panelu dostawcy nie stają się częścią sekretu);
 - **sekret wielowierszowy** (PEM, JSON — końce wierszy są częścią wartości,
-  `tr` by je zepsuł): funkcja `add_multiline` — `--data-file` z pliku
-  tymczasowego (`mktemp`, poza repo), **bez** `tr`; plik usuwany zaraz po
-  wywołaniu gcloud, także przy błędzie.
+  `tr` by je zepsuł): funkcja `add_multiline`, **bez** `tr`, wartość
+  bajt w bajt ze stdin.
 
-Plik z wartością od dostawcy usuwać po dodaniu wersji.
+Plik od dostawcy (oryginał, zapisany z panelu poza repo) usuwa człowiek, po
+wpisaniu wartości i sprawdzeniu, że wersja sekretu powstała. `rm -P` na APFS
+(macOS) nie gwarantuje nadpisania danych na dysku — usunięcie pliku nie jest
+bezpiecznym wymazaniem; ochroną jest szyfrowanie dysku (FileVault) i jak
+najkrótszy czas życia pliku, nie flaga `rm`.
 
 ```bash
 P=my-helper-2-488419
 add() { tr -d '\r\n' | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
-add_multiline() { local rc=0; CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file="$2" || rc=$?; rm -P "$2"; return "$rc"; }
+add_multiline() { CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
 # Użycie add_multiline (dziś żaden sekret z manifestu tego nie wymaga):
-#   f="$(mktemp)"; chmod 600 "$f"   # zapis wartości z panelu dostawcy do "$f"
-#   add_multiline NAZWA "$f"        # plik usunięty zaraz po gcloud
+#   add_multiline NAZWA < "$HOME/secure/NAZWA.pem"   # potem człowiek usuwa oryginał
 
 # Generowane lokalnie:
 openssl rand -base64 48 | add better-auth-secret
@@ -358,13 +361,13 @@ npx --yes web-push generate-vapid-keys --json > "$TMPDIR/vapid.json"
 node -e 'process.stdout.write(require(process.argv[1]).privateKey)' "$TMPDIR/vapid.json" | add vapid-private-key
 node -e 'process.stdout.write(require(process.argv[1]).publicKey)' "$TMPDIR/vapid.json" \
   | gh variable set NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp
-rm -P "$TMPDIR/vapid.json"
+rm "$TMPDIR/vapid.json"
 
-# Od dostawców (plik zapisany z panelu dostawcy, poza repo):
+# Od dostawców (plik zapisany z panelu dostawcy, poza repo; oryginał usuwa człowiek po dodaniu wersji):
 add stripe-secret-key < "$HOME/secure/stripe-secret-key"
-rm -P "$HOME/secure/stripe-secret-key"
+rm "$HOME/secure/stripe-secret-key"
 add stripe-webhook-secret < "$HOME/secure/stripe-webhook-secret"   # para Stripe: oba albo żaden (K-1b)
-rm -P "$HOME/secure/stripe-webhook-secret"
+rm "$HOME/secure/stripe-webhook-secret"
 # … analogicznie: resend-api-key, smsapi-token,
 #    upstash-redis-rest-token, google-client-secret (openrouter-api-key: od K-1 poza Secret Manager)
 ```
