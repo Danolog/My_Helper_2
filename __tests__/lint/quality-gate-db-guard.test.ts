@@ -309,7 +309,12 @@ const PG_ENV_KEYS = ["PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER", "
 /** Klucze bazy: job z którymkolwiek z nich to „job z bazą” (W-a); w env podlegają regule jednej bazy (W-b). */
 const DB_ENV_KEYS = [...DB_URL_KEYS, ...PG_ENV_KEYS];
 const isDbKey = (k: string) => DB_ENV_KEYS.includes(k.toUpperCase());
-/** Klucze bazy jako całe słowa w tekście (bez wielkości liter); `INTEGRATION_POSTGRES_URL_X` to inna nazwa. */
+/**
+ * Klucze bazy jako całe słowa w tekście (bez wielkości liter); `INTEGRATION_POSTGRES_URL_X` to inna nazwa.
+ * Dokładność celowo inna niż w DB_URL_KEY_TEXT (#193): tu KLASYFIKACJA „job z bazą” po dokładnej
+ * nazwie klucza env — podciąg dałby fałszywą czerwień na kluczach pochodnych, których nic nie czyta
+ * (kontrola `_X` z #194). Ta sama zasada w dbKeyLines.
+ */
 const dbKeysIn = (text: string): string[] => [
   ...new Set([...text.matchAll(new RegExp(`\\b(?:${DB_ENV_KEYS.join("|")})\\b`, "gi"))].map((m) => m[0].toUpperCase())),
 ];
@@ -725,8 +730,11 @@ function dbImageViolations(file: string, wf: string): string[] {
 
 /**
  * Nazwa zmiennej bazy w tekście (podciąg, bez względu na wielkość liter; także nazwy pochodne
- * typu `MY_POSTGRES_URL`): adres albo PG* (P0c-2 W-b — obowiązuje każdą regułę opartą na liście
- * kluczy bazy, w tym zapis do `$GITHUB_ENV`).
+ * typu `MY_POSTGRES_URL`, `MY_PGHOST`): adres albo PG* (P0c-2 W-b — obowiązuje każdą regułę
+ * opartą na liście kluczy bazy: zapis do `$GITHUB_ENV`, nazwa bazy w konfiguracji Playwrighta).
+ * Dokładność celowo inna niż w dbKeysIn/dbKeyLines (#193): to reguły zakazu WZMIANKI — nazwa
+ * może być składana albo prefiksowana, więc fail-closed po podciągu; fałszywa czerwień kosztuje
+ * tylko przemianowanie. Igły to pełne nazwy kluczy (nie „pg”), więc np. `pgvector` nie trafia.
  */
 const DB_URL_KEY_TEXT = new RegExp(DB_ENV_KEYS.join("|"), "i");
 
@@ -1862,6 +1870,24 @@ describe("joby z bazą po kluczach bazy: adres i PG* także bez services: (#193 
     const v = newOneDb(SEED, `      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Switch host\n        run: echo "PGHOST=db.example" >> $GITHUB_ENV\n\n      - name: Verify seed data`);
     expect(v).toHaveLength(1);
     expect(v[0]).toMatch(/^quality-gate\.yml: e2e-smoke, krok \d+ \(Switch host\): zapis zmiennej bazy do \$GITHUB_ENV — /);
+  });
+
+  it("reguła wzmianki po podciągu (#193): MY_PGHOST zapisany do $GITHUB_ENV → dokładnie jedno nowe naruszenie (klasyfikacja po dokładnej nazwie: test „nazwy pochodne”)", () => {
+    const SEED = "      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Verify seed data";
+    const v = newOneDb(SEED, `      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Switch host\n        run: echo "MY_PGHOST=db.example" >> $GITHUB_ENV\n\n      - name: Verify seed data`);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toMatch(/^quality-gate\.yml: e2e-smoke, krok \d+ \(Switch host\): zapis zmiennej bazy do \$GITHUB_ENV — /);
+  });
+
+  const PW_NAME = `${PW_FILE}: nazwa zmiennej bazy w konfiguracji Playwrighta`;
+  it.each([["PGHOST"], ["pgdatabase"], ["MY_PGHOST"]])("konfiguracja Playwrighta: %s w treści → naruszenie nazwy bazy (PG* na liście, podciąg)", (k) => {
+    const src = edited(PW_SRC, "const isCI = !!process.env.CI;\n", `const isCI = !!process.env.CI;\nconst note = '${k}';\nvoid note;\n`);
+    expect(playwrightDbViolations(src).join("\n")).toContain(PW_NAME);
+  });
+
+  it("konfiguracja Playwrighta: słowo pgvector to nie nazwa klucza → bez naruszeń (igły to pełne nazwy)", () => {
+    const src = edited(PW_SRC, "const isCI = !!process.env.CI;\n", "const isCI = !!process.env.CI;\nconst note = 'pgvector pg18';\nvoid note;\n");
+    expect(playwrightDbViolations(src)).toEqual([]);
   });
 
   it("hasło w treści polecenia (PGPASSWORD=… psql w kroku weryfikacji seeda) to nie klucz env → bez naruszeń jednej bazy", () => {
