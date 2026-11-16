@@ -1913,6 +1913,8 @@ describe("obraz bazy przypięty po skrócie w obu jobach z bazą (#193 P0c-2, W-
     ["(3) brak image w e2e-smoke", SMOKE, SMOKE.replace(`        image: ${PG_IMAGE}\n`, ""), "e2e-smoke: services.postgres.image — brak image; "],
     ["(4) tag bez @sha256: w e2e-full", FULL, FULL.replace(PG_IMAGE, REF), `e2e-full: services.postgres.image — tag bez skrótu @sha256: ${REF}; `],
     ["(5) container: w e2e-smoke", SMOKE, `    timeout-minutes: 10\n    container: node:22\n${SMOKE.slice("    timeout-minutes: 10\n".length)}`, "e2e-smoke: container: w jobie z bazą — zakazany; "],
+    // Tag i pierwszy skrót równe wzorcowi, drugi „@sha256:” sprawia, że całość jest inna (ostatni return imageDiff).
+    ["(6) drugi skrót po PG_IMAGE w e2e-full", FULL, FULL.replace(PG_IMAGE, `${PG_IMAGE}@sha256:${"ab".repeat(32)}`), `e2e-full: services.postgres.image — inna wartość: ${PG_IMAGE}@sha256:${"ab".repeat(32)}; `],
   ])("%s → dokładnie jedno naruszenie z komunikatem akceptacji", (_n, find, repl, why) => {
     const wf = edited(wfSource(QG), find, repl);
     const v = dbImageViolations(QG, wf);

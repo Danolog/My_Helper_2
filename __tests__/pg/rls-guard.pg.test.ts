@@ -12,7 +12,14 @@
  * Test nie uruchamia `db:*` ani seeda.
  */
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { loadRlsRequirements, runRlsGuard, type RlsGuardResult } from "../../scripts/db-rls-guard";
+import {
+  loadPolicySnapshot,
+  loadRlsRequirements,
+  runPolicyGuard,
+  runRlsGuard,
+  type PolicyGuardResult,
+  type RlsGuardResult,
+} from "../../scripts/db-rls-guard";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
 const suite = h ? describe : describe.skip;
@@ -36,11 +43,12 @@ async function inRolledBackTx(ddl: string): Promise<RlsGuardResult> {
   return result;
 }
 
-suite("strażnik RLS na bazie po migracjach (#190)", () => {
-  afterAll(async () => {
-    await h?.end();
-  });
+// Jedno zamknięcie puli po wszystkich blokach (#193: drugi blok korzysta z tej samej puli).
+afterAll(async () => {
+  await h?.end();
+});
 
+suite("strażnik RLS na bazie po migracjach (#190)", () => {
   it("baza po db:migrate: wszystkie tabele z 0005 z RLS i polityką → OK (D3: tabel z RLS ≥ 39)", async () => {
     const r = await runRlsGuard(h!.observer, REQUIRED);
     expect(r.ok).toBe(true);
@@ -69,5 +77,95 @@ suite("strażnik RLS na bazie po migracjach (#190)", () => {
 
   it("po wycofaniu zmian strażnik znów OK (test nie zostawia śladu)", async () => {
     expect((await runRlsGuard(h!.observer, REQUIRED)).ok).toBe(true);
+  });
+});
+
+/** Zmiana w transakcji, strażnik ról i polityk w tej samej transakcji, potem wycofanie. */
+async function policyGuardInRolledBackTx(ddl: string, snapshot = SNAPSHOT): Promise<PolicyGuardResult> {
+  let result: PolicyGuardResult | undefined;
+  await h!.observer
+    .begin(async (tx) => {
+      // Po jednym poleceniu (protokół rozszerzony nie przyjmuje kilku naraz; wzór z views-privileges).
+      for (const stmt of ddl.split(";").map((s) => s.trim()).filter(Boolean)) await tx.unsafe(stmt);
+      result = await runPolicyGuard(tx, snapshot);
+      throw new Rollback();
+    })
+    .catch((e: unknown) => {
+      if (!(e instanceof Rollback)) throw e;
+    });
+  if (!result) throw new Error("strażnik nie zwrócił wyniku");
+  return result;
+}
+
+const SNAPSHOT = loadPolicySnapshot();
+// Postać polityk po migracji 0010 (nullif), żeby sondy zmieniały tylko badany element.
+const CTX = "nullif(current_setting('app.current_salon_id', true), '')::uuid";
+const problems = (r: PolicyGuardResult) => (r.ok ? [] : r.problems);
+
+suite("strażnik ról i treści polityk na bazie po migracjach (#193)", () => {
+  it("baza po db:migrate: role bez atrybutów, polityki == migawka, semantyka OK (sonda kontrolna)", async () => {
+    const r = await runPolicyGuard(h!.observer, SNAPSHOT);
+    expect(problems(r)).toEqual([]);
+    expect(r.ok && r.policies).toBe(SNAPSHOT.length);
+  });
+
+  it.each([
+    ["ALTER ROLE myhelper_app BYPASSRLS", "ALTER ROLE myhelper_app BYPASSRLS", ["rola myhelper_app ma BYPASSRLS"]],
+    ["ALTER ROLE myhelper_app SUPERUSER", "ALTER ROLE myhelper_app SUPERUSER", ["rola myhelper_app ma SUPERUSER"]],
+  ])("%s (w transakcji) → odmowa", async (_n, ddl, expected) => {
+    expect(problems(await policyGuardInRolledBackTx(ddl))).toEqual(expected);
+  });
+
+  it("USING (true) pod tą samą nazwą na clients → migawka i semantyka czerwone", async () => {
+    const r = await policyGuardInRolledBackTx(
+      `DROP POLICY tenant_isolation ON clients; CREATE POLICY tenant_isolation ON clients USING (true) WITH CHECK (salon_id = ${CTX})`,
+    );
+    expect(problems(r)).toEqual([
+      "clients.tenant_isolation: treść polityki różni się od migawki",
+      "clients.tenant_isolation: USING jest stałą true",
+    ]);
+  });
+
+  it("WITH CHECK (true) pod tą samą nazwą na clients → migawka i semantyka czerwone", async () => {
+    const r = await policyGuardInRolledBackTx(
+      `DROP POLICY tenant_isolation ON clients; CREATE POLICY tenant_isolation ON clients USING (salon_id = ${CTX}) WITH CHECK (true)`,
+    );
+    expect(problems(r)).toEqual([
+      "clients.tenant_isolation: treść polityki różni się od migawki",
+      "clients.tenant_isolation: WITH CHECK jest stałą true",
+    ]);
+  });
+
+  it("odwołanie do innej zmiennej pod nazwą tenant_isolation → migawka i semantyka czerwone", async () => {
+    const other = "current_setting('app.current_user_id', true)::uuid";
+    const r = await policyGuardInRolledBackTx(
+      `DROP POLICY tenant_isolation ON clients; CREATE POLICY tenant_isolation ON clients USING (salon_id = ${other}) WITH CHECK (salon_id = ${other})`,
+    );
+    expect(problems(r)).toEqual([
+      "clients.tenant_isolation: treść polityki różni się od migawki",
+      "clients.tenant_isolation: USING bez odwołania do app.current_salon_id",
+      "clients.tenant_isolation: WITH CHECK bez odwołania do app.current_salon_id",
+    ]);
+  });
+
+  it("polityka bez nullif pod tą samą nazwą na clients (postać sprzed 0010) → migawka i semantyka czerwone", async () => {
+    const bare = "current_setting('app.current_salon_id', true)::uuid";
+    const r = await policyGuardInRolledBackTx(
+      `DROP POLICY tenant_isolation ON clients; CREATE POLICY tenant_isolation ON clients USING (salon_id = ${bare}) WITH CHECK (salon_id = ${bare})`,
+    );
+    expect(problems(r)).toEqual([
+      "clients.tenant_isolation: treść polityki różni się od migawki",
+      "clients.tenant_isolation: USING czyta app.current_salon_id bez nullif",
+      "clients.tenant_isolation: WITH CHECK czyta app.current_salon_id bez nullif",
+    ]);
+  });
+
+  it("migawka niezaktualizowana po zmianie polityki (pozycja clients z innym skrótem) → czerwony", async () => {
+    const stale = SNAPSHOT.map((e) => (e.table === "clients" ? { ...e, sha256: "0".repeat(64) } : e));
+    expect(problems(await policyGuardInRolledBackTx("", stale))).toEqual(["clients.tenant_isolation: treść polityki różni się od migawki"]);
+  });
+
+  it("po wycofaniu zmian strażnik ról i polityk znów OK", async () => {
+    expect(problems(await runPolicyGuard(h!.observer, SNAPSHOT))).toEqual([]);
   });
 });
