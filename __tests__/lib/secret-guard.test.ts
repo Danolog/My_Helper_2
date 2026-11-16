@@ -22,10 +22,13 @@ import {
   FORBIDDEN_SHA256,
   GUARDED_SECRET_ENV,
   SECRET_GUARD_MESSAGE,
+  STRIPE_PAIR,
+  STRIPE_PAIR_MESSAGE,
   enforceSecretGuard,
   forbiddenSecretHits,
   secretGuardActive,
   sha256Hex,
+  stripePairMissing,
 } from "../../infra/runtime/secret-guard.mjs";
 
 const GUARD_URL = pathToFileURL(join(REPO_ROOT, "infra/runtime/secret-guard.mjs")).href;
@@ -182,6 +185,65 @@ describe("kiedy strażnik działa", () => {
     expect(enforceSecretGuard({ NODE_ENV: "production", BETTER_AUTH_SECRET: ciAuthSecret() }, exit, log)).toBe(true);
     expect(exit).not.toHaveBeenCalled();
     expect(log).not.toHaveBeenCalled();
+  });
+});
+
+describe("para Stripe: oba albo żaden (K-1b)", () => {
+  const CR = { K_SERVICE: "myhelper", NODE_ENV: "production" };
+
+  it("stripePairMissing: dokładnie jedna ustawiona → nazwa brakującej; obie / żadna → []", () => {
+    expect(stripePairMissing({ STRIPE_SECRET_KEY: fresh() })).toEqual(["STRIPE_WEBHOOK_SECRET"]);
+    expect(stripePairMissing({ STRIPE_WEBHOOK_SECRET: fresh() })).toEqual(["STRIPE_SECRET_KEY"]);
+    expect(stripePairMissing({ STRIPE_SECRET_KEY: fresh(), STRIPE_WEBHOOK_SECRET: fresh() })).toEqual([]);
+    expect(stripePairMissing({})).toEqual([]);
+    // Pusta albo same białe znaki = nieustawiona.
+    // Klucz wyliczany: zapis { NAZWA: "…" } byłby dla G-K1 nowym literałem.
+    const webhook = STRIPE_PAIR[1]!;
+    expect(stripePairMissing({ STRIPE_SECRET_KEY: fresh(), [webhook]: "" })).toEqual(["STRIPE_WEBHOOK_SECRET"]);
+    expect(stripePairMissing({ STRIPE_SECRET_KEY: fresh(), [webhook]: " \n" })).toEqual(["STRIPE_WEBHOOK_SECRET"]);
+    expect([...STRIPE_PAIR].sort()).toEqual(["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]);
+  });
+
+  it.each([
+    ["tylko klucz API", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+    ["tylko sekret webhooka", "STRIPE_WEBHOOK_SECRET", "STRIPE_SECRET_KEY"],
+  ])("enforceSecretGuard: %s → exit(1), log z nazwą brakującej zmiennej, bez wartości", (_l, present, missing) => {
+    const value = fresh();
+    const env: Record<string, string> = { ...CR, BETTER_AUTH_SECRET: fresh(), [present]: value };
+    const exit = vi.fn();
+    const log = vi.fn();
+    expect(enforceSecretGuard(env, exit, log)).toBe(false);
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(log).toHaveBeenCalledWith(STRIPE_PAIR_MESSAGE, { variable: missing });
+    expect(STRIPE_PAIR_MESSAGE).toContain("STRIPE_SECRET_KEY");
+    expect(STRIPE_PAIR_MESSAGE).toContain("STRIPE_WEBHOOK_SECRET");
+    expect(JSON.stringify(log.mock.calls)).not.toContain(value);
+  });
+
+  it("enforceSecretGuard: obie albo żadna → start", () => {
+    for (const env of [{ ...CR, STRIPE_SECRET_KEY: fresh(), STRIPE_WEBHOOK_SECRET: fresh() }, { ...CR }]) {
+      const exit = vi.fn();
+      const log = vi.fn();
+      expect(enforceSecretGuard(env, exit, log)).toBe(true);
+      expect(exit).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+    }
+  });
+
+  it("poza Cloud Run niepełna para nie blokuje (lokalnie, CI, Vercel)", () => {
+    const exit = vi.fn();
+    expect(enforceSecretGuard({ NODE_ENV: "production", STRIPE_SECRET_KEY: fresh() }, exit, vi.fn())).toBe(true);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("proces: tylko STRIPE_SECRET_KEY na Cloud Run → kod 1, log z nazwą STRIPE_WEBHOOK_SECRET, bez wartości", () => {
+    const value = fresh();
+    const r = startProcess({ K_SERVICE: "myhelper", BETTER_AUTH_SECRET: fresh(), STRIPE_SECRET_KEY: value });
+    const out = r.stdout + r.stderr;
+    expect(r.status).toBe(1);
+    expect(out).not.toContain("STARTED");
+    expect(out).toContain("STRIPE_WEBHOOK_SECRET");
+    expect(out).not.toContain(value);
   });
 });
 

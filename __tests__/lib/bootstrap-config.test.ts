@@ -68,6 +68,7 @@ writeFileSync(
   `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_LOG"
 case " $* " in *" sql users "*) printf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" >> "$FAKE_ENV" ;; esac
+case " $* " in *" versions add "*) printf '%s\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING-unset}" >> "$FAKE_ENV_ADD" ;; esac
 for a in "$@"; do
   case "$a" in
     --flags-file=*) cat "\${a#--flags-file=}" >> "$FAKE_FLAGS" ;;
@@ -106,6 +107,8 @@ interface Run {
   flags: string;
   stdin: string;
   env: string[];
+  /** CLOUDSDK_CORE_DISABLE_FILE_LOGGING przy każdym `secrets versions add`. */
+  envAdd: string[];
 }
 
 interface Opts {
@@ -121,7 +124,8 @@ function bootstrap(args: string[], opts: Opts = {}): Run {
   const flags = join(DIR, `flags-${id}`);
   const stdin = join(DIR, `stdin-${id}`);
   const env = join(DIR, `env-${id}`);
-  for (const f of [log, flags, stdin, env]) writeFileSync(f, "");
+  const envAdd = join(DIR, `env-add-${id}`);
+  for (const f of [log, flags, stdin, env, envAdd]) writeFileSync(f, "");
   const r = spawnSync("bash", [SCRIPT, ...args], {
     encoding: "utf8",
     env: {
@@ -131,6 +135,7 @@ function bootstrap(args: string[], opts: Opts = {}): Run {
       FAKE_FLAGS: flags,
       FAKE_STDIN: stdin,
       FAKE_ENV: env,
+      FAKE_ENV_ADD: envAdd,
       ...(opts.exists ? { FAKE_EXISTS: "1" } : {}),
       ...(opts.usersExist ? { FAKE_USERS_EXIST: "1" } : {}),
       ...(opts.versionsError ? { FAKE_VERSIONS_ERROR: "1" } : {}),
@@ -146,6 +151,7 @@ function bootstrap(args: string[], opts: Opts = {}): Run {
     flags: readFileSync(flags, "utf8"),
     stdin: readFileSync(stdin, "utf8"),
     env: readFileSync(env, "utf8").split("\n").filter(Boolean),
+    envAdd: readFileSync(envAdd, "utf8").split("\n").filter(Boolean),
   };
 }
 
@@ -425,6 +431,14 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
     expect(SOURCE).toMatch(/CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "\$\{GC\[@\]\}" sql users/);
   });
 
+  // N2 (Ryan, K-1b): `secrets versions add` z hasłem w stdin też bez lokalnego logu gcloud.
+  it("N2: każde secrets versions add (postgres-url, postgres-admin-password) bez lokalnego logu gcloud", () => {
+    const adds = r.calls.filter((c) => c.includes("versions add"));
+    expect(adds).toHaveLength(2);
+    expect(r.envAdd).toEqual(["1", "1"]);
+    expect(SOURCE).toMatch(/CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "\$\{GC\[@\]\}" secrets versions add/);
+  });
+
   it("błąd odczytu wersji sekretu (≠ brak wersji) przerywa etap przed hasłem", () => {
     const e = bootstrap([...base("sql"), "--apply"], { versionsError: true });
     expect(e.status).toBe(2);
@@ -608,5 +622,37 @@ describe("G-D1: WIF", () => {
       expect(r.status).toBe(2);
       expect(r.calls).toEqual([]);
     }
+  });
+});
+
+// N2 (Ryan, K-1b): runbook D-5 — wartości sekretów wyłącznie przez stdin,
+// przez tr -d '\r\n' i bez lokalnego logu gcloud (jedna funkcja add).
+describe("G-D1: runbook D-5 — wartości sekretów tylko przez stdin (N2)", () => {
+  const RUNBOOK = readFileSync(join(ROOT, "docs/runbook-krok-d.md"), "utf8");
+  const d5 = RUNBOOK.slice(RUNBOOK.indexOf("## 5. D-5"), RUNBOOK.indexOf("## 6. D-6"));
+  const block = d5.slice(d5.indexOf("```bash"), d5.indexOf("```", d5.indexOf("```bash") + 3));
+  const lines = block.split("\n").filter((l) => !l.trim().startsWith("#"));
+
+  it("funkcja add: tr -d '\\r\\n' → gcloud z CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 i --data-file=-", () => {
+    expect(block).toContain(
+      `add() { tr -d '\\r\\n' | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }`,
+    );
+  });
+
+  it("jedyne `secrets versions add` to funkcja add; żadnego --data-file=ŚCIEŻKA ani starego tr -d '\\n'", () => {
+    const adds = lines.filter((l) => l.includes("secrets versions add"));
+    expect(adds).toHaveLength(1);
+    expect(adds[0]).toMatch(/^add\(\) \{/);
+    expect(block).not.toMatch(/--data-file=(?!-)/);
+    expect(block).not.toContain("tr -d '\\n'");
+  });
+
+  it("każdy sekret dodawany przez add — ze strumienia albo z pliku na stdin", () => {
+    const uses = lines.filter((l) => /(^|\| *)add [a-z]/.test(l));
+    expect(uses.length).toBeGreaterThanOrEqual(5);
+    for (const l of uses) expect(l).toMatch(/\| add [a-z-]+\s*$|^add [a-z-]+ < "[^"]+"(\s+#.*)?$/);
+    expect(uses.map((l) => l.match(/add ([a-z-]+)/)![1])).toEqual(
+      expect.arrayContaining(["better-auth-secret", "cron-secret", "vapid-private-key", "stripe-secret-key", "stripe-webhook-secret"]),
+    );
   });
 });

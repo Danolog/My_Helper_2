@@ -331,7 +331,7 @@ db_password() {
   local value_shown="$shown"
   [[ "$kind" == "url" ]] && value_shown="postgresql://${user}:${shown}@localhost/${DB_NAME}?host=/cloudsql/${PROJECT_ID}:${REGION}:${SQL_INSTANCE}"
   echo "+ CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$PROJECT_ID --quiet sql users $verb $user --instance=$SQL_INSTANCE --flags-file=<(--password: $shown)"
-  echo "+ gcloud --project=$PROJECT_ID --quiet secrets versions add $secret --data-file=- <<< $value_shown"
+  echo "+ CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$PROJECT_ID --quiet secrets versions add $secret --data-file=- <<< $value_shown"
   [[ "$APPLY" == 1 ]] || return 0
   local pw
   pw="$(gen_password)"
@@ -339,12 +339,13 @@ db_password() {
   # Bez lokalnego logu gcloud (~/.config/gcloud/logs zapisuje wartości flag,
   # także rozwinięte z --flags-file) — B-1, Ryan 6899923012.
   CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" sql users "$verb" "$user" --instance="$SQL_INSTANCE" --flags-file=<(password_flags "$pw")
+  # N2 (Ryan, K-1b): także dodanie wersji sekretu bez lokalnego logu gcloud.
   if [[ "$kind" == "url" ]]; then
     printf 'postgresql://%s:%s@localhost/%s?host=/cloudsql/%s:%s:%s' \
       "$user" "$pw" "$DB_NAME" "$PROJECT_ID" "$REGION" "$SQL_INSTANCE" |
-      "${GC[@]}" secrets versions add "$secret" --data-file=-
+      CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" secrets versions add "$secret" --data-file=-
   else
-    printf '%s' "$pw" | "${GC[@]}" secrets versions add "$secret" --data-file=-
+    printf '%s' "$pw" | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" secrets versions add "$secret" --data-file=-
   fi
   pw=""
 }

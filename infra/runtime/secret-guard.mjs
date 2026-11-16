@@ -12,7 +12,10 @@
 // - lista zakazana trzyma tylko skróty SHA-256, nigdy wartości;
 // - przy trafieniu aplikacja ODMAWIA STARTU (kod wyjścia 1) — samo 503
 //   z /api/health zostawiłoby proces obsługujący ruch ze znanym sekretem;
-// - log zawiera wyłącznie nazwę zmiennej, bez wartości i bez skrótu.
+// - log zawiera wyłącznie nazwę zmiennej, bez wartości i bez skrótu;
+// - para Stripe (K-1b): STRIPE_SECRET_KEY i STRIPE_WEBHOOK_SECRET oba albo
+//   żaden — tylko jedna ustawiona = odmowa startu z nazwą brakującej
+//   (run-deploy.sh zatrzymuje taki deploy wcześniej).
 //
 // Kompletność listy pilnuje __tests__/lib/secret-guard.test.ts: każdy
 // literał zmiennej klasy `secret` (infra/gcp/env-manifest.json) w plikach
@@ -55,6 +58,7 @@ export const FORBIDDEN_SHA256 = Object.freeze(new Set([
   "69d929a001b50faa50b28ba737f093d72457ec09b1ac2f6c58baf87901227747", // .github/workflows/quality-gate.yml POSTGRES_URL
   "727af12edfd16c4e920b82106069e92c2321c516db2db2af1befabeaa5e5d6ab", // infra/gcp/smoke-container.sh POSTGRES_URL
   "7ba88f380e2bd2b3a94f74a0f3cdb2b502fdf251f829ad44cd009de9f632ed96", // __tests__/lib/stripe.test.ts STRIPE_SECRET_KEY
+  "905ea8cd6eadc232b9afe81ae4e93082d460e1f499860526e5d55e0a26fdc6e0", // infra/gcp/smoke-container.sh BETTER_AUTH_SECRET (W1, K-1b)
   "7da7dc2f447370e69994c2606ac6db11185d8162011a9381bad221d83d2d686e", // __tests__/lib/workflows.test.ts STRIPE_SECRET_KEY
   "7eeb83914f8151e1e67db9d483b991dd261daba1952c77c364eaaf31682bef15", // __tests__/lib/csrf.test.ts BETTER_AUTH_SECRET
   "9d56078addde1645f626c60e9b0db31d98c7a8712e1350546640a210281594d7", // __tests__/lib/stripe.test.ts STRIPE_WEBHOOK_SECRET
@@ -73,6 +77,27 @@ export const FORBIDDEN_SHA256 = Object.freeze(new Set([
 
 export const SECRET_GUARD_MESSAGE =
   "secret-guard: odmowa startu — sekret ma wartość testową jawną w repozytorium";
+
+/**
+ * Para Stripe (K-1b): klucz API i sekret webhooka — oba albo żaden. Sam klucz
+ * bez sekretu webhooka = płatności przyjmowane, a potwierdzenia odrzucane
+ * (webhook fail-closed); sam sekret webhooka = konfiguracja niekompletna.
+ */
+export const STRIPE_PAIR = Object.freeze(["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]);
+
+export const STRIPE_PAIR_MESSAGE =
+  "secret-guard: odmowa startu — STRIPE_SECRET_KEY i STRIPE_WEBHOOK_SECRET muszą być ustawione oba albo żaden; brakuje";
+
+/**
+ * Nazwy brakujących zmiennych pary Stripe, jeśli ustawiona jest dokładnie jedna
+ * (pusta albo same białe znaki = nieustawiona). Inaczej [].
+ * @param {Record<string, string | undefined>} env
+ * @returns {string[]}
+ */
+export function stripePairMissing(env) {
+  const set = STRIPE_PAIR.filter((n) => typeof env[n] === "string" && env[n].trim().length > 0);
+  return set.length === 1 ? STRIPE_PAIR.filter((n) => !set.includes(n)) : [];
+}
 
 /** @param {string} value */
 export function sha256Hex(value) {
@@ -103,7 +128,8 @@ export function forbiddenSecretHits(env) {
 }
 
 /**
- * Przy trafieniu loguje nazwy zmiennych i kończy proces kodem 1.
+ * Przy trafieniu (wartość z listy zakazanej albo niepełna para Stripe) loguje
+ * nazwy zmiennych i kończy proces kodem 1.
  * @param {Record<string, string | undefined>} [env]
  * @param {(code: number) => never | void} [exit]
  * @param {(message: string, context: { variable: string }) => void} [log]
@@ -116,8 +142,10 @@ export function enforceSecretGuard(
 ) {
   if (!secretGuardActive(env)) return true;
   const hits = forbiddenSecretHits(env);
-  if (hits.length === 0) return true;
+  const stripeMissing = stripePairMissing(env);
+  if (hits.length === 0 && stripeMissing.length === 0) return true;
   for (const variable of hits) log(SECRET_GUARD_MESSAGE, { variable });
+  for (const variable of stripeMissing) log(STRIPE_PAIR_MESSAGE, { variable });
   exit(1);
   return false;
 }
