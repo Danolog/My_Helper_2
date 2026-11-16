@@ -51,7 +51,7 @@ function signInEmailOf(body: unknown): string | null {
 }
 
 /** Czy wynik logowania zeruje licznik konta: sukces albo 403 EMAIL_NOT_VERIFIED. */
-function resetsAccountCounter(returned: unknown): boolean {
+export function resetsAccountCounter(returned: unknown): boolean {
   if (returned instanceof Response) return returned.status >= 200 && returned.status < 300;
   if (returned && typeof returned === "object" && "statusCode" in returned) {
     const err = returned as { statusCode?: unknown; body?: { code?: unknown } };

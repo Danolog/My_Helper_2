@@ -10,6 +10,7 @@
  */
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { reserveAccountSignInAttempt, clearSignInFailures, consumeAuthRateLimit } = vi.hoisted(() => ({
@@ -23,7 +24,7 @@ vi.mock("@/lib/server/system/auth-throttle", () => ({
   consumeAuthRateLimit,
 }));
 
-import { buildAuthRateLimitOptions } from "@/lib/auth-rate-limit-options";
+import { buildAuthRateLimitOptions, resetsAccountCounter } from "@/lib/auth-rate-limit-options";
 
 const SECRET = "test-secret-for-auth-throttle-0123456789abcdef";
 const BASE = "http://localhost:3000";
@@ -76,13 +77,29 @@ describe("tryb database: konfiguracja", () => {
 
 // ── Instancja Better Auth z fabryką ──────────────────────────────────────────
 
-type Captured = { resetToken?: string };
+type Captured = { resetToken?: string; returned: unknown[] };
 
 function makeAuth(opts: { requireEmailVerification?: boolean; enabledOverride?: boolean } = {}) {
   const rl = buildAuthRateLimitOptions("database");
   if (!("rateLimit" in rl)) throw new Error("tryb database bez rateLimit");
-  const captured: Captured = {};
+  const captured: Captured = { returned: [] };
+  // Wtyczka testowa: zapisuje `ctx.context.returned` z /sign-in/email — ten sam obiekt,
+  // który dostaje hook after fabryki (kształt wyniku logowania na tej wersji biblioteki).
+  const capture = {
+    id: "test-capture-returned",
+    hooks: {
+      after: [
+        {
+          matcher: (ctx: { path?: string }) => ctx.path === "/sign-in/email",
+          handler: createAuthMiddleware(async (ctx) => {
+            captured.returned.push(ctx.context.returned);
+          }),
+        },
+      ],
+    },
+  };
   const auth = betterAuth({
+    plugins: [capture],
     baseURL: BASE,
     secret: SECRET,
     database: memoryAdapter({ user: [], session: [], account: [], verification: [] }),
@@ -240,11 +257,94 @@ describe("tryb database: zerowanie licznika konta (hooks.after, onPasswordReset)
     expect(clearSignInFailures).toHaveBeenCalledWith("jan@example.pl");
   });
 
+  it("logowanie z callbackURL (przekierowanie) też zeruje", async () => {
+    const { auth } = makeAuth();
+    await signUp(auth, "jan@example.pl");
+    const res = await auth.handler(post("/sign-in/email", { email: "jan@example.pl", password: PASSWORD, callbackURL: "/dashboard" }));
+    expect(res.status).toBe(200);
+    expect(clearSignInFailures).toHaveBeenCalledTimes(1);
+  });
+
   it("błąd zerowania nie psuje udanego logowania", async () => {
     const { auth } = makeAuth();
     await signUp(auth, "jan@example.pl");
     clearSignInFailures.mockResolvedValueOnce({ cleared: false });
     const res = await auth.handler(post("/sign-in/email", { email: "jan@example.pl", password: PASSWORD }));
     expect(res.status).toBe(200);
+  });
+});
+
+describe("resetsAccountCounter: zeruje tylko rozpoznany sukces albo 403 EMAIL_NOT_VERIFIED", () => {
+  it("kształt wyniku udanego logowania na tej wersji biblioteki: obiekt z token i user.id (nie Response, nie Error)", async () => {
+    const { auth, captured } = makeAuth();
+    await signUp(auth, "jan@example.pl");
+    captured.returned.length = 0;
+    const res = await auth.handler(post("/sign-in/email", { email: "jan@example.pl", password: PASSWORD }));
+    expect(res.status).toBe(200);
+    expect(captured.returned).toHaveLength(1);
+    const ok = captured.returned[0] as { token?: unknown; user?: { id?: unknown } };
+    expect(ok).not.toBeInstanceOf(Response);
+    expect(ok).not.toBeInstanceOf(Error);
+    expect(typeof ok.token).toBe("string");
+    expect(typeof ok.user?.id).toBe("string");
+    expect(resetsAccountCounter(ok)).toBe(true);
+  });
+
+  it("prawdziwy wynik 401 i 403 EMAIL_NOT_VERIFIED z biblioteki: 401 nie zeruje, 403 zeruje", async () => {
+    const { auth, captured } = makeAuth({ requireEmailVerification: true });
+    await signUp(auth, "nowa@example.pl");
+    captured.returned.length = 0;
+    await auth.handler(post("/sign-in/email", { email: "nowa@example.pl", password: "zle-haslo-123" }));
+    await auth.handler(post("/sign-in/email", { email: "nowa@example.pl", password: PASSWORD }));
+    const [unauthorized, forbidden] = captured.returned;
+    expect(unauthorized).toBeInstanceOf(APIError);
+    expect(forbidden).toBeInstanceOf(APIError);
+    expect(resetsAccountCounter(unauthorized)).toBe(false);
+    expect(resetsAccountCounter(forbidden)).toBe(true);
+  });
+
+  it("new Error() nie zeruje", () => {
+    expect(resetsAccountCounter(new Error("boom"))).toBe(false);
+    expect(resetsAccountCounter(new TypeError("boom"))).toBe(false);
+  });
+
+  it("Error z polami kształtu sukcesu też nie zeruje", () => {
+    expect(resetsAccountCounter(Object.assign(new Error("boom"), { token: "t", user: { id: "u" } }))).toBe(false);
+  });
+
+  it.each([
+    ["pusty obiekt", {}],
+    ["obiekt bez statusCode i bez kształtu sukcesu", { ok: true }],
+    ["sam token", { token: "t" }],
+    ["sam user", { user: { id: "u" } }],
+    ["pusty token", { token: "", user: { id: "u" } }],
+    ["user bez id", { token: "t", user: {} }],
+    ["token nie-napis", { token: 1, user: { id: "u" } }],
+    ["null", null],
+    ["undefined", undefined],
+    ["napis", "ok"],
+    ["liczba", 200],
+    ["true", true],
+  ])("%s → nie zeruje", (_label, value) => {
+    expect(resetsAccountCounter(value)).toBe(false);
+  });
+
+  it.each([
+    ["APIError 403 bez kodu", new APIError("FORBIDDEN", { message: "x" })],
+    ["APIError 403 z innym kodem", new APIError("FORBIDDEN", { message: "x", code: "OTHER" })],
+    ["APIError 400", new APIError("BAD_REQUEST", { message: "x" })],
+    ["obiekt statusCode 403 bez body", { statusCode: 403 }],
+  ])("%s → nie zeruje", (_label, value) => {
+    expect(resetsAccountCounter(value)).toBe(false);
+  });
+
+  it("APIError 403 EMAIL_NOT_VERIFIED zeruje", () => {
+    expect(resetsAccountCounter(new APIError("FORBIDDEN", { message: "x", code: "EMAIL_NOT_VERIFIED" }))).toBe(true);
+  });
+
+  it("Response: zeruje tylko 2xx", () => {
+    expect(resetsAccountCounter(new Response(null, { status: 200 }))).toBe(true);
+    expect(resetsAccountCounter(new Response(null, { status: 302 }))).toBe(false);
+    expect(resetsAccountCounter(new Response(null, { status: 401 }))).toBe(false);
   });
 });
