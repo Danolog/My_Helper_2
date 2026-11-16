@@ -424,6 +424,19 @@ describe("POST /api/deposits/create-session — kolizja półotwarta (#165)", ()
     expect((await createSession(makeRequest())).status).toBe(201);
   });
 
+  // Q8 (#168): urlop jednego pracownika nie blokuje rezerwacji u innego.
+  it("blokada INNEGO pracownika w tym samym terminie → 201, wizyta i płatność zapisane", async () => {
+    prime([], [{ ...block("10:00", "11:00"), employee_id: "22222222-2222-4222-8222-999999999999" }]);
+    expect((await createSession(makeRequest())).status).toBe(201);
+    expect(mockDbInsert).toHaveBeenCalledTimes(2);
+  });
+
+  it("kontrast Q8: ta sama blokada u wybranego pracownika → 409, nic nie zapisane", async () => {
+    prime([], [block("10:00", "11:00")]);
+    expect((await createSession(makeRequest())).status).toBe(409);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
   function rejectingInsert(cause: Record<string, unknown>) {
     const chain = createChainMock([]) as Record<string, unknown>;
     chain.then = (_res: unknown, reject: (e: unknown) => unknown) =>
