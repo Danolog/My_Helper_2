@@ -640,6 +640,119 @@ function fileViolations(file: string, wf: string, files: string[]): string[] {
   });
 }
 
+// --- Jedna baza w CI (#193 P0c-1, pkt 8) -------------------------------------------------------
+
+/** Zmienne z adresem bazy, które czyta aplikacja, testy pg albo narzędzia (porównanie bez wielkości liter). */
+const DB_URL_KEYS = ["POSTGRES_URL", "DATABASE_URL", "INTEGRATION_POSTGRES_URL"];
+const isDbUrlKey = (k: string) => DB_URL_KEYS.includes(k.toUpperCase());
+const DB_URL_KEY_TEXT = /POSTGRES_URL|DATABASE_URL/i;
+
+/** Dopuszczenie: [job, nazwa kroku, klucz]. */
+type SameDbCase = [string, string, string];
+
+/**
+ * Jedyne miejsce, gdzie krok może dostać zmienną bazy (decyzja Olivera 16.11): job e2e-smoke,
+ * krok z `run: pnpm test:pg`, klucz `INTEGRATION_POSTGRES_URL`, wartość DOSŁOWNIE równa
+ * `POSTGRES_URL` joba (porównanie tekstu wartości `===`, bez normalizacji).
+ * Każde późniejsze dopuszczenie w tej regule idzie przez recenzję Ethana jako wyjątek.
+ */
+const SAME_DB_ALLOWED = { job: "e2e-smoke", run: "pnpm test:pg", key: "INTEGRATION_POSTGRES_URL" } as const;
+
+/**
+ * Jedna baza w jobach z `services:` (drzewo YAML z #201). W env kroku i w env joba (poza samym
+ * `POSTGRES_URL` joba) zmienna z DB_URL_KEYS (klucz bez względu na wielkość liter) = naruszenie,
+ * chyba że to SAME_DB_ALLOWED: ten job, ten krok, ten klucz i wartość równa `POSTGRES_URL` joba.
+ * Inna wartość (inna baza, inny host, wyrażenie `${{ … }}`), inny krok albo inny job = naruszenie.
+ * Krok, którego `run` pisze do `$GITHUB_ENV` cokolwiek z nazwą zmiennej bazy = naruszenie bez
+ * względu na wartość. Błąd składni YAML zgłasza yamlViolations — tu wtedy wyjątek (fail-closed).
+ */
+function oneDbScan(file: string, wf: string): { violations: string[]; sameDb: SameDbCase[] } {
+  const tree = yamlTree(wf);
+  const violations: string[] = [];
+  const sameDb: SameDbCase[] = [];
+  for (const [name, job] of Object.entries(tree.jobs as Record<string, Y>)) {
+    if (!isMap(job) || !("services" in job)) continue;
+    const jobEnv = isMap(job.env) ? job.env : {};
+    const jobUrl = jobEnv.POSTGRES_URL;
+    if (typeof jobUrl !== "string" || jobUrl === "") {
+      violations.push(`${file}: ${name}: job z services: bez POSTGRES_URL w env joba — nie wiadomo, która to baza`);
+      continue;
+    }
+    const check = (env: Record<string, Y>, where: string, stepName: string, run: Y) => {
+      for (const [k, v] of Object.entries(env)) {
+        if (!isDbUrlKey(k) || (where === "env joba" && k === "POSTGRES_URL")) continue;
+        const allowedPlace = name === SAME_DB_ALLOWED.job && run === SAME_DB_ALLOWED.run && k === SAME_DB_ALLOWED.key;
+        if (!allowedPlace) violations.push(`${file}: ${name}, ${where}: ${k} poza jedynym dozwolonym miejscem (${SAME_DB_ALLOWED.job}, krok \`${SAME_DB_ALLOWED.run}\`) — w CI jedna baza`);
+        else if (v !== jobUrl) violations.push(`${file}: ${name}, ${where}: ${k} wskazuje inną bazę niż POSTGRES_URL joba (wartość różna dosłownie) — w CI jedna baza`);
+        else sameDb.push([name, stepName, k]);
+      }
+    };
+    check(jobEnv, "env joba", "(job)", undefined);
+    const st = Array.isArray(job.steps) ? (job.steps as Y[]) : [];
+    st.forEach((s, i) => {
+      if (!isMap(s)) return;
+      const label = `krok ${i + 1} (${typeof s.name === "string" ? s.name : typeof s.uses === "string" ? `uses ${s.uses}` : "bez nazwy"})`;
+      if (isMap(s.env)) check(s.env, `${label}, env kroku`, typeof s.name === "string" ? s.name : label, s.run);
+      if (typeof s.run === "string" && /GITHUB_ENV/.test(s.run) && DB_URL_KEY_TEXT.test(s.run)) {
+        violations.push(`${file}: ${name}, ${label}: zapis zmiennej bazy do $GITHUB_ENV — w CI jedna baza`);
+      }
+    });
+  }
+  return { violations, sameDb };
+}
+
+/** Inwentarz dopuszczeń na workflow repo: dokładnie jedno (e2e-smoke, krok test:pg). */
+const SAME_DB_CASES: SameDbCase[] = [["e2e-smoke", "Integration test — subscription locks (real Postgres)", "INTEGRATION_POSTGRES_URL"]];
+
+const PW_FILE = "playwright.config.ts";
+const PW = readFileSync(join(ROOT, PW_FILE), "utf8");
+/** `webServer.command` dosłownie jak na d783774 (#193 P0c-1). */
+const PW_COMMAND_LINE = "command: isCI ? 'pnpm start' : 'pnpm dev',";
+/** Skrypty, które uruchamia `webServer.command` — dokładna treść. */
+const PW_SERVER_SCRIPTS: Record<string, string> = { start: "next start", dev: "next dev --turbopack" };
+const PW_WEBSERVER_KEYS = ["command", "url", "reuseExistingServer", "timeout"];
+
+/** Treść obiektu `webServer: { … }` (bez klamer). Inny kształt niż jeden literał obiektu = wyjątek. */
+function webServerBlock(src: string): string {
+  const hits = src.split(/\bwebServer\s*:/).length - 1;
+  if (hits !== 1) throw new Error(`${PW_FILE}: oczekiwano dokładnie jednego „webServer:”, jest ${hits}`);
+  const at = src.search(/\bwebServer\s*:\s*\{/);
+  if (at < 0) throw new Error(`${PW_FILE}: webServer nie jest literałem obiektu`);
+  const open = src.indexOf("{", at);
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}" && --depth === 0) return src.slice(open + 1, i);
+  }
+  throw new Error(`${PW_FILE}: niedomknięty obiekt webServer`);
+}
+
+/**
+ * Serwer E2E (playwright webServer) dziedziczy env kroku, więc bazę ma tę samą co job. Naruszenia:
+ * nazwa zmiennej bazy gdziekolwiek w pliku (także w komentarzu — przenieś opis gdzie indziej),
+ * zapis do `process.env`, w webServer klucz spoza listy (w tym `env`) albo spread, `command`
+ * inne niż na d783774.
+ */
+function playwrightDbViolations(src: string): string[] {
+  const out: string[] = [];
+  if (DB_URL_KEY_TEXT.test(src)) out.push(`${PW_FILE}: nazwa zmiennej bazy w konfiguracji Playwrighta — serwer E2E ma bazę joba`);
+  if (/process\.env(?:\.\w+|\[[^\]]*\])\s*=(?!=)|Object\.assign\(\s*process\.env/.test(src)) out.push(`${PW_FILE}: zapis do process.env w konfiguracji Playwrighta`);
+  let block: string;
+  try {
+    block = webServerBlock(src);
+  } catch (e) {
+    return [...out, (e as Error).message];
+  }
+  if (block.includes("...")) out.push(`${PW_FILE}: spread w webServer — klucze muszą być jawne`);
+  for (const line of block.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("//"))) {
+    const k = line.match(/^([A-Za-z_$][\w$]*)\s*:/)?.[1];
+    if (!k || !PW_WEBSERVER_KEYS.includes(k)) out.push(`${PW_FILE}: webServer — linia spoza listy kluczy (${PW_WEBSERVER_KEYS.join(", ")}): ${line}`);
+  }
+  const cmd = block.split("\n").map((l) => l.trim()).filter((l) => /^command\s*:/.test(l));
+  if (cmd.length !== 1 || cmd[0] !== PW_COMMAND_LINE) out.push(`${PW_FILE}: webServer.command inne niż „${PW_COMMAND_LINE}”: ${cmd.join(" | ") || "(brak)"}`);
+  return out;
+}
+
 const PG_JOBS = [...jobs()].filter(([, body]) => dbReasons(body).length > 0);
 
 describe("wszystkie pliki .github/workflows: bez push, bez baz poza parą, bez kotwic (#194 runda 4)", () => {
@@ -1175,5 +1288,91 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
     expect(msg).toMatch(/kluczy run w pliku (\d+), rozpoznanych przez parser \1, w drzewie YAML \1;/);
     expect(msg).toContain(`nierozpoznane: linia ${flow}: with: { name: x, run: y }`);
     expect(msg).toContain(`rozpoznane przez parser, a niewidoczne jako klucz: linia ${nbsp}: run: b"`);
+  });
+});
+
+describe("jedna baza w CI: env kroków, $GITHUB_ENV, serwer E2E (#193 P0c-1, pkt 8)", () => {
+  /** Adres INNEJ bazy do sond, złożony z części (skaner literałów sekretów; to nie sekret). */
+  const OTHER_DB = ["postgresql", "//probe:probe@localhost:5432/other_db"].join(":");
+  const SMOKE_PW = "          PLAYWRIGHT_TIMEOUT: 15000\n";
+  const FULL_PW = "          ALLOW_PAYMENT_SIMULATION: \"1\"\n\n      # Strażnik RLS drugi raz, po ostatnim kroku z bazą (#194 Z1) — jak w e2e-smoke.";
+  const SMOKE_SEED = "      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Verify seed data";
+  const PG_ENV_LINE = "          INTEGRATION_POSTGRES_URL: ";
+  const edited = (src: string, find: string, repl: string): string => {
+    expect(src.split(find).length - 1, `kotwica sondy: ${find}`).toBe(1);
+    return src.replace(find, repl);
+  };
+
+  it.each(WORKFLOWS)("%s: w jobach z services: zmienne bazy w env kroków/joba tylko z adresem POSTGRES_URL joba; bez zapisu do $GITHUB_ENV", (f, wf) => {
+    expect(oneDbScan(f, wf).violations).toEqual([]);
+  });
+
+  it("dopuszczenia po wartości to dziś dokładnie INTEGRATION_POSTGRES_URL w kroku test:pg (e2e-smoke)", () => {
+    expect(oneDbScan(QG, WF).sameDb).toEqual(SAME_DB_CASES);
+  });
+
+  it(`${PW_FILE}: webServer bez env i bez nadpisania bazy, command dosłownie jak na d783774`, () => {
+    expect(playwrightDbViolations(PW)).toEqual([]);
+  });
+
+  it("skrypty uruchamiane przez webServer.command mają w package.json dokładnie oczekiwaną treść", () => {
+    for (const [name, body] of Object.entries(PW_SERVER_SCRIPTS)) expect(PKG.scripts[name], name).toBe(body);
+  });
+
+  /** Adres bazy joba e2e-smoke odczytany z drzewa (nie literał w teście). */
+  const JOB_URL = (load(WF) as { jobs: Record<string, { env: Record<string, string> }> }).jobs["e2e-smoke"]!.env.POSTGRES_URL!;
+  const PLACE = /poza jedynym dozwolonym miejscem \(e2e-smoke, krok `pnpm test:pg`\)/;
+  const VALUE = /wskazuje inną bazę niż POSTGRES_URL joba \(wartość różna dosłownie\)/;
+  const at = (where: string, re: RegExp) => new RegExp(`${where}, env kroku: ${re.source}`);
+  const PG_STEP = String.raw`e2e-smoke, krok \d+ \(Integration test — subscription locks \(real Postgres\)\)`;
+
+  it.each([
+    ["E13: POSTGRES_URL innej bazy w env kroku Playwrighta (e2e-smoke)", SMOKE_PW, `${SMOKE_PW}          POSTGRES_URL: ${OTHER_DB}\n`, at(String.raw`e2e-smoke, krok \d+ \(Run smoke tests\)`, /POSTGRES_URL /), PLACE],
+    ["DATABASE_URL innej bazy w env kroku Playwrighta (e2e-full)", FULL_PW, FULL_PW.replace('"1"\n', `"1"\n          DATABASE_URL: ${OTHER_DB}\n`), at(String.raw`e2e-full, krok \d+ \(Run full E2E tests\)`, /DATABASE_URL /), PLACE],
+    ["klucz małymi literami (postgres_url) w env kroku", SMOKE_PW, `${SMOKE_PW}          postgres_url: ${OTHER_DB}\n`, /env kroku: postgres_url /, PLACE],
+    ["Oliver (a): INTEGRATION_POSTGRES_URL testu pg na inną bazę", PG_ENV_LINE, `          INTEGRATION_POSTGRES_URL: ${OTHER_DB}\n          X: `, at(PG_STEP, /INTEGRATION_POSTGRES_URL /), VALUE],
+    ["Oliver (a): INTEGRATION_POSTGRES_URL jako wyrażenie zamiast dosłownego adresu", PG_ENV_LINE, "          INTEGRATION_POSTGRES_URL: ${{ env.POSTGRES_URL }}\n          X: ", at(PG_STEP, /INTEGRATION_POSTGRES_URL /), VALUE],
+    ["Oliver (1): bez normalizacji — ten sam adres z hostem WIELKIMI literami", PG_ENV_LINE, `          INTEGRATION_POSTGRES_URL: ${JOB_URL.replace("localhost", "LOCALHOST")}\n          X: `, at(PG_STEP, /INTEGRATION_POSTGRES_URL /), VALUE],
+    ["Oliver (b): INTEGRATION_POSTGRES_URL z adresem joba w innym kroku (Run smoke tests)", SMOKE_PW, `${SMOKE_PW}          INTEGRATION_POSTGRES_URL: ${JOB_URL}\n`, at(String.raw`e2e-smoke, krok \d+ \(Run smoke tests\)`, /INTEGRATION_POSTGRES_URL /), PLACE],
+    ["Oliver (b): INTEGRATION_POSTGRES_URL z adresem joba w innym jobie (e2e-full)", FULL_PW, FULL_PW.replace('"1"\n', `"1"\n          INTEGRATION_POSTGRES_URL: ${JOB_URL}\n`), at(String.raw`e2e-full, krok \d+ \(Run full E2E tests\)`, /INTEGRATION_POSTGRES_URL /), PLACE],
+    ["Oliver (b): inna zmienna bazy (DATABASE_URL) z adresem joba w kroku test:pg", PG_ENV_LINE, `          DATABASE_URL: ${JOB_URL}\n          INTEGRATION_POSTGRES_URL: `, at(PG_STEP, /DATABASE_URL /), PLACE],
+    ["Ethan: krok pisze POSTGRES_URL innej bazy do $GITHUB_ENV", SMOKE_SEED, `      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Switch db\n        run: echo "POSTGRES_URL=${OTHER_DB}" >> "$GITHUB_ENV"\n\n      - name: Verify seed data`, /Switch db\): zapis zmiennej bazy do \$GITHUB_ENV/, /./],
+    ["Ethan: krok pisze INTEGRATION_POSTGRES_URL do $GITHUB_ENV (blok run)", SMOKE_SEED, `      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Switch db\n        run: |\n          echo "INTEGRATION_POSTGRES_URL=${OTHER_DB}" >> "$GITHUB_ENV"\n\n      - name: Verify seed data`, /Switch db\): zapis zmiennej bazy do \$GITHUB_ENV/, /./],
+  ])("A %s → porażka", (_n, find, repl, where, why) => {
+    const v = oneDbScan(QG, edited(WF, find, repl)).violations;
+    expect(v, "dokładnie jedno naruszenie").toHaveLength(1);
+    expect(v[0]).toMatch(where);
+    expect(v[0]).toMatch(why);
+  });
+
+  it("zmienna bazy w env joba z services: (poza POSTGRES_URL joba) → naruszenie, także z adresem joba", () => {
+    const job = (extra: string) =>
+      `name: x\njobs:\n  a:\n    runs-on: x\n    services:\n      postgres:\n        image: x\n    env:\n      POSTGRES_URL: ${OTHER_DB}\n${extra}    steps:\n      - run: pnpm typecheck\n`;
+    for (const v of [`${OTHER_DB}x`, OTHER_DB]) {
+      const r = oneDbScan("x.yml", job(`      DATABASE_URL: ${v}\n`));
+      expect(r.violations.join()).toMatch(/a, env joba: DATABASE_URL poza jedynym dozwolonym miejscem/);
+      expect(r.sameDb).toEqual([]);
+    }
+  });
+
+  it("job z services: bez POSTGRES_URL w env joba → naruszenie (nie wiadomo, która baza)", () => {
+    const wf = "name: x\njobs:\n  a:\n    runs-on: x\n    services:\n      postgres:\n        image: x\n    steps:\n      - run: pnpm typecheck\n";
+    expect(oneDbScan("x.yml", wf).violations.join()).toMatch(/a: job z services: bez POSTGRES_URL/);
+  });
+
+  it.each([
+    ["webServer.env z POSTGRES_URL innej bazy", "          timeout: isCI ? 60000 : 120000,\n", `          timeout: isCI ? 60000 : 120000,\n          env: { POSTGRES_URL: '${OTHER_DB}' },\n`, /nazwa zmiennej bazy[\s\S]*linia spoza listy kluczy .*: env:/],
+    ["webServer.env bez nazwy zmiennej bazy (np. z obiektu)", "          timeout: isCI ? 60000 : 120000,\n", "          timeout: isCI ? 60000 : 120000,\n          env: serverEnv,\n", /linia spoza listy kluczy .*: env: serverEnv,/],
+    ["spread w webServer", "          url: 'http://localhost:3000',\n", "          url: 'http://localhost:3000',\n          ...extra,\n", /spread w webServer/],
+    ["zmienione webServer.command", "command: isCI ? 'pnpm start' : 'pnpm dev',", "command: isCI ? 'pnpm start -p 3000' : 'pnpm dev',", /webServer\.command inne niż/],
+    ["webServer.command z adresem bazy w poleceniu", "command: isCI ? 'pnpm start' : 'pnpm dev',", `command: isCI ? 'DATABASE_URL=${OTHER_DB} pnpm start' : 'pnpm dev',`, /nazwa zmiennej bazy[\s\S]*webServer\.command inne niż/],
+    ["zapis do process.env w konfiguracji", "const isCI = !!process.env.CI;\n", "const isCI = !!process.env.CI;\nprocess.env.PGDATABASE = 'other_db';\n", /zapis do process\.env/],
+  ])("A %s → porażka", (_n, find, repl, re) => {
+    expect(playwrightDbViolations(edited(PW, find, repl)).join("\n")).toMatch(re);
+  });
+
+  it("drugi webServer albo webServer nie-literał → naruszenie (fail-closed)", () => {
+    expect(playwrightDbViolations(`${PW}\nconst webServer: unknown = null;\n`).join()).toMatch(/dokładnie jednego „webServer:”, jest 2/);
+    expect(playwrightDbViolations(PW.replace(/webServer: \{[\s\S]*?\n {8}\},/, "webServer: server,")).join()).toMatch(/nie jest literałem obiektu/);
   });
 });
