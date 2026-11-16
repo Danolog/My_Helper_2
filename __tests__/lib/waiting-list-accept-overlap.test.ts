@@ -189,3 +189,64 @@ describe("acceptEarlierSlot — kolizja półotwarta (#165)", () => {
     expect(h.calc).not.toHaveBeenCalled();
   });
 });
+
+describe("acceptEarlierSlot — wyścig odrzucony przez bazę (#171)", () => {
+  /** Zapis wizyty odrzucony przez bazę (kształt DrizzleQueryError: błąd sterownika w cause). */
+  function rejecting(cause: Record<string, unknown>) {
+    const c = createChainMock([]);
+    c.then = (_res: unknown, reject: (e: unknown) => unknown) =>
+      reject(Object.assign(new Error("Failed query"), { cause: Object.assign(new Error("db"), cause) }));
+    return c;
+  }
+  const OVERLAP = { code: "23P01", constraint_name: "appointments_no_overlap" };
+
+  it("nowa wizyta: 23P01 → odmowa jak przy kolizji, wpis nierozstrzygnięty", async () => {
+    h.select.mockReturnValueOnce(createChainMock([entry()])).mockReturnValueOnce(filteringChain([]));
+    h.insert.mockReturnValue(rejecting(OVERLAP));
+
+    const res = await acceptEarlierSlot("wl-1", "tok");
+
+    expect(res).toEqual({ success: false, message: "Termin jest juz zajety" });
+    expect(h.insert).toHaveBeenCalledTimes(1);
+    expect(h.update).not.toHaveBeenCalled(); // accepted zostaje null
+  });
+
+  it("przeniesienie: 23P01 przy UPDATE wizyty → odmowa, wpis nierozstrzygnięty", async () => {
+    h.select
+      .mockReturnValueOnce(createChainMock([entry({ existingAppointmentId: "apt-old" })]))
+      .mockReturnValueOnce(filteringChain([]))
+      .mockReturnValueOnce(
+        createChainMock([{ id: "apt-old", status: "scheduled", startTime: START, notes: null, employeeId: EMPLOYEE }])
+      );
+    h.update.mockReturnValueOnce(rejecting(OVERLAP));
+
+    const res = await acceptEarlierSlot("wl-1", "tok");
+
+    expect(res).toEqual({ success: false, message: "Termin jest juz zajety" });
+    expect(h.update).toHaveBeenCalledTimes(1); // tylko próba przeniesienia, wpis bez zmian
+  });
+
+  it("istniejąca wizyta anulowana, więc nowa: 23P01 przy INSERT → odmowa, wpis nierozstrzygnięty", async () => {
+    h.select
+      .mockReturnValueOnce(createChainMock([entry({ existingAppointmentId: "apt-old" })]))
+      .mockReturnValueOnce(filteringChain([]))
+      .mockReturnValueOnce(
+        createChainMock([{ id: "apt-old", status: "cancelled", startTime: START, notes: null, employeeId: EMPLOYEE }])
+      );
+    h.insert.mockReturnValue(rejecting(OVERLAP));
+
+    const res = await acceptEarlierSlot("wl-1", "tok");
+
+    expect(res).toEqual({ success: false, message: "Termin jest juz zajety" });
+    expect(h.insert).toHaveBeenCalledTimes(1); // gałąź „anulowana → nowa wizyta”
+    expect(h.update).not.toHaveBeenCalled(); // anulowanej nie ruszamy, accepted zostaje null
+  });
+
+  it("inny błąd zapisu nie jest połykany (rzuca dalej)", async () => {
+    h.select.mockReturnValueOnce(createChainMock([entry()])).mockReturnValueOnce(filteringChain([]));
+    h.insert.mockReturnValue(rejecting({ code: "23514", constraint_name: "appointments_end_after_start" }));
+
+    await expect(acceptEarlierSlot("wl-1", "tok")).rejects.toThrow("Failed query");
+    expect(h.update).not.toHaveBeenCalled();
+  });
+});

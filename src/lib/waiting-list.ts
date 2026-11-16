@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { eq, and, isNull, or, not } from "drizzle-orm";
-import { appointmentConflictWhere } from "@/lib/appointment-overlap";
+import { appointmentConflictWhere, isAppointmentOverlapViolation } from "@/lib/appointment-overlap";
 import { db } from "@/lib/db";
 import {
   checkBookingWithoutDeposit,
@@ -368,33 +368,56 @@ export async function acceptEarlierSlot(
   };
 
   // 7. Move existing appointment or create a new one
-  if (entry.existingAppointmentId) {
-    // Move existing appointment to the earlier slot
-    const [existingAppt] = await db
-      .select()
-      .from(appointments)
-      .where(eq(appointments.id, entry.existingAppointmentId))
-      .limit(1);
+  // #171: każdy zapis poniżej to jedno polecenie; jeśli równoległy zapis
+  // zajął termin po kroku 6, EXCLUDE w bazie odrzuca je (23P01) — odmowa jak
+  // przy kolizji, nic nie zapisane, wpis nierozstrzygnięty.
+  try {
+    if (entry.existingAppointmentId) {
+      // Move existing appointment to the earlier slot
+      const [existingAppt] = await db
+        .select()
+        .from(appointments)
+        .where(eq(appointments.id, entry.existingAppointmentId))
+        .limit(1);
 
-    if (existingAppt && existingAppt.status !== "cancelled") {
-      oldStartTime = new Date(existingAppt.startTime);
-      await db
-        .update(appointments)
-        .set({
-          startTime: offeredStart,
-          endTime: offeredEnd,
-          employeeId: employeeId || existingAppt.employeeId,
-          notes: `${existingAppt.notes || ""} [Przeniesiony z listy oczekujacych]`.trim(),
-        })
-        .where(eq(appointments.id, entry.existingAppointmentId));
-      appointmentId = entry.existingAppointmentId;
-      logger.info("Moved appointment from waiting list", {
-        appointmentId,
-        from: oldStartTime.toISOString(),
-        to: offeredStart.toISOString(),
-      });
+      if (existingAppt && existingAppt.status !== "cancelled") {
+        oldStartTime = new Date(existingAppt.startTime);
+        await db
+          .update(appointments)
+          .set({
+            startTime: offeredStart,
+            endTime: offeredEnd,
+            employeeId: employeeId || existingAppt.employeeId,
+            notes: `${existingAppt.notes || ""} [Przeniesiony z listy oczekujacych]`.trim(),
+          })
+          .where(eq(appointments.id, entry.existingAppointmentId));
+        appointmentId = entry.existingAppointmentId;
+        logger.info("Moved appointment from waiting list", {
+          appointmentId,
+          from: oldStartTime.toISOString(),
+          to: offeredStart.toISOString(),
+        });
+      } else {
+        // Existing appointment was cancelled or missing – create new
+        const blocked = await depositBlocksNewAppointment();
+        if (blocked) return blocked;
+        const [newAppt] = await db
+          .insert(appointments)
+          .values({
+            salonId: entry.salonId,
+            clientId: entry.clientId,
+            employeeId: employeeId as string,
+            serviceId: entry.serviceId,
+            startTime: offeredStart,
+            endTime: offeredEnd,
+            status: "scheduled",
+            notes: "Utworzony z listy oczekujacych",
+          })
+          .returning();
+        appointmentId = newAppt!.id;
+      }
     } else {
-      // Existing appointment was cancelled or missing – create new
+      // No existing appointment – create new
       const blocked = await depositBlocksNewAppointment();
       if (blocked) return blocked;
       const [newAppt] = await db
@@ -412,24 +435,11 @@ export async function acceptEarlierSlot(
         .returning();
       appointmentId = newAppt!.id;
     }
-  } else {
-    // No existing appointment – create new
-    const blocked = await depositBlocksNewAppointment();
-    if (blocked) return blocked;
-    const [newAppt] = await db
-      .insert(appointments)
-      .values({
-        salonId: entry.salonId,
-        clientId: entry.clientId,
-        employeeId: employeeId as string,
-        serviceId: entry.serviceId,
-        startTime: offeredStart,
-        endTime: offeredEnd,
-        status: "scheduled",
-        notes: "Utworzony z listy oczekujacych",
-      })
-      .returning();
-    appointmentId = newAppt!.id;
+  } catch (error) {
+    if (isAppointmentOverlapViolation(error)) {
+      return { success: false, message: "Termin jest juz zajety" };
+    }
+    throw error;
   }
 
   // 8. Mark waiting list entry as accepted

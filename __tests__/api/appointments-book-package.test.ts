@@ -401,6 +401,34 @@ describe("POST /api/appointments/book-package — kolizja półotwarta (#165)", 
     expect(mockInsertValues).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["pierwsza", 1],
+    ["druga", 2],
+  ])("#171: baza odrzuca %s wizytę pakietu (23P01, wyścig) → 409 z komunikatem kolizji", async (_n, nth) => {
+    txQueue.push([], []);
+    const dbErr = Object.assign(new Error("Failed query"), {
+      cause: Object.assign(new Error("db"), { code: "23P01", constraint_name: "appointments_no_overlap" }),
+    });
+    let calls = 0;
+    mockInsertValues.mockImplementation(() => {
+      calls += 1;
+      if (calls === nth) throw dbErr;
+    });
+    const { status, body } = await parseResponse(await bookPackage(request()));
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+    expect(calls).toBe(nth); // po odrzuceniu dalsze wizyty nie są zapisywane
+  });
+
+  it("#171: inny błąd zapisu pakietu → 500", async () => {
+    txQueue.push([], []);
+    mockInsertValues.mockImplementationOnce(() => {
+      throw Object.assign(new Error("db"), { code: "23514", constraint_name: "appointments_end_after_start" });
+    });
+    const { status } = await parseResponse(await bookPackage(request()));
+    expect(status).toBe(500);
+  });
+
   it("blokada czasu nachodząca o 1 minutę → 409", async () => {
     txQueue.push([], [block("11:14", "12:00")]);
     const { status, body } = await parseResponse(await bookPackage(request()));
