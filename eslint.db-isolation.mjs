@@ -155,7 +155,6 @@ export const P5_FILES = [
   "src/app/api/reminders/appointment/route.ts",
   "src/app/api/seed/route.ts",
   "src/app/api/subscription-plans/route.ts",
-  "src/lib/push.ts",
   "src/lib/waiting-list.ts",
 ];
 

@@ -16,7 +16,7 @@
 import path from "node:path";
 import { and, eq, inArray } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { pushSubscriptions } from "@/lib/schema";
 import { VALID_AUTH, VALID_ENDPOINTS, VALID_P256DH } from "../fixtures/push-subscriptions";
 
@@ -120,18 +120,24 @@ const USER = "user-1";
 const SALON = "aaaaaaaa-0000-4000-8000-000000000001";
 const MSG = { title: "T", body: "B", salonId: SALON, clientId: "c1" };
 
-const good = (id: string, endpoint = VALID_ENDPOINTS.chromeFcm) => ({ id, endpoint, p256dh: VALID_P256DH, auth: VALID_AUTH });
+const good = (id: string, endpoint: string = VALID_ENDPOINTS.chromeFcm) => ({
+  id,
+  endpoint,
+  p256dh: VALID_P256DH,
+  auth: VALID_AUTH,
+});
 const BAD_ENDPOINT = "https://evil.example/push/abc";
 
-let getSubs: ReturnType<typeof vi.fn>;
-let delSubs: ReturnType<typeof vi.fn>;
-let send: ReturnType<typeof vi.fn>;
+type AnyFn = (...a: unknown[]) => unknown;
+let getSubs: Mock<AnyFn>;
+let delSubs: Mock<AnyFn>;
+let send: Mock<AnyFn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  getSubs = vi.fn();
-  delSubs = vi.fn().mockResolvedValue(0);
-  send = vi.fn().mockResolvedValue({ statusCode: 201 });
+  getSubs = vi.fn<AnyFn>();
+  delSubs = vi.fn<AnyFn>().mockResolvedValue(0);
+  send = vi.fn<AnyFn>().mockResolvedValue({ statusCode: 201 });
   h.registry.getPushSubscriptionsForUser = getSubs;
   h.registry.deleteUndeliverablePushSubscriptions = delSubs;
   h.send.fn = send;
@@ -172,7 +178,7 @@ describe("push.ts: subskrypcje przez wyjścia rejestru, zapis przez bramę salon
 
   it("odrzucone 404 i 410 → kasowane po id użytkownika; 500 zostaje", async () => {
     getSubs.mockResolvedValue([good("s404"), good("s410"), good("s500"), good("ok")]);
-    send.mockImplementation(async (sub: { endpoint: string }, _p: unknown, _o: unknown) => {
+    send.mockImplementation(async (sub: unknown) => {
       const n = send.mock.calls.length;
       if (n === 1) throw Object.assign(new Error("gone"), { statusCode: 404 });
       if (n === 2) throw Object.assign(new Error("gone"), { statusCode: 410 });

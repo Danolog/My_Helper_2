@@ -8,8 +8,8 @@
  *   puli, bez obiektu z `.select`/`.transaction`/`.execute`, bez nazw
  *   raw/tx/getDb/withTx i bez parametrów-funkcji (zakaz callbacków).
  *   Wyjątki: zamknięta lista przypięta `toEqual` (decyzja Ethana 16.11).
- * - `system/index.ts` = rejestr: re-eksportuje dokładnie wyjścia
- *   session/cron/health, bez wyjątków (pula i adapter nie wychodzą przez rejestr).
+ * - `system/index.ts` = rejestr: re-eksportuje dokładnie wyjścia plików z
+ *   `REGISTRY_SOURCES`, bez wyjątków (pula i adapter nie wychodzą przez rejestr).
  * - Adapter Better Auth: importuje go wyłącznie `src/lib/auth.ts`.
  * - DoD P0b: dawne pliki P0 nie importują surowego `db`.
  */
@@ -37,12 +37,17 @@ const SESSION_EXPORTS = [
 ];
 const CRON_EXPORTS = ["cleanupExpiredTemporaryAccess"];
 const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
+/** #193 P5a-1: subskrypcje push po stronie wysyłki (decyzja CTO 3d / 3d-KOREKTA). */
+const NOTIFICATIONS_EXPORTS = ["deleteUndeliverablePushSubscriptions", "getPushSubscriptionsForUser"];
+/** Pliki re-eksportowane przez rejestr `index.ts` w całości. */
+const REGISTRY_SOURCES = ["session.ts", "cron.ts", "health.ts", "notifications.ts"];
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts": ["authAdapter"],
   "cron.ts": CRON_EXPORTS,
   "db-system.ts": ["dbSystem"],
   "health.ts": HEALTH_EXPORTS,
-  "index.ts": [...SESSION_EXPORTS, ...CRON_EXPORTS, ...HEALTH_EXPORTS].sort(),
+  "index.ts": [...SESSION_EXPORTS, ...CRON_EXPORTS, ...HEALTH_EXPORTS, ...NOTIFICATIONS_EXPORTS].sort(),
+  "notifications.ts": NOTIFICATIONS_EXPORTS,
   "session.ts": SESSION_EXPORTS,
 };
 
@@ -100,10 +105,10 @@ describe("R-Z1: migawka plików i eksportów system/", () => {
     expect(SNAPSHOT).not.toHaveProperty("identity.ts"); // P3: identity.ts dopiero w P2
   });
 
-  it("index.ts re-eksportuje dokładnie wyjścia session/cron/health (te same obiekty), bez wyjątków", async () => {
+  it("index.ts re-eksportuje dokładnie wyjścia plików rejestru (te same obiekty), bez wyjątków", async () => {
     const index = await runtimeExports("index.ts");
     const expected: [string, unknown][] = [];
-    for (const file of ["session.ts", "cron.ts", "health.ts"]) {
+    for (const file of REGISTRY_SOURCES) {
       for (const [k, v] of Object.entries(await runtimeExports(file))) expected.push([k, v]);
     }
     expect(Object.keys(index).sort()).toEqual(expected.map(([k]) => k).sort());

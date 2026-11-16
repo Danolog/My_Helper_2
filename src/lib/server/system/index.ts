@@ -21,3 +21,5 @@ export {
 export type { SalonContext, SalonContextResolution, SalonRole } from "./session";
 export { cleanupExpiredTemporaryAccess } from "./cron";
 export { checkDatabase, pingDatabase } from "./health";
+export { deleteUndeliverablePushSubscriptions, getPushSubscriptionsForUser } from "./notifications";
+export type { PushSubscriptionForSend } from "./notifications";
