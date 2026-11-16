@@ -54,6 +54,8 @@ let entryIds: string[] = ["wl-1"];
 let userReads = 0;
 // Zapis oznaczenia wpisu kończy się błędem.
 let updateFails = false;
+// Odczyt konta kończy się błędem.
+let userReadFails = false;
 
 function entryRow(id = "wl-1") {
   return {
@@ -94,6 +96,10 @@ function selectChain() {
     }
     if (tableName === "user") {
       userReads++;
+      if (userReadFails) {
+        // Błąd zapytania niosący w treści parametr (e-mail klienta).
+        throw new Error(`Failed query: select "id" from "user" where "email" = $1 params: ${CLIENT_EMAIL}`);
+      }
       return resolve(users.filter((u) => matches(u, where)).map((u) => ({ id: u.id })));
     }
     return resolve([]);
@@ -298,6 +304,7 @@ describe("notifyWaitingList — wyszukiwanie konta w przebiegu i nieudany zapis 
     entryIds = ["wl-1"];
     userReads = 0;
     updateFails = false;
+    userReadFails = false;
     clientPhone = null;
     clientEmail = CLIENT_EMAIL;
     mockSendPush.mockResolvedValue({ success: true });
@@ -305,10 +312,12 @@ describe("notifyWaitingList — wyszukiwanie konta w przebiegu i nieudany zapis 
   beforeEach(reset);
   afterEach(reset);
 
-  /** Wszystkie argumenty wywołań loggera jako tekst. */
+  /** Wszystkie argumenty wywołań loggera jako tekst (obiekt błędu z nazwą i treścią). */
   function loggedText(): string {
     const calls = Object.values(logger).flatMap((fn) => (fn as ReturnType<typeof vi.fn>).mock.calls);
-    return JSON.stringify(calls);
+    return JSON.stringify(calls, (_key, value: unknown) =>
+      value instanceof Error ? { name: value.name, message: value.message } : value
+    );
   }
 
   it("dwa wpisy tego samego klienta: jeden odczyt konta w przebiegu, push do obu", async () => {
@@ -367,6 +376,18 @@ describe("notifyWaitingList — wyszukiwanie konta w przebiegu i nieudany zapis 
     expect(text).not.toContain(CLIENT_EMAIL);
     expect(text).not.toContain("Barbara");
     expect(text).not.toContain("Bielska");
+  });
+
+  it("odczyt konta rzuca błąd z e-mailem w treści: log bez e-maila, brak pusha, errors bez zmian", async () => {
+    users = VERIFIED;
+    userReadFails = true;
+
+    const result = await notifyWaitingList(params);
+
+    expect(mockSendPush).not.toHaveBeenCalled();
+    expect(result).toEqual({ notified: 0, smsCount: 0, pushCount: 0, errors: 0 });
+    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), { clientId: "client-b", errorName: "Error" });
+    expect(loggedText()).not.toContain(CLIENT_EMAIL);
   });
 });
 

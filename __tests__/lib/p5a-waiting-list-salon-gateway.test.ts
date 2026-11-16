@@ -18,6 +18,7 @@
 import { eq } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { logger } from "@/lib/logger";
 import { waitingList } from "@/lib/schema";
 import { createChainMock } from "../api/helpers";
 
@@ -294,15 +295,18 @@ describe("notifyWaitingList: forSalon(params.salonId), push poza callbackiem", (
     expect(h.gate.pushDepths).toEqual([0]);
   });
 
-  it("błąd odczytu wpisów → errors = 1, brak zapisu", async () => {
+  it("błąd odczytu wpisów → errors = 1, brak zapisu, log tylko z nazwą klasy błędu", async () => {
     h.tx.select.mockImplementationOnce(() => {
       throw new Error("odczyt");
     });
+    const errorLog = vi.spyOn(logger, "error").mockImplementation(() => {});
 
     const res = await notifyWaitingList(params);
 
     expect(res.errors).toBe(1);
     expect(h.tx.update).not.toHaveBeenCalled();
+    expect(errorLog).toHaveBeenCalledWith("Failed to notify waiting list", { errorName: "Error" });
+    errorLog.mockRestore();
   });
 });
 
