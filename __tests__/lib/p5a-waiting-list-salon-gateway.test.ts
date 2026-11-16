@@ -107,6 +107,11 @@ vi.mock("@/lib/sms", async (importOriginal) => ({
   sendSms: vi.fn(),
 }));
 vi.mock("@/lib/deposit-calculation", () => ({ calculateExpectedDeposit: (...a: unknown[]) => h.calc(...a) }));
+// Stan modułów salonu (przełącznik przy wysyłce) — lista oczekujących włączona.
+vi.mock("@/lib/server/modules", async () => {
+  const { resolveModules } = await vi.importActual<typeof import("@/lib/features")>("@/lib/features");
+  return { getSalonModules: async () => resolveModules({ modules: { waitingList: true } }) };
+});
 
 import { acceptEarlierSlot, declineEarlierSlot, notifyWaitingList } from "@/lib/waiting-list";
 

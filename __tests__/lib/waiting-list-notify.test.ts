@@ -88,7 +88,10 @@ function selectChain() {
   c.where = (w: Cond) => ((where = w), c);
   c.limit = () => c;
   c.then = (resolve: (v: unknown[]) => unknown) => {
-    if (tableName === "waitingList") return resolve(entryIds.map((id) => entryRow(id)));
+    if (tableName === "waitingList") {
+      entryReads++;
+      return resolve(entryIds.map((id) => entryRow(id)));
+    }
     if (tableName === "user") {
       userReads++;
       return resolve(users.filter((u) => matches(u, where)).map((u) => ({ id: u.id })));
@@ -119,6 +122,21 @@ vi.mock("@/lib/server/repository", async () => {
   };
 });
 vi.mock("@/lib/server/system", () => ({ resolveWaitingListToken: vi.fn() }));
+
+// Stan modułów salonu — domyślnie lista oczekujących włączona.
+let waitingListModuleOn = true;
+const mockGetSalonModules = vi.fn();
+vi.mock("@/lib/server/modules", async () => {
+  const { resolveModules } = await vi.importActual<typeof import("@/lib/features")>("@/lib/features");
+  return {
+    getSalonModules: async (salonId: string) => {
+      mockGetSalonModules(salonId);
+      return resolveModules({ modules: { waitingList: waitingListModuleOn } });
+    },
+  };
+});
+// Liczba odczytów listy wpisów.
+let entryReads = 0;
 
 const mockSendPush = vi.fn();
 vi.mock("@/lib/push", () => ({
@@ -349,5 +367,47 @@ describe("notifyWaitingList — wyszukiwanie konta w przebiegu i nieudany zapis 
     expect(text).not.toContain(CLIENT_EMAIL);
     expect(text).not.toContain("Barbara");
     expect(text).not.toContain("Bielska");
+  });
+});
+
+describe("notifyWaitingList — przełącznik modułu listy oczekujących salonu (#221)", () => {
+  const VERIFIED = [{ id: "wlasciciel", email: CLIENT_EMAIL, emailVerified: true }];
+
+  function reset() {
+    vi.clearAllMocks();
+    updates.length = 0;
+    entryIds = ["wl-1"];
+    entryReads = 0;
+    userReads = 0;
+    updateFails = false;
+    waitingListModuleOn = true;
+    clientEmail = CLIENT_EMAIL;
+    mockSendPush.mockResolvedValue({ success: true });
+  }
+  beforeEach(reset);
+  afterEach(reset);
+
+  it("moduł wyłączony: stan modułów salonu sprawdzony, brak odczytu wpisów, kont i wysyłki", async () => {
+    users = VERIFIED;
+    waitingListModuleOn = false;
+
+    const result = await notifyWaitingList(params);
+
+    expect(mockGetSalonModules).toHaveBeenCalledWith("salon-1");
+    expect(entryReads).toBe(0);
+    expect(userReads).toBe(0);
+    expect(mockSendPush).not.toHaveBeenCalled();
+    expect(updates).toHaveLength(0);
+    expect(result).toEqual({ notified: 0, smsCount: 0, pushCount: 0, errors: 0 });
+  });
+
+  it("moduł włączony: wysyłka jak dotąd", async () => {
+    users = VERIFIED;
+
+    const result = await notifyWaitingList(params);
+
+    expect(mockGetSalonModules).toHaveBeenCalledWith("salon-1");
+    expect(entryReads).toBe(1);
+    expect(result).toEqual({ notified: 1, smsCount: 0, pushCount: 1, errors: 0 });
   });
 });
