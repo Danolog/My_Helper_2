@@ -22,10 +22,16 @@
  * w każdej wartości (`shell:`, `defaults:`…), job z bazą po drzewie (także `$GITHUB_ENV`).
  * (2) Niezmiennik krzyżowy tekst ↔ parser liniowy ↔ drzewo YAML z numerem i treścią linii.
  * Kotwice i aliasy YAML nadal = porażka (sprawdzane na tekście).
+ *
+ * #193 P0c-2: job z bazą to także job z dowolną zmienną bazy (adres albo PG*) bez `services:`;
+ * obraz bazy przypięty po skrócie; konfiguracja Playwrighta i pliki globalSetup/globalTeardown
+ * czytane parserem TypeScript (importy z zamkniętych list, bez dotenv i `process.loadEnvFile`,
+ * `process.env` tylko do odczytu).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { load } from "js-yaml";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
@@ -293,6 +299,25 @@ function expandScripts(cmd: string, scripts: Record<string, string>, seen: strin
 /** Jedyne joby, które mogą mieć bazę — objęte listą dozwolonych i strażnikami. */
 const DB_JOBS = ["e2e-full", "e2e-smoke"];
 
+/** Zmienne z adresem bazy, które czyta aplikacja, testy pg albo narzędzia (porównanie bez wielkości liter). */
+const DB_URL_KEYS = ["POSTGRES_URL", "DATABASE_URL", "INTEGRATION_POSTGRES_URL"];
+/**
+ * Zmienne libpq: wskazują bazę albo dane logowania do niej (#193 P0c-2, W-b). Hasło wpisane
+ * w treść polecenia (`PGPASSWORD=… psql` w kroku weryfikacji seeda) to nie klucz env.
+ */
+const PG_ENV_KEYS = ["PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "PGSERVICE", "PGSERVICEFILE", "PGPASSFILE"];
+/** Klucze bazy: job z którymkolwiek z nich to „job z bazą” (W-a); w env podlegają regule jednej bazy (W-b). */
+const DB_ENV_KEYS = [...DB_URL_KEYS, ...PG_ENV_KEYS];
+const isDbKey = (k: string) => DB_ENV_KEYS.includes(k.toUpperCase());
+/** Klucze bazy jako całe słowa w tekście (bez wielkości liter); `INTEGRATION_POSTGRES_URL_X` to inna nazwa. */
+const dbKeysIn = (text: string): string[] => [
+  ...new Set([...text.matchAll(new RegExp(`\\b(?:${DB_ENV_KEYS.join("|")})\\b`, "gi"))].map((m) => m[0].toUpperCase())),
+];
+/** Klucze bazy w pozycji klucza YAML (`KLUCZ:`, `"KLUCZ":`) na początku linii; `lead` = wcięcie. */
+const dbKeyLines = (text: string, lead: string): string[] => [
+  ...new Set([...text.matchAll(new RegExp(`^${lead}["']?(${DB_ENV_KEYS.join("|")})["']?\\s*:`, "gim"))].map((m) => m[1]!.toUpperCase())),
+];
+
 const QG = "quality-gate.yml";
 
 /** WSZYSTKIE pliki workflow repo (nowy plik wchodzi do pętli automatycznie): [nazwa, treść]. */
@@ -304,23 +329,23 @@ const WORKFLOWS: Array<[string, string]> = readdirSync(WF_DIR)
 
 /**
  * Po czym job jest „jobem z bazą” (#194 runda 4, Oliver + Leo): sam klucz `services:`
- * albo `container:` na poziomie joba (bez rozpoznawania obrazów) ALBO `POSTGRES_URL`
- * w env joba lub kroku. Zwraca powody (pusta lista = job bez bazy).
+ * albo `container:` na poziomie joba (bez rozpoznawania obrazów) ALBO klucz bazy z DB_ENV_KEYS
+ * (adres bazy albo PG*, #193 P0c-2 W-a/W-b) w env joba lub kroku. Zwraca powody (pusta lista = job bez bazy).
  */
 function dbReasons(body: string): string[] {
   const c = code(body);
   const out: string[] = [];
   if (/^ {4}["']?services["']?\s*:/m.test(c)) out.push("services:");
   if (/^ {4}["']?container["']?\s*:/m.test(c)) out.push("container:");
-  if (/^\s+["']?POSTGRES_URL["']?\s*:/m.test(c)) out.push("POSTGRES_URL w env");
+  for (const k of dbKeyLines(c, "\\s+")) out.push(`${k} w env`);
   return out;
 }
 
 /** Job z bazą poza parą {e2e-smoke, e2e-full} z quality-gate.yml (w każdym pliku workflow). */
 function dbJobViolations(file: string, wf: string): string[] {
-  // POSTGRES_URL poza sekcją jobs: (env workflow, przed albo po jobach) trafia do KAŻDEGO joba —
-  // zakazane w każdym pliku (G1/G5, C Ethana).
-  const top = /^\s*["']?POSTGRES_URL["']?\s*:/m.test(code(outsideJobs(wf))) ? [`${file}: POSTGRES_URL poza jobs: (env workflow) — zakazane`] : [];
+  // Klucz bazy poza sekcją jobs: (env workflow, przed albo po jobach) trafia do KAŻDEGO joba —
+  // zakazane w każdym pliku (G1/G5, C Ethana; #193 P0c-2: każdy klucz z DB_ENV_KEYS).
+  const top = dbKeyLines(code(outsideJobs(wf)), "\\s*").map((k) => `${file}: ${k} poza jobs: (env workflow) — zakazane`);
   return top.concat([...jobs(wf)].flatMap(([name, body]) => {
     if (file === QG && DB_JOBS.includes(name)) return [];
     const reasons = dbReasons(body);
@@ -389,7 +414,8 @@ function yamlKeyCount(tree: Y, key: string): number {
   return walk(tree, "").filter(([p, v]) => p.endsWith(".{klucz}") && v === key).length;
 }
 
-const mentionsPgUrl = (v: Y) => walk(v, "").some(([, x]) => typeof x === "string" && /\bPOSTGRES_URL\b/.test(x));
+/** Klucze bazy (DB_ENV_KEYS) wymienione gdziekolwiek w poddrzewie: w kluczach i w wartościach tekstowych. */
+const dbKeysInTree = (v: Y): string[] => [...new Set(walk(v, "").flatMap(([, x]) => (typeof x === "string" ? dbKeysIn(x) : [])))];
 
 /**
  * Sprawdzenia na drzewie YAML (#201) — niezależne od kształtu tekstu (jawny klucz `?`, escape,
@@ -397,9 +423,9 @@ const mentionsPgUrl = (v: Y) => walk(v, "").some(([, x]) => typeof x === "string
  * - plik musi się parsować (inaczej GitHub też go odrzuci);
  * - push (`isPush`) w KAŻDEJ wartości i kluczu drzewa (I10: `shell:`, `defaults.run.shell`, `with:`…);
  * - `run` każdego kroku po rozwinięciu skryptów package.json;
- * - job z bazą: `services`, `container` albo `POSTGRES_URL` gdziekolwiek w jobie (env, `$GITHUB_ENV`
- *   w poleceniu…) — tylko para e2e-smoke/e2e-full w quality-gate.yml;
- * - `POSTGRES_URL` poza `jobs:` — zakazane.
+ * - job z bazą: `services`, `container` albo klucz bazy z DB_ENV_KEYS gdziekolwiek w jobie (env,
+ *   `$GITHUB_ENV` w poleceniu…; #193 P0c-2 W-a/W-b) — tylko para e2e-smoke/e2e-full w quality-gate.yml;
+ * - klucz bazy poza `jobs:` — zakazane.
  */
 function yamlViolations(file: string, wf: string): string[] {
   let tree: Record<string, Y>;
@@ -421,12 +447,12 @@ function yamlViolations(file: string, wf: string): string[] {
     });
     if (file === QG && DB_JOBS.includes(name)) continue;
     const reasons = isMap(job)
-      ? [...("services" in job ? ["services"] : []), ...("container" in job ? ["container"] : []), ...(mentionsPgUrl(job) ? ["POSTGRES_URL"] : [])]
+      ? [...("services" in job ? ["services"] : []), ...("container" in job ? ["container"] : []), ...dbKeysInTree(job)]
       : [];
     if (reasons.length) out.push(`${file}: YAML: nowy job z bazą: dodaj go do testu i strażników: ${name} (${reasons.join(", ")})`);
   }
   const outside = Object.fromEntries(Object.entries(tree).filter(([k]) => k !== "jobs"));
-  if (mentionsPgUrl(outside)) out.push(`${file}: YAML: POSTGRES_URL poza jobs: — zakazane`);
+  for (const k of dbKeysInTree(outside)) out.push(`${file}: YAML: ${k} poza jobs: — zakazane`);
   return out;
 }
 
@@ -630,6 +656,7 @@ function fileViolations(file: string, wf: string, files: string[]): string[] {
     () => keyInvariantViolations(file, wf),
     () => anchorViolations(file, wf),
     () => yamlViolations(file, wf),
+    () => dbImageViolations(file, wf),
   ];
   return checks.flatMap((c) => {
     try {
@@ -640,11 +667,57 @@ function fileViolations(file: string, wf: string, files: string[]): string[] {
   });
 }
 
-// --- Jedna baza w CI (#193 P0c-1, pkt 8) -------------------------------------------------------
+// --- Obraz bazy w jobach z bazą (#193 P0c-2, W-c) -----------------------------------------------
 
-/** Zmienne z adresem bazy, które czyta aplikacja, testy pg albo narzędzia (porównanie bez wielkości liter). */
-const DB_URL_KEYS = ["POSTGRES_URL", "DATABASE_URL", "INTEGRATION_POSTGRES_URL"];
-const isDbUrlKey = (k: string) => DB_URL_KEYS.includes(k.toUpperCase());
+/**
+ * Obraz usługi bazy w obu jobach z bazą: przypięty po skrócie indeksu (manifest list / OCI index,
+ * nie jednej platformy). Tag jest dla czytelnika, o obrazie przesądza skrót. Aktualizacja ręczna
+ * (Dependabot nie obsługuje obrazów `services:`).
+ */
+const PG_IMAGE = "pgvector/pgvector:pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782";
+const IMAGE_MSG = "zmianę obrazu (tag lub digest) akceptują CTO i CRCO (#193)";
+
+/** Czym wartość `image` różni się od PG_IMAGE (do komunikatu); "" = równa dosłownie. */
+function imageDiff(v: Y): string {
+  if (v === undefined) return "brak image";
+  if (typeof v !== "string") return `image nie jest tekstem: ${JSON.stringify(v)}`;
+  if (v === PG_IMAGE) return "";
+  const [ref, digest] = v.split("@sha256:");
+  const [wantRef, wantDigest] = PG_IMAGE.split("@sha256:");
+  if (digest === undefined) return `tag bez skrótu @sha256: ${v}`;
+  if (ref !== wantRef) return `inny tag: ${ref}`;
+  if (digest !== wantDigest) return `inny skrót: ${digest}`;
+  return `inna wartość: ${v}`;
+}
+
+/**
+ * W quality-gate.yml każdy job z DB_JOBS: `services.postgres.image` dosłownie równe PG_IMAGE,
+ * bez `container:` (job biegłby w obrazie spoza przypięcia). Inne pliki: bez zmian (tam job
+ * z bazą i tak jest naruszeniem dbJobViolations). Drzewo YAML z #201; błąd składni zgłasza
+ * yamlViolations (tu pomijamy, jak niezmiennik krzyżowy).
+ */
+function dbImageViolations(file: string, wf: string): string[] {
+  if (file !== QG) return [];
+  let all: Record<string, Y>;
+  try {
+    all = yamlTree(wf).jobs as Record<string, Y>;
+  } catch {
+    return [];
+  }
+  return DB_JOBS.flatMap((name) => {
+    const job = all[name];
+    if (!isMap(job)) return [`${file}: ${name}: brak joba z bazą — ${IMAGE_MSG}`];
+    const out: string[] = [];
+    if ("container" in job) out.push(`${file}: ${name}: container: w jobie z bazą — zakazany; ${IMAGE_MSG}`);
+    const pg = isMap(job.services) ? job.services.postgres : undefined;
+    const diff = imageDiff(isMap(pg) ? pg.image : undefined);
+    if (diff) out.push(`${file}: ${name}: services.postgres.image — ${diff}; ${IMAGE_MSG}`);
+    return out;
+  });
+}
+
+// --- Jedna baza w CI (#193 P0c-1, pkt 8; P0c-2 W-b: także PG*) -----------------------------------
+
 const DB_URL_KEY_TEXT = /POSTGRES_URL|DATABASE_URL/i;
 
 /** Dopuszczenie: [job, nazwa kroku, klucz]. */
@@ -661,10 +734,10 @@ const ONE_DB = "w CI jedna baza; nowe dopuszczenie akceptuje CTO (#193)";
 
 /**
  * Jedna baza w CI (drzewo YAML z #201):
- * - `env:` całego workflow: zmienna z DB_URL_KEYS (klucz bez względu na wielkość liter) =
- *   naruszenie bez dopuszczeń (trafia do każdego joba);
- * - joby z `services:`: w env kroku i w env joba (poza samym `POSTGRES_URL` joba) zmienna z
- *   DB_URL_KEYS = naruszenie, chyba że to SAME_DB_ALLOWED: ten job, ten krok, ten klucz i wartość
+ * - `env:` całego workflow: klucz bazy z DB_ENV_KEYS (adres albo PG*, bez względu na wielkość
+ *   liter) = naruszenie bez dopuszczeń (trafia do każdego joba);
+ * - joby z `services:`: w env kroku i w env joba (poza samym `POSTGRES_URL` joba) klucz z
+ *   DB_ENV_KEYS = naruszenie, chyba że to SAME_DB_ALLOWED: ten job, ten krok, ten klucz i wartość
  *   równa `POSTGRES_URL` joba. Inna wartość (inna baza, inny host, wyrażenie `${{ … }}`), inny krok
  *   albo inny job = naruszenie;
  * - krok, którego `run` pisze do `$GITHUB_ENV` cokolwiek z nazwą zmiennej bazy = naruszenie bez
@@ -676,7 +749,7 @@ function oneDbScan(file: string, wf: string): { violations: string[]; sameDb: Sa
   const violations: string[] = [];
   const sameDb: SameDbCase[] = [];
   for (const k of Object.keys(isMap(tree.env) ? tree.env : {})) {
-    if (isDbUrlKey(k)) violations.push(`${file}: env workflow: ${k} — zmienna bazy w env całego workflow trafia do każdego joba; zakazane bez dopuszczeń (#193)`);
+    if (isDbKey(k)) violations.push(`${file}: env workflow: ${k} — zmienna bazy w env całego workflow trafia do każdego joba; zakazane bez dopuszczeń (#193)`);
   }
   for (const [name, job] of Object.entries(tree.jobs as Record<string, Y>)) {
     if (!isMap(job) || !("services" in job)) continue;
@@ -688,7 +761,7 @@ function oneDbScan(file: string, wf: string): { violations: string[]; sameDb: Sa
     }
     const check = (env: Record<string, Y>, where: string, stepName: string, run: Y) => {
       for (const [k, v] of Object.entries(env)) {
-        if (!isDbUrlKey(k) || (where === "env joba" && k === "POSTGRES_URL")) continue;
+        if (!isDbKey(k) || (where === "env joba" && k === "POSTGRES_URL")) continue;
         const allowedPlace = name === SAME_DB_ALLOWED.job && run === SAME_DB_ALLOWED.run && k === SAME_DB_ALLOWED.key;
         if (!allowedPlace) violations.push(`${file}: ${name}, ${where}: ${k} poza jedynym dozwolonym miejscem (${SAME_DB_ALLOWED.job}, krok \`${SAME_DB_ALLOWED.run}\`) — ${ONE_DB}`);
         else if (v !== jobUrl) violations.push(`${file}: ${name}, ${where}: ${k} wskazuje inną bazę niż POSTGRES_URL joba (wartość różna dosłownie) — ${ONE_DB}`);
@@ -722,25 +795,234 @@ const PW_WEBSERVER_KEYS = ["command", "url", "reuseExistingServer", "timeout"];
 /** Zamknięta lista modułów, które konfiguracja Playwrighta może importować (#193 P0c-1). */
 const PW_IMPORTS_ALLOWED = ["@playwright/test"];
 
+// --- Parser TypeScript: konfiguracja Playwrighta i pliki globalSetup/globalTeardown (#193 P0c-2) ---
+
+/** Źródło do skanu i sond: jawny identyfikator (ścieżka od korzenia repo) i treść. */
+type Source = { id: string; text: string };
+const readSource = (id: string): Source => ({ id, text: readFileSync(join(ROOT, id), "utf8") });
+const PW_SRC: Source = { id: PW_FILE, text: PW };
+const SETUP_SRC = readSource("tests/global-setup.ts");
+const TEARDOWN_SRC = readSource("tests/global-teardown.ts");
+const CLEANUP_SRC = readSource("tests/e2e-cleanup.ts");
+
+/** Ścieżki globalSetup/globalTeardown w konfiguracji — literały dokładnie jak dziś. */
+const PW_GLOBAL_PATHS: Array<[string, string]> = [
+  ["globalSetup", "./tests/global-setup.ts"],
+  ["globalTeardown", "./tests/global-teardown.ts"],
+];
+
 /**
- * Importy w konfiguracji Playwrighta: każdy `import … from "x"`, `import "x"` (efekt uboczny,
- * np. ładowanie pliku env), `import("x")` i `require("x")` spoza PW_IMPORTS_ALLOWED = naruszenie.
- * `require`/`import(` z argumentem innym niż literał też = naruszenie (fail-closed).
+ * Pliki wykonywane w procesie Playwrighta, każdy z zamkniętą listą importów równą dzisiejszej.
+ * Rola = skąd plik jest ładowany: konfiguracja, globalSetup, globalTeardown albo import
+ * globalTeardown (jeden poziom lokalnych importów). Importy głębiej (np. `scripts/seed-host-guard`)
+ * zostają ryzykiem rezydualnym P6.
  */
-function playwrightImportViolations(src: string): string[] {
-  const out: string[] = [];
-  const bad = (what: string) => out.push(`${PW_FILE}: ${what} spoza listy (${PW_IMPORTS_ALLOWED.join(", ")}) — biblioteka może załadować env z inną bazą`);
-  for (const m of src.matchAll(/\bimport\s*(?:type\s+)?(?:[\w$*{}\s,]+?\s+from\s*)?(["'`])([^"'`]+)\1/g)) {
-    const mod = m[2] ?? "";
-    if (!PW_IMPORTS_ALLOWED.includes(mod)) bad(`import „${mod}”`);
+type ScanEntry = { src: Source; role: string; imports: string[] };
+const PW_SCAN: ScanEntry[] = [
+  { src: PW_SRC, role: "konfiguracja", imports: PW_IMPORTS_ALLOWED },
+  { src: SETUP_SRC, role: "globalSetup", imports: ["fs", "path", "@playwright/test"] },
+  { src: TEARDOWN_SRC, role: "globalTeardown", imports: ["path", "./e2e-cleanup", "./global-setup", "@playwright/test"] },
+  { src: CLEANUP_SRC, role: "import globalTeardown", imports: ["fs", "util", "postgres", "../scripts/seed-host-guard"] },
+  { src: SETUP_SRC, role: "import globalTeardown", imports: ["fs", "path", "@playwright/test"] },
+];
+const PW_ENTRY = PW_SCAN[0]!;
+
+/** Moduły wczytujące pliki env do `process.env` — zakazane bez względu na listy (#193). */
+const isDotenv = (m: string) => m === "dotenv" || m.startsWith("dotenv/") || m.startsWith("dotenv-") || m.startsWith("@dotenvx/");
+
+function tsSource(id: string, text: string): ts.SourceFile {
+  return ts.createSourceFile(id, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+}
+
+/** Tekst literału napisowego (bez podstawień) albo null. */
+const literal = (e: ts.Node | undefined): string | null =>
+  e && (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) ? e.text : null;
+
+/** Rodzic z pominięciem nawiasów oraz węzeł, który jest jego bezpośrednim dzieckiem. */
+function usage(n: ts.Node): [ts.Node, ts.Node] {
+  let child = n;
+  let p = n.parent;
+  while (ts.isParenthesizedExpression(p)) {
+    child = p;
+    p = p.parent;
   }
-  for (const m of src.matchAll(/\b(require|import)\s*\(\s*([^)]*)\)/g)) {
-    const arg = (m[2] ?? "").trim();
-    const lit = arg.match(/^(["'`])([^"'`]+)\1$/)?.[2];
-    if (lit === undefined) bad(`${m[1]}(${arg}) bez literału`);
-    else if (!PW_IMPORTS_ALLOWED.includes(lit)) bad(`${m[1]}(„${lit}”)`);
+  return [child, p];
+}
+
+/** `process` (także `globalThis.process`, `x["process"]`). */
+const isProcessRef = (n: ts.Node): boolean =>
+  ts.isIdentifier(n) ? n.text === "process" : ts.isPropertyAccessExpression(n) ? n.name.text === "process" : ts.isElementAccessExpression(n) && literal(n.argumentExpression) === "process";
+
+/** Nazwa składowej odczytanej z `x.nazwa` / `x["nazwa"]`; undefined = nie dostęp do składowej, null = klucz nie-literał. */
+function memberName(access: ts.Node, of: ts.Node): string | null | undefined {
+  if (ts.isPropertyAccessExpression(access) && access.expression === of) return access.name.text;
+  if (ts.isElementAccessExpression(access) && access.expression === of) return literal(access.argumentExpression);
+  return undefined;
+}
+
+/** Jak wyrażenie `a` (np. `process.env.X`) jest zapisywane; null = odczyt. */
+function writeForm(a: ts.Node): string | null {
+  const [n, p] = usage(a);
+  if (ts.isBinaryExpression(p) && p.left === n) {
+    const op = p.operatorToken.kind;
+    if (op === ts.SyntaxKind.EqualsToken) return "przypisanie do składowej";
+    const logical: ts.SyntaxKind[] = [ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.AmpersandAmpersandEqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken];
+    if ((op >= ts.SyntaxKind.FirstCompoundAssignment && op <= ts.SyntaxKind.LastCompoundAssignment) || logical.includes(op)) return "przypisanie złożone";
+  }
+  if ((ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) && (p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken)) return "++/--";
+  if (ts.isDeleteExpression(p)) return "delete";
+  if ((ts.isForInStatement(p) || ts.isForOfStatement(p)) && p.initializer === n) return "zmienna pętli for…in/of";
+  // Cel przypisania przez destrukturyzację: `[process.env.X] = …`, `({ a: process.env.X } = …)`.
+  let lit: ts.Node = n;
+  let up = p;
+  while (ts.isArrayLiteralExpression(up) || ts.isObjectLiteralExpression(up) || ts.isPropertyAssignment(up) || ts.isShorthandPropertyAssignment(up) || ts.isSpreadElement(up) || ts.isSpreadAssignment(up)) {
+    lit = up;
+    up = up.parent;
+    while (ts.isParenthesizedExpression(up)) {
+      lit = up;
+      up = up.parent;
+    }
+  }
+  if (lit !== n && ts.isBinaryExpression(up) && up.left === lit && up.operatorToken.kind === ts.SyntaxKind.EqualsToken) return "przypisanie przez destrukturyzację";
+  if (lit !== n && (ts.isForInStatement(up) || ts.isForOfStatement(up)) && up.initializer === lit) return "przypisanie przez destrukturyzację";
+  return null;
+}
+
+/** Funkcje, którym wolno podać `process.env` jako argument: importy z modułów lokalnych i funkcje z pliku. */
+function localFunctions(sf: ts.SourceFile): Set<string> {
+  const out = new Set<string>();
+  for (const st of sf.statements) {
+    if (ts.isFunctionDeclaration(st) && st.name) out.add(st.name.text);
+    const spec = ts.isImportDeclaration(st) ? literal(st.moduleSpecifier) : null;
+    if (spec === null || !/^\.\.?\//.test(spec) || !ts.isImportDeclaration(st) || !st.importClause || st.importClause.isTypeOnly) continue;
+    if (st.importClause.name) out.add(st.importClause.name.text);
+    const b = st.importClause.namedBindings;
+    if (b && ts.isNamedImports(b)) for (const el of b.elements) if (!el.isTypeOnly) out.add(el.name.text);
   }
   return out;
+}
+
+/**
+ * Jeden plik z PW_SCAN, parserem TypeScript (komentarze i napisy to nie kod). Naruszenia:
+ * - plik nie parsuje się;
+ * - odwołanie do modułu spoza zamkniętej listy pliku: `import … from`, `import "x"`, `export … from`
+ *   (także `export * from`), `import x = require()`, `require()`, `import()`; argument nie-literał;
+ *   `require` użyte inaczej niż jako wywołanie z literałem;
+ * - moduł z rodziny dotenv (`dotenv`, `dotenv/*`, `dotenv-*`, `@dotenvx/*`) — zawsze;
+ * - `process.loadEnvFile` (wywołanie albo wartość);
+ * - `process.env` inaczej niż (a) odczyt `process.env.X` / `process.env["X"]` albo (b) bezpośredni
+ *   argument wywołania funkcji lokalnej (import z modułu lokalnego albo funkcja z pliku).
+ *   Każda inna forma = naruszenie: zapis, `delete`, `++`/`--`, przypisanie złożone, destrukturyzacja,
+ *   `process.env = …`, argument `Object.assign`/`Object.defineProperty`/`Reflect.*`, alias;
+ * - `process` jako wartość (alias, `const { env } = process`, argument), klucz `process[…]` nie-literał.
+ */
+function pwFileViolations(e: ScanEntry, text: string = e.src.text): string[] {
+  const at = e.role === "konfiguracja" ? e.src.id : `${e.src.id} [${e.role}]`;
+  const out: string[] = [];
+  const sf = tsSource(e.src.id, text);
+  const diags = (sf as unknown as { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics ?? [];
+  if (diags.length) out.push(`${at}: plik nie parsuje się jako TypeScript: ${ts.flattenDiagnosticMessageText(diags[0]!.messageText, " ")}`);
+  const mod = (what: string, m: string) => {
+    if (!e.imports.includes(m)) out.push(`${at}: ${what} spoza listy (${e.imports.join(", ")}) — biblioteka może załadować env z inną bazą`);
+    if (isDotenv(m)) out.push(`${at}: moduł „${m}” z rodziny dotenv — zakazany bez względu na listy (#193)`);
+  };
+  const env = (msg: string) => out.push(`${at}: zapis do process.env — ${msg}`);
+  const locals = localFunctions(sf);
+  const visit = (n: ts.Node): void => {
+    if (ts.isTypeNode(n)) return;
+    if (ts.isImportDeclaration(n)) mod(`import „${literal(n.moduleSpecifier)}”`, literal(n.moduleSpecifier) ?? "");
+    else if (ts.isExportDeclaration(n) && n.moduleSpecifier) mod(`export … from „${literal(n.moduleSpecifier)}”`, literal(n.moduleSpecifier) ?? "");
+    else if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference)) {
+      const m = literal(n.moduleReference.expression);
+      if (m === null) out.push(`${at}: import = require(${n.moduleReference.expression.getText()}) bez literału spoza listy (${e.imports.join(", ")})`);
+      else mod(`import = require(„${m}”)`, m);
+    } else if (ts.isCallExpression(n) && (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === "require"))) {
+      const how = n.expression.kind === ts.SyntaxKind.ImportKeyword ? "import" : "require";
+      const m = n.arguments.length === 1 ? literal(n.arguments[0]) : null;
+      if (m === null) out.push(`${at}: ${how}(${n.arguments.map((a) => a.getText()).join(", ")}) bez literału spoza listy (${e.imports.join(", ")}) — biblioteka może załadować env z inną bazą`);
+      else mod(`${how}(„${m}”)`, m);
+    } else if (ts.isIdentifier(n) && n.text === "require") {
+      const p = n.parent;
+      if (!(ts.isCallExpression(p) && p.expression === n) && !(ts.isExternalModuleReference(p))) out.push(`${at}: require jako wartość (${p.getText()}) — fail-closed`);
+    }
+    // `process`: odwołanie (nie nazwa składowej `x.process` — tę obsługuje węzeł dostępu).
+    const par = n.parent as ts.Node | undefined;
+    const isName =
+      par !== undefined &&
+      ((ts.isPropertyAccessExpression(par) && par.name === n) ||
+        ((ts.isPropertyAssignment(par) || ts.isPropertySignature(par) || ts.isPropertyDeclaration(par) || ts.isMethodDeclaration(par)) && par.name === n));
+    if (par !== undefined && !isName && isProcessRef(n)) {
+      const [child, p] = usage(n);
+      const name = memberName(p, child);
+      if (name === undefined) out.push(`${at}: process jako wartość (${p.getText()}) — alias albo destrukturyzacja omija regułę process.env`);
+      else if (name === null) out.push(`${at}: process[…] z kluczem nie-literałem (${p.getText()})`);
+      else if (name === "loadEnvFile") out.push(`${at}: process.loadEnvFile — zakazane (wczytuje plik env do process.env): ${p.parent.getText()}`);
+      else if (name === "env") {
+        const [eChild, ep] = usage(p);
+        const key = memberName(ep, eChild);
+        if (key === null) env(`klucz nie-literał: ${ep.getText()}`);
+        else if (key !== undefined) {
+          const w = writeForm(ep);
+          if (w) env(`${w}: ${ep.parent.getText()}`);
+        } else if (ts.isCallExpression(ep) && ep.arguments.some((a) => a === eChild)) {
+          const callee = ep.expression;
+          if (!ts.isIdentifier(callee) || !locals.has(callee.text)) env(`argument wywołania ${callee.getText()}(…) — dozwolone tylko funkcje lokalne (import z modułu lokalnego, funkcja z pliku)`);
+        } else if (ts.isBinaryExpression(ep) && ep.left === eChild && ep.operatorToken.kind === ts.SyntaxKind.EqualsToken) env(`przypisanie całego process.env: ${ep.getText()}`);
+        else if (ts.isDeleteExpression(ep)) env(`delete: ${ep.getText()}`);
+        else env(`process.env jako wartość (alias): ${ep.getText()}`);
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/**
+ * Ścieżki globalSetup/globalTeardown w konfiguracji: nazwa klucza dokładnie raz w całym pliku
+ * (jako nazwa właściwości), wartość — literał napisowy równy PW_GLOBAL_PATHS. Tablica, wyrażenie,
+ * inna ścieżka, skrót `{ globalSetup }` albo brak = naruszenie (fail-closed).
+ */
+function pwGlobalPathViolations(text: string): string[] {
+  const sf = tsSource(PW_FILE, text);
+  return PW_GLOBAL_PATHS.flatMap(([key, want]) => {
+    const hits: ts.Node[] = [];
+    const visit = (n: ts.Node): void => {
+      if ((ts.isIdentifier(n) || ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && n.text === key) hits.push(n);
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    const bad = (why: string) => [`${PW_FILE}: ${key} — oczekiwany dokładnie jeden literał „${want}”: ${why}`];
+    if (hits.length !== 1) return bad(`wystąpień nazwy ${hits.length}`);
+    const p = hits[0]!.parent;
+    if (!ts.isPropertyAssignment(p) || p.name !== hits[0]) return bad(`nie właściwość z wartością: ${p.getText()}`);
+    const v = literal(p.initializer);
+    if (v === null || !ts.isStringLiteral(p.initializer)) return bad(`wartość nie jest literałem: ${p.initializer.getText()}`);
+    return v === want ? [] : bad(`inna ścieżka: ${v}`);
+  });
+}
+
+/**
+ * `CleanupEnv` (typ parametru, przez który teardown podaje `process.env` do e2e-cleanup) tylko do
+ * odczytu: literał typu, każda składowa (sygnatura indeksu albo właściwość) z `readonly`.
+ */
+function cleanupEnvViolations(text: string = CLEANUP_SRC.text): string[] {
+  const sf = tsSource(CLEANUP_SRC.id, text);
+  const decl = sf.statements.filter((s): s is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(s) && s.name.text === "CleanupEnv");
+  const bad = (why: string) => [`${CLEANUP_SRC.id}: CleanupEnv nie jest tylko do odczytu — ${why}`];
+  if (decl.length !== 1) return bad(`deklaracji ${decl.length}`);
+  const t = decl[0]!.type;
+  if (!ts.isTypeLiteralNode(t) || t.members.length === 0) return bad(`oczekiwany literał typu z polami readonly: ${t.getText()}`);
+  const ro = (m: ts.TypeElement) =>
+    (ts.isIndexSignatureDeclaration(m) || ts.isPropertySignature(m)) && (ts.getModifiers(m) ?? []).some((x) => x.kind === ts.SyntaxKind.ReadonlyKeyword);
+  const writable = t.members.filter((m) => !ro(m));
+  return writable.length ? bad(`składowe bez readonly: ${writable.map((m) => m.getText()).join("; ")}`) : [];
+}
+
+/** Cały zestaw Playwrighta, z jednym plikiem podmienionym przez sondę (id z PW_SCAN). */
+function pwSetViolations(id?: string, text?: string): string[] {
+  const t = (s: Source) => (s.id === id && text !== undefined ? text : s.text);
+  return [...PW_SCAN.flatMap((e) => pwFileViolations(e, t(e.src))), ...pwGlobalPathViolations(t(PW_SRC)), ...cleanupEnvViolations(t(CLEANUP_SRC))];
 }
 
 /** Treść obiektu `webServer: { … }` (bez klamer). Inny kształt niż jeden literał obiektu = wyjątek. */
@@ -761,13 +1043,12 @@ function webServerBlock(src: string): string {
 /**
  * Serwer E2E (playwright webServer) dziedziczy env kroku, więc bazę ma tę samą co job. Naruszenia:
  * nazwa zmiennej bazy gdziekolwiek w pliku (także w komentarzu — przenieś opis gdzie indziej),
- * zapis do `process.env`, import spoza PW_IMPORTS_ALLOWED, w webServer klucz spoza listy (w tym
- * `env`) albo spread, `command` inne niż na d783774.
+ * reguły parsera TS z pwFileViolations (importy spoza PW_IMPORTS_ALLOWED, dotenv, `process.loadEnvFile`,
+ * zapis do `process.env`), w webServer klucz spoza listy (w tym `env`) albo spread, `command` inne niż na d783774.
  */
 function playwrightDbViolations(src: string): string[] {
-  const out: string[] = playwrightImportViolations(src);
+  const out: string[] = pwFileViolations(PW_ENTRY, src);
   if (DB_URL_KEY_TEXT.test(src)) out.push(`${PW_FILE}: nazwa zmiennej bazy w konfiguracji Playwrighta — serwer E2E ma bazę joba`);
-  if (/process\.env(?:\.\w+|\[[^\]]*\])\s*=(?!=)|Object\.assign\(\s*process\.env/.test(src)) out.push(`${PW_FILE}: zapis do process.env w konfiguracji Playwrighta`);
   let block: string;
   try {
     block = webServerBlock(src);
@@ -1078,7 +1359,7 @@ describe("joby z bazą, uses: joba, kotwice YAML (#194 runda 4)", () => {
     const stepEnv = "name: x\njobs:\n  e2e-extra:\n    steps:\n      - run: pnpm test:pg\n        env:\n          POSTGRES_URL: x\n";
     expect(dbJobViolations(QG, stepEnv).join("\n")).toMatch(/nowy job z bazą.*POSTGRES_URL/);
     expect(dbJobViolations(QG, wf("e2e-extra", ""))).toEqual([]);
-    expect(dbJobViolations(QG, wf("e2e-extra", "    env:\n      INTEGRATION_POSTGRES_URL_X: y\n"))).toEqual([]);
+    expect(dbJobViolations(QG, wf("e2e-extra", "    env:\n      INTEGRATION_POSTGRES_URL: y\n")).join()).toMatch(/nowy job z bazą: dodaj go do testu i strażników: e2e-extra \(INTEGRATION_POSTGRES_URL w env\)/);
     expect(dbJobViolations(QG, wf("e2e-smoke", "    services:\n      db:\n        image: postgres:18\n"))).toEqual([]);
     expect(dbJobViolations("inny.yml", wf("e2e-smoke", "    services:\n      db:\n        image: postgres:18\n"))).toHaveLength(1);
   });
@@ -1218,14 +1499,20 @@ describe("schemaViolations — drizzle-kit tylko jako `drizzle-kit migrate` (E12
 });
 
 /**
- * Sonda na prawdziwym pliku (plik workflow albo konfiguracja Playwrighta): edycja w pamięci, plik
- * na dysku bez zmian. Kotwica musi wystąpić w pliku dokładnie raz — komunikat podaje plik i kotwicę.
+ * Sonda na prawdziwym pliku: edycja treści źródła w pamięci, plik na dysku bez zmian. Źródło
+ * podane jawnie (treść + identyfikator do komunikatu), bez rozpoznawania pliku po nazwie.
+ * Kotwica musi wystąpić dokładnie raz — komunikat podaje źródło i kotwicę.
  */
-function edited(file: string, find: string, repl: string): string {
-  const src = file === PW_FILE ? PW : WORKFLOWS.find(([f]) => f === file)?.[1];
-  if (src === undefined) throw new Error(`sonda: nieznany plik ${file}`);
-  expect(src.split(find).length - 1, `kotwica sondy w ${file}: ${find}`).toBe(1);
-  return src.replace(find, repl);
+function edited(src: Source, find: string, repl: string): string {
+  expect(src.text.split(find).length - 1, `kotwica sondy w ${src.id}: ${find}`).toBe(1);
+  return src.text.replace(find, repl);
+}
+
+/** Plik workflow z pętli WORKFLOWS jako źródło sondy. */
+function wfSource(file: string): Source {
+  const text = WORKFLOWS.find(([f]) => f === file)?.[1];
+  if (text === undefined) throw new Error(`sonda: brak pliku workflow ${file}`);
+  return { id: file, text };
 }
 
 /**
@@ -1253,7 +1540,7 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
     // Escape w cudzysłowie: w tekście nie ma „POSTGRES_URL”, w drzewie YAML jest — łapie tylko warstwa YAML.
     ["POSTGRES_URL poza jobs: (env workflow, escape w wartości)", EP, "\njobs:\n", '\nenv:\n  DB: "${{ secrets.POSTGRES\\u005fURL }}"\n\njobs:\n', /YAML: POSTGRES_URL poza jobs/],
   ])("A %s → porażka", (_n, file, find, repl, re) => {
-    expect(fileViolations(file, edited(file, find, repl), FILES).join("\n")).toMatch(re);
+    expect(fileViolations(file, edited(wfSource(file), find, repl), FILES).join("\n")).toMatch(re);
   });
 
   it.each([
@@ -1269,14 +1556,14 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
     ["F8 env workflow bez POSTGRES_URL", QG, "\njobs:\n", "\nenv:\n  NODE_VERSION: '22'\n\njobs:\n"],
     ["F9 steps: z komentarzem końcowym", QG, "    name: TypeScript Check\n    runs-on: ubuntu-latest\n    steps:\n", "    name: TypeScript Check\n    runs-on: ubuntu-latest\n    steps: # tsc\n"],
   ])("B %s → bez naruszeń", (_n, file, find, repl) => {
-    expect(fileViolations(file, edited(file, find, repl), FILES)).toEqual([]);
+    expect(fileViolations(file, edited(wfSource(file), find, repl), FILES)).toEqual([]);
   });
 
   it.each([
     ["F5 nazwa kroku z „, uses:” (w cudzysłowie — jedyny poprawny YAML)", QG, QG_TC, "      - name: \"Typecheck, uses: tsc\"\n        run: pnpm typecheck\n"],
     ["F10 wartość with: z „{run:” (w cudzysłowie — jedyny poprawny YAML)", QG, QG_TC, `${QG_TC}      - uses: actions/upload-artifact@v4\n        with:\n          name: x\n          path: "a/{run: 1}"\n`],
   ])("B %s → bez naruszeń", (_n, file, find, repl) => {
-    expect(fileViolations(file, edited(file, find, repl), FILES)).toEqual([]);
+    expect(fileViolations(file, edited(wfSource(file), find, repl), FILES)).toEqual([]);
   });
 
   // F5 i F10 dosłownie z sondy Leo to niepoprawny YAML (plain scalar z „: ” w kontekście blokowym) —
@@ -1286,13 +1573,13 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
     ["F5 dosłownie", QG_TC, "      - name: Typecheck, uses: tsc\n        run: pnpm typecheck\n"],
     ["F10 dosłownie", QG_TC, `${QG_TC}      - uses: actions/upload-artifact@v4\n        with:\n          name: x\n          path: a/{run: 1}\n`],
   ])("B %s (niepoprawny YAML) → jedno naruszenie: plik nie parsuje się jako YAML", (_n, find, repl) => {
-    const v = fileViolations(QG, edited(QG, find, repl), FILES);
+    const v = fileViolations(QG, edited(wfSource(QG), find, repl), FILES);
     expect(v).toHaveLength(1);
     expect(v[0]).toMatch(/nie parsuje się jako YAML/);
   });
 
   it("komunikat niezmiennika wskazuje numer i treść nierozpoznanej linii", () => {
-    const wf = edited(EP, EP_INSTALL, `${EP_INSTALL}      - { run: pnpm exec playwright --version }\n`);
+    const wf = edited(wfSource(EP), EP_INSTALL, `${EP_INSTALL}      - { run: pnpm exec playwright --version }\n`);
     const line = wf.split("\n").findIndex((l) => l === "      - { run: pnpm exec playwright --version }") + 1;
     expect(keyInvariantViolations(EP, wf).join("\n")).toContain(`nierozpoznane: linia ${line}: - { run: pnpm exec playwright --version }`);
   });
@@ -1306,7 +1593,7 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
   // równoważy liczbowo prawdziwy klucz w kontynuacji flow. Bez śledzenia kontynuacji flow
   // wszystkie trzy strony dają tę samą liczbę i te same linie — rozjazd znika.
   it("niezmiennik widzi klucz w kontynuacji flow także, gdy liczby kluczy się bilansują", () => {
-    const wf = edited(EP, EP_INSTALL, `${EP_INSTALL}      - name: "a\n          run: b"\n        uses: actions/upload-artifact@v4\n        with: { name: x,\n          path: y, run: z }\n`);
+    const wf = edited(wfSource(EP), EP_INSTALL, `${EP_INSTALL}      - name: "a\n          run: b"\n        uses: actions/upload-artifact@v4\n        with: { name: x,\n          path: y, run: z }\n`);
     const line = wf.split("\n").indexOf("          path: y, run: z }") + 1;
     const msg = keyInvariantViolations(EP, wf).join("\n");
     expect(msg).toMatch(/kluczy run w pliku .*, w drzewie YAML/);
@@ -1317,7 +1604,7 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
   // niełamliwej spacji w cudzysłowie (\s), tekst go nie widzi; tekst i drzewo widzą run w flow,
   // parser nie. Porównanie samych liczb by to przepuściło — niezmiennik porównuje linie.
   it("niezmiennik porównuje linie, nie same liczby (równe liczby, różne linie)", () => {
-    const wf = edited(EP, EP_INSTALL, `${EP_INSTALL}      - name: "a\n           run: b"\n        uses: actions/upload-artifact@v4\n        with: { name: x, run: y }\n`);
+    const wf = edited(wfSource(EP), EP_INSTALL,`${EP_INSTALL}      - name: "a\n           run: b"\n        uses: actions/upload-artifact@v4\n        with: { name: x, run: y }\n`);
     const ls = wf.split("\n");
     const flow = ls.indexOf("        with: { name: x, run: y }") + 1;
     const nbsp = ls.indexOf("           run: b\"") + 1;
@@ -1338,10 +1625,12 @@ describe("jedna baza w CI: env kroków, $GITHUB_ENV, serwer E2E (#193 P0c-1, pkt
   const PW_IMPORT = "import { defineConfig, devices } from '@playwright/test';\n";
   /**
    * Naruszenia sondy ponad stan bazowy workflow: sonda nie zależy od innych naruszeń w workflow
-   * (te zgłasza test główny), tylko od swojej kotwicy.
+   * (te zgłasza test główny), tylko od swojej kotwicy. Stan bazowy liczony w teście, przy każdej sondzie.
    */
-  const BASE = oneDbScan(QG, WF).violations;
-  const probeViolations = (find: string, repl: string) => oneDbScan(QG, edited(QG, find, repl)).violations.filter((v) => !BASE.includes(v));
+  const probeViolations = (find: string, repl: string) => {
+    const base = oneDbScan(QG, WF).violations;
+    return oneDbScan(QG, edited(wfSource(QG), find, repl)).violations.filter((v) => !base.includes(v));
+  };
 
   it.each(WORKFLOWS)("%s: zmienne bazy bez env workflow; w jobach z services: w env kroków/joba tylko z adresem POSTGRES_URL joba; bez zapisu do $GITHUB_ENV", (f, wf) => {
     expect(oneDbScan(f, wf).violations).toEqual([]);
@@ -1418,16 +1707,226 @@ describe("jedna baza w CI: env kroków, $GITHUB_ENV, serwer E2E (#193 P0c-1, pkt
     ["dynamiczny import modułu", PW_IMPORT, `${PW_IMPORT}void import("dotenv/config");\n`, /import\(„dotenv\/config”\) spoza listy/],
     ["require z argumentem nie-literałem", PW_IMPORT, `${PW_IMPORT}const m = 'dotenv';\nrequire(m);\n`, /require\(m\) bez literału/],
   ])("A %s → porażka", (_n, find, repl, re) => {
-    expect(playwrightDbViolations(edited(PW_FILE, find, repl)).join("\n")).toMatch(re);
+    expect(playwrightDbViolations(edited(PW_SRC, find, repl)).join("\n")).toMatch(re);
   });
 
   it("import pakietu Playwrighta w innym kształcie (wieloliniowy, cudzysłów podwójny) → bez naruszeń", () => {
-    const src = edited(PW_FILE, PW_IMPORT, `import {\n  defineConfig,\n  devices,\n} from "@playwright/test";\nimport type { PlaywrightTestConfig } from '@playwright/test';\n`);
+    const src = edited(PW_SRC, PW_IMPORT,`import {\n  defineConfig,\n  devices,\n} from "@playwright/test";\nimport type { PlaywrightTestConfig } from '@playwright/test';\n`);
     expect(playwrightDbViolations(src)).toEqual([]);
   });
 
   it("drugi webServer albo webServer nie-literał → naruszenie (fail-closed)", () => {
     expect(playwrightDbViolations(`${PW}\nconst webServer: unknown = null;\n`).join()).toMatch(/dokładnie jednego „webServer:”, jest 2/);
     expect(playwrightDbViolations(PW.replace(/webServer: \{[\s\S]*?\n {8}\},/, "webServer: server,")).join()).toMatch(/nie jest literałem obiektu/);
+  });
+});
+
+/** Adres INNEJ bazy do sond P0c-2, złożony z części (skaner literałów sekretów; bez hasła). */
+const PROBE_DB = ["postgresql", "//probe@db.example:5432/other_db"].join(":");
+
+describe("joby z bazą po kluczach bazy: adres i PG* także bez services: (#193 P0c-2, W-a, W-b)", () => {
+  const UNIT = "    name: Unit Tests\n    runs-on: ubuntu-latest\n";
+  const unitEnv = (line: string) => edited(wfSource(QG), UNIT, `${UNIT}    env:\n      ${line}\n`);
+  const textLayer = (k: string, job: string) => `nowy job z bazą: dodaj go do testu i strażników: ${job} (${k} w env)`;
+  const treeLayer = (k: string, job: string) => `YAML: nowy job z bazą: dodaj go do testu i strażników: ${job} (${k})`;
+
+  it.each(DB_ENV_KEYS.map((k) => [k]))("%s w env joba bez services: (unit-tests) → job z bazą w obu warstwach (tekst i drzewo YAML)", (k) => {
+    const wf = unitEnv(`${k}: ${PROBE_DB}`);
+    expect(dbJobViolations(QG, wf).join("\n")).toContain(textLayer(k, "unit-tests"));
+    expect(yamlViolations(QG, wf).join("\n")).toContain(treeLayer(k, "unit-tests"));
+  });
+
+  it("DATABASE_URL w env kroku joba bez services: w innym pliku workflow → job z bazą w obu warstwach", () => {
+    const EP_RUN = "        run: pnpm exec playwright test --grep @production --workers=2 --retries=1 --timeout=15000\n";
+    const wf = edited(wfSource("e2e-production.yml"), EP_RUN, `${EP_RUN}        env:\n          DATABASE_URL: ${PROBE_DB}\n`);
+    expect(dbJobViolations("e2e-production.yml", wf).join("\n")).toContain(textLayer("DATABASE_URL", "e2e-production"));
+    expect(yamlViolations("e2e-production.yml", wf).join("\n")).toContain(treeLayer("DATABASE_URL", "e2e-production"));
+  });
+
+  it("klucz małymi literami (pghost) → job z bazą w obu warstwach", () => {
+    const wf = unitEnv("pghost: db.example");
+    expect(dbJobViolations(QG, wf).join("\n")).toContain(textLayer("PGHOST", "unit-tests"));
+    expect(yamlViolations(QG, wf).join("\n")).toContain(treeLayer("PGHOST", "unit-tests"));
+  });
+
+  it("klucz z escape w cudzysłowie (\"PG\\u0048OST\") — tekst go nie widzi, drzewo YAML łapie", () => {
+    const wf = unitEnv('"PG\\u0048OST": db.example');
+    expect(yamlViolations(QG, wf).join("\n")).toContain(treeLayer("PGHOST", "unit-tests"));
+  });
+
+  it("nazwa zmiennej bazy w treści polecenia joba bez services: (echo $PGHOST) → job z bazą (drzewo YAML)", () => {
+    const QG_TC = "      - run: pnpm typecheck\n";
+    const wf = edited(wfSource(QG), QG_TC, `${QG_TC}      - run: echo "$PGHOST"\n`);
+    expect(yamlViolations(QG, wf).join("\n")).toContain(treeLayer("PGHOST", "typecheck"));
+  });
+
+  it("nazwy pochodne (INTEGRATION_POSTGRES_URL_X, PGHOST_X) to nie klucze bazy → bez naruszeń (kontrola dokładnych nazw)", () => {
+    for (const k of ["INTEGRATION_POSTGRES_URL_X", "PGHOST_X", "MY_DATABASE_URL"]) {
+      const wf = unitEnv(`${k}: x`);
+      expect(dbJobViolations(QG, wf), k).toEqual([]);
+      expect(yamlViolations(QG, wf), k).toEqual([]);
+    }
+  });
+
+  it("PG* w env workflow → porażka w trzech regułach (tekst poza jobs:, drzewo YAML, jedna baza)", () => {
+    const wf = edited(wfSource(QG), "\njobs:\n", "\nenv:\n  PGHOST: db.example\n\njobs:\n");
+    expect(dbJobViolations(QG, wf).join("\n")).toContain("quality-gate.yml: PGHOST poza jobs: (env workflow) — zakazane");
+    expect(yamlViolations(QG, wf).join("\n")).toContain("quality-gate.yml: YAML: PGHOST poza jobs: — zakazane");
+    expect(oneDbScan(QG, wf).violations.join("\n")).toMatch(/^quality-gate\.yml: env workflow: PGHOST — .*zakazane bez dopuszczeń \(#193\)$/m);
+  });
+
+  /** Nowe naruszenia reguły jednej bazy ponad stan bazowy (liczony w teście). */
+  const newOneDb = (find: string, repl: string) => {
+    const base = oneDbScan(QG, WF).violations;
+    return oneDbScan(QG, edited(wfSource(QG), find, repl)).violations.filter((v) => !base.includes(v));
+  };
+  const SMOKE_PW = "          PLAYWRIGHT_TIMEOUT: 15000\n";
+  const PG_ENV_LINE = "          INTEGRATION_POSTGRES_URL: ";
+  const FULL_ENV = "      BASE_URL: http://localhost:3000\n    steps:\n      - uses: actions/checkout@v4\n\n      - uses: pnpm/action-setup@v4\n\n      - uses: actions/setup-node@v4\n        with:\n          node-version-file: '.nvmrc'\n          cache: 'pnpm'\n\n      - run: pnpm install --frozen-lockfile\n\n      # Schemat bazy WYLACZNIE z migracji: 0005 tworzy role myhelper_app i polityki\n      # RLS, bez ktorych kazda transakcja forSalon (SET LOCAL ROLE) pada. BEZ\n      # db:push po migracjach (#190): drizzle-kit push traktuje polityki z 0005\n      # jako dryf, wylacza RLS i usuwa polityki na 39 tabelach — baza w CI\n      # bylaby bez izolacji salonow. Straznik pada, gdy ktorejs tabeli z 0005\n      # brakuje RLS albo polityki z migracji (scripts/db-rls-guard.ts).\n      - name: Run database migrations\n        run: pnpm db:migrate\n      - name: RLS guard (migration 0005)\n        run: pnpm exec tsx scripts/db-rls-guard.ts\n\n      - name: Seed test data\n";
+  it.each([
+    ["PGHOST w env kroku Playwrighta (e2e-smoke)", SMOKE_PW, `${SMOKE_PW}          PGHOST: db.example\n`, /^quality-gate\.yml: e2e-smoke, krok \d+ \(Run smoke tests\), env kroku: PGHOST poza jedynym dozwolonym miejscem/],
+    ["PGPASSWORD w env kroku test:pg (miejsce dozwolone tylko dla INTEGRATION_POSTGRES_URL)", PG_ENV_LINE, "          PGPASSWORD: other\n          INTEGRATION_POSTGRES_URL: ", /e2e-smoke, krok \d+ \(Integration test — subscription locks \(real Postgres\)\), env kroku: PGPASSWORD poza jedynym dozwolonym miejscem/],
+    ["PGDATABASE w env joba e2e-full", FULL_ENV, FULL_ENV.replace("      BASE_URL: http://localhost:3000\n", "      BASE_URL: http://localhost:3000\n      PGDATABASE: other_db\n"), /^quality-gate\.yml: e2e-full, env joba: PGDATABASE poza jedynym dozwolonym miejscem/],
+  ])("jedna baza: %s → dokładnie jedno nowe naruszenie", (_n, find, repl, re) => {
+    const v = newOneDb(find, repl);
+    expect(v, "dokładnie jedno nowe naruszenie").toHaveLength(1);
+    expect(v[0]).toMatch(re);
+  });
+
+  it("hasło w treści polecenia (PGPASSWORD=… psql w kroku weryfikacji seeda) to nie klucz env → bez naruszeń jednej bazy", () => {
+    expect(code(WF)).toMatch(/^ {10}PGPASSWORD=\S+ psql /m);
+    expect(oneDbScan(QG, WF).violations).toEqual([]);
+  });
+});
+
+describe("obraz bazy przypięty po skrócie w obu jobach z bazą (#193 P0c-2, W-c)", () => {
+  const SMOKE = `    timeout-minutes: 10\n    services:\n      postgres:\n        image: ${PG_IMAGE}\n`;
+  const FULL = `    timeout-minutes: 35\n    services:\n      postgres:\n        image: ${PG_IMAGE}\n`;
+  const [REF, DIGEST] = PG_IMAGE.split("@sha256:") as [string, string];
+  const OTHER_DIGEST = `${DIGEST.slice(0, -1)}${DIGEST.endsWith("0") ? "1" : "0"}`;
+
+  it("dziś: oba joby z bazą na PG_IMAGE, bez container: (sonda kontrolna)", () => {
+    expect(dbImageViolations(QG, WF)).toEqual([]);
+    expect(WF.split(`        image: ${PG_IMAGE}\n`).length - 1).toBe(2);
+  });
+
+  it.each([
+    ["(1) zmieniony tag w e2e-smoke", SMOKE, SMOKE.replace(`${REF}@`, "pgvector/pgvector:pg17@"), "e2e-smoke: services.postgres.image — inny tag: pgvector/pgvector:pg17; "],
+    ["(2) zmieniony skrót w e2e-full", FULL, FULL.replace(DIGEST, OTHER_DIGEST), `e2e-full: services.postgres.image — inny skrót: ${OTHER_DIGEST}; `],
+    ["(3) brak image w e2e-smoke", SMOKE, SMOKE.replace(`        image: ${PG_IMAGE}\n`, ""), "e2e-smoke: services.postgres.image — brak image; "],
+    ["(4) tag bez @sha256: w e2e-full", FULL, FULL.replace(PG_IMAGE, REF), `e2e-full: services.postgres.image — tag bez skrótu @sha256: ${REF}; `],
+    ["(5) container: w e2e-smoke", SMOKE, `    timeout-minutes: 10\n    container: node:22\n${SMOKE.slice("    timeout-minutes: 10\n".length)}`, "e2e-smoke: container: w jobie z bazą — zakazany; "],
+  ])("%s → dokładnie jedno naruszenie z komunikatem akceptacji", (_n, find, repl, why) => {
+    const wf = edited(wfSource(QG), find, repl);
+    const v = dbImageViolations(QG, wf);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toBe(`quality-gate.yml: ${why}${IMAGE_MSG}`);
+    expect(fileViolations(QG, wf, WORKFLOWS.map(([f]) => f))).toContain(v[0]);
+  });
+});
+
+describe("Playwright: parser TypeScript — importy, dotenv, loadEnvFile, process.env, globalSetup/Teardown (#193 P0c-2)", () => {
+  it("dzisiejsze pliki: cały zestaw bez naruszeń (sonda kontrolna)", () => {
+    expect(pwSetViolations()).toEqual([]);
+  });
+
+  it.each(PW_SCAN.map((e): [string, ScanEntry] => [`${e.src.id} [${e.role}]`, e]))(
+    "%s: importy z zamkniętej listy, bez dotenv i loadEnvFile, process.env tylko do odczytu",
+    (_n, e) => {
+      expect(pwFileViolations(e)).toEqual([]);
+    },
+  );
+
+  it("ścieżki globalSetup/globalTeardown w konfiguracji dosłownie jak dziś; CleanupEnv tylko do odczytu", () => {
+    expect(pwGlobalPathViolations(PW)).toEqual([]);
+    expect(cleanupEnvViolations()).toEqual([]);
+  });
+
+  const CFG = "const isCI = !!process.env.CI;\n";
+  const SETUP = "import * as path from 'path';";
+  const TD = "  const projectDir = config.configFile ? path.dirname(config.configFile) : process.cwd();\n";
+  const TD_IMP = "import * as path from 'path';\n";
+  const CL = 'import { parseEnv } from "util";';
+  const CL_ENV = "export type CleanupEnv = { readonly [key: string]: string | undefined };";
+  const GS = "  globalSetup: './tests/global-setup.ts',";
+  const GT = "  globalTeardown: './tests/global-teardown.ts',";
+  const S1 = "tests/global-setup.ts [globalSetup]";
+  const S2 = "tests/global-setup.ts [import globalTeardown]";
+  const T = "tests/global-teardown.ts [globalTeardown]";
+  const C = "tests/e2e-cleanup.ts [import globalTeardown]";
+  const P = "playwright.config.ts";
+  const W = "zapis do process.env — ";
+  const td = (stmt: string): [Source, string, string] => [TEARDOWN_SRC, TD, `${TD}  ${stmt}\n`];
+
+  it.each<[string, [Source, string, string], string[]]>([
+    // (a) re-eksport = import
+    ["(a) export {} from 'dotenv/config' w konfiguracji", [PW_SRC, CFG, `${CFG}export {} from 'dotenv/config';\n`], [`${P}: export … from „dotenv/config” spoza listy (@playwright/test)`, `${P}: moduł „dotenv/config” z rodziny dotenv`]],
+    ["(a) export * from 'dotenv' w konfiguracji", [PW_SRC, CFG, `${CFG}export * from 'dotenv';\n`], [`${P}: export … from „dotenv” spoza listy`]],
+    ["(a) export { x } from './x' w konfiguracji", [PW_SRC, CFG, `${CFG}export { x } from './x';\n`], [`${P}: export … from „./x” spoza listy`]],
+    // (b) loadEnvFile
+    ["(b) process.loadEnvFile() w konfiguracji", [PW_SRC, CFG, `${CFG}process.loadEnvFile('.env.other');\n`], [`${P}: process.loadEnvFile — zakazane`]],
+    ["(b) process.loadEnvFile jako wartość w konfiguracji", [PW_SRC, CFG, `${CFG}const load = process.loadEnvFile;\nload('.env.other');\n`], [`${P}: process.loadEnvFile — zakazane`]],
+    ["require jako wartość w konfiguracji", [PW_SRC, CFG, `${CFG}const r = require;\nr('dotenv');\n`], [`${P}: require jako wartość`]],
+    // (c) ścieżki globalSetup / globalTeardown
+    ["(c) globalSetup jako tablica", [PW_SRC, GS, "  globalSetup: ['./tests/global-setup.ts'],"], [`${P}: globalSetup — oczekiwany dokładnie jeden literał „./tests/global-setup.ts”: wartość nie jest literałem`]],
+    ["(c) globalSetup jako wyrażenie", [PW_SRC, GS, "  globalSetup: isCI ? './tests/global-setup.ts' : './tests/global-setup.ts',"], [`${P}: globalSetup — oczekiwany dokładnie jeden literał „./tests/global-setup.ts”: wartość nie jest literałem`]],
+    ["(c) globalSetup z inną ścieżką", [PW_SRC, GS, "  globalSetup: './tests/other-setup.ts',"], [`${P}: globalSetup — oczekiwany dokładnie jeden literał „./tests/global-setup.ts”: inna ścieżka: ./tests/other-setup.ts`]],
+    ["(c) globalSetup ze stałej (skrót)", [PW_SRC, CFG, `${CFG}const globalSetup = './tests/global-setup.ts';\nvoid globalSetup;\n`], [`${P}: globalSetup — oczekiwany dokładnie jeden literał „./tests/global-setup.ts”: wystąpień nazwy 3`]],
+    ["(c) globalTeardown jako tablica", [PW_SRC, GT, "  globalTeardown: ['./tests/global-teardown.ts'],"], [`${P}: globalTeardown — oczekiwany dokładnie jeden literał „./tests/global-teardown.ts”: wartość nie jest literałem`]],
+    ["(c) globalTeardown jako wyrażenie", [PW_SRC, GT, "  globalTeardown: `./tests/${'global-teardown'}.ts`,"], [`${P}: globalTeardown — oczekiwany dokładnie jeden literał „./tests/global-teardown.ts”: wartość nie jest literałem`]],
+    ["(c) globalTeardown z inną ścieżką", [PW_SRC, GT, "  globalTeardown: './tests/other-teardown.ts',"], [`${P}: globalTeardown — oczekiwany dokładnie jeden literał „./tests/global-teardown.ts”: inna ścieżka: ./tests/other-teardown.ts`]],
+    // (c) dodatkowy import w każdym pliku
+    ["(c) dodatkowy import w global-setup.ts", [SETUP_SRC, SETUP, `${SETUP} import * as os from 'os';`], [`${S1}: import „os” spoza listy (fs, path, @playwright/test)`, `${S2}: import „os” spoza listy (fs, path, @playwright/test)`]],
+    ["(c) dodatkowy import w global-teardown.ts", [TEARDOWN_SRC, TD_IMP, `${TD_IMP}import * as os from 'os';\n`], [`${T}: import „os” spoza listy (path, ./e2e-cleanup, ./global-setup, @playwright/test)`]],
+    ["(c) dodatkowy import w e2e-cleanup.ts", [CLEANUP_SRC, CL, `${CL}\nimport * as os from "os";`], [`${C}: import „os” spoza listy (fs, util, postgres, ../scripts/seed-host-guard)`]],
+    // (c) zapis do process.env w każdym pliku (global-setup także jako import teardownu)
+    ["(c) zapis do process.env w konfiguracji", [PW_SRC, CFG, `${CFG}process.env.POSTGRES_URL = 'x';\n`], [`${P}: ${W}przypisanie do składowej`]],
+    ["(c) zapis do process.env w global-setup.ts (globalSetup i import teardownu)", [SETUP_SRC, SETUP, `${SETUP} process.env.POSTGRES_URL = 'x';`], [`${S1}: ${W}przypisanie do składowej`, `${S2}: ${W}przypisanie do składowej`]],
+    ["(c) zapis do process.env w global-teardown.ts", td("process.env.POSTGRES_URL = 'x';"), [`${T}: ${W}przypisanie do składowej`]],
+    ["(c) zapis do process.env w e2e-cleanup.ts", [CLEANUP_SRC, CL, `${CL}\nprocess.env.POSTGRES_URL = "x";`], [`${C}: ${W}przypisanie do składowej`]],
+    // (c) dotenv w każdym pliku; rodzina dotenv
+    ["(c) dotenv/config w global-setup.ts", [SETUP_SRC, SETUP, `${SETUP} import 'dotenv/config';`], [`${S1}: moduł „dotenv/config” z rodziny dotenv`, `${S2}: moduł „dotenv/config” z rodziny dotenv`, `${S1}: import „dotenv/config” spoza listy`]],
+    ["(c) dotenv w global-teardown.ts", [TEARDOWN_SRC, TD_IMP, `${TD_IMP}import { config } from 'dotenv';\n`], [`${T}: moduł „dotenv” z rodziny dotenv`]],
+    ["(c) dotenv-expand w e2e-cleanup.ts", [CLEANUP_SRC, CL, `${CL}\nimport "dotenv-expand";`], [`${C}: moduł „dotenv-expand” z rodziny dotenv`]],
+    ["@dotenvx/dotenvx przez require w global-teardown.ts", td("const dx = require('@dotenvx/dotenvx');"), [`${T}: moduł „@dotenvx/dotenvx” z rodziny dotenv`, `${T}: require(„@dotenvx/dotenvx”) spoza listy`]],
+    // (c) loadEnvFile w każdym pliku
+    ["(c) process.loadEnvFile w global-setup.ts", [SETUP_SRC, SETUP, `${SETUP} process.loadEnvFile();`], [`${S1}: process.loadEnvFile — zakazane`, `${S2}: process.loadEnvFile — zakazane`]],
+    ["(c) process.loadEnvFile w global-teardown.ts", td("process.loadEnvFile('.env.local');"), [`${T}: process.loadEnvFile — zakazane`]],
+    ["(c) process.loadEnvFile w e2e-cleanup.ts", [CLEANUP_SRC, CL, `${CL}\nprocess.loadEnvFile(".env.local");`], [`${C}: process.loadEnvFile — zakazane`]],
+    // process.env: każda forma poza odczytem i argumentem funkcji lokalnej (fail-closed)
+    ["process.env: przypisanie przez klucz literał", td("process.env['POSTGRES_URL'] = 'x';"), [`${T}: ${W}przypisanie do składowej`]],
+    ["process.env: delete", td("delete process.env.POSTGRES_URL;"), [`${T}: ${W}delete`]],
+    ["process.env: przypisanie całego obiektu", td("process.env = {};"), [`${T}: ${W}przypisanie całego process.env`]],
+    ["process.env: Object.assign", td("Object.assign(process.env, { POSTGRES_URL: 'x' });"), [`${T}: ${W}argument wywołania Object.assign(…)`]],
+    ["process.env: Object.defineProperty", td("Object.defineProperty(process.env, 'POSTGRES_URL', { value: 'x' });"), [`${T}: ${W}argument wywołania Object.defineProperty(…)`]],
+    ["process.env: Reflect.set", td("Reflect.set(process.env, 'POSTGRES_URL', 'x');"), [`${T}: ${W}argument wywołania Reflect.set(…)`]],
+    ["process.env: Reflect.deleteProperty", td("Reflect.deleteProperty(process.env, 'POSTGRES_URL');"), [`${T}: ${W}argument wywołania Reflect.deleteProperty(…)`]],
+    ["process.env: alias const e = process.env", td("const e = process.env;\n  e.POSTGRES_URL = 'x';"), [`${T}: ${W}process.env jako wartość (alias)`]],
+    ["process: destrukturyzacja const { env } = process", td("const { env } = process;\n  env.POSTGRES_URL = 'x';"), [`${T}: process jako wartość`]],
+    ["process: alias const p = process", td("const p = process;\n  p.env.POSTGRES_URL = 'x';"), [`${T}: process jako wartość`]],
+    ["process.env: ++", td("process.env.N++;"), [`${T}: ${W}++/--`]],
+    ["process.env: -- (przedrostek)", td("--process.env.N;"), [`${T}: ${W}++/--`]],
+    ["process.env: przypisanie złożone +=", td("process.env.POSTGRES_URL += 'x';"), [`${T}: ${W}przypisanie złożone`]],
+    ["process.env: przypisanie złożone ??=", td("process.env.POSTGRES_URL ??= 'x';"), [`${T}: ${W}przypisanie złożone`]],
+    ["process.env: przez globalThis.process", td("globalThis.process.env.POSTGRES_URL = 'x';"), [`${T}: ${W}przypisanie do składowej`]],
+    ["process.env: destrukturyzacja jako cel przypisania", td("[process.env.POSTGRES_URL] = ['x'];"), [`${T}: ${W}przypisanie przez destrukturyzację`]],
+    ["process.env: klucz nie-literał", td("const key = 'POSTGRES_URL';\n  process.env[key] = 'x';"), [`${T}: ${W}klucz nie-literał`]],
+    ["process.env: argument funkcji spoza lokalnych (alias Reflect.set)", td("const set = Reflect.set;\n  set(process.env, 'POSTGRES_URL', 'x');"), [`${T}: ${W}argument wywołania set(…)`]],
+    // CleanupEnv tylko do odczytu
+    ["CleanupEnv z sygnaturą indeksu bez readonly", [CLEANUP_SRC, CL_ENV, "export type CleanupEnv = { [key: string]: string | undefined };"], ["tests/e2e-cleanup.ts: CleanupEnv nie jest tylko do odczytu — składowe bez readonly"]],
+    ["CleanupEnv z dodatkową właściwością bez readonly", [CLEANUP_SRC, CL_ENV, "export type CleanupEnv = { readonly [key: string]: string | undefined; POSTGRES_URL?: string };"], ["tests/e2e-cleanup.ts: CleanupEnv nie jest tylko do odczytu — składowe bez readonly: POSTGRES_URL?: string"]],
+    ["CleanupEnv jako NodeJS.ProcessEnv", [CLEANUP_SRC, CL_ENV, "export type CleanupEnv = NodeJS.ProcessEnv;"], ["tests/e2e-cleanup.ts: CleanupEnv nie jest tylko do odczytu — oczekiwany literał typu z polami readonly"]],
+  ])("%s → naruszenie z oczekiwanym powodem", (_n, [src, find, repl], expected) => {
+    const out = pwSetViolations(src.id, edited(src, find, repl)).join("\n");
+    for (const s of expected) expect(out).toContain(s);
+  });
+
+  it.each<[string, [Source, string, string]]>([
+    ["odczyt process.env.X i process.env['X']", td("const u = process.env.POSTGRES_URL ?? process.env['CI'];\n  void u;")],
+    ["process.env jako argument funkcji z modułu lokalnego", td("void resolveCleanupUrl(process.env, '.env.test');")],
+    ["słowa import/require/process.env w komentarzu i napisie", [PW_SRC, CFG, `${CFG}// import 'dotenv/config'; process.env.X = '1'; require('dotenv'); process.loadEnvFile()\nconst note = "import 'dotenv/config'; process.env.X = '1'; export * from 'dotenv'";\nvoid note;\n`]],
+    ["import typu z modułu z listy", [SETUP_SRC, SETUP, `${SETUP} import type { Page } from '@playwright/test';`]],
+  ])("poprawna edycja: %s → bez naruszeń (kontrola fałszywej czerwieni)", (_n, [src, find, repl]) => {
+    expect(pwSetViolations(src.id, edited(src, find, repl))).toEqual([]);
   });
 });
