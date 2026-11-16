@@ -28,13 +28,24 @@ const suite = h ? describe : describe.skip;
 const APP_ROLES = ["myhelper_app", "myhelper_app_login"];
 const WRITE_PRIVS = ["INSERT", "UPDATE", "DELETE", "TRUNCATE"];
 const INVOKER = "security_invoker=true";
+/**
+ * Porównanie z `reloptions` jest dosłowne: `security_invoker = on`/`1`/`yes` zapisuje się w
+ * katalogu inaczej i daje czerwony (fail-closed). Migracja widoku pisze dokładnie `= true`.
+ */
+const NO_INVOKER = `brak ${INVOKER} — w migracji widoku użyj dokładnie WITH (security_invoker = true); on/1/yes dają czerwony`;
 
-/** Wyjątek od wymogu `security_invoker` (widok) albo od zakazu (widok zmaterializowany). */
-type ViewException = { name: string; kind: "v" | "m"; reason: string; acceptedBy: string[] };
+/** Role akceptujące wyjątek: wyjątek widoku dotyczy uprawnień w bazie, więc wymagane są obie. */
+const ACCEPT_ROLES = ["CTO", "CRCO"];
 
 /**
- * ZAMKNIĘTA lista wyjątków. Każda pozycja: nazwa, rodzaj, jednozdaniowe uzasadnienie i akceptacja
- * Ryana i Ethana. Dopisanie pozycji = recenzja Ryana i Ethana.
+ * Wyjątek od wymogu `security_invoker` (widok) albo od zakazu (widok zmaterializowany).
+ * `acceptedBy` — role z ACCEPT_ROLES (obie); `pr` — numer PR dodającego wyjątek.
+ */
+type ViewException = { name: string; kind: "v" | "m"; reason: string; acceptedBy: string[]; pr: number };
+
+/**
+ * ZAMKNIĘTA lista wyjątków (#193). Każda pozycja: nazwa, rodzaj, jednozdaniowe uzasadnienie,
+ * akceptacja ról CTO i CRCO oraz numer PR. Dopisanie pozycji = recenzja CTO i CRCO w tym PR.
  */
 const VIEW_EXCEPTIONS: ViewException[] = [];
 
@@ -49,7 +60,10 @@ function exceptionFormatViolations(list: readonly ViewException[]): string[] {
     seen.add(id);
     const r = e.reason.trim();
     if (r.length < 20 || !/[.!]$/.test(r) || /[\n.!?]./.test(r.slice(0, -1))) out.push(`${id}: brak jednozdaniowego uzasadnienia`);
-    for (const who of ["Ryan", "Ethan"]) if (!e.acceptedBy.includes(who)) out.push(`${id}: brak akceptacji ${who}`);
+    const by = Array.isArray(e.acceptedBy) ? e.acceptedBy : [];
+    for (const role of ACCEPT_ROLES) if (!by.includes(role)) out.push(`${id}: brak akceptacji roli ${role}`);
+    for (const role of by) if (!ACCEPT_ROLES.includes(role)) out.push(`${id}: akceptacja spoza ról (${ACCEPT_ROLES.join(", ")}): ${role}`);
+    if (!Number.isInteger(e.pr) || e.pr <= 0) out.push(`${id}: brak numeru PR dodającego wyjątek (dodatnia liczba całkowita)`);
   }
   return out;
 }
@@ -76,7 +90,7 @@ async function appRoles(sql: QueryRunner): Promise<string[]> {
 
 /**
  * Naruszenia zasad dla widoków w public (pusta lista = zasady spełnione), w kolejności:
- * - `widok (v): brak security_invoker=true` i `widok (m): widok zmaterializowany w public — zakaz`
+ * - `widok (v): ${NO_INVOKER}` i `widok (m): widok zmaterializowany w public — zakaz`
  *   (poza VIEW_EXCEPTIONS);
  * - `widok (v): rola PRAWO` — prawo zapisu roli aplikacji na widoku.
  */
@@ -91,7 +105,7 @@ async function viewViolations(sql: QueryRunner, exceptions: readonly ViewExcepti
   const structural = rels.flatMap((r) => {
     if (excepted(r.relname, r.relkind)) return [];
     if (r.relkind === "m") return [`${r.relname} (m): widok zmaterializowany w public — zakaz`];
-    return r.reloptions.includes(INVOKER) ? [] : [`${r.relname} (v): brak ${INVOKER}`];
+    return r.reloptions.includes(INVOKER) ? [] : [`${r.relname} (v): ${NO_INVOKER}`];
   });
   const writes = (await sql.unsafe(`
     SELECT c.relname::text AS relname, r.rolname::text AS rolname, p.priv
@@ -113,7 +127,8 @@ async function inRolledBackTx<T>(ddl: string, read: (tx: QueryRunner) => Promise
   let result: { v: T } | undefined;
   await h!.observer
     .begin(async (tx) => {
-      // Po jednym poleceniu (protokół rozszerzony nie przyjmuje kilku naraz).
+      // Po jednym poleceniu (protokół rozszerzony nie przyjmuje kilku naraz). Podział po każdym
+      // średniku: sonda ze średnikiem w literale SQL rozjedzie się błędem składni, nie cicho.
       for (const stmt of ddl.split(";").map((s) => s.trim()).filter(Boolean)) await tx.unsafe(stmt);
       result = { v: await read(tx) };
       throw new Rollback();
@@ -131,21 +146,30 @@ const PROBE_INV = "p0c1_view_probe_inv";
 const noLogin = (v: string[]) => v.filter((x) => !x.includes("myhelper_app_login"));
 
 describe("lista wyjątków widoków: format (#193 P0c-1)", () => {
-  it("VIEW_EXCEPTIONS: każda pozycja z nazwą, jednozdaniowym uzasadnieniem i akceptacją Ryana i Ethana", () => {
+  /** Pozycja kompletna; przypadki niżej psują w niej po jednym polu. */
+  const OK: ViewException = { name: "x_view", kind: "v", reason: "Katalog publiczny: tylko kolumny publiczne, wyłącznie SELECT.", acceptedBy: ["CTO", "CRCO"], pr: 1 };
+  /** Pozycja bez pola `pr` (np. z JSON albo po rzutowaniu typu). */
+  const noPr = Object.fromEntries(Object.entries(OK).filter(([k]) => k !== "pr")) as unknown as ViewException;
+
+  it("VIEW_EXCEPTIONS: każda pozycja z nazwą, jednozdaniowym uzasadnieniem, akceptacją ról CTO i CRCO i numerem PR", () => {
     expect(exceptionFormatViolations(VIEW_EXCEPTIONS)).toEqual([]);
   });
 
   it.each([
-    ["bez uzasadnienia", { name: "x_view", kind: "v", reason: "", acceptedBy: ["Ryan", "Ethan"] }, /brak jednozdaniowego uzasadnienia/],
-    ["uzasadnienie z dwóch zdań", { name: "x_view", kind: "v", reason: "Tylko kolumny publiczne. Wyłącznie SELECT.", acceptedBy: ["Ryan", "Ethan"] }, /brak jednozdaniowego uzasadnienia/],
-    ["bez akceptacji Ryana", { name: "x_view", kind: "v", reason: "Katalog publiczny: tylko kolumny publiczne, wyłącznie SELECT.", acceptedBy: ["Ethan"] }, /brak akceptacji Ryan/],
-    ["bez akceptacji Ethana", { name: "x_view", kind: "m", reason: "Katalog publiczny: tylko kolumny publiczne, wyłącznie SELECT.", acceptedBy: ["Ryan"] }, /brak akceptacji Ethan/],
+    ["bez uzasadnienia", { ...OK, reason: "" }, /brak jednozdaniowego uzasadnienia/],
+    ["uzasadnienie z dwóch zdań", { ...OK, reason: "Tylko kolumny publiczne. Wyłącznie SELECT." }, /brak jednozdaniowego uzasadnienia/],
+    ["bez akceptacji roli CRCO", { ...OK, acceptedBy: ["CTO"] }, /brak akceptacji roli CRCO/],
+    ["bez akceptacji roli CTO (widok zmaterializowany)", { ...OK, kind: "m", acceptedBy: ["CRCO"] }, /brak akceptacji roli CTO/],
+    ["akceptacja spoza ról", { ...OK, acceptedBy: ["CTO", "CRCO", "QA"] }, /akceptacja spoza ról \(CTO, CRCO\): QA/],
+    ["bez numeru PR", noPr, /brak numeru PR dodającego wyjątek/],
+    ["numer PR 0", { ...OK, pr: 0 }, /brak numeru PR dodającego wyjątek/],
+    ["numer PR niecałkowity", { ...OK, pr: 1.5 }, /brak numeru PR dodającego wyjątek/],
   ] as Array<[string, ViewException, RegExp]>)("pozycja %s → naruszenie formatu", (_n, e, re) => {
     expect(exceptionFormatViolations([e]).join("\n")).toMatch(re);
   });
 
   it("pozycja kompletna → bez naruszeń formatu", () => {
-    expect(exceptionFormatViolations([{ name: "x_view", kind: "v", reason: "Katalog publiczny: tylko kolumny publiczne, wyłącznie SELECT.", acceptedBy: ["Ryan", "Ethan"] }])).toEqual([]);
+    expect(exceptionFormatViolations([OK])).toEqual([]);
   });
 });
 
@@ -155,7 +179,7 @@ suite("widoki w public: security_invoker, bez widoków zmaterializowanych, tylko
   });
 
   // Sondy uwzględniają domyślne uprawnienia schematu: nowy widok może dostać prawa z automatu,
-  // więc sondy z jawnym grantem i sondy kontrolne zaczynają od REVOKE ALL (decyzja Ethana 16.11).
+  // więc sondy z jawnym grantem i sondy kontrolne zaczynają od REVOKE ALL (#193).
   const VIEW = `CREATE VIEW public.${PROBE} AS SELECT 1 AS x`;
   const VIEW_INV = `CREATE VIEW public.${PROBE} WITH (security_invoker = true) AS SELECT 1 AS x`;
   const REVOKE = `REVOKE ALL ON public.${PROBE} FROM myhelper_app, PUBLIC`;
@@ -171,7 +195,7 @@ suite("widoki w public: security_invoker, bez widoków zmaterializowanych, tylko
   });
 
   it("sonda: CREATE VIEW, REVOKE ALL, GRANT SELECT (bez security_invoker) → naruszenie: brak security_invoker", async () => {
-    expect(await check(`${VIEW}; ${REVOKE}; ${SELECT_ONLY}`)).toEqual([`${PROBE} (v): brak ${INVOKER}`]);
+    expect(await check(`${VIEW}; ${REVOKE}; ${SELECT_ONLY}`)).toEqual([`${PROBE} (v): ${NO_INVOKER}`]);
   });
 
   it("sonda kontrolna: CREATE VIEW WITH (security_invoker = true), REVOKE ALL, GRANT SELECT → bez naruszeń", async () => {
@@ -180,7 +204,7 @@ suite("widoki w public: security_invoker, bez widoków zmaterializowanych, tylko
 
   it("sonda: goły CREATE VIEW bez grantów → brak security_invoker i zapis z domyślnych uprawnień schematu", async () => {
     expect(await check(VIEW)).toEqual([
-      `${PROBE} (v): brak ${INVOKER}`,
+      `${PROBE} (v): ${NO_INVOKER}`,
       `${PROBE} (v): myhelper_app DELETE`,
       `${PROBE} (v): myhelper_app INSERT`,
       `${PROBE} (v): myhelper_app UPDATE`,
@@ -200,7 +224,7 @@ suite("widoki w public: security_invoker, bez widoków zmaterializowanych, tylko
 
   it("wyjątek z listy zwalnia z wymogu security_invoker i zakazu (zapis na widoku nadal sprawdzany)", async () => {
     const exc: ViewException[] = [
-      { name: PROBE, kind: "v", reason: "Sonda testu: wyjątek zwalnia z wymogu opcji widoku.", acceptedBy: ["Ryan", "Ethan"] },
+      { name: PROBE, kind: "v", reason: "Sonda testu: wyjątek zwalnia z wymogu opcji widoku.", acceptedBy: ["CTO", "CRCO"], pr: 230 },
     ];
     expect(noLogin(await inRolledBackTx(`${VIEW}; ${REVOKE}; GRANT INSERT ON public.${PROBE} TO myhelper_app`, (tx) => viewViolations(tx, exc)))).toEqual([
       `${PROBE} (v): myhelper_app INSERT`,
