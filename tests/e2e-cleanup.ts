@@ -1,5 +1,6 @@
 /**
- * Sprzątanie danych E2E (#175): znacznik testu i twarde usunięcie oznaczonych wizyt.
+ * Sprzątanie danych E2E (#175, #199): znacznik testu i twarde usunięcie oznaczonych
+ * wizyt oraz pracowników (`purgeE2eEmployees` niżej).
  *
  * Dlaczego twardo: `DELETE /api/appointments/[id]` w aplikacji tylko anuluje
  * (`status = cancelled`), wiersz zostaje. `afterEach` w specach nadal anuluje,
@@ -43,6 +44,53 @@ export function resolveCleanupUrl(env: CleanupEnv, envLocalPath: string): string
   return parseEnv(fs.readFileSync(envLocalPath, "utf8")).POSTGRES_URL?.trim() || undefined;
 }
 
+/** Hosty, na których teardown kasuje dane E2E: lokalny Docker i service container CI. */
+export const CLEANUP_ALLOWED_HOSTS: readonly string[] = ["localhost", "127.0.0.1"];
+
+/**
+ * Bazy, na których teardown kasuje dane E2E. Jawna lista, bez wzorców:
+ * `pos_dev` to baza z `docker-compose.yml` i z obu jobów E2E w
+ * `.github/workflows/quality-gate.yml` (`POSTGRES_DB: pos_dev`).
+ */
+export const CLEANUP_ALLOWED_DATABASES: readonly string[] = ["pos_dev"];
+
+export type CleanupDecision = { run: true } | { run: false; reason: string };
+
+/**
+ * Czy teardown ma w ogóle sprzątać (decyzja przed połączeniem, bez sieci).
+ * Poza listą hostów albo baz: pominięcie z powodem, bez DELETE i bez błędu.
+ * Powód nie zawiera adresu, hosta, nazwy bazy ani danych logowania — tylko listy dozwolone.
+ * Cel z listy przechodzi dalej przez pełny strażnik (`guardedCleanupClient`), który
+ * przy czymkolwiek podejrzanym (np. niejednoznaczny host, Neon, inna baza po stronie
+ * serwera) rzuca błąd, więc przebieg jest czerwony.
+ */
+export function decideCleanupTarget(url: string | undefined): CleanupDecision {
+  const skip = (why: string): CleanupDecision => ({ run: false, reason: `sprzątanie E2E pominięte: ${why}` });
+  if (!url?.trim()) return skip("brak POSTGRES_URL");
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    return skip("POSTGRES_URL nieczytelny");
+  }
+  if (parsed.protocol !== "postgres:" && parsed.protocol !== "postgresql:") {
+    return skip("POSTGRES_URL nie jest adresem postgres(ql)://");
+  }
+  if (!CLEANUP_ALLOWED_HOSTS.includes(parsed.hostname.toLowerCase())) {
+    return skip(`host spoza listy (${CLEANUP_ALLOWED_HOSTS.join(", ")})`);
+  }
+  let database: string;
+  try {
+    database = decodeURIComponent(parsed.pathname.replace(/^\//, ""));
+  } catch {
+    return skip("nieczytelna nazwa bazy");
+  }
+  if (!CLEANUP_ALLOWED_DATABASES.includes(database)) {
+    return skip(`baza spoza listy (${CLEANUP_ALLOWED_DATABASES.join(", ")})`);
+  }
+  return { run: true };
+}
+
 /**
  * Klient postgres.js po trzech etapach strażnika seeda (napis URL → hosty
  * wyliczone przez postgres.js → tożsamość serwera), zanim padnie pierwszy zapis.
@@ -72,7 +120,12 @@ export function e2eGuestName(name: string): string {
   return `${E2E_MARKER} ${name}`;
 }
 
-/** Salon seeda (`scripts/seed-test.ts`) — jedyny, w którym E2E zakładają wizyty. */
+/** Imię pracownika zakładanego przez E2E: `[E2E] <imię>` (samo `[E2E]`, gdy `name` puste). */
+export function e2eEmployeeFirstName(name = ""): string {
+  return name ? `${E2E_MARKER} ${name}` : E2E_MARKER;
+}
+
+/** Salon seeda (`scripts/seed-test.ts`) — jedyny, w którym E2E zakładają wizyty i pracowników. */
 export const E2E_SALON_ID = "00000000-0000-4000-8000-000000000001";
 
 export type PurgeResult = { deleted: number; untouchedBefore: number; untouchedAfter: number };
@@ -126,5 +179,59 @@ export async function purgeE2eAppointments(sql: Sql, salonIds: readonly string[]
       );
     }
     return { deleted: deleted.length, untouchedBefore, untouchedAfter };
+  });
+}
+
+export type EmployeePurgeResult = PurgeResult & { appointmentsBefore: number; appointmentsAfter: number };
+
+/**
+ * Usuwa pracowników ze znacznikiem (`first_name` albo `last_name` zaczyna się od
+ * `[E2E]`) w podanych salonach, w jednej transakcji (#199). API nie ma `DELETE`
+ * pracownika, więc sprzątanie zostaje po stronie testów.
+ *
+ * FK do `employees`: kaskadą znikają wizyty (`appointments`), blokady czasu,
+ * przypisania i ceny usług, grafiki, prowizje; `set null` mają zdjęcia galerii,
+ * opinie i lista oczekujących. Kaskada na wizyty jest groźna, dlatego bezpiecznik
+ * liczy dwie rzeczy w całych tabelach, przed i po usunięciu:
+ *  - pracowników bez znacznika (zgubiony filtr znacznika),
+ *  - wizyty bez znacznika (oznaczony pracownik z prawdziwą wizytą — kaskada
+ *    zabrałaby wizytę razem z nim).
+ * Zmiana którejkolwiek liczby = ROLLBACK i błąd. Wizyty ze znacznikiem usuwa
+ * wcześniej `purgeE2eAppointments`; teardown woła je w tej kolejności.
+ * Granica jak przy wizytach: utraty zakresu salonu bezpiecznik nie wykrywa.
+ */
+export async function purgeE2eEmployees(sql: Sql, salonIds: readonly string[]): Promise<EmployeePurgeResult> {
+  if (salonIds.length === 0) throw new Error("[e2e-cleanup] brak salonów do sprzątania");
+  return sql.begin("isolation level repeatable read", async (txSql) => {
+    const tx = txSql as unknown as Sql;
+    const unmarkedEmployees = async () => {
+      const [row] = await tx<{ n: number }[]>`
+        select count(*)::int as n from employees
+        where not (starts_with(first_name, ${E2E_MARKER}) or starts_with(last_name, ${E2E_MARKER}))`;
+      return row!.n;
+    };
+    const unmarkedAppointments = async () => {
+      const [row] = await tx<{ n: number }[]>`
+        select count(*)::int as n from appointments
+        where not (starts_with(coalesce(notes, ''), ${E2E_MARKER})
+                or starts_with(coalesce(guest_name, ''), ${E2E_MARKER}))`;
+      return row!.n;
+    };
+    const untouchedBefore = await unmarkedEmployees();
+    const appointmentsBefore = await unmarkedAppointments();
+    const deleted = await tx`
+      delete from employees
+      where salon_id = any(${salonIds as string[]}::uuid[])
+        and (starts_with(first_name, ${E2E_MARKER}) or starts_with(last_name, ${E2E_MARKER}))
+      returning id`;
+    const untouchedAfter = await unmarkedEmployees();
+    const appointmentsAfter = await unmarkedAppointments();
+    if (untouchedAfter !== untouchedBefore || appointmentsAfter !== appointmentsBefore) {
+      throw new Error(
+        `[e2e-cleanup] wycofano: usunięcie pracowników ${E2E_MARKER} dotknęło danych bez znacznika ` +
+          `(pracownicy ${untouchedBefore} → ${untouchedAfter}, wizyty ${appointmentsBefore} → ${appointmentsAfter})`
+      );
+    }
+    return { deleted: deleted.length, untouchedBefore, untouchedAfter, appointmentsBefore, appointmentsAfter };
   });
 }

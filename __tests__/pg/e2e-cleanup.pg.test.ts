@@ -1,5 +1,6 @@
 /**
- * `purgeE2eAppointments()` (teardown E2E, #175) na PRAWDZIWYM Postgresie.
+ * `purgeE2eAppointments()` (teardown E2E, #175) i `purgeE2eEmployees()` (#199)
+ * na PRAWDZIWYM Postgresie.
  *
  * Kontrakt: usuwa twardo wyłącznie wizyty ze znacznikiem `[E2E]` na początku
  * `notes` albo `guest_name`, tylko w podanych salonach; zależne `deposit_payments`
@@ -16,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { appointments, depositPayments, employees, salons, user } from "@/lib/schema";
-import { E2E_MARKER, purgeE2eAppointments } from "../../tests/e2e-cleanup";
+import { E2E_MARKER, purgeE2eAppointments, purgeE2eEmployees } from "../../tests/e2e-cleanup";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
 
@@ -49,32 +50,36 @@ async function appt(salonId: string, employeeId: string, fields: { notes?: strin
   return row!.id;
 }
 
+// Dane i połączenie wspólne dla CAŁEGO pliku (oba describe niżej): hooki na poziomie
+// pliku, nie w pierwszym describe — inaczej jego afterAll usuwa salony i zamyka
+// połączenie, zanim ruszy describe pracowników (CONNECTION_ENDED).
+beforeAll(async () => {
+  if (!h) return;
+  const db = h.db;
+  await db.insert(user).values(USERS.map((id) => ({ id, name: "IT T3 e2ec", email: `${id}@example.invalid` })));
+  const [a] = await db.insert(salons).values({ name: `IT T3 e2ec A ${RUN}`, ownerId: USER_A }).returning();
+  const [b] = await db.insert(salons).values({ name: `IT T3 e2ec B ${RUN}`, ownerId: USER_B }).returning();
+  salonA = a!.id;
+  salonB = b!.id;
+  const [ea] = await db.insert(employees).values({ salonId: salonA, firstName: "IT", lastName: "A" }).returning();
+  const [eb] = await db.insert(employees).values({ salonId: salonB, firstName: "IT", lastName: "B" }).returning();
+  empA = ea!.id;
+  empB = eb!.id;
+});
+
+afterAll(async () => {
+  if (!h) return;
+  try {
+    // Po właścicielach, nie po zmiennych salonA/salonB: sprząta też salon
+    // utworzony przed awarią beforeAll w połowie (zmienna jeszcze pusta).
+    await h.db.delete(salons).where(inArray(salons.ownerId, USERS));
+    await h.db.delete(user).where(inArray(user.id, USERS));
+  } finally {
+    await h.end();
+  }
+});
+
 describe.skipIf(!h)("purgeE2eAppointments (pg)", () => {
-  beforeAll(async () => {
-    const db = h!.db;
-    await db.insert(user).values(USERS.map((id) => ({ id, name: "IT T3 e2ec", email: `${id}@example.invalid` })));
-    const [a] = await db.insert(salons).values({ name: `IT T3 e2ec A ${RUN}`, ownerId: USER_A }).returning();
-    const [b] = await db.insert(salons).values({ name: `IT T3 e2ec B ${RUN}`, ownerId: USER_B }).returning();
-    salonA = a!.id;
-    salonB = b!.id;
-    const [ea] = await db.insert(employees).values({ salonId: salonA, firstName: "IT", lastName: "A" }).returning();
-    const [eb] = await db.insert(employees).values({ salonId: salonB, firstName: "IT", lastName: "B" }).returning();
-    empA = ea!.id;
-    empB = eb!.id;
-  });
-
-  afterAll(async () => {
-    if (!h) return;
-    try {
-      // Po właścicielach, nie po zmiennych salonA/salonB: sprząta też salon
-      // utworzony przed awarią beforeAll w połowie (zmienna jeszcze pusta).
-      await h.db.delete(salons).where(inArray(salons.ownerId, USERS));
-      await h.db.delete(user).where(inArray(user.id, USERS));
-    } finally {
-      await h.end();
-    }
-  });
-
   it("usuwa tylko oznaczone wizyty podanego salonu, z kaskadą deposit_payments; reszta zostaje", async () => {
     const markedNotes = await appt(salonA, empA, { notes: `${E2E_MARKER} kalendarz API` });
     const markedGuest = await appt(salonA, empA, { guestName: `${E2E_MARKER} Gosc` });
@@ -111,5 +116,57 @@ describe.skipIf(!h)("purgeE2eAppointments (pg)", () => {
 
   it("pusta lista salonów = błąd, nie DELETE bez zakresu", async () => {
     await expect(purgeE2eAppointments(h!.observer, [])).rejects.toThrow(/brak salonów/);
+  });
+});
+
+// #199: pracownicy E2E. Te same salony z beforeAll pliku (describe biegną po kolei).
+describe.skipIf(!h)("purgeE2eEmployees (pg)", () => {
+  async function emp(salonId: string, firstName: string, lastName: string) {
+    const [row] = await h!.db.insert(employees).values({ salonId, firstName, lastName }).returning({ id: employees.id });
+    return row!.id;
+  }
+  async function idsIn(salonIds: string[]) {
+    const rows = await h!.db.select({ id: employees.id }).from(employees).where(inArray(employees.salonId, salonIds));
+    return new Set(rows.map((x) => x.id));
+  }
+
+  it("usuwa tylko oznaczonych pracowników podanego salonu; reszta zostaje", async () => {
+    const before = await idsIn([salonA, salonB]); // empA, empB
+    const marked = [
+      await emp(salonA, E2E_MARKER, "Edycja"), // jak pracownicy testu edycji
+      await emp(salonA, `${E2E_MARKER} Anna`, "Kowalska"), // jak formularz "Dodaj pracownika"
+      await emp(salonA, "Imie", `${E2E_MARKER} Nazwisko`),
+    ];
+    const keep = [
+      await emp(salonA, "E2E", "Status"), // stara nazwa bez prefiksu (przed #199)
+      await emp(salonA, "Anna", `Kowalska ${E2E_MARKER}`), // znacznik w środku
+      await emp(salonA, "[e2e]", "mała litera"),
+      await emp(salonB, E2E_MARKER, "inny salon"), // poza listą salonów
+    ];
+
+    const r = await purgeE2eEmployees(h!.observer, [salonA]);
+
+    expect(await idsIn([salonA, salonB])).toEqual(new Set([...before, ...keep]));
+    expect(r.deleted).toBe(marked.length);
+    expect(r.untouchedAfter).toBe(r.untouchedBefore);
+    expect(r.appointmentsAfter).toBe(r.appointmentsBefore);
+  });
+
+  it("oznaczony pracownik z wizytą bez znacznika = ROLLBACK: pracownik i wizyta zostają", async () => {
+    const id = await emp(salonA, E2E_MARKER, "z prawdziwa wizyta");
+    const visit = await appt(salonA, id, {}); // wizyta bez znacznika — kaskada by ją zabrała
+
+    await expect(purgeE2eEmployees(h!.observer, [salonA])).rejects.toThrow(/wycofano/);
+
+    expect(await idsIn([salonA])).toContain(id);
+    const left = await h!.db.select({ id: appointments.id }).from(appointments).where(eq(appointments.id, visit));
+    expect(left, "wizyta bez znacznika nie zniknęła kaskadą").toHaveLength(1);
+    // Sprzątanie stanu dla kolejnych testów: bez wizyty pracownik znika normalnie.
+    await h!.db.delete(appointments).where(eq(appointments.id, visit));
+    expect((await purgeE2eEmployees(h!.observer, [salonA])).deleted).toBe(1);
+  });
+
+  it("pusta lista salonów = błąd, nie DELETE bez zakresu", async () => {
+    await expect(purgeE2eEmployees(h!.observer, [])).rejects.toThrow(/brak salonów/);
   });
 });
