@@ -1,5 +1,6 @@
 import { TEST_PHONE } from '../../src/lib/test-phone';
 import { test, expect } from '../fixtures';
+import { e2eGuestName } from '../e2e-cleanup';
 import type { Browser, Page } from '@playwright/test';
 
 // Rezerwacja z zadatkiem w oknie happy hours, gdy happy hours sa zamrozone
@@ -18,9 +19,9 @@ import type { Browser, Page } from '@playwright/test';
 // Zapis do bazy: udane create-session tworzy wizyte "scheduled" bez wplaty.
 // Sprzatanie: afterEach anuluje ja przez DELETE /api/appointments/[id] (sesja
 // wlasciciela): wizyta -> "cancelled", termin wraca do puli, nic "scheduled"
-// nie zostaje. Rekord deposit_payments zostaje "pending" — DELETE go nie
-// rusza (webhook Stripe i cron cleanup-pending-deposits ustawiaja "failed",
-// DELETE nie). Unikalne dane per przebieg nic by nie daly: kazdy przebieg
+// nie zostaje. Wiersze (wizyta i jej deposit_payments, kaskada FK) usuwa
+// dopiero globalTeardown po znaczniku [E2E] w imieniu goscia (#175; formularz
+// portalu nie ma pola uwag). Unikalne dane per przebieg nic by nie daly: kazdy przebieg
 // i tak zostawialby wizyte "scheduled", tylko na innym terminie.
 //
 // Telefon goscia: TEST_PHONE (src/lib/test-phone.ts) — sendSms blokuje go
@@ -30,7 +31,9 @@ const SALON_ID = '00000000-0000-4000-8000-000000000001';
 const SERVICE_ID = '00000000-0000-4000-8000-5e0000000004';
 const EMPLOYEE_ID = '00000000-0000-4000-8000-e00000000003';
 const FULL_PRICE_DEPOSIT = 60; // 30% z 200 PLN
-const HAPPY_HOURS_DEPOSIT = 30; // 30% z 100 PLN (200 PLN - 50%) — kwota, ktorej NIE wolno przyjac
+const HAPPY_HOURS_DEPOSIT = 30;
+// Znacznik #175 w imieniu goscia: po nim globalTeardown rozpoznaje wizyty E2E.
+const GUEST_NAME = e2eGuestName('Gosc'); // 30% z 100 PLN (200 PLN - 50%) — kwota, ktorej NIE wolno przyjac
 
 type CreateSessionJson = { success: boolean; data?: { simulated?: boolean; paymentUrl?: string; appointmentId?: string; amount?: number }; error?: string; details?: unknown };
 
@@ -64,7 +67,7 @@ async function openDepositSummary(page: Page): Promise<string> {
 /** create-session z przegladarki: ta sama sesja, ciasteczka i token CSRF co formularz. */
 async function postCreateSession(page: Page, amount: number, localStart: string) {
   return page.evaluate(
-    async ({ salonId, serviceId, employeeId, amount, localStart, testPhone }) => {
+    async ({ salonId, serviceId, employeeId, amount, localStart, testPhone, guestName }) => {
       const token = document.cookie.match(/(?:^|; )csrf-token=([^;]*)/)?.[1] ?? '';
       const start = new Date(localStart); // bez strefy = czas lokalny przegladarki (timezoneId Europe/Warsaw)
       const res = await fetch('/api/deposits/create-session', {
@@ -75,12 +78,12 @@ async function postCreateSession(page: Page, amount: number, localStart: string)
           startTime: start.toISOString(),
           endTime: new Date(start.getTime() + 60 * 60000).toISOString(),
           depositAmount: amount, paymentMethod: 'stripe',
-          guestName: 'Gosc E2E', guestPhone: testPhone,
+          guestName, guestPhone: testPhone,
         }),
       });
       return { status: res.status, json: (await res.json()) as { success: boolean; data?: { simulated?: boolean; appointmentId?: string }; error?: string } };
     },
-    { salonId: SALON_ID, serviceId: SERVICE_ID, employeeId: EMPLOYEE_ID, amount, localStart, testPhone: TEST_PHONE }
+    { salonId: SALON_ID, serviceId: SERVICE_ID, employeeId: EMPLOYEE_ID, amount, localStart, testPhone: TEST_PHONE, guestName: GUEST_NAME }
   );
 }
 
@@ -169,7 +172,7 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
 
     await openDepositSummary(page);
     // Format numeru jak w placeholderze pola.
-    await page.getByPlaceholder('Twoje imie').fill('Gosc E2E');
+    await page.getByPlaceholder('Twoje imie').fill(GUEST_NAME);
     await page.getByPlaceholder('+48 123 456 789').fill(TEST_PHONE);
     await page.getByTestId('book-appointment-btn').click();
 
@@ -181,6 +184,7 @@ test.describe('Portal: zadatek przy zamrozonych happy hours', () => {
       clientId: null,
       variantId: null,
       guestEmail: null,
+      guestName: GUEST_NAME,
       guestPhone: TEST_PHONE,
     });
     expect(created!.status, `create-session: ${JSON.stringify(created!.json)}`).toBe(201);
