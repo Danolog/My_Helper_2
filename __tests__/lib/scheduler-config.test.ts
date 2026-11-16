@@ -6,6 +6,8 @@
  *  - strefa `Europe/Warsaw`, metoda GET, stan ENABLED|PAUSED,
  *  - zadań z wiadomościami do klientów (notifications) nie ma do R3-C
  *    (Oliver); gdyby wróciły — tylko PAUSED,
+ *  - zadanie trasy zamrożonego modułu (`hardOff`, `frozenModuleForApiPath`)
+ *    tylko PAUSED — `--resume` odrzuca takie zadanie przed gcloud,
  *  - każde `gcloud` idzie przez tablicę z jawnym `--project`,
  *  - sekret idzie przez `--flags-file` ze strumienia, nie w argumencie.
  * Mutacja: dodać `src/app/api/cron/nowy/route.ts` bez wpisu w skrypcie → czerwony.
@@ -13,6 +15,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { frozenModuleForApiPath } from "@/lib/features";
 
 const ROOT = process.cwd();
 const SCRIPT = readFileSync(join(ROOT, "infra/gcp/scheduler.sh"), "utf8");
@@ -74,6 +77,15 @@ describe("G-C5: scheduler.sh ↔ trasy", () => {
     expect(notify).toEqual([]);
     expect(JOBS.every((j) => j.path.startsWith("/api/cron/"))).toBe(true);
     for (const j of JOBS.filter((x) => x.path.startsWith("/api/notifications/"))) expect(j.state, j.name).toBe("PAUSED");
+  });
+
+  it("zadanie trasy zamrożonego modułu (hardOff w features.ts) jest PAUSED — --resume go nie wznowi", () => {
+    const frozen = JOBS.filter((j) => frozenModuleForApiPath(j.path) !== null);
+    // Dziś: moduł pushNotifications (crony push-reminders i push-reminders-24h).
+    expect(frozen.map((j) => j.name).sort()).toEqual(
+      JOBS.filter((j) => /^\/api\/cron\/push-reminders(-24h)?$/.test(j.path)).map((j) => j.name).sort()
+    );
+    for (const j of frozen) expect(j.state, `${j.name} (${frozenModuleForApiPath(j.path)})`).toBe("PAUSED");
   });
 
   it("strefa Europe/Warsaw i metoda GET", () => {
