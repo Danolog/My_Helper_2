@@ -367,6 +367,19 @@ describe("POST /api/appointments/book-package — kolizja półotwarta (#165)", 
     expect((await bookPackage(request())).status).toBe(201);
   });
 
+  // Q8 (#168): urlop jednego pracownika nie blokuje pakietu u innego.
+  it("blokada INNEGO pracownika w terminie pakietu → 201, obie wizyty zapisane", async () => {
+    txQueue.push([], [{ ...block("10:00", "11:15"), employee_id: "22222222-2222-4222-8222-999999999999" }]);
+    expect((await bookPackage(request())).status).toBe(201);
+    expect(mockInsertValues).toHaveBeenCalledTimes(2);
+  });
+
+  it("kontrast Q8: ta sama blokada u pracownika pakietu → 409, bez zapisu", async () => {
+    txQueue.push([], [block("10:00", "11:15")]);
+    expect((await bookPackage(request())).status).toBe(409);
+    expect(mockInsertValues).not.toHaveBeenCalled();
+  });
+
   it("pakiet o zerowym łącznym czasie (baseDuration 0) → 400, bez sprawdzania kolizji i zapisu", async () => {
     mockListOwned.mockResolvedValue([
       { id: SERVICE_1, name: "A", basePrice: "100.00", baseDuration: 0 },

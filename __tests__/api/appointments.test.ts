@@ -1777,7 +1777,8 @@ describe("PUT /api/appointments/[id]", () => {
 
     mockDbSelect
       .mockReturnValueOnce(existChain)
-      .mockReturnValueOnce(overlapChain);
+      .mockReturnValueOnce(overlapChain)
+      .mockReturnValueOnce(chainMock([])); // blokady czasu (#168): termin się zmienia
     mockDbUpdate.mockReturnValue(updateChain);
 
     const request = createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
@@ -2024,7 +2025,8 @@ describe("PUT /api/appointments/[id] — referencje i zadatek (P1)", () => {
     const updateChain = chainMock([makeAppointment()]);
     mockDbSelect
       .mockReturnValueOnce(chainMock([makeAppointment()])) // findOne
-      .mockReturnValueOnce(chainMock([])); // overlap
+      .mockReturnValueOnce(chainMock([])) // overlap
+      .mockReturnValueOnce(chainMock([])); // blokady czasu (#168), gdy termin się zmienia
     mockDbUpdate.mockReturnValue(updateChain);
     return updateChain;
   }

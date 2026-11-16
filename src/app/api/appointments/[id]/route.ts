@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { parseBody, updateAppointmentSchema } from "@/lib/api-validation";
-import { appointmentConflictWhere } from "@/lib/appointment-overlap";
+import { appointmentConflictWhere, overlapsRange } from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // `db` pozostaje dla efektow ubocznych anulacji (forfeit zadatku, notyfikacja,
 // nazwa salonu do waiting-list) — to NIE jest brama zasobu [id], ktora pilnuje
@@ -19,8 +19,9 @@ import {
 } from "@/lib/salon-cancellation";
 import { getSalonContext, type SalonContext } from "@/lib/salon-context";
 import { assertSalonRefs } from "@/lib/salon-refs";
-import { appointments, clients, employees, services, notifications, salons } from "@/lib/schema";
+import { appointments, clients, employees, services, notifications, salons, timeBlocks } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import { timeBlockConflictMessage } from "@/lib/time-block-conflict";
 import { isValidUuid } from "@/lib/validations";
 import { notifyWaitingList } from "@/lib/waiting-list";
 
@@ -194,6 +195,19 @@ export async function PUT(
       );
     }
 
+    // #168: blokady czasu (urlop, przerwa…) sprawdzamy, gdy wizyta zmienia
+    // termin albo pracownika (porównanie WARTOŚCI — dialog edycji wysyła czas
+    // i pracownika także przy samej zmianie notatki) albo gdy anulowana wizyta
+    // wraca do kalendarza. Wizyta, która już leży na blokadzie dodanej później,
+    // nie blokuje edycji notatki ani anulacji. Wynik anulowany: bez sprawdzenia.
+    const resultingStatus = status ?? existing.status;
+    const slotChanged =
+      newStartTime.getTime() !== new Date(existing.startTime).getTime() ||
+      newEndTime.getTime() !== new Date(existing.endTime).getTime() ||
+      newEmployeeId !== existing.employeeId;
+    const revived = existing.status === "cancelled" && resultingStatus !== "cancelled";
+    const checkTimeBlocks = resultingStatus !== "cancelled" && (slotChanged || revived);
+
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {};
     if (startTime) updateData.startTime = newStartTime;
@@ -223,7 +237,26 @@ export async function PUT(
         );
 
       if (overlapping.length > 0) {
-        return { conflicting: overlapping[0], updated: null as typeof appointments.$inferSelect | null };
+        return { conflicting: overlapping[0], blocked: null, updated: null as typeof appointments.$inferSelect | null };
+      }
+
+      // #168: ta sama reguła co POST — blokada NOWEGO pracownika, [start, end)
+      // (styk nie koliduje). timeBlocks nie ma salonId: zakres pilnuje
+      // pracownik (assertSalonRefs wyżej) + kontekst RLS transakcji.
+      if (checkTimeBlocks) {
+        const [block] = await tx
+          .select({ id: timeBlocks.id, blockType: timeBlocks.blockType, reason: timeBlocks.reason })
+          .from(timeBlocks)
+          .where(
+            and(
+              eq(timeBlocks.employeeId, newEmployeeId),
+              overlapsRange(timeBlocks.startTime, timeBlocks.endTime, newStartTime, newEndTime)
+            )
+          )
+          .limit(1);
+        if (block) {
+          return { conflicting: null, blocked: block, updated: null };
+        }
       }
 
       // Tylko nazwy pól — wartości (notatka o kliencie, clientId, zadatek) nie
@@ -236,12 +269,19 @@ export async function PUT(
         .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
         .returning();
 
-      return { conflicting: null, updated: updatedAppointment };
+      return { conflicting: null, blocked: null, updated: updatedAppointment };
     });
 
     if (conflict.conflicting) {
       return NextResponse.json(
         { success: false, error: "Termin koliduje z istniejaca wizyta. Wybierz inna godzine", conflictingAppointment: conflict.conflicting },
+        { status: 409 }
+      );
+    }
+
+    if (conflict.blocked) {
+      return NextResponse.json(
+        { success: false, error: timeBlockConflictMessage(conflict.blocked) },
         { status: 409 }
       );
     }

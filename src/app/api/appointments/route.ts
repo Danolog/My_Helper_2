@@ -16,6 +16,7 @@ import { appointments, clients, employees, salons, services, timeBlocks, promoCo
 import { sendBookingConfirmationSms } from "@/lib/sms";
 import { forSalon } from "@/lib/server/repository";
 import { getOptionalSession } from "@/lib/session";
+import { timeBlockConflictMessage } from "@/lib/time-block-conflict";
 import { isValidUuid, isValidDateString } from "@/lib/validations";
 // GET /api/appointments - List appointments with optional date range filter
 export async function GET(request: Request) {
@@ -334,17 +335,8 @@ export async function POST(request: Request) {
       );
 
     if (conflictingBlocks.length > 0) {
-      const block = conflictingBlocks[0];
-      const blockTypeLabels: Record<string, string> = {
-        vacation: "urlop",
-        holiday: "dzien wolny",
-        break: "przerwa",
-        personal: "czas osobisty",
-        other: "blokada czasu",
-      };
-      const label = block ? (blockTypeLabels[block.blockType] || block.blockType) : "blokada czasu";
       return NextResponse.json(
-        { success: false, error: `Pracownik ma ${label} w tym terminie${block?.reason ? ` (${block.reason})` : ""}` },
+        { success: false, error: timeBlockConflictMessage(conflictingBlocks[0]) },
         { status: 409 }
       );
     }
