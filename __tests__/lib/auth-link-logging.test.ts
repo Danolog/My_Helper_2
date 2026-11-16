@@ -13,6 +13,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { auth } from "@/lib/auth";
+import { logger } from "@/lib/logger";
+import { loggedText } from "../helpers/logged-text";
 
 // -------------------------------------------------------
 // Mocki. vi.mock jest wynoszone nad importy, a fabryki sięgają do zmiennych
@@ -29,10 +31,9 @@ vi.mock("better-auth/adapters/drizzle", () => ({
 
 vi.mock("@/lib/db", () => ({ db: {} }));
 
-const mockLoggerInfo = vi.fn();
 vi.mock("@/lib/logger", () => ({
   logger: {
-    info: (...args: unknown[]) => mockLoggerInfo(...args),
+    info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
     debug: vi.fn(),
@@ -67,9 +68,11 @@ const options = (auth as unknown as { options: AuthOptionsUnderTest }).options;
 const sendResetPassword = options.emailAndPassword.sendResetPassword;
 const sendVerificationEmail = options.emailVerification.sendVerificationEmail;
 
-/** Wszystko, co trafiło do loggera, jako jeden napis. */
+const mockLoggerInfo = vi.mocked(logger.info);
+
+/** Wszystko, co trafiło do loggera (każdy poziom, błędy z treścią), jako jeden napis. */
 function everythingLogged(): string {
-  return JSON.stringify(mockLoggerInfo.mock.calls);
+  return loggedText(logger);
 }
 
 // -------------------------------------------------------
