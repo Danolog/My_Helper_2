@@ -25,22 +25,27 @@ const exclude = statements.find((s) => s.includes("EXCLUDE"));
 
 describe("migracja 0009 — dziennik i snapshot", () => {
   const journal = json("meta/_journal.json") as { entries: { idx: number; tag: string; when: number }[] };
-  const last = journal.entries.at(-1)!;
-  const prev = journal.entries.at(-2)!;
+  const pos = journal.entries.findIndex((e) => e.tag === TAG);
+  const entry = journal.entries[pos]!;
+  const prev = journal.entries[pos - 1]!;
 
-  it("ostatni wpis dziennika to 0009, plik istnieje, `when` rośnie", () => {
-    expect(last).toMatchObject({ idx: 9, tag: TAG });
+  // Zgodność schematu z NAJNOWSZYM snapshotem sprawdza test najnowszej migracji
+  // (__tests__/lib/migration-0010-auth-rate-limit.test.ts); tu tylko pozycja 0009.
+  it("wpis 0009 w dzienniku ma idx 9, plik istnieje, `when` rośnie", () => {
+    expect(entry).toMatchObject({ idx: 9, tag: TAG });
     expect(existsSync(path.join(DRIZZLE, `${TAG}.sql`))).toBe(true);
-    expect(last.when).toBeGreaterThan(prev.when);
+    expect(entry.when).toBeGreaterThan(prev.when);
   });
 
   it("snapshot 0009 następuje po 0008", () => {
     expect(json("meta/0009_snapshot.json").prevId).toBe(json("meta/0008_snapshot.json").id);
   });
 
-  it("schemat == snapshot 0009 (żadnej zmiany schematu bez migracji)", () => {
-    const fromSchema = generateDrizzleJson(schema as Record<string, unknown>) as { tables: unknown };
-    expect(fromSchema.tables).toEqual(json("meta/0009_snapshot.json").tables);
+  it("schemat z 0009 (bez tabel dodanych później) == snapshot 0009", () => {
+    const LATER_TABLES = ["public.auth_rate_limit"];
+    const fromSchema = generateDrizzleJson(schema as Record<string, unknown>) as { tables: Record<string, unknown> };
+    const tables = Object.fromEntries(Object.entries(fromSchema.tables).filter(([k]) => !LATER_TABLES.includes(k)));
+    expect(tables).toEqual(json("meta/0009_snapshot.json").tables);
   });
 
   it("CHECK w SQL to dokładnie to, co drizzle-kit generuje z różnicy 0008 → 0009", async () => {
