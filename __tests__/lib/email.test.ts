@@ -142,8 +142,7 @@ describe("sendEmail", () => {
     const result = await sendEmail({ ...baseMsg, to: "nie-email" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("Invalid email address");
-    expect(result.error).not.toContain("nie-email");
+    expect(result.error).toBe("invalid_address");
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
@@ -158,7 +157,7 @@ describe("sendEmail", () => {
     const result = await sendEmail({ ...baseMsg, salonId: "salon-1" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("422");
+    expect(result.error).toBe("provider_http_422");
     expect(mockDbValues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "failed", type: "email" })
     );
@@ -171,7 +170,7 @@ describe("sendEmail", () => {
     const result = await sendEmail(baseMsg);
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe("network down");
+    expect(result.error).toBe("send_failed");
   });
 
   it("handles a non-JSON error response body", async () => {
@@ -187,7 +186,7 @@ describe("sendEmail", () => {
     const result = await sendEmail(baseMsg);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("HTTP 500");
+    expect(result.error).toBe("provider_http_500");
   });
 });
 
@@ -257,5 +256,55 @@ describe("logi e-maila bez pełnego adresu (hotfix P1)", () => {
     );
     expect(logged).not.toContain("anna.kowalska");
     expect(logged.length).toBeGreaterThan(2);
+  });
+});
+
+describe("komunikaty błędów wysyłki poczty bez treści dostawcy", () => {
+  const RECIPIENT = "ola.nowak@example.org";
+
+  /** Wszystkie wywołania loggera jako tekst; obiekt błędu z nazwą, treścią i przyczyną. */
+  function loggedText(): string {
+    const calls = [logger.info, logger.warn, logger.error, logger.debug].flatMap((fn) => vi.mocked(fn).mock.calls);
+    return JSON.stringify(calls, (_key, value: unknown) =>
+      value instanceof Error
+        ? { name: value.name, message: value.message, cause: (value as { cause?: unknown }).cause }
+        : value
+    );
+  }
+
+  it("błąd dostawcy z adresem w treści: adresu nie ma w logach ani w result.error; status w kodzie", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test_key");
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({ name: "validation_error", message: `Invalid \`to\` field: ${RECIPIENT} is not allowed` }),
+    });
+
+    const result = await sendEmail({ to: RECIPIENT, subject: "Temat", html: "<p>x</p>" });
+
+    expect(result).toEqual({ success: false, error: "provider_http_422" });
+    expect(logger.error).toHaveBeenCalledWith(
+      "Failed to send email",
+      expect.objectContaining({ reason: "provider_http_422", errorName: "EmailProviderError" })
+    );
+    expect(loggedText()).not.toContain("ola.nowak");
+    expect(loggedText()).not.toContain("is not allowed");
+  });
+
+  it("błąd sieci: kod send_failed, w logu nazwa klasy i kod przyczyny, bez treści błędu", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test_key");
+    mockFetch.mockRejectedValue(
+      new Error(`fetch failed for ${RECIPIENT}`, { cause: { code: "ENOTFOUND" } })
+    );
+
+    const result = await sendEmail({ to: RECIPIENT, subject: "Temat", html: "<p>x</p>" });
+
+    expect(result).toEqual({ success: false, error: "send_failed" });
+    expect(logger.error).toHaveBeenCalledWith(
+      "Failed to send email",
+      expect.objectContaining({ reason: "send_failed", errorName: "Error", errorCode: "ENOTFOUND" })
+    );
+    expect(loggedText()).not.toContain("ola.nowak");
+    expect(loggedText()).not.toContain("fetch failed");
   });
 });
