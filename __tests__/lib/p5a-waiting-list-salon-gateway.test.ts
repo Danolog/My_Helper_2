@@ -298,6 +298,119 @@ describe("notifyWaitingList: forSalon(params.salonId), push poza callbackiem", (
   });
 });
 
+/**
+ * Kontrakt `raw()` (repository.ts): każde zapytanie do tabeli z salon_id ma jawne
+ * `eq(<tabela>.salonId, <salon bramy>)`, nie tylko RLS. W accept/decline jedynym
+ * źródłem salonu jest wynik tokenu (`target.salonId`), nie `entry.salonId`.
+ * Fikstura wpisu ma celowo inny `salonId` (OTHER), żeby wykryć drugie źródło.
+ */
+describe("jawny warunek salonu w każdym zapytaniu raw (kontrakt repository.ts)", () => {
+  const OTHER = "salon-OTHER";
+  type ChainT = ReturnType<typeof createChainMock>;
+
+  /** Czy warunek zawiera `"<tabela>"."salon_id" = $n` z parametrem `salon`. */
+  function salonCond(chain: ChainT | undefined, table: string, salon: string): boolean {
+    const w = (chain?.where as ReturnType<typeof vi.fn> | undefined)?.mock.calls[0]?.[0];
+    if (!w) return false;
+    const q = render(w);
+    const re = new RegExp(`"${table}"\\."salon_id" = \\$(\\d+)`, "g");
+    for (const m of q.sql.matchAll(re)) {
+      if (q.params[Number(m[1]) - 1] === salon) return true;
+    }
+    return false;
+  }
+  function recordWrites() {
+    const updates: ChainT[] = [];
+    const inserted: Record<string, unknown>[] = [];
+    h.tx.update.mockImplementation(() => {
+      const c = createChainMock([]);
+      updates.push(c);
+      return c;
+    });
+    h.tx.insert.mockImplementation(() => {
+      const c = createChainMock([{ id: "new-row" }]);
+      c.values = vi.fn((v: Record<string, unknown>) => (inserted.push(v), c));
+      return c;
+    });
+    return { updates, inserted };
+  }
+
+  it("accept, przeniesienie: odczyt wpisu, odczyt i update wizyty, update accepted — warunek salonu z tokenu", async () => {
+    const w = recordWrites();
+    const entryRead = createChainMock([entry({ salonId: OTHER, existingAppointmentId: "apt-A" })]);
+    const overlap = createChainMock([]);
+    const apptRead = createChainMock([{ id: "apt-A", status: "scheduled", startTime: END, notes: null }]);
+    h.tx.select.mockReturnValueOnce(entryRead).mockReturnValueOnce(overlap).mockReturnValueOnce(apptRead);
+
+    const res = await acceptEarlierSlot("wl-A", "tok-A");
+
+    expect(res.success).toBe(true);
+    expect(salonCond(entryRead, "waiting_list", SALON_A), "odczyt wpisu").toBe(true);
+    expect(salonCond(overlap, "appointments", SALON_A), "kolizja: salon z tokenu").toBe(true);
+    expect(salonCond(overlap, "appointments", OTHER), "kolizja: nie entry.salonId").toBe(false);
+    expect(salonCond(apptRead, "appointments", SALON_A), "odczyt wizyty").toBe(true);
+    expect(w.updates).toHaveLength(2);
+    expect(salonCond(w.updates[0], "appointments", SALON_A), "update wizyty").toBe(true);
+    expect(salonCond(w.updates[1], "waiting_list", SALON_A), "update accepted").toBe(true);
+    expect(w.inserted).toEqual([expect.objectContaining({ salonId: SALON_A })]); // notyfikacja
+  });
+
+  it("accept, nowa wizyta: insert wizyty i notyfikacji oraz zadatek z salonem z tokenu", async () => {
+    const w = recordWrites();
+    h.tx.select
+      .mockReturnValueOnce(createChainMock([entry({ salonId: OTHER })]))
+      .mockReturnValueOnce(createChainMock([]));
+
+    const res = await acceptEarlierSlot("wl-A", "tok-A");
+
+    expect(res.success).toBe(true);
+    expect(w.inserted).toEqual([
+      expect.objectContaining({ salonId: SALON_A, status: "scheduled" }),
+      expect.objectContaining({ salonId: SALON_A, type: "sms" }),
+    ]);
+    expect(salonCond(w.updates[0], "waiting_list", SALON_A), "update accepted").toBe(true);
+    expect(h.calc).toHaveBeenCalledWith(expect.objectContaining({ salonId: SALON_A }));
+  });
+
+  it("decline: odczyt wpisu i update accepted z warunkiem salonu z tokenu", async () => {
+    const w = recordWrites();
+    const entryRead = createChainMock([entry({ salonId: OTHER })]);
+    h.tx.select.mockReturnValueOnce(entryRead);
+
+    const res = await declineEarlierSlot("wl-A", "tok-A");
+
+    expect(res.success).toBe(true);
+    expect(salonCond(entryRead, "waiting_list", SALON_A), "odczyt wpisu").toBe(true);
+    expect(salonCond(w.updates[0], "waiting_list", SALON_A), "update accepted").toBe(true);
+  });
+
+  it("notify: update notifiedAt z warunkiem salonu params.salonId", async () => {
+    const w = recordWrites();
+    h.tx.select
+      .mockReturnValueOnce(
+        createChainMock([
+          { entry: entry(), client: { id: "client-A", firstName: "Jan", lastName: "K", email: "jan@example.com" } },
+        ])
+      )
+      .mockReturnValueOnce(createChainMock([{ id: "user-A" }]));
+    h.push.mockResolvedValue({ success: true, sent: 1, failed: 0 });
+
+    await notifyWaitingList({
+      salonId: SALON_A,
+      serviceId: null,
+      employeeId: null,
+      startTime: START,
+      endTime: END,
+      serviceName: "U",
+      employeeName: "E",
+      salonName: "S",
+    });
+
+    expect(w.updates).toHaveLength(1);
+    expect(salonCond(w.updates[0], "waiting_list", SALON_A), "update notifiedAt").toBe(true);
+  });
+});
+
 describe("system/waiting-list.ts: resolveWaitingListToken (tylko odczyt)", () => {
   async function load() {
     vi.resetModules();
