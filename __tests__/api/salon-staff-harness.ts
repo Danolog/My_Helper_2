@@ -66,13 +66,26 @@ export function createSalonStaffMocks() {
     execute: txExecute,
   };
 
+  /**
+   * Surowa pula żądań: WYŁĄCZNIE transakcja (forSalon). `db.select` poza
+   * transakcją nie istnieje — w trasie na requireSalonStaff byłoby to
+   * zapytanie poza izolacją (#193 P0b, decyzja Ethana).
+   */
   const db = {
+    transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
+  };
+
+  /**
+   * #193 P0b: zapytania kontekstu salonu idą przez pulę systemową
+   * (system/session.ts) — osobny strumień ctxRows.
+   * Użycie: vi.mock("@/lib/server/system/db-system", () => ({ dbSystem: m.dbSystem }));
+   */
+  const dbSystem = {
     select: () => ({
       from: () => ({
         where: () => ({ limit: async () => ctxRows.shift() ?? [] }),
       }),
     }),
-    transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
   };
 
   function reset() {
@@ -124,6 +137,7 @@ export function createSalonStaffMocks() {
     insertedValues,
     writes,
     db,
+    dbSystem,
     reset,
     signIn,
     asOwnerOf,

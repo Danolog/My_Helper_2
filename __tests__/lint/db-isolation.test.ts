@@ -36,8 +36,30 @@ const ROOT = path.resolve(__dirname, "../..");
 const NEW_ROUTE = "src/app/api/__p0a-probe__/route.ts";
 const NEW_LIB = "src/lib/__p0a-probe__.ts";
 const SYSTEM_FILE = "src/lib/server/system/__p0a-probe__.ts";
-const LISTED_ROUTE = "src/app/api/health/route.ts";
-const LISTED_ROUTE_WITH_ID = "src/app/api/appointments/[id]/complete/route.ts";
+/**
+ * Pliki z listy przejściowej wyprowadzane z konfiguracji, nie wpisane ręcznie:
+ * partie #193 zdejmują pozycje z listy, a stała wpisana na sztywno po cichu
+ * przestałaby oznaczać „plik z listy”. Asercje przy definicji (bez nowych
+ * przypadków testowych): pozycja istnieje na dysku i należy do listy.
+ * P6 (lista pusta): LISTED_ROUTE → DB_ISOLATION_PERMANENT[0], a przypadki
+ * LISTED_ROUTE_WITH_ID zastępuje test literalGlob na ścieżce z [id].
+ */
+function listedFile(label: string, pick: (f: string) => boolean, kind: string): string {
+  const list = DB_ISOLATION_TRANSITIONAL as readonly string[];
+  if (list.length === 0) {
+    throw new Error(
+      `${label}: lista przejściowa pusta (P6: LISTED_ROUTE → DB_ISOLATION_PERMANENT[0], ` +
+        "przypadki z [id] → test literalGlob, lista kontrolna P6 pkt 11)",
+    );
+  }
+  const file = list.find(pick);
+  if (file === undefined) throw new Error(`${label}: na DB_ISOLATION_TRANSITIONAL brak pozycji ${kind}`);
+  if (!list.includes(file)) throw new Error(`${label}: ${file} nie należy do DB_ISOLATION_TRANSITIONAL`);
+  if (!fs.existsSync(path.join(ROOT, file))) throw new Error(`${label}: ${file} nie istnieje na dysku`);
+  return file;
+}
+const LISTED_ROUTE = listedFile("LISTED_ROUTE", (f) => !f.includes("["), "bez „[”");
+const LISTED_ROUTE_WITH_ID = listedFile("LISTED_ROUTE_WITH_ID", (f) => f.includes("["), "z „[”");
 
 /**
  * Zamrożony stan długu z wyniku reguły bez listy (Z3, 73 pliki na b3a5faf),
@@ -47,15 +69,8 @@ const LISTED_ROUTE_WITH_ID = "src/app/api/appointments/[id]/complete/route.ts";
  * przeniesienie między partiami = decyzja Ethana, osobny commit.
  */
 const BASELINE: Record<string, readonly string[]> = {
-  P0_FILES: [
-    "src/app/api/diagnostics/route.ts",
-    "src/app/api/health/route.ts",
-    "src/lib/auth.ts",
-    "src/lib/get-user-salon.ts",
-    "src/lib/salon-context.ts",
-    "src/lib/session.ts",
-    "src/lib/temporary-access.ts",
-  ],
+  // P0b (#193): wszystkie 7 pozycji zdjęte — zapytania w src/lib/server/system/**.
+  P0_FILES: [],
   P1_FILES: [
     "src/app/api/appointments/route.ts",
     "src/app/api/deposits/create-session/route.ts",
@@ -279,6 +294,16 @@ describe("wymaganie (1) Ethana: własny klient puli tylko w src/lib/db.ts i syst
     expect(await isolationErrors(DB_SYSTEM_FORMS[0]![1], "src/lib/server/system/db-system.ts")).toHaveLength(0);
   }, 30_000);
 
+  // P0b (decyzja Ethana 16.11): do P6 `dbSystem` to re-eksport `db`, więc wyjątek `db`
+  // ma wyłącznie dosłowny plik db-system.ts. Reszta system/** — nadal zakaz.
+  it("P0b: import db w system/db-system.ts → bez błędu; w każdym innym pliku system/** → błąd", async () => {
+    const reexport = 'import { db } from "@/lib/db";\nexport const dbSystem: typeof db = db;';
+    expect(await isolationErrors(reexport, "src/lib/server/system/db-system.ts")).toHaveLength(0);
+    for (const file of [SYSTEM_FILE, "src/lib/server/system/session.ts", "src/lib/server/system/auth-adapter.ts", "src/lib/server/system/sub/db-system.ts"]) {
+      for (const [, code] of DB_IMPORT_FORMS) expect(await isolationErrors(code, file), `${file}: ${code}`).toHaveLength(1);
+    }
+  }, 60_000);
+
   it("żaden plik w src/ poza dozwolonymi (i testami) nie importuje klienta puli", () => {
     const re = new RegExp(DB_CLIENT_IMPORT_SOURCE_REGEX);
     const allowed = new Set<string>(DB_CLIENT_ALLOWED_FILES);
@@ -445,7 +470,7 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
         : rel === "src/lib/db.ts"
           ? [DB, SYS, T]
           : rel === "src/lib/server/system/db-system.ts"
-            ? [DB, T]
+            ? [T] // P0b: do P6 re-eksport `db` (decyzja Ethana 16.11), więc `db: false` tylko tutaj
             : listed.has(rel)
               ? [SYS, CLIENT, T]
               : inSystem
@@ -519,7 +544,7 @@ describe("Z4: lista przejściowa ⊆ BASELINE (suma i per partia), każda pozycj
     expect(extra, "pozycje spoza BASELINE — lista nie może rosnąć").toEqual([]);
   });
 
-  it.each(Object.keys(BASELINE).map((k) => [k]))("%s ⊆ BASELINE.%s (plik nie przeskakuje między tablicami)", (key) => {
+  it.each(Object.keys(BASELINE).map((k) => [k, k]))("%s ⊆ BASELINE.%s (plik nie przeskakuje między tablicami)", (key) => {
     const moved = (partitions[key] ?? []).filter((f) => !BASELINE[key]!.includes(f));
     expect(moved, "przeniesienie między partiami = decyzja Ethana i zmiana BASELINE w osobnym commicie").toEqual([]);
   });

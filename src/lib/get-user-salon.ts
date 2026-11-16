@@ -1,26 +1,19 @@
 import { headers } from "next/headers";
-import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
-import { salons } from "@/lib/schema";
+import { getUserSalon as getUserSalonByOwner } from "@/lib/server/system";
 
 /**
  * Server-side helper to get the authenticated user's salon.
  * Use in API routes to replace hardcoded DEMO_SALON_ID.
  *
  * Returns the salon row or null if not found / not authenticated.
+ * Zapytanie: wyjście systemowe `system/session.ts` (#193).
  */
 export async function getUserSalon() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) return null;
 
-  const [salon] = await db
-    .select()
-    .from(salons)
-    .where(eq(salons.ownerId, session.user.id))
-    .limit(1);
-
-  return salon ?? null;
+  return getUserSalonByOwner(session.user.id);
 }
 
 /**

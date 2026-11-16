@@ -1,10 +1,8 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
 import { resolveSalonContext } from "@/lib/salon-context";
-import { salons } from "@/lib/schema";
+import { isSalonOwner } from "@/lib/server/system";
 
 /**
  * Protected routes that require authentication.
@@ -55,14 +53,8 @@ export async function requireAdmin(): Promise<{
     redirect("/login");
   }
 
-  // Check salon ownership
-  const [salon] = await db
-    .select({ id: salons.id })
-    .from(salons)
-    .where(eq(salons.ownerId, session.user.id))
-    .limit(1);
-
-  return { session, isAdmin: !!salon };
+  // Check salon ownership (wyjście systemowe #193)
+  return { session, isAdmin: await isSalonOwner(session.user.id) };
 }
 
 /**

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePlatformAdmin, isAuthError } from "@/lib/auth-middleware";
 import { resolveStorageDriver } from "@/lib/storage";
+import { checkDatabase } from "@/lib/server/system";
 
 type StatusLevel = "ok" | "warn" | "error";
 
@@ -54,29 +55,13 @@ export async function GET(req: Request) {
     try {
       // Add timeout to prevent hanging on unreachable database
       const dbCheckPromise = (async () => {
-        const [{ db }, { sql }, schema] = await Promise.all([
-          import("@/lib/db"),
-          import("drizzle-orm"),
-          import("@/lib/schema"),
-        ]);
-
-        // Ping DB - this will actually attempt to connect
-        const result = await db.execute(sql`SELECT 1 as ping`);
-        if (!result) {
-          throw new Error("Database query returned no result");
-        }
-        dbConnected = true;
-
-        try {
-          // Touch a known table to verify migrations (only need id for schema check)
-          await db.select({ id: schema.user.id }).from(schema.user).limit(1);
-          schemaApplied = true;
-        } catch {
-          schemaApplied = false;
+        // Ping + tabela user (wyjście systemowe #193); brak połączenia → wyjątek.
+        const check = await checkDatabase();
+        dbConnected = check.connected;
+        schemaApplied = check.schemaApplied;
+        if (!schemaApplied && !dbError) {
           // If we can't query the user table, it's likely migrations haven't run
-          if (!dbError) {
-            dbError = "Schema not applied. Run: pnpm run db:migrate";
-          }
+          dbError = "Schema not applied. Run: pnpm run db:migrate";
         }
       })();
 

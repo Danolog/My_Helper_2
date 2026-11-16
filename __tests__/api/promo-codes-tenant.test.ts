@@ -18,6 +18,7 @@ const m = await vi.hoisted(async () =>
 vi.mock("next/headers", () => ({ headers: vi.fn().mockResolvedValue(new Headers()) }));
 vi.mock("@/lib/auth", () => ({ auth: { api: { getSession: m.getSession } } }));
 vi.mock("@/lib/db", () => ({ db: m.db }));
+vi.mock("@/lib/server/system/db-system", () => ({ dbSystem: m.dbSystem }));
 vi.mock("@/lib/temporary-access", () => ({ hasTemporaryAccess: m.hasTemporaryAccess }));
 
 function list(query: string) {
