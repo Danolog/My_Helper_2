@@ -18,6 +18,7 @@
 import { eq } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { logger } from "@/lib/logger";
 import { waitingList } from "@/lib/schema";
 import { createChainMock } from "../api/helpers";
 
@@ -102,8 +103,16 @@ vi.mock("@/lib/push", () => ({
     return h.push(...a);
   },
 }));
-vi.mock("@/lib/sms", () => ({ sendSms: vi.fn() }));
+vi.mock("@/lib/sms", async (importOriginal) => ({
+  SMS_TIME_ZONE: (await importOriginal<typeof import("@/lib/sms")>()).SMS_TIME_ZONE,
+  sendSms: vi.fn(),
+}));
 vi.mock("@/lib/deposit-calculation", () => ({ calculateExpectedDeposit: (...a: unknown[]) => h.calc(...a) }));
+// Stan modułów salonu (przełącznik przy wysyłce) — lista oczekujących włączona.
+vi.mock("@/lib/server/modules", async () => {
+  const { resolveModules } = await vi.importActual<typeof import("@/lib/features")>("@/lib/features");
+  return { getSalonModules: async () => resolveModules({ modules: { waitingList: true } }) };
+});
 
 import { acceptEarlierSlot, declineEarlierSlot, notifyWaitingList } from "@/lib/waiting-list";
 
@@ -286,15 +295,18 @@ describe("notifyWaitingList: forSalon(params.salonId), push poza callbackiem", (
     expect(h.gate.pushDepths).toEqual([0]);
   });
 
-  it("błąd odczytu wpisów → errors = 1, brak zapisu", async () => {
+  it("błąd odczytu wpisów → errors = 1, brak zapisu, log tylko z nazwą klasy błędu", async () => {
     h.tx.select.mockImplementationOnce(() => {
       throw new Error("odczyt");
     });
+    const errorLog = vi.spyOn(logger, "error").mockImplementation(() => {});
 
     const res = await notifyWaitingList(params);
 
     expect(res.errors).toBe(1);
     expect(h.tx.update).not.toHaveBeenCalled();
+    expect(errorLog).toHaveBeenCalledWith("Failed to notify waiting list", { errorName: "Error" });
+    errorLog.mockRestore();
   });
 });
 
@@ -311,6 +323,14 @@ describe("jawny warunek salonu w każdym zapytaniu raw (kontrakt repository.ts)"
   /** Czy warunek zawiera `"<tabela>"."salon_id" = $n` z parametrem `salon`. */
   function salonCond(chain: ChainT | undefined, table: string, salon: string): boolean {
     const w = (chain?.where as ReturnType<typeof vi.fn> | undefined)?.mock.calls[0]?.[0];
+    return condHasSalon(w, table, salon);
+  }
+  /** Czy warunek złączenia (drugi argument `innerJoin`) zawiera `"<tabela>"."salon_id" = $n` z `salon`. */
+  function joinSalonCond(chain: ChainT | undefined, table: string, salon: string): boolean {
+    const w = (chain?.innerJoin as ReturnType<typeof vi.fn> | undefined)?.mock.calls[0]?.[1];
+    return condHasSalon(w, table, salon);
+  }
+  function condHasSalon(w: unknown, table: string, salon: string): boolean {
     if (!w) return false;
     const q = render(w);
     const re = new RegExp(`"${table}"\\."salon_id" = \\$(\\d+)`, "g");
@@ -408,6 +428,49 @@ describe("jawny warunek salonu w każdym zapytaniu raw (kontrakt repository.ts)"
 
     expect(w.updates).toHaveLength(1);
     expect(salonCond(w.updates[0], "waiting_list", SALON_A), "update notifiedAt").toBe(true);
+  });
+
+  it("notify: złączenie klientów z warunkiem clients.salon_id = salon bramy", async () => {
+    const entriesRead = createChainMock([]);
+    h.tx.select.mockReturnValueOnce(entriesRead);
+
+    await notifyWaitingList({
+      salonId: SALON_A,
+      serviceId: null,
+      employeeId: null,
+      startTime: START,
+      endTime: END,
+      serviceName: "U",
+      employeeName: "E",
+      salonName: "S",
+    });
+
+    expect(salonCond(entriesRead, "waiting_list", SALON_A), "odczyt wpisów").toBe(true);
+    expect(joinSalonCond(entriesRead, "clients", SALON_A), "złączenie klientów").toBe(true);
+  });
+});
+
+/**
+ * Jedno miejsce odczytu konta klienta (tabela kont) w module: funkcja
+ * `findVerifiedLinkedUserId`. Każde inne odwołanie do tabeli kont w
+ * `waiting-list.ts` = czerwony; zamiana na wyjście systemowe ma być wymianą
+ * w jednym miejscu.
+ */
+describe("waiting-list.ts: odczyt konta klienta tylko w findVerifiedLinkedUserId", () => {
+  it("jedno odwołanie do tabeli kont, wewnątrz findVerifiedLinkedUserId", async () => {
+    const { readFileSync } = await vi.importActual<typeof import("node:fs")>("node:fs");
+    const src = readFileSync(`${process.cwd()}/src/lib/waiting-list.ts`, "utf8");
+
+    const refs = [...src.matchAll(/\.from\(\s*user\s*\)/g)].map((m) => m.index!);
+    expect(refs, "odwołania .from(user)").toHaveLength(1);
+
+    const fnStart = src.indexOf("async function findVerifiedLinkedUserId(");
+    expect(fnStart, "funkcja findVerifiedLinkedUserId").toBeGreaterThanOrEqual(0);
+    // koniec funkcji: pierwsza linia z samym "}" (LF albo CRLF)
+    const rel = src.slice(fnStart).search(/\r?\n\}\r?\n/);
+    const fnEnd = rel < 0 ? -1 : fnStart + rel;
+    expect(fnEnd, "koniec funkcji").toBeGreaterThan(fnStart);
+    expect(src.slice(fnStart, fnEnd), "odczyt wewnątrz funkcji").toMatch(/\.from\(\s*user\s*\)/);
   });
 });
 
