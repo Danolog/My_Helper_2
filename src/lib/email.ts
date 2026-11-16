@@ -1,6 +1,6 @@
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { notifications } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 export interface EmailMessage {
   to: string;
@@ -89,24 +89,30 @@ async function sendViaResend(apiKey: string, msg: EmailMessage): Promise<void> {
 /**
  * Save an email notification to the notifications table (audit trail).
  * Only called when the message carries a salon context.
+ *
+ * Zapis przez bramę salonu wiadomości (#193). Bez salonId (e-mail weryfikacji
+ * konta i resetu hasła) — żadnego zapisu i żadnej puli.
  */
 async function saveNotification(
   msg: EmailMessage,
   status: "sent" | "failed"
 ): Promise<string | undefined> {
-  if (!msg.salonId) return undefined;
+  const salonId = msg.salonId;
+  if (!salonId) return undefined;
 
-  const [notification] = await db
-    .insert(notifications)
-    .values({
-      salonId: msg.salonId,
-      clientId: msg.clientId || null,
-      type: "email",
-      message: msg.subject,
-      status,
-      ...(status === "sent" ? { sentAt: new Date() } : {}),
-    })
-    .returning();
+  const [notification] = await forSalon(salonId).raw((tx) =>
+    tx
+      .insert(notifications)
+      .values({
+        salonId,
+        clientId: msg.clientId || null,
+        type: "email",
+        message: msg.subject,
+        status,
+        ...(status === "sent" ? { sentAt: new Date() } : {}),
+      })
+      .returning()
+  );
 
   return notification?.id;
 }

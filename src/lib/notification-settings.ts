@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salons } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 export interface NotificationTypeSettings {
   smsReminders: boolean;
@@ -27,11 +27,14 @@ export async function getNotificationTypeSettings(
   salonId: string
 ): Promise<NotificationTypeSettings> {
   try {
-    const [salon] = await db
-      .select({ settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
+    // Odczyt przez bramę tego salonu (#193).
+    const [salon] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .limit(1)
+    );
 
     if (!salon) {
       return { ...DEFAULT_NOTIFICATION_TYPE_SETTINGS };
