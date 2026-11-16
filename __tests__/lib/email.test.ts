@@ -157,7 +157,7 @@ describe("sendEmail", () => {
     const result = await sendEmail({ ...baseMsg, salonId: "salon-1" });
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe("provider_http_422");
+    expect(result.error).toBe("provider_http_422_other");
     expect(mockDbValues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "failed", type: "email" })
     );
@@ -186,7 +186,7 @@ describe("sendEmail", () => {
     const result = await sendEmail(baseMsg);
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe("provider_http_500");
+    expect(result.error).toBe("provider_http_500_other");
   });
 });
 
@@ -282,14 +282,67 @@ describe("komunikaty błędów wysyłki poczty bez treści dostawcy", () => {
 
     const result = await sendEmail({ to: RECIPIENT, subject: "Temat", html: "<p>x</p>" });
 
-    expect(result).toEqual({ success: false, error: "provider_http_422" });
+    expect(result).toEqual({ success: false, error: "provider_http_422_validation_error" });
     expect(logger.error).toHaveBeenCalledWith(
       "Failed to send email",
-      expect.objectContaining({ reason: "provider_http_422", errorName: "EmailProviderError" })
+      expect.objectContaining({ reason: "provider_http_422_validation_error", errorName: "EmailProviderError" })
     );
     expect(loggedText()).not.toContain("ola.nowak");
     expect(loggedText()).not.toContain("is not allowed");
   });
+
+  /** Odpowiedź dostawcy 403 z podanym polem `name`; zwraca wynik wysyłki. */
+  async function failWithName(name: unknown) {
+    vi.stubEnv("RESEND_API_KEY", "re_test_key");
+    mockFetch.mockResolvedValue({ ok: false, status: 403, json: async () => ({ name, message: "x" }) });
+    return sendEmail({ to: RECIPIENT, subject: "Temat", html: "<p>x</p>" });
+  }
+
+  it("typ błędu dostawcy spoza listy z adresem e-mail → other; adresu nie ma w logach ani w result.error", async () => {
+    const result = await failWithName(`blocked_${RECIPIENT}`);
+
+    expect(result).toEqual({ success: false, error: "provider_http_403_other" });
+    expect(logger.error).toHaveBeenCalledWith(
+      "Failed to send email",
+      expect.objectContaining({ reason: "provider_http_403_other" })
+    );
+    expect(loggedText()).not.toContain("ola.nowak");
+    expect(JSON.stringify(result)).not.toContain("ola.nowak");
+  });
+
+  it.each([
+    ["wielka litera", "Validation_error"],
+    ["spacja na końcu", "validation_error "],
+    ["spacja na początku", " validation_error"],
+    ["przedrostek znanej wartości", "validation_error_x"],
+    ["obiekt", { type: "validation_error" }],
+    ["liczba", 422],
+    ["brak pola", undefined],
+  ])("typ błędu dostawcy: %s → other", async (_label, name) => {
+    const result = await failWithName(name);
+    expect(result.error).toBe("provider_http_403_other");
+  });
+
+  it("odpowiedź dostawcy nie-JSON → other", async () => {
+    vi.stubEnv("RESEND_API_KEY", "re_test_key");
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => {
+        throw new Error("not json");
+      },
+    });
+    const result = await sendEmail({ to: RECIPIENT, subject: "Temat", html: "<p>x</p>" });
+    expect(result.error).toBe("provider_http_502_other");
+  });
+
+  it.each(["rate_limit_exceeded", "restricted_api_key", "validation_error"])(
+    "znany typ błędu dostawcy %s przechodzi do kodu",
+    async (name) => {
+      const result = await failWithName(name);
+      expect(result.error).toBe(`provider_http_403_${name}`);
+    }
+  );
 
   it("błąd sieci: kod send_failed, w logu nazwa klasy i kod przyczyny, bez treści błędu", async () => {
     vi.stubEnv("RESEND_API_KEY", "re_test_key");
