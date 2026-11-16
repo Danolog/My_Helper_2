@@ -438,6 +438,30 @@ describe("jawny warunek salonu w każdym zapytaniu raw (kontrakt repository.ts)"
   });
 });
 
+/**
+ * Jedno miejsce odczytu konta klienta (tabela kont) w module: funkcja
+ * `findVerifiedLinkedUserId`. Każde inne odwołanie do tabeli kont w
+ * `waiting-list.ts` = czerwony; zamiana na wyjście systemowe ma być wymianą
+ * w jednym miejscu.
+ */
+describe("waiting-list.ts: odczyt konta klienta tylko w findVerifiedLinkedUserId", () => {
+  it("jedno odwołanie do tabeli kont, wewnątrz findVerifiedLinkedUserId", async () => {
+    const { readFileSync } = await vi.importActual<typeof import("node:fs")>("node:fs");
+    const src = readFileSync(`${process.cwd()}/src/lib/waiting-list.ts`, "utf8");
+
+    const refs = [...src.matchAll(/\.from\(\s*user\s*\)/g)].map((m) => m.index!);
+    expect(refs, "odwołania .from(user)").toHaveLength(1);
+
+    const fnStart = src.indexOf("async function findVerifiedLinkedUserId(");
+    expect(fnStart, "funkcja findVerifiedLinkedUserId").toBeGreaterThanOrEqual(0);
+    // koniec funkcji: pierwsza linia z samym "}" (LF albo CRLF)
+    const rel = src.slice(fnStart).search(/\r?\n\}\r?\n/);
+    const fnEnd = rel < 0 ? -1 : fnStart + rel;
+    expect(fnEnd, "koniec funkcji").toBeGreaterThan(fnStart);
+    expect(src.slice(fnStart, fnEnd), "odczyt wewnątrz funkcji").toMatch(/\.from\(\s*user\s*\)/);
+  });
+});
+
 describe("system/waiting-list.ts: resolveWaitingListToken (tylko odczyt)", () => {
   async function load() {
     vi.resetModules();
