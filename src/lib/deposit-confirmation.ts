@@ -10,6 +10,7 @@ import {
   employees,
   salons,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { sendPaymentConfirmationSms } from "@/lib/sms";
 
 export interface ConfirmDepositOptions {
@@ -303,11 +304,14 @@ export async function confirmDepositPayment(
           }
         }
 
-        // Nazwa salonu do treści SMS; brak wiersza → SMS bez nazwy salonu
-        const [salon] = await db
-          .select({ name: salons.name })
-          .from(salons)
-          .where(eq(salons.id, payment.salonId));
+        // Nazwa salonu do treści SMS przez bramę salonu płatności (#193);
+        // brak wiersza → SMS bez nazwy salonu, błąd → catch poniżej.
+        const [salon] = await forSalon(payment.salonId).raw((tx) =>
+          tx
+            .select({ name: salons.name })
+            .from(salons)
+            .where(eq(salons.id, payment.salonId))
+        );
 
         const smsResult = await sendPaymentConfirmationSms({
           clientPhone: recipientPhone,

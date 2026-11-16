@@ -216,6 +216,50 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
   }
 }
 
+/** Podstawowa tabela GSM 03.38 bez znaków sterujących (LF, CR, ESC). */
+const GSM7_BASIC = new Set(
+  "@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?" +
+    "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà"
+);
+
+/** Maksymalna długość nazwy salonu w treści SMS. */
+const SMS_SALON_NAME_MAX = 40;
+
+/** Nazwa wyglądająca na adres: „://”, „www.” albo kropka + domena (np. uroda.pl). */
+const ADDRESS_LIKE = /:\/\/|www\.|[a-z0-9]\.[a-z]{2,}(?![a-z])/i;
+
+/**
+ * Nazwa salonu (tekst właściciela) przygotowana do treści SMS. Kolejno:
+ * znaki sterujące i nowe linie → spacja; NFKD bez znaków łączących, ł→l,
+ * Ł→L; tylko podstawowa tabela GSM-7; zwinięte spacje i trim; ponad 40 znaków
+ * → 37 znaków (bez spacji na końcu) + "...". Nazwa wyglądająca na adres jest
+ * pomijana w całości. Pusty wynik = szablon bez fragmentu „w <salon>”.
+ */
+export function salonNameForSms(name: string | null | undefined): string {
+  if (!name) return "";
+  const cleaned = [
+    ...name
+      .replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ")
+      .normalize("NFKD")
+      .replace(/\p{M}/gu, "")
+      .replace(/ł/g, "l")
+      .replace(/Ł/g, "L"),
+  ]
+    .filter((c) => GSM7_BASIC.has(c))
+    .join("")
+    .replace(/ +/g, " ")
+    .trim();
+
+  if (ADDRESS_LIKE.test(name) || ADDRESS_LIKE.test(cleaned)) return "";
+  if (cleaned.length <= SMS_SALON_NAME_MAX) return cleaned;
+  return `${cleaned.slice(0, SMS_SALON_NAME_MAX - 3).trimEnd()}...`;
+}
+
+/** Fragment „ w <salon>” albo pusty napis, gdy nazwy brak po przygotowaniu. */
+function salonPart(name: string): string {
+  return name ? ` w ${name}` : "";
+}
+
 /**
  * Send an appointment reminder SMS to the client 1 hour before the appointment.
  */
@@ -238,8 +282,10 @@ export async function sendAppointmentReminderSms(params: {
     month: "long",
   });
 
+  const salon = salonPart(salonNameForSms(params.salonName));
+
   const message =
-    `Przypomnienie: ${params.clientName}, Twoja wizyta "${params.serviceName}" u ${params.employeeName} w ${params.salonName} juz dzisiaj o ${formattedTime} (${formattedDate}). Do zobaczenia!`;
+    `Przypomnienie: ${params.clientName}, Twoja wizyta "${params.serviceName}" u ${params.employeeName}${salon} juz dzisiaj o ${formattedTime} (${formattedDate}). Do zobaczenia!`;
 
   return sendSms({
     to: params.clientPhone,
@@ -274,8 +320,10 @@ export async function sendBookingConfirmationSms(params: {
     minute: "2-digit",
   });
 
+  const salon = salonPart(salonNameForSms(params.salonName));
+
   const message =
-    `Potwierdzenie rezerwacji: ${params.clientName}, Twoja wizyta "${params.serviceName}" u ${params.employeeName} w ${params.salonName} zostala umowiona na ${formattedDate} o ${formattedTime}. Do zobaczenia!`;
+    `Potwierdzenie rezerwacji: ${params.clientName}, Twoja wizyta "${params.serviceName}" u ${params.employeeName}${salon} zostala umowiona na ${formattedDate} o ${formattedTime}. Do zobaczenia!`;
 
   return sendSms({
     to: params.clientPhone,
@@ -287,8 +335,8 @@ export async function sendBookingConfirmationSms(params: {
 
 /**
  * Send a payment confirmation SMS to the client after a deposit payment.
- * `salonName`: null, pusty napis albo same spacje → treść bez fragmentu
- * „w <salon>” (zachowanie sprzed dodania nazwy).
+ * `salonName` przechodzi przez `salonNameForSms`; pusty wynik (null, pusty
+ * napis, nazwa jak adres albo spoza GSM-7) → treść bez fragmentu „w <salon>”.
  */
 export async function sendPaymentConfirmationSms(params: {
   clientPhone: string;
@@ -311,11 +359,10 @@ export async function sendPaymentConfirmationSms(params: {
     minute: "2-digit",
   });
 
-  const salonName = params.salonName?.trim();
-  const salonPart = salonName ? ` w ${salonName}` : "";
+  const salon = salonPart(salonNameForSms(params.salonName));
 
   const message =
-    `Potwierdzenie platnosci: ${params.clientName}, zadatek ${params.amount.toFixed(2)} ${params.currency} za usluge "${params.serviceName}" u ${params.employeeName}${salonPart} dnia ${formattedDate} zostal przyjety. Dziekujemy!`;
+    `Potwierdzenie platnosci: ${params.clientName}, zadatek ${params.amount.toFixed(2)} ${params.currency} za usluge "${params.serviceName}" u ${params.employeeName}${salon} dnia ${formattedDate} zostal przyjety. Dziekujemy!`;
 
   return sendSms({
     to: params.clientPhone,
