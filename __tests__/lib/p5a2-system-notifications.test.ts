@@ -40,8 +40,13 @@ const h = vi.hoisted(() => {
     push24h: vi.fn(),
     /** Liczba zapytań w chwili każdego wywołania wysyłki. */
     queriesAtSend: [] as number[],
+    warn: vi.fn(),
   };
 });
+
+vi.mock("@/lib/logger", () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: (...a: unknown[]) => h.warn(...a), error: vi.fn() },
+}));
 
 vi.mock("@/lib/db", () => ({ db: h.throwingPool("db") }));
 // Brama salonu: `raw` dostaje budowniczego pg-proxy zapisującego SQL osobno od puli systemowej.
@@ -127,9 +132,11 @@ describe("crony przypomnień przez pulę systemową", () => {
     ];
     const { status, body } = await parseResponse(await POST(req("/api/cron/x", "POST")));
     expect(status, JSON.stringify(body)).toBe(200);
-    expect(h.captured).toHaveLength(3);
-    expect(h.captured[1]!.sql).toMatch(new RegExp(`^update "appointments" set "${flag}"`));
-    expect(h.captured[1]!.sql).toMatch(/where "appointments"\."id" in \(\$\d+\)/);
+    // wybór, zliczenie pominiętych, oznaczenie, subskrypcje
+    expect(h.captured).toHaveLength(4);
+    expect(h.captured[1]!.sql).toMatch(/^select count\(\*\) from "appointments"/);
+    expect(h.captured[2]!.sql).toMatch(new RegExp(`^update "appointments" set "${flag}"`));
+    expect(h.captured[2]!.sql).toMatch(/where "appointments"\."id" in \(\$\d+\)/);
     expect(send).toHaveBeenCalledTimes(1);
   });
 
@@ -146,8 +153,9 @@ describe("crony przypomnień przez pulę systemową", () => {
     h.rows = [[/^select .* from "appointments"/, [["appt-1", START, SALON_A, "Salon A", "c-1", "Ala", "Nowak", "+48500100200", "Ewa", "Kowal", null]]]];
     const { status, body } = await parseResponse(await smsReminders.POST(req("/api/cron/sms-reminders", "POST")));
     expect(status, JSON.stringify(body)).toBe(200);
-    expect(h.captured).toHaveLength(2);
-    expect(h.captured[1]!.sql).toMatch(/^update "appointments" set "reminder_1h_sent_at"/);
+    expect(h.captured).toHaveLength(3);
+    expect(h.captured[1]!.sql).toMatch(/^select count\(\*\) from "appointments"/);
+    expect(h.captured[2]!.sql).toMatch(/^update "appointments" set "reminder_1h_sent_at"/);
     expect(h.sendReminderSms).toHaveBeenCalledTimes(1);
   });
 
@@ -195,17 +203,22 @@ describe("reminders/appointment: filtr salonu wołającego crona (decyzja A)", (
     h.rows = [[/^select .* from "appointments"/, [row]]];
     const { status, body } = await parseResponse(await reminders.POST(req(`/api/reminders/appointment?salonId=${SALON_A}`, "POST")));
     expect(status, JSON.stringify(body)).toBe(200);
-    expect(h.captured).toHaveLength(2);
+    expect(h.captured).toHaveLength(3);
     const sel = h.captured[0]!;
     expect(salonParamIndexes(sel).some((n) => sel.params[n - 1] === SALON_A), sel.sql).toBe(true);
-    expect(h.queriesAtSend).toEqual([1]);
-    expect(h.captured[1]!.sql).toMatch(/^update "appointments" set "reminder_sent_at"/);
+    // zliczenie pominiętych też z filtrem salonu
+    const cnt = h.captured[1]!;
+    expect(cnt.sql).toMatch(/^select count\(\*\) from "appointments"/);
+    expect(salonParamIndexes(cnt).some((n) => cnt.params[n - 1] === SALON_A), cnt.sql).toBe(true);
+    expect(h.queriesAtSend).toEqual([2]);
+    expect(h.captured[2]!.sql).toMatch(/^update "appointments" set "reminder_sent_at"/);
   });
 
   it("POST bez salonId → odczyt bez warunku salonu (wszystkie salony)", async () => {
     const { status } = await parseResponse(await reminders.POST(req("/api/reminders/appointment", "POST")));
     expect(status).toBe(200);
-    expect(h.captured).toHaveLength(1);
+    expect(h.captured).toHaveLength(2);
+    expect(h.captured[1]!.sql).not.toMatch(/"appointments"\."salon_id" = \$\d+/);
     // Join po `"appointments"."salon_id" = "salons"."id"` zostaje; brak tylko warunku z parametrem.
     expect(h.captured[0]!.sql).not.toMatch(/"appointments"\."salon_id" = \$\d+/);
     expect(h.captured[0]!.sql).toMatch(/"appointments"\."salon_id" = "salons"\."id"/);
@@ -298,5 +311,94 @@ describe("wyjścia przypomnień: jawny warunek salonu w złączeniach", () => {
     const sel = h.gateCaptured[0]!;
     expect(sel, "podgląd ma iść przez bramę salonu").toBeDefined();
     expect(joinSalonConditions(sel.sql), sel.sql).toEqual(ALL_TRUE);
+  });
+});
+
+/**
+ * Log pominiętych: osobne zliczenie wizyt w tym samym oknie, odsianych przez
+ * warunek salonu w złączeniu. Jedna linia warn na przebieg, tylko gdy liczba > 0,
+ * w treści wyłącznie rodzaj przypomnienia i liczba.
+ */
+describe("wyjścia przypomnień: log wizyt pominiętych przez warunek salonu", () => {
+  const COUNT_RE = /^select count\(\*\) from "appointments"/;
+  const pushRow = ["appt-1", START, SALON_A, "Salon A", "c-1", "Ala", "Nowak", "user-1", "Ewa", "Kowal", "Strzyżenie"];
+  const smsRow = ["appt-1", START, SALON_A, "Salon A", "c-1", "Ala", "Nowak", "+48500100200", "Ewa", "Kowal", null];
+  const row24 = ["appt-1", START, "2026-11-17 11:00:00", SALON_A, "c-1", "s-1", "e-1", "scheduled", "Ala", "Nowak", "+48500100200", "Salon A", "Strzyżenie", "Ewa", "Kowal"];
+
+  const CASES = [
+    ["push1h", () => push1h.POST(req("/api/cron/x", "POST")), pushRow],
+    ["push24h", () => push24h.POST(req("/api/cron/x", "POST")), pushRow],
+    ["sms1h", () => smsReminders.POST(req("/api/cron/sms-reminders", "POST")), smsRow],
+    ["sms24h", () => reminders.POST(req("/api/reminders/appointment", "POST")), row24],
+  ] as const;
+
+  /** Wiersze: najpierw zliczenie (kolejność ma znaczenie — wybór też zaczyna się od `select`). */
+  const withCount = (countRows: unknown[][], mainRow: readonly unknown[]): Array<[RegExp, unknown[][]]> => [
+    [COUNT_RE, countRows],
+    [/^select .* from "appointments"/, [[...mainRow]]],
+    [/from "push_subscriptions"/, [["user-1"]]],
+  ];
+
+  /** Treść `where` wyboru (bez `limit`) — warunek okna i stanu wizyty. */
+  const whereOf = (sql: string) => sql.slice(sql.indexOf(" where ") + 7).replace(/ limit \$\d+$/, "");
+
+  it.each(CASES)("%s: zliczenie z tym samym warunkiem okna i tymi samymi parametrami co wybór", async (_k, call, mainRow) => {
+    h.rows = withCount([[0]], mainRow);
+    expect((await call()).status).toBe(200);
+    const sel = h.captured[0]!;
+    const cnt = h.captured.find((q) => COUNT_RE.test(q.sql));
+    expect(cnt, "brak zapytania zliczającego").toBeDefined();
+    const due = whereOf(sel.sql);
+    expect(cnt!.sql, `${cnt!.sql}\n--- warunek wyboru:\n${due}`).toContain(due);
+    for (const m of due.matchAll(/\$(\d+)/g)) {
+      const i = Number(m[1]) - 1;
+      expect(cnt!.params[i], `parametr $${i + 1}`).toEqual(sel.params[i]);
+    }
+    // bez grupowania (jedna liczba na przebieg)
+    expect(cnt!.sql).not.toMatch(/group by/);
+  });
+
+  it.each(CASES)("%s: liczba > 0 → dokładnie jedna linia warn z rodzajem i liczbą, bez danych wizyty", async (kind, call, mainRow) => {
+    h.rows = withCount([[3]], mainRow);
+    expect((await call()).status).toBe(200);
+    expect(h.warn).toHaveBeenCalledTimes(1);
+    const [msg, ctx] = h.warn.mock.calls[0]!;
+    expect(typeof msg).toBe("string");
+    expect(ctx).toEqual({ reminder: kind, skipped: 3 });
+    const logged = JSON.stringify(h.warn.mock.calls);
+    for (const v of ["appt-1", "c-1", "e-1", "s-1", "user-1", SALON_A, "Ala", "Nowak", "Ewa", "Kowal", "+48500100200", "Salon A"]) {
+      expect(logged, v).not.toContain(v);
+    }
+  });
+
+  it.each(CASES)("%s: liczba 0 → brak linii", async (_k, call, mainRow) => {
+    h.rows = withCount([[0]], mainRow);
+    expect((await call()).status).toBe(200);
+    expect(h.warn).not.toHaveBeenCalled();
+  });
+
+  it.each(CASES)("%s: wynik zliczenia nie jest liczbą (brak wiersza, tekst, null) → brak linii", async (_k, call, mainRow) => {
+    for (const countRows of [[], [["abc"]], [[null]]] as unknown[][][]) {
+      h.warn.mockClear();
+      h.captured.length = 0;
+      h.rows = withCount(countRows, mainRow);
+      expect((await call()).status).toBe(200);
+      expect(h.warn, JSON.stringify(countRows)).not.toHaveBeenCalled();
+    }
+  });
+
+  it("push1h/push24h/sms1h: liczone niezgodny klient LUB pracownik; sms24h: tylko niezgodny klient", async () => {
+    h.rows = withCount([[0]], pushRow);
+    await push1h.POST(req("/api/cron/x", "POST"));
+    const cron = h.captured.find((q) => COUNT_RE.test(q.sql))!.sql;
+    expect(cron).toMatch(/"clients"\."salon_id" <> "appointments"\."salon_id" or "employees"\."salon_id" <> "appointments"\."salon_id"/);
+
+    h.captured.length = 0;
+    h.rows = withCount([[0]], row24);
+    await reminders.POST(req("/api/reminders/appointment", "POST"));
+    const d24 = h.captured.find((q) => COUNT_RE.test(q.sql))!.sql;
+    expect(d24).toMatch(/"clients"\."salon_id" <> "appointments"\."salon_id"/);
+    expect(d24).not.toMatch(/"employees"\."salon_id" <>/);
+    expect(d24).not.toMatch(/"services"\."salon_id" <>/);
   });
 });
