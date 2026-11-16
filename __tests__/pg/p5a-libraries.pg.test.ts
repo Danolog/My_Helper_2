@@ -162,7 +162,11 @@ suite("P5a-1: biblioteki przez forSalon i wyjścia system/ — prawdziwy Postgre
       { id: CLIENT_USER_A, name: "IT T3 p5a klient A", email: CLIENT_EMAIL_A, emailVerified: true },
       { id: CLIENT_USER_B, name: "IT T3 p5a klient B", email: `${CLIENT_USER_B}@example.invalid` },
     ]);
-    const [a] = await db.insert(salons).values({ name: `IT T3 p5a A ${RUN}`, ownerId: OWNER_A }).returning();
+    // Salon A: moduł listy oczekujących włączony (notifyWaitingList wysyła tylko wtedy).
+    const [a] = await db
+      .insert(salons)
+      .values({ name: `IT T3 p5a A ${RUN}`, ownerId: OWNER_A, settingsJson: { modules: { waitingList: true } } })
+      .returning();
     const [b] = await db.insert(salons).values({ name: `IT T3 p5a B ${RUN}`, ownerId: OWNER_B }).returning();
     ids.salonA = a!.id;
     ids.salonB = b!.id;
