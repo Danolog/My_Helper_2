@@ -29,6 +29,24 @@ async function loginAsClient(page: Page) {
   await expect(page).toHaveURL(/\/salons/);
 }
 
+/**
+ * /salons → klik w pierwszy salon → czeka, az adres zmieni sie na strone salonu.
+ * Link Next.js nawiguje po stronie klienta: waitForLoadState('domcontentloaded')
+ * wraca od razu (dokument sie nie zmienia), wiec bez czekania na URL kolejny krok
+ * (np. goBack) startowal przed zatwierdzeniem nawigacji i trafial w about:blank.
+ * Zwraca sciezke strony salonu.
+ */
+async function openFirstSalonFromList(page: Page): Promise<string> {
+  await page.goto('/salons');
+  await page.waitForLoadState('domcontentloaded');
+  const salonLink = page.locator('a[href*="/salons/"]').first();
+  await expect(salonLink, 'lista salonow bez linku do salonu (seed: salon testowy)').toBeVisible({ timeout: 15000 });
+  const salonPath = new URL((await salonLink.getAttribute('href'))!, page.url()).pathname;
+  await salonLink.click();
+  await page.waitForURL((url) => url.pathname === salonPath);
+  return salonPath;
+}
+
 // ---------------------------------------------------------------------------
 // Flow 7: Client Portal (P2)
 // ---------------------------------------------------------------------------
@@ -77,16 +95,10 @@ test.describe('Flow 7: Client Portal', () => {
     });
 
     test('should view salon detail page', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/salons');
-      await page.waitForLoadState('domcontentloaded');
-
-      // Click on first salon link
-      const salonLink = page.locator('a[href*="/salons/"]').first();
-      if (await salonLink.isVisible()) {
-        await salonLink.click();
-        await page.waitForLoadState('domcontentloaded');
-        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
-      }
+      // Asercja na stronie salonu, nie na liscie (wczesniej klik nie byl
+      // zatwierdzony przed sprawdzeniem, a brak linku pomijal test).
+      await openFirstSalonFromList(page);
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
     test('should view salon services', { tag: '@full' }, async ({ page }) => {
@@ -275,20 +287,15 @@ test.describe('Flow 7: Client Portal', () => {
     });
 
     test('should handle back/forward browser navigation', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/salons');
-      await page.waitForLoadState('domcontentloaded');
-
-      const salonLink = page.locator('a[href*="/salons/"]').first();
-      if (await salonLink.isVisible()) {
-        await salonLink.click();
-        await page.waitForLoadState('domcontentloaded');
-        await page.goBack();
-        await page.waitForLoadState('domcontentloaded');
-        await expect(page).toHaveURL(/\/salons/);
-        await page.goForward();
-        await page.waitForLoadState('domcontentloaded');
-        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
-      }
+      // goBack dopiero po zatwierdzeniu nawigacji do salonu (helper czeka na URL);
+      // wczesniej goBack startowal za wczesnie i trafial w about:blank.
+      const salonPath = await openFirstSalonFromList(page);
+      await page.goBack();
+      // Dokladnie lista, nie /\/salons/ — ten wzorzec pasowal tez do strony salonu.
+      await expect(page).toHaveURL((url) => url.pathname === '/salons');
+      await page.goForward();
+      await expect(page).toHaveURL((url) => url.pathname === salonPath);
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
     });
 
     test('should handle page refresh on appointments page', { tag: '@full' }, async ({ page }) => {

@@ -93,14 +93,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Migracje NAJPIERW: 0005 tworzy role myhelper_app + polityki RLS, bez
-      # ktorych kazda transakcja forSalon (SET LOCAL ROLE) pada. db:push potem
-      # domyka ewentualny dryf schema.ts poza migracjami. (Przyczyna czerwonego
-      # E2E Full od 2026-06-18: push nie zaklada roli z 0005.)
+      # Schemat bazy WYLACZNIE z migracji: 0005 tworzy role myhelper_app i polityki
+      # RLS, bez ktorych kazda transakcja forSalon (SET LOCAL ROLE) pada. BEZ
+      # db:push po migracjach (#190): drizzle-kit push traktuje polityki z 0005
+      # jako dryf, wylacza RLS i usuwa polityki na 39 tabelach — baza w CI
+      # bylaby bez izolacji salonow. Straznik pada, gdy ktorejs tabeli z 0005
+      # brakuje RLS albo polityki z migracji (scripts/db-rls-guard.ts).
       - name: Run database migrations
         run: pnpm db:migrate
-      - name: Push database schema
-        run: pnpm db:push
+      - name: RLS guard (migration 0005)
+        run: pnpm exec tsx scripts/db-rls-guard.ts
 
       # T3: blokady subskrypcji na prawdziwym Postgresie (confirm ‖ webhook,
       # pg_locks, 40P01). Własne wiersze z unikalnymi id, sprzątane po teście;
@@ -131,6 +133,14 @@ jobs:
         env:
           PLAYWRIGHT_TIMEOUT: 15000
           ALLOW_PAYMENT_SIMULATION: "1"
+
+      # Strażnik RLS drugi raz, po ostatnim kroku z bazą (#194 Z1): RLS zdjęte
+      # W TRAKCIE joba (push w dowolnej postaci) = czerwony job. `!cancelled()`:
+      # krok biegnie też po wcześniejszej porażce (nie jest pomijany), a sam
+      # niczego nie maskuje — porażka wcześniejszego kroku zostaje porażką joba.
+      - name: RLS guard (end of job)
+        if: ${{ !cancelled() }}
+        run: pnpm exec tsx scripts/db-rls-guard.ts
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -180,14 +190,16 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Migracje NAJPIERW: 0005 tworzy role myhelper_app + polityki RLS, bez
-      # ktorych kazda transakcja forSalon (SET LOCAL ROLE) pada. db:push potem
-      # domyka ewentualny dryf schema.ts poza migracjami. (Przyczyna czerwonego
-      # E2E Full od 2026-06-18: push nie zaklada roli z 0005.)
+      # Schemat bazy WYLACZNIE z migracji: 0005 tworzy role myhelper_app i polityki
+      # RLS, bez ktorych kazda transakcja forSalon (SET LOCAL ROLE) pada. BEZ
+      # db:push po migracjach (#190): drizzle-kit push traktuje polityki z 0005
+      # jako dryf, wylacza RLS i usuwa polityki na 39 tabelach — baza w CI
+      # bylaby bez izolacji salonow. Straznik pada, gdy ktorejs tabeli z 0005
+      # brakuje RLS albo polityki z migracji (scripts/db-rls-guard.ts).
       - name: Run database migrations
         run: pnpm db:migrate
-      - name: Push database schema
-        run: pnpm db:push
+      - name: RLS guard (migration 0005)
+        run: pnpm exec tsx scripts/db-rls-guard.ts
 
       - name: Seed test data
         run: pnpm db:seed:test
@@ -204,6 +216,11 @@ jobs:
         # VERCEL=1 i handler ją ignoruje z błędem w logu).
         env:
           ALLOW_PAYMENT_SIMULATION: "1"
+
+      # Strażnik RLS drugi raz, po ostatnim kroku z bazą (#194 Z1) — jak w e2e-smoke.
+      - name: RLS guard (end of job)
+        if: ${{ !cancelled() }}
+        run: pnpm exec tsx scripts/db-rls-guard.ts
 
       - uses: actions/upload-artifact@v4
         if: always()
