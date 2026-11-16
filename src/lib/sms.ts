@@ -216,6 +216,12 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
   }
 }
 
+/**
+ * Strefa czasowa daty i godziny w treści SMS (#232): zawsze czas warszawski,
+ * niezależnie od strefy procesu.
+ */
+const SMS_TIME_ZONE = "Europe/Warsaw";
+
 /** Podstawowa tabela GSM 03.38 bez znaków sterujących (LF, CR, ESC). */
 const GSM7_BASIC = new Set(
   "@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?" +
@@ -274,10 +280,12 @@ export async function sendAppointmentReminderSms(params: {
   clientId?: string;
 }): Promise<SmsResult> {
   const formattedTime = params.appointmentDate.toLocaleTimeString("pl-PL", {
+    timeZone: SMS_TIME_ZONE,
     hour: "2-digit",
     minute: "2-digit",
   });
   const formattedDate = params.appointmentDate.toLocaleDateString("pl-PL", {
+    timeZone: SMS_TIME_ZONE,
     day: "numeric",
     month: "long",
   });
@@ -310,12 +318,14 @@ export async function sendBookingConfirmationSms(params: {
   clientId?: string;
 }): Promise<SmsResult> {
   const formattedDate = params.appointmentDate.toLocaleDateString("pl-PL", {
+    timeZone: SMS_TIME_ZONE,
     weekday: "long",
     day: "numeric",
     month: "long",
     year: "numeric",
   });
   const formattedTime = params.appointmentDate.toLocaleTimeString("pl-PL", {
+    timeZone: SMS_TIME_ZONE,
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -351,6 +361,7 @@ export async function sendPaymentConfirmationSms(params: {
   clientId?: string;
 }): Promise<SmsResult> {
   const formattedDate = params.appointmentDate.toLocaleDateString("pl-PL", {
+    timeZone: SMS_TIME_ZONE,
     weekday: "long",
     day: "numeric",
     month: "long",
