@@ -25,7 +25,7 @@ function goodRows(): SeedRows {
   return {
     users: EXPECTED_SEED_USERS.map((u) => ({ id: u.id, email: u.email, email_verified: true, role: u.role })),
     accounts: EXPECTED_SEED_USERS.map((u) => ({ user_id: u.id, provider_id: "credential", has_password: true })),
-    plans: SEED_PLANS.map((p) => ({ slug: p.slug, name: p.name, price_monthly: p.priceMonthly, is_active: true })),
+    plans: SEED_PLANS.map((p) => ({ slug: p.slug, name: p.name, price_monthly: p.priceMonthly, is_active: true, features_json: [...p.featuresJson] })),
   };
 }
 
@@ -50,13 +50,22 @@ describe("checkSeedRows", () => {
     ["brak konta credential", (r) => ({ ...r, accounts: r.accounts.filter((a) => a.user_id !== EXPECTED_SEED_USERS[1].id) }), /użytkownik client: kont credential 0/],
     ["konto innego dostawcy zamiast credential", (r) => ({ ...r, accounts: r.accounts.map((a) => ({ ...a, provider_id: "google" })) }), /kont credential 0/],
     ["dwa konta credential", (r) => ({ ...r, accounts: [...r.accounts, r.accounts[0]!] }), /użytkownik owner: kont credential 2/],
-    ["trzeci plan w tabeli", (r) => ({ ...r, plans: [...r.plans, { slug: "enterprise", name: "E", price_monthly: "1", is_active: true }] }), /planów w tabeli 3, oczekiwane dokładnie 2/],
+    ["trzeci plan w tabeli", (r) => ({ ...r, plans: [...r.plans, { slug: "enterprise", name: "E", price_monthly: "1", is_active: true, features_json: [] }] }), /planów w tabeli 3, oczekiwane dokładnie 2/],
     ["brak planu pro", (r) => ({ ...r, plans: r.plans.filter((p) => p.slug !== "pro") }), /plan pro: brak/],
     ["pusta tabela planów", (r) => ({ ...r, plans: [] }), /planów w tabeli 0/],
     ["plan nieaktywny", (r) => ({ ...r, plans: r.plans.map((p) => ({ ...p, is_active: false })) }), /nieaktywny/],
     ["zła cena", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "basic" ? { ...p, price_monthly: "59.00" } : p)) }), /plan basic: cena niezgodna/],
     ["zła nazwa", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "pro" ? { ...p, name: "Premium" } : p)) }), /plan pro: nazwa niezgodna/],
+    // Przy ON CONFLICT DO NOTHING ponowny seed nie wyrównuje listy funkcji — wykrywa to tylko ta kontrola.
+    ["brak funkcji", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "basic" ? { ...p, features_json: p.features_json.slice(0, -1) } : p)) }), /plan basic: funkcje niezgodne/],
+    ["funkcja dodatkowa", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "pro" ? { ...p, features_json: [...p.features_json, "funkcja-obca"] } : p)) }), /plan pro: funkcje niezgodne/],
+    ["zmieniona kolejność funkcji", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "pro" ? { ...p, features_json: [...p.features_json].reverse() } : p)) }), /plan pro: funkcje niezgodne/],
+    ["funkcje nie są tablicą", (r) => ({ ...r, plans: r.plans.map((p) => (p.slug === "basic" ? { ...p, features_json: null as unknown as string[] } : p)) }), /plan basic: funkcje niezgodne/],
   ];
+
+  it("plany mają po co najmniej 2 różne funkcje (przypadek kolejności ma sens)", () => {
+    for (const p of SEED_PLANS) expect(new Set(p.featuresJson).size).toBeGreaterThan(1);
+  });
 
   it.each(cases)("%s → nie ok, z konkretnym problemem", (_label, mutate, problem) => {
     const result = checkSeedRows(mutate(goodRows()));
@@ -65,7 +74,7 @@ describe("checkSeedRows", () => {
   });
 
   // Komunikaty: tylko nazwa kontroli i liczby — żadnych e-maili, identyfikatorów ani wartości z bazy.
-  const LEAK_MARKERS = ["@", "test-owner", "test-client", "obcy-id-123", "Premium", "59.00", "enterprise", "google"];
+  const LEAK_MARKERS = ["@", "test-owner", "test-client", "obcy-id-123", "Premium", "59.00", "enterprise", "google", "funkcja-obca", ...SEED_PLANS.flatMap((p) => p.featuresJson)];
   it.each(cases)("%s → komunikat bez wartości z bazy", (_label, mutate) => {
     const text = checkSeedRows(mutate(goodRows())).problems.join("\n");
     for (const marker of LEAK_MARKERS) expect(text).not.toContain(marker);
@@ -87,6 +96,10 @@ describe("zapytania i zgodność ze seedem", () => {
 
   it("plany czytane bez filtra — liczba dotyczy całej tabeli", () => {
     expect(VERIFY_SEED_PLANS_SQL).not.toMatch(/\bwhere\b/i);
+  });
+
+  it("zapytanie o plany czyta listę funkcji", () => {
+    expect(VERIFY_SEED_PLANS_SQL).toMatch(/\bfeatures_json\b/);
   });
 
   it("oczekiwani użytkownicy to ci sami, których zakłada seed-test.ts", () => {
