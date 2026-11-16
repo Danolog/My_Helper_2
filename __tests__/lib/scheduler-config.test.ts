@@ -4,7 +4,8 @@
  *  - każda ścieżka zadania ma `route.ts` z `requireCronSecret` i eksportem `GET`,
  *  - każdy katalog `src/app/api/cron/*` ma zadanie w skrypcie,
  *  - strefa `Europe/Warsaw`, metoda GET, stan ENABLED|PAUSED,
- *  - wiadomości do klientów salonów (notifications) są PAUSED,
+ *  - zadań z wiadomościami do klientów (notifications) nie ma do R3-C
+ *    (Oliver); gdyby wróciły — tylko PAUSED,
  *  - każde `gcloud` idzie przez tablicę z jawnym `--project`,
  *  - sekret idzie przez `--flags-file` ze strumienia, nie w argumencie.
  * Mutacja: dodać `src/app/api/cron/nowy/route.ts` bez wpisu w skrypcie → czerwony.
@@ -68,10 +69,11 @@ describe("G-C5: scheduler.sh ↔ trasy", () => {
     }
   });
 
-  it("wiadomości do klientów salonów (notifications) są wstrzymane", () => {
-    const notify = JOBS.filter((j) => j.path.startsWith("/api/notifications/"));
-    expect(notify.length).toBe(3);
-    for (const j of notify) expect(j.state, j.name).toBe("PAUSED");
+  it("bez zadań z wiadomościami do klientów (mh-notify-*, /api/notifications/*) do R3-C", () => {
+    const notify = JOBS.filter((j) => j.path.startsWith("/api/notifications/") || j.name.startsWith("mh-notify-"));
+    expect(notify).toEqual([]);
+    expect(JOBS.every((j) => j.path.startsWith("/api/cron/"))).toBe(true);
+    for (const j of JOBS.filter((x) => x.path.startsWith("/api/notifications/"))) expect(j.state, j.name).toBe("PAUSED");
   });
 
   it("strefa Europe/Warsaw i metoda GET", () => {

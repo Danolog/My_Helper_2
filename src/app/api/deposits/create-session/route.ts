@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { eq, and, not, lt, gt } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { parseBody, depositCreateSessionSchema } from "@/lib/api-validation";
+import { appointmentConflictWhere, overlapsRange } from "@/lib/appointment-overlap";
 // ADR-001 sekcja 4: publiczna ścieżka rezerwacji gościa (brak sesji właściciela salonu) — świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
@@ -260,19 +261,16 @@ export async function POST(request: Request) {
     const depositAmountValue = decision.amount;
     const serviceName = expected.serviceName;
 
-    // Check for overlapping appointments for this employee. Correct overlap
-    // condition: newStart < existing.end AND newEnd > existing.start — pure
-    // boundary touches (e.g. 11:00-12:00 right after 10:00-11:00) do NOT
-    // collide.
+    // Kolizja: wspólna definicja półotwarta [start, end) (#165) — styk
+    // (11:00-12:00 tuż po 10:00-11:00) NIE koliduje.
     const overlapping = await db.select({ id: appointments.id })
       .from(appointments)
       .where(
-        and(
-          eq(appointments.employeeId, employeeId),
-          not(eq(appointments.status, "cancelled")),
-          lt(appointments.startTime, new Date(endTime)),
-          gt(appointments.endTime, new Date(startTime))
-        )
+        appointmentConflictWhere({
+          employeeId,
+          start: new Date(startTime),
+          end: new Date(endTime),
+        })
       );
 
     if (overlapping.length > 0) {
@@ -288,8 +286,7 @@ export async function POST(request: Request) {
       .where(
         and(
           eq(timeBlocks.employeeId, employeeId),
-          lt(timeBlocks.startTime, new Date(endTime)),
-          gt(timeBlocks.endTime, new Date(startTime))
+          overlapsRange(timeBlocks.startTime, timeBlocks.endTime, new Date(startTime), new Date(endTime))
         )
       );
 
