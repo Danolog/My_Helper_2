@@ -29,7 +29,6 @@ export {
   findDueAppointmentReminders,
   findDuePushReminders,
   findDueSmsReminders,
-  getAppointmentReminderPreview,
   getPendingCronReminders,
   getPushSubscriptionsForUser,
   getUserIdsWithPushSubscriptions,
@@ -38,7 +37,6 @@ export {
 } from "./notifications";
 export type {
   AppointmentReminderCandidate,
-  AppointmentReminderPreviewRow,
   CronReminderKind,
   PendingCronReminder,
   PushReminderCandidate,

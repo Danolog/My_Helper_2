@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import { isValidUuid } from "@/lib/api-validation";
 import { requireCronSecret } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
-import { SMS_TIME_ZONE, sendSms } from "@/lib/sms";
-// #193 P5a-2 (decyzja CTO D1): wołający z sekretem crona, salonId to opcjonalny
+import { appointments, clients, employees, salons, services } from "@/lib/schema";
+// #193 (decyzja CTO): podgląd (GET) dotyczy jednego salonu z obowiązkowym
+// salonId → brama salonu; w raw jawny warunek salonu w where i w każdym złączeniu.
+import { forSalon } from "@/lib/server/repository";
+// #193 P5a-2 (decyzja CTO): wysyłka (POST) z sekretem crona, salonId to opcjonalny
 // filtr (bez niego wszystkie salony) → wyjścia systemowe, nie pula żądań.
-import {
-  findDueAppointmentReminders,
-  getAppointmentReminderPreview,
-  markAppointmentRemindersSent,
-} from "@/lib/server/system";
+import { findDueAppointmentReminders, markAppointmentRemindersSent } from "@/lib/server/system";
+import { SMS_TIME_ZONE, sendSms } from "@/lib/sms";
 /**
  * POST /api/reminders/appointment
  *
@@ -185,7 +186,35 @@ export async function GET(request: Request) {
     const now = new Date();
     const in24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
-    const upcoming = await getAppointmentReminderPreview(salonId, { from: now, to: in24Hours });
+    const upcoming = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          appointmentId: appointments.id,
+          startTime: appointments.startTime,
+          status: appointments.status,
+          reminderSentAt: appointments.reminderSentAt,
+          clientFirstName: clients.firstName,
+          clientLastName: clients.lastName,
+          clientPhone: clients.phone,
+          salonName: salons.name,
+          serviceName: services.name,
+          employeeFirstName: employees.firstName,
+          employeeLastName: employees.lastName,
+        })
+        .from(appointments)
+        .leftJoin(clients, and(eq(appointments.clientId, clients.id), eq(clients.salonId, appointments.salonId)))
+        .leftJoin(salons, eq(appointments.salonId, salons.id))
+        .leftJoin(services, and(eq(appointments.serviceId, services.id), eq(services.salonId, appointments.salonId)))
+        .leftJoin(employees, and(eq(appointments.employeeId, employees.id), eq(employees.salonId, appointments.salonId)))
+        .where(
+          and(
+            eq(appointments.salonId, salonId),
+            gte(appointments.startTime, now),
+            lte(appointments.startTime, in24Hours),
+            inArray(appointments.status, ["scheduled", "confirmed"])
+          )
+        )
+    );
 
     return NextResponse.json({
       success: true,

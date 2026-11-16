@@ -267,6 +267,31 @@ describe("wyjścia przypomnień: jawny warunek salonu w złączeniach", () => {
     expect(joinSalonConditions(sel.sql), sel.sql).toEqual(ALL_TRUE);
   });
 
+  it("SMS 24h (findDueAppointmentReminders): złączenia zewnętrzne, warunek salonu tylko w ON — wiersz wizyty zostaje", async () => {
+    const res = await reminders.POST(req("/api/reminders/appointment", "POST"));
+    expect(res.status).toBe(200);
+    const sql = h.captured[0]!.sql;
+    for (const t of [...JOINED, "salons"]) expect(sql, t).toMatch(new RegExp(`left join "${t}" on `));
+    expect(sql).not.toMatch(/inner join/);
+    const where = sql.slice(sql.indexOf(" where "));
+    for (const t of JOINED) expect(where, t).not.toMatch(new RegExp(`"${t}"\\.`));
+  });
+
+  it("SMS 24h: klient spoza salonu wizyty (puste kolumny klienta po złączeniu) → pominięty bez wysyłki", async () => {
+    // Wiersz po złączeniu zewnętrznym z niespełnionym warunkiem salonu: kolumny klienta NULL.
+    h.rows = [
+      [/^select .* from "appointments"/, [["appt-x", START, "2026-11-17 11:00:00", SALON_A, "c-obcy", "s-1", "e-1", "scheduled", null, null, null, "Salon A", null, null, null]]],
+    ];
+    const { status, body } = await parseResponse<{ data: { results: Array<Record<string, unknown>> } }>(
+      await reminders.POST(req("/api/reminders/appointment", "POST"))
+    );
+    expect(status).toBe(200);
+    expect(h.sendSms).not.toHaveBeenCalled();
+    expect(body.data.results).toEqual([
+      { appointmentId: "appt-x", clientName: "Nieznany", success: false, error: "Brak numeru telefonu klienta" },
+    ]);
+  });
+
   it("podgląd SMS 24h (GET przez bramę): każde złączenie z warunkiem salonu", async () => {
     const res = await reminders.GET(req(`/api/reminders/appointment?salonId=${SALON_A}`, "GET"));
     expect(res.status).toBe(200);

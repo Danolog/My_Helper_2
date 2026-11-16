@@ -9,7 +9,11 @@
  *   oznaczenie flagi „wysłane” po id z wyboru, podgląd stanu. Zapytania 1:1
  *   z dawnych tras; wysyłka zostaje w trasie, poza tym modułem.
  * - #193 P5a-2: przypomnienia SMS 24h (`reminders/appointment`, sekret crona,
- *   opcjonalny filtr salonu wołającego): wybór, oznaczenie, podgląd salonu.
+ *   opcjonalny filtr salonu wołającego): wybór i oznaczenie. Podgląd jednego
+ *   salonu czyta trasa przez `forSalon`.
+ * - Każde złączenie wyboru przypomnień (klient, pracownik, usługa) ma warunek
+ *   `<tabela>.salon_id = appointments.salon_id`; salon jest złączony po
+ *   `appointments.salon_id`.
  *
  * Każda nowa funkcja tutaj zmienia migawkę `system/` (R-Z1) i migawkę
  * importerów L7, więc jest widoczna w diffie i w recenzji.
@@ -129,10 +133,10 @@ export async function findDuePushReminders(
       serviceName: services.name,
     })
     .from(appointments)
-    .innerJoin(clients, eq(appointments.clientId, clients.id))
-    .innerJoin(employees, eq(appointments.employeeId, employees.id))
+    .innerJoin(clients, and(eq(appointments.clientId, clients.id), eq(clients.salonId, appointments.salonId)))
+    .innerJoin(employees, and(eq(appointments.employeeId, employees.id), eq(employees.salonId, appointments.salonId)))
     .innerJoin(salons, eq(appointments.salonId, salons.id))
-    .leftJoin(services, eq(appointments.serviceId, services.id))
+    .leftJoin(services, and(eq(appointments.serviceId, services.id), eq(services.salonId, appointments.salonId)))
     .where(dueCondition(kind, window))
     .limit(limit);
 }
@@ -169,10 +173,10 @@ export async function findDueSmsReminders(window: ReminderWindow, limit: number)
       serviceName: services.name,
     })
     .from(appointments)
-    .innerJoin(clients, eq(appointments.clientId, clients.id))
-    .innerJoin(employees, eq(appointments.employeeId, employees.id))
+    .innerJoin(clients, and(eq(appointments.clientId, clients.id), eq(clients.salonId, appointments.salonId)))
+    .innerJoin(employees, and(eq(appointments.employeeId, employees.id), eq(employees.salonId, appointments.salonId)))
     .innerJoin(salons, eq(appointments.salonId, salons.id))
-    .leftJoin(services, eq(appointments.serviceId, services.id))
+    .leftJoin(services, and(eq(appointments.serviceId, services.id), eq(services.salonId, appointments.salonId)))
     .where(dueCondition("sms1h", window))
     .limit(limit);
 }
@@ -258,8 +262,7 @@ export type AppointmentReminderCandidate = {
 /**
  * Wizyty `scheduled`/`confirmed` startujące w oknie, bez wysłanego przypomnienia
  * SMS 24h. `salonId` (już zwalidowany UUID) zawęża do jednego salonu; `null` =
- * wszystkie salony (cron). Warunek salonu dotyczy wizyty, joiny idą po kluczach
- * wizyty.
+ * wszystkie salony (cron). Każde złączenie ma warunek salonu wizyty.
  */
 export async function findDueAppointmentReminders(
   window: ReminderWindow,
@@ -292,10 +295,10 @@ export async function findDueAppointmentReminders(
       employeeLastName: employees.lastName,
     })
     .from(appointments)
-    .leftJoin(clients, eq(appointments.clientId, clients.id))
+    .leftJoin(clients, and(eq(appointments.clientId, clients.id), eq(clients.salonId, appointments.salonId)))
     .leftJoin(salons, eq(appointments.salonId, salons.id))
-    .leftJoin(services, eq(appointments.serviceId, services.id))
-    .leftJoin(employees, eq(appointments.employeeId, employees.id))
+    .leftJoin(services, and(eq(appointments.serviceId, services.id), eq(services.salonId, appointments.salonId)))
+    .leftJoin(employees, and(eq(appointments.employeeId, employees.id), eq(employees.salonId, appointments.salonId)))
     .where(and(...conditions));
 }
 
@@ -311,51 +314,3 @@ export async function markAppointmentRemindersSent(appointmentIds: string[]): Pr
     .where(inArray(appointments.id, appointmentIds));
 }
 
-/** Wiersz podglądu przypomnień SMS 24h jednego salonu. */
-export type AppointmentReminderPreviewRow = {
-  appointmentId: string;
-  startTime: Date;
-  status: string;
-  reminderSentAt: Date | null;
-  clientFirstName: string | null;
-  clientLastName: string | null;
-  clientPhone: string | null;
-  salonName: string | null;
-  serviceName: string | null;
-  employeeFirstName: string | null;
-  employeeLastName: string | null;
-};
-
-/** Podgląd: wizyty `scheduled`/`confirmed` salonu w oknie (z wysłanym przypomnieniem i bez). */
-export async function getAppointmentReminderPreview(
-  salonId: string,
-  window: ReminderWindow
-): Promise<AppointmentReminderPreviewRow[]> {
-  return dbSystem
-    .select({
-      appointmentId: appointments.id,
-      startTime: appointments.startTime,
-      status: appointments.status,
-      reminderSentAt: appointments.reminderSentAt,
-      clientFirstName: clients.firstName,
-      clientLastName: clients.lastName,
-      clientPhone: clients.phone,
-      salonName: salons.name,
-      serviceName: services.name,
-      employeeFirstName: employees.firstName,
-      employeeLastName: employees.lastName,
-    })
-    .from(appointments)
-    .leftJoin(clients, eq(appointments.clientId, clients.id))
-    .leftJoin(salons, eq(appointments.salonId, salons.id))
-    .leftJoin(services, eq(appointments.serviceId, services.id))
-    .leftJoin(employees, eq(appointments.employeeId, employees.id))
-    .where(
-      and(
-        eq(appointments.salonId, salonId),
-        gte(appointments.startTime, window.from),
-        lte(appointments.startTime, window.to),
-        inArray(appointments.status, ["scheduled", "confirmed"])
-      )
-    );
-}
