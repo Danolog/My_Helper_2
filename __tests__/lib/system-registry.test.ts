@@ -41,17 +41,28 @@ const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
 const NOTIFICATIONS_EXPORTS = ["deleteUndeliverablePushSubscriptions", "getPushSubscriptionsForUser"];
 /** #193 P5a-1: token oferty listy oczekujących → wpis i salon (decyzja CTO 4). */
 const WAITING_LIST_EXPORTS = ["resolveWaitingListToken"];
+/** #193 P5a-2: cron martwych rezerwacji z zadatkiem (decyzja CTO D2: lista DOKŁADNIE w L7). */
+const DEPOSITS_CLEANUP_EXPORTS = ["cleanupStaleDepositBookings"];
 /** Pliki re-eksportowane przez rejestr `index.ts` w całości. */
-const REGISTRY_SOURCES = ["session.ts", "cron.ts", "health.ts", "notifications.ts", "waiting-list.ts"];
+const REGISTRY_SOURCES = [
+  "session.ts",
+  "cron.ts",
+  "health.ts",
+  "deposits-cleanup.ts",
+  "notifications.ts",
+  "waiting-list.ts",
+];
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts": ["authAdapter"],
   "cron.ts": CRON_EXPORTS,
   "db-system.ts": ["dbSystem"],
+  "deposits-cleanup.ts": DEPOSITS_CLEANUP_EXPORTS,
   "health.ts": HEALTH_EXPORTS,
   "index.ts": [
     ...SESSION_EXPORTS,
     ...CRON_EXPORTS,
     ...HEALTH_EXPORTS,
+    ...DEPOSITS_CLEANUP_EXPORTS,
     ...NOTIFICATIONS_EXPORTS,
     ...WAITING_LIST_EXPORTS,
   ].sort(),

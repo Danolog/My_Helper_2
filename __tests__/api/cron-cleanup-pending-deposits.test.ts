@@ -31,11 +31,16 @@ const mockTxUpdate = vi.fn((..._a: unknown[]) => ({ set: mockTxUpdateSet }));
 
 const mockTx = { update: (...a: unknown[]) => mockTxUpdate(...a) };
 
-vi.mock("@/lib/db", () => ({
-  db: {
+// #193 P5a-2: zapytania w wyjściu system/deposits-cleanup.ts (pula systemowa);
+// rejestr podaje prawdziwe wyjście, bez ładowania pozostałych modułów system/.
+vi.mock("@/lib/server/system/db-system", () => ({
+  dbSystem: {
     select: (...a: unknown[]) => mockDbSelect(...a),
     transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
+}));
+vi.mock("@/lib/server/system", async () => ({
+  cleanupStaleDepositBookings: (await import("@/lib/server/system/deposits-cleanup")).cleanupStaleDepositBookings,
 }));
 
 // Tylko moduł sesji: auth-middleware (bramka CRON_SECRET) zostaje prawdziwy.

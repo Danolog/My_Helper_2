@@ -26,7 +26,8 @@
  *
  * Kontrakt: PR, który dodaje lub usuwa importera wyjścia, aktualizuje tę migawkę i uzasadnia
  * w opisie, skąd pochodzą `userId`/`salonId`. Dwa poziomy akceptacji:
- * - wyjścia kasujące dane (osobne asercje „lista DOKŁADNIE”): zmianę akceptują CTO i CRCO;
+ * - wyjścia kasujące dane albo nieodwracalnie zmieniające stan wizyty lub płatności w wielu
+ *   salonach (osobne asercje „lista DOKŁADNIE”): zmianę akceptują CTO i CRCO;
  * - pozostałe wyjścia: zmianę akceptuje CTO, CRCO do wglądu.
  * Zakres: wyłącznie `src/` (bez plików testów).
  */
@@ -67,6 +68,7 @@ const SNAPSHOT: Record<string, string[]> = {
     "src/lib/temporary-access.ts",
   ],
   "db-system.ts:dbSystem": [],
+  "deposits-cleanup.ts:cleanupStaleDepositBookings": ["src/app/api/cron/cleanup-pending-deposits/route.ts"],
   "health.ts:checkDatabase": ["src/app/api/diagnostics/route.ts"],
   "health.ts:pingDatabase": ["src/app/api/health/route.ts"],
   "notifications.ts:deleteUndeliverablePushSubscriptions": ["src/lib/push.ts"],
@@ -331,6 +333,12 @@ describe("L7: importerzy wyjść rejestru systemowego (checker TS, src/)", () =>
   it("notifications.ts:deleteUndeliverablePushSubscriptions (kasuje dane): lista DOKŁADNIE — tylko push.ts", () => {
     expect(a.importers["notifications.ts:deleteUndeliverablePushSubscriptions"], DATA_DELETING_CONTRACT).toEqual([
       "src/lib/push.ts",
+    ]);
+  });
+
+  it("deposits-cleanup.ts:cleanupStaleDepositBookings (anuluje wizyty i płatności w wielu salonach): lista DOKŁADNIE — tylko trasa crona", () => {
+    expect(a.importers["deposits-cleanup.ts:cleanupStaleDepositBookings"], DATA_DELETING_CONTRACT).toEqual([
+      "src/app/api/cron/cleanup-pending-deposits/route.ts",
     ]);
   });
 

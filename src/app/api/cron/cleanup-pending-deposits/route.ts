@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
-import { and, eq, inArray, lt } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
-// ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { appointments, depositPayments } from "@/lib/schema";
+// #193 P5a-2: trasa systemowa (requireCronSecret, cross-salon) — wyjście z rejestru system/
+import { cleanupStaleDepositBookings } from "@/lib/server/system";
 
 /**
  * POST /api/cron/cleanup-pending-deposits
@@ -19,37 +17,16 @@ import { appointments, depositPayments } from "@/lib/schema";
  * with depositPaid=false whose deposit payment is pending/failed and older
  * than 45 minutes (comfortably past the session lifetime).
  *
- * System path — raw db access without salon scoping is intentional (ADR-001).
+ * System path — the query runs in `system/deposits-cleanup.ts` (#193 P5a-2).
  */
-const STALE_DEPOSIT_MINUTES = 45;
-
 async function handleCleanup(request: Request) {
   try {
     const cronError = await requireCronSecret(request);
     if (cronError) return cronError;
 
-    const cutoff = new Date(Date.now() - STALE_DEPOSIT_MINUTES * 60 * 1000);
+    const { cancelledAppointments, failedPayments } = await cleanupStaleDepositBookings();
 
-    // Find stale deposit bookings: unpaid deposit payment older than the
-    // cutoff whose appointment is still scheduled and unpaid.
-    const stale = await db
-      .select({
-        paymentId: depositPayments.id,
-        paymentStatus: depositPayments.status,
-        appointmentId: depositPayments.appointmentId,
-      })
-      .from(depositPayments)
-      .innerJoin(appointments, eq(depositPayments.appointmentId, appointments.id))
-      .where(
-        and(
-          inArray(depositPayments.status, ["pending", "failed"]),
-          lt(depositPayments.createdAt, cutoff),
-          eq(appointments.status, "scheduled"),
-          eq(appointments.depositPaid, false)
-        )
-      );
-
-    if (stale.length === 0) {
+    if (cancelledAppointments === 0) {
       return NextResponse.json({
         success: true,
         message: "Brak martwych rezerwacji z nieoplaconym zadatkiem",
@@ -58,48 +35,11 @@ async function handleCleanup(request: Request) {
       });
     }
 
-    const pendingPaymentIds = stale
-      .filter((row) => row.paymentStatus === "pending")
-      .map((row) => row.paymentId);
-    const appointmentIds = [...new Set(stale.map((row) => row.appointmentId))];
-
-    await db.transaction(async (tx) => {
-      if (pendingPaymentIds.length > 0) {
-        await tx
-          .update(depositPayments)
-          .set({ status: "failed" })
-          .where(
-            and(
-              inArray(depositPayments.id, pendingPaymentIds),
-              // Guard against a webhook confirming concurrently
-              eq(depositPayments.status, "pending")
-            )
-          );
-      }
-
-      await tx
-        .update(appointments)
-        .set({ status: "cancelled", updatedAt: new Date() })
-        .where(
-          and(
-            inArray(appointments.id, appointmentIds),
-            eq(appointments.status, "scheduled"),
-            eq(appointments.depositPaid, false)
-          )
-        );
-    });
-
-    logger.info("[Cron] Cancelled stale unpaid deposit bookings", {
-      cancelledAppointments: appointmentIds.length,
-      failedPayments: pendingPaymentIds.length,
-      cutoff: cutoff.toISOString(),
-    });
-
     return NextResponse.json({
       success: true,
-      message: `Anulowano ${appointmentIds.length} rezerwacji z nieoplaconym zadatkiem`,
-      cancelledAppointments: appointmentIds.length,
-      failedPayments: pendingPaymentIds.length,
+      message: `Anulowano ${cancelledAppointments} rezerwacji z nieoplaconym zadatkiem`,
+      cancelledAppointments,
+      failedPayments,
     });
   } catch (error) {
     logger.error("[Cron] Cleanup pending deposits error", { error });

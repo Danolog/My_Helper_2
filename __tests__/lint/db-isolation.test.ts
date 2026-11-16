@@ -130,7 +130,6 @@ const BASELINE: Record<string, readonly string[]> = {
     "src/app/api/salons/mine/route.ts",
   ],
   P5_FILES: [
-    "src/app/api/cron/cleanup-pending-deposits/route.ts",
     "src/app/api/cron/push-reminders-24h/route.ts",
     "src/app/api/cron/push-reminders/route.ts",
     "src/app/api/cron/sms-reminders/route.ts",

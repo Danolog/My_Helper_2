@@ -21,6 +21,8 @@ export {
 export type { SalonContext, SalonContextResolution, SalonRole } from "./session";
 export { cleanupExpiredTemporaryAccess } from "./cron";
 export { checkDatabase, pingDatabase } from "./health";
+export { cleanupStaleDepositBookings } from "./deposits-cleanup";
+export type { StaleDepositCleanupResult } from "./deposits-cleanup";
 export { deleteUndeliverablePushSubscriptions, getPushSubscriptionsForUser } from "./notifications";
 export type { PushSubscriptionForSend } from "./notifications";
 export { resolveWaitingListToken } from "./waiting-list";

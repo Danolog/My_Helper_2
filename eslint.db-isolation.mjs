@@ -144,7 +144,6 @@ export const P4_FILES = [
 
 /** P5 (Eva): crony, powiadomienia, rejestracja triala, seed, plany, biblioteki powiadomień. */
 export const P5_FILES = [
-  "src/app/api/cron/cleanup-pending-deposits/route.ts",
   "src/app/api/cron/push-reminders-24h/route.ts",
   "src/app/api/cron/push-reminders/route.ts",
   "src/app/api/cron/sms-reminders/route.ts",
