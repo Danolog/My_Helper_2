@@ -50,14 +50,32 @@ function signInEmailOf(body: unknown): string | null {
   return normalizeSignInEmail(email) === "" ? null : email;
 }
 
-/** Czy wynik logowania zeruje licznik konta: sukces albo 403 EMAIL_NOT_VERIFIED. */
+/**
+ * Czy wynik logowania (`ctx.context.returned`) zeruje licznik konta.
+ * Pozytywna identyfikacja — wszystko nierozpoznane NIE zeruje (nie zmieniać na fail-open):
+ * - Response 2xx;
+ * - błąd biblioteki 403 z kodem EMAIL_NOT_VERIFIED (hasło było poprawne);
+ * - wynik udanego logowania e-mailem (Better Auth 1.7.x: obiekt z `token` i `user.id`,
+ *   także przy przekierowaniu) — kształt przypięty testem na prawdziwej instancji.
+ * Każdy inny Error, obiekt nieznanego kształtu i wartość prosta → bez zerowania.
+ */
 export function resetsAccountCounter(returned: unknown): boolean {
   if (returned instanceof Response) return returned.status >= 200 && returned.status < 300;
-  if (returned && typeof returned === "object" && "statusCode" in returned) {
+  if (returned === null || typeof returned !== "object") return false;
+  if ("statusCode" in returned) {
     const err = returned as { statusCode?: unknown; body?: { code?: unknown } };
     return err.statusCode === 403 && err.body?.code === "EMAIL_NOT_VERIFIED";
   }
-  return returned !== undefined;
+  if (returned instanceof Error) return false;
+  const ok = returned as { token?: unknown; user?: { id?: unknown } | null };
+  return (
+    typeof ok.token === "string" &&
+    ok.token !== "" &&
+    typeof ok.user === "object" &&
+    ok.user !== null &&
+    typeof ok.user.id === "string" &&
+    ok.user.id !== ""
+  );
 }
 
 type DatabaseRateLimitOptions = ReturnType<typeof buildDatabaseOptions>;
