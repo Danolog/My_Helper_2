@@ -197,12 +197,16 @@ describe("Z7 + W2: eksporty system/** (poza zamkniętą listą wyjątków)", () 
           }
           for (const sig of sigs) {
             const ret = sig.getReturnType();
-            const inner = checker.getPromisedTypeOfPromise(ret);
+            // Publiczne API TS: typ zwracany to Promise (symbol Promise), wynik = typ po await.
+            const isPromise = ret.getSymbol()?.getName() === "Promise";
+            const inner: ts.Type | undefined = isPromise ? checker.getAwaitedType(ret) : undefined;
             if (!inner) bad.push(`${file}:${name} nie zwraca Promise`);
             else {
               if (inner.getCallSignatures().length > 0) bad.push(`${file}:${name} zwraca funkcję`);
-              const props = inner.isUnion() ? inner.types.flatMap((u) => checker.getPropertiesOfType(u)) : checker.getPropertiesOfType(inner);
-              const pool = props.map((p) => p.getName()).filter((p) => POOL_PROPS.includes(p));
+              const props: ts.Symbol[] = inner.isUnion()
+                ? inner.types.flatMap((u: ts.Type) => checker.getPropertiesOfType(u))
+                : checker.getPropertiesOfType(inner);
+              const pool = props.map((p: ts.Symbol) => p.getName()).filter((p: string) => POOL_PROPS.includes(p));
               if (pool.length) bad.push(`${file}:${name} zwraca obiekt z ${pool.join(",")}`);
             }
             for (const param of sig.getParameters()) {
