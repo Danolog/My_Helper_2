@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { eq, and, isNotNull, ne, inArray, count, avg } from "drizzle-orm";
 // ADR-001: korzeń najemcy (salons) — GET to publiczny katalog (bez sesji
 // salonu), poza modelem forSalon, świadomie surowe db.
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salons, services, reviews } from "@/lib/schema";

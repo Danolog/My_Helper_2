@@ -6,7 +6,6 @@ import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateClientSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
 // `account` pozostaje surowym `db` (weryfikacja hasła nie jest salon-scoped):
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";

@@ -3,7 +3,6 @@ import { and, eq, gte, lte, isNull, inArray } from "drizzle-orm";
 import { isValidUuid } from "@/lib/api-validation";
 import { requireCronSecret } from "@/lib/auth-middleware";
 // ADR-001: ścieżka systemowa (salonId z danych, nie z sesji) — świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { appointments, clients, salons, services, employees } from "@/lib/schema";

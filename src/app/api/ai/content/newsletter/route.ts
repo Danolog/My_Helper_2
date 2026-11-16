@@ -5,7 +5,6 @@ import { z } from "zod";
 import { isProAIError, requireProAI, trackAIUsage } from "@/lib/ai/openrouter";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";

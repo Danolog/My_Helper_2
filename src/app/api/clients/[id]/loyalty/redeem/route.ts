@@ -4,7 +4,6 @@ import type { LoyaltySettings, RewardTier } from "@/app/api/salons/[id]/loyalty-
 import { validateBody, loyaltyRedeemSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 R2b grupa B: odczyty `salons` (polityka RLS po owner_id) — czekają na akcesor forOwner; świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";

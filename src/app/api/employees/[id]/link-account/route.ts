@@ -6,7 +6,6 @@ import { linkEmployeeAccountSchema } from "@/lib/api-validation";
 // (tabela user better-auth, bez salon_id) oraz sprawdzenie, czy konto nie jest już
 // podpięte pod pracownika INNEGO salonu / nie należy do właściciela salonu, z
 // definicji wykraczają poza forSalon(salonId) — świadomie surowe db.
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";

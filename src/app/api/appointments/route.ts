@@ -9,7 +9,6 @@ import {
 } from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 R2b: POST to świadomie publiczny booking (gość bez sesji salonu) — świadomie surowe db; GET idzie przez forSalon
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { depositGuardResponse } from "@/lib/deposit-guard";
 import { logger } from "@/lib/logger";

@@ -4,7 +4,6 @@ import { validateBody, clientWaitingListSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { verifiedClientMatchEmail } from "@/lib/client-match";
 // ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import {

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { requirePlatformAdmin, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 sekcja 4: seed deweloperski (cross-salon, poza produkcją) — świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salons, employees, services, clients, appointments } from "@/lib/schema";

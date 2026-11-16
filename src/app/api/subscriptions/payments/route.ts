@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
-// eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
