@@ -32,7 +32,10 @@ vi.mock("@/lib/server/repository", async () => {
   };
 });
 vi.mock("@/lib/push", () => ({ sendPushNotification: vi.fn() }));
-vi.mock("@/lib/sms", () => ({ sendSms: vi.fn() }));
+vi.mock("@/lib/sms", async (importOriginal) => ({
+  SMS_TIME_ZONE: (await importOriginal<typeof import("@/lib/sms")>()).SMS_TIME_ZONE,
+  sendSms: vi.fn(),
+}));
 vi.mock("@/lib/deposit-calculation", () => ({ calculateExpectedDeposit: (...a: unknown[]) => h.calc(...a) }));
 
 const START = new Date(Date.now() + 2 * 86_400_000);
