@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { eq, and, gte, lte, or, not, lt, gt, sql } from "drizzle-orm";
+import { eq, and, gte, lte, lt, gt, sql } from "drizzle-orm";
 import { parseBody, createAppointmentSchema } from "@/lib/api-validation";
+import { appointmentConflictWhere, overlapsRange } from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001 R2b: POST to świadomie publiczny booking (gość bez sesji salonu) — świadomie surowe db; GET idzie przez forSalon
 // eslint-disable-next-line no-restricted-imports
@@ -298,28 +299,16 @@ export async function POST(request: Request) {
       if (depositError) return depositError;
     }
 
-    // Check for overlapping appointments for this employee (only need id for existence check)
+    // Kolizja: przedział półotwarty [start, end) — styk 10–11 / 11–12 nie koliduje (#165).
+    // Tylko id, bo liczy się samo istnienie kolizji.
     const overlapping = await db.select({ id: appointments.id })
       .from(appointments)
       .where(
-        and(
-          eq(appointments.employeeId, employeeId),
-          not(eq(appointments.status, "cancelled")),
-          or(
-            and(
-              lte(appointments.startTime, new Date(startTime)),
-              gte(appointments.endTime, new Date(startTime))
-            ),
-            and(
-              lte(appointments.startTime, new Date(endTime)),
-              gte(appointments.endTime, new Date(endTime))
-            ),
-            and(
-              gte(appointments.startTime, new Date(startTime)),
-              lte(appointments.endTime, new Date(endTime))
-            )
-          )
-        )
+        appointmentConflictWhere({
+          employeeId,
+          start: new Date(startTime),
+          end: new Date(endTime),
+        })
       );
 
     if (overlapping.length > 0) {
@@ -340,9 +329,7 @@ export async function POST(request: Request) {
       .where(
         and(
           eq(timeBlocks.employeeId, employeeId),
-          // Time block overlaps with requested appointment time
-          lt(timeBlocks.startTime, new Date(endTime)),
-          gt(timeBlocks.endTime, new Date(startTime))
+          overlapsRange(timeBlocks.startTime, timeBlocks.endTime, new Date(startTime), new Date(endTime))
         )
       );
 
