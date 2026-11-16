@@ -108,6 +108,7 @@ function smoke(extra: Record<string, string> = {}) {
   const r = spawnSync("bash", [SCRIPT, "img:test"], {
     encoding: "utf8",
     env: {
+      NODE_ENV: "test",
       PATH: `${BIN}:${process.env.PATH}`,
       FAKE_STATE: state,
       FAKE_LOG: log,
