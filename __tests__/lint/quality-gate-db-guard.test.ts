@@ -76,9 +76,9 @@ const code = (s: string) =>
     .filter((l) => !l.trim().startsWith("#"))
     .join("\n");
 
-/** Joby najwyższego poziomu: nazwa → treść (wcięcie 2 spacje pod `jobs:`). */
-function jobs(): Map<string, string> {
-  const body = WF.slice(WF.indexOf("\njobs:\n") + 7);
+/** Joby najwyższego poziomu: nazwa → treść (wcięcie 2 spacje pod `jobs:`). Domyślnie quality-gate.yml. */
+function jobs(wf: string = WF): Map<string, string> {
+  const body = wf.slice(wf.indexOf("\njobs:\n") + 7);
   const out = new Map<string, string>();
   const heads = [...body.matchAll(/^ {2}([a-z0-9_-]+):\s*$/gm)];
   heads.forEach((m, i) => {
@@ -189,7 +189,7 @@ function schemaViolations(text: string): string[] {
  * Rozwinięcie polecenia przez skrypty package.json, rekurencyjnie: wynik to tekst
  * polecenia i treści wszystkich osiągalnych skryptów. Znane kształty (obecne w repo):
  * - `pnpm exec <polecenie…>` — polecenie zostaje w tekście (sprawdzane wprost);
- * - `pnpm install [--flagi]`;
+ * - `pnpm install [--flagi]`, `pnpm audit [--flagi]` (polecenia wbudowane pnpm);
  * - `pnpm <skrypt>` / `pnpm run <skrypt>` ze skryptem z package.json.
  * Każdy inny kształt (`pnpm -r …`, `pnpm --filter …`, `pnpm run -r …`, nieznany
  * skrypt, `npm run`/`yarn`, pętla skryptów) = wyjątek, czyli PORAŻKA testu,
@@ -201,7 +201,7 @@ function expandScripts(cmd: string, scripts: Record<string, string>, seen: strin
   for (const m of cmd.matchAll(/\bpnpm\b((?:\s+[^\s&|;]+)*)/g)) {
     const [first, second] = m[1]!.trim().split(/\s+/);
     if (first === "exec") continue;
-    if (first === "install" && (second === undefined || second.startsWith("--"))) continue;
+    if ((first === "install" || first === "audit") && (second === undefined || second.startsWith("--"))) continue;
     const name = first === "run" ? second : first;
     if (!name || name.startsWith("-") || !Object.prototype.hasOwnProperty.call(scripts, name)) {
       throw new Error(`nieznany kształt wywołania pnpm: pnpm${m[1]}`);
@@ -212,11 +212,88 @@ function expandScripts(cmd: string, scripts: Record<string, string>, seen: strin
   return parts.join("\n");
 }
 
-const PG_JOBS = [...jobs()].filter(([, body]) => /\n {4}services:\n {6}postgres:\n/.test(body));
+/** Jedyne joby, które mogą mieć bazę — objęte listą dozwolonych i strażnikami. */
+const DB_JOBS = ["e2e-full", "e2e-smoke"];
+
+/** Obraz Postgresa: `postgres` albo `pgvector` (z rejestrem/przestrzenią, tagiem, digestem). */
+const PG_IMAGE = /^(?:[\w.-]+\/)*(?:postgres|pgvector)(?::[\w.-]+)?(?:@sha256:[0-9a-f]+)?$/;
+
+/**
+ * Usługi joba z `services:`: [nazwa, obraz]. Rozpoznanie po obrazie, nie po nazwie
+ * usługi (#194 runda 4, mutant R3 Leo: usługa `db:`). Linia na wcięciu usługi w innym
+ * kształcie niż `<nazwa>:` (np. styl flow) albo usługa bez `image:` = obraz nieznany.
+ */
+function servicesOf(body: string): Array<[string, string | undefined]> {
+  const at = body.indexOf("\n    services:\n");
+  if (at < 0) return [];
+  const out: Array<[string, string | undefined]> = [];
+  for (const line of code(body.slice(at + "\n    services:\n".length)).split("\n")) {
+    if (line.trim() === "") continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent <= 4) break;
+    if (indent === 6) {
+      const n = line.match(/^ {6}([A-Za-z0-9_-]+):\s*$/);
+      out.push([n ? n[1]! : line.trim(), undefined]);
+    } else if (indent === 8 && out.length > 0) {
+      const img = line.match(/^ {8}image:\s*["']?([^"'\s]+)["']?\s*$/);
+      if (img) out[out.length - 1]![1] = img[1];
+    }
+  }
+  return out;
+}
+
+/**
+ * Po czym job jest „jobem z bazą” (#194 runda 4, Leo): usługa z obrazem Postgresa
+ * ALBO `POSTGRES_URL` w env joba lub kroku. Zwraca powody (pusta lista = job bez bazy).
+ */
+function dbReasons(body: string): string[] {
+  const out = servicesOf(body)
+    .filter(([, image]) => image !== undefined && PG_IMAGE.test(image))
+    .map(([svc, image]) => `usługa ${svc}, obraz ${image}`);
+  if (/^\s+["']?POSTGRES_URL["']?\s*:/m.test(code(body))) out.push("POSTGRES_URL w env");
+  return out;
+}
+
+/** Naruszenia poza DB_JOBS: job z bazą albo usługa o nierozpoznanym obrazie. */
+function jobServiceViolations(name: string, body: string): string[] {
+  if (DB_JOBS.includes(name)) return [];
+  const reasons = dbReasons(body);
+  const out = reasons.length ? [`nowy job z bazą: dodaj go do testu i strażników: ${name} (${reasons.join("; ")})`] : [];
+  for (const [svc, image] of servicesOf(body)) {
+    if (!image || !PG_IMAGE.test(image)) out.push(`usługa o nierozpoznanym obrazie w jobie ${name}: ${svc} (obraz ${image ?? "brak"})`);
+  }
+  return out;
+}
+
+/** Naruszenia jobów z bazą w całym danym workflow (każdy job). */
+function dbJobViolations(wf: string): string[] {
+  return [...jobs(wf)].flatMap(([name, body]) => jobServiceViolations(name, body));
+}
+
+/**
+ * Push po rozwinięciu skryptów package.json w każdym kroku każdego joba danego
+ * workflow (nie tylko w jobach z bazą). Zwraca komunikaty z jobem i krokiem.
+ */
+function pushViolations(wf: string, scripts: Record<string, string>): string[] {
+  return [...jobs(wf)].flatMap(([name, body]) =>
+    steps(body).flatMap((s, i) => {
+      const cmd = runOf(s);
+      return cmd && PUSH.test(expandScripts(cmd, scripts)) ? [`${stepLabel(name, s, i)}: push w poleceniu: ${cmd}`] : [];
+    }),
+  );
+}
+
+const PG_JOBS = [...jobs()].filter(([, body]) => dbReasons(body).length > 0);
 
 describe("quality-gate.yml: baza CI tylko z migracji + strażnik RLS (#190)", () => {
-  it("joby z Postgresem to e2e-smoke i e2e-full", () => {
-    expect(PG_JOBS.map(([n]) => n).sort()).toEqual(["e2e-full", "e2e-smoke"]);
+  it("joby z bazą (obraz usługi postgres/pgvector albo POSTGRES_URL w env) to dokładnie e2e-smoke i e2e-full; poza nimi brak usług o nierozpoznanym obrazie", () => {
+    expect(dbJobViolations(WF)).toEqual([]);
+    expect(PG_JOBS.map(([n]) => n).sort()).toEqual(DB_JOBS);
+  });
+
+  it("KAŻDY job quality-gate.yml — także przez skrypty package.json — bez drizzle-kit push, db:push i db:dev", () => {
+    expect(jobs().size).toBeGreaterThanOrEqual(5);
+    expect(pushViolations(WF, PKG.scripts)).toEqual([]);
   });
 
   it("nigdzie w workflow (poza komentarzami) nie ma db:push, db:dev ani drizzle-kit push", () => {
@@ -428,6 +505,34 @@ describe("stepViolations — zamknięta gramatyka kroku (Ethan O6–O10)", () =>
     ["klucz w cudzysłowie", "        \"shell\": bash\n"],
   ])("FORBIDDEN_EXEC_KEYS łapie: %s", (_n, text) => {
     expect(FORBIDDEN_EXEC_KEYS.test(text)).toBe(true);
+  });
+});
+
+describe("jobServiceViolations — job z bazą poza e2e-smoke/e2e-full (#194 runda 4, R3 Leo)", () => {
+  const job = (extra: string) => `  e2e-extra:\n    name: x\n    runs-on: ubuntu-24.04\n${extra}    steps:\n      - run: pnpm test:pg\n`;
+  it.each([
+    ["usługa db: z pgvector", "    services:\n      db:\n        image: pgvector/pgvector:pg18\n", /nowy job z bazą: dodaj go do testu i strażników: e2e-extra \(usługa db/],
+    ["usługa z postgres w cudzysłowie", "    services:\n      x:\n        image: 'postgres:18'\n", /nowy job z bazą.*e2e-extra/],
+    ["obraz z rejestru", "    services:\n      x:\n        image: docker.io/library/postgres:16-alpine\n", /nowy job z bazą/],
+    ["POSTGRES_URL w env joba", "    env:\n      POSTGRES_URL: postgresql://localhost/x\n", /nowy job z bazą.*POSTGRES_URL w env/],
+    ["nierozpoznany obraz", "    services:\n      cache:\n        image: redis:7\n", /nierozpoznanym obrazie w jobie e2e-extra: cache \(obraz redis:7\)/],
+    ["usługa bez image", "    services:\n      db:\n        ports:\n          - 5432:5432\n", /nierozpoznanym obrazie.*obraz brak/],
+    ["usługa w stylu flow", "    services:\n      db: { image: postgres }\n", /nierozpoznanym obrazie/],
+  ])("%s → porażka", (_n, extra, re) => {
+    expect(jobServiceViolations("e2e-extra", job(extra)).join("\n")).toMatch(re);
+  });
+
+  it("POSTGRES_URL w env kroku → job z bazą; job bez bazy i usług → bez naruszeń; e2e-smoke/e2e-full zwolnione", () => {
+    const stepEnv = "  e2e-extra:\n    steps:\n      - run: pnpm test:pg\n        env:\n          POSTGRES_URL: x\n";
+    expect(jobServiceViolations("e2e-extra", stepEnv).join("\n")).toMatch(/nowy job z bazą.*POSTGRES_URL/);
+    expect(jobServiceViolations("e2e-extra", job(""))).toEqual([]);
+    expect(jobServiceViolations("e2e-extra", job("    env:\n      INTEGRATION_POSTGRES_URL_X: y\n"))).toEqual([]);
+    expect(jobServiceViolations("e2e-smoke", job("    services:\n      db:\n        image: postgres:18\n"))).toEqual([]);
+  });
+
+  it("pnpm audit [--flagi] to polecenie wbudowane (bez wyjątku); pnpm audit fix nadal nieznany kształt", () => {
+    expect(expandScripts("pnpm audit --audit-level=high", PKG.scripts)).toBe("pnpm audit --audit-level=high");
+    expect(() => expandScripts("pnpm audit fix", PKG.scripts)).toThrow(/nieznany kształt/);
   });
 });
 
