@@ -229,7 +229,7 @@ export async function notifyWaitingList(
               existingAppointmentId: existingApptId,
               acceptToken,
             })
-            .where(eq(waitingList.id, entryId))
+            .where(and(eq(waitingList.id, entryId), eq(waitingList.salonId, gate.salonId)))
         );
         result.notified++;
       } catch (updateErr) {
@@ -280,11 +280,18 @@ export async function acceptEarlierSlot(
   if (!target || target.waitingListId !== waitingListId) {
     return { success: false, message: "Nieprawidlowy token akceptacji" };
   }
-  const gate = forSalon(target.salonId);
+  // Jedno źródło salonu: wynik tokenu. Każde zapytanie poniżej ma jawny
+  // warunek salonu (kontrakt raw() w repository.ts), wartości insertów też.
+  const salonId = target.salonId;
+  const gate = forSalon(salonId);
 
   // 1. Fetch the waiting list entry
   const [entry] = await gate.raw((tx) =>
-    tx.select().from(waitingList).where(eq(waitingList.id, waitingListId)).limit(1)
+    tx
+      .select()
+      .from(waitingList)
+      .where(and(eq(waitingList.id, waitingListId), eq(waitingList.salonId, salonId)))
+      .limit(1)
   );
 
   if (!entry) {
@@ -350,7 +357,7 @@ export async function acceptEarlierSlot(
       .from(appointments)
       .where(
         appointmentConflictWhere({
-          salonId: entry.salonId,
+          salonId,
           employeeId,
           start: offeredStart,
           end: offeredEnd,
@@ -375,7 +382,7 @@ export async function acceptEarlierSlot(
   const depositBlocksNewAppointment = async (): Promise<AcceptResult | null> => {
     if (!entry.serviceId) return null; // bez usługi nie ma zadatku
     const verdict = await checkBookingWithoutDeposit({
-      salonId: entry.salonId,
+      salonId,
       serviceId: entry.serviceId,
       startTime: offeredStart,
       clientId: entry.clientId,
@@ -400,7 +407,7 @@ export async function acceptEarlierSlot(
       tx
         .insert(appointments)
         .values({
-          salonId: entry.salonId,
+          salonId,
           clientId: entry.clientId,
           employeeId,
           serviceId: entry.serviceId,
@@ -419,7 +426,11 @@ export async function acceptEarlierSlot(
       // Move existing appointment to the earlier slot
       const existingId = entry.existingAppointmentId;
       const [existingAppt] = await gate.raw((tx) =>
-        tx.select().from(appointments).where(eq(appointments.id, existingId)).limit(1)
+        tx
+          .select()
+          .from(appointments)
+          .where(and(eq(appointments.id, existingId), eq(appointments.salonId, salonId)))
+          .limit(1)
       );
 
       if (existingAppt && existingAppt.status !== "cancelled") {
@@ -433,7 +444,7 @@ export async function acceptEarlierSlot(
               employeeId,
               notes: `${existingAppt.notes || ""} [Przeniesiony z listy oczekujacych]`.trim(),
             })
-            .where(eq(appointments.id, existingId))
+            .where(and(eq(appointments.id, existingId), eq(appointments.salonId, salonId)))
         );
         appointmentId = existingId;
         logger.info("Moved appointment from waiting list", {
@@ -466,14 +477,17 @@ export async function acceptEarlierSlot(
 
   // 8. Mark waiting list entry as accepted
   await gate.raw((tx) =>
-    tx.update(waitingList).set({ accepted: true }).where(eq(waitingList.id, waitingListId))
+    tx
+      .update(waitingList)
+      .set({ accepted: true })
+      .where(and(eq(waitingList.id, waitingListId), eq(waitingList.salonId, salonId)))
   );
 
   // 9. Log a confirmation notification
   try {
     await gate.raw((tx) =>
       tx.insert(notifications).values({
-        salonId: entry.salonId,
+        salonId,
         clientId: entry.clientId,
         type: "sms",
         message: `Klient zaakceptowal wczesniejszy termin z listy oczekujacych. Wizyta ${appointmentId} przeniesiona na ${offeredStart.toLocaleString("pl-PL")}.`,
@@ -512,10 +526,15 @@ export async function declineEarlierSlot(
   if (!target || target.waitingListId !== waitingListId) {
     return { success: false, message: "Nieprawidlowy token" };
   }
-  const gate = forSalon(target.salonId);
+  const salonId = target.salonId;
+  const gate = forSalon(salonId);
 
   const [entry] = await gate.raw((tx) =>
-    tx.select().from(waitingList).where(eq(waitingList.id, waitingListId)).limit(1)
+    tx
+      .select()
+      .from(waitingList)
+      .where(and(eq(waitingList.id, waitingListId), eq(waitingList.salonId, salonId)))
+      .limit(1)
   );
 
   if (!entry) {
@@ -535,7 +554,10 @@ export async function declineEarlierSlot(
   }
 
   await gate.raw((tx) =>
-    tx.update(waitingList).set({ accepted: false }).where(eq(waitingList.id, waitingListId))
+    tx
+      .update(waitingList)
+      .set({ accepted: false })
+      .where(and(eq(waitingList.id, waitingListId), eq(waitingList.salonId, salonId)))
   );
 
   return {
