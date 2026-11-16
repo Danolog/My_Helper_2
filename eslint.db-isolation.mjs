@@ -42,53 +42,30 @@ export const DB_ISOLATION_PERMANENT = ["src/lib/server/repository.ts"];
 /** Pula systemowa wolna tylko tu. */
 export const DB_SYSTEM_ALLOWED_FILES = ["src/lib/server/system/**"];
 
-/** Dług przejściowy (Z3) — wynik reguły bez listy. Maleje z każdą partią. */
-export const DB_ISOLATION_TRANSITIONAL = [
-  "src/app/api/ai/content/newsletter/route.ts",
-  "src/app/api/appointments/[id]/complete/route.ts",
-  "src/app/api/appointments/[id]/invoice/route.ts",
-  "src/app/api/appointments/[id]/route.ts",
-  "src/app/api/appointments/route.ts",
-  "src/app/api/available-slots/route.ts",
-  "src/app/api/client/appointments/[id]/cancel/route.ts",
-  "src/app/api/client/appointments/[id]/review/route.ts",
-  "src/app/api/client/appointments/[id]/route.ts",
-  "src/app/api/client/appointments/route.ts",
-  "src/app/api/client/reviews/route.ts",
-  "src/app/api/client/waiting-list/[id]/route.ts",
-  "src/app/api/client/waiting-list/route.ts",
-  "src/app/api/clients/[id]/loyalty/redeem/route.ts",
-  "src/app/api/clients/[id]/route.ts",
-  "src/app/api/cron/cleanup-pending-deposits/route.ts",
-  "src/app/api/cron/push-reminders-24h/route.ts",
-  "src/app/api/cron/push-reminders/route.ts",
-  "src/app/api/cron/sms-reminders/route.ts",
-  "src/app/api/dashboard/stats/route.ts",
-  "src/app/api/deposits/create-session/route.ts",
+/**
+ * Dług przejściowy (Z3) — wynik reguły bez listy (73 pliki na b3a5faf),
+ * podzielony na tablice per partia #193 (decyzja Olivera, P0a pkt 3).
+ * Każda strona zmienia WYŁĄCZNIE swoją tablicę (Eva: P5_FILES). Przeniesienie
+ * pliku między tablicami = decyzja Ethana + zmiana BASELINE w teście w
+ * osobnym commicie. Przydział: zlecenie Ethana §0, §1, §3, §6; P5 wg listy Evy;
+ * session.ts → P0 i subscription.ts → P1 (decyzja Ethana).
+ */
+/** P0b: ustalanie salonu z sesji (w tym requireAdmin), health/diagnostics, adapter Better Auth. */
+export const P0_FILES = [
   "src/app/api/diagnostics/route.ts",
-  "src/app/api/employees/[id]/link-account/route.ts",
-  "src/app/api/favorites/salons/check/route.ts",
-  "src/app/api/favorites/salons/route.ts",
   "src/app/api/health/route.ts",
-  "src/app/api/notifications/birthday/route.ts",
-  "src/app/api/notifications/low-stock/route.ts",
-  "src/app/api/notifications/we-miss-you/route.ts",
-  "src/app/api/promotions/check-happy-hours/route.ts",
-  "src/app/api/promotions/check-package/route.ts",
-  "src/app/api/promotions/check/route.ts",
-  "src/app/api/push/subscribe/route.ts",
-  "src/app/api/push/unsubscribe/route.ts",
-  "src/app/api/register-subscription/route.ts",
-  "src/app/api/reminders/appointment/route.ts",
-  "src/app/api/salons/[id]/employees/[employeeId]/route.ts",
-  "src/app/api/salons/[id]/gallery/route.ts",
-  "src/app/api/salons/[id]/route.ts",
-  "src/app/api/salons/[id]/services/[serviceId]/route.ts",
-  "src/app/api/salons/mine/route.ts",
-  "src/app/api/salons/route.ts",
-  "src/app/api/seed/route.ts",
+  "src/lib/auth.ts",
+  "src/lib/get-user-salon.ts",
+  "src/lib/salon-context.ts",
+  "src/lib/session.ts",
+  "src/lib/temporary-access.ts",
+];
+
+/** P1a/b/c: płatności (zadatki, subskrypcje, webhook Stripe). */
+export const P1_FILES = [
+  "src/app/api/appointments/route.ts",
+  "src/app/api/deposits/create-session/route.ts",
   "src/app/api/stripe/webhook/route.ts",
-  "src/app/api/subscription-plans/route.ts",
   "src/app/api/subscriptions/cancel/route.ts",
   "src/app/api/subscriptions/checkout/route.ts",
   "src/app/api/subscriptions/current/route.ts",
@@ -96,28 +73,88 @@ export const DB_ISOLATION_TRANSITIONAL = [
   "src/app/api/subscriptions/payments/[id]/receipt/route.ts",
   "src/app/api/subscriptions/payments/route.ts",
   "src/app/api/subscriptions/renew/route.ts",
+  "src/lib/deposit-calculation.ts",
+  "src/lib/deposit-confirmation.ts",
+  "src/lib/refund.ts",
+  "src/lib/subscription-confirmation.ts",
+  "src/lib/subscription-locks.ts",
+  "src/lib/subscription.ts",
+];
+
+/** P2: ścieżka właściciela. */
+export const P2_FILES = [
+  "src/app/api/ai/content/newsletter/route.ts",
+  "src/app/api/appointments/[id]/complete/route.ts",
+  "src/app/api/appointments/[id]/invoice/route.ts",
+  "src/app/api/appointments/[id]/route.ts",
+  "src/app/api/clients/[id]/loyalty/redeem/route.ts",
+  "src/app/api/clients/[id]/route.ts",
+  "src/app/api/dashboard/stats/route.ts",
+  "src/app/api/employees/[id]/link-account/route.ts",
   "src/app/api/temporary-access/route.ts",
   "src/lib/ai/business/chat.ts",
   "src/lib/ai/openrouter.ts",
   "src/lib/ai/usage-limits.ts",
-  "src/lib/auth.ts",
-  "src/lib/deposit-calculation.ts",
-  "src/lib/deposit-confirmation.ts",
+  "src/lib/salon-cancellation.ts",
+];
+
+/** P3: publiczna rezerwacja i katalog. */
+export const P3_FILES = [
+  "src/app/api/available-slots/route.ts",
+  "src/app/api/promotions/check-happy-hours/route.ts",
+  "src/app/api/promotions/check-package/route.ts",
+  "src/app/api/promotions/check/route.ts",
+  "src/app/api/salons/[id]/employees/[employeeId]/route.ts",
+  "src/app/api/salons/[id]/gallery/route.ts",
+  "src/app/api/salons/[id]/route.ts",
+  "src/app/api/salons/[id]/services/[serviceId]/route.ts",
+  "src/app/api/salons/route.ts",
+];
+
+/** P4: portal klienta (forUser). */
+export const P4_FILES = [
+  "src/app/api/client/appointments/[id]/cancel/route.ts",
+  "src/app/api/client/appointments/[id]/review/route.ts",
+  "src/app/api/client/appointments/[id]/route.ts",
+  "src/app/api/client/appointments/route.ts",
+  "src/app/api/client/reviews/route.ts",
+  "src/app/api/client/waiting-list/[id]/route.ts",
+  "src/app/api/client/waiting-list/route.ts",
+  "src/app/api/favorites/salons/check/route.ts",
+  "src/app/api/favorites/salons/route.ts",
+  "src/app/api/push/subscribe/route.ts",
+  "src/app/api/push/unsubscribe/route.ts",
+  "src/app/api/salons/mine/route.ts",
+];
+
+/** P5 (Eva): crony, powiadomienia, rejestracja triala, seed, plany, biblioteki powiadomień. */
+export const P5_FILES = [
+  "src/app/api/cron/cleanup-pending-deposits/route.ts",
+  "src/app/api/cron/push-reminders-24h/route.ts",
+  "src/app/api/cron/push-reminders/route.ts",
+  "src/app/api/cron/sms-reminders/route.ts",
+  "src/app/api/notifications/birthday/route.ts",
+  "src/app/api/notifications/low-stock/route.ts",
+  "src/app/api/notifications/we-miss-you/route.ts",
+  "src/app/api/register-subscription/route.ts",
+  "src/app/api/reminders/appointment/route.ts",
+  "src/app/api/seed/route.ts",
+  "src/app/api/subscription-plans/route.ts",
   "src/lib/email.ts",
-  "src/lib/get-user-salon.ts",
   "src/lib/notification-settings.ts",
   "src/lib/push.ts",
-  "src/lib/refund.ts",
-  "src/lib/salon-cancellation.ts",
-  "src/lib/salon-context.ts",
-  "src/lib/session.ts",
   "src/lib/sms.ts",
-  "src/lib/subscription-confirmation.ts",
-  "src/lib/subscription-locks.ts",
-  "src/lib/subscription.ts",
-  "src/lib/temporary-access.ts",
   "src/lib/waiting-list.ts",
 ];
+
+/** P6: przełączenie puli (dziś bez plików). */
+export const P6_FILES = [];
+
+/** Partie w kolejności; klucz = nazwa tablicy. */
+export const DB_ISOLATION_PARTITIONS = { P0_FILES, P1_FILES, P2_FILES, P3_FILES, P4_FILES, P5_FILES, P6_FILES };
+
+/** Suma zbiorów — dług przejściowy jako całość. */
+export const DB_ISOLATION_TRANSITIONAL = Object.values(DB_ISOLATION_PARTITIONS).flat();
 
 /** Dosłowna ścieżka → wzorzec minimatch (`[id]` w Next to klasa znaków w globie). */
 export function literalGlob(path) {

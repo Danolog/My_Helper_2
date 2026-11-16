@@ -17,6 +17,7 @@ import { ESLint, type Linter } from "eslint";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   DB_IMPORT_SOURCE_REGEX,
+  DB_ISOLATION_PARTITIONS,
   DB_ISOLATION_PERMANENT,
   DB_ISOLATION_RULES,
   DB_ISOLATION_TRANSITIONAL,
@@ -31,85 +32,100 @@ const LISTED_ROUTE = "src/app/api/health/route.ts";
 const LISTED_ROUTE_WITH_ID = "src/app/api/appointments/[id]/complete/route.ts";
 
 /**
- * Zamrożony stan długu z wyniku reguły bez listy (Z3, 73 pliki na b3a5faf).
- * Partia #193 usuwa swoje pliki z listy w eslint.db-isolation.mjs I stąd w tym
- * samym PR. Dopisanie pozycji do listy bez dopisania tutaj = czerwony test.
+ * Zamrożony stan długu z wyniku reguły bez listy (Z3, 73 pliki na b3a5faf),
+ * per partia. Partia #193 usuwa swoje pliki ze SWOJEJ tablicy w
+ * eslint.db-isolation.mjs I stąd w tym samym PR. Dopisanie pozycji albo
+ * przeniesienie pliku do innej tablicy bez zmiany tutaj = czerwony test;
+ * przeniesienie między partiami = decyzja Ethana, osobny commit.
  */
-const BASELINE = [
-  "src/app/api/ai/content/newsletter/route.ts",
-  "src/app/api/appointments/[id]/complete/route.ts",
-  "src/app/api/appointments/[id]/invoice/route.ts",
-  "src/app/api/appointments/[id]/route.ts",
-  "src/app/api/appointments/route.ts",
-  "src/app/api/available-slots/route.ts",
-  "src/app/api/client/appointments/[id]/cancel/route.ts",
-  "src/app/api/client/appointments/[id]/review/route.ts",
-  "src/app/api/client/appointments/[id]/route.ts",
-  "src/app/api/client/appointments/route.ts",
-  "src/app/api/client/reviews/route.ts",
-  "src/app/api/client/waiting-list/[id]/route.ts",
-  "src/app/api/client/waiting-list/route.ts",
-  "src/app/api/clients/[id]/loyalty/redeem/route.ts",
-  "src/app/api/clients/[id]/route.ts",
-  "src/app/api/cron/cleanup-pending-deposits/route.ts",
-  "src/app/api/cron/push-reminders-24h/route.ts",
-  "src/app/api/cron/push-reminders/route.ts",
-  "src/app/api/cron/sms-reminders/route.ts",
-  "src/app/api/dashboard/stats/route.ts",
-  "src/app/api/deposits/create-session/route.ts",
-  "src/app/api/diagnostics/route.ts",
-  "src/app/api/employees/[id]/link-account/route.ts",
-  "src/app/api/favorites/salons/check/route.ts",
-  "src/app/api/favorites/salons/route.ts",
-  "src/app/api/health/route.ts",
-  "src/app/api/notifications/birthday/route.ts",
-  "src/app/api/notifications/low-stock/route.ts",
-  "src/app/api/notifications/we-miss-you/route.ts",
-  "src/app/api/promotions/check-happy-hours/route.ts",
-  "src/app/api/promotions/check-package/route.ts",
-  "src/app/api/promotions/check/route.ts",
-  "src/app/api/push/subscribe/route.ts",
-  "src/app/api/push/unsubscribe/route.ts",
-  "src/app/api/register-subscription/route.ts",
-  "src/app/api/reminders/appointment/route.ts",
-  "src/app/api/salons/[id]/employees/[employeeId]/route.ts",
-  "src/app/api/salons/[id]/gallery/route.ts",
-  "src/app/api/salons/[id]/route.ts",
-  "src/app/api/salons/[id]/services/[serviceId]/route.ts",
-  "src/app/api/salons/mine/route.ts",
-  "src/app/api/salons/route.ts",
-  "src/app/api/seed/route.ts",
-  "src/app/api/stripe/webhook/route.ts",
-  "src/app/api/subscription-plans/route.ts",
-  "src/app/api/subscriptions/cancel/route.ts",
-  "src/app/api/subscriptions/checkout/route.ts",
-  "src/app/api/subscriptions/current/route.ts",
-  "src/app/api/subscriptions/expiration-warning/route.ts",
-  "src/app/api/subscriptions/payments/[id]/receipt/route.ts",
-  "src/app/api/subscriptions/payments/route.ts",
-  "src/app/api/subscriptions/renew/route.ts",
-  "src/app/api/temporary-access/route.ts",
-  "src/lib/ai/business/chat.ts",
-  "src/lib/ai/openrouter.ts",
-  "src/lib/ai/usage-limits.ts",
-  "src/lib/auth.ts",
-  "src/lib/deposit-calculation.ts",
-  "src/lib/deposit-confirmation.ts",
-  "src/lib/email.ts",
-  "src/lib/get-user-salon.ts",
-  "src/lib/notification-settings.ts",
-  "src/lib/push.ts",
-  "src/lib/refund.ts",
-  "src/lib/salon-cancellation.ts",
-  "src/lib/salon-context.ts",
-  "src/lib/session.ts",
-  "src/lib/sms.ts",
-  "src/lib/subscription-confirmation.ts",
-  "src/lib/subscription-locks.ts",
-  "src/lib/subscription.ts",
-  "src/lib/temporary-access.ts",
-  "src/lib/waiting-list.ts",
-];
+const BASELINE: Record<string, readonly string[]> = {
+  P0_FILES: [
+    "src/app/api/diagnostics/route.ts",
+    "src/app/api/health/route.ts",
+    "src/lib/auth.ts",
+    "src/lib/get-user-salon.ts",
+    "src/lib/salon-context.ts",
+    "src/lib/session.ts",
+    "src/lib/temporary-access.ts",
+  ],
+  P1_FILES: [
+    "src/app/api/appointments/route.ts",
+    "src/app/api/deposits/create-session/route.ts",
+    "src/app/api/stripe/webhook/route.ts",
+    "src/app/api/subscriptions/cancel/route.ts",
+    "src/app/api/subscriptions/checkout/route.ts",
+    "src/app/api/subscriptions/current/route.ts",
+    "src/app/api/subscriptions/expiration-warning/route.ts",
+    "src/app/api/subscriptions/payments/[id]/receipt/route.ts",
+    "src/app/api/subscriptions/payments/route.ts",
+    "src/app/api/subscriptions/renew/route.ts",
+    "src/lib/deposit-calculation.ts",
+    "src/lib/deposit-confirmation.ts",
+    "src/lib/refund.ts",
+    "src/lib/subscription-confirmation.ts",
+    "src/lib/subscription-locks.ts",
+    "src/lib/subscription.ts",
+  ],
+  P2_FILES: [
+    "src/app/api/ai/content/newsletter/route.ts",
+    "src/app/api/appointments/[id]/complete/route.ts",
+    "src/app/api/appointments/[id]/invoice/route.ts",
+    "src/app/api/appointments/[id]/route.ts",
+    "src/app/api/clients/[id]/loyalty/redeem/route.ts",
+    "src/app/api/clients/[id]/route.ts",
+    "src/app/api/dashboard/stats/route.ts",
+    "src/app/api/employees/[id]/link-account/route.ts",
+    "src/app/api/temporary-access/route.ts",
+    "src/lib/ai/business/chat.ts",
+    "src/lib/ai/openrouter.ts",
+    "src/lib/ai/usage-limits.ts",
+    "src/lib/salon-cancellation.ts",
+  ],
+  P3_FILES: [
+    "src/app/api/available-slots/route.ts",
+    "src/app/api/promotions/check-happy-hours/route.ts",
+    "src/app/api/promotions/check-package/route.ts",
+    "src/app/api/promotions/check/route.ts",
+    "src/app/api/salons/[id]/employees/[employeeId]/route.ts",
+    "src/app/api/salons/[id]/gallery/route.ts",
+    "src/app/api/salons/[id]/route.ts",
+    "src/app/api/salons/[id]/services/[serviceId]/route.ts",
+    "src/app/api/salons/route.ts",
+  ],
+  P4_FILES: [
+    "src/app/api/client/appointments/[id]/cancel/route.ts",
+    "src/app/api/client/appointments/[id]/review/route.ts",
+    "src/app/api/client/appointments/[id]/route.ts",
+    "src/app/api/client/appointments/route.ts",
+    "src/app/api/client/reviews/route.ts",
+    "src/app/api/client/waiting-list/[id]/route.ts",
+    "src/app/api/client/waiting-list/route.ts",
+    "src/app/api/favorites/salons/check/route.ts",
+    "src/app/api/favorites/salons/route.ts",
+    "src/app/api/push/subscribe/route.ts",
+    "src/app/api/push/unsubscribe/route.ts",
+    "src/app/api/salons/mine/route.ts",
+  ],
+  P5_FILES: [
+    "src/app/api/cron/cleanup-pending-deposits/route.ts",
+    "src/app/api/cron/push-reminders-24h/route.ts",
+    "src/app/api/cron/push-reminders/route.ts",
+    "src/app/api/cron/sms-reminders/route.ts",
+    "src/app/api/notifications/birthday/route.ts",
+    "src/app/api/notifications/low-stock/route.ts",
+    "src/app/api/notifications/we-miss-you/route.ts",
+    "src/app/api/register-subscription/route.ts",
+    "src/app/api/reminders/appointment/route.ts",
+    "src/app/api/seed/route.ts",
+    "src/app/api/subscription-plans/route.ts",
+    "src/lib/email.ts",
+    "src/lib/notification-settings.ts",
+    "src/lib/push.ts",
+    "src/lib/sms.ts",
+    "src/lib/waiting-list.ts",
+  ],
+  P6_FILES: [],
+};
 
 let eslint: ESLint;
 beforeAll(() => {
@@ -247,11 +263,24 @@ function importsDb(text: string): boolean {
   return sources.some((s) => re.test(s));
 }
 
-describe("Z4: lista przejściowa ⊆ BASELINE, każda pozycja żywa", () => {
-  it("lista ⊆ BASELINE, bez duplikatów", () => {
+describe("Z4: lista przejściowa ⊆ BASELINE (suma i per partia), każda pozycja żywa", () => {
+  const partitions = DB_ISOLATION_PARTITIONS as Record<string, readonly string[]>;
+
+  it("te same tablice co w BASELINE (P0_FILES … P6_FILES), lista = ich suma", () => {
+    expect(Object.keys(partitions)).toEqual(Object.keys(BASELINE));
+    expect([...DB_ISOLATION_TRANSITIONAL]).toEqual(Object.values(partitions).flat());
+  });
+
+  it("suma zbiorów ⊆ suma BASELINE, bez duplikatów (także między tablicami)", () => {
     expect(new Set(DB_ISOLATION_TRANSITIONAL).size).toBe(DB_ISOLATION_TRANSITIONAL.length);
-    const extra = DB_ISOLATION_TRANSITIONAL.filter((f: string) => !BASELINE.includes(f));
+    const all = new Set(Object.values(BASELINE).flat());
+    const extra = DB_ISOLATION_TRANSITIONAL.filter((f: string) => !all.has(f));
     expect(extra, "pozycje spoza BASELINE — lista nie może rosnąć").toEqual([]);
+  });
+
+  it.each(Object.keys(BASELINE).map((k) => [k]))("%s ⊆ BASELINE.%s (plik nie przeskakuje między tablicami)", (key) => {
+    const moved = (partitions[key] ?? []).filter((f) => !BASELINE[key]!.includes(f));
+    expect(moved, "przeniesienie między partiami = decyzja Ethana i zmiana BASELINE w osobnym commicie").toEqual([]);
   });
 
   it.each([...DB_ISOLATION_TRANSITIONAL, ...DB_ISOLATION_PERMANENT].map((f: string) => [f]))(
