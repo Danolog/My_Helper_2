@@ -261,6 +261,8 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     ["nazwa nieznana", ["--resume", "mh-sms-reminder"]],
     ["nazwa poprawna + nieznana", ["--resume", "mh-sms-reminders", "mh-notify-birthday"]],
     ["opcja zamiast nazwy", ["--resume", "--all"]],
+    ["zadanie zamrożonego modułu push", ["--resume", "mh-push-reminders"]],
+    ["poprawna + zamrożona push-24h", ["--resume", "mh-sms-reminders", "mh-push-reminders-24h"]],
   ])("--resume %s → kod 2 przed gcloud, nic nie wznowione", (_l, args) => {
     const w = world();
     expect(w.run([]).status).toBe(0);
@@ -301,7 +303,21 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
     const r = w.run([]);
     expect(r.status, r.stderr).toBe(0);
     expect(w.calls().slice(before).some((c) => verbOf(c).startsWith("pause"))).toBe(false);
-    for (const job of TABLE) expect(w.state(job.name).state).toBe("ENABLED");
+    for (const job of TABLE) expect(w.state(job.name).state, job.name).toBe(job.state);
+  });
+
+  it("zadania push wznowione wcześniej (ENABLED) → przebieg domyślny je wstrzymuje, reszta bez zmian", () => {
+    const w = world();
+    expect(w.run([]).status).toBe(0);
+    expect(w.run(["--resume", ...NAMES]).status).toBe(0);
+    const push = TABLE.filter((j) => j.name.startsWith("mh-push-reminders"));
+    expect(push.map((j) => j.state)).toEqual(["PAUSED", "PAUSED"]);
+    for (const job of push) {
+      w.seed(job.name, { schedule: job.schedule, timeZone: "Europe/Warsaw", uri: SERVICE_URL + job.path, method: "GET", state: "ENABLED" });
+    }
+    const r = w.run([]);
+    expect(r.status, r.stderr).toBe(0);
+    for (const job of TABLE) expect(w.state(job.name).state, job.name).toBe(job.state);
   });
 
   it("Ethan 1: istniejące zadanie ENABLED z harmonogramem zaparkowanym (przerwany przebieg) → pauza przed właściwym harmonogramem", () => {
