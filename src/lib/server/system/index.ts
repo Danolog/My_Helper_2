@@ -21,7 +21,30 @@ export {
 export type { SalonContext, SalonContextResolution, SalonRole } from "./session";
 export { cleanupExpiredTemporaryAccess } from "./cron";
 export { checkDatabase, pingDatabase } from "./health";
-export { deleteUndeliverablePushSubscriptions, getPushSubscriptionsForUser } from "./notifications";
-export type { PushSubscriptionForSend } from "./notifications";
+export { cleanupStaleDepositBookings } from "./deposits-cleanup";
+export type { StaleDepositCleanupResult } from "./deposits-cleanup";
+export {
+  countPushSubscriptions,
+  deleteUndeliverablePushSubscriptions,
+  findDueAppointmentReminders,
+  findDuePushReminders,
+  findDueSmsReminders,
+  getAppointmentReminderPreview,
+  getPendingCronReminders,
+  getPushSubscriptionsForUser,
+  getUserIdsWithPushSubscriptions,
+  markAppointmentRemindersSent,
+  markCronRemindersSent,
+} from "./notifications";
+export type {
+  AppointmentReminderCandidate,
+  AppointmentReminderPreviewRow,
+  CronReminderKind,
+  PendingCronReminder,
+  PushReminderCandidate,
+  PushSubscriptionForSend,
+  ReminderWindow,
+  SmsReminderCandidate,
+} from "./notifications";
 export { resolveWaitingListToken } from "./waiting-list";
 export type { WaitingListTokenTarget } from "./waiting-list";

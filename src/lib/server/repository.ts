@@ -27,11 +27,18 @@
  * Na sterowniku postgres-js cała transakcja `db.transaction(...)` biegnie na
  * jednym połączeniu, więc obie instrukcje `SET LOCAL` obowiązują resztę transakcji.
  *
- * ŚCIEŻKI SYSTEMOWE (webhooki Stripe, crony, seed, migracje) NIE przechodzą
- * przez ten wrapper — używają surowego `db` (rola owner, świadomy bypass RLS),
- * bo nie mają zalogowanego właściciela salonu. To celowe (ADR sekcja 4): owner
- * wykonuje je z kontekstem wyznaczanym z danych (np. salon z subskrypcji), nie z
- * sesji. Nigdy nie wołają `forSalon(...)`.
+ * ŚCIEŻKI BEZ SESJI (webhooki, crony, seed, migracje) — stan faktyczny (#228):
+ *   - Kod wołany z webhooka MOŻE użyć `forSalon(salonId)`, gdy `salonId`
+ *     pochodzi z rekordu, który webhook już zweryfikował i odczytał z bazy
+ *     (np. płatność znaleziona w bazie po id z podpisanego zdarzenia) — nigdy
+ *     wprost z treści żądania.
+ *   - Trasa z sekretem crona działająca na jednym salonie z obowiązkowym,
+ *     zwalidowanym `salonId` też idzie przez `forSalon(salonId)` (#193 P5a-2).
+ *   - Wszystko inne (przebiegi po wielu salonach, tabele bez `salon_id`, tabele
+ *     auth) idzie przez nazwane wyjścia rejestru `@/lib/server/system` (pula
+ *     systemowa, migawka R-Z1 i migawka importerów L7). Surowe `db` zostaje
+ *     tylko w plikach z list przejściowych `eslint.db-isolation.mjs` (#193),
+ *     do ich przeniesienia.
  */
 import { and, eq, sql, type SQL, type AnyColumn } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
