@@ -346,28 +346,66 @@ wpisaniu wartości i sprawdzeniu, że wersja sekretu powstała. `rm -P` na APFS
 bezpiecznym wymazaniem; ochroną jest szyfrowanie dysku (FileVault) i jak
 najkrótszy czas życia pliku, nie flaga `rm`.
 
+Blok uruchamiać **z katalogu repo** (VAPID bierze `web-push` z `node_modules`),
+w **bash albo zsh** — w `sh` nie zadziała (`local`, `pipefail`, `>(…)`).
+Komentarze stoją w osobnych liniach (wklejenie do interaktywnego zsh bez
+`interactivecomments` nie może dostać `#` w środku polecenia).
+
+**Pusta wartość (K-1d, Ethan B1):** `add` i `add_multiline` czytają stdin do
+zmiennej lokalnej i przy pustej wartości kończą się kodem 1 **bez wywołania
+gcloud** (żadnej pustej wersji sekretu). `printf` jest wbudowany w powłokę, więc
+wartość nie trafia do argumentów procesu. `set -o pipefail` na początku bloku:
+błąd generatora w potoku (np. `node` poza katalogiem repo) daje kod ≠ 0 potoku.
+
+**Para VAPID (K-1d, Ethan B2):** `gh variable set` działa asynchronicznie
+(podstawienie procesu), więc po bloku VAPID zawsze `vapid_check`: do 10 prób co
+1 s porównuje klucz publiczny wyliczony (ECDH P-256) z klucza prywatnego
+z Secret Managera ze zmienną w GitHub. Klucz prywatny płynie wyłącznie potokiem
+`gcloud secrets versions access` → stdin `node` (bez ekranu, pliku, argumentów
+i zmiennej powłoki); do zmiennej trafia tylko wyliczony klucz publiczny (jawny).
+Wynik „VAPID: para OK” albo „VAPID: ROZJAZD”. **Przy ROZJAZD albo jakimkolwiek
+błędzie w bloku VAPID powtarza się CAŁY blok VAPID** (nowa para nadpisuje obie
+strony), nigdy jedną linię. D-6 (wdrożenie) dopiero po „VAPID: para OK”.
+
 ```bash
+set -o pipefail
 P=my-helper-2-488419
-add() { tr -d '\r\n' | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
-add_multiline() { CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
-# Użycie add_multiline (dziś żaden sekret z manifestu tego nie wymaga):
-#   add_multiline NAZWA < "$HOME/secure/NAZWA.pem"   # potem człowiek usuwa oryginał
+add() { local v; v="$(tr -d '\r\n')"; [ -n "$v" ] || { echo "error: empty value for $1 — gcloud not called" >&2; return 1; }; printf '%s' "$v" | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
+add_multiline() { local v; v="$(cat; printf x)"; v="${v%x}"; [ -n "$v" ] || { echo "error: empty value for $1 — gcloud not called" >&2; return 1; }; printf '%s' "$v" | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
+vapid_check() {
+  local i sm gh
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    # Prywatny tylko w potoku gcloud → node; w zmiennej sm jest wyłącznie wyliczony klucz publiczny.
+    sm="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions access latest --secret=vapid-private-key | node -e 'let s="";process.stdin.on("data",function(d){s+=d}).on("end",function(){try{const e=require("crypto").createECDH("prime256v1");e.setPrivateKey(Buffer.from(s,"base64url"));process.stdout.write(e.getPublicKey().toString("base64url"))}catch(x){process.exit(1)}})')" || sm=""
+    gh="$(gh variable get NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp)" || gh=""
+    if [ -n "$sm" ] && [ "$sm" = "$gh" ]; then echo "VAPID: para OK"; return 0; fi
+    sleep 1
+  done
+  echo "VAPID: ROZJAZD — powtórz CAŁY blok VAPID; D-6 dopiero po 'VAPID: para OK'" >&2
+  return 1
+}
+# Użycie add_multiline (dziś żaden sekret z manifestu tego nie wymaga); potem człowiek usuwa oryginał:
+#   add_multiline NAZWA < "$HOME/secure/NAZWA.pem"
 
 # Generowane lokalnie:
 openssl rand -base64 48 | add better-auth-secret
 openssl rand -hex 32 | add cron-secret
-# VAPID (K-1d): jedna para z jednego wywołania node (z katalogu repo — web-push z node_modules),
-# bez pliku i bez klucza prywatnego na ekranie ani w argumentach. Prywatny: stdout node → add
-# (stdin gcloud). Publiczny (wartość jawna): deskryptor 3 → gh variable set (stdin) dla D-6.
+
+# VAPID (K-1d) — CAŁY blok do vapid_check włącznie, przy błędzie powtarzany w całości.
+# Jedna para z jednego wywołania node, bez pliku i bez klucza prywatnego na ekranie ani w argumentach.
+# Prywatny: stdout node → add (stdin gcloud). Publiczny (jawny): deskryptor 3 → gh variable set (stdin) dla D-6.
 node -e 'const k=require("web-push").generateVAPIDKeys(); require("fs").writeSync(3, k.publicKey); process.stdout.write(k.privateKey)' \
   3> >(gh variable set NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp) \
   | add vapid-private-key
-gh variable get NEXT_PUBLIC_VAPID_PUBLIC_KEY --env production-gcp   # klucz publiczny ustawiony (jawny)
+vapid_check
+# Metadane najnowszej wersji (bez wartości):
+gcloud --project=$P secrets versions list vapid-private-key --sort-by=~createTime --limit=1 --format='value(name,state,createTime)'
 
 # Od dostawców (plik zapisany z panelu dostawcy, poza repo; oryginał usuwa człowiek po dodaniu wersji).
 # `&& rm` (Ryan, K-1d): nieudane add (kod ≠ 0) nie kasuje oryginału — wartość do ponowienia zostaje.
 add stripe-secret-key < "$HOME/secure/stripe-secret-key" && rm "$HOME/secure/stripe-secret-key"
-add stripe-webhook-secret < "$HOME/secure/stripe-webhook-secret" && rm "$HOME/secure/stripe-webhook-secret"   # para Stripe: oba albo żaden (K-1b)
+# Para Stripe: oba albo żaden (K-1b).
+add stripe-webhook-secret < "$HOME/secure/stripe-webhook-secret" && rm "$HOME/secure/stripe-webhook-secret"
 # … analogicznie: resend-api-key, smsapi-token,
 #    upstash-redis-rest-token, google-client-secret (openrouter-api-key: od K-1 poza Secret Manager)
 ```
