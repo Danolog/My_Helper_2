@@ -19,8 +19,10 @@ Powiązane: #110, #118, #121, #131, #133; plan 0.5 (dane z Neona).
   sekretów, adresów e-mail, identyfikatorów kont poza już jawnymi (id projektu,
   numer projektu, id repo i właściciela).
 - **Sekrety.** Wartość nigdy nie jest argumentem polecenia (nie trafia do `ps`,
-  historii powłoki ani logu). Tylko strumień do `--data-file=-` albo plik spoza
-  repo w `--data-file=ŚCIEŻKA`. Bez `set -x`.
+  historii powłoki ani logu). Wyłącznie strumień do `--data-file=-` (sekcja 5,
+  D-5), nigdy `--data-file=ŚCIEŻKA` (K-1e). Bez `set -x`: każdy blok, który
+  dotyka sekretu, zaczyna się od `set +x`; bloki do wklejenia nie mają linii
+  komentarza (interaktywny zsh bez `interactivecomments` wykonałby je).
 - Polecenie wspólne (dalej `$B`):
 
 ```bash
@@ -656,11 +658,13 @@ set +x
 cloud-sql-proxy --port 6543 my-helper-2-488419:europe-central2:myhelper-pg &
 PGPASSWORD="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=my-helper-2-488419 secrets versions access latest --secret=postgres-admin-password)" \
   psql "host=127.0.0.1 port=6543 user=postgres dbname=myhelper sslmode=disable"
+kill %1
 ```
 
 Hasło trafia tylko do środowiska procesu `psql` (nie do argumentów, historii
 ani lokalnego logu gcloud — `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`, B-1).
-Po pracy: zakończyć proxy (`kill %1`).
+Ostatnia linia bloku (`kill %1`, K-1e) kończy proxy po wyjściu z `psql` —
+proxy do bazy nie zostaje w tle.
 
 ## 10. Opcjonalnie — przeniesienie danych Neon → Cloud SQL
 
