@@ -185,8 +185,8 @@ Tworzy:
 
 Hasła: generowane w pamięci procesu, do gcloud tylko przez `--flags-file`
 ze strumienia (`sql users create|set-password`) i `--data-file=-`
-(`secrets versions add`); nie są wypisywane. Wywołania `sql users …` idą
-z `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1` (B-1). Gdy sekret ma już wersję
+(`secrets versions add`); nie są wypisywane. Wywołania `sql users …` (B-1)
+i `secrets versions add` (N2, K-1b) idą z `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`. Gdy sekret ma już wersję
 ENABLED, etap pomija dany login (hasło bez zmian). Gdy wersji brak, a login
 istnieje (przerwany przebieg), hasło jest ustawiane od nowa (`set-password`) —
 stan sam się naprawia. **Błąd odczytu** wersji (sieć, uprawnienia — kod ≠ 0
@@ -321,17 +321,20 @@ wystrzeli. Jeśli `describe` nie pokazuje nagłówka albo pokazuje dosłownie ś
 
 ## 5. D-5 — wartości sekretów (sesja główna)
 
-Zasada: generator albo plik spoza repo → strumień → `--data-file=-`. Nigdy wartość
-w wierszu polecenia, nigdy `echo WARTOŚĆ`. Plik z wartością od dostawcy usuwać
-po dodaniu wersji.
+Zasada (N2, Ryan, K-1b): wartość sekretu trafia do gcloud **wyłącznie przez
+stdin** (`--data-file=-`), zawsze przez `tr -d '\r\n'` (końce wierszy z pliku
+albo panelu dostawcy nie stają się częścią sekretu) i bez lokalnego logu gcloud
+(`CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1`) — wszystko to robi funkcja `add` niżej,
+innej drogi nie używać. Nigdy wartość w wierszu polecenia, nigdy `echo WARTOŚĆ`,
+nigdy `--data-file=ŚCIEŻKA`. Plik z wartością od dostawcy usuwać po dodaniu wersji.
 
 ```bash
 P=my-helper-2-488419
-add() { gcloud --project=$P secrets versions add "$1" --data-file=-; }
+add() { tr -d '\r\n' | CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project=$P secrets versions add "$1" --data-file=-; }
 
 # Generowane lokalnie:
-openssl rand -base64 48 | tr -d '\n' | add better-auth-secret
-openssl rand -hex 32 | tr -d '\n' | add cron-secret
+openssl rand -base64 48 | add better-auth-secret
+openssl rand -hex 32 | add cron-secret
 # VAPID: prywatny do Secret Manager, publiczny do zmiennej NEXT_PUBLIC_VAPID_PUBLIC_KEY (D-6).
 npx --yes web-push generate-vapid-keys --json > "$TMPDIR/vapid.json"
 node -e 'process.stdout.write(require(process.argv[1]).privateKey)' "$TMPDIR/vapid.json" | add vapid-private-key
@@ -340,11 +343,18 @@ node -e 'process.stdout.write(require(process.argv[1]).publicKey)' "$TMPDIR/vapi
 rm -P "$TMPDIR/vapid.json"
 
 # Od dostawców (plik zapisany z panelu dostawcy, poza repo):
-gcloud --project=$P secrets versions add stripe-secret-key --data-file="$HOME/secure/stripe-secret-key"
+add stripe-secret-key < "$HOME/secure/stripe-secret-key"
 rm -P "$HOME/secure/stripe-secret-key"
-# … analogicznie: stripe-webhook-secret, resend-api-key, smsapi-token,
+add stripe-webhook-secret < "$HOME/secure/stripe-webhook-secret"   # para Stripe: oba albo żaden (K-1b)
+rm -P "$HOME/secure/stripe-webhook-secret"
+# … analogicznie: resend-api-key, smsapi-token,
 #    upstash-redis-rest-token, google-client-secret (openrouter-api-key: od K-1 poza Secret Manager)
 ```
+
+**Para Stripe (K-1b):** `stripe-secret-key` i `stripe-webhook-secret` dodawać
+razem albo wcale. Tylko jeden z wersją → `run-deploy.sh` przerywa wdrożenie
+(kod 2, nazwy obu zmiennych), a strażnik startu (`infra/runtime/secret-guard.mjs`)
+odmawia startu z nazwą brakującej zmiennej.
 
 `postgres-url` i `postgres-admin-password` ustawia etap `sql` — w D-5 ich nie ruszać.
 
@@ -367,9 +377,11 @@ rm -P "$HOME/secure/stripe-secret-key"
 (`NAZWA=sekret:latest`). Cloud Run odrzuca rewizję, której sekret nie ma żadnej
 wersji. Od K-1: `required` w manifeście (wymagane: `postgres-url`,
 `better-auth-secret`); `run-deploy.sh` mapuje wyłącznie sekrety, których
-najnowsza wersja ma stan `ENABLED`; sekret wymagany bez wersji przerywa
-wdrożenie **przed** `gcloud run deploy`; błąd odczytu inny niż brak wersji
-(np. uprawnienia) też przerywa. Żadnych wersji-zaślepek. Webhook Stripe bez
+najnowsza wersja ma stan `ENABLED` (od K-1b odczyt `secrets versions list
+NAZWA --sort-by=~createTime --limit=1`: pusty wynik = brak wersji, bez
+rozpoznawania błędu po tekście); sekret wymagany bez wersji przerywa
+wdrożenie **przed** `gcloud run deploy` z nazwą sekretu; każdy błąd odczytu
+(np. uprawnienia, brak samego kontenera sekretu) też przerywa. Żadnych wersji-zaślepek. Webhook Stripe bez
 `stripe-webhook-secret` odrzuca każde żądanie (503) —
 `__tests__/api/stripe-webhook-no-secret.test.ts`.
 Sprawdzenie, że moduł bez sekretu wyłącza się sam: po K-1, przebieg z pustym
