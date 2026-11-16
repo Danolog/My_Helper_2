@@ -3,12 +3,19 @@
  *
  * Zakres przeniesiony z kroku „Verify seed data” w `.github/workflows/quality-gate.yml`
  * (użytkownicy testowi i ich konta z hasłem) i rozszerzony o plany subskrypcji
- * z `./seed-plans`. Zapytania wykonuje `scripts/verify-seed.ts`.
+ * z `./seed-plans`. Przebieg (`runVerifySeed`) dostaje klienta bazy i wyjście
+ * z zewnątrz — `scripts/verify-seed.ts` podpina postgres.js i konsolę.
  *
  * Komunikaty zawierają wyłącznie nazwę kontroli i liczby: bez adresów e-mail,
  * identyfikatorów, wartości z bazy i adresu bazy. Z tabeli `account` czytany jest
  * wyłącznie znacznik, czy hasło jest ustawione.
  */
+import {
+  checkSeedClientOptions,
+  checkSeedTarget,
+  verifySeedServerIdentities,
+  type SeedProbeClient,
+} from "./seed-host-guard";
 import { SEED_PLANS } from "./seed-plans";
 
 /** Użytkownicy z `scripts/seed-test.ts` (te same stałe; zgodność pilnuje test). */
@@ -84,4 +91,61 @@ export function checkSeedRows(rows: SeedRows): { ok: boolean; problems: string[]
   }
 
   return { ok: problems.length === 0, problems };
+}
+
+/** Klient bazy w kształcie postgres.js: opcje do etapu 2 strażnika, zapytania, zamknięcie. */
+export interface VerifySeedClient extends SeedProbeClient {
+  options: { host?: readonly string[] | string | undefined; path?: string | false | null | undefined };
+}
+
+export type VerifySeedDeps = {
+  env: { POSTGRES_URL?: string | undefined; VERCEL_ENV?: string | undefined };
+  /** Tworzy klienta bez łączenia się (postgres.js łączy przy pierwszym zapytaniu). */
+  connect: (url: string) => VerifySeedClient;
+  log: (line: string) => void;
+  error: (line: string) => void;
+};
+
+/**
+ * Przebieg kontroli: trzy etapy strażnika bazy seeda (napis URL → hosty klienta →
+ * tożsamość serwera), dopiero potem zapytania o dane. Odmowa na każdym etapie kończy
+ * przebieg kodem 1 przed zapytaniami o dane. Wyjście: kod odmowy (nigdy `reason` —
+ * zawiera host i nazwę bazy), nazwy kontroli i liczby, przy błędzie tylko nazwa klasy.
+ */
+export async function runVerifySeed(deps: VerifySeedDeps): Promise<number> {
+  const url = deps.env.POSTGRES_URL;
+  const target = checkSeedTarget(url, { VERCEL_ENV: deps.env.VERCEL_ENV });
+  if (!target.ok || !url) {
+    deps.error(`[verify-seed] Odmowa: ${target.ok ? "missing_url" : target.code}`);
+    return 1;
+  }
+  const sql = deps.connect(url);
+  try {
+    const clientTarget = checkSeedClientOptions(sql.options);
+    if (!clientTarget.ok) {
+      deps.error(`[verify-seed] Odmowa: ${clientTarget.code}`);
+      return 1;
+    }
+    const server = await verifySeedServerIdentities([sql]);
+    if (!server.ok) {
+      deps.error(`[verify-seed] Odmowa: ${server.code}`);
+      return 1;
+    }
+
+    const users = (await sql.unsafe(VERIFY_SEED_USERS_SQL)) as unknown as SeedUserRow[];
+    const accounts = (await sql.unsafe(VERIFY_SEED_ACCOUNTS_SQL)) as unknown as SeedAccountRow[];
+    const plans = (await sql.unsafe(VERIFY_SEED_PLANS_SQL)) as unknown as SeedPlanRow[];
+    const result = checkSeedRows({ users, accounts, plans });
+    if (!result.ok) {
+      for (const p of result.problems) deps.error(`[verify-seed] ${p}`);
+      return 1;
+    }
+    deps.log(`[verify-seed] OK: użytkownicy testowi ${users.length}, konta credential ${accounts.length}, plany ${plans.length}`);
+    return 0;
+  } catch (err) {
+    deps.error(`[verify-seed] Błąd: ${err instanceof Error ? err.name : "UnknownError"}`);
+    return 1;
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 }
