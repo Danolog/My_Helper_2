@@ -380,16 +380,15 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
           new Request(`${BASE}/api/auth/get-session`, { headers: { "x-forwarded-for": trackIp(nextIp()) } }),
         );
         expect(session.status).toBe(200);
-        // Log: sama ścieżka i nazwa klasy błędu (sterownika albo opakowania drizzle).
-        const errorLogs = logger.error.mock.calls.map((c) => c[1]);
-        expect(errorLogs).toContainEqual({
-          path: "/sign-in/email",
-          error: expect.stringMatching(/^(PostgresError|DrizzleQueryError)$/),
-        });
-        // W4: żadne wywołanie loggera w tym teście nie zawiera adresu, e-maila ani klucza.
+        // W4 (przed asercją kształtu logu, żeby czerwień kształtu nie zasłaniała wyniku):
+        // żadne wywołanie loggera w tym teście nie zawiera adresu, e-maila ani klucza.
         const allCalls = JSON.stringify(Object.values(logger).flatMap((fn) => fn.mock.calls));
         const forbidden = [ip, ip2, e1, e2, ...touched.flatMap((k) => [k.toString("hex"), k.toString("base64"), JSON.stringify(k)])];
         for (const f of forbidden) expect(allCalls, "log zawiera dane testu").not.toContain(f);
+        // Log: sama ścieżka i nazwa klasy błędu. Na tym sterowniku błąd zapytania
+        // przychodzi opakowany przez drizzle — w logu jego klasa.
+        const errorLogs = logger.error.mock.calls.map((c) => c[1]);
+        expect(errorLogs).toContainEqual({ path: "/sign-in/email", error: "DrizzleQueryError" });
 
         // Nic nie trafiło do działającej tabeli.
         dbRef.current = undefined;
