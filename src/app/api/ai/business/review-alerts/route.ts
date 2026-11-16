@@ -2,12 +2,10 @@ import { NextResponse } from "next/server";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
-import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-import { getUserSalonId } from "@/lib/get-user-salon";
+import { isProAIError, requireProAI, trackAIUsage } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 import { reviews, clients, employees, services, appointments } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-import { isProPlan } from "@/lib/subscription";
 /**
  * Severity classification for negative reviews.
  * - critical: 1-2 star reviews that require immediate attention
@@ -57,7 +55,8 @@ async function generateResponseSuggestion(
     serviceName: string;
   },
   openrouterApiKey: string | undefined,
-  modelId: string
+  modelId: string,
+  salonId: string
 ): Promise<{ text: string; type: "ai" | "template" }> {
   // Fall back to template if no API key is configured
   if (!openrouterApiKey) {
@@ -94,6 +93,8 @@ async function generateResponseSuggestion(
       ].join("\n"),
     });
 
+    // Jeden wiersz zużycia na każde wywołanie modelu (budżet AI salonu)
+    void trackAIUsage(salonId, "review_alerts");
     return { text, type: "ai" };
   } catch (error) {
     logger.error("[Review Alerts] AI generation failed, using template", { error: error });
@@ -105,23 +106,9 @@ async function generateResponseSuggestion(
 }
 
 export async function GET(_request: Request) {
-  const authResult = await requireAuth();
-  if (isAuthError(authResult)) return authResult;
-
-  // Auth check and resolve salon
-  const salonId = await getUserSalonId();
-  if (!salonId) {
-    return NextResponse.json({ error: "Salon not found" }, { status: 404 });
-  }
-
-  // Pro plan check
-  const hasPro = await isProPlan();
-  if (!hasPro) {
-    return NextResponse.json(
-      { error: "Funkcje AI sa dostepne tylko w Planie Pro." },
-      { status: 403 }
-    );
-  }
+  const gate = await requireProAI({ op: "text" });
+  if (isProAIError(gate)) return gate;
+  const { salonId } = gate;
 
   try {
     const now = new Date();
@@ -198,7 +185,8 @@ export async function GET(_request: Request) {
             serviceName,
           },
           openrouterApiKey,
-          modelId
+          modelId,
+          salonId
         );
       })
     );

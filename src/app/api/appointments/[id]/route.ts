@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { eq, and, not, or, lte, gte } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { parseBody, updateAppointmentSchema } from "@/lib/api-validation";
+import { appointmentConflictWhere } from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // `db` pozostaje dla efektow ubocznych anulacji (forfeit zadatku, notyfikacja,
 // nazwa salonu do waiting-list) — to NIE jest brama zasobu [id], ktora pilnuje
@@ -182,6 +183,17 @@ export async function PUT(
     const newEndTime = endTime ? new Date(endTime) : existing.endTime;
     const newEmployeeId = employeeId || existing.employeeId;
 
+    // Koniec po początku — na wartościach SCALONYCH z istniejącą wizytą (samo
+    // endTime wcześniejsze niż zapisany start albo samo startTime po zapisanym
+    // końcu). Przedział pusty/odwrócony nigdy nie trafia w warunek kolizji
+    // półotwartej, więc ominąłby sprawdzenie (#165). Komunikat jak w POST.
+    if (!(newEndTime.getTime() > newStartTime.getTime())) {
+      return NextResponse.json(
+        { success: false, error: "Czas zakonczenia musi byc pozniej niz czas rozpoczecia" },
+        { status: 400 }
+      );
+    }
+
     // Build update object with only provided fields
     const updateData: Record<string, unknown> = {};
     if (startTime) updateData.startTime = newStartTime;
@@ -200,26 +212,14 @@ export async function PUT(
       const overlapping = await tx.select({ id: appointments.id })
         .from(appointments)
         .where(
-          and(
-            eq(appointments.salonId, salonId),
-            eq(appointments.employeeId, newEmployeeId),
-            not(eq(appointments.id, id)),
-            not(eq(appointments.status, "cancelled")),
-            or(
-              and(
-                lte(appointments.startTime, newStartTime),
-                gte(appointments.endTime, newStartTime)
-              ),
-              and(
-                lte(appointments.startTime, newEndTime),
-                gte(appointments.endTime, newEndTime)
-              ),
-              and(
-                gte(appointments.startTime, newStartTime),
-                lte(appointments.endTime, newEndTime)
-              )
-            )
-          )
+          // Półotwarte [start, end) (#165); wizyta nie koliduje sama ze sobą.
+          appointmentConflictWhere({
+            salonId,
+            employeeId: newEmployeeId,
+            start: newStartTime,
+            end: newEndTime,
+            excludeId: id,
+          })
         );
 
       if (overlapping.length > 0) {

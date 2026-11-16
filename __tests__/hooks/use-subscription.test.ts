@@ -62,6 +62,7 @@ describe("useSubscription", () => {
           status: "active",
           trialEndsAt: null,
         },
+        effectivePlanSlug: "pro",
       }),
     });
 
@@ -352,5 +353,46 @@ describe("useSubscription", () => {
 
     expect(result.current.trialEndsAt).toBeNull();
     expect(result.current.isTrialing).toBe(false);
+  });
+
+  // --- Plan efektywny (effectivePlanSlug z /api/subscriptions/current) ---
+
+  const proResponse = (extra: Record<string, unknown>) => ({
+    ok: true,
+    json: async () => ({
+      plan: { slug: "pro", name: "Pro", priceMonthly: "149.00", features: [] },
+      subscription: { status: "trialing", trialEndsAt: "2026-02-20T12:00:00Z" },
+      ...extra,
+    }),
+  });
+
+  it("zapisany plan Pro, plan efektywny Basic (trial po terminie) -> isProPlan false", async () => {
+    mockFetch.mockResolvedValueOnce(proResponse({ effectivePlanSlug: "basic" }));
+    const { result } = renderHook(() => useSubscription());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.plan?.slug).toBe("pro");
+    expect(result.current.isProPlan).toBe(false);
+    expect(result.current.isBasicPlan).toBe(true);
+  });
+
+  it("plan efektywny Pro -> isProPlan true", async () => {
+    mockFetch.mockResolvedValueOnce(proResponse({ effectivePlanSlug: "pro" }));
+    const { result } = renderHook(() => useSubscription());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.isProPlan).toBe(true);
+    expect(result.current.isBasicPlan).toBe(false);
+  });
+
+  it.each([
+    ["brak pola", {}],
+    ["null", { effectivePlanSlug: null }],
+    ["nieznana wartosc", { effectivePlanSlug: "enterprise" }],
+    ["wielkie litery", { effectivePlanSlug: "PRO" }],
+  ])("effectivePlanSlug: %s -> Basic (fail-closed)", async (_label, extra) => {
+    mockFetch.mockResolvedValueOnce(proResponse(extra));
+    const { result } = renderHook(() => useSubscription());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.isProPlan).toBe(false);
+    expect(result.current.isBasicPlan).toBe(true);
   });
 });

@@ -42,10 +42,21 @@ export function isStripePublishableKeyConfigured(): boolean {
 }
 
 /**
- * Check if Stripe webhook secret is configured.
+ * Sekret webhooka Stripe po trim(), albo null, gdy brak (K-1, #144 W2).
+ * Jedno źródło dla sprawdzenia konfiguracji i weryfikacji podpisu: wartość
+ * z samych białych znaków = brak sekretu (webhook odpowiada 503), a końcowy
+ * znak nowej linii z Secret Manager nie psuje weryfikacji podpisu.
+ */
+export function getStripeWebhookSecret(): string | null {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
+  return secret ? secret : null;
+}
+
+/**
+ * Check if Stripe webhook secret is configured (non-empty after trim).
  */
 export function isStripeWebhookConfigured(): boolean {
-  return !!process.env.STRIPE_WEBHOOK_SECRET;
+  return getStripeWebhookSecret() !== null;
 }
 
 /**

@@ -41,10 +41,15 @@ ARG NEXT_PUBLIC_VAPID_PUBLIC_KEY
 # `images.remotePatterns` przy budowie. W czasie działania usługa dostaje
 # GCS_BUCKET osobno (Cloud Run --set-env-vars).
 ARG GCS_BUCKET
+# Publiczny adres zasobnika (nie sekret; pusty = storage.googleapis.com/<bucket>):
+# next.config.ts przerywa budowę przy hoście, którego remotePatterns nie zna.
+# Ta sama wartość (vars.GCS_PUBLIC_BASE_URL) idzie do usługi w czasie działania.
+ARG GCS_PUBLIC_BASE_URL
 ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL} \
     NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY} \
     NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY} \
     GCS_BUCKET=${GCS_BUCKET} \
+    GCS_PUBLIC_BASE_URL=${GCS_PUBLIC_BASE_URL} \
     NEXT_TELEMETRY_DISABLED=1 \
     BUILD_STANDALONE=1
 COPY . .
@@ -68,6 +73,7 @@ ENV NODE_ENV=production
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY drizzle ./drizzle
 COPY infra/db/migrate.mjs ./migrate.mjs
+COPY infra/db/pg-socket.mjs ./pg-socket.mjs
 USER node
 # POSTGRES_URL przychodzi z Secret Manager w czasie uruchomienia Joba.
 # drizzle-orm/migrator: ta sama tabela dziennika co `drizzle-kit migrate`

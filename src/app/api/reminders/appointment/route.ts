@@ -88,6 +88,7 @@ export async function POST(request: Request) {
       appointmentId: string;
       clientName: string;
       success: boolean;
+      skipped?: boolean | undefined;
       error?: string | undefined;
     }> = [];
 
@@ -142,7 +143,9 @@ export async function POST(request: Request) {
         clientId: appt.clientId,
       });
 
-      if (smsResult.success) {
+      // Numer testowy (#75): SMS świadomie pominięty, ale przypomnienie jest
+      // obsłużone — bez oznaczenia każde wywołanie brałoby tę wizytę od nowa.
+      if (smsResult.success || smsResult.skipped) {
         // Collect for batch update instead of individual UPDATE
         idsToMarkSent.push(appt.appointmentId);
       }
@@ -151,6 +154,7 @@ export async function POST(request: Request) {
         appointmentId: appt.appointmentId,
         clientName,
         success: smsResult.success,
+        ...(smsResult.skipped ? { skipped: true } : {}),
         error: smsResult.error,
       });
     }
@@ -164,15 +168,17 @@ export async function POST(request: Request) {
     }
 
     const sent = results.filter((r) => r.success).length;
-    const failed = results.filter((r) => !r.success).length;
+    const skipped = results.filter((r) => r.skipped).length;
+    const failed = results.filter((r) => !r.success && !r.skipped).length;
 
-    logger.info(`[Reminders] Processed ${results.length} appointments: ${sent} sent, ${failed} failed`);
+    logger.info(`[Reminders] Processed ${results.length} appointments: ${sent} sent, ${skipped} skipped, ${failed} failed`);
 
     return NextResponse.json({
       success: true,
       data: {
         processed: results.length,
         sent,
+        skipped,
         failed,
         results,
       },

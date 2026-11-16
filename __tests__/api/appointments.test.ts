@@ -20,6 +20,7 @@ import {
   makeService,
   TEST_IDS,
 } from "./helpers";
+import { matchesPredicate } from "./predicate-tree";
 
 // -------------------------------------------------------
 // Mocks - must be declared before importing route handlers
@@ -2542,5 +2543,314 @@ describe("Faza 3 role — /api/appointments (employee)", () => {
     expect(status).toBe(404);
     expect(body.success).toBe(false);
     expect(body.error).toContain("not found");
+  });
+});
+
+// -------------------------------------------------------
+// #165: kolizja jako przedział półotwarty [start, end)
+// -------------------------------------------------------
+// Atrapa SELECT-u kolizji filtruje wiersze-fikstury warunkiem WHERE, który
+// zbudowała trasa (ewaluator drzewa zamockowanych operatorów drizzle), więc
+// 201/409 wynika ze znaczenia predykatu, a nie z tego, co atrapa „zwróci”.
+
+function filteringChain(rows: Record<string, unknown>[]) {
+  const chain = chainMock([]);
+  (chain as Record<string, unknown>).then = (resolve: (val: unknown[]) => unknown) => {
+    const where = chain.where!.mock.calls.at(-1)?.[0];
+    if (where === undefined) throw new Error("filteringChain: trasa nie wywołała where()");
+    return resolve(rows.filter((r) => matchesPredicate(where, r)));
+  };
+  return chain;
+}
+
+const at165 = (hhmm: string) => `2026-04-01T${hhmm}:00Z`;
+const existing10to11 = (extra: Record<string, unknown> = {}) =>
+  makeAppointment({
+    id: "aaaaaaaa-0000-4000-8000-000000000001",
+    startTime: new Date(at165("10:00")),
+    endTime: new Date(at165("11:00")),
+    ...extra,
+  });
+
+/** Kolejne db.select() z kolejki; reset po teście, żeby nic nie przeciekło dalej. */
+function queueSelects(...chains: ReturnType<typeof chainMock>[]) {
+  mockDbSelect.mockImplementation(() => chains.shift() ?? chainMock([]));
+}
+
+describe("POST /api/appointments — kolizja półotwarta (#165)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // wcześniejsze opisy (Faza 3) przełączają kontekst na pracownika
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+  });
+
+  async function post(start: string, end: string, rows: Record<string, unknown>[], blocks: Record<string, unknown>[] = []) {
+    queueSelects(filteringChain(rows), filteringChain(blocks));
+    mockDbInsert.mockReturnValue(chainMock([makeAppointment({ startTime: new Date(start), endTime: new Date(end) })]));
+    const response = await createAppointment(
+      createMockRequest("http://localhost:3000/api/appointments", {
+        method: "POST",
+        body: {
+          salonId: TEST_IDS.SALON_UUID,
+          employeeId: TEST_IDS.EMPLOYEE_UUID,
+          serviceId: TEST_IDS.SERVICE_UUID,
+          clientId: TEST_IDS.CLIENT_UUID,
+          startTime: start,
+          endTime: end,
+        },
+      })
+    );
+    return parseResponse(response);
+  }
+
+  it("styk 10–11, potem 11–12 → 201", async () => {
+    const { status } = await post(at165("11:00"), at165("12:00"), [existing10to11()]);
+    expect(status).toBe(201);
+  });
+
+  it("styk z drugiej strony: 10–11, potem 09–10 → 201", async () => {
+    const { status } = await post(at165("09:00"), at165("10:00"), [existing10to11()]);
+    expect(status).toBe(201);
+  });
+
+  it("nakładanie o 1 minutę → 409 z dotychczasowym komunikatem", async () => {
+    const { status, body } = await post(at165("10:59"), at165("12:00"), [existing10to11()]);
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+  });
+
+  it("zawieranie (09–12 obejmuje 10–11) → 409", async () => {
+    const { status } = await post(at165("09:00"), at165("12:00"), [existing10to11()]);
+    expect(status).toBe(409);
+  });
+
+  it("anulowana wizyta w tym samym terminie nie koliduje → 201", async () => {
+    const { status } = await post(at165("10:00"), at165("11:00"), [existing10to11({ status: "cancelled" })]);
+    expect(status).toBe(201);
+  });
+
+  it.each(["scheduled", "confirmed", "completed", "no_show"])("wizyta %s blokuje termin → 409", async (s) => {
+    const { status } = await post(at165("10:30"), at165("11:30"), [existing10to11({ status: s })]);
+    expect(status).toBe(409);
+  });
+
+  it("wizyta innego pracownika nie koliduje → 201", async () => {
+    const { status } = await post(at165("10:00"), at165("11:00"), [
+      existing10to11({ employeeId: "bbbbbbbb-0000-4000-8000-000000000002" }),
+    ]);
+    expect(status).toBe(201);
+  });
+
+  it("blokada czasu na styku (11–12 po wizycie 10–11) nie koliduje → 201", async () => {
+    const block = {
+      id: "block-165",
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      blockType: "break",
+      reason: null,
+      startTime: new Date(at165("11:00")),
+      endTime: new Date(at165("12:00")),
+    };
+    const { status } = await post(at165("10:00"), at165("11:00"), [], [block]);
+    expect(status).toBe(201);
+  });
+
+  it("blokada czasu nachodząca o 1 minutę → 409 (przerwa)", async () => {
+    const block = {
+      id: "block-165",
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      blockType: "break",
+      reason: null,
+      startTime: new Date(at165("10:59")),
+      endTime: new Date(at165("12:00")),
+    };
+    const { status, body } = await post(at165("10:00"), at165("11:00"), [], [block]);
+    expect(status).toBe(409);
+    expect(body.error).toContain("przerwa");
+  });
+});
+
+describe("PUT /api/appointments/[id] — kolizja półotwarta (#165)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+  });
+
+  async function put(start: string, end: string, rows: Record<string, unknown>[]) {
+    // edytowana wizyta: 14–15, ten sam pracownik
+    const self = makeAppointment({
+      startTime: new Date(at165("14:00")),
+      endTime: new Date(at165("15:00")),
+    });
+    queueSelects(chainMock([self]), filteringChain([self, ...rows]));
+    mockDbUpdate.mockReturnValue(chainMock([{ ...self, startTime: new Date(start), endTime: new Date(end) }]));
+    const response = await updateAppointment(
+      createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+        method: "PUT",
+        body: { startTime: start, endTime: end },
+      }),
+      createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+    );
+    return parseResponse(response);
+  }
+
+  it("przeciągnięcie na styk (11–12 po 10–11) → 200", async () => {
+    const { status } = await put(at165("11:00"), at165("12:00"), [existing10to11()]);
+    expect(status).toBe(200);
+  });
+
+  it("nakładanie o 1 minutę → 409 z dotychczasowym komunikatem", async () => {
+    const { status, body } = await put(at165("10:59"), at165("12:00"), [existing10to11()]);
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+  });
+
+  it("wizyta nie koliduje sama ze sobą (przesunięcie o 30 min w obrębie własnego terminu) → 200", async () => {
+    const { status } = await put(at165("14:30"), at165("15:30"), []);
+    expect(status).toBe(200);
+  });
+
+  it("anulowana wizyta w docelowym terminie nie koliduje → 200", async () => {
+    const { status } = await put(at165("10:00"), at165("11:00"), [existing10to11({ status: "cancelled" })]);
+    expect(status).toBe(200);
+  });
+
+  it("wizyta innego salonu nie jest brana pod uwagę (filtr salonu) → 200", async () => {
+    const { status } = await put(at165("10:00"), at165("11:00"), [
+      existing10to11({ salonId: "cccccccc-0000-4000-8000-000000000003" }),
+    ]);
+    expect(status).toBe(200);
+  });
+});
+
+describe("PUT /api/appointments/[id] — koniec po początku na wartościach scalonych (#165)", () => {
+  // Zapisana wizyta: 10:00–11:00 (makeAppointment).
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+  });
+
+  async function put(body: Record<string, unknown>) {
+    queueSelects(chainMock([makeAppointment()]), filteringChain([]));
+    mockDbUpdate.mockReturnValue(chainMock([makeAppointment()]));
+    const response = await updateAppointment(
+      createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+        method: "PUT",
+        body,
+      }),
+      createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+    );
+    return parseResponse(response);
+  }
+
+  it.each([
+    ["samo endTime przed zapisanym startem", { endTime: at165("09:00") }],
+    ["samo startTime po zapisanym końcu", { startTime: at165("12:00") }],
+    ["samo endTime równe zapisanemu startowi", { endTime: at165("10:00") }],
+    ["oba pola odwrócone", { startTime: at165("12:00"), endTime: at165("11:00") }],
+    ["oba pola równe", { startTime: at165("12:00"), endTime: at165("12:00") }],
+  ])("%s → 400, bez sprawdzania kolizji i bez zapisu", async (_n, body) => {
+    const { status, body: res } = await put(body);
+    expect(status).toBe(400);
+    expect(res.error).toBe("Czas zakonczenia musi byc pozniej niz czas rozpoczecia");
+    expect(mockDbSelect).toHaveBeenCalledTimes(1); // tylko odczyt wizyty
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("samo endTime skracające wizytę (10:30) → 200", async () => {
+    const { status } = await put({ endTime: at165("10:30") });
+    expect(status).toBe(200);
+  });
+
+  it("sama notatka (czasy z zapisu) → 200", async () => {
+    const { status } = await put({ notes: "x" });
+    expect(status).toBe(200);
+  });
+});
+
+describe("POST /api/appointments — przedział pusty (#165)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+  afterEach(() => {
+    mockDbSelect.mockReset();
+  });
+
+  it("endTime = startTime → 400, bez zapytań do bazy", async () => {
+    const response = await createAppointment(
+      createMockRequest("http://localhost:3000/api/appointments", {
+        method: "POST",
+        body: {
+          salonId: TEST_IDS.SALON_UUID,
+          employeeId: TEST_IDS.EMPLOYEE_UUID,
+          serviceId: TEST_IDS.SERVICE_UUID,
+          startTime: at165("10:00"),
+          endTime: at165("10:00"),
+        },
+      })
+    );
+    const { status } = await parseResponse(response);
+    expect(status).toBe(400);
+    expect(mockDbSelect).not.toHaveBeenCalled();
+  });
+});
+
+describe("PUT /api/appointments/[id] — przeniesienie na innego pracownika (#165, B1 Quinn)", () => {
+  // Edytowana wizyta: pracownik E1 (TEST_IDS.EMPLOYEE_UUID), 14–15.
+  // Kolizja ma być liczona u NOWEGO pracownika, nie u zapisanego.
+  const E2 = "bbbbbbbb-0000-4000-8000-000000000002";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+  });
+
+  async function moveToE2(rows: Record<string, unknown>[]) {
+    const self = makeAppointment({
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      startTime: new Date(at165("14:00")),
+      endTime: new Date(at165("15:00")),
+    });
+    queueSelects(chainMock([self]), filteringChain([self, ...rows]));
+    mockDbUpdate.mockReturnValue(
+      chainMock([{ ...self, employeeId: E2, startTime: new Date(at165("10:30")), endTime: new Date(at165("11:30")) }])
+    );
+    const response = await updateAppointment(
+      createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+        method: "PUT",
+        body: { employeeId: E2, startTime: at165("10:30"), endTime: at165("11:30") },
+      }),
+      createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+    );
+    return parseResponse(response);
+  }
+
+  it("nowy pracownik zajęty w tym terminie → 409, bez zapisu", async () => {
+    const { status, body } = await moveToE2([existing10to11({ employeeId: E2 })]);
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+  });
+
+  it("nowy pracownik wolny, a stary ma w tym terminie inną wizytę → 200", async () => {
+    const { status } = await moveToE2([existing10to11({ employeeId: TEST_IDS.EMPLOYEE_UUID })]);
+    expect(status).toBe(200);
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1);
   });
 });

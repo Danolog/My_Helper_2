@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lt, not } from "drizzle-orm";
+import { rangesOverlap } from "@/lib/appointment-overlap";
 // ADR-001 R2b: świadomie publiczny endpoint bookingu (bez auth, bez sesji salonu) — świadomie surowe db
 // eslint-disable-next-line no-restricted-imports
 import { db } from "@/lib/db";
@@ -191,10 +192,10 @@ export async function GET(request: Request) {
 
       const isPast = isPastDay || (isToday && slotStart <= nowMinutes);
 
-      // Check if this slot overlaps with any blocked range
-      const isBlocked = isPast || blockedRanges.some((range) => {
-        return slotStart < range.end && slotEnd > range.start;
-      });
+      // Kolizja półotwarta [start, end) — ta sama definicja co przy zapisie (#165)
+      const isBlocked = isPast || blockedRanges.some((range) =>
+        rangesOverlap(slotStart, slotEnd, range.start, range.end)
+      );
 
       const hours = Math.floor(slotStart / 60);
       const mins = slotStart % 60;

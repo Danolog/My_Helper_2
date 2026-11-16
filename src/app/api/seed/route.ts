@@ -25,7 +25,7 @@ export async function POST() {
       .values({
         id: "00000000-0000-4000-8000-000000000001",
         name: "Beauty Studio Demo",
-        phone: "+48 123 456 789",
+        phone: "+48 000 600 704", // numer testowy (src/lib/test-phone.ts)
         email: "demo@beautystudio.pl",
         address: "ul. Przykladowa 123, Warszawa",
         industryType: "beauty_salon",
@@ -98,9 +98,10 @@ export async function POST() {
 
     // Create test clients
     const clientData = [
-      { firstName: "Maria", lastName: "Kaczmarek", phone: "+48 111 222 333" },
-      { firstName: "Joanna", lastName: "Lewandowska", phone: "+48 444 555 666" },
-      { firstName: "Agnieszka", lastName: "Wojcik", phone: "+48 777 888 999" },
+      // Telefony z TEST_PHONE_NUMBERS (#75) — SMS na nie nie wychodzi
+      { firstName: "Maria", lastName: "Kaczmarek", phone: "+48 000 600 701" },
+      { firstName: "Joanna", lastName: "Lewandowska", phone: "+48 000 600 702" },
+      { firstName: "Agnieszka", lastName: "Wojcik", phone: "+48 000 600 703" },
     ];
 
     const createdClients = [];

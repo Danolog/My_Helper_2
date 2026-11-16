@@ -73,4 +73,43 @@ describe("db — leniwe połączenie", () => {
     });
     expect(drizzleMock).toHaveBeenCalledTimes(1);
   });
+
+  it("Cloud SQL: ?host=/cloudsql/… → opcja path (gniazdo), host usunięty z adresu (K-1)", async () => {
+    vi.stubEnv(
+      "POSTGRES_URL",
+      "postgresql://myhelper_owner:pw@localhost/myhelper?host=/cloudsql/my-helper-2-488419:europe-central2:myhelper-pg",
+    );
+    const db = await loadDb();
+    db.select();
+    expect(postgresMock).toHaveBeenCalledTimes(1);
+    const [url, opts] = postgresMock.mock.calls[0]!;
+    expect(url).toBe("postgresql://myhelper_owner:pw@localhost/myhelper");
+    expect(opts).toMatchObject({
+      path: "/cloudsql/my-helper-2-488419:europe-central2:myhelper-pg/.s.PGSQL.5432",
+      prepare: false,
+    });
+  });
+
+  it("adres TCP bez parametru host: bez opcji path, adres bez zmian", async () => {
+    vi.stubEnv("POSTGRES_URL", "postgresql://u:p@127.0.0.1:5432/x?sslmode=require");
+    const db = await loadDb();
+    db.select();
+    const [url, opts] = postgresMock.mock.calls[0]!;
+    expect(url).toBe("postgresql://u:p@127.0.0.1:5432/x?sslmode=require");
+    expect(opts).not.toHaveProperty("path");
+  });
+
+  it("nieprawidłowy adres: błąd bez adresu i hasła w treści", async () => {
+    vi.stubEnv("POSTGRES_URL", "postgresql://u:TAJNE-HASLO@ho st/x");
+    const db = await loadDb();
+    let err: unknown;
+    try {
+      db.select();
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(Error);
+    expect(JSON.stringify({ m: (err as Error).message, s: (err as Error).stack, c: (err as Error).cause, ...(err as object) })).not.toContain("TAJNE-HASLO");
+    expect(postgresMock).not.toHaveBeenCalled();
+  });
 });

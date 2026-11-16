@@ -127,6 +127,36 @@ describe("getCurrentPlan", () => {
     expect(mockDbLimit).toHaveBeenCalledWith(1);
   });
 
+  it("zapytanie filtruje po salonie i tylko statusach active/trialing", async () => {
+    mockDbLimit.mockResolvedValue([]);
+    await getCurrentPlan("salon-123");
+    expect(mockDbInnerJoin).toHaveBeenCalledWith(expect.anything(), {
+      type: "eq",
+      args: ["salonSubscriptions.planId", "subscriptionPlans.id"],
+    });
+    expect(mockDbWhere).toHaveBeenCalledTimes(1);
+    expect(mockDbWhere).toHaveBeenCalledWith({
+      type: "and",
+      args: [
+        { type: "eq", args: ["salonSubscriptions.salonId", "salon-123"] },
+        { type: "inArray", args: ["salonSubscriptions.status", ["active", "trialing"]] },
+      ],
+    });
+  });
+
+  it("bez salonId filtruje po salonie z sesji (getUserSalonId)", async () => {
+    mockGetUserSalonId.mockResolvedValue("resolved-salon");
+    mockDbLimit.mockResolvedValue([]);
+    await getCurrentPlan();
+    expect(mockDbWhere).toHaveBeenCalledWith({
+      type: "and",
+      args: [
+        { type: "eq", args: ["salonSubscriptions.salonId", "resolved-salon"] },
+        { type: "inArray", args: ["salonSubscriptions.status", ["active", "trialing"]] },
+      ],
+    });
+  });
+
   it("should fallback to basic plan on database error", async () => {
     mockDbLimit.mockRejectedValue(new Error("DB error"));
     vi.spyOn(console, "error").mockImplementation(() => {});

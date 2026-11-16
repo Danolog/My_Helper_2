@@ -24,9 +24,10 @@
  * tag z kropką, ścieżka dopuszczona.
  */
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
 const read = (p: string) => readFileSync(join(ROOT, p), "utf8");
@@ -35,8 +36,9 @@ const E2E = read(".github/workflows/e2e-production.yml");
 const RUN_DEPLOY = read("infra/gcp/run-deploy.sh");
 const RUN_MIGRATE = read("infra/gcp/run-migrate.sh");
 const MANIFEST = JSON.parse(read("infra/gcp/env-manifest.json")) as {
-  variables: Record<string, { class: string; secretName?: string }>;
+  variables: Record<string, { class: string; secretName?: string; required?: boolean }>;
 };
+const DOCKERFILE = read("Dockerfile");
 
 /** Klucze najwyższego poziomu w bloku `on:` (wcięcie 2 spacje). */
 function triggers(yaml: string): string[] {
@@ -135,6 +137,7 @@ describe("G-C6: deploy-cloud-run.yml", () => {
       "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
       "NEXT_PUBLIC_VAPID_PUBLIC_KEY",
       "GCS_BUCKET",
+      "GCS_PUBLIC_BASE_URL",
     ]) {
       expect(runner).toContain(`--build-arg ${arg}`);
     }
@@ -188,6 +191,22 @@ describe("G-C6: deploy-cloud-run.yml", () => {
   });
 });
 
+describe("G-C6: GCS_PUBLIC_BASE_URL — jedno źródło dla budowy i usługi (K-1, #133 pkt 1)", () => {
+  it("vars.GCS_PUBLIC_BASE_URL dokładnie raz, w env joba deploy (widzi je build i run-deploy.sh)", () => {
+    const c = code(DEPLOY);
+    expect(c.match(/vars\.GCS_PUBLIC_BASE_URL/g)).toHaveLength(1);
+    expect(c).toMatch(/\n {4}env:\n(?: {6}.*\n)*? {6}GCS_PUBLIC_BASE_URL: \$\{\{ vars\.GCS_PUBLIC_BASE_URL \}\}\n/);
+    // żaden krok nie nadpisuje jej własną wartością
+    expect(c.match(/^\s+GCS_PUBLIC_BASE_URL:/gm)).toHaveLength(1);
+  });
+
+  it("Dockerfile: ARG GCS_PUBLIC_BASE_URL przekazany do ENV etapu builder (next.config.ts)", () => {
+    const builder = DOCKERFILE.slice(DOCKERFILE.indexOf(" AS builder"), DOCKERFILE.indexOf(" AS prod-deps"));
+    expect(builder).toMatch(/^ARG GCS_PUBLIC_BASE_URL$/m);
+    expect(builder).toContain("GCS_PUBLIC_BASE_URL=${GCS_PUBLIC_BASE_URL}");
+  });
+});
+
 describe("G-C6: skrypty wdrożenia", () => {
   it("run-deploy.sh: sekrety i zmienne tylko z manifestu (secret/var), --env-vars-file, bez --update-env-vars", () => {
     expect(RUN_DEPLOY).toContain('e.class === "secret"');
@@ -213,6 +232,35 @@ describe("G-C6: skrypty wdrożenia", () => {
     const lines = code(text).split("\n");
     expect(lines.filter((l) => /\bgcloud\b/.test(l) && !l.startsWith("GC=("))).toEqual([]);
     expect(text.indexOf("missing required env")).toBeLessThan(text.search(/"\$\{GC\[@\]\}"/));
+  });
+
+  it("run-deploy.sh: bez --allow-unauthenticated (zachowuje istniejącą politykę IAM; K-1)", () => {
+    expect(code(RUN_DEPLOY)).not.toMatch(/--(no-)?allow-unauthenticated/);
+    expect(code(RUN_DEPLOY)).not.toMatch(/add-iam-policy-binding|set-iam-policy/);
+  });
+
+  it.each([
+    ["run-deploy.sh", RUN_DEPLOY],
+    ["run-migrate.sh", RUN_MIGRATE],
+  ])("%s: Cloud SQL przez konektor — --set-cloudsql-instances z PROJECT_ID:REGION:SQL_INSTANCE (K-1)", (_n, text) => {
+    expect(text).toContain('CLOUDSQL_INSTANCE="${PROJECT_ID}:${REGION}:${SQL_INSTANCE}"');
+    expect(code(text)).toContain('--set-cloudsql-instances="$CLOUDSQL_INSTANCE"');
+    expect(code(text)).not.toContain("--add-cloudsql-instances");
+  });
+
+  it("manifest: klucze AI (OpenRouter, Google AI, ElevenLabs) poza Secret Manager i nigdy required — aplikacja startuje bez nich", () => {
+    const ai = Object.entries(MANIFEST.variables).filter(([n]) => /OPENROUTER|GOOGLE_AI|GEMINI|ELEVENLABS|VERTEX/.test(n) && /KEY|TOKEN|SECRET/.test(n));
+    expect(ai.map(([n]) => n).sort()).toEqual(["ELEVENLABS_API_KEY", "GOOGLE_AI_API_KEY", "OPENROUTER_API_KEY"]);
+    for (const [n, e] of ai) {
+      expect(e.class, n).not.toBe("secret");
+      expect(e.required, n).not.toBe(true);
+    }
+  });
+
+  it("manifest: każdy sekret ma jawne required; wymagane dokładnie postgres-url i better-auth-secret", () => {
+    const secrets = Object.values(MANIFEST.variables).filter((e) => e.class === "secret");
+    for (const e of secrets) expect(typeof e.required, e.secretName).toBe("boolean");
+    expect(secrets.filter((e) => e.required).map((e) => e.secretName).sort()).toEqual(["better-auth-secret", "postgres-url"]);
   });
 
   it("run-migrate.sh: kopia zapasowa przed migracją, POSTGRES_URL z sekretu z manifestu", () => {
@@ -315,5 +363,239 @@ describe("G-C6: e2e-production.yml", () => {
     expect(E2E).toContain(
       "github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'",
     );
+  });
+});
+
+describe("G-C6: run-deploy.sh — tylko sekrety z wersją (K-1, wykonane z fałszywym gcloud)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "g-c6-deploy-"));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(
+    join(dir, "gcloud"),
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_LOG"
+case "$*" in
+  *"secrets versions describe"*) echo "unexpected describe" >&2; exit 9 ;;
+  *"secrets versions list "*)
+    # Jak prawdziwy gcloud: kod 0 i puste wyjście dla sekretu bez wersji.
+    # Historia wersji w FAKE_SECRETS: najstarsza>…>najnowsza (np. ENABLED>DISABLED).
+    # Bez --sort-by=~createTime kolejność od najstarszej; bez --limit=1 wszystkie.
+    sec=$(printf '%s\\n' "$@" | awk 'p==1{print; exit} $0=="list"{p=1}')
+    st=$(printf '%s\\n' "$FAKE_SECRETS" | tr ',' '\\n' | sed -n "s/^$sec=//p")
+    case "$st" in
+      DENIED) echo "ERROR: (gcloud.secrets.versions.list) PERMISSION_DENIED: denied" >&2; exit 1 ;;
+      NOTFOUNDTEXT) echo "ERROR: (gcloud.secrets.versions.list) NOT_FOUND: Secret [$sec] not found" >&2; exit 1 ;;
+      ""|EMPTY) exit 0 ;;
+    esac
+    hist=$(printf '%s\\n' "$st" | tr '>' '\\n')
+    case "$*" in *"--sort-by=~createTime"*) hist=$(printf '%s\\n' "$hist" | awk '{a[NR]=$0} END{for(i=NR;i>0;i--)print a[i]}') ;; esac
+    case "$*" in *"--limit=1"*) hist=$(printf '%s\\n' "$hist" | head -n1) ;; esac
+    printf '%s\\n' "$hist" ;;
+  *"run services describe"*) echo "https://sha-1234567---myhelper-843777043748.europe-central2.run.app" ;;
+  *" run deploy "*)
+    f=$(printf '%s\n' "$@" | sed -n 's/^--env-vars-file=//p')
+    [ -n "$f" ] && sed 's/^/ENVFILE /' "$f" >> "$FAKE_LOG" ;;
+esac
+exit 0
+`,
+  );
+  chmodSync(join(dir, "gcloud"), 0o755);
+  let n = 0;
+  const deploy = (secrets: string, extra: Record<string, string> = {}) => {
+    const log = join(dir, `log-${n++}`);
+    writeFileSync(log, "");
+    const r = spawnSync("bash", [join(ROOT, "infra/gcp/run-deploy.sh"), "deploy"], {
+      encoding: "utf8",
+      env: {
+        NODE_ENV: "test",
+        PATH: `${dir}:${process.env.PATH}`,
+        FAKE_LOG: log,
+        FAKE_SECRETS: secrets,
+        PROJECT_ID: "my-helper-2-488419",
+        REGION: "europe-central2",
+        SERVICE: "myhelper",
+        IMAGE: "europe-central2-docker.pkg.dev/my-helper-2-488419/myhelper/myhelper:abc",
+        RUNTIME_SA: "myhelper-runtime@my-helper-2-488419.iam.gserviceaccount.com",
+        REVISION_TAG: "sha-1234567",
+        SQL_INSTANCE: "myhelper-pg",
+        BETTER_AUTH_URL: "https://example.test",
+        STORAGE_DRIVER: "gcs",
+        GCS_BUCKET: "mh-media",
+        ...extra,
+      },
+    });
+    const lines = readFileSync(log, "utf8").split("\n").filter(Boolean);
+    const calls = lines.filter((c) => !c.startsWith("ENVFILE "));
+    const envFile = lines.filter((c) => c.startsWith("ENVFILE ")).map((c) => c.slice("ENVFILE ".length));
+    const run = calls.find((c) => c.includes(" run deploy "));
+    const listed = calls.filter((c) => c.includes("secrets versions list "));
+    const described = listed.map((c) => {
+      const a = c.split(" ");
+      return a[a.indexOf("list") + 1]!;
+    });
+    return { ...r, calls, run, envFile, described, listed };
+  };
+  const REQUIRED = "postgres-url=ENABLED,better-auth-secret=ENABLED";
+  const secretsArg = (run: string) => run.split(" ").find((a) => a.startsWith("--set-secrets="))!.slice("--set-secrets=".length).split(",");
+  // Wpis --set-secrets złożony z części: bez nowego literału NAZWA=wartość (G-K1, lista zakazana).
+  const mapping = (env: string, secret: string) => `${env}=${secret}:latest`;
+
+  it("wymagane z wersją, opcjonalne bez → deploy tylko z wymaganymi; opcjonalne pominięte z komunikatem", () => {
+    const r = deploy(REQUIRED);
+    expect(r.status, r.stderr).toBe(0);
+    expect(secretsArg(r.run!).sort()).toEqual(["BETTER_AUTH_SECRET=better-auth-secret:latest", "POSTGRES_URL=postgres-url:latest"]);
+    expect(r.stdout).toMatch(/skip: optional secret stripe-webhook-secret has no enabled version/);
+  });
+
+  it("opcjonalny z wersją ENABLED jest mapowany; DISABLED nie", () => {
+    const r = deploy(`${REQUIRED},cron-secret=ENABLED,resend-api-key=DISABLED`);
+    expect(r.status, r.stderr).toBe(0);
+    expect(secretsArg(r.run!)).toContain(mapping("CRON_SECRET", "cron-secret"));
+    expect(secretsArg(r.run!).join(",")).not.toContain("resend-api-key");
+  });
+
+  // K-1b: stan wersji z `versions list` (najnowsza wersja), nie z tekstu błędu describe.
+  it("odczyt: `versions list <sekret> --sort-by=~createTime --limit=1 --format=value(state)`, bez describe", () => {
+    const r = deploy(REQUIRED);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.listed.length).toBeGreaterThan(0);
+    for (const c of r.listed) {
+      const a = c.split(" ");
+      expect(a, c).toEqual(expect.arrayContaining(["--sort-by=~createTime", "--limit=1", "--format=value(state)"]));
+    }
+    expect(r.calls.some((c) => c.includes("versions describe"))).toBe(false);
+  });
+
+  it("pusty kontener (sekret bez wersji, kod 0) wymaganego sekretu → kod 2 z nazwą sekretu, przed deployem", () => {
+    const r = deploy("postgres-url=EMPTY,better-auth-secret=ENABLED");
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("error: required secret postgres-url has no versions");
+    expect(r.run).toBeUndefined();
+  });
+
+  it("jest wersja ENABLED → przechodzi; liczy się NAJNOWSZA wersja (alias latest)", () => {
+    const ok = deploy("postgres-url=DISABLED>ENABLED,better-auth-secret=ENABLED");
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(secretsArg(ok.run!)).toContain("POSTGRES_URL=postgres-url:latest");
+    const newestDisabled = deploy("postgres-url=ENABLED>DISABLED,better-auth-secret=ENABLED");
+    expect(newestDisabled.status).toBe(2);
+    expect(newestDisabled.stderr).toMatch(/required secrets without an enabled version: postgres-url/);
+    expect(newestDisabled.run).toBeUndefined();
+  });
+
+  it("kod ≠ 0 z tekstem NOT_FOUND to błąd odczytu, nie „brak wersji” (bez rozpoznawania po stderr)", () => {
+    const r = deploy(`${REQUIRED},cron-secret=NOTFOUNDTEXT`);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("cannot read versions of secret cron-secret");
+    expect(r.run).toBeUndefined();
+  });
+
+  // K-1b: para Stripe — oba albo żaden.
+  it.each([
+    ["tylko klucz API", "stripe-secret-key=ENABLED", "STRIPE_SECRET_KEY"],
+    ["tylko sekret webhooka", "stripe-webhook-secret=ENABLED", "STRIPE_WEBHOOK_SECRET"],
+    ["klucz API + webhook DISABLED", "stripe-secret-key=ENABLED,stripe-webhook-secret=DISABLED", "STRIPE_SECRET_KEY"],
+  ])("para Stripe: %s → kod 2 z nazwami zmiennych, przed deployem", (_l, stripe, only) => {
+    const r = deploy(`${REQUIRED},${stripe}`);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain(`STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET must both have an enabled version or neither (only ${only})`);
+    expect(r.run).toBeUndefined();
+  });
+
+  it("para Stripe: obie z wersją → obie mapowane; żadna → deploy bez Stripe", () => {
+    const both = deploy(`${REQUIRED},stripe-secret-key=ENABLED,stripe-webhook-secret=ENABLED`);
+    expect(both.status, both.stderr).toBe(0);
+    expect(secretsArg(both.run!)).toEqual(
+      expect.arrayContaining(["STRIPE_SECRET_KEY=stripe-secret-key:latest", mapping("STRIPE_WEBHOOK_SECRET", "stripe-webhook-secret")]),
+    );
+    const none = deploy(REQUIRED);
+    expect(none.status, none.stderr).toBe(0);
+    expect(secretsArg(none.run!).join(",")).not.toContain("stripe");
+  });
+
+  it.each([
+    ["brak wersji", "better-auth-secret=ENABLED"],
+    ["wersja wyłączona", "postgres-url=DISABLED,better-auth-secret=ENABLED"],
+  ])("wymagany sekret: %s → kod 2 PRZED gcloud run deploy", (_l, secrets) => {
+    const r = deploy(secrets);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/required secrets without an enabled version: postgres-url/);
+    expect(r.run).toBeUndefined();
+  });
+
+  it("błąd odczytu inny niż brak wersji (np. uprawnienia) → kod 2, bez cichego pominięcia", () => {
+    const r = deploy(`${REQUIRED},smsapi-token=DENIED`);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/cannot read versions of secret smsapi-token/);
+    expect(r.run).toBeUndefined();
+  });
+
+  it("deploy: --set-cloudsql-instances z nazwą połączenia, bez --allow-unauthenticated", () => {
+    const r = deploy(REQUIRED);
+    expect(r.run).toContain("--set-cloudsql-instances=my-helper-2-488419:europe-central2:myhelper-pg");
+    expect(r.run).not.toMatch(/allow-unauthenticated/);
+    expect(r.stdout).toContain("tag_url=https://sha-1234567---myhelper-843777043748.europe-central2.run.app");
+  });
+
+  // Ryan (#144): mapowane są tylko klasy secret (→ --set-secrets) i var
+  // (→ --env-vars-file); vercel-only, build, image, platform, ci-only nigdy.
+  it("tylko klasy secret i var trafiają do usługi; describe dokładnie dla sekretów z manifestu", () => {
+    const manifest = JSON.parse(read("infra/gcp/env-manifest.json")) as { variables: Record<string, { class: string; secretName?: string }> };
+    const secretNames = Object.values(manifest.variables).filter((v) => v.class === "secret").map((v) => v.secretName!).sort();
+    const others = Object.entries(manifest.variables).filter(([, v]) => v.class !== "secret" && v.class !== "var").map(([k]) => k);
+    const extra = Object.fromEntries(others.map((k) => [k, "x"]));
+    const r = deploy(REQUIRED, { ...extra, ADMIN_EMAILS: "a@example.test", NODE_ENV: "test" });
+    expect(r.status, r.stderr).toBe(0);
+    expect([...r.described].sort()).toEqual(secretNames);
+    const envNames = r.envFile.map((l) => l.split(":")[0]);
+    expect(envNames).toContain("ADMIN_EMAILS");
+    for (const k of others) {
+      expect(envNames).not.toContain(k);
+      expect(r.run).not.toContain(`${k}=`);
+    }
+  });
+
+  it("vercel-only / build z nazwą sekretu w manifeście nie są mapowane (manifest testowy)", () => {
+    const m = join(dir, "manifest-classes.json");
+    writeFileSync(m, JSON.stringify({ variables: {
+      A_SECRET: { class: "secret", secretName: "a-secret", required: true },
+      VO_KEY: { class: "vercel-only", secretName: "vo-secret", required: true },
+      B_KEY: { class: "build", secretName: "b-secret" },
+      V_VAR: { class: "var" },
+      VO_VAR: { class: "vercel-only" },
+    } }));
+    const r = deploy("a-secret=ENABLED,vo-secret=ENABLED,b-secret=ENABLED", { MANIFEST: m, V_VAR: "v", VO_VAR: "w" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.described).toEqual(["a-secret"]);
+    expect(secretsArg(r.run!)).toEqual(["A_SECRET=a-secret:latest"]);
+    expect(r.envFile).toEqual(['V_VAR: "v"']);
+  });
+
+  // Leo (#151 pkt 2): strażnik „no secrets to map” — osiągalny tylko bez
+  // wymaganych sekretów w manifeście.
+  it("żaden sekret do zmapowania → kod 2 przed gcloud run deploy", () => {
+    const m = join(dir, "manifest-none.json");
+    writeFileSync(m, JSON.stringify({ variables: { OPT_SECRET: { class: "secret", secretName: "opt-secret" } } }));
+    const r = deploy("", { MANIFEST: m });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/error: no secrets to map/);
+    expect(r.run).toBeUndefined();
+  });
+
+  // Ethan (#144): pusty wynik odczytu (kod 0) nie jest ENABLED; od K-1b = brak wersji.
+  it("pusty stan wersji: wymagany → kod 2 przed deployem; opcjonalny → pominięty", () => {
+    const req = deploy("postgres-url=EMPTY,better-auth-secret=ENABLED");
+    expect(req.status).toBe(2);
+    expect(req.stderr).toMatch(/required secrets without an enabled version: postgres-url/);
+    expect(req.run).toBeUndefined();
+    const opt = deploy(`${REQUIRED},cron-secret=EMPTY`);
+    expect(opt.status, opt.stderr).toBe(0);
+    expect(opt.stdout).toMatch(/skip: optional secret cron-secret has no enabled version \(MISSING\)/);
+    expect(secretsArg(opt.run!).join(",")).not.toContain("cron-secret");
+  });
+
+  it("brak SQL_INSTANCE → kod 2 przed pierwszym gcloud", () => {
+    const r = deploy(REQUIRED, { SQL_INSTANCE: "" });
+    expect(r.status).toBe(2);
+    expect(r.calls).toEqual([]);
   });
 });

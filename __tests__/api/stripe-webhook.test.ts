@@ -67,6 +67,7 @@ const mockConstructEvent = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   getStripe: (...args: unknown[]) => mockGetStripe(...args),
   isStripeWebhookConfigured: (...args: unknown[]) => mockIsConfigured(...args),
+  getStripeWebhookSecret: () => (mockIsConfigured() ? "mock-webhook-secret" : null),
 }));
 
 // The `stripe` package is imported for its types only in the route; the
