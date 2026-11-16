@@ -16,7 +16,9 @@
  *   użytkownika ani tego samego id podanego z innym użytkownikiem; pusta lista = 0;
  * - `resolveWaitingListToken`: token nieznany → null i brak zapisu; token salonu A
  *   nie zmienia danych salonu B.
- * - brama: zapis notyfikacji z obcym `salon_id` w `forSalon(A)` → 42501 (RLS WITH CHECK).
+ * - brama: zapis notyfikacji z obcym `salon_id` w `forSalon(A)` → 42501 (RLS WITH CHECK);
+ * - brama: nakładający się insert wizyty w `raw` → `isAppointmentSlotTaken` (23P01, #171);
+ * - notifyWaitingList z powiązanym, zweryfikowanym kontem: push dochodzi do skutku.
  *
  * Dane: użytkownicy `it-t3-p5a-…` (prefiks z notatki sprzątania w pg-harness.ts),
  * dwa salony; reszta kaskadą z salonów w `afterAll`.
@@ -26,6 +28,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
 import { confirmDepositPayment } from "@/lib/deposit-confirmation";
 import { sendPushNotification } from "@/lib/push";
 import {
@@ -346,6 +349,59 @@ suite("P5a-1: biblioteki przez forSalon i wyjścia system/ — prawdziwy Postgre
     const [b] = await h!.db.select().from(waitingList).where(eq(waitingList.id, entryB.id));
     expect(b).toMatchObject({ notifiedAt: null, acceptToken: null, accepted: null });
     await h!.db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub));
+  });
+
+  it("notifyWaitingList, powiązane konto: odczyt konta przez bramę działa, push dochodzi do skutku", async () => {
+    const endpoint = `${VALID_ENDPOINTS.chromeFcm}-linked-${RUN}`;
+    const sub = await pushSub(CLIENT_USER_A, endpoint);
+    const entry = await waitingEntry(ids.salonA, ids.clientA, { serviceId: ids.svcA });
+    const { start, end } = nextSlot();
+    const salonName = `IT linked ${RUN}`;
+
+    const res = await notifyWaitingList({
+      salonId: ids.salonA,
+      serviceId: ids.svcA,
+      employeeId: ids.empA,
+      startTime: start,
+      endTime: end,
+      serviceName: "IT Usługa A",
+      employeeName: "IT A",
+      salonName,
+    });
+
+    expect(res.pushCount).toBeGreaterThanOrEqual(1);
+    // konto znalezione po e-mailu klienta (zweryfikowane) → wysyłka na jego subskrypcję
+    const endpoints = ctl.webpush.mock.calls.map((c) => (c[0] as { endpoint: string }).endpoint);
+    expect(endpoints).toContain(endpoint);
+    const pushRows = (await notificationRows(ids.salonA, "push")).filter((r) => r.message.includes(salonName));
+    expect(pushRows.length).toBeGreaterThanOrEqual(1);
+    expect(pushRows.every((r) => r.status === "sent" && r.clientId === ids.clientA)).toBe(true);
+    const [after] = await h!.db.select().from(waitingList).where(eq(waitingList.id, entry.id));
+    expect(after!.notifiedAt).not.toBeNull();
+    await h!.db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub));
+  });
+
+  it("N2: nakładający się insert wizyty w forSalon(...).raw → isAppointmentSlotTaken = true (23P01 przez bramę)", async () => {
+    const { start, end } = nextSlot();
+    const base = { salonId: ids.salonA, employeeId: ids.empA, serviceId: ids.svcA, status: "scheduled" as const };
+    await forSalon(ids.salonA).raw((tx) =>
+      tx.insert(appointments).values({ ...base, startTime: start, endTime: end, guestName: "IT N2 a" })
+    );
+
+    let caught: unknown;
+    try {
+      await forSalon(ids.salonA).raw((tx) =>
+        tx
+          .insert(appointments)
+          .values({ ...base, startTime: new Date(start.getTime() + 60_000), endTime: end, guestName: "IT N2 b" })
+      );
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught, "drugi insert miał zostać odrzucony przez EXCLUDE").toBeDefined();
+    expect(dbErrorCode(caught)).toBe("23P01");
+    expect(isAppointmentSlotTaken(caught)).toBe(true);
   });
 
   it("resolveWaitingListToken: token nieznany → null; accept/decline z nim → odmowa, brak zapisu", async () => {
