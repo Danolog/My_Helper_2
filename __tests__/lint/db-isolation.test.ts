@@ -36,8 +36,25 @@ const ROOT = path.resolve(__dirname, "../..");
 const NEW_ROUTE = "src/app/api/__p0a-probe__/route.ts";
 const NEW_LIB = "src/lib/__p0a-probe__.ts";
 const SYSTEM_FILE = "src/lib/server/system/__p0a-probe__.ts";
-const LISTED_ROUTE = "src/app/api/health/route.ts";
-const LISTED_ROUTE_WITH_ID = "src/app/api/appointments/[id]/complete/route.ts";
+/**
+ * Pliki z listy przejściowej wyprowadzane z konfiguracji, nie wpisane ręcznie:
+ * partie #193 zdejmują pozycje z listy, a stała wpisana na sztywno po cichu
+ * przestałaby oznaczać „plik z listy”. Asercje przy definicji (bez nowych
+ * przypadków testowych): pozycja istnieje na dysku i należy do listy.
+ * P6 (lista pusta): LISTED_ROUTE → DB_ISOLATION_PERMANENT[0], a przypadki
+ * LISTED_ROUTE_WITH_ID zastępuje test literalGlob na ścieżce z [id].
+ */
+function listedFile(label: string, pick: (f: string) => boolean): string {
+  const file = (DB_ISOLATION_TRANSITIONAL as readonly string[]).find(pick);
+  if (file === undefined) throw new Error(`${label}: brak pozycji na DB_ISOLATION_TRANSITIONAL`);
+  if (!(DB_ISOLATION_TRANSITIONAL as readonly string[]).includes(file)) {
+    throw new Error(`${label}: ${file} nie należy do DB_ISOLATION_TRANSITIONAL`);
+  }
+  if (!fs.existsSync(path.join(ROOT, file))) throw new Error(`${label}: ${file} nie istnieje na dysku`);
+  return file;
+}
+const LISTED_ROUTE = listedFile("LISTED_ROUTE", (f) => !f.includes("["));
+const LISTED_ROUTE_WITH_ID = listedFile("LISTED_ROUTE_WITH_ID", (f) => f.includes("["));
 
 /**
  * Zamrożony stan długu z wyniku reguły bez listy (Z3, 73 pliki na b3a5faf),
