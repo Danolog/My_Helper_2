@@ -24,13 +24,23 @@ const suite = h ? describe : describe.skip;
 const APP_ROLES = ["myhelper_app", "myhelper_app_login"];
 const WRITE_PRIVS = ["INSERT", "UPDATE", "DELETE", "TRUNCATE"];
 
-type Sql = NonNullable<typeof h>["observer"];
-type Tx = Parameters<Parameters<Sql["begin"]>[0]>[0];
+/** Klient albo transakcja postgres.js — wystarczy `unsafe` (wzór z `scripts/db-rls-guard.ts`). */
+type QueryRunner = { unsafe: (query: string) => PromiseLike<readonly unknown[]> };
+
+/** Stałe testu jako lista literałów SQL; tylko identyfikatory/słowa ze znaków [a-z_A-Z] (bez danych z zewnątrz). */
+const sqlList = (xs: readonly string[]) =>
+  xs
+    .map((x) => {
+      if (!/^[A-Za-z_]+$/.test(x)) throw new Error(`nieoczekiwana stała SQL: ${x}`);
+      return `'${x}'`;
+    })
+    .join(", ");
 
 /** Istniejące role z APP_ROLES. */
-async function appRoles(sql: Sql | Tx): Promise<string[]> {
-  const rows = await sql<{ rolname: string }[]>`
-    SELECT rolname FROM pg_roles WHERE rolname = ANY(${APP_ROLES}) ORDER BY rolname`;
+async function appRoles(sql: QueryRunner): Promise<string[]> {
+  const rows = (await sql.unsafe(`SELECT rolname FROM pg_roles WHERE rolname IN (${sqlList(APP_ROLES)}) ORDER BY rolname`)) as Array<{
+    rolname: string;
+  }>;
   return rows.map((r) => r.rolname);
 }
 
@@ -38,17 +48,17 @@ async function appRoles(sql: Sql | Tx): Promise<string[]> {
  * Naruszenia zasady „widoki w public: tylko SELECT”: `widok (v|m): rola PRAWO`.
  * Pusta lista = zasada spełniona.
  */
-async function viewWriteGrants(sql: Sql | Tx): Promise<string[]> {
-  const rows = await sql<{ relname: string; relkind: string; rolname: string; priv: string }[]>`
-    SELECT c.relname, c.relkind::text AS relkind, r.rolname, p.priv
+async function viewWriteGrants(sql: QueryRunner): Promise<string[]> {
+  const rows = (await sql.unsafe(`
+    SELECT c.relname::text AS relname, c.relkind::text AS relkind, r.rolname::text AS rolname, p.priv
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    CROSS JOIN (SELECT rolname FROM pg_roles WHERE rolname = ANY(${APP_ROLES})) r
-    CROSS JOIN unnest(${WRITE_PRIVS}::text[]) AS p(priv)
+    CROSS JOIN (SELECT rolname FROM pg_roles WHERE rolname IN (${sqlList(APP_ROLES)})) r
+    CROSS JOIN unnest(ARRAY[${sqlList(WRITE_PRIVS)}]::text[]) AS p(priv)
     WHERE n.nspname = 'public'
       AND c.relkind IN ('v', 'm')
       AND has_table_privilege(r.rolname, c.oid, p.priv)
-    ORDER BY c.relname, r.rolname, p.priv`;
+    ORDER BY c.relname, r.rolname, p.priv`)) as Array<{ relname: string; relkind: string; rolname: string; priv: string }>;
   return rows.map((x) => `${x.relname} (${x.relkind}): ${x.rolname} ${x.priv}`);
 }
 
