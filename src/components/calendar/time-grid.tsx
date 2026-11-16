@@ -308,13 +308,15 @@ export function TimeGrid({
                 );
               })}
 
-              {/* Events overlay */}
+              {/* Events overlay - cancelled events sit one layer lower so they never
+                  intercept clicks meant for an active event in the same slot (#164) */}
               {employeeEvents.map((event) => {
                 const { top } = getEventPosition(event);
+                const layer = event.appointment.status === "cancelled" ? "z-[1]" : "z-[2]";
                 return (
                   <div
                     key={event.id}
-                    className="absolute left-0 right-0 z-[2]"
+                    className={`absolute left-0 right-0 ${layer}`}
                     style={{ top }}
                   >
                     <CalendarEventComponent
