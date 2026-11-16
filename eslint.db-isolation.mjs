@@ -144,9 +144,6 @@ export const P4_FILES = [
 
 /** P5 (Eva): crony, powiadomienia, rejestracja triala, seed, plany, biblioteki powiadomień. */
 export const P5_FILES = [
-  "src/app/api/notifications/birthday/route.ts",
-  "src/app/api/notifications/low-stock/route.ts",
-  "src/app/api/notifications/we-miss-you/route.ts",
   "src/app/api/register-subscription/route.ts",
   "src/app/api/reminders/appointment/route.ts",
   "src/app/api/seed/route.ts",

@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { eq, and, isNotNull, like, sql } from "drizzle-orm";
 import { isValidUuid, validateBody, lowStockNotificationSchema } from "@/lib/api-validation";
 import { requireCronSecret } from "@/lib/auth-middleware";
-// ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { products, notifications } from "@/lib/schema";
+// #193 P5a-2 (decyzja CTO D1): jeden salon z obowiązkowego salonId → brama salonu;
+// w raw jawny warunek salonu w każdym zapytaniu.
+import { forSalon } from "@/lib/server/repository";
 /**
  * GET /api/notifications/low-stock
  *
@@ -41,16 +42,18 @@ export async function GET(request: Request) {
     }
 
     // Find all products where quantity <= minQuantity
-    const lowStockProducts = await db
-      .select()
-      .from(products)
-      .where(
-        and(
-          eq(products.salonId, salonId),
-          isNotNull(products.minQuantity),
-          sql`CAST(${products.quantity} AS numeric) <= CAST(${products.minQuantity} AS numeric)`
+    const lowStockProducts = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(products)
+        .where(
+          and(
+            eq(products.salonId, salonId),
+            isNotNull(products.minQuantity),
+            sql`CAST(${products.quantity} AS numeric) <= CAST(${products.minQuantity} AS numeric)`
+          )
         )
-      );
+    );
 
     return NextResponse.json({
       success: true,
@@ -112,22 +115,40 @@ export async function POST(request: Request) {
       unit?: string;
     };
 
-    // Check for existing low-stock notification for this product in the last 24h
-    // to avoid duplicate notifications
-    const existingRecent = await db
-      .select({ id: notifications.id })
-      .from(notifications)
-      .where(
-        and(
-          eq(notifications.salonId, salonId),
-          like(notifications.message, `%${productId}%`),
-          sql`${notifications.createdAt} > NOW() - INTERVAL '24 hours'`,
-          sql`${notifications.type} = 'system'`
-        )
-      )
-      .limit(1);
+    const unitLabel = unit || "szt.";
+    const message = `Niski stan magazynowy: "${productName}" - pozostalo ${quantity} ${unitLabel} (minimum: ${minQuantity} ${unitLabel}). Uzupelnij zapasy! [product:${productId}]`;
 
-    if (existingRecent.length > 0) {
+    // Sprawdzenie duplikatu z ostatnich 24h i zapis w jednej transakcji bramy
+    // (bez wywołań zewnętrznych w środku).
+    const notification = await forSalon(salonId).raw(async (tx) => {
+      const existingRecent = await tx
+        .select({ id: notifications.id })
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.salonId, salonId),
+            like(notifications.message, `%${productId}%`),
+            sql`${notifications.createdAt} > NOW() - INTERVAL '24 hours'`,
+            sql`${notifications.type} = 'system'`
+          )
+        )
+        .limit(1);
+      if (existingRecent.length > 0) return null;
+
+      const [created] = await tx
+        .insert(notifications)
+        .values({
+          salonId,
+          type: "system",
+          message,
+          status: "sent",
+          sentAt: new Date(),
+        })
+        .returning();
+      return created ?? null;
+    });
+
+    if (!notification) {
       return NextResponse.json({
         success: true,
         data: {
@@ -136,21 +157,6 @@ export async function POST(request: Request) {
         },
       });
     }
-
-    // Create notification
-    const unitLabel = unit || "szt.";
-    const message = `Niski stan magazynowy: "${productName}" - pozostalo ${quantity} ${unitLabel} (minimum: ${minQuantity} ${unitLabel}). Uzupelnij zapasy! [product:${productId}]`;
-
-    const [notification] = await db
-      .insert(notifications)
-      .values({
-        salonId,
-        type: "system",
-        message,
-        status: "sent",
-        sentAt: new Date(),
-      })
-      .returning();
 
     logger.info(`[Low Stock Alert] Notification sent for product "${productName}" (${productId}) - qty: ${quantity}, min: ${minQuantity}`);
 

@@ -2,10 +2,15 @@ import { NextResponse } from "next/server";
 import { eq, sql, and, lt, isNull, or, inArray } from "drizzle-orm";
 import { isValidUuid, validateBody, weMissYouNotificationSchema } from "@/lib/api-validation";
 import { requireCronSecret } from "@/lib/auth-middleware";
-// ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { clients, appointments, notifications, salons } from "@/lib/schema";
+// #193 P5a-2 (decyzja CTO D1): jeden salon z obowiązkowego salonId → brama salonu;
+// w raw jawny warunek salonu w każdym zapytaniu (także w podzapytaniu wizyt);
+// odczyty kończą się przed sprawdzeniem planu i personalizacją AI.
+import { forSalon } from "@/lib/server/repository";
+
+/** Klient transakcji bramy salonu (parametr callbacku `raw`). */
+type SalonTx = Parameters<Parameters<ReturnType<typeof forSalon>["raw"]>[0]>[0];
 interface WeMissYouSettings {
   enabled: boolean;
   inactiveDays: number;
@@ -29,14 +34,14 @@ const SPAM_GUARD_DAYS = 7;
  * - Their most recent appointment started before the cutoff date, OR
  * - They have no appointments at all and were created before the cutoff date.
  */
-async function findInactiveClients(salonId: string, inactiveDays: number) {
+async function findInactiveClients(tx: SalonTx, salonId: string, inactiveDays: number) {
   const now = new Date();
   const cutoffDate = new Date(now);
   cutoffDate.setDate(cutoffDate.getDate() - inactiveDays);
   const cutoffISO = cutoffDate.toISOString();
 
   // Subquery: get the latest appointment start time per client
-  const lastVisitSubquery = db
+  const lastVisitSubquery = tx
     .select({
       clientId: appointments.clientId,
       lastVisit: sql<string>`MAX(${appointments.startTime})`.as("last_visit"),
@@ -47,7 +52,7 @@ async function findInactiveClients(salonId: string, inactiveDays: number) {
     .as("last_visit_sq");
 
   // Left join clients with the last-visit subquery, then filter for inactive ones
-  const inactiveClients = await db
+  const inactiveClients = await tx
     .select({
       id: clients.id,
       firstName: clients.firstName,
@@ -139,22 +144,24 @@ export async function GET(request: Request) {
       );
     }
 
-    // Get salon with settings
-    const [salon] = await db
-      .select({ id: salons.id, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
+    const { weMissYouSettings, inactiveDays, inactiveClients, cutoffDate } = await forSalon(salonId).raw(
+      async (tx) => {
+        // Get salon with settings
+        const [salon] = await tx
+          .select({ id: salons.id, settingsJson: salons.settingsJson })
+          .from(salons)
+          .where(eq(salons.id, salonId))
+          .limit(1);
 
-    // Extract "we miss you" settings
-    const salonSettings = salon?.settingsJson as Record<string, unknown> | null;
-    const weMissYouSettings = (salonSettings?.weMissYou || null) as WeMissYouSettings | null;
+        // Extract "we miss you" settings
+        const salonSettings = salon?.settingsJson as Record<string, unknown> | null;
+        const weMissYouSettings = (salonSettings?.weMissYou || null) as WeMissYouSettings | null;
 
-    const inactiveDays = weMissYouSettings?.inactiveDays || DEFAULT_INACTIVE_DAYS;
+        const inactiveDays = weMissYouSettings?.inactiveDays || DEFAULT_INACTIVE_DAYS;
 
-    const { clients: inactiveClients, cutoffDate } = await findInactiveClients(
-      salonId,
-      inactiveDays
+        const { clients: inactiveClients, cutoffDate } = await findInactiveClients(tx, salonId, inactiveDays);
+        return { weMissYouSettings, inactiveDays, inactiveClients, cutoffDate };
+      }
     );
 
     return NextResponse.json({
@@ -208,28 +215,65 @@ export async function POST(request: Request) {
 
     const { salonId } = body as { salonId: string };
 
-    // Get salon name and settings
-    const [salon] = await db
-      .select({ name: salons.name, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
+    // Spam guard: batch-check which clients already received a "we miss you" notification recently
+    // (single query instead of N individual checks per client)
+    const spamGuardDate = new Date();
+    spamGuardDate.setDate(spamGuardDate.getDate() - SPAM_GUARD_DAYS);
+    const spamGuardISO = spamGuardDate.toISOString();
+
+    // Odczyty w jednej transakcji bramy, zakończone przed planem i AI.
+    const { salon, savedSettings, inactiveClients, recentlyNotifiedIds } = await forSalon(salonId).raw(
+      async (tx) => {
+        // Get salon name and settings
+        const [salon] = await tx
+          .select({ name: salons.name, settingsJson: salons.settingsJson })
+          .from(salons)
+          .where(eq(salons.id, salonId))
+          .limit(1);
+
+        // Get saved "we miss you" settings
+        const salonSettings = salon?.settingsJson as Record<string, unknown> | null;
+        const savedSettings = (salonSettings?.weMissYou || {}) as Partial<WeMissYouSettings>;
+        const inactiveDays = savedSettings.inactiveDays || DEFAULT_INACTIVE_DAYS;
+
+        // Find inactive clients
+        const { clients: inactiveClients } = await findInactiveClients(tx, salonId, inactiveDays);
+
+        const clientIds = inactiveClients.map((c) => c.id);
+        const recentlyNotifiedIds = new Set<string>();
+        if (clientIds.length > 0) {
+          const recentNotifications = await tx
+            .select({ clientId: notifications.clientId })
+            .from(notifications)
+            .where(
+              and(
+                eq(notifications.salonId, salonId),
+                inArray(notifications.clientId, clientIds),
+                or(
+                  sql`${notifications.message} ILIKE '%tesknimy%'`,
+                  sql`${notifications.message} ILIKE '%tęsknimy%'`,
+                  sql`${notifications.message} ILIKE '%nie widzieli%'`,
+                  sql`${notifications.message} ILIKE '%miss you%'`
+                ),
+                sql`${notifications.createdAt} >= ${spamGuardISO}::timestamp`
+              )
+            );
+          for (const row of recentNotifications) {
+            if (row.clientId) {
+              recentlyNotifiedIds.add(row.clientId);
+            }
+          }
+        }
+        return { salon, savedSettings, inactiveClients, recentlyNotifiedIds };
+      }
+    );
 
     const salonName = salon?.name || "Nasz salon";
-
-    // Get saved "we miss you" settings
-    const salonSettings = salon?.settingsJson as Record<string, unknown> | null;
-    const savedSettings = (salonSettings?.weMissYou || {}) as Partial<WeMissYouSettings>;
-
-    const inactiveDays = savedSettings.inactiveDays || DEFAULT_INACTIVE_DAYS;
     const customMessage = savedSettings.customMessage || DEFAULT_MESSAGE;
     const includeBookingLink =
       savedSettings.includeBookingLink !== undefined
         ? savedSettings.includeBookingLink
         : DEFAULT_INCLUDE_BOOKING_LINK;
-
-    // Find inactive clients
-    const { clients: inactiveClients } = await findInactiveClients(salonId, inactiveDays);
 
     if (inactiveClients.length === 0) {
       return NextResponse.json({
@@ -239,39 +283,6 @@ export async function POST(request: Request) {
           message: "Brak nieaktywnych klientow do powiadomienia",
         },
       });
-    }
-
-    // Spam guard: batch-check which clients already received a "we miss you" notification recently
-    // (single query instead of N individual checks per client)
-    const spamGuardDate = new Date();
-    spamGuardDate.setDate(spamGuardDate.getDate() - SPAM_GUARD_DAYS);
-    const spamGuardISO = spamGuardDate.toISOString();
-
-    const clientIds = inactiveClients.map((c) => c.id);
-    const recentlyNotifiedIds = new Set<string>();
-
-    if (clientIds.length > 0) {
-      const recentNotifications = await db
-        .select({ clientId: notifications.clientId })
-        .from(notifications)
-        .where(
-          and(
-            eq(notifications.salonId, salonId),
-            inArray(notifications.clientId, clientIds),
-            or(
-              sql`${notifications.message} ILIKE '%tesknimy%'`,
-              sql`${notifications.message} ILIKE '%tęsknimy%'`,
-              sql`${notifications.message} ILIKE '%nie widzieli%'`,
-              sql`${notifications.message} ILIKE '%miss you%'`
-            ),
-            sql`${notifications.createdAt} >= ${spamGuardISO}::timestamp`
-          )
-        );
-      for (const row of recentNotifications) {
-        if (row.clientId) {
-          recentlyNotifiedIds.add(row.clientId);
-        }
-      }
     }
 
     // Build notification values for batch insert
@@ -367,10 +378,10 @@ export async function POST(request: Request) {
     // Batch-insert all notifications in a single query instead of N individual INSERTs
     const createdNotifications: Array<Record<string, unknown>> = [];
     if (notificationValues.length > 0) {
-      const inserted = await db
-        .insert(notifications)
-        .values(notificationValues)
-        .returning();
+      // Wszystkie wartości mają salonId bramy (RLS WITH CHECK jako druga warstwa).
+      const inserted = await forSalon(salonId).raw((tx) =>
+        tx.insert(notifications).values(notificationValues).returning()
+      );
 
       for (let i = 0; i < inserted.length; i++) {
         const meta = clientMetadataList[i]!;
