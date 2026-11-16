@@ -74,3 +74,32 @@ export function appointmentConflictWhere(params: AppointmentConflictParams): SQL
   conditions.push(overlapsRange(appointments.startTime, appointments.endTime, params.start, params.end));
   return and(...conditions) as SQL;
 }
+
+/**
+ * Nazwa ograniczenia `EXCLUDE` w bazie (migracja 0009, #171): ta sama reguła
+ * co `appointmentConflictWhere` (pracownik, `[start, end)`, bez `cancelled`).
+ * Łapie wyścig, którego SELECT przed INSERT nie złapie — dwa równoległe zapisy
+ * tego samego terminu.
+ */
+export const APPOINTMENT_NO_OVERLAP_CONSTRAINT = "appointments_no_overlap";
+
+/** SQLSTATE `exclusion_violation`. */
+const EXCLUSION_VIOLATION = "23P01";
+
+/**
+ * Czy błąd zapisu to naruszenie `appointments_no_overlap` (→ 409 w trasie).
+ * Drizzle opakowuje błąd sterownika w `DrizzleQueryError` (`cause`); postgres.js
+ * podaje nazwę w `constraint_name`, node-postgres w `constraint`. Inne
+ * naruszenia (np. CHECK `appointments_end_after_start`) to nie kolizja — 500.
+ */
+export function isAppointmentOverlapViolation(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
+    const e = current as { code?: unknown; constraint_name?: unknown; constraint?: unknown; cause?: unknown };
+    if (e.code === EXCLUSION_VIOLATION) {
+      return (e.constraint_name ?? e.constraint) === APPOINTMENT_NO_OVERLAP_CONSTRAINT;
+    }
+    current = e.cause;
+  }
+  return false;
+}

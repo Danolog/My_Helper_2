@@ -2854,3 +2854,105 @@ describe("PUT /api/appointments/[id] — przeniesienie na innego pracownika (#16
     expect(mockDbUpdate).toHaveBeenCalledTimes(1);
   });
 });
+
+// -------------------------------------------------------
+// #171: EXCLUDE appointments_no_overlap w bazie — 23P01 przy zapisie → 409
+// -------------------------------------------------------
+// Sprawdzenie aplikacyjne przepuszcza (termin wolny w chwili SELECT-u), a
+// INSERT/UPDATE odrzuca baza: równoległy zapis zajął termin w międzyczasie.
+
+/** Łańcuch, którego await kończy się błędem (np. odrzuceniem przez bazę). */
+function rejectingChain(error: unknown) {
+  const chain = chainMock([]);
+  (chain as Record<string, unknown>).then = (_res: unknown, reject: (e: unknown) => unknown) => reject(error);
+  return chain;
+}
+
+// drizzle-orm jest tu zamockowany — kształt DrizzleQueryError (błąd sterownika w cause).
+const dbError = (code: string, constraint_name: string) =>
+  Object.assign(new Error("Failed query: insert ..."), {
+    cause: Object.assign(new Error("db"), { code, constraint_name }),
+  });
+
+describe("POST /api/appointments — wyścig odrzucony przez bazę (#171)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+  });
+
+  async function postRejected(error: unknown) {
+    queueSelects(filteringChain([]), filteringChain([]));
+    mockDbInsert.mockReturnValue(rejectingChain(error));
+    const response = await createAppointment(
+      createMockRequest("http://localhost:3000/api/appointments", {
+        method: "POST",
+        body: {
+          salonId: TEST_IDS.SALON_UUID,
+          employeeId: TEST_IDS.EMPLOYEE_UUID,
+          serviceId: TEST_IDS.SERVICE_UUID,
+          clientId: TEST_IDS.CLIENT_UUID,
+          startTime: at165("10:00"),
+          endTime: at165("11:00"),
+        },
+      })
+    );
+    return parseResponse(response);
+  }
+
+  it("23P01 appointments_no_overlap → 409 z dotychczasowym komunikatem kolizji", async () => {
+    const { status, body } = await postRejected(dbError("23P01", "appointments_no_overlap"));
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+    expect(mockDbInsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("naruszenie CHECK (23514) to nie kolizja → 500", async () => {
+    const { status } = await postRejected(dbError("23514", "appointments_end_after_start"));
+    expect(status).toBe(500);
+  });
+
+  it("inny błąd bazy → 500", async () => {
+    const { status } = await postRejected(new Error("connection reset"));
+    expect(status).toBe(500);
+  });
+});
+
+describe("PUT /api/appointments/[id] — wyścig odrzucony przez bazę (#171)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbUpdate.mockReset();
+  });
+
+  async function putRejected(error: unknown) {
+    queueSelects(chainMock([makeAppointment()]), filteringChain([]));
+    mockDbUpdate.mockReturnValue(rejectingChain(error));
+    const response = await updateAppointment(
+      createMockRequest(`http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}`, {
+        method: "PUT",
+        body: { startTime: at165("12:00"), endTime: at165("13:00") },
+      }),
+      createRouteParams(TEST_IDS.APPOINTMENT_UUID)
+    );
+    return parseResponse(response);
+  }
+
+  it("23P01 appointments_no_overlap → 409 z dotychczasowym komunikatem kolizji", async () => {
+    const { status, body } = await putRejected(dbError("23P01", "appointments_no_overlap"));
+    expect(status).toBe(409);
+    expect(body.error).toBe("Termin koliduje z istniejaca wizyta. Wybierz inna godzine");
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("inny błąd bazy → 500", async () => {
+    const { status } = await putRejected(dbError("23505", "appointments_pkey"));
+    expect(status).toBe(500);
+  });
+});

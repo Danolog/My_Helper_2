@@ -329,11 +329,62 @@ test.describe('Flow 4: Appointment System', () => {
       const event = await openTomorrowWithEvent(page, id);
       await expect(event).toHaveAttribute('data-status', 'scheduled');
 
-      // Klawiatura zamiast klikniecia: anulowane wizyty z poprzednich przebiegow
-      // w tym samym terminie nadal sa rysowane i zaslaniaja aktywna (klik trafia
-      // w wierzch) — osobne zgloszenie. Enter wola ten sam onClick.
-      await event.focus();
-      await page.keyboard.press('Enter');
+      // Prawdziwy klik. Anulowane wizyty z poprzednich przebiegow w tym samym
+      // terminie sa nadal rysowane, ale warstwe nizej (#164) — klik trafia w aktywna.
+      await event.click();
+      await expect(page.getByText('Klient: Maria Kaczmarek | Status: Zaplanowana')).toBeVisible({ timeout: 10000 });
+    });
+
+    test('should open details of a cancelled appointment by click', { tag: '@full' }, async ({ page }) => {
+      // Anulowana wizyta jest warstwe nizej niz aktywna, ale sama w terminie ma
+      // dalej przyjmowac klikniecie (granica jsdom z #173: pointer-events nie da
+      // sie sprawdzic w testach jednostkowych).
+      const id = await createAppointmentViaApi(page, '16:00');
+      const del = await page.request.delete(`/api/appointments/${id}`, { headers: await csrfHeaders(page) });
+      expect(del.status(), `anulowanie wizyty ${id}: ${await del.text()}`).toBe(200);
+      const event = await openTomorrowWithEvent(page, id);
+      await expect(event).toHaveAttribute('data-status', 'cancelled');
+
+      // Klik myszy w srodek wizyty, nie locator.click(): anulowane z poprzednich
+      // przebiegow leza w tym samym miejscu i ktoras z nich moze byc na wierzchu
+      // (Playwright odmowilby kliku "intercepts pointer events"). Trafienie
+      // w dowolna z nich daje te same szczegoly; aktywnych w tym terminie nie ma
+      // (16:00 zaklada tylko ten test, a createAppointmentViaApi anuluje pozostalosci).
+      // mouse.click nie przewija strony (16:00 jest ponizej pierwszego ekranu).
+      await event.scrollIntoViewIfNeeded();
+      const box = await event.boundingBox();
+      expect(box, `polozenie wizyty ${id}`).not.toBeNull();
+      await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await expect(page.getByText('Klient: Maria Kaczmarek | Status: Anulowana').first()).toBeVisible({ timeout: 10000 });
+    });
+
+    test('should stack an active appointment above a cancelled one in the same slot', { tag: '@full' }, async ({ page }) => {
+      // Wlasna para (#164): anulowana C i aktywna A w tym samym terminie, bez
+      // polegania na resztkach z poprzednich przebiegow. 18:00 u Marty zaklada
+      // tylko ten test; 17:00 nie, bo 16:00-17:00 z testu wyzej styka sie
+      // z granica (kolizja w POST jest wlacznie z granica) przy 2 workerach CI.
+      // Resztki (anulowane C z poprzednich przebiegow) nie zmieniaja wyniku:
+      // asercja dotyczy tylko warstw A i tej C, a anulowane sa zawsze pod aktywna.
+      const cancelledId = await createAppointmentViaApi(page, '18:00');
+      const del = await page.request.delete(`/api/appointments/${cancelledId}`, { headers: await csrfHeaders(page) });
+      expect(del.status(), `anulowanie wizyty ${cancelledId}: ${await del.text()}`).toBe(200);
+      const activeId = await createAppointmentViaApi(page, '18:00');
+      createdAppointmentIds.push(activeId);
+
+      const active = await openTomorrowWithEvent(page, activeId);
+      const cancelled = page.locator(`[data-event-id="${cancelledId}"]`);
+      await expect(cancelled).toHaveAttribute('data-status', 'cancelled');
+      await expect(active).toHaveAttribute('data-status', 'scheduled');
+
+      // Warstwa = pozycjonowany rodzic [data-event-id] rysowany przez siatke.
+      // Prawdziwy CSS w przegladarce (w jsdom Tailwind nie dziala).
+      const zIndexOfLayer = (el: Element) => Number(getComputedStyle(el.parentElement!).zIndex);
+      const activeZ = await active.evaluate(zIndexOfLayer);
+      const cancelledZ = await cancelled.evaluate(zIndexOfLayer);
+      expect(activeZ, `z-index warstwy aktywnej (${activeZ}) nad anulowana (${cancelledZ})`).toBeGreaterThan(cancelledZ);
+
+      // Sciezka uzytkownika: klik w tym terminie trafia w aktywna.
+      await active.click();
       await expect(page.getByText('Klient: Maria Kaczmarek | Status: Zaplanowana')).toBeVisible({ timeout: 10000 });
     });
   });
@@ -419,19 +470,25 @@ test.describe('Flow 4: Appointment System', () => {
       createdAppointmentIds.push(id);
       const event = await openTomorrowWithEvent(page, id);
 
-      // Klik zdarzeniem DOM na przycisku: zwykly klik trafia w anulowana wizyte
-      // narysowana na wierzchu (patrz "should view appointment details"), a Enter
-      // na przycisku przechwytuje onKeyDown wydarzenia (preventDefault -> otwiera
-      // szczegoly zamiast dialogu). Oba problemy aplikacji — osobne zgloszenie.
+      // Prawdziwy klik na przycisku ✕ (anulowane pozostalosci leza warstwe nizej, #164).
       const cancelBtn = event.getByTestId('cancel-event-btn');
       await expect(cancelBtn).toHaveCount(1);
-      await cancelBtn.dispatchEvent('click');
+      await cancelBtn.click();
       const dialog = page.getByTestId('cancel-appointment-dialog');
       await expect(dialog).toBeVisible({ timeout: 10000 });
 
       // Zamkniecie bez potwierdzenia nie zmienia statusu
       await page.keyboard.press('Escape');
       await expect(dialog).toBeHidden();
+      await expect(event).toHaveAttribute('data-status', 'scheduled');
+
+      // Enter na przycisku ✕ otwiera dialog anulowania, nie szczegoly wizyty (#164)
+      await cancelBtn.focus();
+      await page.keyboard.press('Enter');
+      await expect(dialog).toBeVisible({ timeout: 10000 });
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+      await expect(page.getByText('Klient: Maria Kaczmarek | Status: Zaplanowana')).toHaveCount(0);
       await expect(event).toHaveAttribute('data-status', 'scheduled');
     });
 
@@ -440,15 +497,24 @@ test.describe('Flow 4: Appointment System', () => {
       createdAppointmentIds.push(id);
       const event = await openTomorrowWithEvent(page, id);
 
-      // Jak w tescie dialogu anulowania: zdarzenie DOM zamiast klikniecia/Enter.
+      // Prawdziwy klik na przycisku ✓ (jak w tescie dialogu anulowania).
       const completeBtn = event.getByTestId('complete-event-btn');
       await expect(completeBtn).toHaveCount(1);
-      await completeBtn.dispatchEvent('click');
+      await completeBtn.click();
       const dialog = page.getByTestId('complete-appointment-dialog');
       await expect(dialog).toBeVisible({ timeout: 10000 });
 
       await page.keyboard.press('Escape');
       await expect(dialog).toBeHidden();
+      await expect(event).toHaveAttribute('data-status', 'scheduled');
+
+      // Enter na przycisku ✓ otwiera dialog zakonczenia, nie szczegoly wizyty (#164)
+      await completeBtn.focus();
+      await page.keyboard.press('Enter');
+      await expect(dialog).toBeVisible({ timeout: 10000 });
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+      await expect(page.getByText('Klient: Maria Kaczmarek | Status: Zaplanowana')).toHaveCount(0);
       await expect(event).toHaveAttribute('data-status', 'scheduled');
     });
 

@@ -55,6 +55,10 @@ nul
 !scripts/generate-pwa-icons.ts
 !scripts/seed-test.ts
 !scripts/seed-host-guard.ts
+# zapytania kontrolne przed migracjami (tylko odczyt), np. 0009-precheck.sql
+!/scripts/sql/
+/scripts/sql/*
+!/scripts/sql/*.sql
 
 # PWA icons (unignore)
 !public/icon-192.png
