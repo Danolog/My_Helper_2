@@ -367,6 +367,17 @@ describe("logi: bez adresu IP, adresu e-mail i klucza", () => {
     for (const f of ["203.0.113.7", EMAIL, "select $1", "cause"]) expect(text).not.toContain(f);
   });
 
+  it("ścieżka z tokenem w adresie trafia do logu jako szablon trasy", async () => {
+    const token = "Tk7resetTk7resetTk7reset";
+    execute.mockRejectedValue(pgError());
+    expect(await t.consumeAuthRateLimit(`203.0.113.7|/reset-password/${token}`, RULE_IN)).toEqual({
+      allowed: false,
+      retryAfter: 10,
+    });
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain(token);
+    expect(logger.error.mock.calls[0]![1]).toEqual({ path: "/reset-password/:token", error: "PostgresError" });
+  });
+
   it("własna klasa błędu bez name → nazwa klasy; błąd z własnym name → to name", async () => {
     class ThrottleProbeError extends Error {}
     execute.mockRejectedValueOnce(new ThrottleProbeError("x"));
