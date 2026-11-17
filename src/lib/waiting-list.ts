@@ -76,20 +76,21 @@ export const WAITING_LIST_NOTIFY_LIMIT = 5;
 const SMS_QUIET_FROM_HOUR = 21;
 const SMS_QUIET_UNTIL_HOUR = 8;
 
-const SMS_HOUR_FORMAT = new Intl.DateTimeFormat("en-GB", {
-  timeZone: SMS_TIME_ZONE,
-  hour: "2-digit",
-  hourCycle: "h23",
-});
-
 /**
  * Czy chwila `now` wypada w godzinach ciszy SMS listy oczekujących: 21:00–8:00
  * czasu warszawskiego (SMS_TIME_ZONE), niezależnie od strefy procesu.
- * Nieprawidłowa data = cisza (SMS nie wychodzi).
+ * Nieprawidłowa data = cisza (SMS nie wychodzi). Formatter tworzony przy
+ * każdym wywołaniu, więc wynik nie zależy od strefy procesu z chwili importu.
  */
 export function isWaitingListSmsQuietTime(now: Date): boolean {
   if (Number.isNaN(now.getTime())) return true;
-  const hourPart = SMS_HOUR_FORMAT.formatToParts(now).find((part) => part.type === "hour");
+  const hourPart = new Intl.DateTimeFormat("en-GB", {
+    timeZone: SMS_TIME_ZONE,
+    hour: "2-digit",
+    hourCycle: "h23",
+  })
+    .formatToParts(now)
+    .find((part) => part.type === "hour");
   const hour = Number(hourPart?.value);
   if (!Number.isInteger(hour)) return true;
   return hour >= SMS_QUIET_FROM_HOUR || hour < SMS_QUIET_UNTIL_HOUR;
