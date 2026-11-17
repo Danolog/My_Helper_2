@@ -317,9 +317,15 @@ suite("P5a-2: trasy z sekretem crona — salony A i B, prawdziwy Postgres", () =
     expect(flags[ids.remindB]!.reminderSentAt).toBeNull();
   });
 
-  // Po poprzednim przypadku wizyty A z klientem A są oznaczone; w oknie A zostaje
-  // tylko wizyta z klientem salonu B (i ewentualnie cudze wiersze bazy spoza testu).
   it("reminders/appointment POST ?salonId=A: wizyta A z klientem salonu B → pominięta bez SMS, bez danych klienta B, log liczby", async () => {
+    // Stan przygotowany w tym przypadku: wizyty A z klientem A oznaczone jako
+    // przypomniane, wizyta A z klientem B nie — w oknie A zostaje tylko ona.
+    await h!.db
+      .update(appointments)
+      .set({ reminderSentAt: new Date() })
+      .where(inArray(appointments.id, [ids.remindA, ids.soonA]));
+    await h!.db.update(appointments).set({ reminderSentAt: null }).where(eq(appointments.id, ids.mismatchA));
+
     const { status, body } = await parseResponse<{ data: { results: Array<Record<string, unknown>> } }>(
       await reminders.POST(postNoBody(`/api/reminders/appointment?salonId=${ids.salonA}`))
     );
