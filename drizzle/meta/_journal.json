@@ -92,6 +92,13 @@
       "when": 1794875450094,
       "tag": "0012_auth_rate_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1794922703856,
+      "tag": "0013_waiting_list_entry_source",
+      "breakpoints": true
     }
   ]
 }
