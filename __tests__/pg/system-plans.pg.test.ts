@@ -5,7 +5,9 @@
  *   - w bazie istnieje ograniczenie UNIQUE dokładnie na `subscription_plans.slug`
  *     (na nim opiera się `ON CONFLICT (slug) DO NOTHING`),
  *   - dwa równoległe wywołania przy braku aktywnych planów kończą się sukcesem
- *     i zostawiają dokładnie po jednym wierszu na slug z `PLANS`,
+ *     i zostawiają dokładnie po jednym wierszu na slug z `PLANS`; przeplot jest
+ *     wymuszony blokadą tabeli (SHARE ROW EXCLUSIVE) w transakcji obserwatora —
+ *     oba wywołania odczytują brak planów i czekają na INSERT, aż blokada zniknie,
  *   - przy istniejących aktywnych planach nic nie jest zapisywane,
  *   - gdy plany są, ale żaden nie jest aktywny — pusta lista, bez zapisu.
  *
@@ -46,6 +48,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { PLANS } from "@/lib/constants";
 import { subscriptionPlans } from "@/lib/schema";
 import { ensurePlansExist } from "@/lib/server/system/plans";
+import type { TransactionSql } from "postgres";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
 
@@ -128,6 +131,30 @@ function describeSettled(r: PromiseSettledResult<unknown>) {
   return `rejected ${code}: ${message}`;
 }
 
+/**
+ * Na połączeniu transakcji `tx` (tym, które trzyma blokadę tabeli) czeka, aż
+ * dokładnie `count` żądań blokady relacji `subscription_plans` czeka
+ * (granted = false). Po `timeoutMs` rzuca błąd — wycofanie transakcji zwalnia blokadę.
+ */
+async function waitForPlanInsertWaiters(tx: TransactionSql, count: number, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  let seen = 0;
+  while (Date.now() < deadline) {
+    // `unsafe` bez parametrów: typ `TransactionSql` w postgres.js nie ma sygnatury wywołania szablonu.
+    const [r] = await tx.unsafe<{ n: number }[]>(`
+      select count(*)::int as n from pg_locks
+      where locktype = 'relation' and not granted
+        and database = (select oid from pg_database where datname = current_database())
+        and relation = 'subscription_plans'::regclass`);
+    seen = r?.n ?? 0;
+    if (seen === count) return;
+    await new Promise((res) => setTimeout(res, 25));
+  }
+  throw new Error(
+    `Po ${timeoutMs} ms na blokadę tabeli subscription_plans czeka ${seen} żądań zamiast ${count} — przeplot nie został wymuszony`
+  );
+}
+
 const suite = h ? describe : describe.skip;
 
 suite("ensurePlansExist — dosiewanie planów, prawdziwy Postgres", () => {
@@ -159,12 +186,22 @@ suite("ensurePlansExist — dosiewanie planów, prawdziwy Postgres", () => {
   });
 
   it("dwa równoległe wywołania bez aktywnych planów → oba spełnione, dokładnie po jednym wierszu na slug", async () => {
+    // Obiekt, nie `let`: przypisanie zachodzi w funkcji transakcji.
+    const pending: { settled?: Promise<PromiseSettledResult<PlanRow[]>[]> } = {};
     try {
       await stashExisting();
       const active = await h!.db.select().from(subscriptionPlans).where(eq(subscriptionPlans.isActive, true));
       expect(active, "przed wywołaniem nie powinno być aktywnych planów").toEqual([]);
 
-      const settled = await Promise.allSettled([ensurePlansExist(), ensurePlansExist()]);
+      // Blokada tabeli trzymana przez obserwatora: oba wywołania odczytują brak
+      // aktywnych planów i stają na INSERT; zatwierdzenie zwalnia je naraz.
+      await h!.observer.begin(async (tx) => {
+        await tx.unsafe("LOCK TABLE subscription_plans IN SHARE ROW EXCLUSIVE MODE");
+        pending.settled = Promise.allSettled([ensurePlansExist(), ensurePlansExist()]);
+        await waitForPlanInsertWaiters(tx, 2);
+      });
+
+      const settled = await pending.settled!;
       expect(settled.map(describeSettled)).toEqual(["fulfilled", "fulfilled"]);
 
       for (const r of settled) {
@@ -181,6 +218,9 @@ suite("ensurePlansExist — dosiewanie planów, prawdziwy Postgres", () => {
       expect(stored.every((s) => s.isActive)).toBe(true);
       expect(await tableIds()).toHaveLength(before!.length + DEFAULT_SLUGS.length);
     } finally {
+      // Blokada jest już zwolniona (zatwierdzenie albo wycofanie transakcji
+      // obserwatora); wywołania muszą się zakończyć przed sprzątaniem.
+      if (pending.settled) await pending.settled;
       await restore();
     }
   });
@@ -224,6 +264,7 @@ suite("ensurePlansExist — dosiewanie planów, prawdziwy Postgres", () => {
     }
   });
 
+  // Porównanie ma sens tylko jako ostatni przypadek pełnego przebiegu pliku.
   it("tabela po przypadkach jest taka sama jak przed testem", async () => {
     expect(await snapshot()).toEqual(before);
   });

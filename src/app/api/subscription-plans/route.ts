@@ -10,7 +10,7 @@ export const revalidate = 3600;
  * GET /api/subscription-plans
  *
  * Returns all active subscription plans with their features and prices.
- * Auto-seeds Basic and Pro plans if the table is empty.
+ * Auto-seeds Basic and Pro plans when there are no active plans.
  */
 export async function GET() {
   try {
