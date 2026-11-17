@@ -457,6 +457,28 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
       expect(after!.blocked_until!.getTime()).toBe(before!.blocked_until!.getTime());
     });
 
+    it("czas blokady liczony zegarem bazy: zegar aplikacji przesunięty o 16 min w trakcie blokady → nadal 429", async () => {
+      const { auth } = makeAuth();
+      const e = trackEmail(email("app-clock"));
+      await signUp(auth, e);
+      for (let i = 0; i < 11; i++) await signIn(auth, e, WRONG);
+      expect((await accountRow(e))!.blocked_until).not.toBeNull();
+      const shifted = Date.now() + 16 * 60 * 1000;
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => shifted);
+      try {
+        const res = await signIn(auth, e, PASSWORD);
+        expect(res.status).toBe(429);
+        const retry = Number(res.headers.get("x-retry-after"));
+        expect(retry).toBeGreaterThan(800);
+        expect(retry).toBeLessThanOrEqual(900);
+        const direct = await reserveAccountSignInAttempt(e);
+        expect(direct.allowed).toBe(false);
+        expect(direct.retryAfter).toBeGreaterThan(800);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
     it("konto istniejące i nieistniejące: te same statusy, ta sama chwila 429, ta sama treść i nagłówki", async () => {
       const { auth } = makeAuth();
       const existing = trackEmail(email("exists"));

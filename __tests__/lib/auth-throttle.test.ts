@@ -52,9 +52,12 @@ afterEach(() => {
 
 const at = (offsetSec: number) => new Date(NOW.getTime() + offsetSec * 1000);
 
-/** Wiersz licznika zwracany przez UPSERT … RETURNING. */
-const row = (count: number, windowStartAgoSec: number, blockedUntilInSec: number | null = null) => [
-  { count, window_start: at(-windowStartAgoSec), blocked_until: blockedUntilInSec === null ? null : at(blockedUntilInSec) },
+/**
+ * Wiersz zwracany przez UPSERT … RETURNING: licznik oraz decyzja i czas do końca
+ * blokady albo okna policzone w SQL (czas blokady liczony zegarem bazy).
+ */
+const row = (count: number, retryAfter: number | null = null, blocked: boolean | null = null) => [
+  { count, blocked, retry_after: retryAfter },
 ];
 
 const pgError = (message = "relation does not exist") => Object.assign(new Error(message), { name: "PostgresError" });
@@ -180,18 +183,28 @@ describe("podział ścieżek: wrażliwe → baza, pozostałe → pamięć proces
 
 describe("licznik adresu: decyzja z wiersza bazy", () => {
   it("count ≤ max → dozwolone, retryAfter null", async () => {
-    execute.mockResolvedValue(row(3, 2));
+    execute.mockResolvedValue(row(3, 8));
     expect(await t.consumeAuthRateLimit(IP_KEY, RULE_IN)).toEqual({ allowed: true, retryAfter: null });
   });
 
-  it("count > max → odmowa, retryAfter = koniec okna − teraz (w górę)", async () => {
-    execute.mockResolvedValue([{ count: 4, window_start: at(-3.5), blocked_until: null }]);
+  it("count > max → odmowa, retryAfter z wiersza bazy, niezależnie od zegara aplikacji", async () => {
+    execute.mockResolvedValue(row(4, 7));
+    vi.setSystemTime(at(3600));
     expect(await t.consumeAuthRateLimit(IP_KEY, RULE_IN)).toEqual({ allowed: false, retryAfter: 7 });
   });
 
-  it("odmowa na granicy okna → retryAfter co najmniej 1", async () => {
-    execute.mockResolvedValue(row(4, 10));
-    expect(await t.consumeAuthRateLimit(IP_KEY, RULE_IN)).toEqual({ allowed: false, retryAfter: 1 });
+  it("count > max bez czasu w wierszu → odmowa z retryAfter = okno reguły", async () => {
+    execute.mockResolvedValue(row(4, null));
+    expect(await t.consumeAuthRateLimit(IP_KEY, RULE_IN)).toEqual({ allowed: false, retryAfter: 10 });
+  });
+
+  it("czas do końca okna liczy SQL: GREATEST(1, CEIL(EXTRACT(EPOCH …))) z now() w RETURNING", async () => {
+    execute.mockResolvedValue(row(1, 10));
+    await t.consumeAuthRateLimit(IP_KEY, RULE_IN);
+    const { sql } = queryOf(execute.mock.calls[0]!);
+    const returning = sql.slice(sql.toLowerCase().lastIndexOf("returning"));
+    expect(returning).toMatch(/greatest\(\s*1\s*,\s*ceil\(\s*extract\(\s*epoch from\s*window_start\s*\+[\s\S]*?-\s*now\(\)/i);
+    expect(returning).toMatch(/\bas retry_after\b/i);
   });
 
   it("pierwsze zapytanie: INSERT … ON CONFLICT … DO UPDATE … RETURNING, okno jako parametr", async () => {
@@ -238,19 +251,36 @@ describe("licznik konta: rezerwacja próby", () => {
     expect(text).toMatch(/\b10\b/);
   });
 
-  it("brak blokady w wierszu → przepuszczenie", async () => {
-    execute.mockResolvedValue(row(10, 60));
+  it("brak blokady w wierszu (blocked null) → przepuszczenie", async () => {
+    execute.mockResolvedValue(row(10, null, null));
     expect(await t.reserveAccountSignInAttempt(EMAIL)).toEqual({ allowed: true, retryAfter: null });
   });
 
-  it("blocked_until w przyszłości → odmowa, retryAfter do końca blokady (w górę)", async () => {
-    execute.mockResolvedValue([{ count: 11, window_start: at(-60), blocked_until: at(125.5) }]);
+  it("blocked true → odmowa, retryAfter z wiersza bazy, także gdy zegar aplikacji jest po końcu blokady", async () => {
+    execute.mockResolvedValue(row(11, 126, true));
+    vi.setSystemTime(at(16 * 60));
     expect(await t.reserveAccountSignInAttempt(EMAIL)).toEqual({ allowed: false, retryAfter: 126 });
   });
 
-  it("blocked_until w przeszłości → przepuszczenie (nowe okno liczy baza)", async () => {
-    execute.mockResolvedValue([{ count: 1, window_start: NOW, blocked_until: at(-1) }]);
+  it("blocked false → przepuszczenie, także gdy zegar aplikacji jest przed końcem blokady", async () => {
+    execute.mockResolvedValue(row(1, 1, false));
+    vi.setSystemTime(at(-16 * 60));
     expect(await t.reserveAccountSignInAttempt(EMAIL)).toEqual({ allowed: true, retryAfter: null });
+  });
+
+  it("blocked true bez czasu w wierszu → odmowa z retryAfter 900", async () => {
+    execute.mockResolvedValue(row(11, null, true));
+    expect(await t.reserveAccountSignInAttempt(EMAIL)).toEqual({ allowed: false, retryAfter: 900 });
+  });
+
+  it("decyzję i czas blokady liczy SQL: (blocked_until > now()) AS blocked i GREATEST(1, CEIL(EXTRACT(EPOCH …)))", async () => {
+    execute.mockResolvedValue(row(1));
+    await t.reserveAccountSignInAttempt(EMAIL);
+    const { sql } = queryOf(execute.mock.calls[0]!);
+    const returning = sql.slice(sql.toLowerCase().lastIndexOf("returning"));
+    expect(returning).toMatch(/\(\s*blocked_until\s*>\s*now\(\)\s*\)\s*as blocked\b/i);
+    expect(returning).toMatch(/greatest\(\s*1\s*,\s*ceil\(\s*extract\(\s*epoch from\s*blocked_until\s*-\s*now\(\)/i);
+    expect(returning).toMatch(/\bas retry_after\b/i);
   });
 
   it("clearSignInFailures: jedno DELETE po kluczu konta", async () => {
