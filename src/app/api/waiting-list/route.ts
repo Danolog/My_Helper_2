@@ -12,6 +12,8 @@ import {
   services,
   employees,
 } from "@/lib/schema";
+import { moduleDisabledResponse } from "@/lib/server/frozen-guard";
+import { getSalonModules } from "@/lib/server/modules";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/waiting-list - List waiting list entries for the salon owner's salon
 export const GET = withApiHandler(
@@ -38,6 +40,10 @@ export const GET = withApiHandler(
         { status: 403 }
       );
     }
+
+    // Przełącznik modułu w ustawieniach salonu — przed odczytem danych
+    const modules = await getSalonModules(salon.id);
+    if (!modules.waitingList) return moduleDisabledResponse();
 
     const { searchParams } = new URL(request.url);
     const serviceId = searchParams.get("serviceId");
@@ -140,6 +146,10 @@ export const POST = withApiHandler(
         { status: 403 }
       );
     }
+
+    // Przełącznik modułu w ustawieniach salonu — przed odczytem treści żądania
+    const modules = await getSalonModules(salon.id);
+    if (!modules.waitingList) return moduleDisabledResponse();
 
     const body = await request.json();
 

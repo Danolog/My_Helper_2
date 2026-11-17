@@ -12,6 +12,8 @@ import {
   services,
   employees,
 } from "@/lib/schema";
+import { moduleDisabledResponse } from "@/lib/server/frozen-guard";
+import { getSalonModules } from "@/lib/server/modules";
 import { forSalon } from "@/lib/server/repository";
 // GET /api/waiting-list/[id] - Get a single waiting list entry
 export const GET = withApiHandler(
@@ -41,6 +43,10 @@ export const GET = withApiHandler(
         { status: 403 }
       );
     }
+
+    // Przełącznik modułu w ustawieniach salonu — przed odczytem danych
+    const modules = await getSalonModules(salon.id);
+    if (!modules.waitingList) return moduleDisabledResponse();
 
     const result = await forSalon(salon.id).raw((tx) =>
       tx
@@ -125,6 +131,10 @@ export const PUT = withApiHandler(
         { status: 403 }
       );
     }
+
+    // Przełącznik modułu w ustawieniach salonu — przed odczytem danych i treści żądania
+    const modules = await getSalonModules(salon.id);
+    if (!modules.waitingList) return moduleDisabledResponse();
 
     // Verify the entry belongs to this salon
     const existing = await forSalon(salon.id).findOne(waitingList, id);
@@ -219,6 +229,10 @@ export const DELETE = withApiHandler(
         { status: 403 }
       );
     }
+
+    // Przełącznik modułu w ustawieniach salonu — przed usunięciem
+    const modules = await getSalonModules(salon.id);
+    if (!modules.waitingList) return moduleDisabledResponse();
 
     // Verify and delete the entry (must belong to this salon)
     const deletedEntry = await forSalon(salon.id).deleteOwned(waitingList, id);

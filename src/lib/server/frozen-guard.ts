@@ -20,6 +20,14 @@ import {
  */
 export function frozenModuleResponse(module: ModuleKey): NextResponse | null {
   if (!isModuleFrozen(module)) return null;
+  return moduleDisabledResponse();
+}
+
+/**
+ * 404 `MODULE_DISABLED` — ta sama odpowiedź dla modułu zamrożonego
+ * w rejestrze i dla modułu wyłączonego przełącznikiem w ustawieniach salonu.
+ */
+export function moduleDisabledResponse(): NextResponse {
   return NextResponse.json(
     { success: false, code: MODULE_DISABLED_CODE, error: MODULE_DISABLED_MESSAGE },
     { status: 404 }
