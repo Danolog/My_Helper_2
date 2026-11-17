@@ -47,7 +47,6 @@ const NOTIFICATIONS_EXPORTS = [
   "findDueAppointmentReminders",
   "findDuePushReminders",
   "findDueSmsReminders",
-  "getAppointmentReminderPreview",
   "getPendingCronReminders",
   "getPushSubscriptionsForUser",
   "getUserIdsWithPushSubscriptions",

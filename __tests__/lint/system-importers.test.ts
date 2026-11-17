@@ -56,6 +56,10 @@ const CONTRACT =
 const DATA_DELETING_CONTRACT =
   "zmiana importerów wyjścia kasującego dane (#193 L7): zaktualizuj SNAPSHOT i listę DOKŁADNIE," +
   " w opisie PR podaj, skąd pochodzą userId/salonId w nowym miejscu; zmianę akceptują CTO i CRCO";
+const IRREVERSIBLE_STATE_CONTRACT =
+  "zmiana importerów wyjścia nieodwracalnie zmieniającego stan wizyt lub płatności w wielu salonach (#193 L7):" +
+  " zaktualizuj SNAPSHOT i listę DOKŁADNIE, w opisie PR podaj, skąd pochodzą userId/salonId w nowym miejscu;" +
+  " zmianę akceptują CTO i CRCO";
 const INTERMEDIATE_CONTRACT =
   "zmiana listy modułów pośrednich rejestru systemowego (#193 L7): zaktualizuj INTERMEDIATE_MODULES" +
   " i SNAPSHOT, w opisie PR podaj, po co nowy moduł re-eksportuje wyjście; zmianę akceptuje CTO, CRCO do wglądu";
@@ -85,7 +89,6 @@ const SNAPSHOT: Record<string, string[]> = {
     "src/app/api/cron/push-reminders/route.ts",
   ],
   "notifications.ts:findDueSmsReminders": ["src/app/api/cron/sms-reminders/route.ts"],
-  "notifications.ts:getAppointmentReminderPreview": ["src/app/api/reminders/appointment/route.ts"],
   "notifications.ts:getPendingCronReminders": [
     "src/app/api/cron/push-reminders-24h/route.ts",
     "src/app/api/cron/push-reminders/route.ts",
@@ -372,7 +375,7 @@ describe("L7: importerzy wyjść rejestru systemowego (checker TS, src/)", () =>
   });
 
   it("deposits-cleanup.ts:cleanupStaleDepositBookings (anuluje wizyty i płatności w wielu salonach): lista DOKŁADNIE — tylko trasa crona", () => {
-    expect(a.importers["deposits-cleanup.ts:cleanupStaleDepositBookings"], DATA_DELETING_CONTRACT).toEqual([
+    expect(a.importers["deposits-cleanup.ts:cleanupStaleDepositBookings"], IRREVERSIBLE_STATE_CONTRACT).toEqual([
       "src/app/api/cron/cleanup-pending-deposits/route.ts",
     ]);
   });
