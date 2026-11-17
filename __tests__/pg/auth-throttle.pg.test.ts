@@ -753,10 +753,29 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
   });
 
   describe("logi", () => {
-    it("żaden log z przebiegów tego pliku nie zawiera adresu testu ani e-maila testu", () => {
-      // Co najmniej logi awarii magazynu z testu „tabela niedostępna” — lista nie jest pusta.
-      expect(allLogCalls.length).toBeGreaterThan(0);
-      for (const c of allLogCalls) {
+    it("błędy magazynu w tym teście i logi wcześniejszych testów pliku nie zawierają adresu testu ani e-maila testu", async () => {
+      // Własne logi tego testu: klient bazy, którego każde zapytanie kończy się błędem
+      // z adresem i e-mailem testu w treści — w logu ma być tylko nazwa błędu.
+      const ip = nextIp();
+      const e = email("logs");
+      const failing = {
+        execute: async () => {
+          throw new Error(`magazyn niedostępny ${ip} ${e}`);
+        },
+      };
+      dbRef.current = failing;
+      try {
+        expect(await consumeAuthRateLimit(`${ip}|/sign-in/email`, IN_RULE)).toEqual({
+          allowed: false,
+          retryAfter: IN_RULE.window,
+        });
+        expect(await reserveAccountSignInAttempt(e)).toEqual({ allowed: false, retryAfter: 900 });
+      } finally {
+        dbRef.current = undefined;
+      }
+      const ownCalls = Object.values(logger).flatMap((fn) => fn.mock.calls);
+      expect(ownCalls.length, "błędy magazynu w tym teście nie trafiły do logu").toBeGreaterThanOrEqual(2);
+      for (const c of [...allLogCalls, ...ownCalls]) {
         const text = JSON.stringify(c);
         expect(text).not.toMatch(/198\.1[89]\./);
         expect(text).not.toMatch(/it-authlimit-/);
