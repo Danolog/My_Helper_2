@@ -16,5 +16,6 @@ export async function register(): Promise<void> {
     process.env,
     (code) => process.exit(code),
     (message, context) => logger.error(message, context),
+    (message, context) => logger.info(message, context),
   );
 }
