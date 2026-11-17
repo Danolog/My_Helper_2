@@ -27,23 +27,30 @@ export function getAuthRateLimitStore(env: Readonly<Record<string, string | unde
 
 export const AUTH_RATE_LIMIT_SECRET_MESSAGE = "AUTH_RATE_LIMIT_STORE=database wymaga BETTER_AUTH_SECRET";
 
+export const AUTH_RATE_LIMIT_ACTIVE_MESSAGE = "Limit prób logowania: aktywny tryb magazynu";
+
 /**
  * Sprawdzenie konfiguracji limitu logowania przy starcie serwera. Ten sam
  * warunek co fabryka opcji: wartość przełącznika dozwolona, a tryb `database`
  * wymaga niepustego `BETTER_AUTH_SECRET`. Błąd → `logError` (bez wartości
- * zmiennych) i `exit(1)`.
+ * zmiennych) i `exit(1)`, bez wpisu informacyjnego. Sukces → dokładnie jeden
+ * `logInfo` z kontekstem zawierającym wyłącznie nazwę aktywnego trybu.
  * @returns true, jeśli start dozwolony
  */
 export function enforceAuthRateLimitStore(
   env: Readonly<Record<string, string | undefined>>,
   exit: (code: number) => void,
   logError: (message: string, context: { variable: string }) => void,
+  logInfo: (message: string, context: { store: AuthRateLimitStore }) => void,
 ): boolean {
   let message: string;
   let variable: string;
   try {
     const store = getAuthRateLimitStore(env);
-    if (store !== "database" || env.BETTER_AUTH_SECRET) return true;
+    if (store !== "database" || env.BETTER_AUTH_SECRET) {
+      logInfo(AUTH_RATE_LIMIT_ACTIVE_MESSAGE, { store });
+      return true;
+    }
     message = AUTH_RATE_LIMIT_SECRET_MESSAGE;
     variable = "BETTER_AUTH_SECRET";
   } catch (e) {

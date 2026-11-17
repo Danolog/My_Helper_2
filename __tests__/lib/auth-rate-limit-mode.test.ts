@@ -8,7 +8,11 @@
  * do trybu domyślnego.
  */
 import { describe, expect, it, vi } from "vitest";
-import { enforceAuthRateLimitStore, getAuthRateLimitStore } from "@/lib/auth-rate-limit-mode";
+import {
+  AUTH_RATE_LIMIT_ACTIVE_MESSAGE,
+  enforceAuthRateLimitStore,
+  getAuthRateLimitStore,
+} from "@/lib/auth-rate-limit-mode";
 
 const SECRET = "test-secret-for-auth-throttle-0123456789abcdef";
 
@@ -69,8 +73,16 @@ describe("enforceAuthRateLimitStore", () => {
   function run(env: Record<string, string | undefined>) {
     const exit = vi.fn();
     const logError = vi.fn();
-    const allowed = enforceAuthRateLimitStore(env, exit, logError);
-    return { allowed, exit, logError, out: JSON.stringify(logError.mock.calls) };
+    const logInfo = vi.fn();
+    const allowed = enforceAuthRateLimitStore(env, exit, logError, logInfo);
+    return {
+      allowed,
+      exit,
+      logError,
+      logInfo,
+      out: JSON.stringify(logError.mock.calls),
+      info: JSON.stringify(logInfo.mock.calls),
+    };
   }
 
   it.each([
@@ -78,11 +90,32 @@ describe("enforceAuthRateLimitStore", () => {
     ["memory", { AUTH_RATE_LIMIT_STORE: "memory" }],
     ["memory z pustym sekretem", { AUTH_RATE_LIMIT_STORE: "memory", BETTER_AUTH_SECRET: "" }],
     ["database z sekretem", { AUTH_RATE_LIMIT_STORE: "database", BETTER_AUTH_SECRET: SECRET }],
-  ])("%s → start dozwolony, bez wyjścia i bez logu", (_name, env) => {
+  ])("%s → start dozwolony, bez wyjścia i bez logu błędu", (_name, env) => {
     const { allowed, exit, logError } = run(env);
     expect(allowed).toBe(true);
     expect(exit).not.toHaveBeenCalled();
     expect(logError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["brak zmiennej", {}, "memory"],
+    ["memory", { AUTH_RATE_LIMIT_STORE: "memory", BETTER_AUTH_SECRET: SECRET }, "memory"],
+    ["database z sekretem", { AUTH_RATE_LIMIT_STORE: "database", BETTER_AUTH_SECRET: SECRET }, "database"],
+  ])("%s → dokładnie jeden wpis informacyjny, kontekst wyłącznie z nazwą trybu", (_name, env, store) => {
+    const { logInfo, info } = run(env);
+    expect(logInfo).toHaveBeenCalledTimes(1);
+    expect(logInfo.mock.calls[0]![0]).toBe(AUTH_RATE_LIMIT_ACTIVE_MESSAGE);
+    expect(logInfo.mock.calls[0]![1]).toStrictEqual({ store });
+    expect(info).not.toContain(SECRET);
+  });
+
+  it.each([
+    ["niedozwolona wartość", { AUTH_RATE_LIMIT_STORE: "redis", BETTER_AUTH_SECRET: SECRET }],
+    ["database bez sekretu", { AUTH_RATE_LIMIT_STORE: "database" }],
+  ])("%s → bez wpisu informacyjnego", (_name, env) => {
+    const { exit, logInfo } = run(env);
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(logInfo).not.toHaveBeenCalled();
   });
 
   it.each([[""], ["Database"], ["MEMORY"], [" database"], ["database "], [" "], ["redis"]])(

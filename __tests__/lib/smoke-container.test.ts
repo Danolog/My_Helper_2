@@ -6,6 +6,9 @@
  *  - W1: kontener w trybie Cloud Run z jawną wartością testową
  *    BETTER_AUTH_SECRET musi się zakończyć kodem 1, log z nazwą zmiennej,
  *    bez wartości i bez skrótu — sprawdzane PRZED pierwszym /api/health;
+ *  - tryb limitu: kontener w trybie platformy z losowym sekretem
+ *    i niedozwoloną wartością AUTH_RATE_LIMIT_STORE musi się zakończyć kodem 1,
+ *    log z nazwą zmiennej, bez wartości — także PRZED pierwszym /api/health;
  *  - kontrola W1: losowa wartość + jednorazowa baza w sieci --internal → 200;
  *  - bez bazy i bez K_SERVICE → 503 (dotychczasowy przypadek).
  * Mutacje: wynik w opisie PR.
@@ -15,6 +18,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { getAuthRateLimitStore } from "@/lib/auth-rate-limit-mode";
 import { FORBIDDEN_SHA256, SECRET_GUARD_MESSAGE, sha256Hex } from "../../infra/runtime/secret-guard.mjs";
 
 const ROOT = process.cwd();
@@ -25,6 +29,8 @@ const AUTH = "BETTER_AUTH_SECRET";
 const PG_URL = "POSTGRES_URL";
 const envOf = (env: string[], name: string) => env.find((e) => e.startsWith(`${name}=`))!.slice(name.length + 1);
 const W1_VALUE = SOURCE.match(new RegExp(`^w1_env=\\("${AUTH}=([^"\\s]+)"\\)$`, "m"))?.[1] ?? "";
+const STORE = "AUTH_RATE_LIMIT_STORE";
+const STORE_VALUE = SOURCE.match(/^store_value="([^"\s]+)"$/m)?.[1] ?? "";
 
 const DIR = mkdtempSync(join(tmpdir(), "smoke-container-"));
 afterAll(() => rmSync(DIR, { recursive: true, force: true }));
@@ -33,7 +39,8 @@ mkdirSync(BIN);
 
 // Fałszywy docker. Kontener = pliki $FAKE_STATE/<nazwa>.{env,status,code,log,role}.
 // Rola: obraz pgvector → db; K_SERVICE + BETTER_AUTH_SECRET = wartość W1 → guard;
-// K_SERVICE → ctl; inaczej plain. FAKE_GUARD steruje zachowaniem kontenera guard.
+// K_SERVICE + AUTH_RATE_LIMIT_STORE → store; K_SERVICE → ctl; inaczej plain.
+// FAKE_GUARD i FAKE_STORE sterują zachowaniem kontenerów guard i store.
 writeFileSync(
   join(BIN, "docker"),
   String.raw`#!/bin/sh
@@ -56,8 +63,10 @@ case "$cmd" in
     mv "$envf" "$S/$name.env"
     echo "$img" > "$S/$name.image"
     secret=$(grep '^BETTER_AUTH_SECRET' "$S/$name.env" | cut -d= -f2-)
+    store=$(grep '^AUTH_RATE_LIMIT_STORE=' "$S/$name.env" | cut -d= -f2-)
     if [ "$img" = "pgvector/pgvector:pg18" ]; then role=db
     elif grep -q '^K_SERVICE=' "$S/$name.env" && [ "$secret" = "$FAKE_W1_VALUE" ]; then role=guard
+    elif grep -q '^K_SERVICE=' "$S/$name.env" && grep -q '^AUTH_RATE_LIMIT_STORE=' "$S/$name.env"; then role=store
     elif grep -q '^K_SERVICE=' "$S/$name.env"; then role=ctl
     else role=plain; fi
     echo "$role" > "$S/$name.role"
@@ -72,6 +81,17 @@ case "$cmd" in
         noname) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "$msg" > "$S/$name.log" ;;
         nomsg) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "fatal: BETTER_AUTH_SECRET" > "$S/$name.log" ;;
         *) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "$msg (BETTER_AUTH_SECRET)" > "$S/$name.log" ;;
+      esac
+    fi
+    if [ "$role" = store ]; then
+      smsg='{"level":"error","msg":"AUTH_RATE_LIMIT_STORE: niedozwolona wartość; dozwolone: memory, database albo brak zmiennej","variable":"AUTH_RATE_LIMIT_STORE"}'
+      case "$FAKE_STORE" in
+        run) echo "server listening" > "$S/$name.log" ;;
+        exit0) echo exited > "$S/$name.status"; echo "$smsg" > "$S/$name.log" ;;
+        noname) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "fatal: startup failed" > "$S/$name.log" ;;
+        leak) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "$smsg $store" > "$S/$name.log" ;;
+        secret) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "$smsg $secret" > "$S/$name.log" ;;
+        *) echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; echo "$smsg" > "$S/$name.log" ;;
       esac
     fi
     if [ "$role" = ctl ] && [ -n "$FAKE_CTL_CRASH" ]; then echo exited > "$S/$name.status"; echo 1 > "$S/$name.code"; fi
@@ -155,8 +175,9 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     expect(r.status, r.stderr).toBe(0);
     const lines = r.stdout.split("\n").filter((l) => l.startsWith("ok:"));
     expect(lines[0]).toMatch(/^ok: W1: public test BETTER_AUTH_SECRET → exit 1/);
-    expect(lines[1]).toMatch(/^ok: W1 control: .* 200/);
-    expect(lines[2]).toMatch(/^ok: \/api\/health -> 503/);
+    expect(lines[1]).toMatch(/^ok: rate-limit store: invalid AUTH_RATE_LIMIT_STORE → exit 1/);
+    expect(lines[2]).toMatch(/^ok: W1 control: .* 200/);
+    expect(lines[3]).toMatch(/^ok: \/api\/health -> 503/);
     const guardRun = r.calls.findIndex((c) => c.startsWith("run ") && c.includes("mh-smoke-guard-"));
     const guardExit = r.calls.findIndex((c) => c.startsWith("inspect -f {{.State.ExitCode}} mh-smoke-guard-"));
     const guardLogs = r.calls.findIndex((c) => c.startsWith("logs mh-smoke-guard-"));
@@ -164,8 +185,50 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     expect(guardExit).toBeGreaterThan(guardRun);
     expect(guardLogs).toBeGreaterThan(guardRun);
     expect(firstHealth(r.calls)).toBeGreaterThan(Math.max(guardExit, guardLogs));
+    const storeRun = r.calls.findIndex((c) => c.startsWith("run ") && c.includes("mh-smoke-store-"));
+    const storeExit = r.calls.findIndex((c) => c.startsWith("inspect -f {{.State.ExitCode}} mh-smoke-store-"));
+    const storeLogs = r.calls.findIndex((c) => c.startsWith("logs mh-smoke-store-"));
+    expect(storeRun).toBeGreaterThan(Math.max(guardExit, guardLogs));
+    expect(storeExit).toBeGreaterThan(storeRun);
+    expect(storeLogs).toBeGreaterThan(storeRun);
+    expect(firstHealth(r.calls)).toBeGreaterThan(Math.max(storeExit, storeLogs));
     expect(r.calls.some((c) => c === "ctl-probe")).toBe(true);
     expect(r.calls.some((c) => c.startsWith("curl "))).toBe(true);
+  });
+
+  it("kontener trybu limitu: tryb platformy, losowy BETTER_AUTH_SECRET spoza listy, niedozwolona wartość trybu", () => {
+    const r = smoke();
+    const store = r.byRole("store")!;
+    expect(store).toBeDefined();
+    expect(store.env).toEqual(expect.arrayContaining(["K_SERVICE=myhelper", "NODE_ENV=production"]));
+    const secret = envOf(store.env, AUTH);
+    expect(secret).toMatch(/^[0-9a-f]{64}$/);
+    expect(FORBIDDEN_SHA256.has(sha256Hex(secret))).toBe(false);
+    expect(envOf(smoke().byRole("store")!.env, AUTH)).not.toBe(secret);
+    const value = envOf(store.env, STORE);
+    expect(value).toBe(STORE_VALUE);
+    expect(() => getAuthRateLimitStore({ [STORE]: value })).toThrow(new RegExp(STORE));
+    // Bez bazy: adres wskazuje zamknięty port, kontener nie jest w sieci z bazą.
+    expect(envOf(store.env, PG_URL)).toMatch(/@127\.0\.0\.1:1\//);
+    const run = r.calls.find((c) => c.startsWith("run ") && c.includes(store.name))!;
+    expect(run).not.toMatch(/--network/);
+  });
+
+  it.each([
+    ["kontener nie kończy się", "run", /rate-limit store: .*still running/],
+    ["kod wyjścia 0", "exit0", /rate-limit store: .*exit code \[0\], expected \[1\]/],
+    ["log bez nazwy zmiennej", "noname", /rate-limit store: .*log lacks the variable name AUTH_RATE_LIMIT_STORE/],
+    ["wartość trybu w logu", "leak", /rate-limit store: .*log contains the AUTH_RATE_LIMIT_STORE value/],
+    ["wartość sekretu w logu", "secret", /rate-limit store: .*log contains the BETTER_AUTH_SECRET value/],
+  ])("tryb limitu: %s → kod 1, bez żadnego /api/health", (_l, mode, msg) => {
+    const r = smoke({ FAKE_STORE: mode });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(msg);
+    expect(firstHealth(r.calls)).toBe(-1);
+    expect(r.calls.some((c) => c.startsWith("network create"))).toBe(false);
+    const secret = envOf(r.byRole("store")!.env, AUTH);
+    expect(r.stdout + r.stderr).not.toContain(secret);
+    expect(r.stdout + r.stderr).not.toContain(STORE_VALUE);
   });
 
   it("kontener W1: tryb Cloud Run (K_SERVICE, NODE_ENV=production) i wartość W1; POSTGRES_URL losowy", () => {
@@ -234,8 +297,8 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     expect(plain.env.some((e) => e.startsWith("K_SERVICE="))).toBe(false);
   });
 
-  it("sprzątanie: każdy kontener i sieć usuwane przy wyjściu (także po porażce W1)", () => {
-    for (const extra of [{}, { FAKE_GUARD: "run" }, { FAKE_CTL_HEALTH: "503" }]) {
+  it("sprzątanie: każdy kontener i sieć usuwane przy wyjściu (także po porażce W1 i trybu limitu)", () => {
+    for (const extra of [{}, { FAKE_GUARD: "run" }, { FAKE_STORE: "run" }, { FAKE_CTL_HEALTH: "503" }]) {
       const r = smoke(extra);
       const rmCalls = r.calls.filter((c) => c.startsWith("rm -f ")).join(" ");
       for (const c of r.containers) expect(rmCalls, c.name).toContain(c.name);
