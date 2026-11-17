@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { eq, and, asc, isNull, isNotNull, or, not } from "drizzle-orm";
+import { eq, and, asc, gt, isNull, isNotNull, or } from "drizzle-orm";
 import { appointmentConflictWhere, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
 import {
   checkBookingWithoutDeposit,
@@ -133,6 +133,8 @@ interface SlotOffer {
   gate: SalonGate;
   salonId: string;
   params: NotifyWaitingListParams;
+  /** Odczyt zegara przebiegu (termin w przyszłości, godziny ciszy, powiązana wizyta). */
+  now: Date;
   /** Treść SMS; null = SMS w tym przebiegu nie wychodzi (godziny ciszy). */
   smsMessage: string | null;
   push: WaitingListPushContent;
@@ -253,7 +255,23 @@ async function deliverOffer(row: EntryRow, offer: SlotOffer, channels: EntryChan
   return delivered;
 }
 
-/** Istniejąca, nieodwołana wizyta klienta na tę samą usługę (do powiązania z ofertą). */
+/**
+ * Warunek wizyty, którą oferta może przenieść: zaplanowana albo potwierdzona,
+ * ze startem później niż proponowany termin i później niż `now`. Ten sam
+ * warunek wybiera wizytę do powiązania i stoi w samym zapisie przeniesienia.
+ */
+function movableAppointmentWhere(offeredStart: Date, now: Date) {
+  return and(
+    or(eq(appointments.status, "scheduled"), eq(appointments.status, "confirmed")),
+    gt(appointments.startTime, offeredStart),
+    gt(appointments.startTime, now)
+  );
+}
+
+/**
+ * Wizyta klienta na tę samą usługę w tym salonie, którą oferta może przenieść
+ * (`movableAppointmentWhere`); przy kilku — najwcześniejsza.
+ */
 async function findExistingAppointmentId(row: EntryRow, offer: SlotOffer): Promise<string | null> {
   const { gate, salonId, params } = offer;
   if (!params.serviceId || !row.client.id) return null;
@@ -268,9 +286,10 @@ async function findExistingAppointmentId(row: EntryRow, offer: SlotOffer): Promi
           eq(appointments.clientId, clientId),
           eq(appointments.salonId, salonId),
           eq(appointments.serviceId, serviceId),
-          not(eq(appointments.status, "cancelled"))
+          movableAppointmentWhere(params.startTime, offer.now)
         )
       )
+      .orderBy(asc(appointments.startTime))
       .limit(1)
   );
   return existingAppts[0]?.id ?? null;
@@ -547,6 +566,7 @@ export async function notifyWaitingList(
       gate,
       salonId,
       params,
+      now,
       smsMessage,
       push: buildWaitingListPush({
         salonName: params.salonName,
@@ -598,6 +618,9 @@ interface AcceptResult {
  * the client's existing appointment to the earlier time or creates a new
  * appointment. Marks the waiting list entry as accepted and logs a
  * confirmation notification.
+ *
+ * Powiązana wizyta, która istnieje, nie jest odwołana i nie spełnia warunku
+ * przeniesienia = odmowa „Oferta nie jest już aktualna”, bez zapisu.
  *
  * Moduł listy oczekujących wyłączony w salonie (albo błąd odczytu ustawień)
  * = odmowa „Oferta nie jest już aktualna”, bez odczytu wpisu i bez zapisów.
@@ -680,8 +703,10 @@ export async function acceptEarlierSlot(
     return { success: false, message: "Nieprawidlowy proponowany termin" };
   }
 
-  // 5. Check that the offered slot is still in the future
-  if (offeredStart <= new Date()) {
+  // 5. Check that the offered slot is still in the future. Ten sam odczyt
+  // zegara stoi w warunku przeniesienia powiązanej wizyty (krok 7).
+  const now = new Date();
+  if (offeredStart <= now) {
     return {
       success: false,
       message: "Proponowany termin juz minal",
@@ -762,21 +787,30 @@ export async function acceptEarlierSlot(
     return newAppt!.id;
   };
 
+  // Powiązana wizyta: odczyt (stan, stary termin, notatki) w tym salonie.
+  const readLinkedAppointment = async (existingId: string) => {
+    const [row] = await gate.raw((tx) =>
+      tx
+        .select()
+        .from(appointments)
+        .where(and(eq(appointments.id, existingId), eq(appointments.salonId, salonId)))
+        .limit(1)
+    );
+    return row;
+  };
+
   try {
     if (entry.existingAppointmentId) {
-      // Move existing appointment to the earlier slot
+      // Powiązana wizyta: przeniesienie jednym warunkowym zapisem (warunek
+      // `movableAppointmentWhere`). Wizyty brak albo odwołana → nowa wizyta.
+      // Wizyta żywa, której zapis nie objął (zakończona, bez stawienia się,
+      // start nie później niż oferta) → odmowa: bez nowej wizyty obok niej
+      // i bez oznaczenia wpisu.
       const existingId = entry.existingAppointmentId;
-      const [existingAppt] = await gate.raw((tx) =>
-        tx
-          .select()
-          .from(appointments)
-          .where(and(eq(appointments.id, existingId), eq(appointments.salonId, salonId)))
-          .limit(1)
-      );
+      const existingAppt = await readLinkedAppointment(existingId);
 
       if (existingAppt && existingAppt.status !== "cancelled") {
-        oldStartTime = new Date(existingAppt.startTime);
-        await gate.raw((tx) =>
+        const moved = await gate.raw((tx) =>
           tx
             .update(appointments)
             .set({
@@ -785,14 +819,38 @@ export async function acceptEarlierSlot(
               employeeId,
               notes: `${existingAppt.notes || ""} [Przeniesiony z listy oczekujacych]`.trim(),
             })
-            .where(and(eq(appointments.id, existingId), eq(appointments.salonId, salonId)))
+            .where(
+              and(
+                eq(appointments.id, existingId),
+                eq(appointments.salonId, salonId),
+                movableAppointmentWhere(offeredStart, now)
+              )
+            )
+            .returning({ id: appointments.id })
         );
-        appointmentId = existingId;
-        logger.info("Moved appointment from waiting list", {
-          appointmentId,
-          from: oldStartTime.toISOString(),
-          to: offeredStart.toISOString(),
-        });
+
+        if (moved.length > 0) {
+          oldStartTime = new Date(existingAppt.startTime);
+          appointmentId = existingId;
+          logger.info("Moved appointment from waiting list", {
+            appointmentId,
+            from: oldStartTime.toISOString(),
+            to: offeredStart.toISOString(),
+          });
+        } else {
+          // Zapis nie objął wizyty: stan po odczycie rozstrzyga ścieżkę.
+          const current = await readLinkedAppointment(existingId);
+          if (current && current.status !== "cancelled") {
+            logger.info("Waiting list offer refused: linked appointment not movable", {
+              waitingListId,
+              appointmentId: existingId,
+            });
+            return { success: false, message: "Oferta nie jest już aktualna" };
+          }
+          const blocked = await depositBlocksNewAppointment();
+          if (blocked) return blocked;
+          appointmentId = await insertNewAppointment();
+        }
       } else {
         // Existing appointment was cancelled or missing – create new
         const blocked = await depositBlocksNewAppointment();
@@ -841,7 +899,10 @@ export async function acceptEarlierSlot(
 
   return {
     success: true,
-    message: "Termin zostal zaakceptowany! Wizyta zostala przeniesiona.",
+    message:
+      oldStartTime !== undefined
+        ? "Termin zostal zaakceptowany! Wizyta zostala przeniesiona."
+        : "Termin zostal zaakceptowany! Wizyta zostala zarezerwowana.",
     appointmentId,
     ...(oldStartTime !== undefined ? { oldStartTime } : {}),
     newStartTime: offeredStart,

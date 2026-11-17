@@ -118,8 +118,9 @@ describe("acceptEarlierSlot — zadatek (#63)", () => {
       .mockReturnValueOnce(createChainMock([entry({ existingAppointmentId: "apt-old" })]))
       .mockReturnValueOnce(createChainMock([])) // kolizje
       .mockReturnValueOnce(
-        createChainMock([{ id: "apt-old", status: "scheduled", startTime: new Date(), notes: null, employeeId: "e-1" }])
+        createChainMock([{ id: "apt-old", status: "scheduled", startTime: new Date(FUTURE_START.getTime() + 86400000), notes: null, employeeId: "e-1" }])
       );
+    h.update.mockReturnValueOnce(createChainMock([{ id: "apt-old" }])); // zapis przeniesienia objął wizytę
 
     const res = await acceptEarlierSlot("wl-1", "tok");
 
