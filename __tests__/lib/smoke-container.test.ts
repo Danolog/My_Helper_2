@@ -297,8 +297,8 @@ describe("smoke-container.sh: W1 strażnik sekretów na obrazie (K-1b)", () => {
     expect(plain.env.some((e) => e.startsWith("K_SERVICE="))).toBe(false);
   });
 
-  it("sprzątanie: każdy kontener i sieć usuwane przy wyjściu (także po porażce W1)", () => {
-    for (const extra of [{}, { FAKE_GUARD: "run" }, { FAKE_CTL_HEALTH: "503" }]) {
+  it("sprzątanie: każdy kontener i sieć usuwane przy wyjściu (także po porażce W1 i trybu limitu)", () => {
+    for (const extra of [{}, { FAKE_GUARD: "run" }, { FAKE_STORE: "run" }, { FAKE_CTL_HEALTH: "503" }]) {
       const r = smoke(extra);
       const rmCalls = r.calls.filter((c) => c.startsWith("rm -f ")).join(" ");
       for (const c of r.containers) expect(rmCalls, c.name).toContain(c.name);
