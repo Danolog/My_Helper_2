@@ -338,7 +338,7 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
       }
     });
 
-    it("W2: kasowanie wierszy starszych niż 24 h — najwyżej 100 na wywołanie, świeże zostają", async () => {
+    it("W2: kasowanie wierszy z updated_at starszym niż 24 h — najwyżej 100 na wywołanie, świeże zostają (także ze starym window_start)", async () => {
       const old = (await h!.observer.unsafe(`
         INSERT INTO auth_rate_limit (key, count, window_start, updated_at)
         SELECT decode(md5(random()::text || g::text) || md5(g::text || random()::text), 'hex'), 1,
@@ -351,7 +351,13 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
                now() - interval '23 hours', now() - interval '23 hours'
         FROM generate_series(1, 5) g
         RETURNING key`)) as unknown as Array<{ key: Buffer }>;
-      trackedKeys.push(...old.map((r) => r.key), ...fresh.map((r) => r.key));
+      // Okno sprzed 48 h, ostatnia zmiana sprzed 1 h: kasowanie idzie po updated_at, więc wiersz zostaje.
+      const freshUpdatedOldWindow = (await h!.observer.unsafe(`
+        INSERT INTO auth_rate_limit (key, count, window_start, updated_at)
+        VALUES (decode(md5(random()::text || 'w') || md5('w' || random()::text), 'hex'), 1,
+                now() - interval '48 hours', now() - interval '1 hour')
+        RETURNING key`)) as unknown as Array<{ key: Buffer }>;
+      trackedKeys.push(...old.map((r) => r.key), ...fresh.map((r) => r.key), ...freshUpdatedOldWindow.map((r) => r.key));
 
       const oldTotal = async () =>
         ((await h!.observer.unsafe(
@@ -368,6 +374,11 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
       }
       expect(await oldTotal()).toBe(0);
       for (const r of fresh) expect(await rowByKey(r.key)).toBeDefined();
+      expect(freshUpdatedOldWindow).toHaveLength(1);
+      expect(
+        await rowByKey(freshUpdatedOldWindow[0]!.key),
+        "wiersz ze świeżym updated_at i starym window_start",
+      ).toBeDefined();
     });
 
     it("ścieżka z listy pamięci (get-session) nie tworzy wiersza", async () => {
