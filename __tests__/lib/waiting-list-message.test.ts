@@ -487,6 +487,26 @@ describe("buildWaitingListPush", () => {
   });
 });
 
+describe("data i godzina w nazwie (najwyżej trzy człony liczbowe)", () => {
+  const DATED = "Promocja 12.05.2026 10.30";
+
+  it("nazwa usługi z datą i godziną → zachowana w SMS i push", () => {
+    const sms = buildWaitingListSms({ salonName: "Salon Uroda", serviceName: DATED, startTime: SUMMER });
+    expect(sms).toContain(`Zwolnil sie termin w Salon Uroda: "${DATED}" 15 lipca o 10:30.`);
+
+    const { body } = buildWaitingListPush({ salonName: "Salon Uroda", serviceName: DATED, startTime: SUMMER });
+    expect(body).toBe(`Salon Uroda: ${DATED}, 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.`);
+  });
+
+  it("nazwa salonu z datą i godziną → zachowana w SMS i push", () => {
+    const sms = buildWaitingListSms({ salonName: DATED, startTime: SUMMER });
+    expect(sms.startsWith(`Zwolnil sie termin w ${DATED}: 15 lipca o 10:30.`)).toBe(true);
+
+    const { body } = buildWaitingListPush({ salonName: DATED, startTime: SUMMER });
+    expect(body).toBe(`${DATED}: 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.`);
+  });
+});
+
 describe("parametry bez danych osobowych klienta i pracownika", () => {
   it("typ parametrów odrzuca imię klienta, telefon klienta, pracownika i link", () => {
     const base = { salonName: "Salon Uroda", startTime: SUMMER };

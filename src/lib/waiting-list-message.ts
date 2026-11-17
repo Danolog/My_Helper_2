@@ -23,6 +23,8 @@ function scriptNeutral(plain: string): string {
   return plain.replace(/\p{L}/gu, "a").replace(/\p{N}/gu, "0").replace(DOT_LIKE, ".");
 }
 
+const GRAPHEMES = new Intl.Segmenter("pl", { granularity: "grapheme" });
+
 /**
  * Tekst właściciela salonu przygotowany do treści push: znaki sterujące
  * i separatory linii → spacja, zwinięte spacje i trim; polskie znaki zostają.
@@ -38,8 +40,6 @@ function scriptNeutral(plain: string): string {
  * wyłącznie na granicy widocznego znaku, więc emoji złożone z kilku punktów
  * kodowych, flaga ani litera ze znakiem łączącym nie są rozcinane.
  */
-const GRAPHEMES = new Intl.Segmenter("pl", { granularity: "grapheme" });
-
 function ownerTextForPush(text: string, max: number): string {
   const cleaned = text
     .replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ")
