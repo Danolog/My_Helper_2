@@ -152,6 +152,76 @@ describe("buildWaitingListSms", () => {
     expect(nonGsm7(message), message).toEqual([]);
     expect(message).not.toMatch(/http/i);
   });
+
+  it.each([
+    ["kropka pełnej szerokości", "Uroda．pl"],
+    ["znak łączący przed kropką", "Urodá.pl"],
+    ["znak spoza GSM-7 przed kropką", "Uroda✨.pl"],
+    ["postać surowa", "Uroda.pl"],
+  ])("nazwa usługi jak adres (%s) → bez fragmentu usługi", (_label, serviceName) => {
+    const message = buildWaitingListSms({ salonName: "Salon Uroda", serviceName, startTime: SUMMER });
+    expect(message).toContain("Zwolnil sie termin w Salon Uroda: 15 lipca o 10:30.");
+    expect(message).not.toContain('"');
+    expect(message).not.toMatch(/\.pl\b/i);
+  });
+
+  it.each([
+    ["+48 512 345 678"],
+    ["512-345-678"],
+    ["(91) 123 45 67"],
+    ["  +48 512 345 678  "],
+  ])("telefon salonu %j w poprawnym formacie → fragment „lub zadzwon”", (salonPhone) => {
+    const message = buildWaitingListSms({ salonName: "Salon Uroda", startTime: SUMMER, salonPhone });
+    expect(message.endsWith(`otworz liste oczekujacych lub zadzwon: ${salonPhone.trim()}.`)).toBe(true);
+  });
+
+  it.each([
+    ["z literami", "zadzwon do Ani"],
+    ["adres", "uroda.pl"],
+    ["adres z http", "https://uroda.example"],
+    ["za krótki", "12345"],
+    ["za długi", "1".repeat(21)],
+    ["za długi z plusem", "+" + "1".repeat(21)],
+    ["numer z dopisanym tekstem", "512 345 678 wew. 12"],
+    ["numer i adres w nowej linii", "512 345 678\nwww.uroda.pl"],
+    ["plus w środku", "512+345+678"],
+  ])("telefon salonu %s → bez fragmentu „lub zadzwon” i bez tej wartości", (_label, salonPhone) => {
+    const message = buildWaitingListSms({ salonName: "Salon Uroda", startTime: SUMMER, salonPhone });
+    expect(message).not.toContain("zadzwon");
+    expect(message).not.toContain(salonPhone.trim());
+    expect(message.endsWith("otworz liste oczekujacych.")).toBe(true);
+  });
+
+  it("bardzo długa nazwa usługi → 37 znaków + \"...\"", () => {
+    const long = "Koloryzacja " + "x".repeat(100);
+    const message = buildWaitingListSms({ salonName: "Salon Uroda", serviceName: long, startTime: SUMMER });
+    expect(message).toContain(`: "${long.slice(0, 37)}..." 15 lipca o 10:30.`);
+    expect(message).not.toContain(long.slice(0, 41));
+  });
+
+  it("nazwa usługi dokładnie 40 znaków bez zmian", () => {
+    const exact = "Koloryzacja " + "y".repeat(28);
+    const message = buildWaitingListSms({ salonName: "Salon Uroda", serviceName: exact, startTime: SUMMER });
+    expect(message).toContain(`: "${exact}" 15 lipca o 10:30.`);
+  });
+
+  it("najdłuższa możliwa treść (maksymalny salon, usługa, telefon, każdy miesiąc) ≤ 306 znaków, podstawowy GSM-7", () => {
+    const lengths: number[] = [];
+    for (let month = 1; month <= 12; month++) {
+      const message = buildWaitingListSms({
+        salonName: "S".repeat(200),
+        serviceName: "U".repeat(200),
+        startTime: new Date(`2026-${String(month).padStart(2, "0")}-28T10:30:00Z`),
+        salonPhone: "+" + "1".repeat(20),
+      });
+      expect(message).toContain("lub zadzwon: +" + "1".repeat(20) + ".");
+      expect(nonGsm7(message), message).toEqual([]);
+      expect(message.length, message).toBeLessThanOrEqual(306);
+      lengths.push(message.length);
+    }
+    // Październik ma najdłuższą nazwę miesiąca („pazdziernika”).
+    expect(Math.max(...lengths)).toBe(234);
+  });
 });
 
 describe("buildWaitingListPush", () => {
@@ -184,10 +254,68 @@ describe("buildWaitingListPush", () => {
     );
   });
 
-  it("nazwa salonu surowa: polskie znaki i długość bez zmian", () => {
+  it("polskie znaki w nazwie salonu i usługi zachowane", () => {
+    const { body } = buildWaitingListPush({
+      salonName: "Zakład Łucja Żółć",
+      serviceName: "Strzyżenie męskie — Łódź",
+      startTime: SUMMER,
+    });
+    expect(body).toBe("Zakład Łucja Żółć: Strzyżenie męskie — Łódź, 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.");
+  });
+
+  it("nazwa salonu ponad 40 znaków → 39 znaków + „…”, polskie znaki zachowane", () => {
     const long = "Zakład Fryzjerski Łucja " + "x".repeat(30);
     const { body } = buildWaitingListPush({ salonName: long, startTime: SUMMER });
-    expect(body.startsWith(`${long}: 15 lipca o 10:30.`)).toBe(true);
+    expect(body).toBe(`${long.slice(0, 39)}…: 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.`);
+  });
+
+  it("nazwa salonu dokładnie 40 znaków bez zmian", () => {
+    const exact = "Zakład " + "ż".repeat(33);
+    const { body } = buildWaitingListPush({ salonName: exact, startTime: SUMMER });
+    expect(body.startsWith(`${exact}: 15 lipca`)).toBe(true);
+  });
+
+  it("nazwa usługi ponad 60 znaków → 59 znaków + „…”", () => {
+    const long = "Koloryzacja " + "ó".repeat(60);
+    const { body } = buildWaitingListPush({ salonName: "Salon Uroda", serviceName: long, startTime: SUMMER });
+    expect(body).toBe(`Salon Uroda: ${long.slice(0, 59)}…, 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.`);
+  });
+
+  it("obcięcie nie rozcina emoji (para zastępcza)", () => {
+    const long = "x".repeat(38) + "💇💇💇";
+    const { body } = buildWaitingListPush({ salonName: long, startTime: SUMMER });
+    expect(body.startsWith(`${"x".repeat(38)}💇…: 15 lipca`)).toBe(true);
+  });
+
+  it.each([
+    ["nowa linia", "Salon\nUroda"],
+    ["CR LF i tabulator", "Salon\r\n\tUroda"],
+    ["separator linii", "Salon Uroda"],
+    ["separator akapitu i spacje", "  Salon    Uroda  "],
+  ])("znaki sterujące w nazwie salonu (%s) → jedna spacja", (_label, salonName) => {
+    const { body } = buildWaitingListPush({ salonName, serviceName: "Strzyżenie\nmęskie", startTime: SUMMER });
+    expect(body).toBe("Salon Uroda: Strzyżenie męskie, 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.");
+  });
+
+  it.each([
+    ["https://", "https://uroda.example"],
+    ["www.", "Salon www.uroda"],
+    [".pl", "Uroda.pl"],
+    ["kropka pełnej szerokości", "Uroda．pl"],
+    ["znak łączący przed kropką", "Urodá.pl"],
+    ["nowa linia przed adresem", "Salon\nuroda.pl"],
+  ])("nazwa salonu jak adres (%s) → pominięta", (_label, salonName) => {
+    const { body } = buildWaitingListPush({ salonName, serviceName: "Strzyżenie", startTime: SUMMER });
+    expect(body).toBe("Strzyżenie, 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.");
+  });
+
+  it.each([
+    ["https://", "Promocja https://uroda.example"],
+    [".pl", "Strzyżenie uroda.pl"],
+    ["kropka pełnej szerokości", "Uroda．pl"],
+  ])("nazwa usługi jak adres (%s) → pominięta", (_label, serviceName) => {
+    const { body } = buildWaitingListPush({ salonName: "Salon Uroda", serviceName, startTime: SUMMER });
+    expect(body).toBe("Salon Uroda: 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.");
   });
 
   it.each(TIME_CASES)("strefa Europe/Warsaw przy procesie w UTC: $label", (c) => {
