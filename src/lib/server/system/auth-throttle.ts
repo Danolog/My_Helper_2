@@ -74,6 +74,11 @@ function pathOfLibraryKey(libraryKey: string): string {
   return libraryKey.slice(libraryKey.indexOf("|") + 1);
 }
 
+/** Ścieżka do logu: trasa z tokenem w adresie (`/reset-password/:token`) jako szablon. */
+function logPathOf(path: string): string {
+  return path.startsWith("/reset-password/") ? "/reset-password/:token" : path;
+}
+
 // ── Licznik w pamięci procesu dla zamkniętej listy ścieżek (semantyka jak magazyn
 //    pamięciowy biblioteki: okno od ostatniego dozwolonego żądania). ──────────
 
@@ -162,7 +167,7 @@ export async function consumeAuthRateLimit(
     row = firstRow(result);
     if (!row) throw new Error("auth rate limit upsert returned no row");
   } catch (err) {
-    logger.error("auth rate limit store error", { path, error: errorName(err) });
+    logger.error("auth rate limit store error", { path: logPathOf(path), error: errorName(err) });
     return { allowed: false, retryAfter: rule.window };
   }
 
