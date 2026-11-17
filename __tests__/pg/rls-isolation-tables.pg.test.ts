@@ -23,6 +23,8 @@
  * - (f) bez kontekstu (zmienna = '', jak po transakcji forSalon): odczyt → 0 wierszy,
  *   INSERT → 42501 z polityki RLS.
  * 42501 liczy się tylko z komunikatem o polityce RLS (brak uprawnienia do tabeli to inny powód).
+ * INSERT w (c) i (f) jest bez RETURNING, żeby odmowa pochodziła z WITH CHECK (przy RETURNING
+ * nowy wiersz sprawdza też USING).
  * Zachowanie na świeżym połączeniu (zmienna nieustawiona) sprawdza `salon-context-nullif.pg.test.ts`.
  *
  * Nic nie jest zatwierdzane; ostatni test wycofuje transakcję i sprawdza, że wierszy testu nie ma.
@@ -148,10 +150,13 @@ const q = (ident: string) => `"${ident}"`;
  * INSERT wybranych kolumn z rekordu JSON (typy kolumn z tabeli, pozostałe kolumny z wartości domyślnych).
  * Parametr to tekst JSON rzutowany `$1::text::jsonb`: przy `$1::jsonb` sterownik serializuje napis
  * drugi raz i do bazy trafia skalar jsonb zamiast obiektu.
+ * `returning: false` w próbach zapisu (c) i (f): odmowa ma pochodzić z WITH CHECK, a RETURNING
+ * dokłada sprawdzenie nowego wiersza względem USING.
  */
-function insertSql(t: string, row: Row): string {
+function insertSql(t: string, row: Row, returning = true): string {
   const cols = Object.keys(row).map(q).join(", ");
-  return `INSERT INTO ${q(t)} (${cols}) SELECT ${cols} FROM jsonb_populate_record(null::${q(t)}, $1::text::jsonb) RETURNING id::text AS id`;
+  const tail = returning ? " RETURNING id::text AS id" : "";
+  return `INSERT INTO ${q(t)} (${cols}) SELECT ${cols} FROM jsonb_populate_record(null::${q(t)}, $1::text::jsonb)${tail}`;
 }
 
 type Attempt = { rows: readonly unknown[] } | { code: unknown; rls: boolean };
@@ -335,7 +340,7 @@ suite("izolacja salonów na każdej tabeli z RLS pod rolą aplikacji (#193)", ()
           const r = await attempt(conn, `SELECT count(*)::int AS n FROM ${q(t)} WHERE id = $1::uuid`, [rB.id]);
           return "rows" in r ? (r.rows[0] as { n: number }).n : r.code;
         }),
-        cInsert: await asApp(conn, A, async () => writeOutcome(await attempt(conn, insertSql(t, foreign), [foreignJson]))),
+        cInsert: await asApp(conn, A, async () => writeOutcome(await attempt(conn, insertSql(t, foreign, false), [foreignJson]))),
         dUpdate: await asApp(conn, A, async () =>
           writeOutcome(await attempt(conn, `UPDATE ${q(t)} SET ${col} = $1::uuid WHERE id = $2::uuid`, [rB.ref, rA.id])),
         ),
@@ -347,7 +352,7 @@ suite("izolacja salonów na każdej tabeli z RLS pod rolą aplikacji (#193)", ()
           const r = await attempt(conn, `SELECT count(*)::int AS n FROM ${q(t)}`);
           return "rows" in r ? (r.rows[0] as { n: number }).n : r.code;
         }),
-        fInsert: await asApp(conn, "", async () => writeOutcome(await attempt(conn, insertSql(t, foreign), [foreignJson]))),
+        fInsert: await asApp(conn, "", async () => writeOutcome(await attempt(conn, insertSql(t, foreign, false), [foreignJson]))),
       };
 
       // (e) zapis w kontekście A do wiersza B; w tym samym kroku rola migracji sprawdza wiersz B.
