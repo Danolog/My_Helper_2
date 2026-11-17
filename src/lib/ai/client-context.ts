@@ -44,10 +44,16 @@ export type ClientContextOptions = {
   };
 };
 
-/** Tekst w jednej linii: znaki nowej linii i tabulatory zamienione na spacje. */
+/**
+ * Ciągi białych znaków: `\s` oraz NEL (U+0085), którego `\s` w JavaScript nie
+ * obejmuje, a który część narzędzi traktuje jak znak nowej linii.
+ */
+const WHITESPACE_RUN = /[\s\u0085]+/g;
+
+/** Tekst w jednej linii: ciągi białych znaków (w tym nowe linie) zamienione na jedną spację. */
 function toSingleLine(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
-  const normalized = value.replace(/\s+/g, " ").trim();
+  const normalized = value.replace(WHITESPACE_RUN, " ").trim();
   return normalized.length > 0 ? normalized : null;
 }
 
@@ -102,9 +108,16 @@ export type FirstNameInput = {
 };
 
 /**
- * Samo pierwsze imię osoby do zapytania: pierwszy wyraz `firstName` po
- * przycięciu białych znaków, bez znaków nowej linii. Brak osoby albo pustego
- * imienia daje `null`.
+ * Najdłuższe imię (w znakach), jakie trafia do zapytania; dłuższe jest
+ * przycinane do tej długości.
+ */
+export const FIRST_NAME_MAX_LENGTH = 40;
+
+/**
+ * Samo pierwsze imię osoby do zapytania: pierwszy wyraz `firstName` (wyrazy
+ * rozdzielone białymi znakami, w tym NEL), bez znaków nowej linii, przycięty
+ * do `FIRST_NAME_MAX_LENGTH` znaków. Brak osoby albo pustego imienia daje
+ * `null`.
  *
  * Zasada dla tras korzystających z tego modułu: imię trafia do modelu tylko
  * w tekście skierowanym do klienta (odpowiedź na jego opinię): imię tego
@@ -115,6 +128,11 @@ export function firstNameForReply(
   person: FirstNameInput | null | undefined,
 ): string | null {
   if (!person || typeof person.firstName !== "string") return null;
-  const [first] = person.firstName.trim().split(/\s+/);
-  return first ? first : null;
+  const [first] = person.firstName
+    .replace(WHITESPACE_RUN, " ")
+    .trim()
+    .split(" ");
+  if (!first) return null;
+  // Przycięcie po pełnych znakach, żeby nie rozdzielić pary zastępczej.
+  return Array.from(first).slice(0, FIRST_NAME_MAX_LENGTH).join("");
 }

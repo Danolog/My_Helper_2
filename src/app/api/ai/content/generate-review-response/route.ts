@@ -18,29 +18,11 @@ const requestSchema = z.object({
   reviewId: z.string().uuid("Nieprawidlowe ID opinii"),
 });
 
-export async function POST(req: Request) {
-  const proResult = await requireProAI();
-  if (isProAIError(proResult)) return proResult;
-  const { salonId } = proResult;
-
-  // Parse request
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-
-  const parsed = requestSchema.safeParse(body);
-  if (!parsed.success) {
-    return Response.json(
-      { error: "Invalid request", details: parsed.error.flatten().fieldErrors },
-      { status: 400 }
-    );
-  }
-
-  const { reviewId } = parsed.data;
-
+/**
+ * Opinia z powiązanymi danymi i kontekst salonu. Brak opinii w salonie daje
+ * `null`; błąd bazy jest rzucany dalej.
+ */
+async function loadReviewContext(salonId: string, reviewId: string) {
   // Fetch the review with related data
   const [reviewData] = await forSalon(salonId).raw((tx) =>
     tx
@@ -65,13 +47,56 @@ export async function POST(req: Request) {
       .limit(1)
   );
 
-  if (!reviewData) {
+  if (!reviewData) return null;
+
+  const { salonName, industryLabel } = await getSalonContext(salonId);
+  return { reviewData, salonName, industryLabel };
+}
+
+export async function POST(req: Request) {
+  const proResult = await requireProAI();
+  if (isProAIError(proResult)) return proResult;
+  const { salonId } = proResult;
+
+  // Parse request
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return Response.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const parsed = requestSchema.safeParse(body);
+  if (!parsed.success) {
+    return Response.json(
+      { error: "Invalid request", details: parsed.error.flatten().fieldErrors },
+      { status: 400 }
+    );
+  }
+
+  const { reviewId } = parsed.data;
+
+  // Odczyty z bazy; błąd = 500 bez wywołania modelu. Log zawiera tylko błąd,
+  // bez treści opinii i danych klienta.
+  let loaded: Awaited<ReturnType<typeof loadReviewContext>>;
+  try {
+    loaded = await loadReviewContext(salonId, reviewId);
+  } catch (error) {
+    logger.error("[AI Content] Error loading review data", { error: error });
+    return Response.json(
+      { error: "Blad podczas pobierania opinii. Sprobuj ponownie." },
+      { status: 500 }
+    );
+  }
+
+  if (!loaded) {
     return Response.json(
       { error: "Opinia nie zostala znaleziona" },
       { status: 404 }
     );
   }
 
+  const { reviewData, salonName, industryLabel } = loaded;
   const review = reviewData.review;
   // Odpowiedź jest skierowana do klienta, więc do modelu trafia samo jego
   // pierwsze imię; pracownik też tylko z imienia. Nazwiska nie trafiają nigdy.
@@ -79,7 +104,10 @@ export async function POST(req: Request) {
   const employeeFirstName = firstNameForReply(reviewData.employee);
   const serviceName = reviewData.service?.name || null;
 
-  const { salonName, industryLabel } = await getSalonContext(salonId);
+  // Bez imienia klienta model nie dostaje polecenia zwracania się po imieniu.
+  const addressRule = clientFirstName
+    ? "Zwroc sie do klienta po imieniu (uzyj pierwszego imienia)"
+    : "Zwroc sie do klienta bez imienia - nie zgaduj i nie wymyslaj imienia";
 
   // Build context about the review
   const contextParts: string[] = [];
@@ -108,7 +136,7 @@ export async function POST(req: Request) {
 Zasady:
 - Pisz TYLKO po polsku
 - Napisz krotka odpowiedz (2-4 zdania)
-- Zwroc sie do klienta po imieniu (uzyj pierwszego imienia)
+- ${addressRule}
 - ${toneGuidance}
 - NIE uzywaj naglowkow, punktorow ani formatowania - sam czysty tekst
 - NIE dodawaj tekstu typu "Odpowiedz:" na poczatku

@@ -8,8 +8,11 @@
  * - Not found (404 when the review does not exist in the salon)
  * - Happy path (200 with the generated response and tone)
  * - Server errors (500 when the model fails or returns no text)
+ * - Database errors (500 without a model call, log without review text or
+ *   client data)
  * - Request sent to the model: only the first name of the client and of the
- *   employee, never last names, contact data or health data
+ *   employee, never last names, contact data or health data; without a first
+ *   name the system prompt asks to address the client without a name
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockRequest, parseResponse, TEST_IDS } from "./helpers";
@@ -100,6 +103,7 @@ vi.mock("@/lib/logger", () => ({
 // -------------------------------------------------------
 
 import { POST } from "@/app/api/ai/content/generate-review-response/route";
+import { logger } from "@/lib/logger";
 
 // -------------------------------------------------------
 // Chain builder (same pattern as other API tests)
@@ -194,6 +198,11 @@ const FORBIDDEN_VALUES = [
   "+48700222333",
   "marta.zielinska@example.com",
 ];
+
+/** Rule in the system prompt when the client's first name is known. */
+const ADDRESS_BY_NAME = "po imieniu";
+/** Rule in the system prompt when there is no first name to use. */
+const ADDRESS_WITHOUT_NAME = "bez imienia";
 
 async function callAndGetRequest(row: unknown) {
   mockDbSelect.mockReturnValueOnce(chainMock([row]));
@@ -441,6 +450,89 @@ describe("POST /api/ai/content/generate-review-response", () => {
       const { system } = await callAndGetRequest(makeRow());
 
       expect(system).not.toMatch(/nazwisk/i);
+    });
+
+    it("system prompt asks to address the client by first name when it is known", async () => {
+      setupAuthenticatedPro();
+
+      const { system } = await callAndGetRequest(makeRow());
+
+      expect(system).toContain(ADDRESS_BY_NAME);
+      expect(system).not.toContain(ADDRESS_WITHOUT_NAME);
+    });
+
+    it("system prompt does not ask for a first name when the review has no client", async () => {
+      setupAuthenticatedPro();
+
+      const { system } = await callAndGetRequest(makeRow({ client: null }));
+
+      expect(system).not.toContain(ADDRESS_BY_NAME);
+      expect(system).toContain(ADDRESS_WITHOUT_NAME);
+      expect(system).toMatch(/nie zgaduj/i);
+    });
+
+    it("system prompt does not ask for a first name when the client has none", async () => {
+      setupAuthenticatedPro();
+
+      const { system } = await callAndGetRequest(
+        makeRow({ client: makeClient({ firstName: " \n " }) }),
+      );
+
+      expect(system).not.toContain(ADDRESS_BY_NAME);
+      expect(system).toContain(ADDRESS_WITHOUT_NAME);
+    });
+  });
+
+  describe("database errors", () => {
+    function rejectingChain(message: string) {
+      const chain: Record<string, unknown> = {};
+      for (const m of ["select", "from", "where", "leftJoin", "innerJoin", "limit", "orderBy"]) {
+        chain[m] = vi.fn().mockReturnValue(chain);
+      }
+      chain.then = (_: unknown, reject: (err: Error) => void) => reject(new Error(message));
+      return chain;
+    }
+
+    it("returns 500 without calling the model when the review lookup fails", async () => {
+      setupAuthenticatedPro();
+      mockDbSelect.mockReturnValueOnce(rejectingChain("DB connection failed"));
+
+      const { status, body } = await parseResponse(await POST(makeRequest()));
+
+      expect(status).toBe(500);
+      expect(typeof body.error).toBe("string");
+      expect(mockGenerateText).not.toHaveBeenCalled();
+      expect(mockTrackAIUsage).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledTimes(1);
+    });
+
+    it("logs the lookup error without review text or client data", async () => {
+      setupAuthenticatedPro();
+      mockDbSelect.mockReturnValueOnce(rejectingChain("DB connection failed"));
+
+      await POST(makeRequest());
+
+      const logged = JSON.stringify(
+        vi.mocked(logger.error).mock.calls,
+        (_key, value: unknown) =>
+          value instanceof Error ? { name: value.name, message: value.message } : value,
+      );
+      for (const value of ["Swietna obsluga", "Anna", "Marta", ...FORBIDDEN_VALUES]) {
+        expect(logged).not.toContain(value);
+      }
+    });
+
+    it("returns 500 without calling the model when loading the salon context fails", async () => {
+      setupAuthenticatedPro();
+      mockDbSelect.mockReturnValueOnce(chainMock([makeRow()]));
+      mockGetSalonContext.mockRejectedValueOnce(new Error("DB connection failed"));
+
+      const { status, body } = await parseResponse(await POST(makeRequest()));
+
+      expect(status).toBe(500);
+      expect(typeof body.error).toBe("string");
+      expect(mockGenerateText).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledTimes(1);
     });
   });
 });
