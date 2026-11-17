@@ -240,16 +240,13 @@ const SMS_SALON_NAME_MAX = 40;
 const ADDRESS_LIKE = /:\/\/|www\.|[a-z0-9]\.[a-z]{2,}(?![a-z])/i;
 
 /**
- * Nazwa salonu (tekst właściciela) przygotowana do treści SMS. Kolejno:
- * znaki sterujące i nowe linie → spacja; NFKD bez znaków łączących, ł→l,
- * Ł→L; tylko podstawowa tabela GSM-7; zwinięte spacje i trim; ponad 40 znaków
- * → 37 znaków (bez spacji na końcu) + "...". Nazwa wyglądająca na adres jest
- * pomijana w całości. Pusty wynik = szablon bez fragmentu „w <salon>”.
+ * Tekst sprowadzony do podstawowej tabeli GSM-7. Kolejno: znaki sterujące
+ * i nowe linie → spacja; NFKD bez znaków łączących, ł→l, Ł→L; tylko
+ * podstawowa tabela GSM-7; zwinięte spacje i trim.
  */
-export function salonNameForSms(name: string | null | undefined): string {
-  if (!name) return "";
-  const cleaned = [
-    ...name
+function toGsm7Basic(text: string): string {
+  return [
+    ...text
       .replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ")
       .normalize("NFKD")
       .replace(/\p{M}/gu, "")
@@ -260,6 +257,17 @@ export function salonNameForSms(name: string | null | undefined): string {
     .join("")
     .replace(/ +/g, " ")
     .trim();
+}
+
+/**
+ * Nazwa salonu (tekst właściciela) przygotowana do treści SMS: `toGsm7Basic`,
+ * potem ponad 40 znaków → 37 znaków (bez spacji na końcu) + "...". Nazwa
+ * wyglądająca na adres jest pomijana w całości. Pusty wynik = szablon bez
+ * fragmentu „w <salon>”.
+ */
+export function salonNameForSms(name: string | null | undefined): string {
+  if (!name) return "";
+  const cleaned = toGsm7Basic(name);
 
   if (ADDRESS_LIKE.test(name) || ADDRESS_LIKE.test(cleaned)) return "";
   if (cleaned.length <= SMS_SALON_NAME_MAX) return cleaned;
@@ -269,6 +277,53 @@ export function salonNameForSms(name: string | null | undefined): string {
 /** Fragment „ w <salon>” albo pusty napis, gdy nazwy brak po przygotowaniu. */
 function salonPart(name: string): string {
   return name ? ` w ${name}` : "";
+}
+
+/**
+ * Parametry treści SMS o zwolnionym terminie z listy oczekujących. Celowo bez
+ * danych klienta, pracownika i bez linku.
+ */
+export interface WaitingListSmsParams {
+  salonName: string | null | undefined;
+  serviceName?: string | null | undefined;
+  startTime: Date;
+  salonPhone?: string | null | undefined;
+}
+
+/**
+ * Treść SMS o zwolnionym terminie (czysta funkcja, bez wysyłki). Nazwa salonu
+ * przez `salonNameForSms`; nazwa usługi, data i telefon salonu przez
+ * `toGsm7Basic`; nazwa usługi wyglądająca na adres jest pomijana. Data
+ * i godzina w strefie SMS_TIME_ZONE. Fragmenty salonu, usługi i telefonu
+ * pojawiają się tylko, gdy po przygotowaniu nie są puste.
+ */
+export function buildWaitingListSms(params: WaitingListSmsParams): string {
+  const formattedDate = toGsm7Basic(
+    params.startTime.toLocaleDateString("pl-PL", {
+      timeZone: SMS_TIME_ZONE,
+      day: "numeric",
+      month: "long",
+    })
+  );
+  const formattedTime = params.startTime.toLocaleTimeString("pl-PL", {
+    timeZone: SMS_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const salon = salonPart(salonNameForSms(params.salonName));
+
+  const rawService = params.serviceName ?? "";
+  const service = ADDRESS_LIKE.test(rawService) ? "" : toGsm7Basic(rawService);
+  const servicePart = service ? ` "${service}"` : "";
+
+  const phone = toGsm7Basic(params.salonPhone ?? "");
+  const phonePart = phone ? ` lub zadzwon: ${phone}` : "";
+
+  return (
+    `Zwolnil sie termin${salon}:${servicePart} ${formattedDate} o ${formattedTime}. ` +
+    `Aby go przyjac, zaloguj sie w aplikacji i otworz liste oczekujacych${phonePart}.`
+  );
 }
 
 /**
