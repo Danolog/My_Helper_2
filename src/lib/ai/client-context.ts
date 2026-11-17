@@ -1,7 +1,8 @@
 /**
  * Kontekst klienta w zapytaniach do zewnętrznego modelu AI.
  *
- * Jedyne miejsce, które zamienia rekord klienta na linie tekstu zapytania.
+ * Trasy korzystające z tego modułu zamieniają rekord klienta na linie tekstu
+ * zapytania wyłącznie tutaj.
  * Do zapytania trafiają tylko pola z listy `CLIENT_CONTEXT_FIELDS`, nawet gdy
  * funkcja dostanie cały rekord z bazy. Klient jest opisany stałym słowem
  * `CLIENT_LABEL` — bez imienia i nazwiska. Nie trafiają tu dane o zdrowiu
@@ -105,10 +106,10 @@ export type FirstNameInput = {
  * przycięciu białych znaków, bez znaków nowej linii. Brak osoby albo pustego
  * imienia daje `null`.
  *
- * Zasada: imię trafia do modelu tylko w tekście skierowanym do klienta
- * (odpowiedź na jego opinię): imię tego klienta i imię pracownika, którego
- * odpowiedź może wymienić. Nazwisko nie trafia do modelu nigdy — ta funkcja
- * go nie czyta.
+ * Zasada dla tras korzystających z tego modułu: imię trafia do modelu tylko
+ * w tekście skierowanym do klienta (odpowiedź na jego opinię): imię tego
+ * klienta i imię pracownika, którego odpowiedź może wymienić. Ta funkcja nie
+ * czyta nazwiska.
  */
 export function firstNameForReply(
   person: FirstNameInput | null | undefined,
