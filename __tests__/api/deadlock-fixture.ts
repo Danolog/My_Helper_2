@@ -1,7 +1,6 @@
 /**
  * Błąd zakleszczenia (40P01) w kształcie sterownika: postgres.js i node-postgres
- * podają CONTEXT w polu `where`. Tekst z prawdziwego logu bazy (main `db71a43`,
- * scratchpad/team-lead/pg-race-db71a43.log).
+ * podają CONTEXT w polu `where`. Tekst z prawdziwego logu bazy (main `db71a43`).
  */
 export const DEADLOCK_ON_APPOINTMENTS_EXCLUDE =
   'while checking exclusion constraint on tuple (13,108) in relation "appointments"';

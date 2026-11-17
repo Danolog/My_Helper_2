@@ -1,6 +1,6 @@
 /**
  * Blokady subskrypcji na PRAWDZIWYM Postgresie (T3, ostrzeżenia [MEDIUM] #2
- * i #3 oraz kolejność zdarzeń; warunki Ethana a–d, `scratchpad/ethan/pr62-shape.md`).
+ * i #3 oraz kolejność zdarzeń; warunki a–d).
  *
  * (a) Ścieżka produkcyjna: prawdziwe `confirmSubscriptionCheckout` i
  *     prawdziwe handlery webhooka (`POST /api/stripe/webhook`) na prawdziwej

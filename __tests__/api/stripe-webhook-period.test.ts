@@ -1,6 +1,5 @@
 /**
- * Okres rozliczeniowy w handlerach webhooka Stripe (T3, warunek Ethana dla
- * 1.1 — `scratchpad/ethan/1-1-trial.md` §2).
+ * Okres rozliczeniowy w handlerach webhooka Stripe (T3, warunek dla 1.1).
  *
  * Nowsze API Stripe nie ma `current_period_*` na poziomie subskrypcji, tylko
  * w `items.data[0]`. Przed poprawką `customer.subscription.updated` czytał

@@ -13,8 +13,8 @@ import type Stripe from "stripe";
 /**
  * Webhooki zmieniające stan subskrypcji (`customer.subscription.updated`,
  * `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`)
- * traktują zdarzenie TYLKO jako sygnał (T3, kolejność zdarzeń — Ethan,
- * `scratchpad/ethan/pr62-shape.md` §1). Stripe nie gwarantuje kolejności
+ * traktują zdarzenie TYLKO jako sygnał (T3, kolejność zdarzeń). Stripe nie
+ * gwarantuje kolejności
  * dostarczenia: blokada usuwa przeplot, ale nie przywraca kolejności, więc
  * późne `invoice.paid` albo `updated: active` po `deleted` wskrzesiłoby
  * anulowaną subskrypcję. Dlatego pod blokadą stripe_sub czytamy BIEŻĄCY stan

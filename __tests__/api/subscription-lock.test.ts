@@ -4,7 +4,7 @@
  * wywołań (`f.log`). Kolejność i czekanie na prawdziwym Postgresie dowodzi
  * test integracyjny `__tests__/integration/subscription-locks.pg.test.ts`.
  *
- * Kształt (Ethan, `scratchpad/ethan/pr62-shape.md`):
+ * Kształt:
  * - dwuargumentowe `pg_advisory_xact_lock(<przestrzeń>, hashtext(id))`,
  *   przestrzenie `stripe_sub` i `salon`, tylko `xact`;
  * - kolejność: lock_timeout → stripe_sub → odczyt Stripe → salon; co najwyżej
