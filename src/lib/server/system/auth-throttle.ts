@@ -7,10 +7,11 @@
  * HMAC z osobnymi etykietami; w tabeli nie ma adresu IP ani e-maila):
  *
  * 1. Licznik adresu (`consumeAuthRateLimit`) — magazyn limitu Better Auth
- *    (`rateLimit.customStorage`). Ścieżki wrażliwe (reguły specjalne biblioteki:
- *    logowanie, rejestracja, zmiana hasła i e-maila, reset hasła, weryfikacja)
- *    liczy baza jednym atomowym UPSERT; pozostałe ścieżki (np. odczyt sesji)
- *    liczy pamięć procesu — bez zapytań do bazy przy każdym żądaniu.
+ *    (`rateLimit.customStorage`). Domyślnie liczy baza jednym atomowym UPSERT
+ *    (okno stałe liczone od pierwszego żądania w oknie). Pamięć procesu liczy
+ *    wyłącznie zamkniętą listę ścieżek `@/lib/auth-rate-limit-paths` (m.in. odczyt
+ *    sesji) — bez zapytań do bazy przy każdym takim żądaniu. Każda inna ścieżka,
+ *    także nieznana, idzie do bazy.
  *
  * 2. Licznik konta (`reserveAccountSignInAttempt`, `clearSignInFailures`) —
  *    każda próba logowania e-mailem rezerwuje miejsce PRZED sprawdzeniem hasła
@@ -28,6 +29,7 @@
 import { DrizzleQueryError, sql } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 import { accountThrottleKey, ipThrottleKey } from "@/lib/auth-throttle-keys";
+import { isMemoryCountedPath } from "@/lib/auth-rate-limit-paths";
 import { dbSystem } from "./db-system";
 
 const ACCOUNT_WINDOW_SEC = 15 * 60;
@@ -72,22 +74,7 @@ function pathOfLibraryKey(libraryKey: string): string {
   return libraryKey.slice(libraryKey.indexOf("|") + 1);
 }
 
-/** Te same ścieżki co reguły specjalne Better Auth (rate-limiter, 1.7.x). */
-function isSensitivePath(path: string): boolean {
-  return (
-    path.startsWith("/sign-in") ||
-    path.startsWith("/sign-up") ||
-    path.startsWith("/change-password") ||
-    path.startsWith("/change-email") ||
-    path === "/request-password-reset" ||
-    path === "/send-verification-email" ||
-    path.startsWith("/forget-password") ||
-    path === "/email-otp/send-verification-otp" ||
-    path === "/email-otp/request-password-reset"
-  );
-}
-
-// ── Licznik w pamięci procesu dla ścieżek niewrażliwych (semantyka jak magazyn
+// ── Licznik w pamięci procesu dla zamkniętej listy ścieżek (semantyka jak magazyn
 //    pamięciowy biblioteki: okno od ostatniego dozwolonego żądania). ──────────
 
 const memory = new Map<string, { count: number; lastRequest: number; expiresAt: number }>();
@@ -100,7 +87,7 @@ let callsSinceSweep = 0;
  *
  * Po przekroczeniu limitu wypierane są najdawniej dodane klucze. Zalew żądań z wielu
  * różnych adresów może więc wyzerować czyjś licznik — dotyczy to WYŁĄCZNIE ścieżek
- * niewrażliwych (np. odczyt sesji); ścieżki wrażliwe i licznik konta liczy baza.
+ * z zamkniętej listy pamięci (np. odczyt sesji); pozostałe ścieżki i licznik konta liczy baza.
  * Ocena, czy to wystarcza: CTO (przegląd tego PR).
  */
 function pruneMemory(now: number): void {
@@ -148,7 +135,7 @@ function retryAfterOf(r: CounterRow, fallback: number): number {
 
 /**
  * Magazyn limitu adresu dla Better Auth (`rateLimit.customStorage.consume`).
- * Ścieżka wrażliwa → atomowy UPSERT w bazie, potem ograniczone kasowanie
+ * Ścieżka spoza listy pamięci → atomowy UPSERT w bazie, potem ograniczone kasowanie
  * wierszy starszych niż 24 h (osobna instrukcja; jej błąd nie zmienia wyniku).
  */
 export async function consumeAuthRateLimit(
@@ -156,7 +143,7 @@ export async function consumeAuthRateLimit(
   rule: { window: number; max: number },
 ): Promise<{ allowed: boolean; retryAfter: number | null }> {
   const path = pathOfLibraryKey(key);
-  if (!isSensitivePath(path)) return consumeInMemory(key, rule);
+  if (isMemoryCountedPath(path)) return consumeInMemory(key, rule);
 
   let row: CounterRow | undefined;
   try {
