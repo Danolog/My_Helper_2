@@ -234,6 +234,7 @@ describe("strażnik — rola aplikacji i treść polityk (#193)", () => {
 
   it.each([
     ["USING (true)", { qual: "true" }, ["clients.tenant_isolation: USING jest stałą true"]],
+    ["polityka DELETE z USING (true)", { cmd: "DELETE", qual: "true", withCheck: null }, ["clients.tenant_isolation: USING jest stałą true"]],
     ["WITH CHECK (true)", { withCheck: "true" }, ["clients.tenant_isolation: WITH CHECK jest stałą true"]],
     [
       "odwołanie do innej zmiennej",

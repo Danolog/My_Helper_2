@@ -17,6 +17,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { runPolicyGuard } from "../../scripts/db-rls-guard";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
 const suite = h ? describe : describe.skip;
@@ -48,16 +49,22 @@ async function forSalonTx(c: Conn): Promise<void> {
   await c.unsafe("COMMIT");
 }
 
-/** Pod rolą aplikacji BEZ kontekstu: liczba wierszy z każdej tabeli albo kod błędu; każda w swojej tx z ROLLBACK. */
+/**
+ * Pod rolą aplikacji BEZ kontekstu: liczba wierszy z każdej tabeli albo kod błędu; każda w swojej tx z ROLLBACK.
+ * ROLLBACK w `finally`: błąd DDL przed próbą nie zwalnia połączenia z otwartą (przerwaną) transakcją.
+ */
 async function readWithoutContext(c: Conn, ddl: readonly string[] = []): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   for (const t of READ_TABLES) {
     await c.unsafe("BEGIN");
-    for (const stmt of ddl) await c.unsafe(stmt);
-    await c.unsafe("SET LOCAL ROLE myhelper_app");
-    const r = await attempt(c, `SELECT count(*)::int AS n FROM ${t}`);
-    out[t] = "rows" in r ? (r.rows[0] as { n: number }).n : r.code;
-    await c.unsafe("ROLLBACK");
+    try {
+      for (const stmt of ddl) await c.unsafe(stmt);
+      await c.unsafe("SET LOCAL ROLE myhelper_app");
+      const r = await attempt(c, `SELECT count(*)::int AS n FROM ${t}`);
+      out[t] = "rows" in r ? (r.rows[0] as { n: number }).n : r.code;
+    } finally {
+      await c.unsafe("ROLLBACK");
+    }
   }
   return out;
 }
@@ -136,5 +143,9 @@ suite("brak kontekstu salonu: 0 wierszy i 42501 na każdym połączeniu (#193)",
     } finally {
       c.release();
     }
+  });
+
+  it("po sondzie: polityka clients wróciła (strażnik polityk bez problemów)", async () => {
+    expect(await runPolicyGuard(h!.observer)).toEqual({ ok: true, policies: expect.any(Number) });
   });
 });
