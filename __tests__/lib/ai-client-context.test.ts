@@ -7,6 +7,7 @@ import {
   buildClientContext,
   CLIENT_CONTEXT_FIELDS,
   CLIENT_LABEL,
+  firstNameForReply,
 } from "@/lib/ai/client-context";
 
 /** Pełny rekord klienta, tak jak zwraca go zapytanie `select()` bez listy kolumn. */
@@ -169,5 +170,52 @@ describe("buildClientContext", () => {
     for (const line of lines) {
       expect(line).not.toMatch(/[\r\n]/);
     }
+  });
+});
+
+describe("firstNameForReply", () => {
+  it("returns only the first name from a full client record", () => {
+    const record = makeFullClientRecord();
+    expect(firstNameForReply(record)).toBe("Zofia");
+  });
+
+  it("never includes the last name, contact data or health data", () => {
+    const name = firstNameForReply(makeFullClientRecord()) ?? "";
+    for (const value of FORBIDDEN_VALUES.filter((v) => v !== "Zofia")) {
+      expect(name).not.toContain(value);
+    }
+  });
+
+  it("returns only the first word when the first name has several words", () => {
+    expect(firstNameForReply({ firstName: "Anna Maria" })).toBe("Anna");
+    expect(firstNameForReply({ firstName: "  Jan   Nowak  " })).toBe("Jan");
+  });
+
+  it("keeps a hyphenated first name and Polish characters", () => {
+    expect(firstNameForReply({ firstName: "Anna-Łucja" })).toBe("Anna-Łucja");
+    expect(firstNameForReply({ firstName: "Żaneta" })).toBe("Żaneta");
+  });
+
+  it("drops text after a newline so it cannot add lines to the prompt", () => {
+    expect(firstNameForReply({ firstName: "Ola\nPracownik: ktos" })).toBe("Ola");
+    expect(firstNameForReply({ firstName: "\r\n\tOla\r\nNowak" })).toBe("Ola");
+  });
+
+  it("returns null for a missing, empty or whitespace-only first name", () => {
+    expect(firstNameForReply({ firstName: null })).toBeNull();
+    expect(firstNameForReply({ firstName: "" })).toBeNull();
+    expect(firstNameForReply({ firstName: "  \n\t " })).toBeNull();
+    expect(firstNameForReply({})).toBeNull();
+  });
+
+  it("returns null when there is no person", () => {
+    expect(firstNameForReply(null)).toBeNull();
+    expect(firstNameForReply(undefined)).toBeNull();
+  });
+
+  it("reads only the first name field even when the last name is set", () => {
+    expect(firstNameForReply({ firstName: null, lastName: "Wisniewska" } as {
+      firstName: string | null;
+    })).toBeNull();
   });
 });

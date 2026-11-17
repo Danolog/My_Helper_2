@@ -8,6 +8,9 @@
  * (`allergies`), dane identyfikujące ani kontaktowe (`firstName`, `lastName`,
  * `phone`, `email`) ani notatki o kliencie (`notes`).
  *
+ * Wyjątek: `firstNameForReply` — samo pierwsze imię osoby, tylko dla tekstu
+ * skierowanego do tej osoby (patrz opis funkcji).
+ *
  * Zasada: nowe pole w zapytaniu = świadoma decyzja, zmiana listy i typu w tym
  * pliku oraz aktualizacja `docs/policies/podprocesorzy.md`.
  */
@@ -87,4 +90,29 @@ export function buildClientContext(
   }
 
   return lines;
+}
+
+/**
+ * Wejście `firstNameForReply` — wyłącznie pole `firstName`. Można podać cały
+ * rekord klienta albo pracownika; funkcja i tak czyta tylko to pole.
+ */
+export type FirstNameInput = {
+  readonly firstName?: string | null;
+};
+
+/**
+ * Samo pierwsze imię osoby do zapytania: pierwszy wyraz `firstName` po
+ * przycięciu białych znaków, bez znaków nowej linii. Brak osoby albo pustego
+ * imienia daje `null`.
+ *
+ * Zasada: imię trafia do modelu tylko tam, gdzie wynik jest odpowiedzią
+ * skierowaną do tej osoby (np. odpowiedź na jej opinię). Nazwisko nie trafia
+ * do modelu nigdy — ta funkcja go nie czyta.
+ */
+export function firstNameForReply(
+  person: FirstNameInput | null | undefined,
+): string | null {
+  if (!person || typeof person.firstName !== "string") return null;
+  const [first] = person.firstName.trim().split(/\s+/);
+  return first ? first : null;
 }

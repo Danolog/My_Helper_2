@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
+import { firstNameForReply } from "@/lib/ai/client-context";
 import {
   createAIClient,
   getAIModel,
@@ -72,12 +73,10 @@ export async function POST(req: Request) {
   }
 
   const review = reviewData.review;
-  const clientName = reviewData.client
-    ? `${reviewData.client.firstName} ${reviewData.client.lastName}`
-    : "Klient";
-  const employeeName = reviewData.employee
-    ? `${reviewData.employee.firstName} ${reviewData.employee.lastName}`
-    : null;
+  // Odpowiedź jest skierowana do klienta, więc do modelu trafia samo jego
+  // pierwsze imię; pracownik też tylko z imienia. Nazwiska nie trafiają nigdy.
+  const clientFirstName = firstNameForReply(reviewData.client);
+  const employeeFirstName = firstNameForReply(reviewData.employee);
   const serviceName = reviewData.service?.name || null;
 
   const { salonName, industryLabel } = await getSalonContext(salonId);
@@ -90,8 +89,8 @@ export async function POST(req: Request) {
   } else {
     contextParts.push("Klient nie pozostawil komentarza (tylko ocena)");
   }
-  contextParts.push(`Imie klienta: ${clientName}`);
-  if (employeeName) contextParts.push(`Pracownik: ${employeeName}`);
+  if (clientFirstName) contextParts.push(`Imie klienta: ${clientFirstName}`);
+  if (employeeFirstName) contextParts.push(`Pracownik: ${employeeFirstName}`);
   if (serviceName) contextParts.push(`Usluga: ${serviceName}`);
 
   // Determine tone based on rating
