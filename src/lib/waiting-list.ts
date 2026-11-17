@@ -1,7 +1,6 @@
 import crypto from "crypto";
 import { eq, and, isNull, or, not } from "drizzle-orm";
 import { appointmentConflictWhere, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
-import { db } from "@/lib/db";
 import {
   checkBookingWithoutDeposit,
   DEPOSIT_CHECK_UNAVAILABLE_MESSAGE,
@@ -16,6 +15,37 @@ import {
   appointments,
   notifications,
 } from "@/lib/schema";
+import { getSalonModules } from "@/lib/server/modules";
+import { forSalon } from "@/lib/server/repository";
+import { resolveWaitingListToken } from "@/lib/server/system";
+import { SMS_TIME_ZONE } from "@/lib/sms";
+
+// #193 P5a-1 (decyzja CTO 4): bez puli `db`. notifyWaitingList działa w
+// forSalon(params.salonId); accept/decline ustalają salon wyłącznie przez
+// wyjście `resolveWaitingListToken` i dalej idą przez forSalon(salonId).
+// Każde polecenie to osobne `raw(...)` — jak przed zmianą, gdzie każde było
+// osobnym poleceniem bez wspólnej transakcji (#171: błąd EXCLUDE dotyczy
+// jednego zapisu). Push i wyliczenie zadatku są wołane poza callbackiem bramy.
+
+type SalonGate = ReturnType<typeof forSalon>;
+
+/**
+ * Konto klienta do wysyłki push: JEDYNE miejsce odczytu tabeli kont w tym
+ * module. Tylko konto ze ZWERYFIKOWANYM e-mailem równym e-mailowi klienta
+ * (ta sama reguła co src/lib/client-match.ts) — konto założone na cudzy
+ * adres nie dostaje danych klienta, salonu, usługi, pracownika i terminu.
+ * null = brak takiego konta.
+ */
+async function findVerifiedLinkedUserId(gate: SalonGate, email: string): Promise<string | null> {
+  const [linkedUser] = await gate.raw((tx) =>
+    tx
+      .select({ id: user.id })
+      .from(user)
+      .where(and(eq(user.email, email), eq(user.emailVerified, true)))
+      .limit(1)
+  );
+  return linkedUser?.id ?? null;
+}
 
 interface NotifyWaitingListParams {
   salonId: string;
@@ -43,10 +73,14 @@ interface NotifyWaitingListResult {
  * notified or accepted/declined yet. For each match it sends a push
  * notification with the freed slot details.
  *
+ * Moduł listy oczekujących wyłączony w salonie (albo błąd odczytu ustawień)
+ * = brak odczytu wpisów i brak wysyłki.
+ *
  * Kanał SMS jest wstrzymany do czasu #221 (`smsCount` zostaje w wyniku, = 0).
  * Wpis jest oznaczany (`notifiedAt`, `acceptToken`, `offered*`) TYLKO gdy
- * wiadomość faktycznie dotarła (push `success`). Inaczej wpis zostaje
- * nietknięty i wraca przy następnym zwolnionym terminie — bez błędu w wyniku.
+ * wiadomość została przyjęta przez dostawcę (push `success`). Inaczej wpis
+ * zostaje nietknięty i wraca przy następnym zwolnionym terminie — bez błędu
+ * w wyniku.
  */
 export async function notifyWaitingList(
   params: NotifyWaitingListParams
@@ -58,7 +92,21 @@ export async function notifyWaitingList(
     errors: 0,
   };
 
+  // Jedno źródło salonu, jak w accept/decline: każde zapytanie poniżej ma
+  // jawny warunek salonu (kontrakt raw() w repository.ts).
+  const salonId = params.salonId;
+
   try {
+    // Przełącznik modułu salonu przed jakimkolwiek odczytem wpisów. Błąd
+    // odczytu ustawień daje stan domyślny, w którym moduł jest wyłączony.
+    const modules = await getSalonModules(salonId);
+    if (!modules.waitingList) {
+      logger.debug("Waiting list module disabled for salon", { salonId });
+      return result;
+    }
+
+    const gate = forSalon(salonId);
+
     // Build conditions for matching waiting list entries:
     // - Same salon (required)
     // - Not already notified (notifiedAt is null)
@@ -79,46 +127,59 @@ export async function notifyWaitingList(
         )
       : isNull(waitingList.preferredEmployeeId);
 
-    const entries = await db
-      .select({
-        entry: waitingList,
-        client: clients,
-      })
-      .from(waitingList)
-      .innerJoin(clients, eq(waitingList.clientId, clients.id))
-      .where(
-        and(
-          eq(waitingList.salonId, params.salonId),
-          isNull(waitingList.notifiedAt),
-          isNull(waitingList.accepted),
-          serviceCondition,
-          employeeCondition
+    const entries = await gate.raw((tx) =>
+      tx
+        .select({
+          entry: waitingList,
+          client: clients,
+        })
+        .from(waitingList)
+        .innerJoin(
+          clients,
+          and(eq(waitingList.clientId, clients.id), eq(clients.salonId, salonId))
         )
-      );
+        .where(
+          and(
+            eq(waitingList.salonId, salonId),
+            isNull(waitingList.notifiedAt),
+            isNull(waitingList.accepted),
+            serviceCondition,
+            employeeCondition
+          )
+        )
+    );
 
     if (entries.length === 0) {
-      logger.debug("No matching waiting list entries for freed slot", { salonId: params.salonId });
+      logger.debug("No matching waiting list entries for freed slot", { salonId });
       return result;
     }
 
-    logger.info("Found matching waiting list entries for freed slot", { count: entries.length, salonId: params.salonId });
+    logger.info("Found matching waiting list entries for freed slot", { count: entries.length, salonId });
 
-    // Format the freed slot details for notification messages
+    // Data i godzina terminu w czasie warszawskim (SMS_TIME_ZONE), niezależnie
+    // od strefy procesu; jedna wartość dla każdego kanału.
     const formattedDate = params.startTime.toLocaleDateString("pl-PL", {
+      timeZone: SMS_TIME_ZONE,
       weekday: "long",
       day: "numeric",
       month: "long",
     });
     const formattedTime = params.startTime.toLocaleTimeString("pl-PL", {
+      timeZone: SMS_TIME_ZONE,
       hour: "2-digit",
       minute: "2-digit",
     });
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
+    // Konto klienta po e-mailu: jeden odczyt na e-mail w tym przebiegu. Mapa
+    // żyje tylko w pamięci tego wywołania — następny zwolniony termin czyta
+    // konto od nowa (konto założone później też dostanie powiadomienie).
+    const linkedUserIdByEmail = new Map<string, string | null>();
+
     for (const row of entries) {
       const clientName = `${row.client.firstName} ${row.client.lastName}`;
-      const bookingLink = `${appUrl}/salons/${params.salonId}/book`;
+      const bookingLink = `${appUrl}/salons/${salonId}/book`;
 
       // Build the notification message in Polish
       const message =
@@ -130,31 +191,28 @@ export async function notifyWaitingList(
       // Kanał SMS wstrzymany do #221 — brak wywołania sendSms.
       let delivered = false;
 
-      // Send push notification if the client has a linked user account.
-      // We look up the user by email to find the userId for push delivery —
-      // ONLY accounts with a VERIFIED email (same rule as src/lib/client-match.ts):
-      // an account registered on someone else's address must not receive the
-      // client's name, salon, service, employee and time.
+      // Push na konto klienta (findVerifiedLinkedUserId: tylko zweryfikowany e-mail).
       if (row.client.email) {
         try {
-          const [linkedUser] = await db
-            .select({ id: user.id })
-            .from(user)
-            .where(and(eq(user.email, row.client.email), eq(user.emailVerified, true)))
-            .limit(1);
+          const email = row.client.email;
+          let linkedUserId = linkedUserIdByEmail.get(email);
+          if (linkedUserId === undefined) {
+            linkedUserId = await findVerifiedLinkedUserId(gate, email);
+            linkedUserIdByEmail.set(email, linkedUserId);
+          }
 
-          if (linkedUser) {
-            const pushResult = await sendPushNotification(linkedUser.id, {
+          if (linkedUserId) {
+            const pushResult = await sendPushNotification(linkedUserId, {
               title: "Zwolnil sie termin!",
               body: message,
               tag: `waiting-list-${row.entry.id}`,
               data: {
                 type: "waiting_list_notification",
                 waitingListId: row.entry.id,
-                salonId: params.salonId,
+                salonId,
                 url: "/client/waiting-list",
               },
-              salonId: params.salonId,
+              salonId,
               clientId: row.client.id,
             });
             if (pushResult.success) {
@@ -163,7 +221,10 @@ export async function notifyWaitingList(
             }
           }
         } catch (err) {
-          logger.warn("Waiting list push notification failed", { clientId: row.client.id, error: err });
+          logger.warn("Waiting list push notification failed", {
+            clientId: row.client.id,
+            errorName: err instanceof Error ? err.name : typeof err,
+          });
           // Push failures are non-critical; do not increment errors
         }
       }
@@ -176,18 +237,22 @@ export async function notifyWaitingList(
       // Find client's existing appointment for same service to link it
       let existingApptId: string | null = null;
       if (params.serviceId && row.client.id) {
-        const existingAppts = await db
-          .select({ id: appointments.id })
-          .from(appointments)
-          .where(
-            and(
-              eq(appointments.clientId, row.client.id),
-              eq(appointments.salonId, params.salonId),
-              eq(appointments.serviceId, params.serviceId),
-              not(eq(appointments.status, "cancelled"))
+        const clientId = row.client.id;
+        const serviceId = params.serviceId;
+        const existingAppts = await gate.raw((tx) =>
+          tx
+            .select({ id: appointments.id })
+            .from(appointments)
+            .where(
+              and(
+                eq(appointments.clientId, clientId),
+                eq(appointments.salonId, salonId),
+                eq(appointments.serviceId, serviceId),
+                not(eq(appointments.status, "cancelled"))
+              )
             )
-          )
-          .limit(1);
+            .limit(1)
+        );
         if (existingAppts.length > 0) {
           existingApptId = existingAppts[0]!.id;
         }
@@ -198,20 +263,30 @@ export async function notifyWaitingList(
 
       // Mark the entry as notified and save offered slot details
       try {
-        await db
-          .update(waitingList)
-          .set({
-            notifiedAt: new Date(),
-            offeredStartTime: params.startTime,
-            offeredEndTime: params.endTime,
-            offeredEmployeeId: params.employeeId,
-            existingAppointmentId: existingApptId,
-            acceptToken,
-          })
-          .where(eq(waitingList.id, row.entry.id));
+        const entryId = row.entry.id;
+        await gate.raw((tx) =>
+          tx
+            .update(waitingList)
+            .set({
+              notifiedAt: new Date(),
+              offeredStartTime: params.startTime,
+              offeredEndTime: params.endTime,
+              offeredEmployeeId: params.employeeId,
+              existingAppointmentId: existingApptId,
+              acceptToken,
+            })
+            .where(and(eq(waitingList.id, entryId), eq(waitingList.salonId, salonId)))
+        );
         result.notified++;
       } catch (updateErr) {
-        logger.error("Failed to update notifiedAt for waiting list entry", { entryId: row.entry.id, error: updateErr });
+        // Wiadomość przyjęta przez dostawcę, ale zapis oznaczenia się nie
+        // udał: błąd w wyniku, bez ponawiania zapisu. Wpis zostaje oczekujący,
+        // więc przy następnym zwolnionym terminie klient może dostać kolejną
+        // wiadomość (z nowym terminem). Log bez danych klienta.
+        logger.error("Failed to update notifiedAt for waiting list entry", {
+          entryId: row.entry.id,
+          errorName: updateErr instanceof Error ? updateErr.name : typeof updateErr,
+        });
         result.errors++;
       }
     }
@@ -223,7 +298,9 @@ export async function notifyWaitingList(
       errors: result.errors,
     });
   } catch (error) {
-    logger.error("Failed to notify waiting list", { error });
+    logger.error("Failed to notify waiting list", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
     result.errors++;
   }
 
@@ -252,12 +329,25 @@ export async function acceptEarlierSlot(
   waitingListId: string,
   acceptToken: string
 ): Promise<AcceptResult> {
+  // 0. Salon wyłącznie z tokenu (#193 P5a-1). Token nieznany albo wskazujący
+  // inny wpis = odmowa, nic nie odczytane w salonie i nic nie zapisane.
+  const target = await resolveWaitingListToken(acceptToken);
+  if (!target || target.waitingListId !== waitingListId) {
+    return { success: false, message: "Nieprawidlowy token akceptacji" };
+  }
+  // Jedno źródło salonu: wynik tokenu. Każde zapytanie poniżej ma jawny
+  // warunek salonu (kontrakt raw() w repository.ts), wartości insertów też.
+  const salonId = target.salonId;
+  const gate = forSalon(salonId);
+
   // 1. Fetch the waiting list entry
-  const [entry] = await db
-    .select()
-    .from(waitingList)
-    .where(eq(waitingList.id, waitingListId))
-    .limit(1);
+  const [entry] = await gate.raw((tx) =>
+    tx
+      .select()
+      .from(waitingList)
+      .where(and(eq(waitingList.id, waitingListId), eq(waitingList.salonId, salonId)))
+      .limit(1)
+  );
 
   if (!entry) {
     return { success: false, message: "Wpis nie zostal znaleziony" };
@@ -316,19 +406,21 @@ export async function acceptEarlierSlot(
   // zapisie wizyty, półotwarta [start, end). Przenoszona wizyta klienta nie
   // koliduje sama ze sobą. Przy kolizji nic nie zapisujemy — wpis zostaje
   // nierozstrzygnięty (accepted = null).
-  const overlapping = await db
-    .select({ id: appointments.id })
-    .from(appointments)
-    .where(
-      appointmentConflictWhere({
-        salonId: entry.salonId,
-        employeeId,
-        start: offeredStart,
-        end: offeredEnd,
-        excludeId: entry.existingAppointmentId,
-      })
-    )
-    .limit(1);
+  const overlapping = await gate.raw((tx) =>
+    tx
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(
+        appointmentConflictWhere({
+          salonId,
+          employeeId,
+          start: offeredStart,
+          end: offeredEnd,
+          excludeId: entry.existingAppointmentId,
+        })
+      )
+      .limit(1)
+  );
 
   if (overlapping.length > 0) {
     return { success: false, message: "Termin jest juz zajety" };
@@ -345,7 +437,7 @@ export async function acceptEarlierSlot(
   const depositBlocksNewAppointment = async (): Promise<AcceptResult | null> => {
     if (!entry.serviceId) return null; // bez usługi nie ma zadatku
     const verdict = await checkBookingWithoutDeposit({
-      salonId: entry.salonId,
+      salonId,
       serviceId: entry.serviceId,
       startTime: offeredStart,
       clientId: entry.clientId,
@@ -365,27 +457,51 @@ export async function acceptEarlierSlot(
   // zajął termin po kroku 6, EXCLUDE w bazie odrzuca je (23P01, albo 40P01
   // przy sprawdzaniu ograniczenia) — odmowa jak
   // przy kolizji, nic nie zapisane, wpis nierozstrzygnięty.
+  const insertNewAppointment = async (): Promise<string> => {
+    const [newAppt] = await gate.raw((tx) =>
+      tx
+        .insert(appointments)
+        .values({
+          salonId,
+          clientId: entry.clientId,
+          employeeId,
+          serviceId: entry.serviceId,
+          startTime: offeredStart,
+          endTime: offeredEnd,
+          status: "scheduled",
+          notes: "Utworzony z listy oczekujacych",
+        })
+        .returning()
+    );
+    return newAppt!.id;
+  };
+
   try {
     if (entry.existingAppointmentId) {
       // Move existing appointment to the earlier slot
-      const [existingAppt] = await db
-        .select()
-        .from(appointments)
-        .where(eq(appointments.id, entry.existingAppointmentId))
-        .limit(1);
+      const existingId = entry.existingAppointmentId;
+      const [existingAppt] = await gate.raw((tx) =>
+        tx
+          .select()
+          .from(appointments)
+          .where(and(eq(appointments.id, existingId), eq(appointments.salonId, salonId)))
+          .limit(1)
+      );
 
       if (existingAppt && existingAppt.status !== "cancelled") {
         oldStartTime = new Date(existingAppt.startTime);
-        await db
-          .update(appointments)
-          .set({
-            startTime: offeredStart,
-            endTime: offeredEnd,
-            employeeId,
-            notes: `${existingAppt.notes || ""} [Przeniesiony z listy oczekujacych]`.trim(),
-          })
-          .where(eq(appointments.id, entry.existingAppointmentId));
-        appointmentId = entry.existingAppointmentId;
+        await gate.raw((tx) =>
+          tx
+            .update(appointments)
+            .set({
+              startTime: offeredStart,
+              endTime: offeredEnd,
+              employeeId,
+              notes: `${existingAppt.notes || ""} [Przeniesiony z listy oczekujacych]`.trim(),
+            })
+            .where(and(eq(appointments.id, existingId), eq(appointments.salonId, salonId)))
+        );
+        appointmentId = existingId;
         logger.info("Moved appointment from waiting list", {
           appointmentId,
           from: oldStartTime.toISOString(),
@@ -395,39 +511,13 @@ export async function acceptEarlierSlot(
         // Existing appointment was cancelled or missing – create new
         const blocked = await depositBlocksNewAppointment();
         if (blocked) return blocked;
-        const [newAppt] = await db
-          .insert(appointments)
-          .values({
-            salonId: entry.salonId,
-            clientId: entry.clientId,
-            employeeId,
-            serviceId: entry.serviceId,
-            startTime: offeredStart,
-            endTime: offeredEnd,
-            status: "scheduled",
-            notes: "Utworzony z listy oczekujacych",
-          })
-          .returning();
-        appointmentId = newAppt!.id;
+        appointmentId = await insertNewAppointment();
       }
     } else {
       // No existing appointment – create new
       const blocked = await depositBlocksNewAppointment();
       if (blocked) return blocked;
-      const [newAppt] = await db
-        .insert(appointments)
-        .values({
-          salonId: entry.salonId,
-          clientId: entry.clientId,
-          employeeId,
-          serviceId: entry.serviceId,
-          startTime: offeredStart,
-          endTime: offeredEnd,
-          status: "scheduled",
-          notes: "Utworzony z listy oczekujacych",
-        })
-        .returning();
-      appointmentId = newAppt!.id;
+      appointmentId = await insertNewAppointment();
     }
   } catch (error) {
     if (isAppointmentSlotTaken(error)) {
@@ -441,20 +531,24 @@ export async function acceptEarlierSlot(
   }
 
   // 8. Mark waiting list entry as accepted
-  await db
-    .update(waitingList)
-    .set({ accepted: true })
-    .where(eq(waitingList.id, waitingListId));
+  await gate.raw((tx) =>
+    tx
+      .update(waitingList)
+      .set({ accepted: true })
+      .where(and(eq(waitingList.id, waitingListId), eq(waitingList.salonId, salonId)))
+  );
 
   // 9. Log a confirmation notification
   try {
-    await db.insert(notifications).values({
-      salonId: entry.salonId,
-      clientId: entry.clientId,
-      type: "sms",
-      message: `Klient zaakceptowal wczesniejszy termin z listy oczekujacych. Wizyta ${appointmentId} przeniesiona na ${offeredStart.toLocaleString("pl-PL")}.`,
-      status: "sent",
-    });
+    await gate.raw((tx) =>
+      tx.insert(notifications).values({
+        salonId,
+        clientId: entry.clientId,
+        type: "sms",
+        message: `Klient zaakceptowal wczesniejszy termin z listy oczekujacych. Wizyta ${appointmentId} przeniesiona na ${offeredStart.toLocaleString("pl-PL", { timeZone: SMS_TIME_ZONE })}.`,
+        status: "sent",
+      })
+    );
   } catch (notifErr) {
     logger.error("Failed to create waiting list confirmation notification", { error: notifErr });
   }
@@ -482,11 +576,21 @@ export async function declineEarlierSlot(
   waitingListId: string,
   acceptToken: string
 ): Promise<DeclineResult> {
-  const [entry] = await db
-    .select()
-    .from(waitingList)
-    .where(eq(waitingList.id, waitingListId))
-    .limit(1);
+  // Salon wyłącznie z tokenu (#193 P5a-1), jak w acceptEarlierSlot.
+  const target = await resolveWaitingListToken(acceptToken);
+  if (!target || target.waitingListId !== waitingListId) {
+    return { success: false, message: "Nieprawidlowy token" };
+  }
+  const salonId = target.salonId;
+  const gate = forSalon(salonId);
+
+  const [entry] = await gate.raw((tx) =>
+    tx
+      .select()
+      .from(waitingList)
+      .where(and(eq(waitingList.id, waitingListId), eq(waitingList.salonId, salonId)))
+      .limit(1)
+  );
 
   if (!entry) {
     return { success: false, message: "Wpis nie zostal znaleziony" };
@@ -504,10 +608,12 @@ export async function declineEarlierSlot(
     };
   }
 
-  await db
-    .update(waitingList)
-    .set({ accepted: false })
-    .where(eq(waitingList.id, waitingListId));
+  await gate.raw((tx) =>
+    tx
+      .update(waitingList)
+      .set({ accepted: false })
+      .where(and(eq(waitingList.id, waitingListId), eq(waitingList.salonId, salonId)))
+  );
 
   return {
     success: true,

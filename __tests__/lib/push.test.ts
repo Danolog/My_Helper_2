@@ -51,6 +51,26 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+// #193 P5a-1: subskrypcje idą przez wyjścia rejestru systemowego, zapis
+// notyfikacji przez forSalon(salonId).raw. Mocki delegują do mocków `db`
+// powyżej, więc asercje na odczycie i zapisie zostają bez zmian; kasowanie
+// jest jednym wywołaniem na listę id użytkownika (3d-KOREKTA).
+vi.mock("@/lib/server/system", () => ({
+  getPushSubscriptionsForUser: (userId: string) =>
+    mockDbSelect().from("push_subscriptions").where({ type: "eq", args: ["pushSubscriptions.userId", userId] }),
+  deleteUndeliverablePushSubscriptions: async (userId: string, ids: string[]) => {
+    if (ids.length === 0) return 0;
+    await mockDbDelete("push_subscriptions").where({ type: "userIdAndIdIn", userId, ids });
+    return ids.length;
+  },
+}));
+vi.mock("@/lib/server/repository", async () => {
+  const { db } = await import("@/lib/db");
+  return {
+    forSalon: (salonId: string) => ({ salonId, raw: (fn: (tx: unknown) => unknown) => fn(db) }),
+  };
+});
+
 // Mock drizzle-orm
 vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
@@ -231,7 +251,7 @@ describe("sendPushNotification — obrona w głębi (wiersze sprzed allowlisty)"
       expect((call[0] as { endpoint: string }).endpoint).not.toBe(endpoint);
     }
     expect(mockDbDelete).toHaveBeenCalledTimes(1);
-    expect(_mockDbDeleteWhere).toHaveBeenCalledWith({ type: "eq", args: ["pushSubscriptions.id", "sub-bad"] });
+    expect(_mockDbDeleteWhere).toHaveBeenCalledWith({ type: "userIdAndIdIn", userId: "user-1", ids: ["sub-bad"] });
     expect(result).toMatchObject({ success: true, sent: 1, failed: 1 });
   });
 

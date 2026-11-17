@@ -94,7 +94,7 @@ describe("vi.mock modułu db wyłącznie z fabryką", () => {
   it("żaden plik testu nie mockuje @/lib/db bez fabryki (automock, { spy: true })", () => {
     const violations = TEST_SOURCES.flatMap((f) => findDbMockWithoutFactory(fs.readFileSync(f, "utf8"), f));
     expect(violations, "mockuj @/lib/db fabryką: vi.mock(\"@/lib/db\", () => ({ db: … }))").toEqual([]);
-  });
+  }, 30_000);
 
   const probeFile = path.join(ROOT, "__tests__/lib/__probe__.test.ts");
   it.each([

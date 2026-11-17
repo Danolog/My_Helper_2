@@ -1,6 +1,7 @@
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
+import { toErrorIdentity } from "@/lib/safe-error";
 import { notifications } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 export interface EmailMessage {
   to: string;
@@ -50,6 +51,73 @@ interface ResendResponse {
 }
 
 /**
+ * Typy błędów dostawcy dopuszczone do kodu błędu wysyłki. Przepisane dosłownie
+ * ze strony https://resend.com/docs/api-reference/errors (odczyt 16.11.2026).
+ * Zmiana listy wymaga recenzji CRCO. Nazwa pola z typem w treści odpowiedzi
+ * (`name`) jest założeniem — przy innym kształcie odpowiedzi wynik to "other".
+ */
+export const PROVIDER_ERROR_TYPES = [
+  "application_error",
+  "concurrent_idempotent_requests",
+  "daily_quota_exceeded",
+  "dns_lookup_failed",
+  "email_above_quota",
+  "forge_not_enabled",
+  "forge_unavailable",
+  "invalid_attachment",
+  "invalid_idempotency_key",
+  "invalid_idempotent_request",
+  "invalid_parameter",
+  "invalid_permission",
+  "method_not_allowed",
+  "missing_api_key",
+  "missing_required_field",
+  "missing_required_parameter",
+  "monthly_quota_exceeded",
+  "not_found",
+  "rate_limit_exceeded",
+  "resource_locked",
+  "restricted_api_key",
+  "return_path_unavailable",
+  "service_unavailable",
+  "suspended_api_key",
+  "validation_error",
+] as const;
+
+export type ProviderErrorType = (typeof PROVIDER_ERROR_TYPES)[number] | "other";
+
+/** Typ z listy przy dokładnej równości; każda inna wartość (także nie-string) → "other". */
+function providerErrorType(name: unknown): ProviderErrorType {
+  if (typeof name !== "string") return "other";
+  for (const known of PROVIDER_ERROR_TYPES) {
+    if (name === known) return known;
+  }
+  return "other";
+}
+
+/**
+ * Odpowiedź dostawcy spoza 2xx. Komunikat to sam kod ze statusem HTTP i typem
+ * z listy (albo "other") — tekst z odpowiedzi dostawcy nie trafia ani do
+ * komunikatu, ani do logu.
+ */
+export class EmailProviderError extends Error {
+  readonly status: number;
+  readonly providerType: ProviderErrorType;
+
+  constructor(status: number, providerType: ProviderErrorType) {
+    super(`provider_http_${status}_${providerType}`);
+    this.name = "EmailProviderError";
+    this.status = status;
+    this.providerType = providerType;
+  }
+}
+
+/** Kod nieudanej wysyłki do logu i do `result.error`. */
+function sendFailureReason(error: unknown): string {
+  return error instanceof EmailProviderError ? error.message : "send_failed";
+}
+
+/**
  * Send a single email through the Resend REST API.
  * Throws on non-2xx HTTP statuses and network failures.
  */
@@ -69,18 +137,22 @@ async function sendViaResend(apiKey: string, msg: EmailMessage): Promise<void> {
     }),
   });
 
+  if (!response.ok) {
+    let body: unknown = null;
+    try {
+      body = await response.json();
+    } catch {
+      // Non-JSON response body → typ "other"
+    }
+    const name = body && typeof body === "object" ? (body as { name?: unknown }).name : undefined;
+    throw new EmailProviderError(response.status, providerErrorType(name));
+  }
+
   let data: ResendResponse | null = null;
   try {
     data = (await response.json()) as ResendResponse;
   } catch {
-    // Non-JSON response body - fall through to the HTTP status check
-  }
-
-  if (!response.ok) {
-    const detail = data?.message
-      ? `${response.status} - ${data.message}`
-      : `HTTP ${response.status}`;
-    throw new Error(`Resend error: ${detail}`);
+    // Non-JSON response body - the message id is optional
   }
 
   logger.info("Email sent via Resend", { to: maskEmailAddress(msg.to), messageId: data?.id });
@@ -89,24 +161,30 @@ async function sendViaResend(apiKey: string, msg: EmailMessage): Promise<void> {
 /**
  * Save an email notification to the notifications table (audit trail).
  * Only called when the message carries a salon context.
+ *
+ * Zapis przez bramę salonu wiadomości (#193). Bez salonId (e-mail weryfikacji
+ * konta i resetu hasła) — żadnego zapisu i żadnej puli.
  */
 async function saveNotification(
   msg: EmailMessage,
   status: "sent" | "failed"
 ): Promise<string | undefined> {
-  if (!msg.salonId) return undefined;
+  const salonId = msg.salonId;
+  if (!salonId) return undefined;
 
-  const [notification] = await db
-    .insert(notifications)
-    .values({
-      salonId: msg.salonId,
-      clientId: msg.clientId || null,
-      type: "email",
-      message: msg.subject,
-      status,
-      ...(status === "sent" ? { sentAt: new Date() } : {}),
-    })
-    .returning();
+  const [notification] = await forSalon(salonId).raw((tx) =>
+    tx
+      .insert(notifications)
+      .values({
+        salonId,
+        clientId: msg.clientId || null,
+        type: "email",
+        message: msg.subject,
+        status,
+        ...(status === "sent" ? { sentAt: new Date() } : {}),
+      })
+      .returning()
+  );
 
   return notification?.id;
 }
@@ -140,8 +218,8 @@ export async function sendEmail(msg: EmailMessage): Promise<EmailResult> {
     await saveFailedNotification(msg);
     return {
       success: false,
-      // Wynik trafia do logów wywołujących (newsletter, faktura) — bez pełnego adresu.
-      error: `Invalid email address: ${maskEmailAddress(msg.to)}`,
+      // Wynik trafia do logów wywołujących (newsletter, faktura) — sam kod.
+      error: "invalid_address",
     };
   }
 
@@ -166,13 +244,19 @@ export async function sendEmail(msg: EmailMessage): Promise<EmailResult> {
       notificationId,
     };
   } catch (error) {
-    logger.error("Failed to send email", { error, to: maskEmailAddress(msg.to) });
+    // Log i wynik bez treści błędu: kod, nazwa klasy i kod błędu.
+    const reason = sendFailureReason(error);
+    logger.error("Failed to send email", {
+      reason,
+      ...toErrorIdentity(error),
+      to: maskEmailAddress(msg.to),
+    });
 
     await saveFailedNotification(msg);
 
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: reason,
     };
   }
 }

@@ -8,8 +8,8 @@
  *   puli, bez obiektu z `.select`/`.transaction`/`.execute`, bez nazw
  *   raw/tx/getDb/withTx i bez parametrów-funkcji (zakaz callbacków).
  *   Wyjątki: zamknięta lista przypięta `toEqual` (decyzja Ethana 16.11).
- * - `system/index.ts` = rejestr: re-eksportuje dokładnie wyjścia
- *   session/cron/health, bez wyjątków (pula i adapter nie wychodzą przez rejestr).
+ * - `system/index.ts` = rejestr: re-eksportuje dokładnie wyjścia plików z
+ *   `REGISTRY_SOURCES`, bez wyjątków (pula i adapter nie wychodzą przez rejestr).
  * - Adapter Better Auth: importuje go wyłącznie `src/lib/auth.ts`.
  * - DoD P0b: dawne pliki P0 nie importują surowego `db`.
  */
@@ -38,14 +38,55 @@ const SESSION_EXPORTS = [
 const CRON_EXPORTS = ["cleanupExpiredTemporaryAccess"];
 const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
 const AUTH_THROTTLE_EXPORTS = ["clearSignInFailures", "consumeAuthRateLimit", "reserveAccountSignInAttempt"];
+/** #193 P5a-1: subskrypcje push po stronie wysyłki (decyzja CTO 3d / 3d-KOREKTA). */
+const NOTIFICATIONS_EXPORTS = [
+  // #193 P5a-2: crony przypomnień push 1h / 24h i SMS 1h (cross-salon, sekret crona).
+  "countPushSubscriptions",
+  "deleteUndeliverablePushSubscriptions",
+  // #193 P5a-2: przypomnienia SMS 24h (reminders/appointment).
+  "findDueAppointmentReminders",
+  "findDuePushReminders",
+  "findDueSmsReminders",
+  "getAppointmentReminderPreview",
+  "getPendingCronReminders",
+  "getPushSubscriptionsForUser",
+  "getUserIdsWithPushSubscriptions",
+  "markAppointmentRemindersSent",
+  "markCronRemindersSent",
+];
+/** #193 P5a-1: token oferty listy oczekujących → wpis i salon (decyzja CTO 4). */
+const WAITING_LIST_EXPORTS = ["resolveWaitingListToken"];
+/** #193 P5a-2: cron martwych rezerwacji z zadatkiem (decyzja CTO D2: lista DOKŁADNIE w L7). */
+const DEPOSITS_CLEANUP_EXPORTS = ["cleanupStaleDepositBookings"];
+/** Pliki re-eksportowane przez rejestr `index.ts` w całości. */
+const REGISTRY_SOURCES = [
+  "session.ts",
+  "cron.ts",
+  "health.ts",
+  "deposits-cleanup.ts",
+  "notifications.ts",
+  "waiting-list.ts",
+  "auth-throttle.ts",
+];
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts": ["authAdapter"],
   "auth-throttle.ts": AUTH_THROTTLE_EXPORTS,
   "cron.ts": CRON_EXPORTS,
   "db-system.ts": ["dbSystem"],
+  "deposits-cleanup.ts": DEPOSITS_CLEANUP_EXPORTS,
   "health.ts": HEALTH_EXPORTS,
-  "index.ts": [...SESSION_EXPORTS, ...CRON_EXPORTS, ...HEALTH_EXPORTS, ...AUTH_THROTTLE_EXPORTS].sort(),
+  "index.ts": [
+    ...SESSION_EXPORTS,
+    ...CRON_EXPORTS,
+    ...HEALTH_EXPORTS,
+    ...DEPOSITS_CLEANUP_EXPORTS,
+    ...NOTIFICATIONS_EXPORTS,
+    ...WAITING_LIST_EXPORTS,
+    ...AUTH_THROTTLE_EXPORTS,
+  ].sort(),
+  "notifications.ts": NOTIFICATIONS_EXPORTS,
   "session.ts": SESSION_EXPORTS,
+  "waiting-list.ts": WAITING_LIST_EXPORTS,
 };
 
 /** Zamknięta lista wyjątków od Z7/W2 (Ethan 16.11). */
@@ -102,10 +143,10 @@ describe("R-Z1: migawka plików i eksportów system/", () => {
     expect(SNAPSHOT).not.toHaveProperty("identity.ts"); // P3: identity.ts dopiero w P2
   });
 
-  it("index.ts re-eksportuje dokładnie wyjścia session/cron/health/auth-throttle (te same obiekty), bez wyjątków", async () => {
+  it("index.ts re-eksportuje dokładnie wyjścia plików rejestru (te same obiekty), bez wyjątków", async () => {
     const index = await runtimeExports("index.ts");
     const expected: [string, unknown][] = [];
-    for (const file of ["session.ts", "cron.ts", "health.ts", "auth-throttle.ts"]) {
+    for (const file of REGISTRY_SOURCES) {
       for (const [k, v] of Object.entries(await runtimeExports(file))) expected.push([k, v]);
     }
     expect(Object.keys(index).sort()).toEqual(expected.map(([k]) => k).sort());

@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { eq, sql, and, isNotNull, inArray, like } from "drizzle-orm";
 import { isValidUuid, validateBody, birthdayNotificationSchema } from "@/lib/api-validation";
 import { requireCronSecret } from "@/lib/auth-middleware";
-// ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { clients, notifications, salons } from "@/lib/schema";
+// #193 P5a-2 (decyzja CTO D1): jeden salon z obowiązkowego salonId → brama salonu;
+// w raw jawny warunek salonu w każdym zapytaniu; odczyty kończą się przed
+// sprawdzeniem planu i personalizacją AI, zapis notyfikacji osobno na końcu.
+import { forSalon } from "@/lib/server/repository";
 interface BirthdaySettings {
   enabled: boolean;
   giftType: "discount" | "product";
@@ -42,40 +44,43 @@ export async function GET(request: Request) {
       );
     }
 
-    // Get salon with settings
-    const [salon] = await db
-      .select({ id: salons.id, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
-
-    // Extract birthday settings
-    const salonSettings = salon?.settingsJson as Record<string, unknown> | null;
-    const birthdayGiftSettings = (salonSettings?.birthdayGift || null) as BirthdaySettings | null;
-
     // Find clients whose birthday month and day match today
     const today = new Date();
     const month = String(today.getMonth() + 1).padStart(2, "0");
     const day = String(today.getDate()).padStart(2, "0");
     const todayMonthDay = `-${month}-${day}`;
 
-    const birthdayClients = await db
-      .select({
-        id: clients.id,
-        firstName: clients.firstName,
-        lastName: clients.lastName,
-        phone: clients.phone,
-        email: clients.email,
-        birthday: clients.birthday,
-      })
-      .from(clients)
-      .where(
-        and(
-          eq(clients.salonId, salonId),
-          isNotNull(clients.birthday),
-          like(clients.birthday, `%${todayMonthDay}`)
-        )
-      );
+    const { salon, birthdayClients } = await forSalon(salonId).raw(async (tx) => {
+      // Get salon with settings
+      const [salon] = await tx
+        .select({ id: salons.id, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .limit(1);
+
+      const birthdayClients = await tx
+        .select({
+          id: clients.id,
+          firstName: clients.firstName,
+          lastName: clients.lastName,
+          phone: clients.phone,
+          email: clients.email,
+          birthday: clients.birthday,
+        })
+        .from(clients)
+        .where(
+          and(
+            eq(clients.salonId, salonId),
+            isNotNull(clients.birthday),
+            like(clients.birthday, `%${todayMonthDay}`)
+          )
+        );
+      return { salon, birthdayClients };
+    });
+
+    // Extract birthday settings
+    const salonSettings = salon?.settingsJson as Record<string, unknown> | null;
+    const birthdayGiftSettings = (salonSettings?.birthdayGift || null) as BirthdaySettings | null;
 
     return NextResponse.json({
       success: true,
@@ -139,12 +144,67 @@ export async function POST(request: Request) {
     };
     const { salonId } = validated;
 
-    // Get salon name and settings
-    const [salon] = await db
-      .select({ name: salons.name, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
+    // Find clients with birthday today
+    const today = new Date();
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const day = String(today.getDate()).padStart(2, "0");
+    const todayMonthDay = `-${month}-${day}`;
+
+    // Batch-check for existing birthday notifications sent today for this salon
+    // (single query instead of N individual checks per client)
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartISO = todayStart.toISOString();
+
+    // Odczyty w jednej transakcji bramy, zakończone przed planem i AI.
+    const { salon, birthdayClients, alreadyNotifiedIds } = await forSalon(salonId).raw(async (tx) => {
+      // Get salon name and settings
+      const [salon] = await tx
+        .select({ name: salons.name, settingsJson: salons.settingsJson })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .limit(1);
+
+      const birthdayClients = await tx
+        .select({
+          id: clients.id,
+          firstName: clients.firstName,
+          lastName: clients.lastName,
+          phone: clients.phone,
+          email: clients.email,
+          birthday: clients.birthday,
+        })
+        .from(clients)
+        .where(
+          and(
+            eq(clients.salonId, salonId),
+            isNotNull(clients.birthday),
+            like(clients.birthday, `%${todayMonthDay}`)
+          )
+        );
+
+      const alreadyNotifiedIds = new Set<string>();
+      const clientIds = birthdayClients.map((c) => c.id);
+      if (clientIds.length > 0) {
+        const existingNotifications = await tx
+          .select({ clientId: notifications.clientId })
+          .from(notifications)
+          .where(
+            and(
+              eq(notifications.salonId, salonId),
+              inArray(notifications.clientId, clientIds),
+              sql`${notifications.message} LIKE '%urodzin%'`,
+              sql`${notifications.createdAt} >= ${todayStartISO}::timestamp`
+            )
+          );
+        for (const row of existingNotifications) {
+          if (row.clientId) {
+            alreadyNotifiedIds.add(row.clientId);
+          }
+        }
+      }
+      return { salon, birthdayClients, alreadyNotifiedIds };
+    });
 
     const salonName = salon?.name || "Nasz salon";
 
@@ -161,30 +221,6 @@ export async function POST(request: Request) {
     const productName = validated.productName || savedSettings.productName || "";
     const customMessage = validated.customMessage || savedSettings.customMessage || "";
 
-    // Find clients with birthday today
-    const today = new Date();
-    const month = String(today.getMonth() + 1).padStart(2, "0");
-    const day = String(today.getDate()).padStart(2, "0");
-    const todayMonthDay = `-${month}-${day}`;
-
-    const birthdayClients = await db
-      .select({
-        id: clients.id,
-        firstName: clients.firstName,
-        lastName: clients.lastName,
-        phone: clients.phone,
-        email: clients.email,
-        birthday: clients.birthday,
-      })
-      .from(clients)
-      .where(
-        and(
-          eq(clients.salonId, salonId),
-          isNotNull(clients.birthday),
-          like(clients.birthday, `%${todayMonthDay}`)
-        )
-      );
-
     if (birthdayClients.length === 0) {
       return NextResponse.json({
         success: true,
@@ -193,34 +229,6 @@ export async function POST(request: Request) {
           message: "Brak klientow z urodzinami dzisiaj",
         },
       });
-    }
-
-    // Batch-check for existing birthday notifications sent today for this salon
-    // (single query instead of N individual checks per client)
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayStartISO = todayStart.toISOString();
-
-    const clientIds = birthdayClients.map((c) => c.id);
-    const alreadyNotifiedIds = new Set<string>();
-
-    if (clientIds.length > 0) {
-      const existingNotifications = await db
-        .select({ clientId: notifications.clientId })
-        .from(notifications)
-        .where(
-          and(
-            eq(notifications.salonId, salonId),
-            inArray(notifications.clientId, clientIds),
-            sql`${notifications.message} LIKE '%urodzin%'`,
-            sql`${notifications.createdAt} >= ${todayStartISO}::timestamp`
-          )
-        );
-      for (const row of existingNotifications) {
-        if (row.clientId) {
-          alreadyNotifiedIds.add(row.clientId);
-        }
-      }
     }
 
     // Build notification values for batch insert
@@ -325,10 +333,10 @@ export async function POST(request: Request) {
     // Batch-insert all notifications in a single query instead of N individual INSERTs
     const createdNotifications: Array<Record<string, unknown>> = [];
     if (notificationValues.length > 0) {
-      const inserted = await db
-        .insert(notifications)
-        .values(notificationValues)
-        .returning();
+      // Wszystkie wartości mają salonId bramy (RLS WITH CHECK jako druga warstwa).
+      const inserted = await forSalon(salonId).raw((tx) =>
+        tx.insert(notifications).values(notificationValues).returning()
+      );
 
       for (let i = 0; i < inserted.length; i++) {
         const meta = clientMetadata[i]!;

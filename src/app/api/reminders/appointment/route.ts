@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
-import { and, eq, gte, lte, isNull, inArray } from "drizzle-orm";
 import { isValidUuid } from "@/lib/api-validation";
 import { requireCronSecret } from "@/lib/auth-middleware";
-// ADR-001: ścieżka systemowa (salonId z danych, nie z sesji) — świadomie surowe db
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { appointments, clients, salons, services, employees } from "@/lib/schema";
 import { SMS_TIME_ZONE, sendSms } from "@/lib/sms";
+// #193 P5a-2 (decyzja CTO D1): wołający z sekretem crona, salonId to opcjonalny
+// filtr (bez niego wszystkie salony) → wyjścia systemowe, nie pula żądań.
+import {
+  findDueAppointmentReminders,
+  getAppointmentReminderPreview,
+  markAppointmentRemindersSent,
+} from "@/lib/server/system";
 /**
  * POST /api/reminders/appointment
  *
@@ -16,10 +19,9 @@ import { SMS_TIME_ZONE, sendSms } from "@/lib/sms";
  * - Have a linked client with a phone number
  * - Have NOT already received a reminder (reminderSentAt is null)
  *
- * This endpoint can be called:
- * - Manually by salon owner
- * - By a cron job / scheduled task
- * - Via query param ?salonId=xxx to limit to a specific salon
+ * Wymaga sekretu crona (wołający: cron / zadanie planowe). Parametr
+ * ?salonId=<uuid> zawęża do jednego salonu; podany, ale nie-UUID (także pusty)
+ * → 400 przed jakimkolwiek zapytaniem.
  *
  * In development mode, SMS messages are logged to the console.
  */
@@ -30,58 +32,18 @@ export async function POST(request: Request) {
     const { searchParams } = new URL(request.url);
     const salonId = searchParams.get("salonId");
 
+    if (salonId !== null && !isValidUuid(salonId)) {
+      return NextResponse.json(
+        { success: false, error: "Nieprawidłowy salonId" },
+        { status: 400 }
+      );
+    }
+
     const now = new Date();
     const in24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
-    // Build conditions for finding appointments needing reminders
-    const conditions = [
-      gte(appointments.startTime, now), // appointment is in the future
-      lte(appointments.startTime, in24Hours), // within next 24 hours
-      isNull(appointments.reminderSentAt), // reminder not yet sent
-      // Only scheduled or confirmed appointments
-      inArray(appointments.status, ["scheduled", "confirmed"]),
-    ];
-
-    // Optionally filter by salon
-    if (salonId) {
-      if (!isValidUuid(salonId)) {
-        return NextResponse.json(
-          { success: false, error: "Nieprawidłowy salonId" },
-          { status: 400 }
-        );
-      }
-      conditions.push(eq(appointments.salonId, salonId));
-    }
-
-    // Find all upcoming appointments needing reminders with related data
-    const upcomingAppointments = await db
-      .select({
-        appointmentId: appointments.id,
-        startTime: appointments.startTime,
-        endTime: appointments.endTime,
-        salonId: appointments.salonId,
-        clientId: appointments.clientId,
-        serviceId: appointments.serviceId,
-        employeeId: appointments.employeeId,
-        status: appointments.status,
-        // Client info
-        clientFirstName: clients.firstName,
-        clientLastName: clients.lastName,
-        clientPhone: clients.phone,
-        // Salon info
-        salonName: salons.name,
-        // Service info
-        serviceName: services.name,
-        // Employee info
-        employeeFirstName: employees.firstName,
-        employeeLastName: employees.lastName,
-      })
-      .from(appointments)
-      .leftJoin(clients, eq(appointments.clientId, clients.id))
-      .leftJoin(salons, eq(appointments.salonId, salons.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .leftJoin(employees, eq(appointments.employeeId, employees.id))
-      .where(and(...conditions));
+    // Odczyt kończy się przed wysyłką SMS; oznaczenie po wysyłce, po id z odczytu.
+    const upcomingAppointments = await findDueAppointmentReminders({ from: now, to: in24Hours }, salonId);
 
     const results: Array<{
       appointmentId: string;
@@ -161,12 +123,7 @@ export async function POST(request: Request) {
     }
 
     // Batch-update all successfully sent appointments in a single query instead of N individual UPDATEs
-    if (idsToMarkSent.length > 0) {
-      await db
-        .update(appointments)
-        .set({ reminderSentAt: new Date() })
-        .where(inArray(appointments.id, idsToMarkSent));
-    }
+    await markAppointmentRemindersSent(idsToMarkSent);
 
     const sent = results.filter((r) => r.success).length;
     const skipped = results.filter((r) => r.skipped).length;
@@ -200,8 +157,8 @@ export async function POST(request: Request) {
  * GET /api/reminders/appointment
  *
  * Returns a preview of appointments that would receive reminders
- * (within next 24 hours, not yet reminded, not cancelled).
- * Useful for salon owners to see what reminders will be sent.
+ * (within next 24 hours, scheduled or confirmed) for one salon.
+ * Wymaga sekretu crona i salonId (UUID).
  */
 export async function GET(request: Request) {
   try {
@@ -228,33 +185,7 @@ export async function GET(request: Request) {
     const now = new Date();
     const in24Hours = new Date(now.getTime() + 24 * 60 * 60 * 1000);
 
-    const upcoming = await db
-      .select({
-        appointmentId: appointments.id,
-        startTime: appointments.startTime,
-        status: appointments.status,
-        reminderSentAt: appointments.reminderSentAt,
-        clientFirstName: clients.firstName,
-        clientLastName: clients.lastName,
-        clientPhone: clients.phone,
-        salonName: salons.name,
-        serviceName: services.name,
-        employeeFirstName: employees.firstName,
-        employeeLastName: employees.lastName,
-      })
-      .from(appointments)
-      .leftJoin(clients, eq(appointments.clientId, clients.id))
-      .leftJoin(salons, eq(appointments.salonId, salons.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .leftJoin(employees, eq(appointments.employeeId, employees.id))
-      .where(
-        and(
-          eq(appointments.salonId, salonId),
-          gte(appointments.startTime, now),
-          lte(appointments.startTime, in24Hours),
-          inArray(appointments.status, ["scheduled", "confirmed"])
-        )
-      );
+    const upcoming = await getAppointmentReminderPreview(salonId, { from: now, to: in24Hours });
 
     return NextResponse.json({
       success: true,

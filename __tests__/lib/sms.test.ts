@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// #193 P5a-1: biblioteka zapisuje przez forSalon(salonId).raw — brama deleguje
+// do zmockowanego `db`, więc asercje na zapisie zostają bez zmian.
+vi.mock("@/lib/server/repository", async () => {
+  const { db } = await import("@/lib/db");
+  return {
+    forSalon: (salonId: string) => ({ salonId, raw: (fn: (tx: unknown) => unknown) => fn(db) }),
+  };
+});
+
 // Use vi.hoisted for mock variables
 const { mockDbReturning, mockDbValues, mockDbInsertInto } = vi.hoisted(() => {
   const mockDbReturning = vi.fn();
@@ -45,6 +54,7 @@ import {
   TEST_PHONE_NUMBERS,
   isTestPhoneNumber,
 } from "@/lib/test-phone";
+import { loggedText } from "../helpers/logged-text";
 
 const mockFetch = vi.fn();
 
@@ -276,7 +286,7 @@ describe("sendSms (real delivery via SMSAPI)", () => {
     expect(result.error).not.toContain("Authorization failed");
     // #75: do logu tylko kod błędu — `message` dostawcy bywa echem danych wejściowych
     expect(loggedErrorMessage()).toBe("SMSAPI error: code 101");
-    expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("Authorization failed");
+    expect(loggedText(logger)).not.toContain("Authorization failed");
     expect(result.notificationId).toBeUndefined();
     expect(mockDbValues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "failed" })
@@ -294,7 +304,7 @@ describe("sendSms (real delivery via SMSAPI)", () => {
 
     expect(result.error).toBe(SMS_SEND_FAILED_ERROR);
     expect(loggedErrorMessage()).toBe("SMSAPI error: code unknown");
-    expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("48111222333");
+    expect(loggedText(logger)).not.toContain("48111222333");
   });
 
   it("should fail on non-OK HTTP response without JSON error", async () => {
@@ -366,12 +376,7 @@ describe("sendSms: logi bez pełnego numeru i bez treści (Ryan)", () => {
   const CONTENT = "Anna Nowak, koloryzacja u Ewy jutro o 10:00";
 
   function allLogCalls(): string {
-    return JSON.stringify([
-      vi.mocked(logger.debug).mock.calls,
-      vi.mocked(logger.info).mock.calls,
-      vi.mocked(logger.warn).mock.calls,
-      vi.mocked(logger.error).mock.calls,
-    ]);
+    return loggedText(logger);
   }
 
   function expectNoPii(log: string) {

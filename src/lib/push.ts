@@ -1,6 +1,4 @@
-import { eq } from "drizzle-orm";
 import webpush from "web-push";
-import { db } from "@/lib/db";
 import { isModuleFrozen } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import {
@@ -10,7 +8,9 @@ import {
   runWithConcurrency,
   withPushDeadline,
 } from "@/lib/push-subscription";
-import { notifications, pushSubscriptions } from "@/lib/schema";
+import { notifications } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { deleteUndeliverablePushSubscriptions, getPushSubscriptionsForUser } from "@/lib/server/system";
 
 // Configure web-push with VAPID details
 const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "";
@@ -48,11 +48,53 @@ export interface PushResult {
 }
 
 /**
+ * Kasuje niedostarczalne subskrypcje użytkownika (#193 P5a-1). Błąd kasowania
+ * jest logowany (tylko id subskrypcji) i NIE przerywa wysyłki.
+ */
+async function removeUndeliverable(userId: string, subscriptionIds: string[], reason: string): Promise<void> {
+  if (subscriptionIds.length === 0) return;
+  try {
+    await deleteUndeliverablePushSubscriptions(userId, subscriptionIds);
+  } catch (err) {
+    logger.error("Failed to remove undeliverable push subscriptions", {
+      subscriptionIds,
+      reason,
+      error: err,
+    });
+  }
+}
+
+/** Zapis notyfikacji przez bramę salonu wiadomości (#193). */
+async function saveNotification(
+  msg: PushMessage & { salonId: string },
+  status: "sent" | "failed",
+  sentAt?: Date
+): Promise<string | undefined> {
+  const [notification] = await forSalon(msg.salonId).raw((tx) =>
+    tx
+      .insert(notifications)
+      .values({
+        salonId: msg.salonId,
+        clientId: msg.clientId || null,
+        type: "push",
+        message: `${msg.title}: ${msg.body}`,
+        status,
+        ...(sentAt ? { sentAt } : {}),
+      })
+      .returning()
+  );
+  return notification?.id;
+}
+
+/**
  * Send a push notification to all devices registered by a specific user.
  *
  * In development mode, push notifications are logged to the console.
  * The notification is saved to the notifications table for audit trail
  * (only when msg.salonId is set).
+ *
+ * #193 P5a-1: subskrypcje przez wyjścia rejestru systemowego (należą do
+ * użytkownika, nie do salonu), zapis notyfikacji przez `forSalon(salonId)`.
  */
 export async function sendPushNotification(
   userId: string,
@@ -67,10 +109,7 @@ export async function sendPushNotification(
 
   try {
     // Get all push subscriptions for this user
-    const subs = await db
-      .select()
-      .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.userId, userId));
+    const subs = await getPushSubscriptionsForUser(userId);
 
     if (subs.length === 0) {
       logger.debug("No push subscriptions found for user", { userId });
@@ -99,6 +138,7 @@ export async function sendPushNotification(
     // walidacji) nie dostają żądania. Usuwamy je jak wygasłe (410) — do usługi
     // push spoza allowlisty i tak nie dostarczymy.
     const deliverable: typeof subs = [];
+    const invalidIds: string[] = [];
     for (const sub of subs) {
       if (isValidPushSubscription(sub)) {
         deliverable.push(sub);
@@ -108,15 +148,11 @@ export async function sendPushNotification(
       logger.warn("Removing push subscription with invalid endpoint or keys", {
         subscriptionId: sub.id,
       });
-      try {
-        await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub.id));
-      } catch (err) {
-        logger.error("Failed to remove invalid push subscription", {
-          subscriptionId: sub.id,
-          error: err,
-        });
-      }
+      invalidIds.push(sub.id);
     }
+    await removeUndeliverable(userId, invalidIds, "invalid");
+
+    const expiredIds: string[] = [];
 
     // Równolegle z limitem i twardym terminem na każdą wysyłkę: jeden wiszący
     // endpoint nie blokuje pozostałych ani crona push-reminders*.
@@ -147,39 +183,22 @@ export async function sendPushNotification(
         // If subscription is expired/invalid (410 Gone or 404), remove it
         if (statusCode === 410 || statusCode === 404) {
           logger.info("Removing expired push subscription", { subscriptionId: sub.id });
-          try {
-            await db
-              .delete(pushSubscriptions)
-              .where(eq(pushSubscriptions.id, sub.id));
-          } catch (deleteErr) {
-            logger.error("Failed to remove expired push subscription", {
-              subscriptionId: sub.id,
-              error: deleteErr,
-            });
-          }
+          expiredIds.push(sub.id);
         }
       }
     });
+    await removeUndeliverable(userId, expiredIds, "expired");
 
     if (!msg.salonId) {
       return { success: sent > 0, sent, failed };
     }
 
     // Save notification to database
-    const salonId = msg.salonId;
-    const [notification] = await db
-      .insert(notifications)
-      .values({
-        salonId,
-        clientId: msg.clientId || null,
-        type: "push",
-        message: `${msg.title}: ${msg.body}`,
-        status: sent > 0 ? "sent" : "failed",
-        sentAt: new Date(),
-      })
-      .returning();
-
-    const notifId = notification?.id;
+    const notifId = await saveNotification(
+      { ...msg, salonId: msg.salonId },
+      sent > 0 ? "sent" : "failed",
+      new Date()
+    );
     logger.info("Push notification saved", { notificationId: notifId, sent, failed });
 
     return {
@@ -194,13 +213,7 @@ export async function sendPushNotification(
     // Try to save notification with failed status
     if (msg.salonId) {
       try {
-        await db.insert(notifications).values({
-          salonId: msg.salonId,
-          clientId: msg.clientId || null,
-          type: "push",
-          message: `${msg.title}: ${msg.body}`,
-          status: "failed",
-        });
+        await saveNotification({ ...msg, salonId: msg.salonId }, "failed");
       } catch {
         // Ignore save failure
       }

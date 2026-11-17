@@ -20,6 +20,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { exceptionFormatViolations } from "./exception-list";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
 const suite = h ? describe : describe.skip;
@@ -34,9 +35,6 @@ const INVOKER = "security_invoker=true";
  */
 const NO_INVOKER = `brak ${INVOKER} — w migracji widoku użyj dokładnie WITH (security_invoker = true); on/1/yes dają czerwony`;
 
-/** Role akceptujące wyjątek: wyjątek widoku dotyczy uprawnień w bazie, więc wymagane są obie. */
-const ACCEPT_ROLES = ["CTO", "CRCO"];
-
 /**
  * Wyjątek od wymogu `security_invoker` (widok) albo od zakazu (widok zmaterializowany).
  * `acceptedBy` — role z ACCEPT_ROLES (obie); `pr` — numer PR dodającego wyjątek.
@@ -48,25 +46,6 @@ type ViewException = { name: string; kind: "v" | "m"; reason: string; acceptedBy
  * akceptacja ról CTO i CRCO oraz numer PR. Dopisanie pozycji = recenzja CTO i CRCO w tym PR.
  */
 const VIEW_EXCEPTIONS: ViewException[] = [];
-
-/** Naruszenia formatu listy wyjątków (pusta lista = format w porządku). */
-function exceptionFormatViolations(list: readonly ViewException[]): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const e of list) {
-    const id = `${e.name} (${e.kind})`;
-    if (!/^[a-z_][a-z0-9_]*$/.test(e.name)) out.push(`${id}: nazwa spoza [a-z0-9_]`);
-    if (seen.has(id)) out.push(`${id}: zdublowana pozycja`);
-    seen.add(id);
-    const r = e.reason.trim();
-    if (r.length < 20 || !/[.!]$/.test(r) || /[\n.!?]./.test(r.slice(0, -1))) out.push(`${id}: brak jednozdaniowego uzasadnienia`);
-    const by = Array.isArray(e.acceptedBy) ? e.acceptedBy : [];
-    for (const role of ACCEPT_ROLES) if (!by.includes(role)) out.push(`${id}: brak akceptacji roli ${role}`);
-    for (const role of by) if (!ACCEPT_ROLES.includes(role)) out.push(`${id}: akceptacja spoza ról (${ACCEPT_ROLES.join(", ")}): ${role}`);
-    if (!Number.isInteger(e.pr) || e.pr <= 0) out.push(`${id}: brak numeru PR dodającego wyjątek (dodatnia liczba całkowita)`);
-  }
-  return out;
-}
 
 /** Klient albo transakcja postgres.js — wystarczy `unsafe` (wzór z `scripts/db-rls-guard.ts`). */
 type QueryRunner = { unsafe: (query: string) => PromiseLike<readonly unknown[]> };

@@ -115,6 +115,7 @@ vi.mock("@/lib/schema", () => ({
 
 import { logger } from "@/lib/logger";
 import { processAutomaticRefund, refundAppointmentDeposits } from "@/lib/refund";
+import { loggedText } from "../helpers/logged-text";
 
 const eqArgs = (col: string, val: unknown) => ({ type: "eq", args: [col, val] });
 
@@ -274,7 +275,9 @@ describe("processAutomaticRefund — jedna wskazana płatność", () => {
     const logged = vi.mocked(logger.error).mock.calls[0]!;
     expect(logged[0]).toBe("Deposit refund failed — manual refund");
     expect(logged[1]).toMatchObject({ stripeErrorType: "StripeInvalidRequestError", stripeErrorCode: "resource_missing" });
-    expect(JSON.stringify(logged[1])).not.toContain("jan@example.com");
+    const text = loggedText(logger);
+    expect(text).not.toContain("jan@example.com");
+    expect(text).not.toContain("No such payment_intent");
   });
 
   it("timeout sessions.retrieve => manual refund (stripe_refund_failed)", async () => {
@@ -298,6 +301,7 @@ describe("processAutomaticRefund — jedna wskazana płatność", () => {
     const result = await processAutomaticRefund("appt-1", "pay-1", "powod");
     expect(result).toMatchObject({ success: false, refunded: false, error: "refund_error" });
     expect(JSON.stringify(result)).not.toContain("secret");
+    expect(loggedText(logger)).not.toContain("secret");
   });
 });
 

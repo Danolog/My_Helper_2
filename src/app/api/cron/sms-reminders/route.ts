@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
-import { eq, and, gte, lte, isNull, not, inArray } from "drizzle-orm";
 import { requireCronSecret } from "@/lib/auth-middleware";
-// ADR-001 sekcja 4: trasa systemowa (requireCronSecret, cross-salon) — świadomie surowe db
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { appointments, clients, employees, services, salons } from "@/lib/schema";
+// #193 P5a-2: trasa systemowa (requireCronSecret, cross-salon) — wyjścia z rejestru system/
+import { findDueSmsReminders, getPendingCronReminders, markCronRemindersSent } from "@/lib/server/system";
 import { sendAppointmentReminderSms } from "@/lib/sms";
 
 // Wysyłka SMS w pętli może trwać — bez tego domyślny timeout ucina cron w połowie
@@ -47,37 +45,8 @@ export async function POST(request: Request) {
     });
 
     // Find appointments in the window that haven't received a 1h reminder
-    const upcomingAppointments = await db
-      .select({
-        appointmentId: appointments.id,
-        appointmentStartTime: appointments.startTime,
-        salonId: appointments.salonId,
-        salonName: salons.name,
-        clientId: clients.id,
-        clientFirstName: clients.firstName,
-        clientLastName: clients.lastName,
-        clientPhone: clients.phone,
-        employeeFirstName: employees.firstName,
-        employeeLastName: employees.lastName,
-        serviceName: services.name,
-      })
-      .from(appointments)
-      .innerJoin(clients, eq(appointments.clientId, clients.id))
-      .innerJoin(employees, eq(appointments.employeeId, employees.id))
-      .innerJoin(salons, eq(appointments.salonId, salons.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .where(
-        and(
-          // Appointment starts within window
-          gte(appointments.startTime, windowStart),
-          lte(appointments.startTime, windowEnd),
-          // Not cancelled or completed
-          not(inArray(appointments.status, ["cancelled", "completed", "no_show"])),
-          // 1h reminder not yet sent
-          isNull(appointments.reminder1hSentAt)
-        )
-      )
-      .limit(BATCH_LIMIT);
+    // Starts within window, not cancelled/completed/no_show, 1h reminder not yet sent
+    const upcomingAppointments = await findDueSmsReminders({ from: windowStart, to: windowEnd }, BATCH_LIMIT);
 
     logger.info("Appointments found for SMS reminder", {
       count: upcomingAppointments.length,
@@ -87,17 +56,10 @@ export async function POST(request: Request) {
     // a lost reminder is far cheaper than the alternative: flags never
     // written -> next run resends every already-delivered SMS (duplicate
     // loop, real SMSAPI cost, spam to clients).
-    if (upcomingAppointments.length > 0) {
-      await db
-        .update(appointments)
-        .set({ reminder1hSentAt: new Date() })
-        .where(
-          inArray(
-            appointments.id,
-            upcomingAppointments.map((a) => a.appointmentId)
-          )
-        );
-    }
+    await markCronRemindersSent(
+      "sms1h",
+      upcomingAppointments.map((a) => a.appointmentId)
+    );
 
     // #75 (Ryan): bez imienia i nazwiska klienta w logach i w odpowiedzi crona
     // (dane osobowe) — identyfikuje appointmentId.
@@ -217,21 +179,7 @@ export async function GET(request: Request) {
     const windowEnd = new Date(now.getTime() + 90 * 60 * 1000);
 
     // Count appointments pending reminders
-    const pendingReminders = await db
-      .select({
-        appointmentId: appointments.id,
-        startTime: appointments.startTime,
-        status: appointments.status,
-      })
-      .from(appointments)
-      .where(
-        and(
-          gte(appointments.startTime, windowStart),
-          lte(appointments.startTime, windowEnd),
-          not(inArray(appointments.status, ["cancelled", "completed", "no_show"])),
-          isNull(appointments.reminder1hSentAt)
-        )
-      );
+    const pendingReminders = await getPendingCronReminders("sms1h", { from: windowStart, to: windowEnd });
 
     return NextResponse.json({
       success: true,

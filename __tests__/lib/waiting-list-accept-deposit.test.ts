@@ -15,8 +15,23 @@ vi.mock("@/lib/db", () => ({
     update: (...a: unknown[]) => h.update(...a),
   },
 }));
+// #193 P5a-1: salon z tokenu przez wyjście systemowe, zapytania przez
+// forSalon(salonId).raw — mock deleguje do mocka `db`, kolejność bez zmian.
+vi.mock("@/lib/server/system", () => ({
+  resolveWaitingListToken: async (token: string) =>
+    token === "tok" ? { waitingListId: "wl-1", salonId: "salon-1" } : null,
+}));
+vi.mock("@/lib/server/repository", async () => {
+  const { db } = await import("@/lib/db");
+  return {
+    forSalon: (salonId: string) => ({ salonId, raw: (fn: (tx: unknown) => unknown) => fn(db) }),
+  };
+});
 vi.mock("@/lib/push", () => ({ sendPushNotification: vi.fn() }));
-vi.mock("@/lib/sms", () => ({ sendSms: vi.fn() }));
+vi.mock("@/lib/sms", async (importOriginal) => ({
+  SMS_TIME_ZONE: (await importOriginal<typeof import("@/lib/sms")>()).SMS_TIME_ZONE,
+  sendSms: vi.fn(),
+}));
 vi.mock("@/lib/deposit-calculation", () => ({ calculateExpectedDeposit: (...a: unknown[]) => h.calc(...a) }));
 
 import { acceptEarlierSlot } from "@/lib/waiting-list";

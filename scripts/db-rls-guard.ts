@@ -19,11 +19,16 @@
  * Gdzie działa: krok „RLS guard” po `pnpm db:migrate` w obu jobach z Postgresem
  * w `.github/workflows/quality-gate.yml`; test `__tests__/pg/rls-guard.pg.test.ts`.
  *
- * Tylko odczyt katalogu (`pg_class`, `pg_policies`), bez parametrów od użytkownika.
+ * #193: dodatkowo atrybuty ról aplikacji, treść polityk względem migawki
+ * `scripts/rls-policies.snapshot.json` i semantyka polityk tenant_* (`runPolicyGuard`).
+ * Migawkę generuje `scripts/rls-policies-snapshot.ts` z bazy zbudowanej migracjami.
+ *
+ * Tylko odczyt katalogu (`pg_class`, `pg_policies`, `pg_roles`), bez parametrów od użytkownika.
  * Komunikaty bez adresu bazy i danych logowania.
  *
  * Użycie: `pnpm exec tsx scripts/db-rls-guard.ts` z POSTGRES_URL bazy.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -174,6 +179,198 @@ export async function runRlsGuard(
   );
 }
 
+// ---------------------------------------------------------------------------
+// #193: rola aplikacji i TREŚĆ polityk, nie tylko nazwa.
+// (a) myhelper_app (i myhelper_app_login, gdy istnieje) bez SUPERUSER i BYPASSRLS;
+// (b) migawka polityk z repo == polityki w bazie (każda różnica = odmowa);
+// (c) semantyka niezależna od migawki: polityka tenant_* odwołuje się do
+//     app.current_salon_id w USING i w WITH CHECK (dla poleceń z zapisem).
+// ---------------------------------------------------------------------------
+
+/** Rola, na którą forSalon przełącza transakcję (0005). */
+export const APP_ROLE = "myhelper_app";
+/** Rola logowania puli żądań (od P6); przed P6 jej brak nie jest błędem. */
+export const LOGIN_ROLE = "myhelper_app_login";
+/** Plik migawki polityk w repo, generowany z bazy zbudowanej wyłącznie migracjami. */
+export const POLICY_SNAPSHOT_FILE = "scripts/rls-policies.snapshot.json";
+/** Zmienna kontekstu salonu ustawiana przez forSalon. */
+export const SALON_CONTEXT_VAR = "app.current_salon_id";
+
+/** Atrybuty ról aplikacji (tylko odczyt katalogu). */
+export const ROLE_GUARD_SQL =
+  'select rolname::text as "role", rolsuper as "super", rolbypassrls as "bypass" ' +
+  `from pg_roles where rolname in ('${APP_ROLE}', '${LOGIN_ROLE}') order by rolname`;
+
+/** Polityki schematu public z treścią wyrażeń (pg_policies = pg_get_expr). */
+export const POLICY_GUARD_SQL =
+  'select tablename::text as "table", policyname::text as "name", cmd::text as "cmd", ' +
+  'permissive::text as "permissive", roles::text[] as "roles", qual as "qual", with_check as "withCheck" ' +
+  "from pg_policies where schemaname = 'public' order by tablename, policyname";
+
+export interface RoleRow {
+  role: string;
+  super: boolean;
+  bypass: boolean;
+}
+
+/** Polityka po normalizacji białych znaków (bez skrótu). */
+export interface PolicyRow {
+  table: string;
+  name: string;
+  cmd: string;
+  permissive: string;
+  roles: string[];
+  qual: string | null;
+  withCheck: string | null;
+}
+
+/** Pozycja migawki: polityka + skrót jej pól. */
+export interface PolicySnapshotEntry extends PolicyRow {
+  sha256: string;
+}
+
+const ws = (s: string | null): string | null => (s === null ? null : s.replace(/\s+/g, " ").trim());
+
+/** Normalizacja wiersza katalogu: białe znaki w wyrażeniach, role posortowane. */
+export function normalizePolicy(r: PolicyRow): PolicyRow {
+  return {
+    table: r.table,
+    name: r.name,
+    cmd: r.cmd,
+    permissive: r.permissive,
+    roles: [...r.roles].sort(),
+    qual: ws(r.qual),
+    withCheck: ws(r.withCheck),
+  };
+}
+
+/** Skrót pól polityki (stała kolejność pól). */
+export function policyHash(r: PolicyRow): string {
+  const n = normalizePolicy(r);
+  return createHash("sha256")
+    .update(JSON.stringify([n.table, n.name, n.cmd, n.permissive, n.roles, n.qual, n.withCheck]))
+    .digest("hex");
+}
+
+/** Migawka z wierszy katalogu: posortowana po tabeli i nazwie, każda pozycja ze skrótem. */
+export function toPolicySnapshot(rows: readonly PolicyRow[]): PolicySnapshotEntry[] {
+  return rows
+    .map((r) => normalizePolicy(r))
+    .sort((a, b) => (a.table === b.table ? a.name.localeCompare(b.name) : a.table.localeCompare(b.table)))
+    .map((r) => ({ ...r, sha256: policyHash(r) }));
+}
+
+/** (a) Atrybuty ról: myhelper_app musi istnieć; żadna z ról bez SUPERUSER/BYPASSRLS. */
+export function checkRoles(rows: readonly RoleRow[]): string[] {
+  const out: string[] = [];
+  if (!rows.some((r) => r.role === APP_ROLE)) out.push(`brak roli ${APP_ROLE}`);
+  for (const r of rows) {
+    if (r.super !== false) out.push(`rola ${r.role} ma SUPERUSER`);
+    if (r.bypass !== false) out.push(`rola ${r.role} ma BYPASSRLS`);
+  }
+  return out;
+}
+
+const WRITE_CMDS = new Set(["ALL", "INSERT", "UPDATE"]);
+const READ_CMDS = new Set(["ALL", "SELECT", "UPDATE", "DELETE"]);
+const refsContext = (e: string | null): boolean => e !== null && e.includes(`'${SALON_CONTEXT_VAR}'`);
+const isConstTrue = (e: string | null): boolean => e !== null && /^\(*\s*true\s*\)*$/i.test(e.trim());
+/**
+ * #193: każde odczytanie kontekstu jest w nullif(…, ''). Bez tego `''::uuid` na
+ * połączeniu po transakcji forSalon rzuca 22P02 zamiast dać 0 wierszy.
+ */
+const CONTEXT_READ = `current_setting('${SALON_CONTEXT_VAR}'`;
+const withoutNullif = (e: string | null): boolean =>
+  e !== null && e.replace(/nullif\(current_setting\('app\.current_salon_id'/gi, "").includes(CONTEXT_READ);
+
+/**
+ * (c) Semantyka polityk tenant_* (niezależna od migawki):
+ * - USING (polecenia z odczytem) odwołuje się do app.current_salon_id, bezpośrednio
+ *   albo przez rodzica w EXISTS, i nie jest stałą true;
+ * - WITH CHECK (polecenia z zapisem) odwołuje się do kontekstu i nie jest stałą true;
+ * - każde odczytanie kontekstu w USING i WITH CHECK jest w nullif(…, '').
+ * Kontrola tekstowa: wyrażenie złożone (np. `true OR …`) przechodzi semantykę, ale nie
+ * migawkę — dlatego obie kontrole działają razem.
+ */
+export function checkPolicySemantics(rows: readonly PolicyRow[]): string[] {
+  const out: string[] = [];
+  for (const raw of rows) {
+    if (!raw.name.startsWith("tenant_")) continue;
+    const r = normalizePolicy(raw);
+    const id = `${r.table}.${r.name}`;
+    if (READ_CMDS.has(r.cmd)) {
+      if (isConstTrue(r.qual)) out.push(`${id}: USING jest stałą true`);
+      else if (!refsContext(r.qual)) out.push(`${id}: USING bez odwołania do ${SALON_CONTEXT_VAR}`);
+    }
+    if (WRITE_CMDS.has(r.cmd)) {
+      if (isConstTrue(r.withCheck)) out.push(`${id}: WITH CHECK jest stałą true`);
+      // WITH CHECK równy poprawnemu USING też zawiera odwołanie, więc wystarcza jeden warunek.
+      else if (!refsContext(r.withCheck)) out.push(`${id}: WITH CHECK bez odwołania do ${SALON_CONTEXT_VAR}`);
+    }
+    if (withoutNullif(r.qual)) out.push(`${id}: USING czyta ${SALON_CONTEXT_VAR} bez nullif`);
+    if (withoutNullif(r.withCheck)) out.push(`${id}: WITH CHECK czyta ${SALON_CONTEXT_VAR} bez nullif`);
+  }
+  return out;
+}
+
+/** (b) Baza == migawka: brak, nadmiar albo zmiana któregokolwiek pola = odmowa. */
+export function checkPolicySnapshot(rows: readonly PolicyRow[], snapshot: readonly PolicySnapshotEntry[]): string[] {
+  if (snapshot.length === 0) return [`pusta migawka ${POLICY_SNAPSHOT_FILE}`];
+  const out: string[] = [];
+  const key = (r: { table: string; name: string }) => `${r.table}.${r.name}`;
+  const current = new Map(toPolicySnapshot(rows).map((r) => [key(r), r]));
+  const expected = new Map(snapshot.map((r) => [key(r), r]));
+  for (const [k, want] of expected) {
+    const got = current.get(k);
+    if (!got) out.push(`${k}: polityka z migawki nie istnieje w bazie`);
+    else if (got.sha256 !== want.sha256 || policyHash(want) !== want.sha256) {
+      out.push(`${k}: treść polityki różni się od migawki`);
+    }
+  }
+  for (const k of current.keys()) if (!expected.has(k)) out.push(`${k}: polityka spoza migawki`);
+  return out;
+}
+
+/** Migawka z pliku w repozytorium. */
+export function loadPolicySnapshot(root = process.cwd()): PolicySnapshotEntry[] {
+  return JSON.parse(readFileSync(join(root, POLICY_SNAPSHOT_FILE), "utf8")) as PolicySnapshotEntry[];
+}
+
+type PolicyDbRow = Omit<PolicyRow, "roles"> & { roles: string[] | null };
+
+/** Odczyt polityk z katalogu przez podanego klienta. */
+export async function readPolicies(sql: RlsQueryRunner): Promise<PolicyRow[]> {
+  const rows = (await sql.unsafe(POLICY_GUARD_SQL)) as PolicyDbRow[];
+  return rows.map((r) => ({ ...r, roles: [...(r.roles ?? [])] }));
+}
+
+export type PolicyGuardResult = { ok: true; policies: number } | { ok: false; problems: string[]; message: string };
+
+/** Role + migawka + semantyka. Nie zamyka połączenia. */
+export async function runPolicyGuard(
+  sql: RlsQueryRunner,
+  snapshot: readonly PolicySnapshotEntry[] = loadPolicySnapshot(),
+): Promise<PolicyGuardResult> {
+  const roles = (await sql.unsafe(ROLE_GUARD_SQL)) as Array<{ role: string; super: unknown; bypass: unknown }>;
+  const policies = await readPolicies(sql);
+  const problems = [
+    // Wartość inna niż dosłowne false liczy się jako atrybut nadany (fail-closed).
+    ...checkRoles(roles.map((r) => ({ role: r.role, super: r.super !== false, bypass: r.bypass !== false }))),
+    ...checkPolicySnapshot(policies, snapshot),
+    ...checkPolicySemantics(policies),
+  ];
+  if (problems.length === 0) return { ok: true, policies: policies.length };
+  const shown = problems.slice(0, 5).join("; ");
+  const more = problems.length > 5 ? ` i ${problems.length - 5} więcej` : "";
+  return {
+    ok: false,
+    problems,
+    message:
+      `Rola aplikacji albo treść polityk niezgodna (${problems.length}): ${shown}${more} — ` +
+      `zmiana polityk w migracji wymaga aktualizacji ${POLICY_SNAPSHOT_FILE} w tym samym PR.`,
+  };
+}
+
 async function main(): Promise<number> {
   const url = process.env.POSTGRES_URL?.trim();
   if (!url) {
@@ -181,10 +378,12 @@ async function main(): Promise<number> {
     return 1;
   }
   let required: RlsRequirement[];
+  let snapshot: PolicySnapshotEntry[];
   try {
     required = loadRlsRequirements();
+    snapshot = loadPolicySnapshot();
   } catch (error) {
-    // Błąd parsowania pliku z repo — bez danych bazy, można pokazać.
+    // Błąd odczytu plików z repo — bez danych bazy, można pokazać.
     console.error(`[db-rls-guard] ${(error as Error).message}`);
     return 1;
   }
@@ -195,7 +394,15 @@ async function main(): Promise<number> {
       console.error(`[db-rls-guard] ${result.message}`);
       return 1;
     }
-    console.log(`[db-rls-guard] OK: RLS i polityki z 0005 na ${result.checked} tabelach; tabel z RLS w bazie: ${result.rlsTables}`);
+    const policies = await runPolicyGuard(sql, snapshot);
+    if (!policies.ok) {
+      console.error(`[db-rls-guard] ${policies.message}`);
+      return 1;
+    }
+    console.log(
+      `[db-rls-guard] OK: RLS i polityki z 0005 na ${result.checked} tabelach; tabel z RLS w bazie: ${result.rlsTables}; ` +
+        `polityk zgodnych z migawką: ${policies.policies}; role aplikacji bez SUPERUSER/BYPASSRLS`,
+    );
     return 0;
   } catch (error) {
     // Bez echa błędu połączenia — może zawierać adres bazy albo użytkownika.

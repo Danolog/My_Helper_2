@@ -25,7 +25,10 @@
  * - Fail-closed konfiguracji: tsconfig wczytany bez błędów, alias `@/` rozwiązuje się do rejestru.
  *
  * Kontrakt: PR, który dodaje lub usuwa importera wyjścia, aktualizuje tę migawkę i uzasadnia
- * w opisie, skąd pochodzą `userId`/`salonId`. Zmianę migawki akceptuje CTO, CRCO do wglądu.
+ * w opisie, skąd pochodzą `userId`/`salonId`. Dwa poziomy akceptacji:
+ * - wyjścia kasujące dane albo nieodwracalnie zmieniające stan wizyty lub płatności w wielu
+ *   salonach (osobne asercje „lista DOKŁADNIE”): zmianę akceptują CTO i CRCO;
+ * - pozostałe wyjścia: zmianę akceptuje CTO, CRCO do wglądu.
  * Zakres: wyłącznie `src/` (bez plików testów).
  */
 import fs from "node:fs";
@@ -50,6 +53,9 @@ const CONTRACT =
   "zmiana importerów wyjść rejestru systemowego (#193 L7): zaktualizuj SNAPSHOT" +
   " (dla wyjść kasujących dane także osobną listę DOKŁADNIE) i w opisie PR podaj, skąd pochodzą" +
   " userId/salonId w nowym miejscu; zmianę akceptuje CTO, CRCO do wglądu";
+const DATA_DELETING_CONTRACT =
+  "zmiana importerów wyjścia kasującego dane (#193 L7): zaktualizuj SNAPSHOT i listę DOKŁADNIE," +
+  " w opisie PR podaj, skąd pochodzą userId/salonId w nowym miejscu; zmianę akceptują CTO i CRCO";
 const INTERMEDIATE_CONTRACT =
   "zmiana listy modułów pośrednich rejestru systemowego (#193 L7): zaktualizuj INTERMEDIATE_MODULES" +
   " i SNAPSHOT, w opisie PR podaj, po co nowy moduł re-eksportuje wyjście; zmianę akceptuje CTO, CRCO do wglądu";
@@ -65,8 +71,38 @@ const SNAPSHOT: Record<string, string[]> = {
     "src/lib/temporary-access.ts",
   ],
   "db-system.ts:dbSystem": [],
+  "deposits-cleanup.ts:cleanupStaleDepositBookings": ["src/app/api/cron/cleanup-pending-deposits/route.ts"],
   "health.ts:checkDatabase": ["src/app/api/diagnostics/route.ts"],
   "health.ts:pingDatabase": ["src/app/api/health/route.ts"],
+  "notifications.ts:countPushSubscriptions": [
+    "src/app/api/cron/push-reminders-24h/route.ts",
+    "src/app/api/cron/push-reminders/route.ts",
+  ],
+  "notifications.ts:deleteUndeliverablePushSubscriptions": ["src/lib/push.ts"],
+  "notifications.ts:findDueAppointmentReminders": ["src/app/api/reminders/appointment/route.ts"],
+  "notifications.ts:findDuePushReminders": [
+    "src/app/api/cron/push-reminders-24h/route.ts",
+    "src/app/api/cron/push-reminders/route.ts",
+  ],
+  "notifications.ts:findDueSmsReminders": ["src/app/api/cron/sms-reminders/route.ts"],
+  "notifications.ts:getAppointmentReminderPreview": ["src/app/api/reminders/appointment/route.ts"],
+  "notifications.ts:getPendingCronReminders": [
+    "src/app/api/cron/push-reminders-24h/route.ts",
+    "src/app/api/cron/push-reminders/route.ts",
+    "src/app/api/cron/sms-reminders/route.ts",
+  ],
+  "notifications.ts:getPushSubscriptionsForUser": ["src/lib/push.ts"],
+  "notifications.ts:getUserIdsWithPushSubscriptions": [
+    "src/app/api/cron/push-reminders-24h/route.ts",
+    "src/app/api/cron/push-reminders/route.ts",
+  ],
+  "notifications.ts:markAppointmentRemindersSent": ["src/app/api/reminders/appointment/route.ts"],
+  "notifications.ts:markCronRemindersSent": [
+    "src/app/api/cron/push-reminders-24h/route.ts",
+    "src/app/api/cron/push-reminders/route.ts",
+    "src/app/api/cron/sms-reminders/route.ts",
+  ],
+  "waiting-list.ts:resolveWaitingListToken": ["src/lib/waiting-list.ts"],
   "session.ts:getActiveTemporaryAccess": [
     "src/app/api/temporary-access/check/route.ts",
     "src/lib/temporary-access.ts",
@@ -310,22 +346,34 @@ describe("L7: importerzy wyjść rejestru systemowego (checker TS, src/)", () =>
   });
 
   it("session.ts:revokeSalonGrantsForUser (kasuje dane): lista DOKŁADNIE dzisiejsza", () => {
-    expect(a.importers["session.ts:revokeSalonGrantsForUser"], `wyjście kasujące dane — ${CONTRACT}`).toEqual([
+    expect(a.importers["session.ts:revokeSalonGrantsForUser"], DATA_DELETING_CONTRACT).toEqual([
       "src/app/api/employees/[id]/link-account/route.ts",
       "src/lib/temporary-access.ts",
     ]);
   });
 
   it("cron.ts:cleanupExpiredTemporaryAccess (kasuje dane): lista DOKŁADNIE dzisiejsza", () => {
-    expect(a.importers["cron.ts:cleanupExpiredTemporaryAccess"], `wyjście kasujące dane — ${CONTRACT}`).toEqual([
+    expect(a.importers["cron.ts:cleanupExpiredTemporaryAccess"], DATA_DELETING_CONTRACT).toEqual([
       "src/app/api/cron/cleanup-temporary-access/route.ts",
       "src/lib/temporary-access.ts",
     ]);
   });
 
   it("auth-throttle.ts:clearSignInFailures (kasuje dane): lista DOKŁADNIE dzisiejsza", () => {
-    expect(a.importers["auth-throttle.ts:clearSignInFailures"], `wyjście kasujące dane — ${CONTRACT}`).toEqual([
+    expect(a.importers["auth-throttle.ts:clearSignInFailures"], DATA_DELETING_CONTRACT).toEqual([
       "src/lib/auth-rate-limit-options.ts",
+    ]);
+  });
+
+  it("notifications.ts:deleteUndeliverablePushSubscriptions (kasuje dane): lista DOKŁADNIE — tylko push.ts", () => {
+    expect(a.importers["notifications.ts:deleteUndeliverablePushSubscriptions"], DATA_DELETING_CONTRACT).toEqual([
+      "src/lib/push.ts",
+    ]);
+  });
+
+  it("deposits-cleanup.ts:cleanupStaleDepositBookings (anuluje wizyty i płatności w wielu salonach): lista DOKŁADNIE — tylko trasa crona", () => {
+    expect(a.importers["deposits-cleanup.ts:cleanupStaleDepositBookings"], DATA_DELETING_CONTRACT).toEqual([
+      "src/app/api/cron/cleanup-pending-deposits/route.ts",
     ]);
   });
 
