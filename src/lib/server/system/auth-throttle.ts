@@ -63,9 +63,13 @@ function errorName(err: unknown): string {
   return err.name === "Error" && err.constructor?.name ? err.constructor.name : err.name;
 }
 
-/** Ścieżka z klucza biblioteki `<ip>|<ścieżka>` — po OSTATNIM „|” (IPv6 ma „:”). */
+/**
+ * Ścieżka z klucza biblioteki `<adres>|<ścieżka>` — po PIERWSZYM „|” (adres, także
+ * IPv6 i „no-trusted-ip”, nie zawiera „|”; ścieżka może). Kształt klucza przypięty
+ * testem na prawdziwej instancji Better Auth.
+ */
 function pathOfLibraryKey(libraryKey: string): string {
-  return libraryKey.slice(libraryKey.lastIndexOf("|") + 1);
+  return libraryKey.slice(libraryKey.indexOf("|") + 1);
 }
 
 /** Te same ścieżki co reguły specjalne Better Auth (rate-limiter, 1.7.x). */
