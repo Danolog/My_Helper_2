@@ -27,6 +27,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -46,6 +47,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { mutationFetch } from "@/lib/api-client";
+
+const ANY_OPTION = "any";
+const CLIENT_REQUEST_CONFIRM_LABEL =
+  "Klient sam poprosił o zapis na listę oczekujących i zgadza się na wiadomość o zwolnionym terminie.";
+const CLIENT_REQUEST_CONFIRM_MESSAGE =
+  "Potwierdź, że klient sam poprosił o zapis na listę oczekujących.";
 
 interface WaitingListEntry {
   id: string;
@@ -116,6 +123,8 @@ function WaitingListPageInner() {
   const [selectedServiceId, setSelectedServiceId] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [preferredDate, setPreferredDate] = useState("");
+  const [clientRequestConfirmed, setClientRequestConfirmed] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const fetchEntries = useCallback(async () => {
@@ -160,16 +169,43 @@ function WaitingListPageInner() {
     fetchOptions();
   }, [fetchOptions]);
 
+  const resetAddForm = () => {
+    setSelectedClientId("");
+    setSelectedServiceId("");
+    setSelectedEmployeeId("");
+    setPreferredDate("");
+    setClientRequestConfirmed(false);
+    setConfirmError(null);
+  };
+
+  // Zamknięcie okna bez wysłania (Anuluj, Escape, krzyżyk) czyści formularz
+  const handleAddDialogOpenChange = (open: boolean) => {
+    setAddDialogOpen(open);
+    if (!open) resetAddForm();
+  };
+
   const handleAdd = async () => {
     if (!selectedClientId) {
       toast.error("Wybierz klienta");
       return;
     }
+    if (!clientRequestConfirmed) {
+      setConfirmError(CLIENT_REQUEST_CONFIRM_MESSAGE);
+      return;
+    }
     setSubmitting(true);
     try {
-      const body: Record<string, string> = { clientId: selectedClientId };
-      if (selectedServiceId) body.serviceId = selectedServiceId;
-      if (selectedEmployeeId) body.preferredEmployeeId = selectedEmployeeId;
+      const body: Record<string, string | boolean> = {
+        clientId: selectedClientId,
+        clientRequestConfirmed: true,
+      };
+      // Pozycja „Dowolna…/Dowolny…” oznacza brak preferencji — pole pomijane
+      if (selectedServiceId && selectedServiceId !== ANY_OPTION) {
+        body.serviceId = selectedServiceId;
+      }
+      if (selectedEmployeeId && selectedEmployeeId !== ANY_OPTION) {
+        body.preferredEmployeeId = selectedEmployeeId;
+      }
       if (preferredDate) body.preferredDate = new Date(preferredDate).toISOString();
 
       const res = await mutationFetch("/api/waiting-list", {
@@ -181,11 +217,10 @@ function WaitingListPageInner() {
       if (data.success) {
         toast.success("Dodano do listy oczekujacych");
         setAddDialogOpen(false);
-        setSelectedClientId("");
-        setSelectedServiceId("");
-        setSelectedEmployeeId("");
-        setPreferredDate("");
+        resetAddForm();
         fetchEntries();
+      } else if (data.details?.clientRequestConfirmed) {
+        setConfirmError(String(data.details.clientRequestConfirmed));
       } else {
         toast.error(data.error || "Blad podczas dodawania");
       }
@@ -251,7 +286,7 @@ function WaitingListPageInner() {
           </Button>
         </div>
 
-        <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+        <Dialog open={addDialogOpen} onOpenChange={handleAddDialogOpenChange}>
           <DialogTrigger asChild>
             <Button>
               <Plus className="w-4 h-4 mr-2" />
@@ -262,7 +297,7 @@ function WaitingListPageInner() {
             <DialogHeader>
               <DialogTitle>Dodaj klienta do listy oczekujacych</DialogTitle>
               <DialogDescription>
-                Klient zostanie powiadomiony gdy zwolni sie termin.
+                Klient dostanie SMS lub powiadomienie, gdy zwolni się pasujący termin.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
@@ -321,9 +356,41 @@ function WaitingListPageInner() {
                   onChange={(e) => setPreferredDate(e.target.value)}
                 />
               </div>
+              <div>
+                <div className="flex items-start gap-3">
+                  <Checkbox
+                    id="waiting-list-client-request-confirmed"
+                    className="mt-0.5"
+                    checked={clientRequestConfirmed}
+                    onCheckedChange={(checked) => {
+                      setClientRequestConfirmed(checked);
+                      if (checked) setConfirmError(null);
+                    }}
+                    aria-invalid={confirmError ? true : undefined}
+                    aria-describedby={
+                      confirmError ? "waiting-list-client-request-confirmed-error" : undefined
+                    }
+                  />
+                  <Label
+                    htmlFor="waiting-list-client-request-confirmed"
+                    className="leading-snug font-normal"
+                  >
+                    {CLIENT_REQUEST_CONFIRM_LABEL}
+                  </Label>
+                </div>
+                {confirmError && (
+                  <p
+                    id="waiting-list-client-request-confirmed-error"
+                    role="alert"
+                    className="mt-2 text-sm text-destructive"
+                  >
+                    {confirmError}
+                  </p>
+                )}
+              </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setAddDialogOpen(false)}>
+              <Button variant="outline" onClick={() => handleAddDialogOpenChange(false)}>
                 Anuluj
               </Button>
               <Button onClick={handleAdd} disabled={submitting}>
