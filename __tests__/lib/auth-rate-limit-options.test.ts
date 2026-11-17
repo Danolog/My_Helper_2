@@ -190,6 +190,20 @@ describe("tryb database: rezerwacja próby na konto (hooks.before)", () => {
     expect(reserveAccountSignInAttempt).not.toHaveBeenCalled();
   });
 
+  it("klucz przekazywany do consumeAuthRateLimit na tej wersji biblioteki: `<adres>|<ścieżka>`, bez zapytania URL", async () => {
+    const { auth } = makeAuth();
+    await auth.handler(post("/sign-in/email", { email: "jan@example.pl", password: "zle-haslo-123" }, "198.51.100.4"));
+    await auth.handler(post("/sign-in/email", { email: "jan@example.pl", password: "zle-haslo-123" }, "2001:db8::1"));
+    await auth.handler(
+      new Request(`${BASE}/api/auth/get-session?probe=jan@example.pl`, { headers: { "x-forwarded-for": "198.51.100.4" } }),
+    );
+    expect(consumeAuthRateLimit.mock.calls.map((c) => c[0])).toEqual([
+      "198.51.100.4|/sign-in/email",
+      "2001:0db8:0000:0000:0000:0000:0000:0000|/sign-in/email",
+      "198.51.100.4|/get-session",
+    ]);
+  });
+
   it("hooki na konto działają niezależnie od flagi enabled", async () => {
     const { auth } = makeAuth({ enabledOverride: false });
     await auth.handler(post("/sign-in/email", { email: "jan@example.pl", password: "zle-haslo-123" }));

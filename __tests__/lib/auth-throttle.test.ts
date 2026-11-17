@@ -123,16 +123,16 @@ describe("podział ścieżek: wrażliwe → baza, pozostałe → pamięć proces
     },
   );
 
-  it("ścieżka brana po OSTATNIM „|” (adres IPv6, klucz bez adresu)", async () => {
+  it("ścieżka brana po PIERWSZYM „|” (adres IPv6, klucz bez adresu, „|” w ścieżce)", async () => {
     execute.mockResolvedValue(row(1, 0));
     await t.consumeAuthRateLimit("2001:0db8:0001:0002:0000:0000:0000:0000|/sign-in/email", RULE_IN);
     const afterIpv6 = execute.mock.calls.length;
     expect(afterIpv6).toBeGreaterThan(0);
     await t.consumeAuthRateLimit("no-trusted-ip|/sign-in/email", RULE_IN);
     expect(execute.mock.calls.length).toBeGreaterThan(afterIpv6);
-    execute.mockReset();
-    await t.consumeAuthRateLimit("a|/sign-in/email-x|/get-session", { window: 10, max: 100 });
-    expect(execute).not.toHaveBeenCalled();
+    execute.mockClear();
+    await t.consumeAuthRateLimit("198.51.100.7|/sign-in/email|/get-session", { window: 10, max: 100 });
+    expect(execute).toHaveBeenCalled();
   });
 
   it("pamięć: max w oknie przechodzi, następna odmowa z retryAfter, po oknie znów dozwolone", async () => {
