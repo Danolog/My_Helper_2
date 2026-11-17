@@ -83,10 +83,6 @@ function isSensitivePath(path: string): boolean {
   );
 }
 
-function secondsUntil(ms: number, now: number): number {
-  return Math.max(1, Math.ceil((ms - now) / 1000));
-}
-
 // ── Licznik w pamięci procesu dla ścieżek niewrażliwych (semantyka jak magazyn
 //    pamięciowy biblioteki: okno od ostatniego dozwolonego żądania). ──────────
 
@@ -129,10 +125,21 @@ function consumeInMemory(libraryKey: string, rule: { window: number; max: number
   return { allowed: true, retryAfter: null };
 }
 
-type CounterRow = { count: number; window_start: Date | string; blocked_until: Date | string | null };
+/**
+ * Wiersz z UPSERT … RETURNING. Decyzję o blokadzie (`blocked`) i czas do końca
+ * blokady albo okna (`retry_after`, w sekundach, co najmniej 1) liczy SQL —
+ * czas blokady liczony zegarem bazy; aplikacja tylko je czyta.
+ */
+type CounterRow = { count: number; blocked?: boolean | null; retry_after: number | string | null };
 
 function firstRow(result: unknown): CounterRow | undefined {
   return (result as ArrayLike<CounterRow> | undefined)?.[0];
+}
+
+/** `retry_after` z wiersza; brak albo wartość nieliczbowa → `fallback`. */
+function retryAfterOf(r: CounterRow, fallback: number): number {
+  const n = Number(r.retry_after);
+  return r.retry_after !== null && Number.isFinite(n) && n >= 1 ? n : fallback;
 }
 
 /**
@@ -159,7 +166,8 @@ export async function consumeAuthRateLimit(
         window_start = CASE WHEN auth_rate_limit.window_start <= now() - make_interval(secs => ${rule.window})
                      THEN now() ELSE auth_rate_limit.window_start END,
         updated_at = now()
-      RETURNING count, window_start, blocked_until`);
+      RETURNING count,
+        GREATEST(1, CEIL(EXTRACT(EPOCH FROM window_start + make_interval(secs => ${rule.window}) - now())))::int AS retry_after`);
     row = firstRow(result);
     if (!row) throw new Error("auth rate limit upsert returned no row");
   } catch (err) {
@@ -178,8 +186,7 @@ export async function consumeAuthRateLimit(
   }
 
   if (Number(row.count) <= rule.max) return { allowed: true, retryAfter: null };
-  const windowEnd = new Date(row.window_start).getTime() + rule.window * 1000;
-  return { allowed: false, retryAfter: secondsUntil(windowEnd, Date.now()) };
+  return { allowed: false, retryAfter: retryAfterOf(row, rule.window) };
 }
 
 /**
@@ -187,6 +194,7 @@ export async function consumeAuthRateLimit(
  * - trwająca blokada → bez zmiany licznika, odmowa;
  * - blokada minęła albo okno wygasło → nowe okno od tej próby;
  * - inaczej licznik +1; przekroczenie progu ustawia blokadę stałą, odmowa.
+ * Decyzja i czas do końca blokady przychodzą z RETURNING (czas blokady liczony zegarem bazy).
  * Błąd albo brak wiersza → odmowa (fail-closed).
  */
 export async function reserveAccountSignInAttempt(
@@ -216,14 +224,12 @@ export async function reserveAccountSignInAttempt(
             THEN now() + make_interval(secs => ${ACCOUNT_BLOCK_SEC})
           ELSE NULL END,
         updated_at = now()
-      RETURNING count, window_start, blocked_until`);
+      RETURNING count,
+        (blocked_until > now()) AS blocked,
+        GREATEST(1, CEIL(EXTRACT(EPOCH FROM blocked_until - now())))::int AS retry_after`);
     const row = firstRow(result);
     if (!row) throw new Error("account throttle upsert returned no row");
-    if (row.blocked_until !== null) {
-      const until = new Date(row.blocked_until).getTime();
-      const now = Date.now();
-      if (until > now) return { allowed: false, retryAfter: secondsUntil(until, now) };
-    }
+    if (row.blocked === true) return { allowed: false, retryAfter: retryAfterOf(row, ACCOUNT_BLOCK_SEC) };
     return { allowed: true, retryAfter: null };
   } catch (err) {
     logger.error("auth rate limit store error", { path: "/sign-in/email", error: errorName(err) });
