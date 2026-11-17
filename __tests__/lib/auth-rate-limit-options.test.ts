@@ -141,12 +141,22 @@ describe("tryb database: rezerwacja próby na konto (hooks.before)", () => {
     expect(reserveAccountSignInAttempt).toHaveBeenCalledWith("Nie.Ma@Example.PL");
   });
 
-  it("inne ścieżki nie rezerwują", async () => {
+  it("inne ścieżki nie rezerwują i nie zerują licznika konta (także udana rejestracja z token i user.id)", async () => {
     const { auth } = makeAuth();
-    await auth.handler(post("/sign-up/email", { email: "nowy@example.pl", password: PASSWORD, name: "N" }));
-    await auth.handler(post("/request-password-reset", { email: "nowy@example.pl" }));
+    const signUpRes = await auth.handler(post("/sign-up/email", { email: "nowy@example.pl", password: PASSWORD, name: "N" }));
+    // Warunek wstępny: odpowiedź rejestracji ma kształt wyniku, który na /sign-in/email zeruje licznik.
+    expect(signUpRes.status).toBe(200);
+    const signUpBody = (await signUpRes.json()) as { token?: unknown; user?: { id?: unknown } };
+    expect(resetsAccountCounter(signUpBody)).toBe(true);
+    expect(clearSignInFailures, "zerowanie po /sign-up/email").not.toHaveBeenCalled();
+
+    const resetReq = await auth.handler(post("/request-password-reset", { email: "nowy@example.pl" }));
+    expect(resetReq.status).toBe(200);
+    expect(clearSignInFailures, "zerowanie po /request-password-reset").not.toHaveBeenCalled();
+
     await auth.handler(new Request(`${BASE}/api/auth/get-session`, { headers: { "x-forwarded-for": "198.51.100.1" } }));
     expect(reserveAccountSignInAttempt).not.toHaveBeenCalled();
+    expect(clearSignInFailures).not.toHaveBeenCalled();
   });
 
   it.each([
