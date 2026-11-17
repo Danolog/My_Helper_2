@@ -61,6 +61,13 @@ describe("#193 P5a-2: trasy bez puli żądań", () => {
     expect(code).not.toMatch(/["']@\/lib\/server\/system\/[^"']+["']/);
   });
 
+  it("reminders/appointment: podgląd jednego salonu (GET) przez forSalon, wybór i oznaczenie (POST) przez wyjścia", () => {
+    const code = src("src/app/api/reminders/appointment/route.ts");
+    expect(importsFrom(code, "@/lib/server/repository")).toBe(true);
+    expect(code).toMatch(/\bforSalon\(salonId\)\.raw\(/);
+    expect(code).not.toMatch(/\bgetAppointmentReminderPreview\b/);
+  });
+
   it.each([...new Set(SYSTEM_ROUTES.map(([, m]) => m))])("moduł system/%s.ts istnieje", (mod) => {
     expect(existsSync(path.join(ROOT, "src/lib/server/system", `${mod}.ts`))).toBe(true);
   });
