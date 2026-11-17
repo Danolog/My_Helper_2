@@ -33,6 +33,7 @@ export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registe
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
+  const [tooManyAttempts, setTooManyAttempts] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [isPending, setIsPending] = useState(false)
   const [isGooglePending, setIsGooglePending] = useState(false)
@@ -57,6 +58,7 @@ export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registe
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+    setTooManyAttempts(false)
 
     // Validate required fields
     const errors: Record<string, string> = {}
@@ -83,6 +85,11 @@ export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registe
       })
 
       if (result.error) {
+        // 429: ten sam komunikat dla limitu adresu i limitu konta (API ich nie rozróżnia).
+        if (result.error.status === 429) {
+          setTooManyAttempts(true)
+          return
+        }
         setError(sanitizeAuthError(result.error.message, "Nie udalo sie zalogowac. Sprawdz dane i sprobuj ponownie."))
       } else {
         router.replace(redirectTo)
@@ -137,6 +144,15 @@ export function SignInButton({ returnTo, defaultRedirect = "/dashboard", registe
       </div>
       {error && (
         <p className="text-sm text-destructive">{error}</p>
+      )}
+      {tooManyAttempts && (
+        <p role="alert" className="text-sm text-destructive">
+          Zbyt wiele prob logowania. Sprobuj ponownie za kilka minut albo{" "}
+          <Link href="/forgot-password" className="underline">
+            zresetuj haslo
+          </Link>
+          .
+        </p>
       )}
       <Button type="submit" className="w-full" disabled={isPending || isGooglePending}>
         {isPending ? "Logowanie..." : "Zaloguj sie"}

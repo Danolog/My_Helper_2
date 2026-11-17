@@ -45,6 +45,8 @@ const lit = (xs: readonly string[]) => xs.map((x) => `'${x}'`).join(", ");
 
 /** Numer PR, w którym pozycje trafiają na listy. */
 const THIS_PR = 242;
+/** PR tabeli liczników limitu prób logowania. */
+const AUTH_RATE_LIMIT_PR = 248;
 const BOTH = ["CTO", "CRCO"];
 
 /** Tabele wspólne dla wszystkich salonów, z uprawnieniami roli aplikacji, bez RLS. */
@@ -64,6 +66,7 @@ const NO_ACCESS_TABLES: ExceptionEntry[] = [
   { name: "session", reason: "Sesje logowania czyta wyłącznie adapter auth na puli systemowej.", acceptedBy: BOTH, pr: THIS_PR },
   { name: "account", reason: "Konta logowania z hasłami czyta wyłącznie adapter auth na puli systemowej.", acceptedBy: BOTH, pr: THIS_PR },
   { name: "verification", reason: "Tokeny weryfikacji czyta wyłącznie adapter auth na puli systemowej.", acceptedBy: BOTH, pr: THIS_PR },
+  { name: "auth_rate_limit", reason: "Liczniki limitu prób logowania czyta i zapisuje wyłącznie wyjście systemowe na puli systemowej.", acceptedBy: BOTH, pr: AUTH_RATE_LIMIT_PR },
 ];
 
 type Lists = { global: readonly ExceptionEntry[]; debt: readonly ExceptionEntry[]; noAccess: readonly ExceptionEntry[] };

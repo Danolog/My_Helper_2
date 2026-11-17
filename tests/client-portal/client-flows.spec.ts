@@ -1,3 +1,4 @@
+import { failedLoginEmail } from '../failed-login-email';
 import { test, expect, type Page } from '../fixtures';
 
 // ---------------------------------------------------------------------------
@@ -192,7 +193,7 @@ test.describe('Flow 7: Client Portal', () => {
       await page.goto('/portal/login');
       await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
       await page.waitForTimeout(500);
-      await page.fill('#email', 'wrong@example.com');
+      await page.fill('#email', failedLoginEmail());
       await page.fill('#password', 'WrongPass123!');
       await page.locator('form button[type="submit"]').click();
 

@@ -37,6 +37,7 @@ const SESSION_EXPORTS = [
 ];
 const CRON_EXPORTS = ["cleanupExpiredTemporaryAccess"];
 const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
+const AUTH_THROTTLE_EXPORTS = ["clearSignInFailures", "consumeAuthRateLimit", "reserveAccountSignInAttempt"];
 /** #193 P5a-1: subskrypcje push po stronie wysyłki (decyzja CTO 3d / 3d-KOREKTA). */
 const NOTIFICATIONS_EXPORTS = [
   // #193 P5a-2: crony przypomnień push 1h / 24h i SMS 1h (cross-salon, sekret crona).
@@ -64,9 +65,11 @@ const REGISTRY_SOURCES = [
   "deposits-cleanup.ts",
   "notifications.ts",
   "waiting-list.ts",
+  "auth-throttle.ts",
 ];
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts": ["authAdapter"],
+  "auth-throttle.ts": AUTH_THROTTLE_EXPORTS,
   "cron.ts": CRON_EXPORTS,
   "db-system.ts": ["dbSystem"],
   "deposits-cleanup.ts": DEPOSITS_CLEANUP_EXPORTS,
@@ -78,6 +81,7 @@ const SNAPSHOT: Record<string, string[]> = {
     ...DEPOSITS_CLEANUP_EXPORTS,
     ...NOTIFICATIONS_EXPORTS,
     ...WAITING_LIST_EXPORTS,
+    ...AUTH_THROTTLE_EXPORTS,
   ].sort(),
   "notifications.ts": NOTIFICATIONS_EXPORTS,
   "session.ts": SESSION_EXPORTS,

@@ -67,6 +67,9 @@ const INTERMEDIATE_CONTRACT =
 /** Migawka: wpis `<plik w system/>:<deklaracja>` → posortowani importerzy spoza `system/**`. */
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts:authAdapter": ["src/lib/auth.ts"],
+  "auth-throttle.ts:clearSignInFailures": ["src/lib/auth-rate-limit-options.ts"],
+  "auth-throttle.ts:consumeAuthRateLimit": ["src/lib/auth-rate-limit-options.ts"],
+  "auth-throttle.ts:reserveAccountSignInAttempt": ["src/lib/auth-rate-limit-options.ts"],
   "cron.ts:cleanupExpiredTemporaryAccess": [
     "src/app/api/cron/cleanup-temporary-access/route.ts",
     "src/lib/temporary-access.ts",
@@ -356,6 +359,12 @@ describe("L7: importerzy wyjść rejestru systemowego (checker TS, src/)", () =>
     expect(a.importers["cron.ts:cleanupExpiredTemporaryAccess"], DATA_DELETING_CONTRACT).toEqual([
       "src/app/api/cron/cleanup-temporary-access/route.ts",
       "src/lib/temporary-access.ts",
+    ]);
+  });
+
+  it("auth-throttle.ts:clearSignInFailures (kasuje dane): lista DOKŁADNIE dzisiejsza", () => {
+    expect(a.importers["auth-throttle.ts:clearSignInFailures"], DATA_DELETING_CONTRACT).toEqual([
+      "src/lib/auth-rate-limit-options.ts",
     ]);
   });
 

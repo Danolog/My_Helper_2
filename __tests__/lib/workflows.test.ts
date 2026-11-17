@@ -491,6 +491,25 @@ exit 0
     expect(r.run).toBeUndefined();
   });
 
+  // Przełącznik magazynu limitu logowania (klasa var, niewymagana). W aplikacji pusty
+  // napis zatrzymuje start, więc nieustawiona zmienna repo (w workflow `vars.*` daje "")
+  // nie może trafić do usługi — usługa ma widzieć BRAK zmiennej, czyli tryb domyślny.
+  it.each([
+    ["nieustawiona", undefined],
+    ["pusta (nieustawiona zmienna repo)", ""],
+  ])("AUTH_RATE_LIMIT_STORE %s → brak wpisu w env.yaml, deploy przechodzi", (_label, value) => {
+    const r = deploy(REQUIRED, value === undefined ? {} : { AUTH_RATE_LIMIT_STORE: value });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.run).toBeDefined();
+    expect(r.envFile.some((l) => l.startsWith("AUTH_RATE_LIMIT_STORE"))).toBe(false);
+  });
+
+  it.each([["database"], ["memory"]])("AUTH_RATE_LIMIT_STORE=%s → dokładnie ta wartość w env.yaml", (value) => {
+    const r = deploy(REQUIRED, { AUTH_RATE_LIMIT_STORE: value });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.envFile.filter((l) => l.startsWith("AUTH_RATE_LIMIT_STORE"))).toEqual([`AUTH_RATE_LIMIT_STORE: "${value}"`]);
+  });
+
   it("K-1c: błąd odczytu → pierwsze 3 linie stderr gcloud z prefiksem, dalsze pominięte, kod 2", () => {
     const r = deploy(`${REQUIRED},smsapi-token=MULTILINE`);
     expect(r.status).toBe(2);
