@@ -11,13 +11,16 @@
  * Kompletność: klucze FACTORIES == tabele z RLS z parsera migracji (`loadRlsRequirements`)
  * == tabele z `relrowsecurity` w bazie (katalog). Nowa tabela z RLS bez fabryki albo fabryka
  * bez tabeli → czerwony. Kolumna przypisania do salonu zadeklarowana w fabryce musi zgadzać się
- * z treścią polityki w `pg_policies`.
+ * z treścią polityki w `pg_policies` (USING), a WITH CHECK każdej polityki jest równy USING.
+ * Katalog czyta połączenie transakcji testu.
  *
  * Na każdą tabelę, pod `SET LOCAL ROLE myhelper_app` (każdy krok w SAVEPOINT / ROLLBACK TO):
  * - (a) kontekst A widzi swój wiersz i żaden wiersz spoza salonu A;
  * - (b) kontekst B widzi wiersz B (kontrola fałszywej zieleni);
  * - (c) INSERT wiersza salonu B w kontekście A → 42501 z polityki RLS;
  * - (d) UPDATE wiersza A przepinający go do B (salon albo rodzic) → 42501 z polityki RLS;
+ *   UPDATE z WHERE po kolumnie podlega także USING dla nowego wiersza, więc krok sprawdza
+ *   łącznie USING i WITH CHECK;
  * - (e) UPDATE i DELETE wiersza B w kontekście A → 0 wierszy; wiersz B, sprawdzony rolą
  *   migracji w tym samym kroku, bez zmian;
  * - (f) bez kontekstu (zmienna = '', jak po transakcji forSalon): odczyt → 0 wierszy,
@@ -277,29 +280,40 @@ suite("izolacja salonów na każdej tabeli z RLS pod rolą aplikacji (#193)", ()
   });
 
   it("kompletność w bazie: tabele z relrowsecurity (katalog) == tabele z parsera", async () => {
-    const rows = (await h!.observer.unsafe(
+    // Połączenie transakcji testu: DDL wykonany w tej transakcji jest widoczny bez czekania na blokadę.
+    const rows = (await c!.unsafe(
       `SELECT c.relname::text AS t FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relrowsecurity ORDER BY 1`,
     )) as Array<{ t: string }>;
     expect(rows.map((r) => r.t)).toEqual(TABLES);
   });
 
-  it("kolumna przypisania do salonu z fabryki zgodna z USING polityki w pg_policies", async () => {
-    const rows = (await h!.observer.unsafe(
-      "SELECT tablename::text AS t, qual FROM pg_policies WHERE schemaname = 'public' ORDER BY 1, policyname",
-    )) as Array<{ t: string; qual: string | null }>;
-    const quals = new Map<string, string[]>();
-    for (const r of rows) quals.set(r.t, [...(quals.get(r.t) ?? []), (r.qual ?? "").replace(/\s+/g, " ")]);
-    const mismatch = TABLES.filter((t) => {
+  it("polityka w pg_policies: USING po kolumnie przypisania z fabryki, WITH CHECK równy USING", async () => {
+    // Połączenie transakcji testu, jak wyżej.
+    const rows = (await c!.unsafe(
+      `SELECT tablename::text AS t, qual, with_check AS "withCheck" FROM pg_policies WHERE schemaname = 'public' ORDER BY 1, policyname`,
+    )) as Array<{ t: string; qual: string | null; withCheck: string | null }>;
+    const ws = (e: string | null): string => (e ?? "").replace(/\s+/g, " ").trim();
+    const byTable = new Map<string, Array<{ qual: string; withCheck: string }>>();
+    for (const r of rows) byTable.set(r.t, [...(byTable.get(r.t) ?? []), { qual: ws(r.qual), withCheck: ws(r.withCheck) }]);
+    const problems = TABLES.flatMap((t): string[] => {
       const v = FACTORIES[t]?.via;
-      const qs = quals.get(t) ?? [];
-      if (!v || qs.length !== 1) return true;
-      const qual = qs[0]!;
-      if (v.kind === "self") return !qual.startsWith("(id = ");
-      if (v.kind === "direct") return !qual.startsWith("(salon_id = ");
-      return !qual.includes(`FROM ${v.parent} p WHERE ((p.id = ${t}.${v.col})`);
+      const ps = byTable.get(t) ?? [];
+      if (!v) return [`${t}: brak fabryki`];
+      if (ps.length !== 1) return [`${t}: ${ps.length} polityk zamiast 1`];
+      const { qual, withCheck } = ps[0]!;
+      const out: string[] = [];
+      const usingOk =
+        v.kind === "self"
+          ? qual.startsWith("(id = ")
+          : v.kind === "direct"
+            ? qual.startsWith("(salon_id = ")
+            : qual.includes(`FROM ${v.parent} p WHERE ((p.id = ${t}.${v.col})`);
+      if (!usingOk) out.push(`${t}: USING nie po kolumnie ${v.col} z fabryki`);
+      if (withCheck !== qual) out.push(`${t}: WITH CHECK różny od USING`);
+      return out;
     });
-    expect(mismatch).toEqual([]);
+    expect(problems).toEqual([]);
   });
 
   it.each(TABLES)("%s: (a)–(f)", async (t) => {
