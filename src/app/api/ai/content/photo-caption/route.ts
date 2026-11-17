@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
+import { firstNameForReply } from "@/lib/ai/client-context";
 import {
   createAIClient,
   getAIModel,
@@ -92,7 +93,6 @@ export async function POST(req: Request) {
     beforePhotoUrl: string | null;
     afterPhotoUrl: string | null;
     employeeFirstName: string | null;
-    employeeLastName: string | null;
     serviceName: string | null;
   } | null = null;
 
@@ -108,7 +108,6 @@ export async function POST(req: Request) {
           beforePhotoUrl: galleryPhotos.beforePhotoUrl,
           afterPhotoUrl: galleryPhotos.afterPhotoUrl,
           employeeFirstName: employees.firstName,
-          employeeLastName: employees.lastName,
           serviceName: services.name,
         })
         .from(galleryPhotos)
@@ -138,10 +137,8 @@ export async function POST(req: Request) {
 
   // Build photo context for the prompt
   const isBeforeAfter = Boolean(photo.beforePhotoUrl && photo.afterPhotoUrl);
-  const employeeName =
-    photo.employeeFirstName && photo.employeeLastName
-      ? `${photo.employeeFirstName} ${photo.employeeLastName}`
-      : null;
+  // Wykonawca w zapytaniu: samo pierwsze imię, bez nazwiska.
+  const employeeName = firstNameForReply({ firstName: photo.employeeFirstName });
 
   const photoContextParts: string[] = [];
   photoContextParts.push(`Salon: "${salonName}" (${industryLabel})`);
