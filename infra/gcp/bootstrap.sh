@@ -2,8 +2,8 @@
 # Krok D, zadanie 0.3: jednorazowe przygotowanie projektu GCP pod MyHelper.
 # Procedura i kolejność etapów: docs/runbook-krok-d.md.
 #
-# KTO URUCHAMIA: wyłącznie sesja główna, etap po etapie, po recenzji Ethana
-# (architektura) i Ryana (uprawnienia, WIF). Agenci nie wykonują tego skryptu
+# KTO URUCHAMIA: wyłącznie sesja główna, etap po etapie, po przeglądzie
+# architektury i przeglądzie uprawnień (WIF). Agenci nie wykonują tego skryptu
 # na projekcie.
 #
 # DOMYŚLNIE --dry-run: skrypt NICZEGO nie wykonuje, ani odczytu, ani zmiany.
@@ -17,7 +17,7 @@
 # ZERO WARTOŚCI SEKRETÓW W WYJŚCIU, ARGUMENTACH I REPO. Etap `secrets` tworzy
 # PUSTE kontenery Secret Manager (bez wersji) dla sekretów z
 # infra/gcp/env-manifest.json; wartości dodaje sesja główna (runbook D-5).
-# Jedyny wyjątek to etap `sql` (decyzja Ethana, #121): losowe hasła bazy
+# Jedyny wyjątek to etap `sql` (decyzja architektoniczna, #121): losowe hasła bazy
 # ([A-Za-z0-9]{32}) powstają w pamięci procesu i idą wyłącznie do gcloud przez
 # --flags-file ze strumienia oraz do Secret Manager przez --data-file=-.
 # Nie są wypisywane ani podawane jako argument (nie trafiają do `ps`/historii).
@@ -31,7 +31,7 @@
 #   secrets  puste kontenery Secret Manager (replikacja tylko w regionie)
 #   sa       konta: runtime (secretAccessor osobno na każdy sekret, zapis do
 #            zasobnika) i deploy (AR writer na jednym repo, actAs tylko na runtime)
-#   sql      Cloud SQL wg decyzji Ethana (#121, 0.4): JAWNIE edycja enterprise
+#   sql      Cloud SQL wg decyzji architektonicznej (#121, 0.4): JAWNIE edycja enterprise
 #            (dla PG16–18 domyślna jest Enterprise Plus — bez shared-core,
 #            wielokrotność budżetu), POSTGRES_18, db-f1-micro, zonal, 10 GB SSD
 #            z auto-increase do 30 GB, 7 kopii, PITR 7 dni, ochrona przed
@@ -49,11 +49,11 @@
 #            setIamPolicy), run.developer dla deploy NA ZASOBACH (nie projekt)
 #   wif      pula + provider OIDC GitHuba z warunkiem z pliku (--wif-condition-file)
 #            + workloadIdentityUser na koncie deploy. Bramka wykonania: runbook
-#            3.8 (hook Ryana podpisany i zainstalowany ALBO agenci na koncie
+#            3.8 (hook zabezpieczający podpisany i zainstalowany ALBO agenci na koncie
 #            maszynowym).
 #
 # Region: wyłącznie europe-central2 (szacunek kosztu i lokalizacja danych —
-# Ethan, recenzja #134). Inna wartość = błąd przed pierwszym gcloud.
+# przegląd #134). Inna wartość = błąd przed pierwszym gcloud.
 #
 # Użycie:
 #   infra/gcp/bootstrap.sh --project=ID --region=europe-central2 --stage=ETAP [opcje] [--apply]
@@ -77,12 +77,12 @@ MANIFEST="$(dirname "$0")/env-manifest.json"
 SQL_INSTANCE="myhelper-pg"
 WIF_CONDITION_FILE="" WIF_POOL="github" WIF_PROVIDER="github-actions"
 
-# Cloud SQL — decyzja Ethana (#121, komentarz 6899299212). Zmiana = nowa decyzja.
+# Cloud SQL — decyzja architektoniczna (#121, komentarz 6899299212). Zmiana = nowa decyzja.
 SQL_EDITION="enterprise"
 SQL_TIER="db-f1-micro"
 PG_VERSION="POSTGRES_18"
 DB_NAME="myhelper"
-# Jedyny login bazy (aplikacja i migracje; Ethan 6899299212, Oliver 19:44).
+# Jedyny login bazy (aplikacja i migracje; komentarz 6899299212).
 # Role NOLOGIN (myhelper_app) tworzą WYŁĄCZNIE migracje (0005), nigdy bootstrap.
 DB_USER="myhelper_owner"
 DB_URL_SECRET="postgres-url"
@@ -96,7 +96,7 @@ ALLOWED_REGION="europe-central2"
 # Stałe repozytorium GitHub (liczbowe id — odporne na zmianę nazwy repo/właściciela).
 GITHUB_REPOSITORY_ID="1152153440"
 GITHUB_REPOSITORY_OWNER_ID="171363250"
-# Jedyny dopuszczony wywołujący wdrożenie (Ryan 6899923012: zmiana konta
+# Jedyny dopuszczony wywołujący wdrożenie (komentarz 6899923012: zmiana konta
 # wywołującego = świadoma zmiana warunku z recenzją).
 GITHUB_ACTOR_ID="171363250"
 DEPLOY_WORKFLOW_REF="Danolog/My_Helper_2/.github/workflows/deploy-cloud-run.yml@refs/heads/main"
@@ -179,7 +179,7 @@ exists() {
 }
 
 # Czy sekret ma wersję ENABLED. Rozróżnia „brak wersji” od błędu odczytu
-# (Ethan, recenzja #134): `versions list` kończy się kodem 0 także przy braku
+# (przegląd #134): `versions list` kończy się kodem 0 także przy braku
 # wersji (puste wyjście), więc kod ≠ 0 to błąd odczytu (sieć, uprawnienia) —
 # wtedy etap się przerywa, zamiast wygenerować nowe hasło dla istniejącego loginu.
 # Wynik: 0 = ma wersję, 1 = brak wersji (lub dry-run); błąd odczytu = exit 2.
@@ -337,9 +337,9 @@ db_password() {
   pw="$(gen_password)"
   [[ "$pw" =~ ^[A-Za-z0-9]{32}$ ]] || die "password generator failed"
   # Bez lokalnego logu gcloud (~/.config/gcloud/logs zapisuje wartości flag,
-  # także rozwinięte z --flags-file) — B-1, Ryan 6899923012.
+  # także rozwinięte z --flags-file) — B-1, komentarz 6899923012.
   CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" sql users "$verb" "$user" --instance="$SQL_INSTANCE" --flags-file=<(password_flags "$pw")
-  # N2 (Ryan, K-1b): także dodanie wersji sekretu bez lokalnego logu gcloud.
+  # N2 (K-1b): także dodanie wersji sekretu bez lokalnego logu gcloud.
   if [[ "$kind" == "url" ]]; then
     printf 'postgresql://%s:%s@localhost/%s?host=/cloudsql/%s:%s:%s' \
       "$user" "$pw" "$DB_NAME" "$PROJECT_ID" "$REGION" "$SQL_INSTANCE" |
@@ -396,11 +396,11 @@ stage_sql() {
   db_password "$DB_USER" "$DB_URL_SECRET" url
   db_password postgres "$DB_ADMIN_SECRET" raw
   local cond="expression=resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"${SQL_RESOURCE}\",title=only-${SQL_INSTANCE}"
-  # Kopia na żądanie: operacje na kopiach mają typ zasobu BackupRun (W-1, Ryan).
+  # Kopia na żądanie: operacje na kopiach mają typ zasobu BackupRun (W-1).
   local backup_cond="expression=(resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"${SQL_RESOURCE}\") || (resource.type == \"sqladmin.googleapis.com/BackupRun\" && resource.name.startsWith(\"${SQL_RESOURCE}/\")),title=only-${SQL_INSTANCE}-backups"
   # Usługa i job migracji działają jako konto runtime — tylko ono łączy się
   # z bazą: Cloud SQL Client wyłącznie na tej instancji. Konto deploy NIE
-  # dostaje cloudsql.client (Oliver, recenzja #134): po jego stronie nic nie
+  # dostaje cloudsql.client (przegląd #134): po jego stronie nic nie
   # łączy się z bazą (kopia na żądanie to Admin API — rola niżej).
   run projects add-iam-policy-binding "$PROJECT_ID" \
     --member="serviceAccount:$RUNTIME_SA" --role=roles/cloudsql.client --condition="$cond"
@@ -445,7 +445,7 @@ stage_run() {
 # Warunek atrybutów WIF z pliku (CEL, jedna lub wiele linii). Warunek musi być
 # CZYSTĄ KONIUNKCJĄ równości `assertion.<pole> == '<wartość>'` połączonych `&&`
 # (#140): bez `||`, negacji, operatora warunkowego, nawiasów i funkcji — każdy
-# człon jest sprawdzany osobno, nie podciągiem. Obowiązkowe człony (Ryan,
+# człon jest sprawdzany osobno, nie podciągiem. Obowiązkowe człony (komentarz
 # 6899923012) muszą wystąpić dokładnie w tej postaci; dodatkowe równości wolno
 # dopisać (tylko zawężają).
 wif_condition() {

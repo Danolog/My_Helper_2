@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test dymny obrazu `runner` (Ethan, #110): serwer z obrazu (`node server.js`
+# Test dymny obrazu `runner` (#110): serwer z obrazu (`node server.js`
 # standalone), nie `pnpm start`. Uruchamia go workflow przed wypchnięciem
 # obrazu; lokalnie: infra/gcp/smoke-container.sh <obraz>.
 #

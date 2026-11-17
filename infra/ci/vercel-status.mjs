@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Obserwator statusów Vercela na commicie (Ethan, #110 / review #108).
+// Obserwator statusów Vercela na commicie (#110, przegląd #108).
 //
 // Odróżnia „limit wdrożeń" od porażki budowy — oba kończą się statusem
 // `failure`, ale znaczą co innego:

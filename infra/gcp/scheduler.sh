@@ -2,15 +2,15 @@
 # Harmonogram Cloud Scheduler dla MyHelper (brief C §4, zadanie 0.7).
 #
 # NIE URUCHAMIAĆ w kroku C. Włączenie harmonogramu = prawdziwe SMS-y i push do
-# klientów salonów (krok D, decyzja Darka).
+# klientów salonów (krok D, decyzja właściciela).
 #
 # Użycie (kolejność obowiązkowa, runbook kroku D, D-8):
 #   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh           # 1. create/update — WSZYSTKO WSTRZYMANE
 #   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --check   # 2. porównanie (dryf stanu ENABLED → PAUSED jest tu oczekiwany)
-#   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --resume NAZWA…  # 3. włączenie WYMIENIONYCH zadań (decyzja Darka)
+#   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --resume NAZWA…  # 3. włączenie WYMIENIONYCH zadań (decyzja właściciela)
 #   PROJECT_ID=… REGION=europe-central2 BASE_URL=https://… infra/gcp/scheduler.sh --check   # 4. pełna zgodność z tabelą (kod 0)
 #
-# --resume wymaga jawnych nazw zadań (W-3, Ryan): włączenie = prawdziwe SMS-y
+# --resume wymaga jawnych nazw zadań (W-3): włączenie = prawdziwe SMS-y
 # i push, więc decyzja jest widoczna w poleceniu. Bez nazw, nazwa nieznana albo
 # zadanie, które w tabeli jest PAUSED → błąd (kod 2) przed pierwszym gcloud.
 #
@@ -32,15 +32,15 @@
 #   argument polecenia (nie trafia do tablicy procesów ani historii powłoki);
 #   WSZYSTKIE wywołania gcloud idą z CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1
 #   (export niżej; gcloud zapisuje do ~/.config/gcloud/logs rozwinięte flagi
-#   i wyjście poleceń — B-1, Ryan 6900239072);
+#   i wyjście poleceń — B-1, komentarz 6900239072);
 # - create/update http zawsze z --format=none: wyjście gcloud z zasobem
-#   zadania nie trafia na stdout ani do logu (Ryan, #137);
+#   zadania nie trafia na stdout ani do logu (#137);
 # - token jest czytany RAZ przed pierwszą zmianą; błąd odczytu albo pusty
 #   token → stop (W-1), nigdy zadanie z pustym nagłówkiem;
 # - pause tylko dla stanu ENABLED, resume tylko dla PAUSED (API odrzuca inne
 #   przejścia: FAILED_PRECONDITION);
 # - istniejące zadanie ENABLED z harmonogramem zaparkowanym (przerwany przebieg
-#   między create a pause) jest traktowane jak nowe: najpierw pauza (Ethan);
+#   między create a pause) jest traktowane jak nowe: najpierw pauza;
 # - idempotentnie: istnieje → update (z nagłówkiem — rotacja cron-secret),
 #   nie istnieje → create.
 # Strażnicy: __tests__/lib/scheduler-config.test.ts (G-C5), scheduler-paused.test.ts (G-C5b).
@@ -104,7 +104,7 @@ JOBS=(
 # wysyłają). Tryb domyślny wymusza PAUSED, --resume odrzuca je przed gcloud.
 # Po odmrożeniu modułu: zmiana stanu w tabeli na ENABLED (strażnik:
 # __tests__/lib/scheduler-config.test.ts, zadania tras zamrożonych modułów).
-# Zadań mh-notify-* (birthday, low-stock, we-miss-you) NIE tworzymy (Oliver):
+# Zadań mh-notify-* (birthday, low-stock, we-miss-you) NIE tworzymy:
 # trasy /api/notifications/* działają na jeden salon (wymagają salonId) i nic
 # nie zrobią z harmonogramu. Wracają z R3-C razem z systemową trasą po
 # wszystkich salonach. Tabela może zawierać stan PAUSED dla przyszłych zadań.
@@ -290,10 +290,10 @@ for entry in "${JOBS[@]}"; do
   if job_exists "$name"; then
     # Istniejące zadanie: stan bez zmian, poza wymuszeniem PAUSED z tabeli
     # i zadaniem z harmonogramem zaparkowanym (przerwany przebieg między create
-    # a pause) — to traktujemy jak nowe: najpierw pauza (Ethan, #137).
+    # a pause) — to traktujemy jak nowe: najpierw pauza (#137).
     # Odczyt harmonogramu obowiązkowy: błąd albo pusty wynik → stop (kod 1)
     # BEZ aktualizacji — inaczej zaparkowane zadanie ENABLED dostałoby
-    # prawdziwy harmonogram bez pauzy (Ethan, #137 @ b4bf4d0).
+    # prawdziwy harmonogram bez pauzy (#137 @ b4bf4d0).
     if ! current_schedule="$(job_schedule "$name")" || [[ -z "$current_schedule" ]]; then
       echo "error: cannot read schedule of $name — stop, job not updated" >&2
       exit 1

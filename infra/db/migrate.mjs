@@ -1,7 +1,7 @@
 // Migracje bazy dla Cloud Run Job `myhelper-migrate` (Dockerfile, etap `migrator`).
 //
 // Zastępuje `pnpm db:migrate` (drizzle-kit, zależność deweloperska) w obrazie:
-// obraz migratora ma tylko zależności produkcyjne (Ryan, #110 P2).
+// obraz migratora ma tylko zależności produkcyjne (#110 P2).
 // drizzle-orm/migrator czyta te same pliki `drizzle/*.sql` + `meta/_journal.json`
 // i ten sam dziennik `drizzle.__drizzle_migrations` co `drizzle-kit migrate`,
 // więc bazy migrowane jednym i drugim są zgodne. Ponowne uruchomienie bez
@@ -45,7 +45,7 @@ try {
 } catch (error) {
   // Kod błędu sieci/bazy (np. ENOENT — brak gniazda, ECONNREFUSED — TCP)
   // bez adresu: drizzle owija błąd i w `message` zostaje tylko „Failed query”
-  // (Leo, #151 pkt 1). Tylko kody w postaci [A-Z0-9_].
+  // (#151 pkt 1). Tylko kody w postaci [A-Z0-9_].
   const code = errorCode(error);
   console.error(
     "[migrate] failed:",
