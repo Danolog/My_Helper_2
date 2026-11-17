@@ -15,7 +15,7 @@
 --    sesji (STABLE), a wyrażenie ograniczenia musi być IMMUTABLE.
 --    Styk (10:00–11:00 i 11:00–12:00) nie jest kolizją: '[)' — jak w kodzie.
 --
--- Przed zastosowaniem na każdej bazie (produkcja: słowo Darka) uruchomić
+-- Przed zastosowaniem na każdej bazie (produkcja: zgoda właściciela) uruchomić
 -- scripts/sql/0009-precheck.sql (tylko odczyt, BEGIN READ ONLY).
 -- Wszystkie trzy liczby muszą wynosić 0 — inaczej ADD CONSTRAINT się nie powiedzie:
 --   SELECT count(*) FROM appointments WHERE end_time <= start_time;

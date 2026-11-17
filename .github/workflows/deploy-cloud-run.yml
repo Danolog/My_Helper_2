@@ -13,8 +13,8 @@
 # z gałęzi main — bez wejścia `ref`; job ma warunek refs/heads/main, a krok
 # „merge-base --is-ancestor" przed budową potwierdza, że commit jest na
 # origin/main. Wdrożenie innej (starszej) wersji = rollback rewizją Cloud Run
-# decyzją Darka, nie tym workflow. Wymaganych recenzentów środowiska ustawia
-# Darek w ustawieniach repo (krok D). Nazwa środowiska jest TYLKO w jednej
+# decyzją właściciela, nie tym workflow. Wymaganych recenzentów środowiska ustawia
+# właściciel repo w ustawieniach repo (krok D). Nazwa środowiska jest TYLKO w jednej
 # linii `environment:` niżej (+ stała w G-C6) — celowo inna niż „Production"
 # Vercela (nazwy środowisk GitHuba nie rozróżniają wielkości liter, a
 # e2e-production.yml reaguje na deployment_status środowiska Production).

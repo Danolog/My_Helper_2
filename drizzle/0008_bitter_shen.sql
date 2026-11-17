@@ -2,7 +2,7 @@
 -- Wygenerowane przez `pnpm db:generate`; kolejność zmieniona ręcznie: najpierw
 -- nowy indeks unikalny, potem usunięcie starego (bez chwili bez indeksu).
 --
--- Przed zastosowaniem na produkcji (słowo Darka) sprawdzić, czy nie ma kolizji.
+-- Przed zastosowaniem na produkcji (zgoda właściciela) sprawdzić, czy nie ma kolizji.
 -- Oba zapytania muszą zwrócić 0 wierszy:
 --   SELECT salon_id FROM salon_subscriptions WHERE status IN ('trialing','active')
 --     GROUP BY salon_id HAVING count(*) > 1;
