@@ -375,6 +375,33 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
       await consumeAuthRateLimit(`${ip}|/get-session`, { window: 10, max: 100 });
       expect(await rowByKey(ipThrottleKey(`${ip}|/get-session`, SECRET))).toBeUndefined();
     });
+
+    it("ścieżka w kluczu i w logu jako szablon trasy: wiersz pod kluczem szablonu, bez wiersza pod kluczem z tokenem", async () => {
+      const ip = nextIp();
+      const token = `Tk7${RUN}reset${randomUUID().replace(/-/g, "")}`;
+      const templateKey = ipThrottleKey(`${ip}|/reset-password/:token`, SECRET);
+      const rawKey = ipThrottleKey(`${ip}|/reset-password/${token}`, SECRET);
+      trackedKeys.push(templateKey, rawKey);
+      const { auth } = makeAuth();
+      await auth.handler(new Request(`${BASE}/api/auth/reset-password/${token}`, { headers: { "x-forwarded-for": ip } }));
+      expect((await rowByKey(templateKey))?.count, "wiersz pod kluczem szablonu trasy").toBe(1);
+      expect(await rowByKey(rawKey), "wiersz pod kluczem z tokenem").toBeUndefined();
+      expect(JSON.stringify(Object.values(logger).flatMap((fn) => fn.mock.calls))).not.toContain(token);
+    });
+
+    it("ścieżki spoza listy tras liczone wspólnie na adres: 5 różnych ścieżek z jednego adresu → 1 wiersz", async () => {
+      const ip = nextIp();
+      const paths = Array.from({ length: 5 }, (_, i) => `/brak-trasy-${RUN}-${i}`);
+      const otherKey = ipThrottleKey(`${ip}|other`, SECRET);
+      const rawKeys = paths.map((p) => ipThrottleKey(`${ip}|${p}`, SECRET));
+      trackedKeys.push(otherKey, ...rawKeys);
+      const { auth } = makeAuth();
+      for (const p of paths) {
+        await auth.handler(new Request(`${BASE}/api/auth${p}`, { headers: { "x-forwarded-for": ip } }));
+      }
+      expect((await rowByKey(otherKey))?.count, "wspólny wiersz ścieżek spoza listy").toBe(paths.length);
+      for (const k of rawKeys) expect(await rowByKey(k), "wiersz pod kluczem ścieżki spoza listy").toBeUndefined();
+    });
   });
 
   // ── Magazyn niedostępny ────────────────────────────────────────────────────

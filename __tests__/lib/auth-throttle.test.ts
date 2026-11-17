@@ -79,6 +79,34 @@ describe("klucz w zapytaniu", () => {
     expect(firstBuffer(execute.mock.calls[1]!)!.equals(expected)).toBe(true);
   });
 
+  it("ścieżka w kluczu jako szablon trasy: token z adresu nie wchodzi do klucza", async () => {
+    const token = "Tk7resetTk7resetTk7reset";
+    execute.mockResolvedValue(row(1, 0));
+    await t.consumeAuthRateLimit(`203.0.113.7|/reset-password/${token}`, RULE_IN);
+    const key = firstBuffer(execute.mock.calls[0]!)!;
+    expect(key.equals(ipThrottleKey("203.0.113.7|/reset-password/:token", SECRET))).toBe(true);
+    expect(key.equals(ipThrottleKey(`203.0.113.7|/reset-password/${token}`, SECRET))).toBe(false);
+  });
+
+  it("ścieżki spoza listy tras liczone wspólnie na adres: jeden klucz dla wielu ścieżek", async () => {
+    execute.mockResolvedValue(row(1, 0));
+    const paths = ["/sciezka-a", "/sciezka-b", "/reset-password/a/b", "/sign-in/email|/get-session"];
+    for (const p of paths) await t.consumeAuthRateLimit(`203.0.113.7|${p}`, RULE_IN);
+    const upserts = execute.mock.calls.filter((c) => queryOf(c).sql.includes("INSERT INTO auth_rate_limit"));
+    expect(upserts).toHaveLength(paths.length);
+    const expected = ipThrottleKey("203.0.113.7|other", SECRET);
+    for (const c of upserts) expect(firstBuffer(c)!.equals(expected)).toBe(true);
+  });
+
+  it("ta sama ścieżka spoza listy z dwóch adresów → dwa różne klucze", async () => {
+    execute.mockResolvedValue(row(1, 0));
+    await t.consumeAuthRateLimit("203.0.113.7|/sciezka-a", RULE_IN);
+    await t.consumeAuthRateLimit("203.0.113.8|/sciezka-a", RULE_IN);
+    const upserts = execute.mock.calls.filter((c) => queryOf(c).sql.includes("INSERT INTO auth_rate_limit"));
+    expect(firstBuffer(upserts[0]!)!.equals(ipThrottleKey("203.0.113.7|other", SECRET))).toBe(true);
+    expect(firstBuffer(upserts[1]!)!.equals(ipThrottleKey("203.0.113.8|other", SECRET))).toBe(true);
+  });
+
   it("żaden parametr zapytania nie zawiera adresu IP ani e-maila jawnym tekstem", async () => {
     execute.mockResolvedValue(row(1, 0));
     await t.consumeAuthRateLimit(IP_KEY, RULE_IN);
@@ -376,6 +404,13 @@ describe("logi: bez adresu IP, adresu e-mail i klucza", () => {
     });
     expect(JSON.stringify(logger.error.mock.calls)).not.toContain(token);
     expect(logger.error.mock.calls[0]![1]).toEqual({ path: "/reset-password/:token", error: "PostgresError" });
+  });
+
+  it("ścieżka spoza listy tras trafia do logu jako wspólny klucz", async () => {
+    execute.mockRejectedValue(pgError());
+    await t.consumeAuthRateLimit("203.0.113.7|/sciezka-nieznana-bibliotece", RULE_IN);
+    expect(JSON.stringify(logger.error.mock.calls)).not.toContain("sciezka-nieznana-bibliotece");
+    expect(logger.error.mock.calls[0]![1]).toEqual({ path: "other", error: "PostgresError" });
   });
 
   it("własna klasa błędu bez name → nazwa klasy; błąd z własnym name → to name", async () => {
