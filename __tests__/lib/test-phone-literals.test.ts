@@ -13,7 +13,7 @@ import { isTestPhoneNumber } from "@/lib/test-phone";
  * Pliki czytamy jako tekst: `scripts/seed-test.ts` po imporcie łączy się z bazą
  * (ten sam powód co w seed-ids.test.ts).
  */
-const SEED_FILES = ["scripts/seed-test.ts", "src/app/api/seed/route.ts"];
+const SEED_FILES = ["scripts/seed-test.ts", "src/lib/server/system/seed.ts"];
 const E2E_DIR = "tests";
 
 // Literał napisowy wyglądający na polski numer: +48 i 9 cyfr albo 9 cyfr (spacje/myślniki dozwolone).
