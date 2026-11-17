@@ -24,7 +24,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { appointments, clients, employees, salons, services, user, waitingList } from "@/lib/schema";
+import { appointments, clients, employees, notifications, salons, services, user, waitingList } from "@/lib/schema";
 import { acceptEarlierSlot, notifyWaitingList } from "@/lib/waiting-list";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
@@ -125,6 +125,13 @@ async function clientVisits(clientId: string, serviceId: string) {
     .where(and(eq(appointments.clientId, clientId), eq(appointments.serviceId, serviceId)));
 }
 
+async function salonNotifications(type: string) {
+  return h!.db
+    .select({ id: notifications.id, message: notifications.message, status: notifications.status })
+    .from(notifications)
+    .where(and(eq(notifications.salonId, ids.salon), eq(notifications.type, type)));
+}
+
 async function notify(serviceId: string, s: { start: Date; end: Date }) {
   const res = await notifyWaitingList({
     salonId: ids.salon,
@@ -192,9 +199,17 @@ suite("lista oczekujących: powiązana wizyta przy ofercie i przyjęciu — praw
     await notify(svc, offer);
     const offered = await entryRow(entry.id);
     expect(offered.existingAppointmentId).toBe(apptId);
+    const smsBefore = await salonNotifications("sms");
+    const systemBefore = await salonNotifications("system");
 
     const res = await acceptEarlierSlot(entry.id, offered.acceptToken!);
 
+    const systemAfter = await salonNotifications("system");
+    const systemNew = systemAfter.filter((n) => !systemBefore.some((b) => b.id === n.id));
+    expect(systemNew).toEqual([
+      expect.objectContaining({ status: "sent", message: expect.stringContaining(`Wizyta ${apptId} przeniesiona na`) }),
+    ]);
+    expect(await salonNotifications("sms")).toEqual(smsBefore);
     expect(res).toMatchObject({ success: true, appointmentId: apptId, oldStartTime: oldStart, newStartTime: offer.start });
     expect(res.message).toMatch(/przeniesiona/);
     expect(await clientVisits(clientId, svc)).toEqual([

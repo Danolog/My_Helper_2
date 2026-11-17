@@ -87,6 +87,8 @@ let apptSelects: Array<{ where: SQL; order: string[]; limit: number | undefined 
 let apptUpdates: Array<{ where: SQL; set: Row; affected: number }> = [];
 let apptInserts: Row[] = [];
 let entryUpdates: Row[] = [];
+/** Wartości zapisów do `notifications`. */
+let notifInserts: Row[] = [];
 /** Wołane po każdym odczycie wizyt z numerem odczytu (zmiana stanu w oknie). */
 let afterApptSelect: ((n: number) => void) | null = null;
 
@@ -185,6 +187,10 @@ function insertChain(t: Table) {
   c.values = (v: Row) => ((values = v), c);
   c.returning = () => c;
   return thenable(c, () => {
+    if (table === "notifications") {
+      notifInserts.push(values);
+      return [];
+    }
     if (table !== "appointments") return [];
     const row = { ...values, id: "apt-new" };
     apptInserts.push(row);
@@ -250,6 +256,7 @@ beforeEach(() => {
   apptUpdates = [];
   apptInserts = [];
   entryUpdates = [];
+  notifInserts = [];
   afterApptSelect = null;
   st.db = {
     select: () => selectChain(),
@@ -468,5 +475,60 @@ describe("przyjęcie oferty: powiązana wizyta", () => {
     expect(res.message).toBe(BOOKED_MESSAGE);
     expect(res.message).not.toMatch(/przeniesion/);
     expect(res.oldStartTime).toBeUndefined();
+  });
+});
+
+// ─── Przyjęcie oferty: wpis w historii powiadomień ───────────────────────────
+
+describe("przyjęcie oferty: wpis w historii powiadomień", () => {
+  const WHEN = START.toLocaleString("pl-PL", { timeZone: "Europe/Warsaw" });
+  const PREFIX = "Klient zaakceptowal wczesniejszy termin z listy oczekujacych.";
+
+  it("przeniesienie → jeden wpis systemowy „wysłany” z czasem wysłania i treścią o przeniesieniu; bez wpisu SMS", async () => {
+    acceptEntry = entry("apt-old");
+    appts = [appt("apt-old", DAY, "scheduled")];
+
+    const res = await acceptEarlierSlot("wl-1", "tok");
+
+    expect(res).toMatchObject({ success: true, appointmentId: "apt-old" });
+    expect(notifInserts).toEqual([
+      {
+        salonId: SALON,
+        clientId: CLIENT,
+        type: "system",
+        message: `${PREFIX} Wizyta apt-old przeniesiona na ${WHEN}.`,
+        status: "sent",
+        sentAt: NOW,
+      },
+    ]);
+    expect(notifInserts.filter((n) => n.type === "sms")).toEqual([]);
+  });
+
+  it("nowa wizyta → wpis systemowy z treścią o rezerwacji, bez słowa o przeniesieniu", async () => {
+    acceptEntry = entry(null);
+
+    const res = await acceptEarlierSlot("wl-1", "tok");
+
+    expect(res).toMatchObject({ success: true, appointmentId: "apt-new" });
+    expect(notifInserts).toHaveLength(1);
+    expect(notifInserts[0]).toMatchObject({
+      salonId: SALON,
+      clientId: CLIENT,
+      type: "system",
+      status: "sent",
+      sentAt: NOW,
+      message: `${PREFIX} Wizyta apt-new zarezerwowana na ${WHEN}.`,
+    });
+    expect(notifInserts[0]!.message).not.toMatch(/przeniesion/);
+  });
+
+  it("odmowa (oferta nieaktualna) → brak wpisu w historii powiadomień", async () => {
+    acceptEntry = entry("apt-old");
+    appts = [appt("apt-old", DAY, "completed")];
+
+    const res = await acceptEarlierSlot("wl-1", "tok");
+
+    expect(res).toEqual(REFUSED);
+    expect(notifInserts).toEqual([]);
   });
 });

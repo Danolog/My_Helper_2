@@ -168,9 +168,9 @@ describe("acceptEarlierSlot: termin w wierszu potwierdzenia w Europe/Warsaw przy
     const res = await acceptEarlierSlot("wl-A", "tok-A");
 
     expect(res.success).toBe(true);
-    const confirmation = inserted.find((v) => v.type === "sms");
+    const confirmation = inserted.find((v) => v.type === "system");
     expect(confirmation?.message).toBe(
-      `Klient zaakceptowal wczesniejszy termin z listy oczekujacych. Wizyta apt-new przeniesiona na ${c.full}.`
+      `Klient zaakceptowal wczesniejszy termin z listy oczekujacych. Wizyta apt-new zarezerwowana na ${c.full}.`
     );
   });
 });

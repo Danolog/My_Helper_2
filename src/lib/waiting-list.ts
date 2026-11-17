@@ -882,15 +882,18 @@ export async function acceptEarlierSlot(
       .where(and(eq(waitingList.id, waitingListId), eq(waitingList.salonId, salonId)))
   );
 
-  // 9. Log a confirmation notification
+  // 9. Wpis systemowy w historii powiadomień salonu (żaden SMS tu nie wychodzi);
+  // treść mówi o przeniesieniu tylko po przeniesieniu.
   try {
+    const outcome = oldStartTime !== undefined ? "przeniesiona" : "zarezerwowana";
     await gate.raw((tx) =>
       tx.insert(notifications).values({
         salonId,
         clientId: entry.clientId,
-        type: "sms",
-        message: `Klient zaakceptowal wczesniejszy termin z listy oczekujacych. Wizyta ${appointmentId} przeniesiona na ${offeredStart.toLocaleString("pl-PL", { timeZone: SMS_TIME_ZONE })}.`,
+        type: "system",
+        message: `Klient zaakceptowal wczesniejszy termin z listy oczekujacych. Wizyta ${appointmentId} ${outcome} na ${offeredStart.toLocaleString("pl-PL", { timeZone: SMS_TIME_ZONE })}.`,
         status: "sent",
+        sentAt: new Date(),
       })
     );
   } catch (notifErr) {

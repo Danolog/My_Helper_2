@@ -387,7 +387,7 @@ describe("jawny warunek salonu w każdym zapytaniu raw (kontrakt repository.ts)"
     expect(res.success).toBe(true);
     expect(w.inserted).toEqual([
       expect.objectContaining({ salonId: SALON_A, status: "scheduled" }),
-      expect.objectContaining({ salonId: SALON_A, type: "sms" }),
+      expect.objectContaining({ salonId: SALON_A, type: "system" }),
     ]);
     expect(salonCond(w.updates[0], "waiting_list", SALON_A), "update accepted").toBe(true);
     expect(h.calc).toHaveBeenCalledWith(expect.objectContaining({ salonId: SALON_A }));
