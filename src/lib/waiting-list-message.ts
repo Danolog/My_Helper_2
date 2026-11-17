@@ -7,12 +7,33 @@ const PUSH_SALON_NAME_MAX = 40;
 const PUSH_SERVICE_NAME_MAX = 60;
 
 /**
+ * Znaki liczone w regule adresu jak kropka: kropka ASCII, separatory etykiet
+ * domeny wg UTS #46 (U+3002, U+FF0E, U+FF61), znaki, które NFKD sprowadza do
+ * kropki (U+2024, U+FE52), oraz kropki środkowe wyglądające jak kropka
+ * (U+00B7, U+2027, U+2219, U+22C5, U+30FB, U+FF65).
+ */
+const DOT_LIKE = /[.。．｡․﹒·‧∙⋅・･]/gu;
+
+/**
+ * Postać tekstu do reguły adresu niezależna od alfabetu: każda litera → "a",
+ * każda cyfra → "0", każdy znak „jak kropka” → ".". Wejście bez znaków
+ * łączących i niewidocznych (postać po NFKD).
+ */
+function scriptNeutral(plain: string): string {
+  return plain.replace(/\p{L}/gu, "a").replace(/\p{N}/gu, "0").replace(DOT_LIKE, ".");
+}
+
+/**
  * Tekst właściciela salonu przygotowany do treści push: znaki sterujące
  * i separatory linii → spacja, zwinięte spacje i trim; polskie znaki zostają.
- * Tekst wyglądający na adres — surowy, po oczyszczeniu albo po sprowadzeniu
- * do postaci podstawowej (NFKD, bez znaków łączących i niewidocznych) — jest
- * pomijany w całości. Ponad `max` znaków → `max - 1` znaków (bez spacji na
- * końcu) + "…"; długość liczona w punktach kodowych, emoji nie jest rozcinane.
+ * Tekst wyglądający na adres — surowy, po oczyszczeniu, po sprowadzeniu
+ * do postaci podstawowej (NFKD, bez znaków łączących i niewidocznych) albo
+ * w postaci niezależnej od alfabetu (`scriptNeutral`) — jest pomijany
+ * w całości. Tekst z kropką między literami (w dowolnym alfabecie, bez spacji
+ * po kropce) traktujemy jak adres, np. „św.Anna”; „ul. Długa” przechodzi.
+ * Wyświetlany jest tekst oczyszczony, bez zmian liter i kropek. Ponad `max`
+ * znaków → `max - 1` znaków (bez spacji na końcu) + "…"; długość liczona
+ * w punktach kodowych, emoji nie jest rozcinane.
  */
 function ownerTextForPush(text: string, max: number): string {
   const cleaned = text
@@ -22,7 +43,14 @@ function ownerTextForPush(text: string, max: number): string {
   if (!cleaned) return "";
 
   const plain = cleaned.normalize("NFKD").replace(/[\p{M}\p{Cf}]/gu, "");
-  if (looksLikeAddress(text) || looksLikeAddress(cleaned) || looksLikeAddress(plain)) return "";
+  if (
+    looksLikeAddress(text) ||
+    looksLikeAddress(cleaned) ||
+    looksLikeAddress(plain) ||
+    looksLikeAddress(scriptNeutral(plain))
+  ) {
+    return "";
+  }
 
   const chars = [...cleaned];
   if (chars.length <= max) return cleaned;

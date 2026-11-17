@@ -318,6 +318,48 @@ describe("buildWaitingListPush", () => {
     expect(body).toBe("Salon Uroda: 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.");
   });
 
+  /**
+   * Reguła adresu w push: każda litera liczy się jak litera, każda cyfra jak
+   * cyfra, a znak „jak kropka” jak kropka — niezależnie od alfabetu.
+   */
+  const ADDRESS_ANY_SCRIPT = [
+    ["litera ł przed kropką", "Pawł.pl"],
+    ["końcówka cyrylicą", "Uroda.рф"],
+    ["cała nazwa cyrylicą z kropką", "салон.рф"],
+    ["końcówka grecka", "Uroda.ελ"],
+    ["kropka ideograficzna U+3002", "Uroda。pl"],
+    ["kropka połówkowej szerokości U+FF61", "Uroda｡pl"],
+    ["kropka prowadząca U+2024", "Uroda․pl"],
+    ["kropka prowadząca U+2024 po literze ł", "Pawł․pl"],
+    ["znak zerowej szerokości między literą a kropką", "Pawł​.pl"],
+    ["tekst z kropką między literami (św.Anna)", "św.Anna"],
+    ["tekst z kropką między słowami bez spacji", "Strzyżenie.Modelowanie"],
+  ] as const;
+
+  it.each(ADDRESS_ANY_SCRIPT)("nazwa salonu jak adres w dowolnym alfabecie (%s) → pominięta", (_label, salonName) => {
+    const { body } = buildWaitingListPush({ salonName, serviceName: "Strzyżenie", startTime: SUMMER });
+    expect(body).toBe("Strzyżenie, 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.");
+  });
+
+  it.each(ADDRESS_ANY_SCRIPT)("nazwa usługi jak adres w dowolnym alfabecie (%s) → pominięta", (_label, name) => {
+    const { body } = buildWaitingListPush({
+      salonName: "Salon Uroda",
+      serviceName: `Promocja ${name}`,
+      startTime: SUMMER,
+    });
+    expect(body).toBe("Salon Uroda: 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.");
+  });
+
+  it.each([
+    ["skrót ze spacją po kropce", "Salon ul. Długa 5", "Strzyżenie dr. Anny"],
+    ["tytuł ze spacją po kropce", "Salon dr. Anny", "Koloryzacja wg. wzoru"],
+    ["kropka na końcu", "Salon Uroda.", "Strzyżenie męskie."],
+    ["liczba z kropką", "Salon 2.0", "Masaż 1.5 h"],
+  ])("tekst ze spacją po kropce (%s) → zachowany bez zmian", (_label, salonName, serviceName) => {
+    const { body } = buildWaitingListPush({ salonName, serviceName, startTime: SUMMER });
+    expect(body).toBe(`${salonName}: ${serviceName}, 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.`);
+  });
+
   it.each(TIME_CASES)("strefa Europe/Warsaw przy procesie w UTC: $label", (c) => {
     assertProcessInUtc();
     const { body } = buildWaitingListPush({ salonName: "Salon Uroda", startTime: new Date(c.at) });
