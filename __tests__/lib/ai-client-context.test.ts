@@ -1,6 +1,7 @@
 /**
  * Kontekst klienta w zapytaniach do modelu AI — do zapytania trafiają tylko
- * pola z białej listy, bez danych o zdrowiu i bez danych identyfikujących.
+ * pola z białej listy; bez alergii, imienia i nazwiska, danych kontaktowych
+ * i notatek o kliencie.
  */
 import { describe, it, expect } from "vitest";
 import {
