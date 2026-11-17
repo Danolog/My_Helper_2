@@ -88,7 +88,8 @@ beforeEach(() => {
   h.tx.select.mockReset();
   h.tx.insert.mockReset();
   h.tx.update.mockReset();
-  h.tx.update.mockReturnValue(createChainMock([]));
+  // Zapis wpisu zwraca wiersz (warunkowe zajęcie wpisu przed wysyłką się udaje).
+  h.tx.update.mockReturnValue(createChainMock([{ id: "wl-A" }]));
   vi.stubEnv("TZ", "UTC");
   // Zwolniony termin i oferta w akceptacji muszą być w przyszłości względem „teraz”.
   vi.useFakeTimers({ toFake: ["Date"] });

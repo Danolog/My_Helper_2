@@ -151,7 +151,8 @@ beforeEach(() => {
   h.tx.insert.mockReset();
   h.tx.update.mockReset();
   h.tx.insert.mockReturnValue(createChainMock([{ id: "new-row" }]));
-  h.tx.update.mockReturnValue(createChainMock([]));
+  // Zapis wpisu zwraca wiersz (warunkowe zajęcie wpisu przed wysyłką się udaje).
+  h.tx.update.mockReturnValue(createChainMock([{ id: "wl-A" }]));
   h.calc.mockResolvedValue({ ok: true, required: false, amount: 0, serviceName: "X" });
   h.resolve.mockImplementation(async (token: string) =>
     token === "tok-A" ? { waitingListId: "wl-A", salonId: SALON_A } : token === "tok-B" ? { waitingListId: "wl-B", salonId: SALON_B } : null
@@ -343,7 +344,7 @@ describe("jawny warunek salonu w każdym zapytaniu raw (kontrakt repository.ts)"
     const updates: ChainT[] = [];
     const inserted: Record<string, unknown>[] = [];
     h.tx.update.mockImplementation(() => {
-      const c = createChainMock([]);
+      const c = createChainMock([{ id: "wl-A" }]);
       updates.push(c);
       return c;
     });
