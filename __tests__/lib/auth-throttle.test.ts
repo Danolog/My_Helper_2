@@ -97,7 +97,24 @@ describe("klucz w zapytaniu", () => {
   });
 });
 
-describe("podział ścieżek: wrażliwe → baza, pozostałe → pamięć procesu", () => {
+describe("podział ścieżek: zamknięta lista → pamięć procesu, każda inna ścieżka → baza", () => {
+  it.each([
+    ["/update-user"],
+    ["/delete-user"],
+    ["/verify-email"],
+    ["/reset-password"],
+    ["/revoke-sessions"],
+    ["/sciezka-nieznana-bibliotece"],
+    ["/get-session-x"],
+    ["/callback"],
+    ["/ok/x"],
+  ])("ścieżka spoza listy pamięci %s → zapytanie do bazy", async (p) => {
+    execute.mockResolvedValue(row(1, 0));
+    await t.consumeAuthRateLimit(`203.0.113.7|${p}`, { window: 10, max: 100 });
+    expect(execute).toHaveBeenCalled();
+  });
+
+
   it.each([
     ["/sign-in/email"],
     ["/sign-in/social"],

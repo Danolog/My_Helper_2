@@ -66,6 +66,8 @@ const PASSWORD = "Poprawne-Haslo-123";
 const WRONG = "Zle-Haslo-000";
 const RUN = randomUUID().slice(0, 8);
 const IN_RULE = { window: 10, max: 3 };
+/** Endpoint Better Auth spoza zamkniętej listy pamięci i spoza reguł specjalnych biblioteki. */
+const UNKNOWN_PATH = "/verify-email";
 
 // ── Adresy i klucze testu ────────────────────────────────────────────────────
 
@@ -329,7 +331,7 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
       for (const r of fresh) expect(await rowByKey(r.key)).toBeDefined();
     });
 
-    it("ścieżka niewrażliwa (get-session) nie tworzy wiersza", async () => {
+    it("ścieżka z listy pamięci (get-session) nie tworzy wiersza", async () => {
       const ip = nextIp();
       await consumeAuthRateLimit(`${ip}|/get-session`, { window: 10, max: 100 });
       expect(await rowByKey(ipThrottleKey(`${ip}|/get-session`, SECRET))).toBeUndefined();
@@ -339,7 +341,7 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
   // ── Magazyn niedostępny ────────────────────────────────────────────────────
 
   describe("tabela niedostępna (W6/U3): odmowa, nie 500; odczyt sesji działa", () => {
-    it("logowanie → 429, rezerwacja na konto → odmowa 900 s, get-session → 200", async () => {
+    it("logowanie → 429, ścieżka spoza listy pamięci → 429, rezerwacja na konto → odmowa 900 s, get-session → 200", async () => {
       // Ten sam serwer, ale search_path bez schematu public: tabela „nie istnieje”.
       const url = INTEGRATION_URL!;
       const target = checkSeedTarget(url, { VERCEL_ENV: process.env.VERCEL_ENV }, HARNESS_GUARD_CONTEXT);
@@ -360,6 +362,10 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
         accountThrottleKey(e1, SECRET),
         accountThrottleKey(e2, SECRET),
       ];
+      const unknownIp = nextIp();
+      const queryEmail = email("query");
+      const unknownKey = ipThrottleKey(`${unknownIp}|${UNKNOWN_PATH}`, SECRET);
+      trackedKeys.push(unknownKey);
       try {
         const server = await verifySeedServerIdentities([client], HARNESS_GUARD_CONTEXT);
         if (!server.ok) throw new Error(`Odmowa: ${server.reason}`);
@@ -370,11 +376,25 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
         const down = drizzle(client, { schema });
         const downExecute = vi.spyOn(down, "execute");
         const { auth } = makeAuth();
+
+        // Ścieżka obsługiwana przez bibliotekę, spoza zamkniętej listy pamięci → licznik w bazie.
+        // Zapytanie URL z wartością w kształcie e-maila testu: w logu ma być sama ścieżka.
+        const unknownRequest = () =>
+          auth.handler(
+            new Request(`${BASE}/api/auth${UNKNOWN_PATH}?token=${queryEmail}`, { headers: { "x-forwarded-for": unknownIp } }),
+          );
+        // Kontrola na działającej bazie: to samo żądanie nie dostaje 429 i jest liczone w bazie.
+        expect((await unknownRequest()).status).not.toBe(429);
+        expect((await rowByKey(unknownKey))?.count, "ścieżka spoza listy pamięci liczona w bazie").toBe(1);
+
         dbRef.current = down;
 
         const res = await post(auth, "/sign-in/email", { email: e1, password: WRONG }, ip);
         // Warunek wstępny 2: zapytanie wyjścia poszło przez niedostępny klient i skończyło się błędem.
         expect(downExecute).toHaveBeenCalled();
+        const callsBeforeUnknown = downExecute.mock.calls.length;
+        const unknownRes = await unknownRequest();
+        expect(downExecute.mock.calls.length - callsBeforeUnknown, "ścieżka spoza listy pamięci nie poszła do bazy").toBeGreaterThanOrEqual(1);
         // Kod błędu bazy wprost albo w `cause` (drizzle może opakować błąd sterownika).
         const pgCode = (err: unknown) =>
           (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code;
@@ -389,6 +409,7 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
         }
 
         expect(res.status).toBe(429);
+        expect(unknownRes.status).toBe(429);
         // Każdy licznik osobno (429 z logowania daje którykolwiek z nich):
         // licznik adresu → odmowa z retryAfter = okno reguły; licznik konta → odmowa 900 s.
         expect(await consumeAuthRateLimit(`${ip2}|/sign-in/email`, IN_RULE)).toEqual({
@@ -403,19 +424,32 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
         // W4 (przed asercją kształtu logu, żeby czerwień kształtu nie zasłaniała wyniku):
         // żadne wywołanie loggera w tym teście nie zawiera adresu, e-maila ani klucza.
         const allCalls = JSON.stringify(Object.values(logger).flatMap((fn) => fn.mock.calls));
-        const forbidden = [ip, ip2, e1, e2, ...touched.flatMap((k) => [k.toString("hex"), k.toString("base64"), JSON.stringify(k)])];
+        const forbidden = [
+          ip,
+          ip2,
+          unknownIp,
+          e1,
+          e2,
+          queryEmail,
+          encodeURIComponent(queryEmail),
+          ...[...touched, unknownKey].flatMap((k) => [k.toString("hex"), k.toString("base64"), JSON.stringify(k)]),
+        ];
+        expect(forbidden).toContain(queryEmail);
         for (const f of forbidden) expect(allCalls, "log zawiera dane testu").not.toContain(f);
-        // Log: sama ścieżka i nazwa klasy błędu. Na tym sterowniku błąd zapytania
-        // przychodzi opakowany przez drizzle — w logu jego klasa.
+        // Log: sama ścieżka (bez zapytania URL) i nazwa klasy błędu. Na tym sterowniku błąd
+        // zapytania przychodzi opakowany przez drizzle — w logu jego klasa.
         const errorLogs = logger.error.mock.calls.map((c) => c[1]);
         expect(errorLogs).toContainEqual({ path: "/sign-in/email", error: "DrizzleQueryError" });
+        expect(errorLogs).toContainEqual({ path: UNKNOWN_PATH, error: "DrizzleQueryError" });
+        for (const l of errorLogs) expect(String((l as { path?: unknown }).path ?? "")).not.toContain("?");
 
         // Nic nie trafiło do działającej tabeli.
         dbRef.current = undefined;
         for (const k of touched) expect(await rowByKey(k)).toBeUndefined();
+        expect((await rowByKey(unknownKey))?.count, "żądanie przy niedostępnej tabeli zmieniło działającą tabelę").toBe(1);
       } finally {
         dbRef.current = undefined;
-        for (const k of touched) await h!.observer.unsafe("DELETE FROM auth_rate_limit WHERE key = $1", [k]);
+        for (const k of [...touched, unknownKey]) await h!.observer.unsafe("DELETE FROM auth_rate_limit WHERE key = $1", [k]);
         await client.end({ timeout: 5 });
       }
     });
