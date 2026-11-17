@@ -213,6 +213,10 @@ export const POST = withApiHandler(
           serviceId: serviceId || null,
           preferredEmployeeId: preferredEmployeeId || null,
           preferredDate: preferredDate ? new Date(preferredDate) : null,
+          // Źródło, potwierdzenie prośby klienta i autor — wyłącznie po stronie serwera
+          source: "staff",
+          clientRequestConfirmedAt: new Date(),
+          createdByUserId: session.user.id,
         })
         .returning()
     );

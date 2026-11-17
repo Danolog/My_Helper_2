@@ -100,7 +100,7 @@ const METHODS: Array<{ name: string; call: Call; validBody?: unknown; invalidBod
   {
     name: "POST /api/waiting-list",
     call: (body) => createEntry(createMockRequest(BASE, { method: "POST", body })),
-    validBody: { clientId: CLIENT_ID },
+    validBody: { clientId: CLIENT_ID, clientRequestConfirmed: true },
     invalidBody: { serviceId: 123 },
   },
   {

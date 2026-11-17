@@ -585,12 +585,19 @@ export const createPromoCodeSchema = z.object({
 
 /**
  * Schema for POST /api/waiting-list — add a client to the waiting list.
+ *
+ * Personel dodaje wpis tylko na prośbę klienta: `clientRequestConfirmed`
+ * musi być dokładnie `true`. Schemat ścisły — źródło wpisu, czas potwierdzenia
+ * i autora ustawia serwer, więc takie pola w treści są odrzucane.
  */
-export const createWaitingListSchema = z.object({
+export const createWaitingListSchema = z.strictObject({
   clientId: requiredString("Klient"),
   serviceId: z.string().nullable().optional(),
   preferredEmployeeId: z.string().nullable().optional(),
   preferredDate: z.string().nullable().optional(),
+  clientRequestConfirmed: z.literal(true, {
+    message: "Potwierdź, że klient sam poprosił o zapis na listę oczekujących.",
+  }),
 });
 
 /**
