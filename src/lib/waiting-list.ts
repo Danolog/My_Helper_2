@@ -324,6 +324,9 @@ interface AcceptResult {
  * the client's existing appointment to the earlier time or creates a new
  * appointment. Marks the waiting list entry as accepted and logs a
  * confirmation notification.
+ *
+ * Moduł listy oczekujących wyłączony w salonie (albo błąd odczytu ustawień)
+ * = odmowa „Oferta nie jest już aktualna”, bez odczytu wpisu i bez zapisów.
  */
 export async function acceptEarlierSlot(
   waitingListId: string,
@@ -338,6 +341,15 @@ export async function acceptEarlierSlot(
   // Jedno źródło salonu: wynik tokenu. Każde zapytanie poniżej ma jawny
   // warunek salonu (kontrakt raw() w repository.ts), wartości insertów też.
   const salonId = target.salonId;
+
+  // Przełącznik modułu listy oczekujących (ta sama reguła co przy wysyłce):
+  // moduł wyłączony albo błąd odczytu ustawień = odmowa przed odczytem wpisu
+  // i przed jakimkolwiek zapisem. Oferta zostaje nietknięta.
+  const modules = await getSalonModules(salonId);
+  if (!modules.waitingList) {
+    return { success: false, message: "Oferta nie jest już aktualna" };
+  }
+
   const gate = forSalon(salonId);
 
   // 1. Fetch the waiting list entry
@@ -571,6 +583,9 @@ interface DeclineResult {
 
 /**
  * Decline an offered earlier slot from the waiting list.
+ *
+ * Bez przełącznika modułu: odrzucenie nie tworzy wizyty, tylko zamyka wpis,
+ * więc działa także przy wyłączonym module listy oczekujących.
  */
 export async function declineEarlierSlot(
   waitingListId: string,
