@@ -6,7 +6,7 @@
 // każdy mógłby podpisać ciasteczko sesji. Konto wdrożeniowe widzi tylko
 // metadane sekretów, więc porównanie wartości robi aplikacja przy starcie.
 //
-// Zasady (przyjęta zasada):
+// Zasady:
 // - działa wyłącznie na Cloud Run w produkcji: K_SERVICE ustawione
 //   + NODE_ENV=production; lokalnie, w CI i na Vercelu nic nie robi;
 // - lista zakazana trzyma tylko skróty SHA-256, nigdy wartości;
