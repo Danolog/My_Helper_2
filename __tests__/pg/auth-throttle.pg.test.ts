@@ -407,7 +407,7 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
   // ── Magazyn niedostępny ────────────────────────────────────────────────────
 
   describe("tabela niedostępna (W6/U3): odmowa, nie 500; odczyt sesji działa", () => {
-    it("logowanie → 429, ścieżka spoza listy pamięci → 429, rezerwacja na konto → odmowa 900 s, get-session → 200", async () => {
+    it("logowanie → 429, ścieżka spoza listy pamięci → 429, trasa z tokenem → 429 (w logu szablon trasy), rezerwacja na konto → odmowa 900 s, get-session → 200", async () => {
       // Ten sam serwer, ale search_path bez schematu public: tabela „nie istnieje”.
       const url = INTEGRATION_URL!;
       const target = checkSeedTarget(url, { VERCEL_ENV: process.env.VERCEL_ENV }, HARNESS_GUARD_CONTEXT);
@@ -422,11 +422,16 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
       const ip2 = trackIp(nextIp());
       const e1 = trackEmail(email("down"));
       const e2 = trackEmail(email("down2"));
+      const tokenIp = nextIp();
+      const token = `Tk7${RUN}down${randomUUID().replace(/-/g, "")}`;
+      const tokenTemplateKey = ipThrottleKey(`${tokenIp}|/reset-password/:token`, SECRET);
+      trackedKeys.push(tokenTemplateKey);
       const touched = [
         ipThrottleKey(`${ip}|/sign-in/email`, SECRET),
         ipThrottleKey(`${ip2}|/sign-in/email`, SECRET),
         accountThrottleKey(e1, SECRET),
         accountThrottleKey(e2, SECRET),
+        tokenTemplateKey,
       ];
       const unknownIp = nextIp();
       const queryEmail = email("query");
@@ -461,6 +466,12 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
         const callsBeforeUnknown = downExecute.mock.calls.length;
         const unknownRes = await unknownRequest();
         expect(downExecute.mock.calls.length - callsBeforeUnknown, "ścieżka spoza listy pamięci nie poszła do bazy").toBeGreaterThanOrEqual(1);
+        // Trasa z tokenem w adresie: w kluczu i w logu szablon trasy.
+        const callsBeforeToken = downExecute.mock.calls.length;
+        const tokenRes = await auth.handler(
+          new Request(`${BASE}/api/auth/reset-password/${token}`, { headers: { "x-forwarded-for": tokenIp } }),
+        );
+        expect(downExecute.mock.calls.length - callsBeforeToken, "trasa z tokenem nie poszła do bazy").toBeGreaterThanOrEqual(1);
         // Kod błędu bazy wprost albo w `cause` (drizzle może opakować błąd sterownika).
         const pgCode = (err: unknown) =>
           (err as { code?: string }).code ?? (err as { cause?: { code?: string } }).cause?.code;
@@ -476,6 +487,7 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
 
         expect(res.status).toBe(429);
         expect(unknownRes.status).toBe(429);
+        expect(tokenRes.status).toBe(429);
         // Każdy licznik osobno (429 z logowania daje którykolwiek z nich):
         // licznik adresu → odmowa z retryAfter = okno reguły; licznik konta → odmowa 900 s.
         expect(await consumeAuthRateLimit(`${ip2}|/sign-in/email`, IN_RULE)).toEqual({
@@ -494,6 +506,8 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
           ip,
           ip2,
           unknownIp,
+          tokenIp,
+          token,
           e1,
           e2,
           queryEmail,
@@ -501,12 +515,14 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
           ...[...touched, unknownKey].flatMap((k) => [k.toString("hex"), k.toString("base64"), JSON.stringify(k)]),
         ];
         expect(forbidden).toContain(queryEmail);
+        expect(forbidden).toContain(token);
         for (const f of forbidden) expect(allCalls, "log zawiera dane testu").not.toContain(f);
         // Log: sama ścieżka (bez zapytania URL) i nazwa klasy błędu. Na tym sterowniku błąd
         // zapytania przychodzi opakowany przez drizzle — w logu jego klasa.
         const errorLogs = logger.error.mock.calls.map((c) => c[1]);
         expect(errorLogs).toContainEqual({ path: "/sign-in/email", error: "DrizzleQueryError" });
         expect(errorLogs).toContainEqual({ path: UNKNOWN_PATH, error: "DrizzleQueryError" });
+        expect(errorLogs).toContainEqual({ path: "/reset-password/:token", error: "DrizzleQueryError" });
         for (const l of errorLogs) expect(String((l as { path?: unknown }).path ?? "")).not.toContain("?");
 
         // Nic nie trafiło do działającej tabeli.

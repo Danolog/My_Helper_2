@@ -46,7 +46,7 @@ const lit = (xs: readonly string[]) => xs.map((x) => `'${x}'`).join(", ");
 /** Numer PR, w którym pozycje trafiają na listy. */
 const THIS_PR = 242;
 /** PR tabeli liczników limitu prób logowania. */
-const AUTH_RATE_LIMIT_PR = 247;
+const AUTH_RATE_LIMIT_PR = 248;
 const BOTH = ["CTO", "CRCO"];
 
 /** Tabele wspólne dla wszystkich salonów, z uprawnieniami roli aplikacji, bez RLS. */
