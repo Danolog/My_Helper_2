@@ -24,6 +24,7 @@ export { checkDatabase, pingDatabase } from "./health";
 export { clearSignInFailures, consumeAuthRateLimit, reserveAccountSignInAttempt } from "./auth-throttle";
 export { cleanupStaleDepositBookings } from "./deposits-cleanup";
 export type { StaleDepositCleanupResult } from "./deposits-cleanup";
+export { ensurePlansExist } from "./plans";
 export {
   countPushSubscriptions,
   deleteUndeliverablePushSubscriptions,

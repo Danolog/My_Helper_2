@@ -146,7 +146,6 @@ export const P4_FILES = [
 export const P5_FILES = [
   "src/app/api/register-subscription/route.ts",
   "src/app/api/seed/route.ts",
-  "src/app/api/subscription-plans/route.ts",
 ];
 
 /** P6: przełączenie puli (dziś bez plików). */
