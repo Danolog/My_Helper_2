@@ -9,8 +9,8 @@
  * (`allergies`), dane identyfikujące ani kontaktowe (`firstName`, `lastName`,
  * `phone`, `email`) ani notatki o kliencie (`notes`).
  *
- * Wyjątek: `firstNameForReply` — samo pierwsze imię, tylko w tekście
- * skierowanym do klienta (patrz opis funkcji).
+ * Wyjątek: `firstNameForReply` — samo pierwsze imię osoby (klienta albo
+ * pracownika); gdzie wolno go użyć, opisuje funkcja.
  *
  * Zasada: nowe pole w zapytaniu = świadoma decyzja, zmiana listy i typu w tym
  * pliku oraz aktualizacja `docs/policies/podprocesorzy.md`.
@@ -119,10 +119,11 @@ export const FIRST_NAME_MAX_LENGTH = 40;
  * do `FIRST_NAME_MAX_LENGTH` znaków. Brak osoby albo pustego imienia daje
  * `null`.
  *
- * Zasada dla tras korzystających z tego modułu: imię trafia do modelu tylko
- * w tekście skierowanym do klienta (odpowiedź na jego opinię): imię tego
- * klienta i imię pracownika, którego odpowiedź może wymienić. Ta funkcja nie
- * czyta nazwiska.
+ * Zasada dla tras korzystających z tego modułu: imię klienta trafia do
+ * modelu tylko w tekście skierowanym do tego klienta (odpowiedź na jego
+ * opinię); imię pracownika — w odpowiedzi na opinię, w podpisie zdjęcia
+ * i w danych asystenta (tam z inicjałem nazwiska tylko przy powtórzonym
+ * imieniu, `employeeLabelsForModel`). Ta funkcja nie czyta nazwiska.
  */
 export function firstNameForReply(
   person: FirstNameInput | null | undefined,
