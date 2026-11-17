@@ -11,7 +11,8 @@
  *    (okno stałe liczone od pierwszego żądania w oknie). Pamięć procesu liczy
  *    wyłącznie zamkniętą listę ścieżek `@/lib/auth-rate-limit-paths` (m.in. odczyt
  *    sesji) — bez zapytań do bazy przy każdym takim żądaniu. Każda inna ścieżka,
- *    także nieznana, idzie do bazy.
+ *    także nieznana, idzie do bazy. Ścieżka w kluczu i w logu jako szablon trasy
+ *    (`counterKeyPathOf`); ścieżki spoza listy tras liczone wspólnie na adres.
  *
  * 2. Licznik konta (`reserveAccountSignInAttempt`, `clearSignInFailures`) —
  *    każda próba logowania e-mailem rezerwuje miejsce PRZED sprawdzeniem hasła
@@ -27,7 +28,7 @@
  * ścieżkę albo nazwę operacji i nazwę błędu — nigdy adres, e-mail ani klucz.
  */
 import { DrizzleQueryError, sql } from "drizzle-orm";
-import { isMemoryCountedPath } from "@/lib/auth-rate-limit-paths";
+import { counterKeyPathOf, isMemoryCountedPath } from "@/lib/auth-rate-limit-paths";
 import { accountThrottleKey, ipThrottleKey } from "@/lib/auth-throttle-keys";
 import { logger } from "@/lib/logger";
 import { dbSystem } from "./db-system";
@@ -66,17 +67,14 @@ function errorName(err: unknown): string {
 }
 
 /**
- * Ścieżka z klucza biblioteki `<adres>|<ścieżka>` — po PIERWSZYM „|” (adres, także
- * IPv6 i „no-trusted-ip”, nie zawiera „|”; ścieżka może). Kształt klucza przypięty
- * testem na prawdziwej instancji Better Auth.
+ * Adres i ścieżka z klucza biblioteki `<adres>|<ścieżka>` — podział po PIERWSZYM „|”
+ * (adres, także IPv6 i „no-trusted-ip”, nie zawiera „|”; ścieżka może). Kształt klucza
+ * przypięty testem na prawdziwej instancji Better Auth.
  */
-function pathOfLibraryKey(libraryKey: string): string {
-  return libraryKey.slice(libraryKey.indexOf("|") + 1);
-}
-
-/** Ścieżka do logu: trasa z tokenem w adresie (`/reset-password/:token`) jako szablon. */
-function logPathOf(path: string): string {
-  return path.startsWith("/reset-password/") ? "/reset-password/:token" : path;
+function splitLibraryKey(libraryKey: string): { address: string; path: string } {
+  const i = libraryKey.indexOf("|");
+  if (i < 0) return { address: libraryKey, path: "" };
+  return { address: libraryKey.slice(0, i), path: libraryKey.slice(i + 1) };
 }
 
 // ── Licznik w pamięci procesu dla zamkniętej listy ścieżek (semantyka jak magazyn
@@ -140,19 +138,21 @@ function retryAfterOf(r: CounterRow, fallback: number): number {
 
 /**
  * Magazyn limitu adresu dla Better Auth (`rateLimit.customStorage.consume`).
- * Ścieżka spoza listy pamięci → atomowy UPSERT w bazie, potem ograniczone kasowanie
+ * Ścieżka spoza listy pamięci → atomowy UPSERT w bazie (klucz: adres i ścieżka
+ * z `counterKeyPathOf`), potem ograniczone kasowanie
  * wierszy starszych niż 24 h (osobna instrukcja; jej błąd nie zmienia wyniku).
  */
 export async function consumeAuthRateLimit(
   key: string,
   rule: { window: number; max: number },
 ): Promise<{ allowed: boolean; retryAfter: number | null }> {
-  const path = pathOfLibraryKey(key);
+  const { address, path } = splitLibraryKey(key);
   if (isMemoryCountedPath(path)) return consumeInMemory(key, rule);
 
+  const counterPath = counterKeyPathOf(path);
   let row: CounterRow | undefined;
   try {
-    const hashed = ipThrottleKey(key, getSecret());
+    const hashed = ipThrottleKey(`${address}|${counterPath}`, getSecret());
     const result = await dbSystem.execute(sql`
       INSERT INTO auth_rate_limit (key, count, window_start, updated_at)
       VALUES (${hashed}, 1, now(), now())
@@ -167,7 +167,7 @@ export async function consumeAuthRateLimit(
     row = firstRow(result);
     if (!row) throw new Error("auth rate limit upsert returned no row");
   } catch (err) {
-    logger.error("auth rate limit store error", { path: logPathOf(path), error: errorName(err) });
+    logger.error("auth rate limit store error", { path: counterPath, error: errorName(err) });
     return { allowed: false, retryAfter: rule.window };
   }
 
