@@ -16,7 +16,7 @@ import { z } from "zod";
  * Pliki czytamy jako tekst, a nie importujemy, bo `scripts/seed-test.ts`
  * po imporcie od razu łączy się z bazą.
  */
-const SEED_FILES = ["scripts/seed-test.ts", "src/app/api/seed/route.ts"];
+const SEED_FILES = ["scripts/seed-test.ts", "src/lib/server/system/seed.ts"];
 
 // Wszystko, co wygląda na UUID (8-4-4-4-12 hex) w literałach napisowych.
 const UUID_LIKE = /["'`]([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})["'`]/g;

@@ -59,6 +59,8 @@ const WAITING_LIST_EXPORTS = ["resolveWaitingListToken"];
 const DEPOSITS_CLEANUP_EXPORTS = ["cleanupStaleDepositBookings"];
 /** #193 P5b: globalny cennik planów z dosiewaniem (bez danych najemcy). */
 const PLANS_EXPORTS = ["ensurePlansExist"];
+/** #193 P5b: seed danych demonstracyjnych z blokadą celu (poza produkcją). */
+const SEED_EXPORTS = ["seedDemoData"];
 /** Pliki re-eksportowane przez rejestr `index.ts` w całości. */
 const REGISTRY_SOURCES = [
   "session.ts",
@@ -66,6 +68,7 @@ const REGISTRY_SOURCES = [
   "health.ts",
   "deposits-cleanup.ts",
   "plans.ts",
+  "seed.ts",
   "notifications.ts",
   "waiting-list.ts",
   "auth-throttle.ts",
@@ -83,12 +86,14 @@ const SNAPSHOT: Record<string, string[]> = {
     ...HEALTH_EXPORTS,
     ...DEPOSITS_CLEANUP_EXPORTS,
     ...PLANS_EXPORTS,
+    ...SEED_EXPORTS,
     ...NOTIFICATIONS_EXPORTS,
     ...WAITING_LIST_EXPORTS,
     ...AUTH_THROTTLE_EXPORTS,
   ].sort(),
   "notifications.ts": NOTIFICATIONS_EXPORTS,
   "plans.ts": PLANS_EXPORTS,
+  "seed.ts": SEED_EXPORTS,
   "session.ts": SESSION_EXPORTS,
   "waiting-list.ts": WAITING_LIST_EXPORTS,
 };

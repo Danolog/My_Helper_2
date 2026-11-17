@@ -25,6 +25,8 @@ export { clearSignInFailures, consumeAuthRateLimit, reserveAccountSignInAttempt 
 export { cleanupStaleDepositBookings } from "./deposits-cleanup";
 export type { StaleDepositCleanupResult } from "./deposits-cleanup";
 export { ensurePlansExist } from "./plans";
+export { seedDemoData } from "./seed";
+export type { SeedDemoRefusal, SeedDemoResult } from "./seed";
 export {
   countPushSubscriptions,
   deleteUndeliverablePushSubscriptions,

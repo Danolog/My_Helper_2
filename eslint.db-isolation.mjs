@@ -145,7 +145,6 @@ export const P4_FILES = [
 /** P5 (Eva): crony, powiadomienia, rejestracja triala, seed, plany, biblioteki powiadomień. */
 export const P5_FILES = [
   "src/app/api/register-subscription/route.ts",
-  "src/app/api/seed/route.ts",
 ];
 
 /** P6: przełączenie puli (dziś bez plików). */
