@@ -46,7 +46,9 @@ const ipAddressOptions = getAuthIpAddressOptions()
 /**
  * Magazyn limitu prób logowania (AUTH_RATE_LIMIT_STORE): brak zmiennej →
  * konfiguracja biblioteki bez zmian; `database` → liczniki w bazie i limit na
- * konto (src/lib/auth-rate-limit-options.ts). Zła wartość → błąd przy starcie.
+ * konto (src/lib/auth-rate-limit-options.ts). Zła wartość albo `database` bez
+ * BETTER_AUTH_SECRET → błąd przy ładowaniu tego modułu; start serwera zatrzymuje
+ * wcześniej `enforceAuthRateLimitStore` w `register()` (src/instrumentation.ts).
  */
 const rateLimitOptions = buildAuthRateLimitOptions(getAuthRateLimitStore(process.env))
 

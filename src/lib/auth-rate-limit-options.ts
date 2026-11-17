@@ -15,7 +15,9 @@
  *     Każda inna odpowiedź (401, 400) zostaje w liczniku — zerowanie tylko
  *     po pozytywnie rozpoznanym wyniku;
  *   - `onPasswordReset` zeruje licznik konta po udanym resecie hasła.
- *   Brak `BETTER_AUTH_SECRET` → błąd przy starcie (klucze liczników to HMAC z sekretu).
+ *   Brak `BETTER_AUTH_SECRET` → błąd przy ładowaniu modułu auth (klucze liczników
+ *   to HMAC z sekretu); start serwera zatrzymuje wcześniej `enforceAuthRateLimitStore`
+ *   (src/lib/auth-rate-limit-mode.ts) w `register()`.
  *
  * Odmowa per konto ma odpowiedź identyczną z odpowiedzią limitu biblioteki
  * (429, ta sama treść i nagłówki) — nie zdradza, czy konto istnieje.
