@@ -14,7 +14,6 @@ import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
-  employees,
   services,
   treatmentHistory,
   appointmentMaterials,
@@ -54,18 +53,16 @@ export async function POST(req: Request) {
   const { appointmentId } = parsed.data;
 
   try {
-    // Fetch appointment with related data (client, employee, service)
+    // Fetch appointment with related data (client, service)
     const [appointmentData] = await forSalon(salonId).raw((tx) =>
       tx
         .select({
           appointment: appointments,
           client: clients,
-          employee: employees,
           service: services,
         })
         .from(appointments)
         .leftJoin(clients, eq(appointments.clientId, clients.id))
-        .leftJoin(employees, eq(appointments.employeeId, employees.id))
         .leftJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
