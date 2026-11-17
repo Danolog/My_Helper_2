@@ -244,17 +244,21 @@ const SMS_SERVICE_NAME_MAX = 40;
 
 /**
  * Telefon salonu w treści SMS: po obcięciu spacji w całości cyfry, spacje,
- * nawiasy i myślniki (opcjonalny „+” na początku), 6–20 znaków. Wartość
- * niepasująca nie jest poprawiana — fragment z telefonem jest pomijany.
+ * nawiasy i myślniki (opcjonalny „+” na początku), 6–20 znaków, w tym co
+ * najmniej 6 cyfr. Wartość niepasująca nie jest poprawiana — fragment
+ * z telefonem jest pomijany.
  */
-const SMS_SALON_PHONE = /^\+?[0-9 ()-]{6,20}$/;
-
-/** Nazwa wyglądająca na adres: „://”, „www.” albo kropka + domena (np. uroda.pl). */
-const ADDRESS_LIKE = /:\/\/|www\.|[a-z0-9]\.[a-z]{2,}(?![a-z])/i;
+const SMS_SALON_PHONE = /^(?=(?:\D*\d){6})\+?[0-9 ()-]{6,20}$/;
 
 /**
- * Czy tekst wygląda na adres („://”, „www.”, kropka + domena). Jedna reguła
- * dla treści SMS i push.
+ * Nazwa wyglądająca na adres: „://”, „www.”, kropka + domena (np. uroda.pl)
+ * albo czteroczęściowy adres numeryczny (np. 192.168.10.20).
+ */
+const ADDRESS_LIKE = /:\/\/|www\.|[a-z0-9]\.[a-z]{2,}(?![a-z])|\d{1,3}(?:\.\d{1,3}){3}/i;
+
+/**
+ * Czy tekst wygląda na adres („://”, „www.”, kropka + domena, czteroczęściowy
+ * adres numeryczny). Jedna reguła dla treści SMS i push.
  */
 export function looksLikeAddress(text: string): boolean {
   return ADDRESS_LIKE.test(text);

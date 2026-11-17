@@ -166,6 +166,56 @@ describe("buildWaitingListSms", () => {
   });
 
   it.each([
+    ["adres numeryczny", "Salon 192.168.10.20"],
+    ["adres numeryczny ze ścieżką", "Promocja 203.0.113.5/a"],
+  ])("nazwa salonu jak %s → bez fragmentu „w <salon>”", (_label, salonName) => {
+    const message = buildWaitingListSms({ salonName, startTime: SUMMER });
+    expect(message.startsWith("Zwolnil sie termin: 15 lipca o 10:30.")).toBe(true);
+    expect(message).not.toMatch(/\d+\.\d+\.\d+\.\d+/);
+  });
+
+  it.each([
+    ["adres numeryczny", "Salon 192.168.10.20"],
+    ["adres numeryczny ze ścieżką", "Promocja 203.0.113.5/a"],
+  ])("nazwa usługi jak %s → bez fragmentu usługi", (_label, serviceName) => {
+    const message = buildWaitingListSms({ salonName: "Salon Uroda", serviceName, startTime: SUMMER });
+    expect(message).toContain("Zwolnil sie termin w Salon Uroda: 15 lipca o 10:30.");
+    expect(message).not.toContain('"');
+    expect(message).not.toMatch(/\d+\.\d+\.\d+\.\d+/);
+  });
+
+  it.each([
+    ["liczba z kropką", "Salon 2.0", "Masaz 1.5 h", "Salon 2.0", "Masaz 1.5 h"],
+    ["znak &", "Salon & Spa", "Strzyzenie & modelowanie", "Salon & Spa", "Strzyzenie & modelowanie"],
+    ["znak +", "Uroda+", "Manicure + pedicure", "Uroda+", "Manicure + pedicure"],
+    ["skrót ze spacją po kropce", "Salon św. Anna", "Masaż św. Anny", "Salon sw. Anna", "Masaz sw. Anny"],
+    ["tytuł bez kropki", "Gabinet dr Anna", "Konsultacja dr Anna", "Gabinet dr Anna", "Konsultacja dr Anna"],
+    // Kropka środkowa (U+00B7) nie należy do GSM-7 — po sprowadzeniu zostają same spacje.
+    ["kropka środkowa ze spacjami", "Hair · Beauty", "Strzyżenie · Modelowanie", "Hair Beauty", "Strzyzenie Modelowanie"],
+  ])(
+    "tekst nie będący adresem (%s) → zachowany po sprowadzeniu do GSM-7",
+    (_label, salonName, serviceName, smsSalon, smsService) => {
+      const message = buildWaitingListSms({ salonName, serviceName, startTime: SUMMER });
+      expect(message).toContain(`Zwolnil sie termin w ${smsSalon}: "${smsService}" 15 lipca o 10:30.`);
+      expect(nonGsm7(message), message).toEqual([]);
+    }
+  );
+
+  it("nazwa salonu null → bez fragmentu „w <salon>”", () => {
+    expect(buildWaitingListSms({ salonName: null, serviceName: "Strzyzenie", startTime: SUMMER })).toBe(
+      'Zwolnil sie termin: "Strzyzenie" 15 lipca o 10:30. ' +
+        "Aby go przyjac, zaloguj sie w aplikacji i otworz liste oczekujacych."
+    );
+  });
+
+  it("nazwa usługi null → bez fragmentu w cudzysłowie", () => {
+    expect(buildWaitingListSms({ salonName: "Salon Uroda", serviceName: null, startTime: SUMMER })).toBe(
+      "Zwolnil sie termin w Salon Uroda: 15 lipca o 10:30. " +
+        "Aby go przyjac, zaloguj sie w aplikacji i otworz liste oczekujacych."
+    );
+  });
+
+  it.each([
     ["+48 512 345 678"],
     ["512-345-678"],
     ["(91) 123 45 67"],
@@ -185,6 +235,10 @@ describe("buildWaitingListSms", () => {
     ["numer z dopisanym tekstem", "512 345 678 wew. 12"],
     ["numer i adres w nowej linii", "512 345 678\nwww.uroda.pl"],
     ["plus w środku", "512+345+678"],
+    ["same myślniki", "------"],
+    ["same nawiasy i spacje", "( ) ( )"],
+    ["plus i myślniki", "+ - - - - -"],
+    ["mniej niż 6 cyfr", "(1) 2-3 4-5"],
   ])("telefon salonu %s → bez fragmentu „lub zadzwon” i bez tej wartości", (_label, salonPhone) => {
     const message = buildWaitingListSms({ salonName: "Salon Uroda", startTime: SUMMER, salonPhone });
     expect(message).not.toContain("zadzwon");
@@ -288,6 +342,51 @@ describe("buildWaitingListPush", () => {
   });
 
   it.each([
+    ["emoji z łącznikiem (kobieta + łącznik + rude włosy)", "👩‍🦰"],
+    ["flaga", "🇵🇱"],
+    ["emoji z odcieniem skóry", "💇🏽"],
+  ])("38 znaków + trzy razy %s → całe pierwsze emoji przed „…”", (_label, emoji) => {
+    const name = "x".repeat(38) + emoji.repeat(3);
+    const { body } = buildWaitingListPush({ salonName: name, startTime: SUMMER });
+    expect(body).toBe(`${"x".repeat(38)}${emoji}…: 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.`);
+    expect(body).not.toMatch(/‍…/u);
+  });
+
+  it("litera z osobnym znakiem łączącym (NFD) na granicy limitu → cała litera przed „…”", () => {
+    const nfd = "x".repeat(38) + "é" + "yz";
+    const { body } = buildWaitingListPush({ salonName: nfd, startTime: SUMMER });
+    expect(body).toBe(`${"x".repeat(38)}é…: 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.`);
+  });
+
+  it.each([
+    ["40 widocznych znaków", "x".repeat(39) + "é"],
+    ["41 widocznych znaków", "x".repeat(38) + "éé" + "y"],
+    ["polskie znaki", "Zakład Łucja Żółć " + "ś".repeat(30)],
+  ])("ten sam tekst w NFC i NFD (%s) → ta sama treść push", (_label, name) => {
+    const nfc = buildWaitingListPush({ salonName: name.normalize("NFC"), startTime: SUMMER });
+    const nfd = buildWaitingListPush({ salonName: name.normalize("NFD"), startTime: SUMMER });
+    expect(nfd).toEqual(nfc);
+  });
+
+  it("nazwa 40 znaków zapisana w NFD → bez obcięcia", () => {
+    const name = "x".repeat(39) + "é";
+    const { body } = buildWaitingListPush({ salonName: name.normalize("NFD"), startTime: SUMMER });
+    expect(body).toBe(`${name.normalize("NFC")}: 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.`);
+  });
+
+  it("nazwa salonu null → treść bez prefiksu salonu", () => {
+    expect(buildWaitingListPush({ salonName: null, serviceName: "Strzyżenie", startTime: SUMMER }).body).toBe(
+      "Strzyżenie, 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić."
+    );
+  });
+
+  it("nazwa usługi null → treść bez usługi", () => {
+    expect(buildWaitingListPush({ salonName: "Salon Uroda", serviceName: null, startTime: SUMMER }).body).toBe(
+      "Salon Uroda: 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić."
+    );
+  });
+
+  it.each([
     ["nowa linia", "Salon\nUroda"],
     ["CR LF i tabulator", "Salon\r\n\tUroda"],
     ["separator linii", "Salon Uroda"],
@@ -304,6 +403,8 @@ describe("buildWaitingListPush", () => {
     ["kropka pełnej szerokości", "Uroda．pl"],
     ["znak łączący przed kropką", "Urodá.pl"],
     ["nowa linia przed adresem", "Salon\nuroda.pl"],
+    ["adres numeryczny", "Salon 192.168.10.20"],
+    ["adres numeryczny ze ścieżką", "Promocja 203.0.113.5/a"],
   ])("nazwa salonu jak adres (%s) → pominięta", (_label, salonName) => {
     const { body } = buildWaitingListPush({ salonName, serviceName: "Strzyżenie", startTime: SUMMER });
     expect(body).toBe("Strzyżenie, 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.");
@@ -313,6 +414,8 @@ describe("buildWaitingListPush", () => {
     ["https://", "Promocja https://uroda.example"],
     [".pl", "Strzyżenie uroda.pl"],
     ["kropka pełnej szerokości", "Uroda．pl"],
+    ["adres numeryczny", "Salon 192.168.10.20"],
+    ["adres numeryczny ze ścieżką", "Promocja 203.0.113.5/a"],
   ])("nazwa usługi jak adres (%s) → pominięta", (_label, serviceName) => {
     const { body } = buildWaitingListPush({ salonName: "Salon Uroda", serviceName, startTime: SUMMER });
     expect(body).toBe("Salon Uroda: 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.");
@@ -334,6 +437,8 @@ describe("buildWaitingListPush", () => {
     ["znak zerowej szerokości między literą a kropką", "Pawł​.pl"],
     ["tekst z kropką między literami (św.Anna)", "św.Anna"],
     ["tekst z kropką między słowami bez spacji", "Strzyżenie.Modelowanie"],
+    ["kropka środkowa U+00B7", "Uroda·pl"],
+    ["kropka środkowa katakana U+30FB", "Uroda・pl"],
   ] as const;
 
   it.each(ADDRESS_ANY_SCRIPT)("nazwa salonu jak adres w dowolnym alfabecie (%s) → pominięta", (_label, salonName) => {
@@ -355,7 +460,12 @@ describe("buildWaitingListPush", () => {
     ["tytuł ze spacją po kropce", "Salon dr. Anny", "Koloryzacja wg. wzoru"],
     ["kropka na końcu", "Salon Uroda.", "Strzyżenie męskie."],
     ["liczba z kropką", "Salon 2.0", "Masaż 1.5 h"],
-  ])("tekst ze spacją po kropce (%s) → zachowany bez zmian", (_label, salonName, serviceName) => {
+    ["znak &", "Salon & Spa", "Strzyżenie & modelowanie"],
+    ["znak +", "Uroda+", "Manicure + pedicure"],
+    ["skrót ze spacją po kropce", "Salon św. Anna", "Masaż św. Anny"],
+    ["tytuł bez kropki", "Gabinet dr Anna", "Konsultacja dr Anna"],
+    ["kropka środkowa ze spacjami", "Hair · Beauty", "Strzyżenie · Modelowanie"],
+  ])("tekst nie będący adresem (%s) → zachowany bez zmian", (_label, salonName, serviceName) => {
     const { body } = buildWaitingListPush({ salonName, serviceName, startTime: SUMMER });
     expect(body).toBe(`${salonName}: ${serviceName}, 15 lipca o 10:30. Dotknij, aby przyjąć lub odrzucić.`);
   });

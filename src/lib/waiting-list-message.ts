@@ -31,10 +31,15 @@ function scriptNeutral(plain: string): string {
  * w postaci niezależnej od alfabetu (`scriptNeutral`) — jest pomijany
  * w całości. Tekst z kropką między literami (w dowolnym alfabecie, bez spacji
  * po kropce) traktujemy jak adres, np. „św.Anna”; „ul. Długa” przechodzi.
- * Wyświetlany jest tekst oczyszczony, bez zmian liter i kropek. Ponad `max`
- * znaków → `max - 1` znaków (bez spacji na końcu) + "…"; długość liczona
- * w punktach kodowych, emoji nie jest rozcinane.
+ * Wyświetlany jest tekst oczyszczony w postaci NFC, bez zmian liter i kropek.
+ * Długość liczona w widocznych znakach (grafemach wg `Intl.Segmenter`), więc
+ * ten sam napis w NFC i NFD daje ten sam wynik. Ponad `max` widocznych znaków
+ * → pierwsze `max - 1` (bez spacji na końcu) + "…"; obcięcie przebiega
+ * wyłącznie na granicy widocznego znaku, więc emoji złożone z kilku punktów
+ * kodowych, flaga ani litera ze znakiem łączącym nie są rozcinane.
  */
+const GRAPHEMES = new Intl.Segmenter("pl", { granularity: "grapheme" });
+
 function ownerTextForPush(text: string, max: number): string {
   const cleaned = text
     .replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, " ")
@@ -52,9 +57,10 @@ function ownerTextForPush(text: string, max: number): string {
     return "";
   }
 
-  const chars = [...cleaned];
-  if (chars.length <= max) return cleaned;
-  return `${chars.slice(0, max - 1).join("").trimEnd()}…`;
+  const display = cleaned.normalize("NFC");
+  const graphemes = Array.from(GRAPHEMES.segment(display), (s) => s.segment);
+  if (graphemes.length <= max) return display;
+  return `${graphemes.slice(0, max - 1).join("").trimEnd()}…`;
 }
 
 /**
