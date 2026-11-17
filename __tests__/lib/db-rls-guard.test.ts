@@ -11,14 +11,28 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  APP_ROLE,
+  LOGIN_ROLE,
+  POLICY_GUARD_SQL,
+  POLICY_SNAPSHOT_FILE,
+  ROLE_GUARD_SQL,
   RLS_GUARD_SQL,
   RLS_MIGRATION_FILE,
+  checkPolicySemantics,
+  checkPolicySnapshot,
   checkRls,
+  checkRoles,
+  loadPolicySnapshot,
   loadRlsRequirements,
   parseRlsRequirements,
+  policyHash,
+  runPolicyGuard,
   runRlsGuard,
+  toPolicySnapshot,
+  type PolicyRow,
   type RlsRequirement,
   type RlsRow,
+  type RoleRow,
 } from "../../scripts/db-rls-guard";
 
 const ROOT = process.cwd();
@@ -137,6 +151,138 @@ describe("strażnik — decyzja", () => {
     const r = await runRlsGuard({ unsafe: odd }, req);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.missing[0]).toBe("appointments (RLS wyłączone)");
+  });
+});
+
+describe("strażnik — rola aplikacji i treść polityk (#193)", () => {
+  // Postać z pg_get_expr po migracji 0010 (kontekst w nullif).
+  const CTX = "(NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid";
+  const direct = (table: string): PolicyRow => ({
+    table,
+    name: "tenant_isolation",
+    cmd: "ALL",
+    permissive: "PERMISSIVE",
+    roles: ["public"],
+    qual: `(salon_id = ${CTX})`,
+    withCheck: `(salon_id = ${CTX})`,
+  });
+  const child: PolicyRow = {
+    ...direct("time_blocks"),
+    qual: `(EXISTS ( SELECT 1\n   FROM employees p\n  WHERE ((p.id = time_blocks.employee_id) AND (p.salon_id = ${CTX}))))`,
+    withCheck: `(EXISTS ( SELECT 1\n   FROM employees p\n  WHERE ((p.id = time_blocks.employee_id) AND (p.salon_id = ${CTX}))))`,
+  };
+  const self: PolicyRow = { ...direct("salons"), name: "tenant_self", qual: `(id = ${CTX})`, withCheck: `(id = ${CTX})` };
+  const ROWS: PolicyRow[] = [direct("clients"), child, self];
+  const SNAP = toPolicySnapshot(ROWS);
+
+  it("zapytania o role i polityki tylko do odczytu katalogu", () => {
+    for (const q of [ROLE_GUARD_SQL, POLICY_GUARD_SQL]) {
+      expect(q).toMatch(/^select /);
+      expect(q).not.toMatch(/;|\b(insert|update|delete|drop|alter|create|truncate|grant)\b/i);
+    }
+    expect(ROLE_GUARD_SQL).toContain("pg_roles");
+    expect(ROLE_GUARD_SQL).toContain(`'${APP_ROLE}', '${LOGIN_ROLE}'`);
+    expect(POLICY_GUARD_SQL).toContain("pg_policies");
+    expect(POLICY_GUARD_SQL).toContain("schemaname = 'public'");
+  });
+
+  it("(a) role: myhelper_app bez atrybutów → OK; brak roli logowania przed P6 to nie błąd", () => {
+    expect(checkRoles([{ role: APP_ROLE, super: false, bypass: false }])).toEqual([]);
+    expect(checkRoles([{ role: APP_ROLE, super: false, bypass: false }, { role: LOGIN_ROLE, super: false, bypass: false }])).toEqual([]);
+  });
+
+  it.each([
+    ["brak myhelper_app", [], ["brak roli myhelper_app"]],
+    ["BYPASSRLS na myhelper_app", [{ role: APP_ROLE, super: false, bypass: true }], ["rola myhelper_app ma BYPASSRLS"]],
+    ["SUPERUSER na myhelper_app", [{ role: APP_ROLE, super: true, bypass: false }], ["rola myhelper_app ma SUPERUSER"]],
+    [
+      "rola logowania z BYPASSRLS",
+      [{ role: APP_ROLE, super: false, bypass: false }, { role: LOGIN_ROLE, super: false, bypass: true }],
+      ["rola myhelper_app_login ma BYPASSRLS"],
+    ],
+  ])("(a) %s → odmowa", (_n, rows, expected) => {
+    expect(checkRoles(rows as RoleRow[])).toEqual(expected);
+  });
+
+  it("(b) migawka: posortowana, białe znaki znormalizowane, skrót z pól; ta sama baza → zgodna", () => {
+    expect(SNAP.map((r) => `${r.table}.${r.name}`)).toEqual(["clients.tenant_isolation", "salons.tenant_self", "time_blocks.tenant_isolation"]);
+    expect(SNAP[2]!.qual).not.toMatch(/\n|  /);
+    for (const e of SNAP) expect(e.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(checkPolicySnapshot(ROWS, SNAP)).toEqual([]);
+    expect(checkPolicySnapshot([...ROWS].reverse(), SNAP)).toEqual([]);
+  });
+
+  it.each([
+    ["USING (true) pod tą samą nazwą", (r: PolicyRow[]) => r.map((x) => (x.table === "clients" ? { ...x, qual: "true" } : x)), ["clients.tenant_isolation: treść polityki różni się od migawki"]],
+    ["inne role", (r: PolicyRow[]) => r.map((x) => (x.table === "clients" ? { ...x, roles: ["myhelper_app"] } : x)), ["clients.tenant_isolation: treść polityki różni się od migawki"]],
+    ["RESTRICTIVE", (r: PolicyRow[]) => r.map((x) => (x.table === "clients" ? { ...x, permissive: "RESTRICTIVE" } : x)), ["clients.tenant_isolation: treść polityki różni się od migawki"]],
+    ["polityka usunięta", (r: PolicyRow[]) => r.filter((x) => x.table !== "salons"), ["salons.tenant_self: polityka z migawki nie istnieje w bazie"]],
+    ["polityka spoza migawki", (r: PolicyRow[]) => [...r, { ...direct("clients"), name: "extra" }], ["clients.extra: polityka spoza migawki"]],
+  ])("(b) baza różna od migawki (%s) → odmowa", (_n, mutate, expected) => {
+    expect(checkPolicySnapshot(mutate(ROWS), SNAP)).toEqual(expected);
+  });
+
+  it("(b) migawka z ręcznie poprawioną treścią bez nowego skrótu → odmowa; pusta migawka → odmowa", () => {
+    const edited = SNAP.map((e) => (e.table === "clients" ? { ...e, qual: "true" } : e));
+    expect(checkPolicySnapshot(ROWS, edited)).toEqual(["clients.tenant_isolation: treść polityki różni się od migawki"]);
+    expect(checkPolicySnapshot(ROWS, [])).toEqual([`pusta migawka ${POLICY_SNAPSHOT_FILE}`]);
+  });
+
+  it("(c) semantyka: bezpośrednia, przez rodzica (EXISTS) i tenant_self → bez naruszeń", () => {
+    expect(checkPolicySemantics(ROWS)).toEqual([]);
+  });
+
+  it.each([
+    ["USING (true)", { qual: "true" }, ["clients.tenant_isolation: USING jest stałą true"]],
+    ["polityka DELETE z USING (true)", { cmd: "DELETE", qual: "true", withCheck: null }, ["clients.tenant_isolation: USING jest stałą true"]],
+    ["WITH CHECK (true)", { withCheck: "true" }, ["clients.tenant_isolation: WITH CHECK jest stałą true"]],
+    [
+      "odwołanie do innej zmiennej",
+      { qual: "(salon_id = (current_setting('app.current_user_id'::text, true))::uuid)", withCheck: "(salon_id = (current_setting('app.current_user_id'::text, true))::uuid)" },
+      ["clients.tenant_isolation: USING bez odwołania do app.current_salon_id", "clients.tenant_isolation: WITH CHECK bez odwołania do app.current_salon_id"],
+    ],
+    ["WITH CHECK bez kontekstu przy USING z kontekstem", { withCheck: "(salon_id IS NOT NULL)" }, ["clients.tenant_isolation: WITH CHECK bez odwołania do app.current_salon_id"]],
+    ["brak USING przy ALL", { qual: null }, ["clients.tenant_isolation: USING bez odwołania do app.current_salon_id"]],
+    [
+      "kontekst bez nullif (postać sprzed 0010)",
+      { qual: "(salon_id = (current_setting('app.current_salon_id'::text, true))::uuid)", withCheck: "(salon_id = (current_setting('app.current_salon_id'::text, true))::uuid)" },
+      ["clients.tenant_isolation: USING czyta app.current_salon_id bez nullif", "clients.tenant_isolation: WITH CHECK czyta app.current_salon_id bez nullif"],
+    ],
+    [
+      "nullif tylko w jednym z dwóch odczytów (EXISTS z drugim odczytem)",
+      { qual: `(EXISTS ( SELECT 1 FROM employees p WHERE ((p.salon_id = ${CTX}) OR (p.salon_id = (current_setting('app.current_salon_id'::text, true))::uuid))))` },
+      ["clients.tenant_isolation: USING czyta app.current_salon_id bez nullif"],
+    ],
+  ])("(c) %s → naruszenie semantyki", (_n, patch, expected) => {
+    expect(checkPolicySemantics([{ ...direct("clients"), ...patch }])).toEqual(expected);
+  });
+
+  it("(c) polityka INSERT ocenia tylko WITH CHECK, SELECT tylko USING; polityki spoza tenant_* poza semantyką (pilnuje ich migawka)", () => {
+    expect(checkPolicySemantics([{ ...direct("clients"), cmd: "INSERT", qual: null }])).toEqual([]);
+    expect(checkPolicySemantics([{ ...direct("clients"), cmd: "SELECT", withCheck: null }])).toEqual([]);
+    expect(checkPolicySemantics([{ ...direct("clients"), name: "inna", qual: "true" }])).toEqual([]);
+  });
+
+  it("runPolicyGuard: role + migawka + semantyka; wartość atrybutu inna niż false liczy się jako nadany", async () => {
+    const unsafe = vi.fn(async (q: string) =>
+      q === ROLE_GUARD_SQL ? [{ role: APP_ROLE, super: false, bypass: false }] : ROWS.map((r) => ({ ...r })),
+    );
+    expect(await runPolicyGuard({ unsafe }, SNAP)).toEqual({ ok: true, policies: 3 });
+    expect(unsafe.mock.calls).toEqual([[ROLE_GUARD_SQL], [POLICY_GUARD_SQL]]);
+    const odd = vi.fn(async (q: string) => (q === ROLE_GUARD_SQL ? [{ role: APP_ROLE, super: "f", bypass: null }] : ROWS));
+    const r = await runPolicyGuard({ unsafe: odd }, SNAP);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.problems).toEqual(["rola myhelper_app ma SUPERUSER", "rola myhelper_app ma BYPASSRLS"]);
+      expect(r.message).toContain(POLICY_SNAPSHOT_FILE);
+    }
+  });
+
+  it("migawka w repo: istnieje, niepusta, każda pozycja ze zgodnym skrótem i semantyką", () => {
+    const snap = loadPolicySnapshot();
+    expect(snap.length).toBeGreaterThanOrEqual(39);
+    for (const e of snap) expect(e.sha256).toBe(policyHash(e));
+    expect(checkPolicySemantics(snap)).toEqual([]);
   });
 });
 

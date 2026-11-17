@@ -1,0 +1,470 @@
+[
+  {
+    "table": "ai_conversations",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "8f49385013b386edeeebf56cfb8ee76cb5b19ff709c79dfba81a5a78504b2a62"
+  },
+  {
+    "table": "ai_generated_media",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "44b102bf54af4d48865e5623e425f829d3472bdcc9e3c3fbd347dbc27ea1fa65"
+  },
+  {
+    "table": "albums",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "aef40d884784ebf1f3c88d2a0bc64d4385bd94e17c6f08edc7c2ba4d837c2f8e"
+  },
+  {
+    "table": "appointment_materials",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM appointments p WHERE ((p.id = appointment_materials.appointment_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM appointments p WHERE ((p.id = appointment_materials.appointment_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "f13f26e6a9e56f8ae949cd2ea3466bdf0085b8976a3a52bab15646c8bb9207b3"
+  },
+  {
+    "table": "appointments",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "851bd633010a641b94d20b2475e5ebb55986e125afe91609fb7bbf7fe9b7b15b"
+  },
+  {
+    "table": "clients",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "326f779089ff6c4293d8fe63d0d7a65f9f2c1791d64158a09a58901ddd1e09c7"
+  },
+  {
+    "table": "deposit_payments",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "003bf74c64caf33053fd877a944187875dc6ccaf93ac202f54bc7e4f04ace9eb"
+  },
+  {
+    "table": "employee_commissions",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM employees p WHERE ((p.id = employee_commissions.employee_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM employees p WHERE ((p.id = employee_commissions.employee_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "3aa57357009873c22f47d9704d6a2e07bee7292d0b64d0d0262eb85e8acfa8a9"
+  },
+  {
+    "table": "employee_service_prices",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM employees p WHERE ((p.id = employee_service_prices.employee_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM employees p WHERE ((p.id = employee_service_prices.employee_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "6bf7115e5f7f32188a2fd8fef455938cf079edaef004ffee0fda68162c2f681a"
+  },
+  {
+    "table": "employee_services",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM employees p WHERE ((p.id = employee_services.employee_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM employees p WHERE ((p.id = employee_services.employee_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "cd37646f96181135ffcda39e376c78fa393b2e8c1175d2668487091870cc9ede"
+  },
+  {
+    "table": "employees",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "dde351939fbab16b01b1205759135428870ff40d48842eba33a2f66dff558a56"
+  },
+  {
+    "table": "favorite_salons",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "f97ab891f933bacdbf55b4ffc98456480dadf2710028bdb4c0225a5c30eb5c0d"
+  },
+  {
+    "table": "fiscal_receipts",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "3247e701d7a70461fac793b758de07099fad2927d0abc45f89913dc542123d5d"
+  },
+  {
+    "table": "gallery_photos",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "df4fd35b104879f8064463df7ad53dde56a8c756faf81e260423a488b184c9b7"
+  },
+  {
+    "table": "invoices",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "41e9594b194b65ecff6107cac351c938f6b1b4636402d31f09196149d00472ff"
+  },
+  {
+    "table": "loyalty_points",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "d233a58372106bddca6d342860a2b867a09c2512a58ebb616716a3b84ceffb22"
+  },
+  {
+    "table": "loyalty_transactions",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM loyalty_points p WHERE ((p.id = loyalty_transactions.loyalty_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM loyalty_points p WHERE ((p.id = loyalty_transactions.loyalty_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "0eba09eaa42737ccfc635f0f5f325b58485d7e5a54f437f80f7e81910dfe824d"
+  },
+  {
+    "table": "marketing_consents",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "6bef49ca570b256e87aa41206887776112c02ceca761810d13d8f3a41d96e97c"
+  },
+  {
+    "table": "newsletters",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "1bed60eb423c9c415a16f62c0880b74506ab24f6e2782437dc840e73dbc45cc5"
+  },
+  {
+    "table": "notifications",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "9939bac6072c0abedbd32144e7bd712dc3fb68416b09af63e30071d993514ee0"
+  },
+  {
+    "table": "photo_albums",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM gallery_photos p WHERE ((p.id = photo_albums.photo_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM gallery_photos p WHERE ((p.id = photo_albums.photo_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "0235453f7bbeda6a41e2f373c8cd9d37e5e972e0d78d6ca4c2a6df47494cbc22"
+  },
+  {
+    "table": "product_categories",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "a2e51d0b9f52bfedba002786db719c2d5e7f90ca0e4551ece0c4d9b9943332f3"
+  },
+  {
+    "table": "product_usage",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM products p WHERE ((p.id = product_usage.product_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM products p WHERE ((p.id = product_usage.product_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "2afe787c81f1d74f28d3ab118b142a70c6f0faf1137d3dc5faf221612b9a415e"
+  },
+  {
+    "table": "products",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "9602557921808f11c6b50f71be3e13df76cd0ea4c7d580e249c281243d43e33e"
+  },
+  {
+    "table": "promo_codes",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "40601c6a957206908204bf74741ff905b3b8a6067062280a03bf413ddb94a4f3"
+  },
+  {
+    "table": "promotions",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "075ff0f143cf2462041ca22c8b3553d428b781c758e69a99612ac414998e19e4"
+  },
+  {
+    "table": "reviews",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "f94e3b2257cea82c19339767017a9d3dc87b56b0644061540d3b476ee9723fa1"
+  },
+  {
+    "table": "salon_subscriptions",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "56a980c30f5f0cfddbad269ad40cb838fe7ec2b593c3bbab2683cadd094c0e90"
+  },
+  {
+    "table": "salons",
+    "name": "tenant_self",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "9fd503dd5c2d5a7ee36b118522b4342a84664f3362bafa7452e2d6c72b16b39e"
+  },
+  {
+    "table": "scheduled_posts",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "0d89bba7a1fa723200599eb9476c258ee0092f7fc39413e8176a18a198b001b3"
+  },
+  {
+    "table": "service_categories",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "e240e0e3e653c47c2ef3b7ec8dd5bd8310cbe88001f85a1fea28e9d231dffb4a"
+  },
+  {
+    "table": "service_products",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM services p WHERE ((p.id = service_products.service_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM services p WHERE ((p.id = service_products.service_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "b1a5f1445820252f58c4aefd060c4e6bcd74b14e00e11af81269a492e43a2eef"
+  },
+  {
+    "table": "service_variants",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM services p WHERE ((p.id = service_variants.service_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM services p WHERE ((p.id = service_variants.service_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "ae577d82f86b5397902a2449c46379cd9d2d6754a34824496bd31e4c516d1910"
+  },
+  {
+    "table": "services",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "13ffaa684b97e9aeece4100845843b92cc1d3ecdd063bba2010c874baf96462d"
+  },
+  {
+    "table": "subscription_payments",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "f0f391f3d3338f524b3850f659828d4a1865a2ac66f925c64843d2d82ca15f70"
+  },
+  {
+    "table": "time_blocks",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM employees p WHERE ((p.id = time_blocks.employee_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM employees p WHERE ((p.id = time_blocks.employee_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "72deb8bb65de69217bdfad2642205a28591c643e5e2421a6f6e19342b9e2e0c8"
+  },
+  {
+    "table": "treatment_history",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM appointments p WHERE ((p.id = treatment_history.appointment_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM appointments p WHERE ((p.id = treatment_history.appointment_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "1661b0c5c41ef13af55c46deb3d60820e70b7735424e3232f22ab0d63cf5aec2"
+  },
+  {
+    "table": "waiting_list",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "a70bc7580317ab86ccba63f155eef8ab4b4f0a9146c739ed88e66a26cd4968f0"
+  },
+  {
+    "table": "work_schedules",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(EXISTS ( SELECT 1 FROM employees p WHERE ((p.id = work_schedules.employee_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "withCheck": "(EXISTS ( SELECT 1 FROM employees p WHERE ((p.id = work_schedules.employee_id) AND (p.salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid))))",
+    "sha256": "ae73620fcbee72aff8e12654f92df31afc3ffb3f34267551883c5a7f6a2ea54b"
+  }
+]

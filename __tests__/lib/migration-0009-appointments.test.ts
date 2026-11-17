@@ -25,22 +25,24 @@ const exclude = statements.find((s) => s.includes("EXCLUDE"));
 
 describe("migracja 0009 — dziennik i snapshot", () => {
   const journal = json("meta/_journal.json") as { entries: { idx: number; tag: string; when: number }[] };
+  const entry = journal.entries.find((e) => e.idx === 9);
+  const prev = journal.entries.find((e) => e.idx === 8);
   const last = journal.entries.at(-1)!;
-  const prev = journal.entries.at(-2)!;
 
-  it("ostatni wpis dziennika to 0009, plik istnieje, `when` rośnie", () => {
-    expect(last).toMatchObject({ idx: 9, tag: TAG });
+  it("wpis dziennika o idx 9 to 0009, plik istnieje, `when` rośnie", () => {
+    expect(entry).toMatchObject({ idx: 9, tag: TAG });
     expect(existsSync(path.join(DRIZZLE, `${TAG}.sql`))).toBe(true);
-    expect(last.when).toBeGreaterThan(prev.when);
+    expect(entry!.when).toBeGreaterThan(prev!.when);
   });
 
   it("snapshot 0009 następuje po 0008", () => {
     expect(json("meta/0009_snapshot.json").prevId).toBe(json("meta/0008_snapshot.json").id);
   });
 
-  it("schemat == snapshot 0009 (żadnej zmiany schematu bez migracji)", () => {
+  it("schemat == snapshot ostatniego wpisu dziennika (żadnej zmiany schematu bez migracji)", () => {
     const fromSchema = generateDrizzleJson(schema as Record<string, unknown>) as { tables: unknown };
-    expect(fromSchema.tables).toEqual(json("meta/0009_snapshot.json").tables);
+    const lastSnapshot = `meta/${String(last.idx).padStart(4, "0")}_snapshot.json`;
+    expect(fromSchema.tables).toEqual(json(lastSnapshot).tables);
   });
 
   it("CHECK w SQL to dokładnie to, co drizzle-kit generuje z różnicy 0008 → 0009", async () => {
