@@ -1,7 +1,6 @@
 /**
  * `subscriptions/downgrade` (POST, DELETE) i `subscriptions/expiration-warning`
- * (POST) — odczyt „active” i zapis pod blokadą salonu (T3b; Ethan,
- * `scratchpad/ethan/pr62-shape.md` §1 „Poza tym PR, ale to ten sam wyścig”).
+ * (POST) — odczyt „active” i zapis pod blokadą salonu (T3b).
  *
  * Bez blokady zapis trasy mógł się przepleść z webhookiem, który w tym czasie
  * zmienia stan tej subskrypcji (utrata zapisu / decyzja na nieaktualnym

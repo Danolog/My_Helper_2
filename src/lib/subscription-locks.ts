@@ -5,7 +5,7 @@ import type Stripe from "stripe";
 
 /**
  * Blokady subskrypcji salonu (T3, ostrzeżenia [MEDIUM] #2 TOCTOU i #3
- * „zdarzenie przed wierszem”, kształt: Ethan, `scratchpad/ethan/pr62-shape.md`).
+ * „zdarzenie przed wierszem”).
  *
  * Dwie przestrzenie `pg_advisory_xact_lock(<przestrzeń>, hashtext(id))`, obie
  * tylko w wersji `xact` (zwalniane przy COMMIT/ROLLBACK, działają przez pooler

@@ -8,7 +8,7 @@
  *    bez wartości i bez skrótu — sprawdzane PRZED pierwszym /api/health;
  *  - kontrola W1: losowa wartość + jednorazowa baza w sieci --internal → 200;
  *  - bez bazy i bez K_SERVICE → 503 (dotychczasowy przypadek).
- * Mutacje (wynik w PR): scratchpad/eva/k1b-mut.py.
+ * Mutacje: wynik w opisie PR.
  */
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";

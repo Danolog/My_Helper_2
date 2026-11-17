@@ -1,6 +1,6 @@
 /**
  * Niezmiennik, na którym stoi „brak wiersza pod blokadą → 2xx + warn” w
- * webhooku (T3, ostrzeżenie #3; Ethan, `scratchpad/ethan/pr62-shape.md`):
+ * webhooku (T3, ostrzeżenie #3):
  *
  *   jedyna ścieżka zapisująca `salon_subscriptions.stripe_subscription_id`
  *   to confirm (`src/lib/subscription-confirmation.ts`), który czyta Stripe
