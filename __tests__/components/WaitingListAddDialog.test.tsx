@@ -63,7 +63,7 @@ vi.mock("@/components/ui/select", () => ({
 const CHECKBOX_LABEL =
   "Klient sam poprosił o zapis na listę oczekujących i zgadza się na wiadomość o zwolnionym terminie.";
 const CONFIRM_MESSAGE = "Potwierdź, że klient sam poprosił o zapis na listę oczekujących.";
-const DIALOG_DESCRIPTION = "Klient dostanie SMS lub powiadomienie, gdy zwolni się pasujący termin.";
+const DIALOG_DESCRIPTION = "Klient zostanie powiadomiony gdy zwolni sie termin.";
 
 const CLIENT_ID = "11111111-1111-4111-8111-111111111111";
 const SERVICE_ID = "22222222-2222-4222-8222-222222222222";
@@ -130,7 +130,7 @@ describe("Lista oczekujących — okno dodawania wpisu", () => {
     vi.clearAllMocks();
   });
 
-  it("pokazuje niezaznaczone pole potwierdzenia z dokładną etykietą i nowy opis okna", async () => {
+  it("pokazuje niezaznaczone pole potwierdzenia z dokładną etykietą i opis okna", async () => {
     const user = userEvent.setup();
     render(<WaitingListPage />);
     const dialog = await openDialog(user);
