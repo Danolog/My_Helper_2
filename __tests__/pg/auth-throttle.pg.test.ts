@@ -237,14 +237,53 @@ suite("auth_rate_limit na prawdziwej bazie", () => {
       ).toEqual(expect.arrayContaining(["DELETE", "INSERT", "SELECT", "UPDATE"]));
     };
 
+    /**
+     * Warunek wstępny (#193): tabela należy do roli połączenia testu — tej, której
+     * dotyczy reguła domyślnych uprawnień. Inaczej reguła nie objęłaby tabeli i brak
+     * uprawnień też niczego nie dowodzi o REVOKE.
+     */
+    const expectTableOwnedByDefaultAclRole = async () => {
+      const rows = (await h!.observer.unsafe(
+        "SELECT pg_get_userbyid(relowner) = current_user AS ok FROM pg_class WHERE oid = 'public.auth_rate_limit'::regclass",
+      )) as unknown as Array<{ ok: boolean }>;
+      expect(rows[0]!.ok, "tabela nie należy do roli z regułą domyślną — test nie dowodzi REVOKE (#193)").toBe(true);
+    };
+
     it.each([["SELECT"], ["INSERT"], ["UPDATE"], ["DELETE"], ["TRUNCATE"], ["REFERENCES"], ["TRIGGER"]])(
       "rola żądań myhelper_app nie ma %s (wprost, przez PUBLIC ani członkostwo)",
       async (priv) => {
         await expectDefaultAclForRequestRole();
+        await expectTableOwnedByDefaultAclRole();
         const rows = (await h!.observer.unsafe(
           `SELECT has_table_privilege('myhelper_app', 'public.auth_rate_limit', '${priv}') AS ok`,
         )) as unknown as Array<{ ok: boolean }>;
         expect(rows[0]!.ok).toBe(false);
+      },
+    );
+
+    /** Polecenia wykonywane w wycofywanej transakcji przed odczytem praw kolumnowych (kontrola: pusto). */
+    const COLUMN_PROBE_SETUP: string[] = [];
+    class Rollback extends Error {}
+
+    it.each([["SELECT"], ["INSERT"], ["UPDATE"], ["REFERENCES"]])(
+      "rola żądań myhelper_app nie ma prawa kolumnowego %s do żadnej kolumny",
+      async (priv) => {
+        await expectDefaultAclForRequestRole();
+        await expectTableOwnedByDefaultAclRole();
+        let ok: boolean | undefined;
+        await h!.observer
+          .begin(async (tx) => {
+            for (const stmt of COLUMN_PROBE_SETUP) await tx.unsafe(stmt);
+            const rows = (await tx.unsafe(
+              `SELECT has_any_column_privilege('myhelper_app', 'public.auth_rate_limit', '${priv}') AS ok`,
+            )) as unknown as Array<{ ok: boolean }>;
+            ok = rows[0]!.ok;
+            throw new Rollback();
+          })
+          .catch((e: unknown) => {
+            if (!(e instanceof Rollback)) throw e;
+          });
+        expect(ok).toBe(false);
       },
     );
 
