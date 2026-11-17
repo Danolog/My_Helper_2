@@ -429,12 +429,15 @@ describe("wyjścia przypomnień: log wizyt pominiętych przez warunek salonu", (
       expect(typeof msg).toBe("string");
       expect(ctx).toStrictEqual({ reminder: kind });
 
+      // Linia o nieudanym zliczeniu: bez danych wizyty i bez parametrów zapytania.
       const warned = JSON.stringify(h.warn.mock.calls);
-      for (const v of ["appt-1", "c-1", "e-1", "s-1", "user-1", SALON_A, "Ala", "Nowak", "Ewa", "Kowal", "+48500100200", "Salon A"]) {
+      const forbidden = ["appt-1", "c-1", "e-1", "s-1", "user-1", SALON_A, "Ala", "Nowak", "Ewa", "Kowal", "+48500100200", "Salon A"];
+      for (const v of [...forbidden, ...cnt!.params.map(String)]) {
         expect(warned, v).not.toContain(v);
       }
+      // Treść błędu (SQL i parametry) nie trafia do logu na żadnym poziomie.
       const allLogs = JSON.stringify([h.debug, h.info, h.warn, h.error].map((f) => f.mock.calls));
-      for (const v of ["zapytanie nieudane", "select count", ...cnt!.params.map(String)]) {
+      for (const v of ["zapytanie nieudane", "select count"]) {
         expect(allLogs, v).not.toContain(v);
       }
     }

@@ -113,18 +113,29 @@ type SkippedReminderKind = CronReminderKind | "sms24h";
  *
  * Wynik zliczenia jest sprawdzany jawnie: log idzie tylko, gdy to skończona
  * liczba całkowita > 0. Brak wiersza, `null`, tekst albo `NaN` → brak linii.
+ *
+ * Zliczenie jest wyłącznie diagnostyczne: jego błąd jest przechwycony tutaj,
+ * a wybór, wysyłka i oznaczenie idą dalej. Wtedy jedna linia warn z samym
+ * rodzajem przypomnienia — bez obiektu i komunikatu błędu (mogą zawierać
+ * treść i parametry zapytania).
  */
 async function warnSkippedOutsideSalon(
   kind: SkippedReminderKind,
   due: SQL | undefined,
   mismatch: SQL | undefined
 ): Promise<void> {
-  const rows = await dbSystem
-    .select({ n: count() })
-    .from(appointments)
-    .leftJoin(clients, eq(appointments.clientId, clients.id))
-    .leftJoin(employees, eq(appointments.employeeId, employees.id))
-    .where(and(due, mismatch));
+  let rows: Array<{ n: number }>;
+  try {
+    rows = await dbSystem
+      .select({ n: count() })
+      .from(appointments)
+      .leftJoin(clients, eq(appointments.clientId, clients.id))
+      .leftJoin(employees, eq(appointments.employeeId, employees.id))
+      .where(and(due, mismatch));
+  } catch {
+    logger.warn("Przypomnienia: zliczenie pominiętych nieudane", { reminder: kind });
+    return;
+  }
   const n: unknown = rows[0]?.n;
   if (typeof n !== "number" || !Number.isSafeInteger(n) || n <= 0) return;
   logger.warn("Przypomnienia pominięte: dane wizyty spoza jej salonu", { reminder: kind, skipped: n });
