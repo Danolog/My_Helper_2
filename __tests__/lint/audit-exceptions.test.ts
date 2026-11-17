@@ -12,8 +12,13 @@
  *  4. Brak wpisów `"//"` o `ignoreGhsas` bez pozycji na liście.
  *  5. `pnpm.auditConfig` nie ma innych kluczy niż `ignoreGhsas`.
  *  6. Kod aplikacji (`src/**`, `next.config.ts`) nie importuje bibliotek
- *     dopasowujących wzorce glob — wyjątek GHSA-fc5q-39xc-vjpf (picomatch)
- *     zakłada, że pakiet działa tylko w narzędziach (lint, testy).
+ *     dopasowujących wzorce glob, także kopii wbudowanej w Next — wyjątek
+ *     GHSA-fc5q-39xc-vjpf (picomatch) zakłada, że pakiet z drzewa zależności
+ *     działa tylko w narzędziach (lint, testy).
+ *  7. Wzorce `hostname` i `pathname` w `next.config.ts` nie zawierają extglob.
+ *     Next dopasowuje adresy obrazów do `images.remotePatterns` własną kopią
+ *     biblioteki; ostrzeżenie dotyczy wzorców extglob, więc wyjątek zakłada,
+ *     że takich wzorców nie ma.
  * Testy kontrolne niżej pokazują, że każda reguła łapie podrzucone naruszenie.
  */
 import fs from "node:fs";
@@ -107,17 +112,30 @@ export function findAuditExceptionViolations(pkg: unknown, expected: string[], t
 }
 
 const GLOB_IMPORT = new RegExp(
-  String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)["'](${GLOB_LIBS.map((l) => l.replace(/[-]/g, "\\-")).join("|")})(?:/[^"']*)?["']`,
+  String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)["'](?:next/dist/compiled/)?(${GLOB_LIBS.map((l) => l.replace(/[-]/g, "\\-")).join("|")})(?:/[^"']*)?["']`,
   "g"
 );
 
-/** Reguła 6: import statyczny, dynamiczny i require bibliotek glob. */
+/** Reguła 6: import statyczny, dynamiczny i require bibliotek glob (także `next/dist/compiled/<nazwa>`). */
 export function findGlobImports(files: Record<string, string>): string[] {
   const out: string[] = [];
   for (const [file, src] of Object.entries(files)) {
     for (const m of src.matchAll(GLOB_IMPORT)) out.push(`${file}: import ${m[1]}`);
   }
   return out;
+}
+
+const PATTERN_LINE = /\b(hostname|pathname)\s*:\s*(.+)$/;
+const EXTGLOB = /[+*?@!]\(/;
+
+/** Reguła 7: wiersze `hostname:` / `pathname:` z konfiguracji i te z nich, które zawierają extglob. */
+export function findImagePatterns(configSource: string): { all: string[]; extglob: string[] } {
+  const all = configSource
+    .split(/\r?\n/)
+    .map((line) => PATTERN_LINE.exec(line))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => `${m[1]}: ${m[2]!.trim()}`);
+  return { all, extglob: all.filter((entry) => EXTGLOB.test(entry)) };
 }
 
 function walk(dir: string): string[] {
@@ -163,6 +181,12 @@ describe("#260 strażnik: wyjątki audytu zależności", () => {
     const sources = readSources();
     expect(Object.keys(sources)).toContain("src/lib/utils.ts");
     expect(findGlobImports(sources)).toEqual([]);
+  });
+
+  it("wzorce obrazów w next.config.ts nie zawierają extglob", () => {
+    const { all, extglob } = findImagePatterns(fs.readFileSync(path.join(ROOT, "next.config.ts"), "utf8"));
+    expect(all.length).toBeGreaterThan(0);
+    expect(extglob).toEqual([]);
   });
 });
 
@@ -247,6 +271,7 @@ describe("#260 strażnik — testy kontrolne (podrzucone naruszenia są łapane)
       "src/lib/b.ts": "const m = await import('micromatch');",
       "src/lib/c.ts": 'const g = require("fast-glob");',
       "src/lib/d.tsx": 'import { glob } from "glob/sync";\nimport "tinyglobby";\nexport { minimatch } from "minimatch";',
+      "src/lib/e.ts": 'import pm from "next/dist/compiled/picomatch";',
       "next.config.ts": 'import globby from "globby";\nimport x from "./glob";',
     });
     expect(v).toEqual([
@@ -256,6 +281,22 @@ describe("#260 strażnik — testy kontrolne (podrzucone naruszenia są łapane)
       "src/lib/d.tsx: import glob",
       "src/lib/d.tsx: import tinyglobby",
       "src/lib/d.tsx: import minimatch",
+      "src/lib/e.ts: import picomatch",
     ]);
+  });
+
+  it("podrzucony wzorzec extglob w hostname i pathname; zwykłe wzorce i inne wiersze bez zarzutu", () => {
+    const { all, extglob } = findImagePatterns(
+      [
+        '        hostname: "*.example.com",',
+        '        hostname: "+(a|b).example.com",',
+        "        pathname: `/${bucket}/**`,",
+        '        pathname: "/img/!(private)/**",',
+        '        source: "/(.*)",',
+        "  if (!(target)) return;",
+      ].join("\n")
+    );
+    expect(all).toHaveLength(4);
+    expect(extglob).toEqual(['hostname: "+(a|b).example.com",', 'pathname: "/img/!(private)/**",']);
   });
 });
