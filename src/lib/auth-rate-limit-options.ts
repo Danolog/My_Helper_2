@@ -5,15 +5,15 @@
  * - `memory`: pusty fragment. Konfiguracja biblioteki bez zmian (magazyn
  *   w pamięci procesu, `rateLimit.enabled` domyślne = tylko produkcja).
  * - `database`:
- *   - `rateLimit.enabled: true` niezależnie od NODE_ENV — start poza produkcją
- *     (np. inny hosting) nie może po cichu wyłączyć limitu przy włączonym
- *     przełączniku. Flaga jest ustawiana WYŁĄCZNIE tutaj;
+ *   - `rateLimit.enabled: true` niezależnie od NODE_ENV — przy włączonym
+ *     przełączniku limit działa w każdym środowisku. Flaga jest ustawiana
+ *     WYŁĄCZNIE tutaj;
  *   - `rateLimit.customStorage` = licznik adresu w bazie (wyjście systemowe);
  *   - hooki limitu na konto dla `/sign-in/email` (działają niezależnie od flagi):
  *     `before` rezerwuje próbę przed sprawdzeniem hasła, `after` zeruje licznik
  *     po sukcesie 2xx i po odmowie „e-mail niezweryfikowany" (hasło było poprawne).
- *     Każda inna odpowiedź (401, 400) zostaje w liczniku — nigdy nie zerować
- *     po 400, bo źle sformatowane żądanie kasowałoby własne porażki;
+ *     Każda inna odpowiedź (401, 400) zostaje w liczniku — zerowanie tylko
+ *     po pozytywnie rozpoznanym wyniku;
  *   - `onPasswordReset` zeruje licznik konta po udanym resecie hasła.
  *   Brak `BETTER_AUTH_SECRET` → błąd przy starcie (klucze liczników to HMAC z sekretu).
  *

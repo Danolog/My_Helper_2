@@ -88,10 +88,9 @@ let callsSinceSweep = 0;
  * a pełny przebieg mapy idzie co MEMORY_SWEEP_EVERY wywołań albo gdy mapa przekroczy
  * MEMORY_MAX_ENTRIES — nie przy każdym żądaniu (odczyt sesji to najczęstsze żądanie).
  *
- * Po przekroczeniu limitu wypierane są najdawniej dodane klucze. Zalew żądań z wielu
- * różnych adresów może więc wyzerować czyjś licznik — dotyczy to WYŁĄCZNIE ścieżek
- * z zamkniętej listy pamięci (np. odczyt sesji); pozostałe ścieżki i licznik konta liczy baza.
- * Ocena, czy to wystarcza: CTO (przegląd tego PR).
+ * Po przekroczeniu MEMORY_MAX_ENTRIES wypierane są najdawniej dodane klucze. Licznik
+ * w pamięci obejmuje wyłącznie zamkniętą listę ścieżek; pozostałe ścieżki i licznik
+ * konta liczy baza.
  */
 function pruneMemory(now: number): void {
   if (++callsSinceSweep < MEMORY_SWEEP_EVERY && memory.size <= MEMORY_MAX_ENTRIES) return;
