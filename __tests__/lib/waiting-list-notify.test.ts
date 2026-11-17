@@ -20,6 +20,7 @@ vi.mock("drizzle-orm", () => ({
   or: (): Cond => ({ kind: "other" }),
   not: (): Cond => ({ kind: "other" }),
   isNull: (): Cond => ({ kind: "other" }),
+  isNotNull: (): Cond => ({ kind: "other" }),
 }));
 
 vi.mock("@/lib/schema", () => {

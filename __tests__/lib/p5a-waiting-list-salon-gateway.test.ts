@@ -448,6 +448,27 @@ describe("jawny warunek salonu w każdym zapytaniu raw (kontrakt repository.ts)"
     expect(salonCond(entriesRead, "waiting_list", SALON_A), "odczyt wpisów").toBe(true);
     expect(joinSalonCond(entriesRead, "clients", SALON_A), "złączenie klientów").toBe(true);
   });
+
+  it("notify: odczyt wpisów tylko z potwierdzoną prośbą klienta (warunek w SQL zapytania)", async () => {
+    const entriesRead = createChainMock([]);
+    h.tx.select.mockReturnValueOnce(entriesRead);
+
+    await notifyWaitingList({
+      salonId: SALON_A,
+      serviceId: "service-A",
+      employeeId: "emp-A",
+      startTime: START,
+      endTime: END,
+      serviceName: "U",
+      employeeName: "E",
+      salonName: "S",
+    });
+
+    const w = (entriesRead.where as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+    expect(w, "warunek WHERE odczytu wpisów").toBeDefined();
+    expect(render(w).sql).toContain('"waiting_list"."client_request_confirmed_at" is not null');
+    expect(salonCond(entriesRead, "waiting_list", SALON_A), "odczyt wpisów").toBe(true);
+  });
 });
 
 /**

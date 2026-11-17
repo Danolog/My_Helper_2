@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { eq, and, isNull, or, not } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, or, not } from "drizzle-orm";
 import { appointmentConflictWhere, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
 import {
   checkBookingWithoutDeposit,
@@ -109,6 +109,8 @@ export async function notifyWaitingList(
 
     // Build conditions for matching waiting list entries:
     // - Same salon (required)
+    // - Wpis z potwierdzoną prośbą klienta (clientRequestConfirmedAt is not null);
+    //   wpis bez potwierdzenia nie jest powiadamiany, oznaczany ani liczony
     // - Not already notified (notifiedAt is null)
     // - Not already accepted or declined (accepted is null)
     // - Same service OR no service preference
@@ -141,6 +143,7 @@ export async function notifyWaitingList(
         .where(
           and(
             eq(waitingList.salonId, salonId),
+            isNotNull(waitingList.clientRequestConfirmedAt),
             isNull(waitingList.notifiedAt),
             isNull(waitingList.accepted),
             serviceCondition,
