@@ -41,11 +41,21 @@ const h = vi.hoisted(() => {
     /** Liczba zapytań w chwili każdego wywołania wysyłki. */
     queriesAtSend: [] as number[],
     warn: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    debug: vi.fn(),
+    /** Zapytanie puli systemowej pasujące do wzorca rzuca błąd z treścią SQL i parametrami. */
+    throwOn: null as RegExp | null,
   };
 });
 
 vi.mock("@/lib/logger", () => ({
-  logger: { debug: vi.fn(), info: vi.fn(), warn: (...a: unknown[]) => h.warn(...a), error: vi.fn() },
+  logger: {
+    debug: (...a: unknown[]) => h.debug(...a),
+    info: (...a: unknown[]) => h.info(...a),
+    warn: (...a: unknown[]) => h.warn(...a),
+    error: (...a: unknown[]) => h.error(...a),
+  },
 }));
 
 vi.mock("@/lib/db", () => ({ db: h.throwingPool("db") }));
@@ -68,6 +78,9 @@ vi.mock("@/lib/server/system/db-system", async () => {
   return {
     dbSystem: drizzle(async (sql: string, params: unknown[]) => {
       h.captured.push({ sql, params });
+      if (h.throwOn?.test(sql)) {
+        throw Object.assign(new Error(`zapytanie nieudane: ${sql} ${JSON.stringify(params)}`), { code: "57014" });
+      }
       const hit = h.rows.find(([re]) => re.test(sql));
       return { rows: hit ? hit[1] : [] };
     }),
@@ -113,6 +126,7 @@ beforeEach(() => {
   h.forSalonCalls.length = 0;
   h.queriesAtSend.length = 0;
   h.rows = [];
+  h.throwOn = null;
   h.sendSms.mockResolvedValue({ success: true });
   h.sendReminderSms.mockResolvedValue({ success: true });
   h.push1h.mockResolvedValue({ success: true, sent: 1 });
@@ -387,6 +401,44 @@ describe("wyjścia przypomnień: log wizyt pominiętych przez warunek salonu", (
       expect(h.warn, JSON.stringify(countRows)).not.toHaveBeenCalled();
     }
   });
+
+  const FAIL_CASES = [
+    ["push1h", () => push1h.POST(req("/api/cron/x", "POST")), pushRow, h.push1h, "reminder_push_1h_sent_at"],
+    ["push24h", () => push24h.POST(req("/api/cron/x", "POST")), pushRow, h.push24h, "reminder_push_sent_at"],
+    ["sms1h", () => smsReminders.POST(req("/api/cron/sms-reminders", "POST")), smsRow, h.sendReminderSms, "reminder_1h_sent_at"],
+    ["sms24h", () => reminders.POST(req("/api/reminders/appointment", "POST")), row24, h.sendSms, "reminder_sent_at"],
+  ] as const;
+
+  it.each(FAIL_CASES)(
+    "%s: zliczenie rzuca błąd → 200, wysyłka i oznaczenie wykonane, jedna linia logu tylko z rodzajem",
+    async (kind, call, mainRow, send, flag) => {
+      h.rows = withCount([[0]], mainRow);
+      h.throwOn = COUNT_RE;
+      const { status, body } = await parseResponse(await call());
+      expect(status, JSON.stringify(body)).toBe(200);
+      const cnt = h.captured.find((q) => COUNT_RE.test(q.sql));
+      expect(cnt, "brak zapytania zliczającego").toBeDefined();
+      expect(send).toHaveBeenCalledTimes(1);
+      const mark = h.captured.find((q) => q.sql.startsWith(`update "appointments" set "${flag}"`));
+      expect(mark, `brak oznaczenia ${flag}`).toBeDefined();
+      expect(mark!.params).toContain("appt-1");
+
+      expect(h.error).not.toHaveBeenCalled();
+      expect(h.warn).toHaveBeenCalledTimes(1);
+      const [msg, ctx] = h.warn.mock.calls[0]!;
+      expect(typeof msg).toBe("string");
+      expect(ctx).toStrictEqual({ reminder: kind });
+
+      const warned = JSON.stringify(h.warn.mock.calls);
+      for (const v of ["appt-1", "c-1", "e-1", "s-1", "user-1", SALON_A, "Ala", "Nowak", "Ewa", "Kowal", "+48500100200", "Salon A"]) {
+        expect(warned, v).not.toContain(v);
+      }
+      const allLogs = JSON.stringify([h.debug, h.info, h.warn, h.error].map((f) => f.mock.calls));
+      for (const v of ["zapytanie nieudane", "select count", ...cnt!.params.map(String)]) {
+        expect(allLogs, v).not.toContain(v);
+      }
+    }
+  );
 
   it("push1h/push24h/sms1h: liczone niezgodny klient LUB pracownik; sms24h: tylko niezgodny klient", async () => {
     h.rows = withCount([[0]], pushRow);
