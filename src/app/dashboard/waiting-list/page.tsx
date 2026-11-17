@@ -297,7 +297,7 @@ function WaitingListPageInner() {
             <DialogHeader>
               <DialogTitle>Dodaj klienta do listy oczekujacych</DialogTitle>
               <DialogDescription>
-                Klient zostanie powiadomiony gdy zwolni sie termin.
+                Klient dostanie SMS, gdy zwolni się pasujący termin, jeśli podasz jego numer telefonu.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
