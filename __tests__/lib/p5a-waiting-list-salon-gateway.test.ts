@@ -104,7 +104,7 @@ vi.mock("@/lib/push", () => ({
   },
 }));
 vi.mock("@/lib/sms", async (importOriginal) => ({
-  SMS_TIME_ZONE: (await importOriginal<typeof import("@/lib/sms")>()).SMS_TIME_ZONE,
+  ...(await importOriginal<typeof import("@/lib/sms")>()),
   sendSms: vi.fn(),
 }));
 vi.mock("@/lib/deposit-calculation", () => ({ calculateExpectedDeposit: (...a: unknown[]) => h.calc(...a) }));

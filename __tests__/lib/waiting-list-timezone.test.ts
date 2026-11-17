@@ -49,7 +49,6 @@ vi.mock("@/lib/deposit-guard", () => ({
 import { acceptEarlierSlot, notifyWaitingList } from "@/lib/waiting-list";
 
 const SALON = "salon-A";
-const APP_URL = "https://app.example";
 
 /**
  * Chwile w UTC i oczekiwany tekst w Warszawie:
@@ -59,19 +58,19 @@ const APP_URL = "https://app.example";
  * - granica doby: 22:30 UTC 15 lipca → w Warszawie czwartek 16 lipca, 00:30.
  */
 const CASES = [
-  { label: "lato", at: "2026-07-15T08:30:00Z", date: "środa, 15 lipca", time: "10:30", full: "15.07.2026, 10:30:00" },
-  { label: "zima", at: "2026-01-15T08:30:00Z", date: "czwartek, 15 stycznia", time: "09:30", full: "15.01.2026, 09:30:00" },
+  { label: "lato", at: "2026-07-15T08:30:00Z", date: "15 lipca", time: "10:30", full: "15.07.2026, 10:30:00" },
+  { label: "zima", at: "2026-01-15T08:30:00Z", date: "15 stycznia", time: "09:30", full: "15.01.2026, 09:30:00" },
   {
     label: "tuż po północy UTC",
     at: "2026-01-15T00:15:00Z",
-    date: "czwartek, 15 stycznia",
+    date: "15 stycznia",
     time: "01:15",
     full: "15.01.2026, 01:15:00",
   },
   {
     label: "granica doby (następny dzień w Warszawie)",
     at: "2026-07-15T22:30:00Z",
-    date: "czwartek, 16 lipca",
+    date: "16 lipca",
     time: "00:30",
     full: "16.07.2026, 00:30:00",
   },
@@ -91,8 +90,7 @@ beforeEach(() => {
   h.tx.update.mockReset();
   h.tx.update.mockReturnValue(createChainMock([]));
   vi.stubEnv("TZ", "UTC");
-  vi.stubEnv("NEXT_PUBLIC_APP_URL", APP_URL);
-  // Oferta w akceptacji musi być w przyszłości względem „teraz”.
+  // Zwolniony termin i oferta w akceptacji muszą być w przyszłości względem „teraz”.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2025-12-01T00:00:00Z"));
 });
@@ -131,10 +129,7 @@ describe("notifyWaitingList: data i godzina w Europe/Warsaw przy procesie w UTC"
 
     expect(h.push).toHaveBeenCalledTimes(1);
     const msg = h.push.mock.calls[0]![1] as { body: string };
-    expect(msg.body).toBe(
-      `Jan K, zwolnil sie termin w Salon A: Strzyżenie u Anna Nowak, ${c.date} o ${c.time}. ` +
-        `Zarezerwuj teraz: ${APP_URL}/salons/${SALON}/book`
-    );
+    expect(msg.body).toBe(`Salon A: Strzyżenie, ${c.date} o ${c.time}. Dotknij, aby przyjąć lub odrzucić.`);
   });
 });
 
