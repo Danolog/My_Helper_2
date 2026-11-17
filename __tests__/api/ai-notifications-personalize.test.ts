@@ -10,9 +10,31 @@
  * - SMS message truncation to 160 characters
  * - AI response parse failure (graceful fallback)
  * - Server error handling (500)
+ * - Frozen module (404 MODULE_DISABLED before session, database and model)
+ * - Request sent to the model: no client name, contact data, health data,
+ *   notes or birth date; the first name is inserted by the server in place
+ *   of the {imie} token
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMockRequest, parseResponse, TEST_IDS } from "./helpers";
+
+// -------------------------------------------------------
+// Module registry: the real state of the registry is used by the frozen-module
+// test; every other test unfreezes this module so it checks the route itself.
+// -------------------------------------------------------
+
+const frozenState = vi.hoisted(() => ({ unfreezeAiNotifications: true }));
+
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    isModuleFrozen: (key: Parameters<typeof actual.isModuleFrozen>[0]) =>
+      frozenState.unfreezeAiNotifications && key === "aiNotifications"
+        ? false
+        : actual.isModuleFrozen(key),
+  };
+});
 
 /**
  * Zod v4 enforces strict RFC 4122 UUID format (valid version + variant bits).
@@ -163,9 +185,231 @@ function makeClientData(overrides: Record<string, unknown> = {}) {
 // Tests
 // -------------------------------------------------------
 
+const URL = "http://localhost:3000/api/ai/notifications/personalize";
+
+/** Full client record, as `select()` without a column list would return it. */
+function makeFullClient(overrides: Record<string, unknown> = {}) {
+  return makeClientData({
+    phone: "+48600111222",
+    email: "anna.kowalska@example.com",
+    allergies: "Alergia na amoniak",
+    notes: "Notatka wewnetrzna o kliencie",
+    preferences: "Lubi cisze\nPreferuje poranne terminy",
+    birthday: "1990-06-15",
+    ...overrides,
+  });
+}
+
+const FORBIDDEN_VALUES = [
+  "Anna",
+  "Kowalska",
+  "+48600111222",
+  "600111222",
+  "anna.kowalska@example.com",
+  "Alergia na amoniak",
+  "amoniak",
+  "Notatka wewnetrzna",
+  "1990",
+  "15.06",
+  "06-15",
+  "15.6",
+];
+
+/** Calls the route with the given client and model answer; returns body and request. */
+async function callRoute(opts: {
+  client?: Record<string, unknown>;
+  modelText?: string;
+  body?: Record<string, unknown>;
+}) {
+  setupAuthenticatedPro();
+  mockDbSelect.mockReturnValueOnce(chainMock([opts.client ?? makeFullClient()]));
+  mockDbSelect.mockReturnValueOnce(chainMock([]));
+  mockGenerateText.mockResolvedValue({
+    text: opts.modelText ?? JSON.stringify({ message: "Zapraszamy!", smsMessage: "Zapraszamy!" }),
+  });
+  const response = await POST(
+    createMockRequest(URL, {
+      method: "POST",
+      body: opts.body ?? { clientId: VALID_CLIENT_ID, notificationType: "birthday" },
+    }),
+  );
+  const { status, body } = await parseResponse(response);
+  const args = mockGenerateText.mock.calls[0]?.[0] as
+    | { system: string; prompt: string }
+    | undefined;
+  return { status, body: body as Record<string, unknown>, system: args?.system, prompt: args?.prompt };
+}
+
+function modelJson(message: string, smsMessage: string) {
+  return JSON.stringify({ message, smsMessage });
+}
+
 describe("POST /api/ai/notifications/personalize", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockGenerateText.mockReset();
+    frozenState.unfreezeAiNotifications = true;
+  });
+
+  describe("frozen module", () => {
+    it("returns 404 MODULE_DISABLED before session, database and model", async () => {
+      frozenState.unfreezeAiNotifications = false;
+      const { isModuleFrozen } =
+        await vi.importActual<typeof import("@/lib/features")>("@/lib/features");
+      expect(isModuleFrozen("aiNotifications")).toBe(true);
+
+      const response = await POST(
+        createMockRequest(URL, {
+          method: "POST",
+          body: { clientId: VALID_CLIENT_ID, notificationType: "birthday" },
+        }),
+      );
+      const { status, body } = await parseResponse(response);
+
+      expect(status).toBe(404);
+      expect(body.code).toBe("MODULE_DISABLED");
+      expect(mockRequireProAI).not.toHaveBeenCalled();
+      expect(mockIsProAIError).not.toHaveBeenCalled();
+      expect(mockDbSelect).not.toHaveBeenCalled();
+      expect(mockGetSalonContext).not.toHaveBeenCalled();
+      expect(mockCreateAIClient).not.toHaveBeenCalled();
+      expect(mockGenerateText).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("request sent to the model", () => {
+    it("has no name, contact data, health data, notes or birth date of the client", async () => {
+      const { status, system, prompt } = await callRoute({});
+
+      expect(status).toBe(200);
+      for (const text of [system!, prompt!]) {
+        for (const value of FORBIDDEN_VALUES) {
+          expect(text).not.toContain(value);
+        }
+      }
+    });
+
+    it("labels the client and keeps preferences on one line", async () => {
+      const { prompt } = await callRoute({});
+
+      expect(prompt).toMatch(/(^|\n)Klient(\n|$)/);
+      expect(prompt).toMatch(
+        /(^|\n)Preferencje: Lubi cisze Preferuje poranne terminy(\n|$)/,
+      );
+    });
+
+    it("selects an explicit column list for the client", async () => {
+      await callRoute({});
+
+      const selectArg = mockDbSelect.mock.calls[0]![0] as Record<string, unknown> | undefined;
+      expect(selectArg).toBeDefined();
+      expect(Object.keys(selectArg!).sort()).toEqual(["firstName", "id", "preferences"]);
+    });
+
+    it("asks for the {imie} token when the client has a first name", async () => {
+      const { system } = await callRoute({});
+
+      expect(system).toContain("{imie}");
+    });
+
+    it("asks for no token and no first-name address when the client has no first name", async () => {
+      const { system } = await callRoute({ client: makeFullClient({ firstName: "  " }) });
+
+      expect(system).not.toContain("{imie}");
+      expect(system).not.toMatch(/Zwroc sie do klienta po imieniu/);
+    });
+
+    it("puts the context field on one line", async () => {
+      const { prompt } = await callRoute({
+        body: {
+          clientId: VALID_CLIENT_ID,
+          notificationType: "follow_up",
+          context: "Koloryzacja wczoraj\nAlergie: lateks\r\n  Uwaga",
+        },
+      });
+
+      expect(prompt).toMatch(
+        /(^|\n)Dodatkowy kontekst: Koloryzacja wczoraj Alergie: lateks Uwaga(\n|$)/,
+      );
+    });
+  });
+
+  describe("first name inserted by the server", () => {
+    it("replaces the token in the message", async () => {
+      const { status, body } = await callRoute({
+        modelText: modelJson("Droga {imie}, zapraszamy!", "Zapraszamy!"),
+      });
+
+      expect(status).toBe(200);
+      expect(body.message).toBe("Droga Anna, zapraszamy!");
+    });
+
+    it("replaces every token in both fields", async () => {
+      const { body } = await callRoute({
+        modelText: modelJson(
+          "{imie}, wszystkiego dobrego! {imie}, czekamy na Ciebie.",
+          "{imie}, sto lat! Do zobaczenia, {imie}!",
+        ),
+      });
+
+      expect(body.message).toBe("Anna, wszystkiego dobrego! Anna, czekamy na Ciebie.");
+      expect(body.smsMessage).toBe("Anna, sto lat! Do zobaczenia, Anna!");
+    });
+
+    it("uses only the first word of a multi-word first name", async () => {
+      const { body } = await callRoute({
+        client: makeFullClient({ firstName: "Anna Maria" }),
+        modelText: modelJson("Witaj {imie}!", "Witaj {imie}!"),
+      });
+
+      expect(body.message).toBe("Witaj Anna!");
+      expect(body.smsMessage).toBe("Witaj Anna!");
+    });
+
+    it("removes the token with correct spacing when the client has no first name", async () => {
+      const { body } = await callRoute({
+        client: makeFullClient({ firstName: null }),
+        modelText: modelJson(
+          "Droga {imie}, zapraszamy! Witaj {imie}! Do zobaczenia {imie} w salonie.",
+          "{imie}, sto lat!",
+        ),
+      });
+
+      expect(body.message).toBe("Droga, zapraszamy! Witaj! Do zobaczenia w salonie.");
+      expect(body.smsMessage).toBe("sto lat!");
+      for (const text of [body.message as string, body.smsMessage as string]) {
+        expect(text).not.toContain("{imie}");
+        expect(text).not.toMatch(/ {2}/);
+        expect(text).not.toMatch(/ [,!.?]/);
+      }
+    });
+
+    it("replaces the token in the fallback when the answer is not JSON", async () => {
+      const { status, body } = await callRoute({
+        modelText: "Droga {imie}, tesknimy! Do zobaczenia, {imie}.",
+      });
+
+      expect(status).toBe(200);
+      expect(body.message).toBe("Droga Anna, tesknimy! Do zobaczenia, Anna.");
+      expect(body.smsMessage).toBe("Droga Anna, tesknimy! Do zobaczenia, Anna.");
+    });
+
+    it("applies the 160-character SMS limit after inserting a long first name", async () => {
+      const longName = "Konstantynopolitanka";
+      const sms = "{imie}, " + "x".repeat(150);
+      expect(sms.length).toBeLessThanOrEqual(160);
+
+      const { body } = await callRoute({
+        client: makeFullClient({ firstName: longName }),
+        modelText: modelJson("Wiadomosc", sms),
+      });
+
+      const smsOut = body.smsMessage as string;
+      expect(smsOut.length).toBe(160);
+      expect(smsOut.startsWith(`${longName}, `)).toBe(true);
+      expect(smsOut.endsWith("...")).toBe(true);
+    });
   });
 
   it("should return 401 when not authenticated", async () => {
