@@ -30,7 +30,7 @@
  *
  * Wymaga bazy po `pnpm db:migrate`.
  */
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type ExceptionEntry, exceptionFormatViolations } from "./exception-list";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
@@ -208,7 +208,15 @@ describe("lista FUNCTION_EXCEPTIONS: format (#193)", () => {
   });
 });
 
+/** Liczba ról logowania przed sondami (0 przed P6, 1 po P6) — po sondach ma być taka sama. */
+const loginRoleCount = async (): Promise<number> =>
+  (await h!.observer.unsafe(`SELECT 1 FROM pg_roles WHERE rolname = '${LOGIN_ROLE}'`)).length;
+
 suite("funkcje i rozszerzenia w bazie (#193)", () => {
+  let loginRolesBefore = -1;
+  beforeAll(async () => {
+    loginRolesBefore = await loginRoleCount();
+  });
   afterAll(async () => {
     await h?.end();
   });
@@ -398,5 +406,7 @@ suite("funkcje i rozszerzenia w bazie (#193)", () => {
     expect(await h!.observer.unsafe("SELECT 1 FROM pg_proc WHERE proname IN ('it_probe_fn', 'it_probe_proc', 'it_ext_fn')")).toHaveLength(0);
     expect(await securityDefinerViolations(h!.observer)).toEqual([]);
     expect(await policyFunctionViolations(h!.observer)).toEqual([]);
+    expect(loginRolesBefore).toBeGreaterThanOrEqual(0);
+    expect(await loginRoleCount()).toBe(loginRolesBefore);
   });
 });
