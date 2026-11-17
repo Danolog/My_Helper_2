@@ -11,9 +11,9 @@
  * - AI response parse failure (graceful fallback)
  * - Server error handling (500)
  * - Frozen module (404 MODULE_DISABLED before session, database and model)
- * - Request sent to the model: no client name, contact data, health data,
- *   notes or birth date; the first name is inserted by the server in place
- *   of the {imie} token
+ * - Request sent to the model: no name, contact data, allergies, notes or
+ *   birth date from the client record; the first name is inserted by the
+ *   server in place of the {imie} token
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createMockRequest, parseResponse, TEST_IDS } from "./helpers";
@@ -279,7 +279,7 @@ describe("POST /api/ai/notifications/personalize", () => {
   });
 
   describe("request sent to the model", () => {
-    it("has no name, contact data, health data, notes or birth date of the client", async () => {
+    it("has no name, contact data, allergies, notes or birth date from the client record", async () => {
       const { status, system, prompt } = await callRoute({});
 
       expect(status).toBe(200);
@@ -325,12 +325,12 @@ describe("POST /api/ai/notifications/personalize", () => {
         body: {
           clientId: VALID_CLIENT_ID,
           notificationType: "follow_up",
-          context: "Koloryzacja wczoraj\nAlergie: lateks\r\n  Uwaga",
+          context: "Koloryzacja wczoraj\nKlientka prosi o krotsza wizyte\r\n  Uwaga",
         },
       });
 
       expect(prompt).toMatch(
-        /(^|\n)Dodatkowy kontekst: Koloryzacja wczoraj Alergie: lateks Uwaga(\n|$)/,
+        /(^|\n)Dodatkowy kontekst: Koloryzacja wczoraj Klientka prosi o krotsza wizyte Uwaga(\n|$)/,
       );
     });
   });
