@@ -250,11 +250,12 @@ describe("reminders/appointment: filtr salonu wołającego crona (decyzja A)", (
 });
 
 /**
- * Złączenia wyboru przypomnień: każda tabela złączona z wizytą (klient, pracownik,
- * usługa) ma w `ON` warunek `<tabela>.salon_id = appointments.salon_id`; salon jest
- * złączony po `appointments.salon_id = salons.id` (tabela `salons` nie ma `salon_id`).
- * Jedna asercja sprawdza wszystkie cztery warunki, więc usunięcie dowolnego z nich
- * daje czerwony wynik tego samego testu.
+ * Złączenia wyboru przypomnień: `ON` każdej tabeli złączonej z wizytą (klient,
+ * pracownik, usługa) to dokładnie klucz złączenia `and` warunek
+ * `<tabela>.salon_id = appointments.salon_id` — nic więcej; salon jest złączony
+ * wyłącznie po `appointments.salon_id = salons.id` (tabela `salons` nie ma
+ * `salon_id`). Jedna asercja porównuje pełną treść czterech `ON`, więc brak
+ * klucza, brak warunku salonu albo inny łącznik niż `and` daje czerwony wynik.
  */
 const JOINED = ["clients", "employees", "services"] as const;
 
@@ -264,21 +265,18 @@ function joinOn(sql: string, table: string): string | null {
   return m ? m[1]! : null;
 }
 
-function joinSalonConditions(sql: string) {
-  const out: Record<string, boolean> = {};
-  for (const t of JOINED) {
-    const on = joinOn(sql, t) ?? "";
-    out[t] = new RegExp(
-      `"${t}"\\."salon_id" = "appointments"\\."salon_id"|"appointments"\\."salon_id" = "${t}"\\."salon_id"`
-    ).test(on);
-  }
-  out.salons = /"appointments"\."salon_id" = "salons"\."id"|"salons"\."id" = "appointments"\."salon_id"/.test(
-    joinOn(sql, "salons") ?? ""
-  );
+function joinOnClauses(sql: string) {
+  const out: Record<string, string | null> = {};
+  for (const t of [...JOINED, "salons"]) out[t] = joinOn(sql, t);
   return out;
 }
 
-const ALL_TRUE = { clients: true, employees: true, services: true, salons: true };
+const EXPECTED_ON = {
+  clients: `("appointments"."client_id" = "clients"."id" and "clients"."salon_id" = "appointments"."salon_id")`,
+  employees: `("appointments"."employee_id" = "employees"."id" and "employees"."salon_id" = "appointments"."salon_id")`,
+  services: `("appointments"."service_id" = "services"."id" and "services"."salon_id" = "appointments"."salon_id")`,
+  salons: `"appointments"."salon_id" = "salons"."id"`,
+};
 
 describe("wyjścia przypomnień: jawny warunek salonu w złączeniach", () => {
   it.each([
@@ -286,12 +284,12 @@ describe("wyjścia przypomnień: jawny warunek salonu w złączeniach", () => {
     ["push 24h (findDuePushReminders)", () => push24h.POST(req("/api/cron/x", "POST"))],
     ["SMS 1h (findDueSmsReminders)", () => smsReminders.POST(req("/api/cron/sms-reminders", "POST"))],
     ["SMS 24h (findDueAppointmentReminders)", () => reminders.POST(req("/api/reminders/appointment", "POST"))],
-  ] as const)("%s: każde złączenie z warunkiem salonu", async (_n, call) => {
+  ] as const)("%s: każde złączenie z kluczem i warunkiem salonu połączonymi przez and", async (_n, call) => {
     const res = await call();
     expect(res.status).toBe(200);
     const sel = h.captured[0]!;
     expect(sel.sql).toMatch(/^select .* from "appointments"/);
-    expect(joinSalonConditions(sel.sql), sel.sql).toEqual(ALL_TRUE);
+    expect(joinOnClauses(sel.sql), sel.sql).toEqual(EXPECTED_ON);
   });
 
   it("SMS 24h (findDueAppointmentReminders): złączenia zewnętrzne, warunek salonu tylko w ON — wiersz wizyty zostaje", async () => {
@@ -319,12 +317,12 @@ describe("wyjścia przypomnień: jawny warunek salonu w złączeniach", () => {
     ]);
   });
 
-  it("podgląd SMS 24h (GET przez bramę): każde złączenie z warunkiem salonu", async () => {
+  it("podgląd SMS 24h (GET przez bramę): każde złączenie z kluczem i warunkiem salonu połączonymi przez and", async () => {
     const res = await reminders.GET(req(`/api/reminders/appointment?salonId=${SALON_A}`, "GET"));
     expect(res.status).toBe(200);
     const sel = h.gateCaptured[0]!;
     expect(sel, "podgląd ma iść przez bramę salonu").toBeDefined();
-    expect(joinSalonConditions(sel.sql), sel.sql).toEqual(ALL_TRUE);
+    expect(joinOnClauses(sel.sql), sel.sql).toEqual(EXPECTED_ON);
   });
 });
 
