@@ -37,6 +37,11 @@ vi.mock("@/lib/sms", async (importOriginal) => ({
   sendSms: vi.fn(),
 }));
 vi.mock("@/lib/deposit-calculation", () => ({ calculateExpectedDeposit: (...a: unknown[]) => h.calc(...a) }));
+// Moduł listy oczekujących włączony w salonie (przełącznik: osobny plik testów).
+vi.mock("@/lib/server/modules", async () => {
+  const { resolveModules } = await vi.importActual<typeof import("@/lib/features")>("@/lib/features");
+  return { getSalonModules: async () => resolveModules({ modules: { waitingList: true } }) };
+});
 
 const START = new Date(Date.now() + 2 * 86_400_000);
 const END = new Date(START.getTime() + 3_600_000);
