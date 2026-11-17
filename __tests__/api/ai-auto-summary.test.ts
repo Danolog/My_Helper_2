@@ -10,7 +10,7 @@
  * - AI response parse failure (graceful fallback)
  * - Server error handling (500)
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockRequest, parseResponse, TEST_IDS } from "./helpers";
 
 /**
@@ -430,6 +430,120 @@ describe("POST /api/ai/appointments/auto-summary", () => {
     expect(body.success).toBe(true);
     // Verify generateText was called (which means context was built)
     expect(mockGenerateText).toHaveBeenCalledTimes(1);
+  });
+
+  describe("client context sent to the model", () => {
+    /** Linia z samą etykietą klienta (bez imienia i nazwiska). */
+    const CLIENT_LABEL_LINE = /(^|\n)Klient(\n|$)/;
+
+    // Niezużyte wartości `mockReturnValueOnce` z nieudanego testu nie mogą
+    // przejść do kolejnych testów.
+    beforeEach(() => {
+      mockDbSelect.mockReset();
+    });
+    afterEach(() => {
+      mockDbSelect.mockReset();
+    });
+
+    function setupAppointment(data: { client: unknown; [key: string]: unknown }) {
+      mockDbSelect.mockReturnValueOnce(chainMock([data]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockDbSelect.mockReturnValueOnce(chainMock([]));
+      // Poprzednie wizyty są pobierane tylko, gdy wizyta ma klienta.
+      if (data.client) mockDbSelect.mockReturnValueOnce(chainMock([]));
+      mockGenerateText.mockResolvedValue({
+        text: JSON.stringify({
+          keyPoints: ["a"],
+          productRecommendations: [],
+          followUpTiming: "za 4 tygodnie",
+          fullSummary: "b",
+        }),
+      });
+    }
+
+    async function callAndGetPrompt(): Promise<{ status: number; prompt: string; system: string }> {
+      const request = createMockRequest(
+        "http://localhost:3000/api/ai/appointments/auto-summary",
+        { method: "POST", body: { appointmentId: VALID_APPOINTMENT_ID } },
+      );
+      const response = await POST(request);
+      expect(mockGenerateText).toHaveBeenCalledTimes(1);
+      const args = mockGenerateText.mock.calls[0]![0] as { prompt: string; system: string };
+      return { status: response.status, prompt: args.prompt, system: args.system };
+    }
+
+    it("prompt has no client allergies, client names or employee name", async () => {
+      setupAuthenticatedPro();
+      const data = makeAppointmentData();
+      setupAppointment({
+        ...data,
+        client: {
+          ...data.client,
+          phone: "+48600111222",
+          email: "anna.kowalska@example.com",
+          notes: "Notatka wewnetrzna o kliencie",
+          birthday: "1990-05-20",
+        },
+      });
+
+      const { status, prompt, system } = await callAndGetPrompt();
+
+      expect(status).toBe(200);
+      for (const text of [prompt, system]) {
+        expect(text).not.toContain("Alergia na amoniak");
+        expect(text).not.toContain("amoniak");
+        expect(text).not.toContain("Anna");
+        expect(text).not.toContain("Kowalska");
+        expect(text).not.toContain("Nowak");
+        expect(text).not.toContain("Maria");
+        expect(text).not.toContain("+48600111222");
+        expect(text).not.toContain("anna.kowalska@example.com");
+        expect(text).not.toContain("Notatka wewnetrzna");
+        expect(text).not.toContain("1990");
+      }
+      expect(prompt).not.toMatch(/Alergie/i);
+    });
+
+    it("prompt still has client preferences, visit notes and service", async () => {
+      setupAuthenticatedPro();
+      setupAppointment(makeAppointmentData());
+
+      const { prompt } = await callAndGetPrompt();
+
+      expect(prompt).toMatch(CLIENT_LABEL_LINE);
+      expect(prompt).toContain("Preferencje klienta: Preferuje poranne terminy");
+      expect(prompt).toContain("Notatki z wizyty: Klientka chciala lekkie rozjasnienie");
+      expect(prompt).toContain("Usluga: Koloryzacja");
+      expect(prompt).toContain('Salon: "Test Salon"');
+    });
+
+    it("prompt has no client lines when the appointment has no client", async () => {
+      setupAuthenticatedPro();
+      setupAppointment({ ...makeAppointmentData(), client: null, employee: null });
+
+      const { status, prompt } = await callAndGetPrompt();
+
+      expect(status).toBe(200);
+      expect(prompt).not.toMatch(CLIENT_LABEL_LINE);
+      expect(prompt).not.toContain("Preferencje");
+      expect(prompt).toContain("Notatki z wizyty");
+    });
+
+    it("prompt skips empty client preferences", async () => {
+      setupAuthenticatedPro();
+      const data = makeAppointmentData();
+      setupAppointment({
+        ...data,
+        client: { ...data.client, preferences: null, allergies: null },
+      });
+
+      const { status, prompt } = await callAndGetPrompt();
+
+      expect(status).toBe(200);
+      expect(prompt).toMatch(CLIENT_LABEL_LINE);
+      expect(prompt).not.toContain("Preferencje");
+      expect(prompt).not.toContain("Kowalska");
+    });
   });
 
   it("should handle AI JSON parse failure gracefully", async () => {
