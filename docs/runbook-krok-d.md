@@ -442,7 +442,7 @@ odmawia startu z nazwą brakującej zmiennej.
 |---|---|
 | postgres-url, better-auth-secret | aplikacja nie startuje (`env.ts`: „is required”) — **obowiązkowe** |
 | cron-secret | endpointy cron → 500 „CRON_SECRET not configured” (harmonogram i tak dopiero w D-8) |
-| smsapi-token | na hostingu SMS nie wychodzi: błąd w logu, brak wpisu w historii powiadomień, wołający dostaje błąd (symulacja działa tylko poza hostingiem) |
+| smsapi-token | na hostingu SMS nie wychodzi: błąd w logu, brak wpisu w historii powiadomień, wołający dostaje błąd (symulacja działa tylko poza hostingiem); cron przypomnień odpowiada 503 przed wyborem wizyt i ich nie oznacza — przypomnień dla wizyt, które w tym czasie zejdą poniżej 30 min do startu, nie nadrabia |
 | resend-api-key | e-mail tylko logowany, nie wysyłany |
 | stripe-secret-key, stripe-webhook-secret | webhook 503 „Webhook not configured”; płatności nie działają |
 | upstash-redis-rest-token | limitowanie zapytań w pamięci instancji |
@@ -644,6 +644,16 @@ domyślny je wstrzymuje (także wcześniej wznowione), a `--resume` z ich nazwą
 kończy się błędem przed gcloud.
 
 Włączenie harmonogramu = prawdziwe SMS-y i push do klientów salonów — decyzja Darka.
+
+**Warunek przed `--resume mh-sms-reminders`.** Cron oznacza wizyty jako
+przypomniane przed wysyłką, więc przebieg z nieprawidłowym albo wygasłym
+tokenem dostawcy SMS nie jest powtarzany dla tych samych wizyt. Dlatego:
+1. przed wznowieniem — jedna testowa wysyłka SMS z aplikacji na własny numer
+   (nie z listy numerów testowych — na nie SMS nie wychodzi), potwierdzająca,
+   że token działa;
+2. po pierwszym przebiegu harmonogramu — odczyt wpisu logu
+   „SMS reminders cron completed”: pole `failed` ma mieć wartość `0`; inna
+   wartość = wstrzymać zadanie i sprawdzić token.
 Zadania `mh-notify-*` (urodziny, niski stan magazynu, „tęsknimy”) nie są
 tworzone — wracają z R3-C.
 
