@@ -432,6 +432,14 @@ describe("logger — liczby i tablice pod kluczem z fragmentem phone/email", () 
     ).toEqual({ emails: [[], [[]]], phones: [[{ id: "c-1", phone: REDACTED, count: 3 }]] });
   });
 
+  it("szeroka tablica zawierająca samą siebie pod kluczem bez fragmentu → wywołanie wraca ze znacznikiem [circular]", async () => {
+    const { redactLogContext } = await import("@/lib/logger");
+    const a: unknown[] = [];
+    for (let i = 0; i < 20; i++) a.push(a);
+    const out = redactLogContext({ items: a });
+    expect(JSON.stringify(out)).toContain("[circular]");
+  });
+
   it("liczba całkowita od 7 cyfr i bigint pod kluczem z fragmentem → [redacted], także w tablicy", async () => {
     const { redactLogContext, REDACTED } = await import("@/lib/logger");
     expect(
@@ -509,6 +517,85 @@ describe("logger — liczby i tablice pod kluczem z fragmentem phone/email", () 
       blikPhoneNumber: "[redacted]",
       emails: "[redacted]",
       emailCount: 3,
+    });
+  });
+});
+
+describe("logger — wartości nieserializowalne w kontekście (produkcja)", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("bigint pod zwykłym kluczem → napis dziesiętny, wpis nie ginie", async () => {
+    const logger = await importLoggerWithEnv("production");
+    expect(() => logger.info("x", { count: BigInt(10) })).not.toThrow();
+
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(logSpy.mock.calls[0]![0] as string)).toMatchObject({ level: "info", msg: "x", count: "10" });
+  });
+
+  it("bigint głęboko w obiekcie i tablicy → napis dziesiętny; pod kluczem kontaktowym → [redacted]", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { a: { b: [BigInt(1)] }, phone: BigInt("48600100200") });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("48600100200");
+    expect(JSON.parse(raw)).toMatchObject({ a: { b: ["1"] }, phone: "[redacted]" });
+  });
+
+  it("bigint w obiekcie niebędącym zwykłym obiektem → napis dziesiętny", async () => {
+    class Licznik {
+      value = BigInt(42);
+    }
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { licznik: new Licznik() });
+
+    expect(JSON.parse(logSpy.mock.calls[0]![0] as string)).toMatchObject({ licznik: { value: "42" } });
+  });
+
+  it("cykl w obiekcie niebędącym zwykłym obiektem → wpis zastępczy bez kontekstu, kanał wg poziomu", async () => {
+    class Wezel {
+      self: Wezel;
+      constructor() {
+        this.self = this;
+      }
+    }
+    const logger = await importLoggerWithEnv("production");
+    expect(() => logger.error("Padlo", { route: "/api/x", node: new Wezel() })).not.toThrow();
+    expect(() => logger.warn("Uwaga", { node: new Wezel() })).not.toThrow();
+    expect(() => logger.info("Info", { node: new Wezel() })).not.toThrow();
+
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(errorSpy.mock.calls[0]![0] as string)).toEqual({
+      level: "error",
+      msg: "Padlo",
+      timestamp: expect.any(String),
+      contextError: "unserializable",
+    });
+    expect(JSON.parse(warnSpy.mock.calls[0]![0] as string)).toEqual({
+      level: "warn",
+      msg: "Uwaga",
+      timestamp: expect.any(String),
+      contextError: "unserializable",
+    });
+    expect(JSON.parse(logSpy.mock.calls[0]![0] as string)).toEqual({
+      level: "info",
+      msg: "Info",
+      timestamp: expect.any(String),
+      contextError: "unserializable",
     });
   });
 });
