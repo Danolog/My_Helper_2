@@ -54,7 +54,20 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm exec playwright install --with-deps chromium
+      # Bez --with-deps: pobieranie pakietów systemowych (apt) potrafi trwać
+      # minuty i zjadało limit joba. Obraz runnera ma biblioteki Chromium;
+      # brak dodatkowych czcionek nie wpływa na testy (nie porównują zrzutów).
+      - name: Install Chromium (no apt)
+        timeout-minutes: 3
+        run: pnpm exec playwright install chromium
+
+      # Gdyby obraz runnera stracił bibliotekę potrzebną Chromium: czytelny błąd
+      # środowiska przed testami zamiast czerwonych testów.
+      - name: "Environment: Chromium starts"
+        timeout-minutes: 1
+        run: |
+          node -e "require('@playwright/test').chromium.launch().then(b=>b.close())" \
+            || { echo "::error title=CI environment not ready::Chromium does not start on the runner; tests were not run (this is not a failing test)"; exit 1; }
 
       - name: Run production health checks
         run: pnpm exec playwright test --grep @production --workers=2 --retries=1 --timeout=15000

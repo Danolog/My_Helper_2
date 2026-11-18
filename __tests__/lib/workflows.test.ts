@@ -27,6 +27,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { load } from "js-yaml";
 import { afterAll, describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
@@ -363,6 +364,88 @@ describe("G-C6: e2e-production.yml", () => {
     expect(E2E).toContain(
       "github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Production'",
     );
+  });
+});
+
+describe("instalacja przeglądarki w CI bez pakietów systemowych (#268)", () => {
+  type Step = Record<string, unknown>;
+  type Job = { "timeout-minutes"?: unknown; "continue-on-error"?: unknown; steps?: Step[] };
+  const WORKFLOWS = readdirSync(join(ROOT, ".github/workflows"))
+    .filter((f) => /\.ya?ml$/.test(f))
+    .sort()
+    .map((f): [string, Record<string, Job>] => [f, (load(read(`.github/workflows/${f}`)) as { jobs: Record<string, Job> }).jobs]);
+  /** Wszystkie kroki z `run:` w danym pliku: [job, indeks, krok, polecenie]. */
+  const runSteps = (jobs: Record<string, Job>) =>
+    Object.entries(jobs).flatMap(([job, j]) =>
+      (j.steps ?? []).flatMap((s, i): Array<[string, number, Step, string]> => (typeof s.run === "string" ? [[job, i, s, s.run]] : [])),
+    );
+  const label = (f: string, job: string, i: number) => `${f}: ${job}, krok ${i + 1}`;
+
+  it("pętla obejmuje quality-gate.yml i e2e-production.yml", () => {
+    expect(WORKFLOWS.map(([f]) => f)).toEqual(expect.arrayContaining(["quality-gate.yml", "e2e-production.yml"]));
+  });
+
+  it.each(WORKFLOWS)("%s: w poleceniach brak --with-deps, install-deps, apt-get i apt install", (f, jobs) => {
+    const bad = runSteps(jobs).flatMap(([job, i, , run]) =>
+      run
+        .split("\n")
+        .filter((l) => /--with-deps|install-deps|\bapt-get\b|\bapt\s+install\b/.test(l))
+        .map((l) => `${label(f, job, i)}: ${l.trim()}`),
+    );
+    expect(bad).toEqual([]);
+  });
+
+  it.each(WORKFLOWS)("%s: każdy krok z `playwright install` ma własny timeout-minutes (1–5)", (f, jobs) => {
+    const bad = runSteps(jobs)
+      .filter(([, , , run]) => /playwright\s+install\b/.test(run))
+      .flatMap(([job, i, s]) => {
+        const t = s["timeout-minutes"];
+        return typeof t === "number" && t >= 1 && t <= 5 ? [] : [`${label(f, job, i)}: timeout-minutes = ${JSON.stringify(t)}`];
+      });
+    expect(bad).toEqual([]);
+  });
+
+  it("każde z trzech miejsc instalacji przeglądarki to dokładnie `pnpm exec playwright install chromium`", () => {
+    const installs = WORKFLOWS.flatMap(([f, jobs]) =>
+      runSteps(jobs)
+        .filter(([, , , run]) => /playwright\s+install\b/.test(run))
+        .map(([job, , , run]) => [f, job, run]),
+    );
+    expect(installs).toEqual([
+      ["e2e-production.yml", "e2e-production", "pnpm exec playwright install chromium"],
+      ["quality-gate.yml", "e2e-smoke", "pnpm exec playwright install chromium"],
+      ["quality-gate.yml", "e2e-full", "pnpm exec playwright install chromium"],
+    ]);
+  });
+
+  it("e2e-production.yml: sprawdzenie startu Chromium po instalacji, przed testami; ::error i exit 1; bez continue-on-error", () => {
+    const job = WORKFLOWS.find(([f]) => f === "e2e-production.yml")![1]["e2e-production"]!;
+    const st = job.steps ?? [];
+    const runs = st.map((s) => (typeof s.run === "string" ? s.run : ""));
+    const install = runs.findIndex((r) => /playwright\s+install\b/.test(r));
+    const checks = runs.flatMap((r, i) => (/chromium\.launch\(/.test(r) ? [i] : []));
+    const tests = runs.findIndex((r) => /playwright\s+test\b/.test(r));
+    expect(checks, "dokładnie jeden krok sprawdzający start Chromium").toHaveLength(1);
+    const check = checks[0]!;
+    expect(install, "krok instalacji").toBeGreaterThanOrEqual(0);
+    expect(check, "sprawdzenie po instalacji").toBeGreaterThan(install);
+    expect(check, "sprawdzenie przed testami").toBeLessThan(tests);
+    const s = st[check]!;
+    expect(runs[check]).toContain("::error");
+    expect(runs[check]).toMatch(/\bexit 1\b/);
+    expect(s).not.toHaveProperty("continue-on-error");
+    expect(s).not.toHaveProperty("if");
+    expect(s["timeout-minutes"]).toBe(1);
+    expect(job).not.toHaveProperty("continue-on-error");
+  });
+
+  it.each([
+    ["quality-gate.yml", "e2e-smoke", 10],
+    ["quality-gate.yml", "e2e-full", 35],
+    ["e2e-production.yml", "e2e-production", 5],
+  ])("%s: limit joba %s bez zmian (%i min)", (f, job, minutes) => {
+    const jobs = WORKFLOWS.find(([n]) => n === f)![1];
+    expect(jobs[job]?.["timeout-minutes"]).toBe(minutes);
   });
 });
 
