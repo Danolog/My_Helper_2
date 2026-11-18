@@ -1,3 +1,4 @@
+import { hostingPlatform } from "@/lib/hosting";
 import { logger } from "@/lib/logger";
 import { maskPhoneNumber, normalizePolishPhoneNumber } from "@/lib/phone";
 import { notifications } from "@/lib/schema";
@@ -32,6 +33,9 @@ export const SMS_SEND_FAILED_ERROR = "Nie udało się wysłać SMS.";
 
 /** Wynik dla numeru z listy TEST_PHONE_NUMBERS — SMS celowo nie wychodzi. */
 export const SMS_TEST_PHONE_ERROR = "SMS nie wysłany: numer testowy.";
+
+/** Wynik na hostingu bez skonfigurowanego dostawcy SMS — wiadomość nie wychodzi. */
+export const SMS_PROVIDER_UNAVAILABLE_ERROR = "Wysyłka SMS jest niedostępna.";
 
 const SMSAPI_URL = "https://api.smsapi.pl/sms.do";
 const DEFAULT_SENDER = "Info";
@@ -146,10 +150,15 @@ async function saveFailedNotification(msg: SmsMessage): Promise<void> {
  * When `SMSAPI_TOKEN` is configured, the message is sent through the
  * SMSAPI.pl REST API (sender name taken from `SMSAPI_SENDER`, default "Info").
  *
- * Without a token (e.g. local development), the message is only logged -
- * the previous stub behaviour is preserved.
+ * Without a token outside hosting (local development, tests, CI), the message
+ * is only logged (simulation) and saved as "sent".
  *
- * The message is always saved to the notifications table for audit trail:
+ * Without a token on hosting (Vercel, Cloud Run) nothing is sent or simulated:
+ * the error is logged, no row is written to the notifications table and the
+ * result is `success: false` with SMS_PROVIDER_UNAVAILABLE_ERROR (no `skipped`
+ * field, so callers do not treat the message as handled).
+ *
+ * Otherwise the message is saved to the notifications table for audit trail:
  * status "sent" on success, "failed" on any error.
  */
 export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
@@ -179,6 +188,18 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
   }
 
   const token = process.env.SMSAPI_TOKEN;
+
+  // Na hostingu bez dostawcy wiadomość nie wychodzi, więc nie może zostać
+  // zapisana ani zgłoszona jako wysłana. Brak konfiguracji nie jest zdarzeniem
+  // jednej wiadomości — bez wpisu w notifications; wołający dostaje błąd.
+  const platform = hostingPlatform();
+  if (!token && platform !== null) {
+    logger.error("SMS not sent: no SMS provider configured on hosting", {
+      platform,
+      salonId: msg.salonId,
+    });
+    return { success: false, error: SMS_PROVIDER_UNAVAILABLE_ERROR };
+  }
 
   try {
     if (token) {

@@ -48,6 +48,7 @@ import {
   normalizePolishPhoneNumber,
   SMS_SEND_FAILED_ERROR,
   SMS_TEST_PHONE_ERROR,
+  SMS_PROVIDER_UNAVAILABLE_ERROR,
 } from "@/lib/sms";
 import {
   TEST_PHONE,
@@ -70,6 +71,13 @@ function resetDbMocks() {
   mockDbValues.mockReturnValue({ returning: mockDbReturning });
   vi.stubGlobal("fetch", mockFetch);
 }
+
+// Domyślnie środowisko nie jest hostingiem (bez względu na zmienne procesu);
+// grupy dotyczące hostingu ustawiają VERCEL albo K_SERVICE same.
+beforeEach(() => {
+  vi.stubEnv("VERCEL", "");
+  vi.stubEnv("K_SERVICE", "");
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -182,6 +190,98 @@ describe("sendSms (simulation mode - no SMSAPI_TOKEN)", () => {
 
     expect(result.success).toBe(true);
     expect(result.notificationId).toBeUndefined();
+  });
+});
+
+describe("sendSms: brak dostawcy na hostingu", () => {
+  const PHONE = "+48 512 345 678";
+  const CONTENT = "Anna Nowak, koloryzacja u Ewy jutro o 10:00";
+
+  beforeEach(() => {
+    resetDbMocks();
+    mockDbReturning.mockResolvedValue([{ id: "notif-hosting" }]);
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ count: 1, list: [{ id: "msg-hosting" }] }),
+    });
+  });
+
+  it.each([
+    ["Vercel", "VERCEL", "1"],
+    ["Cloud Run", "K_SERVICE", "myhelper-web"],
+  ])(
+    "%s bez tokenu: błąd bez symulacji, bez wysyłki i bez zapisu w notifications",
+    async (platform, variable, value) => {
+      vi.stubEnv("SMSAPI_TOKEN", "");
+      vi.stubEnv(variable, value);
+
+      const result = await sendSms({ to: PHONE, message: CONTENT, salonId: "salon-1" });
+
+      expect(result).toEqual({ success: false, error: SMS_PROVIDER_UNAVAILABLE_ERROR });
+      expect(SMS_PROVIDER_UNAVAILABLE_ERROR).toEqual(expect.any(String));
+      expect(result).not.toHaveProperty("skipped");
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockDbInsertInto).not.toHaveBeenCalled();
+      expect(mockDbValues).not.toHaveBeenCalled();
+
+      expect(logger.error).toHaveBeenCalledTimes(1);
+      const errorLog = JSON.stringify(vi.mocked(logger.error).mock.calls);
+      expect(errorLog).toContain(platform);
+      expect(errorLog).toContain("salon-1");
+      const log = loggedText(logger);
+      expect(log).not.toContain("512345678");
+      expect(log).not.toContain("512 345 678");
+      expect(log).not.toContain("678");
+      expect(log).not.toContain("Anna Nowak");
+      expect(log).not.toContain("koloryzacja");
+    }
+  );
+
+  it("numer testowy na hostingu bez tokenu nadal daje skipped: test_phone", async () => {
+    vi.stubEnv("SMSAPI_TOKEN", "");
+    vi.stubEnv("VERCEL", "1");
+
+    const result = await sendSms({ to: TEST_PHONE, message: "Hello", salonId: "salon-1" });
+
+    expect(result).toEqual({ success: false, error: SMS_TEST_PHONE_ERROR, skipped: "test_phone" });
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(mockDbInsertInto).not.toHaveBeenCalled();
+  });
+
+  it("nieprawidłowy numer na hostingu bez tokenu nadal daje błąd numeru i wpis „failed”", async () => {
+    vi.stubEnv("SMSAPI_TOKEN", "");
+    vi.stubEnv("VERCEL", "1");
+
+    const result = await sendSms({ to: "12345", message: "Hello", salonId: "salon-1" });
+
+    expect(result.error).toContain("Invalid phone number");
+    expect(mockDbValues).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+  });
+
+  it.each([
+    ["VERCEL", "1"],
+    ["K_SERVICE", "myhelper-web"],
+  ])("%s z tokenem: wysyłka przez dostawcę jak dotąd", async (variable, value) => {
+    vi.stubEnv("SMSAPI_TOKEN", "test-token");
+    vi.stubEnv(variable, value);
+
+    const result = await sendSms({ to: PHONE, message: CONTENT, salonId: "salon-1" });
+
+    expect(result.success).toBe(true);
+    expect(result.notificationId).toBe("notif-hosting");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockDbValues).toHaveBeenCalledWith(expect.objectContaining({ status: "sent" }));
+  });
+
+  it("poza hostingiem bez tokenu: symulacja jak dotąd", async () => {
+    vi.stubEnv("SMSAPI_TOKEN", "");
+
+    const result = await sendSms({ to: PHONE, message: CONTENT, salonId: "salon-1" });
+
+    expect(result.success).toBe(true);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockDbValues).toHaveBeenCalledWith(expect.objectContaining({ status: "sent" }));
   });
 });
 

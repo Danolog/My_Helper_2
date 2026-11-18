@@ -442,7 +442,7 @@ odmawia startu z nazwą brakującej zmiennej.
 |---|---|
 | postgres-url, better-auth-secret | aplikacja nie startuje (`env.ts`: „is required”) — **obowiązkowe** |
 | cron-secret | endpointy cron → 500 „CRON_SECRET not configured” (harmonogram i tak dopiero w D-8) |
-| smsapi-token | tryb symulacji SMS (numer maskowany w logu) |
+| smsapi-token | na hostingu SMS nie wychodzi: błąd w logu, brak wpisu w historii powiadomień, wołający dostaje błąd (symulacja działa tylko poza hostingiem) |
 | resend-api-key | e-mail tylko logowany, nie wysyłany |
 | stripe-secret-key, stripe-webhook-secret | webhook 503 „Webhook not configured”; płatności nie działają |
 | upstash-redis-rest-token | limitowanie zapytań w pamięci instancji |

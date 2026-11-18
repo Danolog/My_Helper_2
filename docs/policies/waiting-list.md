@@ -22,7 +22,7 @@ Po usunięciu konta personelu identyfikator konta jest usuwany z wpisu, a źród
 Wysyłka powiadomień jest zapisywana w historii powiadomień salonu. Zapis zawiera rodzaj (SMS albo push), treść, status i powiązanie z klientem, a czas wysyłki — jak niżej:
 - SMS wysłany: status „wysłane” i czas wysyłki. SMS, którego nie udało się wysłać (także z powodu nieprawidłowego numeru): aplikacja próbuje zapisać go ze statusem „nieudane”, bez czasu wysyłki.
 - Push: zapis powstaje, gdy klient ma co najmniej jedno zarejestrowane urządzenie — ze statusem „wysłane”, gdy powiadomienie dotarło do co najmniej jednego urządzenia, w przeciwnym razie „nieudane”; w obu przypadkach z czasem próby. Przy błędzie wysyłki aplikacja próbuje zapisać powiadomienie ze statusem „nieudane”, bez czasu wysyłki. Zapisywany jest tytuł i treść powiadomienia, bez dołączonych do niego identyfikatorów i adresu strony.
-- Wiadomość, która nie jest wysyłana (pora, w której SMS nie wychodzi, brak urządzeń klienta, kanał push nieudostępniony), nie jest zapisywana.
+- Wiadomość, która nie jest wysyłana (pora, w której SMS nie wychodzi, brak skonfigurowanej bramki SMS, brak urządzeń klienta, kanał push nieudostępniony), nie jest zapisywana.
 
 Przyjęcie terminu dodaje do tej historii wpis systemowy ze statusem „wysłane”, czasem zapisu i powiązaniem z klientem; jego treść zawiera identyfikator wizyty, informację, czy wizyta została przeniesiona, czy zarezerwowana, oraz datę i godzinę terminu (czas polski). Historia powiadomień nie jest powiązana z wpisem listy oczekujących i nie jest usuwana razem z nim.
 
