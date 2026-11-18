@@ -50,7 +50,7 @@ import { mutationFetch } from "@/lib/api-client";
 
 const ANY_OPTION = "any";
 const CLIENT_REQUEST_CONFIRM_LABEL =
-  "Klient sam poprosił o zapis na listę oczekujących i zgadza się na wiadomość o zwolnionym terminie.";
+  "Klient sam poprosił o zapis na listę oczekujących i o wiadomość o zwolnionym terminie.";
 const CLIENT_REQUEST_CONFIRM_MESSAGE =
   "Potwierdź, że klient sam poprosił o zapis na listę oczekujących.";
 
@@ -297,7 +297,7 @@ function WaitingListPageInner() {
             <DialogHeader>
               <DialogTitle>Dodaj klienta do listy oczekujacych</DialogTitle>
               <DialogDescription>
-                Klient zostanie powiadomiony gdy zwolni sie termin.
+                Gdy zwolni się pasujący termin, klient może dostać SMS na numer z kartoteki. SMS-y nie wychodzą między 21:00 a 8:00.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">

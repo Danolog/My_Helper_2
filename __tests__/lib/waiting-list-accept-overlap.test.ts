@@ -156,6 +156,7 @@ describe("acceptEarlierSlot — kolizja półotwarta (#165)", () => {
       .mockReturnValueOnce(
         createChainMock([{ id: "apt-old", status: "scheduled", startTime: own.start_time, notes: null, employeeId: EMPLOYEE }])
       );
+    h.update.mockReturnValueOnce(createChainMock([{ id: "apt-old" }])); // zapis przeniesienia objął wizytę
 
     const res = await acceptEarlierSlot("wl-1", "tok");
 

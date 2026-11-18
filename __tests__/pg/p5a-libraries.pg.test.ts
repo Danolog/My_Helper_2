@@ -541,7 +541,7 @@ suite("P5a-1: biblioteki przez forSalon i wyjścia system/ — prawdziwy Postgre
     expect(appt).toMatchObject({ salonId: ids.salonA, clientId: ids.clientA, employeeId: ids.empA, status: "scheduled" });
     const [after] = await h!.db.select().from(waitingList).where(eq(waitingList.id, entry.id));
     expect(after!.accepted).toBe(true);
-    const notifs = (await notificationRows(ids.salonA, "sms")).filter((r) => r.message.includes(res.appointmentId!));
+    const notifs = (await notificationRows(ids.salonA, "system")).filter((r) => r.message.includes(res.appointmentId!));
     expect(notifs).toHaveLength(1);
   });
 
