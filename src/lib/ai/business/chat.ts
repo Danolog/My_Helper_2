@@ -9,6 +9,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { streamText, UIMessage, convertToModelMessages } from "ai";
 import { eq, and, gte, sql, count, desc } from "drizzle-orm";
 import { firstNameForReply } from "@/lib/ai/client-context";
+import { getAIModel } from "@/lib/ai/openrouter";
 // ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
  
 import { db } from "@/lib/db";
@@ -564,9 +565,7 @@ export async function streamBusinessChat({
   );
 
   const result = streamText({
-    model: openrouter(
-      process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4",
-    ),
+    model: openrouter(getAIModel()),
     system: systemPrompt,
     messages: convertToModelMessages(messages),
     maxOutputTokens: 2000,

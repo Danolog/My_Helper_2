@@ -20,10 +20,17 @@ export function createAIClient() {
 }
 
 /**
+ * Default model identifier for text AI features. The only place in the
+ * source where the default is written; `OPENROUTER_MODEL` overrides it.
+ */
+export const DEFAULT_AI_MODEL = "anthropic/claude-sonnet-5.5";
+
+/**
  * Get the AI model identifier from env or default.
+ * An empty `OPENROUTER_MODEL` falls back to the default.
  */
 export function getAIModel() {
-  return process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4";
+  return process.env.OPENROUTER_MODEL || DEFAULT_AI_MODEL;
 }
 
 // ────────────────────────────────────────────────────────────

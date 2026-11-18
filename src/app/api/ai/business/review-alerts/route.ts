@@ -3,7 +3,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { firstNameForReply } from "@/lib/ai/client-context";
-import { isProAIError, requireProAI, trackAIUsage } from "@/lib/ai/openrouter";
+import { getAIModel, isProAIError, requireProAI, trackAIUsage } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 import { reviews, clients, employees, services, appointments } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
@@ -176,7 +176,7 @@ export async function GET(_request: Request) {
 
     // Read AI configuration once for all generations
     const openrouterApiKey = process.env.OPENROUTER_API_KEY;
-    const modelId = process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4";
+    const modelId = getAIModel();
 
     // Generate response suggestions for all reviews in parallel
     const responseResults = await Promise.allSettled(

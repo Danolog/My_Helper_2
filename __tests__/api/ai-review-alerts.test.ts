@@ -30,11 +30,14 @@ const REVIEW_ID = "c1d2e3f4-a5b6-4789-abcd-ef1234567890";
 const mockRequireProAI = vi.fn();
 const mockIsProAIError = vi.fn();
 const mockTrackAIUsage = vi.fn();
+const MODEL_FROM_GETTER = "test-provider/model-from-getter";
+const mockGetAIModel = vi.fn(() => MODEL_FROM_GETTER);
 
 vi.mock("@/lib/ai/openrouter", () => ({
   requireProAI: (...args: unknown[]) => mockRequireProAI(...args),
   isProAIError: (...args: unknown[]) => mockIsProAIError(...args),
   trackAIUsage: (...args: unknown[]) => mockTrackAIUsage(...args),
+  getAIModel: () => mockGetAIModel(),
 }));
 
 vi.mock("@openrouter/ai-sdk-provider", () => ({
@@ -419,6 +422,22 @@ describe("GET /api/ai/business/review-alerts", () => {
 
       expect(prompt).not.toMatch(/(^|\n)Klient:/);
       expect(prompt).not.toContain("Kowalska");
+    });
+
+    it("uses the model id returned by getAIModel()", async () => {
+      setupAuthenticatedPro();
+      const previousModel = process.env.OPENROUTER_MODEL;
+      process.env.OPENROUTER_MODEL = "env/model-read-directly";
+      try {
+        await callAndGetRequest(makeReviewRow());
+      } finally {
+        if (previousModel === undefined) delete process.env.OPENROUTER_MODEL;
+        else process.env.OPENROUTER_MODEL = previousModel;
+      }
+
+      expect(mockGetAIModel).toHaveBeenCalled();
+      const args = mockGenerateText.mock.calls[0]![0] as { model: { modelId: string } };
+      expect(args.model).toEqual({ modelId: MODEL_FROM_GETTER });
     });
 
     it("system prompt never asks for the last name", async () => {

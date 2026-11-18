@@ -42,6 +42,7 @@ vi.mock("drizzle-orm", () => ({
 }));
 
 vi.mock("@openrouter/ai-sdk-provider", () => ({ createOpenRouter: vi.fn() }));
+vi.mock("@/lib/ai/openrouter", () => ({ getAIModel: vi.fn(() => "test-provider/model") }));
 vi.mock("ai", () => ({ streamText: vi.fn(), convertToModelMessages: vi.fn() }));
 
 vi.mock("@/lib/logger", () => ({
