@@ -198,6 +198,16 @@ describe("moduł listy oczekujących włączony → metoda działa dalej", () =>
     expect(body.code).not.toBe(MODULE_DISABLED_CODE);
   });
 
+  it("DELETE /api/waiting-list/[id] przy włączonym module → 200, usunięcie wywołane raz", async () => {
+    setModule(true);
+
+    const response = await callDelete();
+
+    expect(response.status).toBe(200);
+    expect(gate.deleteOwned).toHaveBeenCalledTimes(1);
+    expect(gate.deleteOwned).toHaveBeenCalledWith(expect.anything(), ENTRY_ID);
+  });
+
   it("niepoprawna treść POST przy włączonym module → 400", async () => {
     setModule(true);
     const response = await createEntry(
@@ -211,11 +221,19 @@ describe("moduł listy oczekujących włączony → metoda działa dalej", () =>
 describe("usunięcie wpisu przy wyłączonym module", () => {
   it("wpis własnego salonu → 200, usunięcie przez bramę salonu z sesji", async () => {
     setModule(false);
+    gate.deleteOwned.mockResolvedValue({
+      id: ENTRY_ID,
+      note: "znacznik-tresci-wpisu-7f3a",
+    });
 
     const response = await callDelete();
+    const text = await response.text();
+    const body = JSON.parse(text);
 
     expect(response.status).toBe(200);
-    expect((await response.json()).success).toBe(true);
+    expect(body.success).toBe(true);
+    expect(body.data).toBeUndefined();
+    expect(text).not.toContain("znacznik-tresci-wpisu-7f3a");
     expect(mockForSalon).toHaveBeenCalledWith(SALON_ID);
     expect(gate.deleteOwned).toHaveBeenCalledTimes(1);
     expect(gate.deleteOwned).toHaveBeenCalledWith(expect.anything(), ENTRY_ID);
@@ -256,8 +274,9 @@ describe("usunięcie wpisu przy wyłączonym module", () => {
   it("przełącznik modułu nie jest czytany", async () => {
     setModule(false);
 
-    await callDelete();
+    const response = await callDelete();
 
+    expect(response.status).toBe(200);
     expect(mockGetSalonModules).not.toHaveBeenCalled();
   });
 });

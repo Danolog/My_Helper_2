@@ -246,7 +246,6 @@ export const DELETE = withApiHandler(
 
     return NextResponse.json({
       success: true,
-      data: deletedEntry,
       message: "Wpis zostal usuniety z listy oczekujacych",
     });
   }
