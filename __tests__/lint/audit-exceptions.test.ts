@@ -2,23 +2,18 @@
 /**
  * #260: strażnik wyjątków audytu zależności (`pnpm.auditConfig.ignoreGhsas`).
  *
- * Każdy wyjątek audytu ma uzasadnienie i termin. Reguły:
+ * Każdy wyjątek audytu ma uzasadnienie i termin. Lista wyjątków jest dziś pusta.
+ * Reguły:
  *  1. Lista `ignoreGhsas` jest równa zamkniętej liście EXPECTED niżej —
- *     dopisanie wyjątku wymaga zmiany tego testu.
+ *     dopisanie wyjątku wymaga zmiany tego testu. Przy pustej liście oczekiwanej
+ *     brak sekcji `pnpm.auditConfig` albo brak `ignoreGhsas` jest zgodny
+ *     z oczekiwaniem, podobnie jak `ignoreGhsas: []`.
  *  2. Każdy identyfikator ma dokładnie jeden wpis w tablicy `"//"` package.json:
  *     `pnpm.auditConfig.ignoreGhsas <GHSA>: …`, z numerem zgłoszenia (`#<liczba>`)
  *     i datą `Przegląd do RRRR-MM-DD`.
  *  3. Data przeglądu nie minęła (UTC; w dniu przeglądu jeszcze zielono).
  *  4. Brak wpisów `"//"` o `ignoreGhsas` bez pozycji na liście.
  *  5. `pnpm.auditConfig` nie ma innych kluczy niż `ignoreGhsas`.
- *  6. Kod aplikacji (`src/**`, `next.config.ts`) nie importuje bibliotek
- *     dopasowujących wzorce glob, także kopii wbudowanej w Next — wyjątek
- *     GHSA-fc5q-39xc-vjpf (picomatch) zakłada, że pakiet z drzewa zależności
- *     działa tylko w narzędziach (lint, testy).
- *  7. Wzorce `hostname` i `pathname` w `next.config.ts` nie zawierają extglob.
- *     Next dopasowuje adresy obrazów do `images.remotePatterns` własną kopią
- *     biblioteki; ostrzeżenie dotyczy wzorców extglob, więc wyjątek zakłada,
- *     że takich wzorców nie ma.
  * Testy kontrolne niżej pokazują, że każda reguła łapie podrzucone naruszenie.
  */
 import fs from "node:fs";
@@ -28,10 +23,9 @@ import { describe, expect, it } from "vitest";
 const ROOT = path.resolve(__dirname, "../..");
 
 /** Zamknięta lista wyjątków. Zmiana = nowy wpis w `"//"` z uzasadnieniem, zgłoszeniem i datą przeglądu. */
-const EXPECTED = ["GHSA-fc5q-39xc-vjpf"];
+const EXPECTED: string[] = [];
 
 const NOTE_PREFIX = "pnpm.auditConfig.ignoreGhsas ";
-const GLOB_LIBS = ["picomatch", "micromatch", "minimatch", "fast-glob", "tinyglobby", "glob"];
 
 export type Kind = "lista" | "wpis" | "termin" | "sierota" | "klucze";
 export type Violation = { kind: Kind; message: string };
@@ -60,7 +54,11 @@ export function findAuditExceptionViolations(pkg: unknown, expected: string[], t
   const list = Array.isArray(rawList) ? rawList.map(String) : [];
 
   // 1. Lista równa zamkniętej liście oczekiwanej.
-  if (!Array.isArray(rawList) || JSON.stringify(list) !== JSON.stringify(expected)) {
+  const listOk =
+    expected.length === 0
+      ? rawList === undefined || (Array.isArray(rawList) && list.length === 0)
+      : Array.isArray(rawList) && JSON.stringify(list) === JSON.stringify(expected);
+  if (!listOk) {
     out.push({
       kind: "lista",
       message: `pnpm.auditConfig.ignoreGhsas = ${JSON.stringify(rawList)}, oczekiwano ${JSON.stringify(expected)} — nowy wyjątek wymaga zmiany listy EXPECTED w tym teście`,
@@ -111,46 +109,6 @@ export function findAuditExceptionViolations(pkg: unknown, expected: string[], t
   return out;
 }
 
-const GLOB_IMPORT = new RegExp(
-  String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)["'](?:next/dist/compiled/)?(${GLOB_LIBS.map((l) => l.replace(/[-]/g, "\\-")).join("|")})(?:/[^"']*)?["']`,
-  "g"
-);
-
-/** Reguła 6: import statyczny, dynamiczny i require bibliotek glob (także `next/dist/compiled/<nazwa>`). */
-export function findGlobImports(files: Record<string, string>): string[] {
-  const out: string[] = [];
-  for (const [file, src] of Object.entries(files)) {
-    for (const m of src.matchAll(GLOB_IMPORT)) out.push(`${file}: import ${m[1]}`);
-  }
-  return out;
-}
-
-const PATTERN_LINE = /\b(hostname|pathname)\s*:\s*(.+)$/;
-const EXTGLOB = /[+*?@!]\(/;
-
-/** Reguła 7: wiersze `hostname:` / `pathname:` z konfiguracji i te z nich, które zawierają extglob. */
-export function findImagePatterns(configSource: string): { all: string[]; extglob: string[] } {
-  const all = configSource
-    .split(/\r?\n/)
-    .map((line) => PATTERN_LINE.exec(line))
-    .filter((m): m is RegExpExecArray => m !== null)
-    .map((m) => `${m[1]}: ${m[2]!.trim()}`);
-  return { all, extglob: all.filter((entry) => EXTGLOB.test(entry)) };
-}
-
-function walk(dir: string): string[] {
-  return fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((e) => {
-    const rel = path.posix.join(dir, e.name);
-    if (e.isDirectory()) return walk(rel);
-    return /\.(ts|tsx)$/.test(e.name) ? [rel] : [];
-  });
-}
-
-function readSources(): Record<string, string> {
-  const files = [...walk("src"), "next.config.ts"];
-  return Object.fromEntries(files.map((f) => [f, fs.readFileSync(path.join(ROOT, f), "utf8")]));
-}
-
 const readPkg = () => JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as Record<string, unknown>;
 const of = (v: Violation[], kind: Kind) => v.filter((x) => x.kind === kind).map((x) => x.message);
 
@@ -175,18 +133,6 @@ describe("#260 strażnik: wyjątki audytu zależności", () => {
 
   it("pnpm.auditConfig ma tylko klucz ignoreGhsas", () => {
     expect(of(v, "klucze")).toEqual([]);
-  });
-
-  it("src i next.config.ts nie importują bibliotek glob", () => {
-    const sources = readSources();
-    expect(Object.keys(sources)).toContain("src/lib/utils.ts");
-    expect(findGlobImports(sources)).toEqual([]);
-  });
-
-  it("wzorce obrazów w next.config.ts nie zawierają extglob", () => {
-    const { all, extglob } = findImagePatterns(fs.readFileSync(path.join(ROOT, "next.config.ts"), "utf8"));
-    expect(all.length).toBeGreaterThan(0);
-    expect(extglob).toEqual([]);
   });
 });
 
@@ -265,38 +211,26 @@ describe("#260 strażnik — testy kontrolne (podrzucone naruszenia są łapane)
     expect(check(pkg([ID], [note(ID), "luźna notka o ignoreGhsas. #3"])).map((x) => x.kind)).toEqual(["sierota"]);
   });
 
-  it("podrzucony import w pliku z src (statyczny, dynamiczny, require, podścieżka)", () => {
-    const v = findGlobImports({
-      "src/lib/a.ts": 'import picomatch from "picomatch";',
-      "src/lib/b.ts": "const m = await import('micromatch');",
-      "src/lib/c.ts": 'const g = require("fast-glob");',
-      "src/lib/d.tsx": 'import { glob } from "glob/sync";\nimport "tinyglobby";\nexport { minimatch } from "minimatch";',
-      "src/lib/e.ts": 'import pm from "next/dist/compiled/picomatch";',
-      "next.config.ts": 'import globby from "globby";\nimport x from "./glob";',
-    });
-    expect(v).toEqual([
-      "src/lib/a.ts: import picomatch",
-      "src/lib/b.ts: import micromatch",
-      "src/lib/c.ts: import fast-glob",
-      "src/lib/d.tsx: import glob",
-      "src/lib/d.tsx: import tinyglobby",
-      "src/lib/d.tsx: import minimatch",
-      "src/lib/e.ts: import picomatch",
-    ]);
-  });
+  describe("pusta lista oczekiwana", () => {
+    const checkEmpty = (p: unknown) => findAuditExceptionViolations(p, [], "2026-11-17");
 
-  it("podrzucony wzorzec extglob w hostname i pathname; zwykłe wzorce i inne wiersze bez zarzutu", () => {
-    const { all, extglob } = findImagePatterns(
-      [
-        '        hostname: "*.example.com",',
-        '        hostname: "+(a|b).example.com",',
-        "        pathname: `/${bucket}/**`,",
-        '        pathname: "/img/!(private)/**",',
-        '        source: "/(.*)",',
-        "  if (!(target)) return;",
-      ].join("\n")
-    );
-    expect(all).toHaveLength(4);
-    expect(extglob).toEqual(['hostname: "+(a|b).example.com",', 'pathname: "/img/!(private)/**",']);
+    it("brak auditConfig: zero naruszeń", () => {
+      expect(checkEmpty({ "//": [], pnpm: { overrides: {} } })).toEqual([]);
+    });
+
+    it("auditConfig z pustą listą ignoreGhsas: zero naruszeń", () => {
+      expect(checkEmpty({ "//": [], pnpm: { overrides: {}, auditConfig: { ignoreGhsas: [] } } })).toEqual([]);
+      expect(checkEmpty({ "//": [], pnpm: { overrides: {}, auditConfig: {} } })).toEqual([]);
+    });
+
+    it("wyjątek na liście przy pustej liście oczekiwanej", () => {
+      const v = checkEmpty({ "//": [note(ID)], pnpm: { overrides: {}, auditConfig: { ignoreGhsas: [ID] } } });
+      expect(v.map((x) => x.kind)).toEqual(["lista"]);
+    });
+
+    it("dodatkowy klucz w auditConfig bez ignoreGhsas", () => {
+      const v = checkEmpty({ "//": [], pnpm: { overrides: {}, auditConfig: { ignoreUnfixed: true } } });
+      expect(v.map((x) => x.kind)).toEqual(["klucze"]);
+    });
   });
 });

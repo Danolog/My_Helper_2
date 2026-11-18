@@ -1,7 +1,6 @@
 {
   "//": [
-    "pnpm.overrides zod@>=4.0.0 <4.6.6: runtime @vercel/blob>@vercel/oidc>@vercel/cli-config>zod (ładowane przy imporcie @vercel/blob). Usunąć, gdy @vercel/blob przejdzie na @vercel/cli-config z zod >=4.6.6. #68",
-    "pnpm.auditConfig.ignoreGhsas GHSA-fc5q-39xc-vjpf: picomatch <=4.0.7, ReDoS przy wzorcach extglob, brak wersji poprawionej; pakiet z drzewa zależności tylko w narzędziach (lint, testy), kod aplikacji nie importuje bibliotek glob; jedyne dopasowanie glob w działaniu aplikacji (kopia wbudowana w Next, images.remotePatterns) używa wzorców z next.config.ts ustalanych przy budowie, bez extglob. Przegląd do 2026-12-17. Usunąć, gdy wyjdzie picomatch >4.0.7: podnieść wersję i skasować wpis. #260"
+    "pnpm.overrides zod@>=4.0.0 <4.6.6: runtime @vercel/blob>@vercel/oidc>@vercel/cli-config>zod (ładowane przy imporcie @vercel/blob). Usunąć, gdy @vercel/blob przejdzie na @vercel/cli-config z zod >=4.6.6. #68"
   ],
   "name": "myhelper",
   "version": "1.1.2",
@@ -140,9 +139,6 @@
       "nanoid@<3.3.18": "^3.3.18",
       "source-map-js@<1.2.2": "^1.2.2",
       "browserslist@<4.28.7": "^4.28.7"
-    },
-    "auditConfig": {
-      "ignoreGhsas": ["GHSA-fc5q-39xc-vjpf"]
     }
   }
 }
