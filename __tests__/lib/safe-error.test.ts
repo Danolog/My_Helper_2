@@ -4,7 +4,13 @@
  */
 import { describe, it, expect } from "vitest";
 import { DrizzleQueryError } from "drizzle-orm";
-import { redactQueryParamsText, toErrorIdentity, toSafeErrorMeta, type SafeErrorMeta } from "@/lib/safe-error";
+import {
+  INVALID_JSON_MESSAGE,
+  redactQueryParamsText,
+  toErrorIdentity,
+  toSafeErrorMeta,
+  type SafeErrorMeta,
+} from "@/lib/safe-error";
 
 const PII = ["Anna Nowak", "+48123456789", "anna@test.pl"];
 
@@ -51,6 +57,67 @@ describe("toSafeErrorMeta", () => {
     expect(toSafeErrorMeta("zwykły napis")).toBe("zwykły napis");
     expect(toSafeErrorMeta(42)).toBe(42);
     expect(toSafeErrorMeta(null)).toBeNull();
+  });
+});
+
+describe("toSafeErrorMeta — błąd parsowania JSON", () => {
+  // Zły znak tuż przed wartością: wycinek wejścia w treści błędu obejmuje
+  // znaki następujące po nim. Fragment = część wartości widoczna w wycinku.
+  const CASES = [
+    { raw: 'x"anna@test.pl"', fragment: "anna@test" },
+    { raw: 'x"+48123456789"', fragment: "4812345" },
+  ];
+  const RAW = CASES[0]!.raw;
+
+  function jsonParseError(text: string): SyntaxError {
+    try {
+      JSON.parse(text);
+    } catch (e) {
+      return e as SyntaxError;
+    }
+    throw new Error("JSON.parse nie rzucił");
+  }
+
+  it("SyntaxError z JSON.parse z telefonem i e-mailem → w metadanych ani wartości, ani wycinka wejścia", () => {
+    for (const { raw, fragment } of CASES) {
+      const err = jsonParseError(raw);
+      // Warunek wstępny: treść oryginału niesie wycinek wejścia.
+      expect(err.message).toContain(fragment);
+      expect(err.message).toContain("is not valid JSON");
+
+      const meta = toSafeErrorMeta(err) as SafeErrorMeta;
+      const serialized = JSON.stringify(meta);
+      expect(serialized, raw).not.toContain(fragment);
+      expect(serialized).not.toContain("is not valid JSON");
+      expect(serialized).not.toContain("Unexpected token");
+      expect(meta.message).toBe(INVALID_JSON_MESSAGE);
+      expect(meta.name).toBe("SyntaxError");
+    }
+  });
+
+  it("stack zaczyna się od bezpiecznej linii i zachowuje ramki", () => {
+    const meta = toSafeErrorMeta(jsonParseError(RAW)) as SafeErrorMeta;
+    expect(meta.stack?.startsWith(`SyntaxError: ${INVALID_JSON_MESSAGE}\n`)).toBe(true);
+    expect(meta.stack).toMatch(/\n\s+at /);
+  });
+
+  it("'Unexpected end of JSON input' (treść zawiera JSON) → stały tekst", () => {
+    const err = jsonParseError('{"phone":');
+    expect(err.message).toContain("JSON");
+    expect((toSafeErrorMeta(err) as SafeErrorMeta).message).toBe(INVALID_JSON_MESSAGE);
+  });
+
+  it("napis error.message błędu parsowania → stały tekst", () => {
+    const text = jsonParseError(RAW).message;
+    expect(toSafeErrorMeta(text)).toBe(INVALID_JSON_MESSAGE);
+  });
+
+  it("SyntaxError bez JSON w treści i zwykły Error → bez zmian", () => {
+    const syntax = new SyntaxError("x");
+    expect(toSafeErrorMeta(syntax)).toEqual({ message: "x", name: "SyntaxError", stack: syntax.stack });
+    const plain = new Error("Invalid JSON body");
+    expect(toSafeErrorMeta(plain)).toEqual({ message: "Invalid JSON body", name: "Error", stack: plain.stack });
+    expect(toSafeErrorMeta("JSON w środku napisu")).toBe("JSON w środku napisu");
   });
 });
 

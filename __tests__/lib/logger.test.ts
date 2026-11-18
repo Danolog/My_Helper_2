@@ -274,3 +274,115 @@ describe("logger — redakcja danych osobowych (hotfix P1)", () => {
     expect(JSON.stringify(redactLogContext(deep))).not.toContain('"1"');
   });
 });
+
+describe("logger — klucze z fragmentem phone/email", () => {
+  const CONTACT_KEYS = ["guestPhone", "guestEmail", "blikPhoneNumber", "clientEmail"] as const;
+  const VALUES: Record<(typeof CONTACT_KEYS)[number], string> = {
+    guestPhone: "+48600123456",
+    guestEmail: "anna@test.pl",
+    blikPhoneNumber: "+48123456789",
+    clientEmail: "a@b.pl",
+  };
+
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("napis pod kluczem z fragmentem → [redacted] na poziomie głównym, zagnieżdżonym i w tablicy, bez wielkości liter", async () => {
+    const { redactLogContext, REDACTED } = await import("@/lib/logger");
+    for (const key of CONTACT_KEYS) {
+      const v = VALUES[key];
+      const ctx = { [key]: v, [key.toUpperCase()]: v, deep: { a: [{ [key]: v }, [{ [key]: v }]] } };
+      expect(redactLogContext(ctx), key).toEqual({
+        [key]: REDACTED,
+        [key.toUpperCase()]: REDACTED,
+        deep: { a: [{ [key]: REDACTED }, [{ [key]: REDACTED }]] },
+      });
+    }
+  });
+
+  it("wartości nienapisowe pod kluczem z fragmentem zostają", async () => {
+    const { redactLogContext } = await import("@/lib/logger");
+    const ctx = { emailSent: true, emailCount: 3, phoneVerified: false, emailAt: null };
+    expect(redactLogContext(ctx)).toEqual(ctx);
+  });
+
+  it("obiekt pod kluczem z fragmentem nie znika; jego pola redagowane wg reguł", async () => {
+    const { redactLogContext } = await import("@/lib/logger");
+    expect(
+      redactLogContext({
+        emailData: { recipientEmail: "anna@test.pl", template: "reminder", sent: true, body: "tekst" },
+      }),
+    ).toEqual({
+      emailData: { recipientEmail: "[redacted]", template: "reminder", sent: true, body: "[redacted]" },
+    });
+  });
+
+  it("fragmenty są eksportowane obok listy pełnych nazw", async () => {
+    const { PII_LOG_KEY_FRAGMENTS } = await import("@/lib/logger");
+    expect(PII_LOG_KEY_FRAGMENTS).toEqual(["phone", "email"]);
+  });
+
+  it("produkcja: klucze z fragmentem zredagowane w wyjściu JSON", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("Rezerwacja", { salonId: "salon-1", emailSent: true, guest: [{ ...VALUES }] });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    for (const v of Object.values(VALUES)) expect(raw).not.toContain(v);
+    expect(JSON.parse(raw)).toMatchObject({
+      salonId: "salon-1",
+      emailSent: true,
+      guest: [Object.fromEntries(CONTACT_KEYS.map((k) => [k, "[redacted]"]))],
+    });
+  });
+
+  it("development: ta sama redakcja", async () => {
+    const logger = await importLoggerWithEnv("development");
+    logger.info("x", { guestPhone: "+48600123456", nested: { clientEmail: "a@b.pl" }, emailCount: 3 });
+
+    expect(logSpy).toHaveBeenCalledWith("[INFO]", "x", {
+      guestPhone: "[redacted]",
+      nested: { clientEmail: "[redacted]" },
+      emailCount: 3,
+    });
+  });
+
+  it("logger.error z SyntaxError z JSON.parse → w wyjściu brak telefonu i e-maila (produkcja i development)", async () => {
+    // Zły znak tuż przed wartością: wycinek wejścia w treści błędu obejmuje
+    // znaki następujące po nim.
+    const parse = (text: string): Error => {
+      try {
+        JSON.parse(text);
+      } catch (e) {
+        return e as Error;
+      }
+      throw new Error("JSON.parse nie rzucił");
+    };
+    const emailError = parse('x"anna@test.pl"');
+    const phoneError = parse('x"+48123456789"');
+    expect(emailError.message).toContain("anna@test");
+    expect(phoneError.message).toContain("4812345");
+
+    const prod = await importLoggerWithEnv("production");
+    prod.error("Padlo", { error: emailError, cause: phoneError });
+    const raw = errorSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("anna@test");
+    expect(raw).not.toContain("4812345");
+    expect(JSON.parse(raw).error.name).toBe("SyntaxError");
+
+    const dev = await importLoggerWithEnv("development");
+    dev.error("Padlo", { error: emailError, cause: phoneError });
+    const printed = JSON.stringify(errorSpy.mock.calls[1]);
+    expect(printed).not.toContain("anna@test");
+    expect(printed).not.toContain("4812345");
+  });
+});

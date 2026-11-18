@@ -21,12 +21,27 @@ export function redactQueryParamsText(text: string): string {
 }
 
 /**
- * message/stack bez parametrów. Stack składany z bezpiecznego message i ramek
- * z oryginału — bez wyrażenia regularnego: wartość parametru może zawierać
- * "\n    at ..." i nie może skrócić wycięcia.
+ * Stała treść błędu parsowania JSON. `SyntaxError` z `JSON.parse` /
+ * `request.json()` niesie w treści wycinek wejścia (np. telefon, e-mail
+ * z ciała żądania) — do logu trafia tylko ten tekst.
+ */
+export const INVALID_JSON_MESSAGE = `Invalid JSON input ${REDACTED}`;
+
+/** Końcówka treści błędu parsowania JSON, który zawiera wycinek wejścia. */
+const INVALID_JSON_SUFFIX = "is not valid JSON";
+
+function isJsonParseError(error: Error): boolean {
+  return error.name === "SyntaxError" && error.message.includes("JSON");
+}
+
+/**
+ * message/stack bez parametrów zapytania i bez wycinka wejścia JSON. Stack
+ * składany z bezpiecznego message i ramek z oryginału — bez wyrażenia
+ * regularnego: wartość parametru może zawierać "\n    at ..." i nie może
+ * skrócić wycięcia.
  */
 function redactError(error: Error): { message: string; stack: string | undefined } {
-  const message = redactQueryParamsText(error.message);
+  const message = isJsonParseError(error) ? INVALID_JSON_MESSAGE : redactQueryParamsText(error.message);
   if (message === error.message) return { message, stack: error.stack };
   const head = `${error.name}: ${error.message}`;
   const frames = error.stack?.startsWith(head) ? error.stack.slice(head.length) : "";
@@ -44,8 +59,10 @@ export interface SafeErrorMeta {
 /**
  * Metadane błędu do logu: message, name, stack (bez parametrów zapytania)
  * i `causeCode`. `detail` Postgresa i samo `cause` NIE trafiają do logu
- * (zawierają wartości: "Key (email)=(...)"). Napis z parametrami (np. ktoś
- * zalogował `error.message`) też jest redagowany. Inne wartości bez zmian.
+ * (zawierają wartości: "Key (email)=(...)"). Błąd parsowania JSON ma stałą
+ * treść (`INVALID_JSON_MESSAGE`). Napis z parametrami albo treść błędu
+ * parsowania JSON (np. ktoś zalogował `error.message`) też jest redagowany.
+ * Inne wartości bez zmian.
  */
 export function toSafeErrorMeta(value: unknown): unknown {
   if (value instanceof Error) {
@@ -59,7 +76,9 @@ export function toSafeErrorMeta(value: unknown): unknown {
     if (causeCode) meta.causeCode = causeCode;
     return meta;
   }
-  if (typeof value === "string") return redactQueryParamsText(value);
+  if (typeof value === "string") {
+    return value.endsWith(INVALID_JSON_SUFFIX) ? INVALID_JSON_MESSAGE : redactQueryParamsText(value);
+  }
   return value;
 }
 
