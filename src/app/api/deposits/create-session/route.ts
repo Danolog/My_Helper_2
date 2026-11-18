@@ -143,7 +143,6 @@ export async function POST(request: Request) {
       notes,
       depositAmount,
       paymentMethod,
-      blikPhoneNumber,
       guestName,
       guestPhone,
       guestEmail,
@@ -169,9 +168,9 @@ export async function POST(request: Request) {
       }
     }
 
-    // NOTE: the "Blik P2P" mock flow (payment request sent to a phone number)
-    // was removed — BLIK is now handled as a payment method inside Stripe
-    // Checkout. The blikPhoneNumber column stays in the DB (no migration).
+    // NOTE: BLIK is a payment method inside Stripe Checkout; the request field
+    // blikPhoneNumber is accepted and not stored — this route writes null to
+    // the blik_phone_number column (no migration).
 
     // A deposit session is meaningless without a service (the deposit is
     // derived from the service price and settings).
@@ -371,7 +370,7 @@ export async function POST(request: Request) {
           amount: String(depositAmountValue),
           currency: "PLN",
           paymentMethod: stripeConfigured ? "stripe" : paymentMethod || "stripe",
-          blikPhoneNumber: blikPhoneNumber || null,
+          blikPhoneNumber: null,
           status: "pending",
         })
         .returning();

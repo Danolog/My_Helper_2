@@ -511,3 +511,123 @@ describe("POST /api/deposits/create-session — kolizja półotwarta (#165)", ()
     expect(body.error).toBe("Pracownik nie jest dostepny w wybranym terminie.");
   });
 });
+
+describe("POST /api/deposits/create-session — numer telefonu BLIK z żądania nie jest zapisywany", () => {
+  const BLIK_RAW = "+48 123 456 789";
+  const BLIK_DIGITS = "123456789";
+  const mockSessionsCreate = vi.fn();
+  const fakeStripe = {
+    checkout: { sessions: { create: (...a: unknown[]) => mockSessionsCreate(...a) } },
+  };
+
+  let appointmentChain: ReturnType<typeof createChainMock>;
+  let paymentChain: ReturnType<typeof createChainMock>;
+  let updateChain: ReturnType<typeof createChainMock>;
+  let logSpies: ReturnType<typeof vi.spyOn>[];
+
+  /** Argumenty wszystkich zapisów do bazy (values / set) po serializacji. */
+  function dbWriteArgs(): string {
+    const calls = (chain: Record<string, unknown>, method: string) =>
+      (chain[method] as ReturnType<typeof vi.fn>).mock.calls;
+    return JSON.stringify([
+      calls(appointmentChain, "values"),
+      calls(paymentChain, "values"),
+      calls(updateChain, "set"),
+    ]);
+  }
+
+  function paymentValues(): Record<string, unknown> {
+    return (paymentChain.values as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Record<string, unknown>;
+  }
+
+  function expectNoNumber(serialized: string) {
+    expect(serialized).not.toContain(BLIK_DIGITS);
+    expect(serialized).not.toContain("123 456 789");
+  }
+
+  beforeEach(async () => {
+    vi.stubEnv("ALLOW_PAYMENT_SIMULATION", "1");
+    vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    mockDbSelect
+      .mockReturnValueOnce(createChainMock([]))
+      .mockReturnValueOnce(createChainMock([]));
+    appointmentChain = createChainMock([insertedAppointment]);
+    paymentChain = createChainMock([insertedPayment]);
+    updateChain = createChainMock([]);
+    mockDbInsert.mockReturnValueOnce(appointmentChain).mockReturnValueOnce(paymentChain);
+    mockDbUpdate.mockReturnValue(updateChain);
+    mockDbDelete.mockReturnValue(createChainMock([]));
+    primeExpectedDeposit(50);
+    mockSessionsCreate.mockResolvedValue({
+      id: "cs_test_123",
+      url: "https://checkout.stripe.com/c/pay/cs_test_123",
+    });
+    const { logger } = await import("@/lib/logger");
+    logSpies = [vi.spyOn(logger, "info"), vi.spyOn(logger, "warn"), vi.spyOn(logger, "error")];
+  });
+
+  afterEach(() => {
+    for (const spy of logSpies) spy.mockRestore();
+  });
+
+  it("Stripe skonfigurowany, żądanie z numerem BLIK: ta sama odpowiedź co bez numeru, wiersz płatności z null, numer poza zapisem i sesją Stripe", async () => {
+    mockIsStripeConfigured.mockReturnValue(true);
+    mockGetStripe.mockReturnValue(fakeStripe);
+
+    const withNumber = await createSession(
+      makeRequest({ ...validBody, paymentMethod: "blik", blikPhoneNumber: BLIK_RAW })
+    );
+    const withNumberParsed = await parseResponse<{ success: boolean; data: Record<string, unknown> }>(withNumber);
+
+    expect(withNumberParsed.status).toBe(201);
+    expect(withNumberParsed.body.success).toBe(true);
+    expect(paymentValues().blikPhoneNumber).toBeNull();
+    expectNoNumber(dbWriteArgs());
+    expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
+    expectNoNumber(JSON.stringify(mockSessionsCreate.mock.calls));
+    expectNoNumber(JSON.stringify(withNumberParsed.body));
+    for (const spy of logSpies) expectNoNumber(JSON.stringify(spy.mock.calls));
+
+    // Ta sama trasa bez numeru: ten sam status i ten sam kształt odpowiedzi.
+    mockDbSelect
+      .mockReturnValueOnce(createChainMock([]))
+      .mockReturnValueOnce(createChainMock([]));
+    mockDbInsert
+      .mockReturnValueOnce(createChainMock([insertedAppointment]))
+      .mockReturnValueOnce(createChainMock([insertedPayment]));
+    const without = await createSession(makeRequest({ ...validBody, paymentMethod: "blik" }));
+    const withoutParsed = await parseResponse<{ success: boolean; data: Record<string, unknown> }>(without);
+    expect(withoutParsed.status).toBe(withNumberParsed.status);
+    expect(withoutParsed.body).toEqual(withNumberParsed.body);
+  });
+
+  it("tryb symulacji (Stripe nieskonfigurowany), żądanie z numerem BLIK: wiersz płatności z null, numer poza zapisem, odpowiedzią i logami", async () => {
+    mockIsStripeConfigured.mockReturnValue(false);
+    mockGetStripe.mockReturnValue(null);
+
+    const response = await createSession(
+      makeRequest({ ...validBody, paymentMethod: "blik", blikPhoneNumber: BLIK_RAW })
+    );
+    const { status, body } = await parseResponse<{ data: Record<string, unknown> }>(response);
+
+    expect(status).toBe(201);
+    expect(body.data.simulated).toBe(true);
+    expect(paymentValues().paymentMethod).toBe("blik");
+    expect(paymentValues().blikPhoneNumber).toBeNull();
+    expectNoNumber(dbWriteArgs());
+    expectNoNumber(JSON.stringify(body));
+    for (const spy of logSpies) expectNoNumber(JSON.stringify(spy.mock.calls));
+  });
+
+  it("żądanie bez numeru BLIK: wiersz płatności z null", async () => {
+    mockIsStripeConfigured.mockReturnValue(false);
+    mockGetStripe.mockReturnValue(null);
+
+    const response = await createSession(makeRequest({ ...validBody, paymentMethod: "blik" }));
+
+    expect(response.status).toBe(201);
+    expect(paymentValues().blikPhoneNumber).toBeNull();
+  });
+});
