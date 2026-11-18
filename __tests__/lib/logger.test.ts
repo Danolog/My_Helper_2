@@ -440,6 +440,14 @@ describe("logger — liczby i tablice pod kluczem z fragmentem phone/email", () 
     expect(JSON.stringify(out)).toContain("[circular]");
   });
 
+  it("szeroka tablica zawierająca samą siebie pod kluczem z fragmentem → wywołanie wraca ze znacznikiem [circular]", async () => {
+    const { redactLogContext } = await import("@/lib/logger");
+    const a: unknown[] = [];
+    for (let i = 0; i < 20; i++) a.push(a);
+    const out = redactLogContext({ emails: a });
+    expect(JSON.stringify(out)).toContain("[circular]");
+  });
+
   it("liczba całkowita od 7 cyfr i bigint pod kluczem z fragmentem → [redacted], także w tablicy", async () => {
     const { redactLogContext, REDACTED } = await import("@/lib/logger");
     expect(
@@ -564,7 +572,7 @@ describe("logger — wartości nieserializowalne w kontekście (produkcja)", () 
     expect(JSON.parse(logSpy.mock.calls[0]![0] as string)).toMatchObject({ licznik: { value: "42" } });
   });
 
-  it("cykl w obiekcie niebędącym zwykłym obiektem → wpis zastępczy bez kontekstu, kanał wg poziomu", async () => {
+  it("cykl w obiekcie niebędącym zwykłym obiektem → wpis zastępczy z polami prostymi kontekstu, kanał wg poziomu", async () => {
     class Wezel {
       self: Wezel;
       constructor() {
@@ -583,6 +591,7 @@ describe("logger — wartości nieserializowalne w kontekście (produkcja)", () 
       level: "error",
       msg: "Padlo",
       timestamp: expect.any(String),
+      route: "/api/x",
       contextError: "unserializable",
     });
     expect(JSON.parse(warnSpy.mock.calls[0]![0] as string)).toEqual({
@@ -597,5 +606,163 @@ describe("logger — wartości nieserializowalne w kontekście (produkcja)", () 
       timestamp: expect.any(String),
       contextError: "unserializable",
     });
+  });
+});
+
+describe("logger — redakcja przy serializacji, wpis zastępczy, logger nie rzuca", () => {
+  const PHONE = "+48600100200";
+  const EMAIL = "anna@example.com";
+  const DB_URL = "https://uzytkownik:tajne-haslo@db.example.com/x?token=abc";
+  const DB_URL_SAFE = "https://db.example.com/x?token=abc";
+
+  class Kontakt {
+    id = "c-1";
+    phone = PHONE;
+    email = EMAIL;
+    firstName = "Anna";
+  }
+
+  class Wezel {
+    self: Wezel;
+    constructor() {
+      this.self = this;
+    }
+  }
+
+  let logSpy: ReturnType<typeof vi.spyOn>;
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("pola phone, email i firstName instancji klasy → [redacted], pole zwykłe zostaje", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { kontakt: new Kontakt() });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("600100200");
+    expect(raw).not.toContain(EMAIL);
+    expect(JSON.parse(raw).kontakt).toEqual({
+      id: "c-1",
+      phone: "[redacted]",
+      email: "[redacted]",
+      firstName: "[redacted]",
+    });
+  });
+
+  it("instancja klasy z zagnieżdżonym zwykłym obiektem i tablicą pod kluczem z fragmentem → zredagowane", async () => {
+    class Rezerwacja {
+      id = "r-1";
+      contact = { email: EMAIL };
+      phones = [PHONE];
+    }
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { rezerwacja: new Rezerwacja() });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("600100200");
+    expect(raw).not.toContain(EMAIL);
+    expect(JSON.parse(raw).rezerwacja).toEqual({
+      id: "r-1",
+      contact: { email: "[redacted]" },
+      phones: "[redacted]",
+    });
+  });
+
+  it("URL z danymi logowania w zwykłym obiekcie i w instancji klasy → adres bez nazwy użytkownika i hasła", async () => {
+    class Polaczenie {
+      url = new URL(DB_URL);
+    }
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { dbUrl: new URL(DB_URL), polaczenie: new Polaczenie() });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("tajne-haslo");
+    expect(raw).not.toContain("uzytkownik:");
+    expect(raw).toContain("db.example.com");
+    expect(JSON.parse(raw)).toMatchObject({ dbUrl: DB_URL_SAFE, polaczenie: { url: DB_URL_SAFE } });
+  });
+
+  it("URL z danymi logowania — redactLogContext i tryb deweloperski dają adres bez nazwy użytkownika i hasła", async () => {
+    const { redactLogContext } = await import("@/lib/logger");
+    expect(redactLogContext({ dbUrl: new URL(DB_URL) })).toEqual({ dbUrl: DB_URL_SAFE });
+
+    const logger = await importLoggerWithEnv("development");
+    logger.info("x", { dbUrl: new URL(DB_URL) });
+    expect(logSpy).toHaveBeenCalledWith("[INFO]", "x", { dbUrl: DB_URL_SAFE });
+  });
+
+  it("wpis zastępczy: pola proste kontekstu zostają, level/msg/timestamp z wpisu wygrywają, bez obiektów", async () => {
+    const logger = await importLoggerWithEnv("production");
+    expect(() =>
+      logger.error("Padlo", {
+        route: "/api/x",
+        attempt: 2,
+        ok: false,
+        level: "fałszywy",
+        node: new Wezel(),
+        meta: { a: 1 },
+      }),
+    ).not.toThrow();
+
+    expect(JSON.parse(errorSpy.mock.calls[0]![0] as string)).toEqual({
+      level: "error",
+      msg: "Padlo",
+      timestamp: expect.any(String),
+      route: "/api/x",
+      attempt: 2,
+      ok: false,
+      contextError: "unserializable",
+    });
+  });
+
+  it("wpis zastępczy: phone w kontekście → [redacted]", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.error("Padlo", { phone: PHONE, node: new Wezel() });
+
+    const raw = errorSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("600100200");
+    expect(JSON.parse(raw)).toMatchObject({ phone: "[redacted]", contextError: "unserializable" });
+  });
+
+  it("msg typu bigint z kodu bez typów i cykl w kontekście → logger nie rzuca", async () => {
+    const logger = await importLoggerWithEnv("production");
+    expect(() => logger.error(BigInt(5) as unknown as string, { node: new Wezel() })).not.toThrow();
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("getter rzucający wyjątek w kontekście → logger nie rzuca (produkcja i development), contextError bez treści wyjątku", async () => {
+    const makeCtx = () => {
+      const ctx: Record<string, unknown> = { route: "/api/x" };
+      Object.defineProperty(ctx, "x", {
+        enumerable: true,
+        get() {
+          throw new Error("getter-tekst");
+        },
+      });
+      return ctx;
+    };
+
+    const prod = await importLoggerWithEnv("production");
+    expect(() => prod.error("Padlo", makeCtx())).not.toThrow();
+    const raw = errorSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("getter-tekst");
+    expect(JSON.parse(raw)).toEqual({
+      level: "error",
+      msg: "Padlo",
+      timestamp: expect.any(String),
+      contextError: "unserializable",
+    });
+
+    const dev = await importLoggerWithEnv("development");
+    expect(() => dev.error("Padlo", makeCtx())).not.toThrow();
+    expect(errorSpy).toHaveBeenNthCalledWith(2, "[ERROR]", "Padlo", { contextError: "unserializable" });
   });
 });
