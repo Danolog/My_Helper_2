@@ -64,18 +64,39 @@ export const PII_LOG_KEYS: readonly string[] = [
 
 /**
  * Fragmenty nazw kluczy kontaktowych: klucz, którego nazwa zawiera fragment
- * (bez wielkości liter, np. `guestPhone`, `clientEmail`), ma wartość-napis
- * zamienianą na `[redacted]`; wartości nienapisowe (`emailSent: true`,
- * obiekt `emailData`) zostają i są redagowane rekurencyjnie wg tych samych reguł.
+ * (bez wielkości liter, np. `guestPhone`, `clientEmail`), ma zamienianą na
+ * `[redacted]` wartość: napis, liczbę całkowitą o co najmniej 7 cyfrach albo
+ * `bigint` (numer telefonu zapisany liczbą) oraz tablicę, w której choć jeden
+ * element jest napisem albo taką liczbą, także w tablicy zagnieżdżonej (bez
+ * wchodzenia w obiekty) — cała tablica. Pozostałe wartości
+ * zostają: liczniki i małe liczby (`emailCount: 3`), `boolean`, `null`, pusta
+ * tablica; obiekt (`emailData`) i tablica samych obiektów są redagowane
+ * rekurencyjnie wg tych samych reguł.
  */
 export const PII_LOG_KEY_FRAGMENTS: readonly string[] = ["phone", "email"];
 
 const PII_KEY_SET = new Set(PII_LOG_KEYS.map((k) => k.toLowerCase()));
 
+/** Najmniejsza wartość bezwzględna liczby traktowanej jak numer telefonu (7 cyfr). */
+const PHONE_LIKE_NUMBER_MIN = 1_000_000;
+
+function isContactScalar(value: unknown): boolean {
+  if (typeof value === "string" || typeof value === "bigint") return true;
+  return typeof value === "number" && Number.isInteger(value) && Math.abs(value) >= PHONE_LIKE_NUMBER_MIN;
+}
+
+/** Wartość kontaktowa albo tablica, która ją zawiera — także w tablicy zagnieżdżonej (bez wchodzenia w obiekty). */
+function isContactValue(value: unknown, depth = 0): boolean {
+  if (isContactScalar(value)) return true;
+  return (
+    Array.isArray(value) && depth < MAX_REDACTION_DEPTH && value.some((item) => isContactValue(item, depth + 1))
+  );
+}
+
 function isRedactedEntry(key: string, value: unknown): boolean {
   const lower = key.toLowerCase();
   if (PII_KEY_SET.has(lower)) return true;
-  return typeof value === "string" && PII_LOG_KEY_FRAGMENTS.some((f) => lower.includes(f));
+  return isContactValue(value) && PII_LOG_KEY_FRAGMENTS.some((f) => lower.includes(f));
 }
 
 /** Granica zagnieżdżenia — głębiej logujemy znacznik, nie wartość. */
@@ -89,8 +110,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * Siatka na dane osobowe: kopia wartości z wartościami kluczy z
- * `PII_LOG_KEYS` oraz napisami pod kluczami z `PII_LOG_KEY_FRAGMENTS`
- * zamienionymi na `[redacted]`. Błędy (`Error`) przechodzą
+ * `PII_LOG_KEYS` oraz wartościami kontaktowymi pod kluczami z
+ * `PII_LOG_KEY_FRAGMENTS` (reguła przy tej stałej) zamienionymi na `[redacted]`. Błędy (`Error`) przechodzą
  * przez `toSafeErrorMeta` (message, name, stack zostają), napisy — przez
  * redakcję parametrów zapytania. Obiekty niebędące zwykłymi obiektami
  * (Date itp.) zostają bez zmian. Wejście nie jest modyfikowane.

@@ -386,3 +386,129 @@ describe("logger — klucze z fragmentem phone/email", () => {
     expect(printed).not.toContain("4812345");
   });
 });
+
+describe("logger — liczby i tablice pod kluczem z fragmentem phone/email", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("tablica napisów pod kluczem z fragmentem → [redacted] w całości", async () => {
+    const { redactLogContext, REDACTED } = await import("@/lib/logger");
+    expect(
+      redactLogContext({ phones: ["+48600123456", "+48123456789"], emails: ["anna@example.com"] }),
+    ).toEqual({ phones: REDACTED, emails: REDACTED });
+  });
+
+  it("tablica mieszana (napis + obiekt) pod kluczem z fragmentem → [redacted] w całości", async () => {
+    const { redactLogContext, REDACTED } = await import("@/lib/logger");
+    expect(redactLogContext({ guestEmails: ["anna@example.com", { id: "c-1" }] })).toEqual({
+      guestEmails: REDACTED,
+    });
+  });
+
+  it("tablica zagnieżdżona z napisem, liczbą albo bigint pod kluczem z fragmentem → [redacted] w całości", async () => {
+    const { redactLogContext, REDACTED } = await import("@/lib/logger");
+    expect(
+      redactLogContext({
+        phones: [["+48600123456"]],
+        guestPhones: [[], [[48600123456]]],
+        emails: [[{ id: "c-1" }], ["anna@example.com"]],
+        blikPhones: [[BigInt("48123456789")]],
+      }),
+    ).toEqual({ phones: REDACTED, guestPhones: REDACTED, emails: REDACTED, blikPhones: REDACTED });
+  });
+
+  it("tablica zagnieżdżona bez wartości kontaktowej pod kluczem z fragmentem → bez zmiany kształtu", async () => {
+    const { redactLogContext, REDACTED } = await import("@/lib/logger");
+    expect(
+      redactLogContext({ emails: [[], [[]]], phones: [[{ id: "c-1", phone: "+48600123456", count: 3 }]] }),
+    ).toEqual({ emails: [[], [[]]], phones: [[{ id: "c-1", phone: REDACTED, count: 3 }]] });
+  });
+
+  it("liczba całkowita od 7 cyfr i bigint pod kluczem z fragmentem → [redacted], także w tablicy", async () => {
+    const { redactLogContext, REDACTED } = await import("@/lib/logger");
+    expect(
+      redactLogContext({
+        guestPhone: 48600123456,
+        clientPhone: -48600123456,
+        blikPhoneNumber: BigInt("48123456789"),
+        phoneMin: 1_000_000,
+        phones: [{ id: "c-1" }, 48600123456],
+      }),
+    ).toEqual({
+      guestPhone: REDACTED,
+      clientPhone: REDACTED,
+      blikPhoneNumber: REDACTED,
+      phoneMin: REDACTED,
+      phones: REDACTED,
+    });
+  });
+
+  it("zostają: licznik, wartość logiczna, pusta tablica; tablica obiektów redagowana rekurencyjnie", async () => {
+    const { redactLogContext, REDACTED } = await import("@/lib/logger");
+    expect(
+      redactLogContext({
+        emailCount: 3,
+        phoneMax: 999_999,
+        emailSent: true,
+        emails: [],
+        emailRecipients: [
+          { id: "c-1", email: "anna@example.com", sent: true },
+          { id: "c-2", guestPhone: "+48600123456" },
+        ],
+      }),
+    ).toEqual({
+      emailCount: 3,
+      phoneMax: 999_999,
+      emailSent: true,
+      emails: [],
+      emailRecipients: [
+        { id: "c-1", email: REDACTED, sent: true },
+        { id: "c-2", guestPhone: REDACTED },
+      ],
+    });
+  });
+
+  it("na poziomie zagnieżdżonym i w tablicy obiektów", async () => {
+    const { redactLogContext, REDACTED } = await import("@/lib/logger");
+    expect(
+      redactLogContext({
+        booking: { guest: { phones: ["+48600123456"], guestPhone: 48600123456, emailCount: 2 } },
+        list: [{ emails: ["anna@example.com"], salonId: "salon-1" }],
+      }),
+    ).toEqual({
+      booking: { guest: { phones: REDACTED, guestPhone: REDACTED, emailCount: 2 } },
+      list: [{ emails: REDACTED, salonId: "salon-1" }],
+    });
+  });
+
+  it("produkcja: w wyjściu JSON ani numeru zapisanego liczbą, ani adresu z tablicy", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("Rezerwacja", {
+      salonId: "salon-1",
+      guestPhone: 48600123456,
+      blikPhoneNumber: BigInt("48123456789"),
+      emails: ["anna@example.com"],
+      emailCount: 3,
+    });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("600123456");
+    expect(raw).not.toContain("123456789");
+    expect(raw).not.toContain("anna@example.com");
+    expect(JSON.parse(raw)).toMatchObject({
+      salonId: "salon-1",
+      guestPhone: "[redacted]",
+      blikPhoneNumber: "[redacted]",
+      emails: "[redacted]",
+      emailCount: 3,
+    });
+  });
+});

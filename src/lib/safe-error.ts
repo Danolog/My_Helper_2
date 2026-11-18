@@ -27,7 +27,10 @@ export function redactQueryParamsText(text: string): string {
  */
 export const INVALID_JSON_MESSAGE = `Invalid JSON input ${REDACTED}`;
 
-/** Końcówka treści błędu parsowania JSON, który zawiera wycinek wejścia. */
+/**
+ * Fraza treści błędu parsowania JSON, który zawiera wycinek wejścia. Napis
+ * zawierający ją (także z dopiskiem po treści błędu) jest redagowany w całości.
+ */
 const INVALID_JSON_SUFFIX = "is not valid JSON";
 
 function isJsonParseError(error: Error): boolean {
@@ -60,8 +63,9 @@ export interface SafeErrorMeta {
  * Metadane błędu do logu: message, name, stack (bez parametrów zapytania)
  * i `causeCode`. `detail` Postgresa i samo `cause` NIE trafiają do logu
  * (zawierają wartości: "Key (email)=(...)"). Błąd parsowania JSON ma stałą
- * treść (`INVALID_JSON_MESSAGE`). Napis z parametrami albo treść błędu
- * parsowania JSON (np. ktoś zalogował `error.message`) też jest redagowany.
+ * treść (`INVALID_JSON_MESSAGE`). Napis z parametrami albo napis zawierający
+ * treść błędu parsowania JSON (np. ktoś zalogował `error.message`, także
+ * z dopiskiem) też jest redagowany.
  * Inne wartości bez zmian.
  */
 export function toSafeErrorMeta(value: unknown): unknown {
@@ -77,7 +81,7 @@ export function toSafeErrorMeta(value: unknown): unknown {
     return meta;
   }
   if (typeof value === "string") {
-    return value.endsWith(INVALID_JSON_SUFFIX) ? INVALID_JSON_MESSAGE : redactQueryParamsText(value);
+    return value.includes(INVALID_JSON_SUFFIX) ? INVALID_JSON_MESSAGE : redactQueryParamsText(value);
   }
   return value;
 }

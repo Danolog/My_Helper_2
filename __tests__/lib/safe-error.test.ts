@@ -112,6 +112,14 @@ describe("toSafeErrorMeta — błąd parsowania JSON", () => {
     expect(toSafeErrorMeta(text)).toBe(INVALID_JSON_MESSAGE);
   });
 
+  it("napis z treścią błędu parsowania i dopiskiem po niej → stały tekst", () => {
+    const text = `${jsonParseError(RAW).message} (POST /api/appointments)`;
+    // Warunek wstępny: napis niesie wycinek wejścia i nie kończy się frazą błędu.
+    expect(text).toContain("anna@test");
+    expect(text.endsWith("is not valid JSON")).toBe(false);
+    expect(toSafeErrorMeta(text)).toBe(INVALID_JSON_MESSAGE);
+  });
+
   it("SyntaxError bez JSON w treści i zwykły Error → bez zmian", () => {
     const syntax = new SyntaxError("x");
     expect(toSafeErrorMeta(syntax)).toEqual({ message: "x", name: "SyntaxError", stack: syntax.stack });
