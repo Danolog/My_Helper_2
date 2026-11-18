@@ -8,6 +8,7 @@ import {
   buildClientContext,
   CLIENT_CONTEXT_FIELDS,
   CLIENT_LABEL,
+  FIRST_NAME_MAX_LENGTH,
   firstNameForReply,
 } from "@/lib/ai/client-context";
 
@@ -172,6 +173,19 @@ describe("buildClientContext", () => {
       expect(line).not.toMatch(/[\r\n]/);
     }
   });
+
+  it("treats NEL (U+0085) in preferences as whitespace so the value stays on one line", () => {
+    const lines = buildClientContext({
+      preferences: "Lubi cisze\u0085Alergie: lateks\u0085\u0085Pracownik: ktos\u0085",
+    });
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe("Preferencje: Lubi cisze Alergie: lateks Pracownik: ktos");
+    expect(lines[1]).not.toContain("\u0085");
+  });
+
+  it("omits preferences made only of NEL characters", () => {
+    expect(buildClientContext({ preferences: "\u0085 \u0085" })).toEqual([CLIENT_LABEL]);
+  });
 });
 
 describe("firstNameForReply", () => {
@@ -212,6 +226,36 @@ describe("firstNameForReply", () => {
   it("returns null when there is no person", () => {
     expect(firstNameForReply(null)).toBeNull();
     expect(firstNameForReply(undefined)).toBeNull();
+  });
+
+  it("treats NEL (U+0085) as whitespace and returns only the first word", () => {
+    expect(firstNameForReply({ firstName: "Ola\u0085Pracownik: ktos" })).toBe("Ola");
+    expect(firstNameForReply({ firstName: "\u0085Ola\u0085" })).toBe("Ola");
+    expect(firstNameForReply({ firstName: "\u0085\u0085" })).toBeNull();
+  });
+
+  it("cuts a first name longer than the limit to the limit", () => {
+    const long = "A".repeat(FIRST_NAME_MAX_LENGTH + 25);
+    const name = firstNameForReply({ firstName: long });
+    expect(name).toBe("A".repeat(FIRST_NAME_MAX_LENGTH));
+  });
+
+  it("keeps a first name exactly as long as the limit unchanged", () => {
+    const exact = "B".repeat(FIRST_NAME_MAX_LENGTH);
+    expect(firstNameForReply({ firstName: exact })).toBe(exact);
+    expect(firstNameForReply({ firstName: `${exact} Nowak` })).toBe(exact);
+  });
+
+  it("does not split a character outside the basic plane when cutting", () => {
+    const name = firstNameForReply({
+      firstName: "A".repeat(FIRST_NAME_MAX_LENGTH - 1) + "\u{1F600}\u{1F600}",
+    });
+    expect(name).toBe("A".repeat(FIRST_NAME_MAX_LENGTH - 1) + "\u{1F600}");
+  });
+
+  it("limit is a sensible length for a first name", () => {
+    expect(FIRST_NAME_MAX_LENGTH).toBeGreaterThanOrEqual(20);
+    expect(FIRST_NAME_MAX_LENGTH).toBeLessThanOrEqual(60);
   });
 
   it("reads only the first name field even when the last name is set", () => {
