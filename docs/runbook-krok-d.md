@@ -648,12 +648,17 @@ Włączenie harmonogramu = prawdziwe SMS-y i push do klientów salonów — decy
 **Warunek przed `--resume mh-sms-reminders`.** Cron oznacza wizyty jako
 przypomniane przed wysyłką, więc przebieg z nieprawidłowym albo wygasłym
 tokenem dostawcy SMS nie jest powtarzany dla tych samych wizyt. Dlatego:
-1. przed wznowieniem — jedna testowa wysyłka SMS z aplikacji na własny numer
-   (nie z listy numerów testowych — na nie SMS nie wychodzi), potwierdzająca,
-   że token działa;
-2. po pierwszym przebiegu harmonogramu — odczyt wpisu logu
-   „SMS reminders cron completed”: pole `failed` ma mieć wartość `0`; inna
-   wartość = wstrzymać zadanie i sprawdzić token.
+1. przed wznowieniem — jedna rezerwacja testowa bez zadatku, w panelu salonu,
+   dla klienta z własnym numerem telefonu (nie z listy numerów testowych — na
+   nie SMS nie wychodzi): SMS z potwierdzeniem rezerwacji ma dojść na ten
+   numer, a w historii powiadomień ma się pojawić wpis wysłanej wiadomości;
+   komunikat panelu o utworzeniu wizyty tego nie potwierdza. Brak SMS-a = nie
+   wznawiać. Rezerwację testową odwołać przed wznowieniem;
+2. po pierwszym przebiegu harmonogramu z polem `total` większym od `0` —
+   odczyt wpisu logu „SMS reminders cron completed”: pole `failed` ma mieć
+   wartość `0`; inna wartość = wstrzymać zadanie i sprawdzić token. Przebiegi
+   z `total` równym `0` niczego nie potwierdzają.
+
 Zadania `mh-notify-*` (urodziny, niski stan magazynu, „tęsknimy”) nie są
 tworzone — wracają z R3-C.
 
