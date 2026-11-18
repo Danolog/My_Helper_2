@@ -11,7 +11,7 @@ MyHelper to alternatywa dla Booksy dla malych firm uslugowych (salony kosmetyczn
 - **ORM**: Drizzle ORM 0.44.7, schema: `src/lib/schema.ts` (1057 lines, 45 tabele)
 - **Auth**: Better Auth 1.4.18 (email/password + Google OAuth), 15-min session timeout
 - **Payments**: Stripe 20.3.1 (subskrypcje + zadatki) + Blik P2P
-- **AI**: Vercel AI SDK 5 + OpenRouter (anthropic/claude-sonnet-4-5-20250929) — tylko plan Pro
+- **AI**: Vercel AI SDK 5 — tylko plan Pro. Asystent przechodzi z OpenRouter na Claude Sonnet 5.5 (`claude-sonnet-5-5`) przez Google Vertex AI (`docs/PLAN_WEJSCIA_NA_RYNEK_2026-11.md`, pkt 4.2). Samego wywolania dostawcy OpenRouter (`createAIClient()`, `getAIModel()` w `src/lib/ai/openrouter.ts`) nie rozwijac ani nie naprawiac — zostanie usuniete. Bramka planu Pro (`requireProAI()` w `src/lib/ai/gate.ts`, re-eksportowana z `openrouter.ts`) oraz pomocniki w `openrouter.ts` (`getSalonContext()`, `trackAIUsage()`) zostaja i podlegaja poprawkom jak reszta kodu.
 - **Voice AI**: ElevenLabs (TTS, STT) via `elevenlabs` SDK
 - **Image AI**: Google Imagen 3 via `@google/genai` SDK
 - **Video AI**: Google Veo 3.1 via `@google/genai` SDK

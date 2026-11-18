@@ -52,8 +52,8 @@ All AI features require Pro plan (149 PLN/mies). Gated by `requireProAI()` serve
 ## Environment Variables (AI)
 
 ```
-OPENROUTER_API_KEY                    # AI via OpenRouter (tylko Pro)
-OPENROUTER_MODEL                      # domyslnie anthropic/claude-sonnet-4-5-20250929
+OPENROUTER_API_KEY                    # wycofywane razem z dostawca — nie rozwijac, nie naprawiac
+OPENROUTER_MODEL                      # wycofywane; docelowy model: claude-sonnet-5-5 przez Google Vertex AI (plan, pkt 4.2)
 ELEVENLABS_API_KEY                    # ElevenLabs voice AI (TTS, STT)
 GOOGLE_AI_API_KEY                     # Google Imagen + Veo (images, video)
 TWILIO_ACCOUNT_SID                    # Twilio telephony (optional)
