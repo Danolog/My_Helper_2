@@ -37,7 +37,7 @@ export const SMS_TEST_PHONE_ERROR = "SMS nie wysłany: numer testowy.";
 /** Wynik na hostingu bez skonfigurowanego dostawcy SMS — wiadomość nie wychodzi. */
 export const SMS_PROVIDER_UNAVAILABLE_ERROR = "Wysyłka SMS jest niedostępna.";
 
-const SMSAPI_URL ="https://api.smsapi.pl/sms.do";
+const SMSAPI_URL = "https://api.smsapi.pl/sms.do";
 const DEFAULT_SENDER = "Info";
 
 // Format E.164 i maskowanie żyją w czystym module (importuje go też schemat
