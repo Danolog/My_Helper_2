@@ -3,7 +3,11 @@ import { requireCronSecret } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
 // #193 P5a-2: trasa systemowa (requireCronSecret, cross-salon) — wyjścia z rejestru system/
 import { findDueSmsReminders, getPendingCronReminders, markCronRemindersSent } from "@/lib/server/system";
-import { sendAppointmentReminderSms } from "@/lib/sms";
+import {
+  SMS_PROVIDER_UNAVAILABLE_ERROR,
+  sendAppointmentReminderSms,
+  smsProviderUnavailablePlatform,
+} from "@/lib/sms";
 
 // Wysyłka SMS w pętli może trwać — bez tego domyślny timeout ucina cron w połowie
 export const maxDuration = 300;
@@ -25,11 +29,27 @@ const BATCH_LIMIT = 200;
  *
  * Uses a 30-90 minute window to account for cron execution intervals.
  * A cron running every 5-10 minutes ensures no appointment is missed.
+ *
+ * Na hostingu bez dostawcy SMS odpowiada 503 zaraz po sprawdzeniu sekretu,
+ * przed wyborem i oznaczeniem wizyt — przypomnienia zostają do kolejnego przebiegu.
  */
 export async function POST(request: Request) {
   try {
     const cronError = await requireCronSecret(request);
     if (cronError) return cronError;
+
+    // Bez dostawcy SMS na hostingu żadna wiadomość nie wyjdzie: kończymy przed
+    // wyborem i oznaczeniem wizyt, żeby przypomnienia nie przepadły.
+    const unavailablePlatform = smsProviderUnavailablePlatform();
+    if (unavailablePlatform !== null) {
+      logger.error("SMS reminders cron stopped: no SMS provider configured on hosting", {
+        platform: unavailablePlatform,
+      });
+      return NextResponse.json(
+        { success: false, error: SMS_PROVIDER_UNAVAILABLE_ERROR },
+        { status: 503 }
+      );
+    }
 
     const now = new Date();
     // Window: appointments starting between 30 minutes and 90 minutes from now

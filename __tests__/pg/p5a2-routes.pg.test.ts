@@ -51,6 +51,8 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/sms", async (orig) => ({
   SMS_TIME_ZONE: (await orig<typeof import("@/lib/sms")>()).SMS_TIME_ZONE,
+  SMS_PROVIDER_UNAVAILABLE_ERROR: (await orig<typeof import("@/lib/sms")>()).SMS_PROVIDER_UNAVAILABLE_ERROR,
+  smsProviderUnavailablePlatform: () => null,
   sendSms: (...a: unknown[]) => ctl.sendSms(...a),
   sendAppointmentReminderSms: (...a: unknown[]) => ctl.sendReminderSms(...a),
 }));
