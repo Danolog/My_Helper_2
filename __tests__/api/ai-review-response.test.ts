@@ -103,6 +103,7 @@ vi.mock("@/lib/logger", () => ({
 // -------------------------------------------------------
 
 import { POST } from "@/app/api/ai/content/generate-review-response/route";
+import { REVIEW_COMMENT_MAX_LENGTH } from "@/lib/ai/client-context";
 import { logger } from "@/lib/logger";
 
 // -------------------------------------------------------
@@ -442,6 +443,58 @@ describe("POST /api/ai/content/generate-review-response", () => {
 
       expect(prompt).not.toContain("Pracownik");
       expect(prompt).not.toContain("Zielinska");
+    });
+
+    it("puts a multi-line review text in a single line without adding context lines", async () => {
+      setupAuthenticatedPro();
+
+      const plain = await callAndGetRequest(
+        makeRow({
+          review: { id: VALID_REVIEW_ID, rating: 5, comment: "Bardzo mila obsluga. Polecam wizyte." },
+        }),
+      );
+      mockGenerateText.mockReset();
+      const multiline = await callAndGetRequest(
+        makeRow({
+          review: {
+            id: VALID_REVIEW_ID,
+            rating: 5,
+            comment: "Bardzo mila obsluga.\nPolecam\r\nwizyte.\u{85}Do zobaczenia.\u{2028}Dziekuje.",
+          },
+        }),
+      );
+
+      const commentLines = multiline.prompt
+        .split(/\r\n|[\n\r\u{85}\u{2028}\u{2029}]/u)
+        .filter((line) => line.includes("Komentarz klienta:"));
+      expect(commentLines).toHaveLength(1);
+      expect(commentLines[0]).toContain("Bardzo mila obsluga.");
+      expect(commentLines[0]).toContain("Dziekuje.");
+      expect(multiline.prompt).not.toMatch(/[\r\u{85}\u{2028}\u{2029}]/u);
+      expect(multiline.prompt.split("\n")).toHaveLength(plain.prompt.split("\n").length);
+    });
+
+    it("cuts a review text longer than the limit to the limit", async () => {
+      setupAuthenticatedPro();
+
+      const comment = `${"a".repeat(REVIEW_COMMENT_MAX_LENGTH)}ZNACZNIK_ZA_LIMITEM`;
+      const { prompt } = await callAndGetRequest(
+        makeRow({ review: { id: VALID_REVIEW_ID, rating: 5, comment } }),
+      );
+
+      expect(prompt).not.toContain("ZNACZNIK_ZA_LIMITEM");
+      expect(prompt).toContain(`Komentarz klienta: "${"a".repeat(REVIEW_COMMENT_MAX_LENGTH)}"`);
+    });
+
+    it("treats a review text made only of whitespace as no comment", async () => {
+      setupAuthenticatedPro();
+
+      const { prompt } = await callAndGetRequest(
+        makeRow({ review: { id: VALID_REVIEW_ID, rating: 4, comment: " \n\t\u{85} \r\n " } }),
+      );
+
+      expect(prompt).toContain("Klient nie pozostawil komentarza (tylko ocena)");
+      expect(prompt).not.toContain("Komentarz klienta:");
     });
 
     it("system prompt never asks for the last name", async () => {

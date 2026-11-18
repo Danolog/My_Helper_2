@@ -1,7 +1,7 @@
 import { generateText } from "ai";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
-import { firstNameForReply } from "@/lib/ai/client-context";
+import { firstNameForReply, reviewCommentForModel } from "@/lib/ai/client-context";
 import {
   createAIClient,
   getAIModel,
@@ -112,8 +112,9 @@ export async function POST(req: Request) {
   // Build context about the review
   const contextParts: string[] = [];
   contextParts.push(`Ocena: ${review.rating ? `${review.rating}/5 gwiazdek` : "brak oceny"}`);
-  if (review.comment) {
-    contextParts.push(`Komentarz klienta: "${review.comment}"`);
+  const reviewComment = reviewCommentForModel(review.comment);
+  if (reviewComment) {
+    contextParts.push(`Komentarz klienta: "${reviewComment}"`);
   } else {
     contextParts.push("Klient nie pozostawil komentarza (tylko ocena)");
   }
