@@ -13,6 +13,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMockRequest, parseResponse, TEST_IDS } from "./helpers";
+import { REVIEW_COMMENT_MAX_LENGTH } from "@/lib/ai/client-context";
 
 /**
  * Zod v4 enforces strict RFC 4122 UUID format, so request bodies use a valid
@@ -171,7 +172,10 @@ const AI_INSIGHTS = {
 };
 
 /** Queues the route's database reads in order, for an existing client. */
-function setupClientData(client: unknown) {
+function setupClientData(
+  client: unknown,
+  reviewRows: unknown[] = [{ rating: 5, comment: "Super" }],
+) {
   // 1. client profile
   mockDbSelect.mockReturnValueOnce(chainMock([client]));
   // 2. appointment statistics
@@ -192,7 +196,7 @@ function setupClientData(client: unknown) {
     chainMock([{ serviceName: "Koloryzacja", servicePrice: "250.00", visitCount: 3 }]),
   );
   // 4. reviews
-  mockDbSelect.mockReturnValueOnce(chainMock([{ rating: 5, comment: "Super" }]));
+  mockDbSelect.mockReturnValueOnce(chainMock(reviewRows));
   // 5. loyalty points
   mockDbSelect.mockReturnValueOnce(chainMock([{ points: 120 }]));
   // 6. spending
@@ -414,6 +418,62 @@ describe("POST /api/ai/clients/insights", () => {
       expect(prompt).not.toContain("Preferencje");
       expect(prompt).not.toContain("Urodziny");
       expect(prompt).not.toContain("Kowalska");
+    });
+
+    const MULTI_LINE_COMMENT =
+      "Bardzo mila obsluga.\nPolecam salon.\r\nWroce za miesiac.\u{85}Do zobaczenia.\u{2028}Dziekuje.";
+    const SINGLE_LINE_COMMENT =
+      "Bardzo mila obsluga. Polecam salon. Wroce za miesiac. Do zobaczenia. Dziekuje.";
+
+    it("prompt keeps an ordinary review comment unchanged", async () => {
+      setupAuthenticatedPro();
+      setupClientData(makeClient(), [
+        { rating: 4, comment: "Bardzo mila obsluga." },
+      ]);
+
+      const { prompt } = await callAndGetPrompt();
+
+      expect(prompt).toContain('  1. Ocena: 4/5 - "Bardzo mila obsluga."');
+    });
+
+    it("prompt has a multi-line review comment in a single line", async () => {
+      setupAuthenticatedPro();
+      setupClientData(makeClient(), [{ rating: 5, comment: MULTI_LINE_COMMENT }]);
+      const { prompt } = await callAndGetPrompt();
+
+      mockGenerateText.mockClear();
+      setupAuthenticatedPro();
+      setupClientData(makeClient(), [{ rating: 5, comment: SINGLE_LINE_COMMENT }]);
+      const { prompt: referencePrompt } = await callAndGetPrompt();
+
+      expect(prompt).toContain(`  1. Ocena: 5/5 - "${SINGLE_LINE_COMMENT}"`);
+      expect(prompt).not.toMatch(/[\r\u{85}\u{2028}\u{2029}]/u);
+      expect(prompt.split("\n")).toHaveLength(referencePrompt.split("\n").length);
+    });
+
+    it("prompt cuts a review comment to the maximum length", async () => {
+      setupAuthenticatedPro();
+      const longComment = "a".repeat(REVIEW_COMMENT_MAX_LENGTH) + "ZZZ";
+      setupClientData(makeClient(), [{ rating: 3, comment: longComment }]);
+
+      const { prompt } = await callAndGetPrompt();
+
+      expect(prompt).toContain(
+        `  1. Ocena: 3/5 - "${"a".repeat(REVIEW_COMMENT_MAX_LENGTH)}"`,
+      );
+      expect(prompt).not.toContain("ZZZ");
+    });
+
+    it("prompt has no quoted text for a review comment made only of whitespace", async () => {
+      setupAuthenticatedPro();
+      setupClientData(makeClient(), [
+        { rating: 2, comment: " \n\t\r\n\u{85}\u{2028} " },
+      ]);
+
+      const { prompt } = await callAndGetPrompt();
+
+      expect(prompt).toMatch(/\n {2}1\. Ocena: 2\/5\n/);
+      expect(prompt).not.toContain(" - \"");
     });
 
     it("system prompt does not ask about allergies, health or the client's name", async () => {

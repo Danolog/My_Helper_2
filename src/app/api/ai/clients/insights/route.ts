@@ -1,7 +1,10 @@
 import { generateText } from "ai";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { z } from "zod";
-import { buildClientContext } from "@/lib/ai/client-context";
+import {
+  buildClientContext,
+  reviewCommentForModel,
+} from "@/lib/ai/client-context";
 import {
   createAIClient,
   getAIModel,
@@ -219,10 +222,10 @@ export async function POST(req: Request) {
 
     if (clientReviews.length > 0) {
       const reviewsStr = clientReviews
-        .map(
-          (r, i) =>
-            `  ${i + 1}. Ocena: ${r.rating ?? "brak"}/5${r.comment ? ` - "${r.comment}"` : ""}`,
-        )
+        .map((r, i) => {
+          const comment = reviewCommentForModel(r.comment);
+          return `  ${i + 1}. Ocena: ${r.rating ?? "brak"}/5${comment ? ` - "${comment}"` : ""}`;
+        })
         .join("\n");
       contextParts.push(`\nOPINIE KLIENTA:\n${reviewsStr}`);
     } else {

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
-import { firstNameForReply } from "@/lib/ai/client-context";
+import { firstNameForReply, reviewCommentForModel } from "@/lib/ai/client-context";
 import { isProAIError, requireProAI, trackAIUsage } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 import { reviews, clients, employees, services, appointments } from "@/lib/schema";
@@ -93,7 +93,7 @@ async function generateResponseSuggestion(
         ...(review.clientFirstName ? [`Klient: ${review.clientFirstName}`] : []),
         `Usluga: ${review.serviceName}`,
         `Ocena: ${review.rating}/5`,
-        `Komentarz: ${review.comment || "(brak komentarza)"}`,
+        `Komentarz: ${reviewCommentForModel(review.comment) ?? "(brak komentarza)"}`,
         "",
         "Napisz profesjonalna odpowiedz od wlasciciela salonu, ktora:",
         "- Odnosi sie do konkretnych uwag klienta (jesli podane)",
