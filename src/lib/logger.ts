@@ -31,8 +31,7 @@ const serializeError = toSafeErrorMeta;
 export const REDACTED = "[redacted]";
 
 /**
- * Klucze, których WARTOŚĆ nigdy nie trafia do logu (hotfix P1, dane osobowe
- * w logach; lista: decyzja Olivera 16:30). Porównanie bez wielkości liter,
+ * Klucze, których WARTOŚĆ nigdy nie trafia do logu. Porównanie bez wielkości liter,
  * na każdym poziomie zagnieżdżenia, także w tablicach, w każdym środowisku.
  * `message` i `name` celowo NIE są na liście — wycięłyby treść i nazwę
  * każdego błędu (`toSafeErrorMeta`). Osobę z kluczem `name` poprawia się
@@ -72,6 +71,11 @@ export const PII_LOG_KEYS: readonly string[] = [
  * zostają: liczniki i małe liczby (`emailCount: 3`), `boolean`, `null`, pusta
  * tablica; obiekt (`emailData`) i tablica samych obiektów są redagowane
  * rekurencyjnie wg tych samych reguł.
+ * Granica reguły: napis pod kluczem bez fragmentu (np. `value`) w obiekcie
+ * wewnątrz tablicy pod kluczem z fragmentem (`phones: [{ value: "…" }]`) NIE
+ * jest objęty — dane kontaktowe maskuje się w miejscu wywołania. Liczba
+ * niecałkowita i liczba poniżej 7 cyfr zostają;
+ * liczbowy znacznik czasu pod takim kluczem jest redagowany.
  */
 export const PII_LOG_KEY_FRAGMENTS: readonly string[] = ["phone", "email"];
 
@@ -85,6 +89,9 @@ function isContactScalar(value: unknown): boolean {
   return typeof value === "number" && Number.isInteger(value) && Math.abs(value) >= PHONE_LIKE_NUMBER_MIN;
 }
 
+/** Granica zagnieżdżenia — głębiej logujemy znacznik, nie wartość. */
+const MAX_REDACTION_DEPTH = 8;
+
 /** Wartość kontaktowa albo tablica, która ją zawiera — także w tablicy zagnieżdżonej (bez wchodzenia w obiekty). */
 function isContactValue(value: unknown, depth = 0): boolean {
   if (isContactScalar(value)) return true;
@@ -96,11 +103,8 @@ function isContactValue(value: unknown, depth = 0): boolean {
 function isRedactedEntry(key: string, value: unknown): boolean {
   const lower = key.toLowerCase();
   if (PII_KEY_SET.has(lower)) return true;
-  return isContactValue(value) && PII_LOG_KEY_FRAGMENTS.some((f) => lower.includes(f));
+  return PII_LOG_KEY_FRAGMENTS.some((f) => lower.includes(f)) && isContactValue(value);
 }
-
-/** Granica zagnieżdżenia — głębiej logujemy znacznik, nie wartość. */
-const MAX_REDACTION_DEPTH = 8;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== "object") return false;
@@ -135,6 +139,11 @@ export function redactLogContext(value: unknown, depth = 0, seen: WeakSet<object
   return out;
 }
 
+/** Replacer `JSON.stringify`: `bigint` (na każdym poziomie) → napis dziesiętny. */
+function bigintToString(_key: string, value: unknown): unknown {
+  return typeof value === "bigint" ? value.toString() : value;
+}
+
 /**
  * Format and output a log entry.
  *
@@ -160,7 +169,14 @@ function formatLog(level: LogLevel, message: string, context?: LogContext) {
       ...normalizedContext,
     };
 
-    const json = JSON.stringify(entry);
+    let json: string;
+    try {
+      json = JSON.stringify(entry, bigintToString);
+    } catch {
+      // Kontekst nieserializowalny (np. cykl w obiekcie niebędącym zwykłym
+      // obiektem): wpis zastępczy bez kontekstu i bez treści wyjątku.
+      json = JSON.stringify({ level, msg: message, timestamp: entry.timestamp, contextError: "unserializable" });
+    }
 
     // Route to the correct console method so Vercel and cloud providers
     // can distinguish severity in their log viewer.
