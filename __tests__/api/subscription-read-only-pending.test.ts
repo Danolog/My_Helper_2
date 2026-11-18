@@ -10,7 +10,7 @@
  *
  * Stan subskrypcji salonu jest opisany na poziomie bazy (atrapa oddaje wiersze
  * tabeli `salon_subscriptions` po tabeli z `from(...)`), więc test nie zależy
- * od tego, którą funkcją trasa odczyta subskrypcję.
+ * od tego, którą funkcją trasa odczyta subskrypcję, o ile odczyt idzie przez `select().from(salonSubscriptions)` i zwraca płaskie pola wiersza.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -84,6 +84,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST as createAppointment } from "@/app/api/appointments/route";
+import { logger } from "@/lib/logger";
 import { getCurrentPlan } from "@/lib/subscription";
 import { createMockRequest, makeAppointment, parseResponse, TEST_IDS } from "./helpers";
 
@@ -104,6 +105,7 @@ function subscriptionRow(status: string, planSlug: "basic" | "pro", dates: {
     trialEndsAt: dates.trialEndsAt ?? null,
     currentPeriodEnd: dates.currentPeriodEnd ?? null,
     canceledAt: dates.canceledAt ?? null,
+    createdAt: new Date(NOW.getTime() - 60 * DAY),
     planSlug,
     planName: planSlug === "pro" ? "Pro" : "Basic",
   };
@@ -133,6 +135,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   mockSubscriptionRows.mockReset().mockReturnValue([]);
   mockGetOptionalSession.mockReset().mockResolvedValue(null);
+  vi.mocked(logger.error).mockClear();
   mockInsertRows.mockReset().mockReturnValue([
     makeAppointment({
       clientId: null,
@@ -182,11 +185,11 @@ describe("getCurrentPlan — brak wiersza, anulowanie z opłaconym okresem", () 
     expect(await getCurrentPlan(SALON)).toMatchObject({ slug: "pro", status: "active" });
   });
 
-  // Przypadek opisuje zachowanie docelowe; po wejściu poprawki `it.fails` zmienia się w `it`.
-  it.fails("salon bez wiersza subskrypcji nie dostaje statusu active", async () => {
+  it("salon bez wiersza subskrypcji nie dostaje statusu active", async () => {
     mockSubscriptionRows.mockReturnValue([]);
     const plan = await getCurrentPlan(SALON);
     expect(plan.status).not.toBe("active");
+    expect(logger.error).not.toHaveBeenCalled();
   });
 
   it.todo("anulowana subskrypcja Pro z opłaconym okresem w przyszłości zachowuje plan Pro do końca okresu");
