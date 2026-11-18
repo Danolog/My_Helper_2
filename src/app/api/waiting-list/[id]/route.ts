@@ -230,10 +230,8 @@ export const DELETE = withApiHandler(
       );
     }
 
-    // Przełącznik modułu w ustawieniach salonu — przed usunięciem
-    const modules = await getSalonModules(salon.id);
-    if (!modules.waitingList) return moduleDisabledResponse();
-
+    // Usunięcie wpisu nie zależy od przełącznika modułu: salon może usunąć wpis
+    // na prośbę klienta także przy wyłączonym module.
     // Verify and delete the entry (must belong to this salon)
     const deletedEntry = await forSalon(salon.id).deleteOwned(waitingList, id);
 
@@ -248,7 +246,6 @@ export const DELETE = withApiHandler(
 
     return NextResponse.json({
       success: true,
-      data: deletedEntry,
       message: "Wpis zostal usuniety z listy oczekujacych",
     });
   }

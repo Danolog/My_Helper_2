@@ -2,9 +2,11 @@
  * Trasy personelu listy oczekujących: /api/waiting-list i /api/waiting-list/[id].
  *
  * Przełącznik modułu listy oczekujących (per salon) obowiązuje w każdej
- * metodzie: po autoryzacji i ustaleniu salonu, przed odczytem treści
- * żądania i jakimkolwiek dostępem do danych listy. Wyłączony moduł → 404
- * `MODULE_DISABLED`; włączony → metoda działa jak dotąd.
+ * metodzie poza usunięciem wpisu: po autoryzacji i ustaleniu salonu, przed
+ * odczytem treści żądania i jakimkolwiek dostępem do danych listy. Wyłączony
+ * moduł → 404 `MODULE_DISABLED`; włączony → metoda działa jak dotąd.
+ * Usunięcie wpisu (`DELETE /api/waiting-list/[id]`) działa także przy
+ * wyłączonym module i nie czyta przełącznika.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
@@ -118,17 +120,21 @@ const METHODS: Array<{ name: string; call: Call; validBody?: unknown; invalidBod
     validBody: { accepted: true },
     invalidBody: { accepted: "tak" },
   },
-  {
-    name: "DELETE /api/waiting-list/[id]",
-    call: () =>
-      deleteEntry(
-        createMockRequest(`${BASE}/${ENTRY_ID}`, { method: "DELETE" }),
-        createRouteParams(ENTRY_ID)
-      ),
-  },
 ];
 
 const CASES = METHODS.map((m) => [m.name, m] as const);
+
+/** Usunięcie wpisu nie zależy od przełącznika modułu. */
+const DELETE_NAME = "DELETE /api/waiting-list/[id]";
+const callDelete = () =>
+  deleteEntry(
+    createMockRequest(`${BASE}/${ENTRY_ID}`, { method: "DELETE" }),
+    createRouteParams(ENTRY_ID)
+  );
+const ORDER_CASES = [
+  ...CASES,
+  [DELETE_NAME, { name: DELETE_NAME, call: callDelete } as (typeof METHODS)[number]] as const,
+];
 
 function setModule(enabled: boolean) {
   mockGetSalonModules.mockResolvedValue({ waitingList: enabled });
@@ -192,6 +198,16 @@ describe("moduł listy oczekujących włączony → metoda działa dalej", () =>
     expect(body.code).not.toBe(MODULE_DISABLED_CODE);
   });
 
+  it("DELETE /api/waiting-list/[id] przy włączonym module → 200, usunięcie wywołane raz", async () => {
+    setModule(true);
+
+    const response = await callDelete();
+
+    expect(response.status).toBe(200);
+    expect(gate.deleteOwned).toHaveBeenCalledTimes(1);
+    expect(gate.deleteOwned).toHaveBeenCalledWith(expect.anything(), ENTRY_ID);
+  });
+
   it("niepoprawna treść POST przy włączonym module → 400", async () => {
     setModule(true);
     const response = await createEntry(
@@ -202,8 +218,71 @@ describe("moduł listy oczekujących włączony → metoda działa dalej", () =>
   });
 });
 
+describe("usunięcie wpisu przy wyłączonym module", () => {
+  it("wpis własnego salonu → 200, usunięcie przez bramę salonu z sesji", async () => {
+    setModule(false);
+    gate.deleteOwned.mockResolvedValue({
+      id: ENTRY_ID,
+      note: "znacznik-tresci-wpisu-7f3a",
+    });
+
+    const response = await callDelete();
+    const text = await response.text();
+    const body = JSON.parse(text);
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data).toBeUndefined();
+    expect(text).not.toContain("znacznik-tresci-wpisu-7f3a");
+    expect(mockForSalon).toHaveBeenCalledWith(SALON_ID);
+    expect(gate.deleteOwned).toHaveBeenCalledTimes(1);
+    expect(gate.deleteOwned).toHaveBeenCalledWith(expect.anything(), ENTRY_ID);
+  });
+
+  it("wpisu nie ma w salonie → zwykłe 404 bez kodu wyłączonego modułu", async () => {
+    setModule(false);
+    gate.deleteOwned.mockResolvedValue(undefined);
+
+    const response = await callDelete();
+    const body = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(body.code).toBeUndefined();
+    expect(body.error).not.toBe(MODULE_DISABLED_MESSAGE);
+  });
+
+  it("bez sesji → 401 bez usuwania", async () => {
+    setModule(false);
+    mockGetSession.mockResolvedValue(null);
+
+    const response = await callDelete();
+
+    expect(response.status).toBe(401);
+    expect(gate.deleteOwned).not.toHaveBeenCalled();
+  });
+
+  it("bez salonu → 403 bez usuwania", async () => {
+    setModule(false);
+    mockGetUserSalon.mockResolvedValue(null);
+
+    const response = await callDelete();
+
+    expect(response.status).toBe(403);
+    expect(gate.deleteOwned).not.toHaveBeenCalled();
+  });
+
+  it("przełącznik modułu nie jest czytany", async () => {
+    setModule(false);
+
+    const response = await callDelete();
+
+    expect(response.status).toBe(200);
+    expect(mockGetSalonModules).not.toHaveBeenCalled();
+  });
+});
+
 describe("kolejność statusów: 401 i 403 przed sprawdzeniem modułu", () => {
-  it.each(CASES)("%s bez sesji → 401", async (_name, m) => {
+  it.each(ORDER_CASES)("%s bez sesji → 401", async (_name, m) => {
     setModule(false);
     mockGetSession.mockResolvedValue(null);
 
@@ -214,7 +293,7 @@ describe("kolejność statusów: 401 i 403 przed sprawdzeniem modułu", () => {
     expect(mockForSalon).not.toHaveBeenCalled();
   });
 
-  it.each(CASES)("%s bez sesji w warstwie wspólnej → 401", async (_name, m) => {
+  it.each(ORDER_CASES)("%s bez sesji w warstwie wspólnej → 401", async (_name, m) => {
     setModule(false);
     mockRequireAuth.mockResolvedValue(
       NextResponse.json({ success: false, error: "Brak autoryzacji" }, { status: 401 })
@@ -227,7 +306,7 @@ describe("kolejność statusów: 401 i 403 przed sprawdzeniem modułu", () => {
     expect(mockForSalon).not.toHaveBeenCalled();
   });
 
-  it.each(CASES)("%s bez salonu → 403", async (_name, m) => {
+  it.each(ORDER_CASES)("%s bez salonu → 403", async (_name, m) => {
     setModule(false);
     mockGetUserSalon.mockResolvedValue(null);
 
