@@ -9,7 +9,9 @@ import {
   CLIENT_CONTEXT_FIELDS,
   CLIENT_LABEL,
   FIRST_NAME_MAX_LENGTH,
+  REVIEW_COMMENT_MAX_LENGTH,
   firstNameForReply,
+  reviewCommentForModel,
 } from "@/lib/ai/client-context";
 
 /** Pełny rekord klienta, tak jak zwraca go zapytanie `select()` bez listy kolumn. */
@@ -262,5 +264,81 @@ describe("firstNameForReply", () => {
     expect(firstNameForReply({ firstName: null, lastName: "Wisniewska" } as {
       firstName: string | null;
     })).toBeNull();
+  });
+});
+
+describe("reviewCommentForModel", () => {
+  const NEL = "\u{85}";
+  const LINE_SEPARATOR = "\u{2028}";
+  const PARAGRAPH_SEPARATOR = "\u{2029}";
+  const LINE_BREAKS = /[\r\n\t\u{85}\u{2028}\u{2029}]/u;
+
+  it("returns null for a missing, empty or whitespace-only comment", () => {
+    expect(reviewCommentForModel(null)).toBeNull();
+    expect(reviewCommentForModel(undefined)).toBeNull();
+    expect(reviewCommentForModel("")).toBeNull();
+    expect(reviewCommentForModel("   ")).toBeNull();
+    expect(
+      reviewCommentForModel(` \n\r\n\t${NEL}${LINE_SEPARATOR}${PARAGRAPH_SEPARATOR} `),
+    ).toBeNull();
+  });
+
+  it("returns null for a value that is not text", () => {
+    expect(reviewCommentForModel(123 as unknown as string)).toBeNull();
+    expect(reviewCommentForModel({} as unknown as string)).toBeNull();
+  });
+
+  it("turns each kind of line break into a single space", () => {
+    const separators = ["\n", "\r\n", "\t", NEL, LINE_SEPARATOR, PARAGRAPH_SEPARATOR];
+    for (const separator of separators) {
+      const result = reviewCommentForModel(`Miła wizyta${separator}polecam`);
+      expect(result).toBe("Miła wizyta polecam");
+      expect(result).not.toMatch(LINE_BREAKS);
+    }
+  });
+
+  it("collapses runs of whitespace and trims the edges", () => {
+    const result = reviewCommentForModel(
+      `\n  Dobra obsługa \r\n\r\n  i miła atmosfera${NEL}${LINE_SEPARATOR} \t`,
+    );
+    expect(result).toBe("Dobra obsługa i miła atmosfera");
+    expect(result).not.toMatch(LINE_BREAKS);
+  });
+
+  it("leaves ordinary text unchanged", () => {
+    const text = 'Świetna wizyta, „zażółć gęślą jaźń” i "cudowna" atmosfera \u{1F600} — polecam!';
+    expect(reviewCommentForModel(text)).toBe(text);
+  });
+
+  it("keeps a comment exactly as long as the limit unchanged", () => {
+    const exact = "a".repeat(REVIEW_COMMENT_MAX_LENGTH);
+    expect(reviewCommentForModel(exact)).toBe(exact);
+  });
+
+  it("cuts a longer comment to exactly the limit counted in characters", () => {
+    const result = reviewCommentForModel("b".repeat(REVIEW_COMMENT_MAX_LENGTH + 50));
+    expect(result).toBe("b".repeat(REVIEW_COMMENT_MAX_LENGTH));
+    expect(Array.from(result ?? "")).toHaveLength(REVIEW_COMMENT_MAX_LENGTH);
+  });
+
+  it("does not split a character outside the basic plane when cutting", () => {
+    const result = reviewCommentForModel(
+      "a".repeat(REVIEW_COMMENT_MAX_LENGTH - 1) + "\u{1F600}\u{1F600}",
+    );
+    expect(result).toBe("a".repeat(REVIEW_COMMENT_MAX_LENGTH - 1) + "\u{1F600}");
+    expect(Array.from(result ?? "")).toHaveLength(REVIEW_COMMENT_MAX_LENGTH);
+  });
+
+  it("does not leave a space at the end when the cut falls after a space", () => {
+    const result = reviewCommentForModel(
+      "a".repeat(REVIEW_COMMENT_MAX_LENGTH - 1) + " " + "c".repeat(20),
+    );
+    expect(result).toBe("a".repeat(REVIEW_COMMENT_MAX_LENGTH - 1));
+    expect(result?.endsWith(" ")).toBe(false);
+  });
+
+  it("limit is a sensible length for a review comment", () => {
+    expect(REVIEW_COMMENT_MAX_LENGTH).toBeGreaterThanOrEqual(500);
+    expect(REVIEW_COMMENT_MAX_LENGTH).toBeLessThanOrEqual(5000);
   });
 });

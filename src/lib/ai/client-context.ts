@@ -10,7 +10,9 @@
  * `phone`, `email`) ani notatki o kliencie (`notes`).
  *
  * Wyjątek: `firstNameForReply` — samo pierwsze imię osoby (klienta albo
- * pracownika); gdzie wolno go użyć, opisuje funkcja.
+ * pracownika); gdzie wolno go użyć, opisuje funkcja. Drugi wyjątek:
+ * `reviewCommentForModel` — treść opinii klienta w jednej linii i z limitem
+ * długości.
  *
  * Zasada: nowe pole w zapytaniu = świadoma decyzja, zmiana listy i typu w tym
  * pliku oraz aktualizacja `docs/policies/podprocesorzy.md`.
@@ -136,4 +138,33 @@ export function firstNameForReply(
   if (!first) return null;
   // Przycięcie po pełnych znakach, żeby nie rozdzielić pary zastępczej.
   return Array.from(first).slice(0, FIRST_NAME_MAX_LENGTH).join("");
+}
+
+/**
+ * Najdłuższa treść opinii (w znakach), jaka trafia do zapytania; dłuższa jest
+ * przycinana do tej długości.
+ */
+export const REVIEW_COMMENT_MAX_LENGTH = 2000;
+
+/**
+ * Treść opinii klienta do zapytania: tekst w jednej linii (ciągi białych
+ * znaków, w tym nowe linie i NEL, zamienione na jedną spację, bez białych
+ * znaków na brzegach), przycięty do `REVIEW_COMMENT_MAX_LENGTH` pełnych
+ * znaków i bez spacji na końcu po przycięciu. Brak treści, wartość niebędąca
+ * tekstem albo same białe znaki dają `null`.
+ *
+ * Trasy wstawiające treść opinii do zapytania biorą ją wyłącznie z tej
+ * funkcji.
+ */
+export function reviewCommentForModel(
+  comment: string | null | undefined,
+): string | null {
+  const singleLine = toSingleLine(comment);
+  if (!singleLine) return null;
+  // Przycięcie po pełnych znakach, żeby nie rozdzielić pary zastępczej.
+  const cut = Array.from(singleLine)
+    .slice(0, REVIEW_COMMENT_MAX_LENGTH)
+    .join("")
+    .trimEnd();
+  return cut.length > 0 ? cut : null;
 }
