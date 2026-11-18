@@ -18,6 +18,7 @@
  * list instead of 404, so it has no 400 or 404 responses.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { REVIEW_COMMENT_MAX_LENGTH } from "@/lib/ai/client-context";
 import { createMockRequest, parseResponse, TEST_IDS } from "./helpers";
 
 const URL = "http://localhost:3000/api/ai/business/review-alerts";
@@ -419,6 +420,58 @@ describe("GET /api/ai/business/review-alerts", () => {
 
       expect(prompt).not.toMatch(/(^|\n)Klient:/);
       expect(prompt).not.toContain("Kowalska");
+    });
+
+    it("puts a multi-line review comment on exactly one line", async () => {
+      setupAuthenticatedPro();
+      const multiLine =
+        "Bardzo mila obsluga.\nCzekalam dlugo.\r\nPotem znowu.\u{85}Koniec.\u{2028}Ostatnia.";
+      const singleLine =
+        "Bardzo mila obsluga. Czekalam dlugo. Potem znowu. Koniec. Ostatnia.";
+
+      const { prompt } = await callAndGetRequest(makeReviewRow({ comment: multiLine }));
+
+      const commentLines = prompt.split("\n").filter((line) => line.startsWith("Komentarz:"));
+      expect(commentLines).toEqual([`Komentarz: ${singleLine}`]);
+      expect(prompt).not.toMatch(/[\r\u{85}\u{2028}\u{2029}]/u);
+
+      mockGenerateText.mockReset();
+      const { prompt: reference } = await callAndGetRequest(
+        makeReviewRow({ comment: singleLine }),
+      );
+      expect(prompt.split("\n").length).toBe(reference.split("\n").length);
+    });
+
+    it("cuts a review comment longer than the limit", async () => {
+      setupAuthenticatedPro();
+      const longComment = `${"x".repeat(REVIEW_COMMENT_MAX_LENGTH)}ZNACZNIKZALIMITEM`;
+
+      const { prompt } = await callAndGetRequest(makeReviewRow({ comment: longComment }));
+
+      expect(prompt).not.toContain("ZNACZNIKZALIMITEM");
+      const commentLines = prompt.split("\n").filter((line) => line.startsWith("Komentarz:"));
+      expect(commentLines).toEqual([`Komentarz: ${"x".repeat(REVIEW_COMMENT_MAX_LENGTH)}`]);
+    });
+
+    it("uses the no-comment text for a comment made only of whitespace", async () => {
+      setupAuthenticatedPro();
+
+      const { prompt } = await callAndGetRequest(
+        makeReviewRow({ comment: "  \n\r\n \u{85} \t " }),
+      );
+
+      expect(prompt).toMatch(/(^|\n)Komentarz: \(brak komentarza\)(\n|$)/);
+    });
+
+    it("keeps the original comment in the response for the dashboard", async () => {
+      setupAuthenticatedPro();
+      setupReviews([makeReviewRow({ comment: "Bardzo mila obsluga.\nCzekalam dlugo." })]);
+      mockGenerateText.mockResolvedValue({ text: "Przepraszamy za czekanie." });
+
+      const { body } = await parseResponse(await GET(makeRequest()));
+
+      const alerts = (body as Record<string, unknown>).alerts as Array<Record<string, unknown>>;
+      expect(alerts[0]!.comment).toBe("Bardzo mila obsluga.\nCzekalam dlugo.");
     });
 
     it("system prompt never asks for the last name", async () => {
