@@ -71,9 +71,10 @@ export const PII_LOG_KEYS: readonly string[] = [
  * zostają: liczniki i małe liczby (`emailCount: 3`), `boolean`, `null`, pusta
  * tablica; obiekt (`emailData`) i tablica samych obiektów są redagowane
  * rekurencyjnie wg tych samych reguł.
- * Granica reguły: napis w obiekcie wewnątrz tablicy pod kluczem bez fragmentu
- * (`phones: [{ value: "…" }]`) NIE jest objęty — dane kontaktowe maskuje się
- * w miejscu wywołania. Liczba niecałkowita i liczba poniżej 7 cyfr zostają;
+ * Granica reguły: napis pod kluczem bez fragmentu (np. `value`) w obiekcie
+ * wewnątrz tablicy pod kluczem z fragmentem (`phones: [{ value: "…" }]`) NIE
+ * jest objęty — dane kontaktowe maskuje się w miejscu wywołania. Liczba
+ * niecałkowita i liczba poniżej 7 cyfr zostają;
  * liczbowy znacznik czasu pod takim kluczem jest redagowany.
  */
 export const PII_LOG_KEY_FRAGMENTS: readonly string[] = ["phone", "email"];
