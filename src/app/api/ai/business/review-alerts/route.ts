@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText } from "ai";
 import { eq, and, gte, lte, desc } from "drizzle-orm";
+import { firstNameForReply } from "@/lib/ai/client-context";
 import { isProAIError, requireProAI, trackAIUsage } from "@/lib/ai/openrouter";
 import { logger } from "@/lib/logger";
 import { reviews, clients, employees, services, appointments } from "@/lib/schema";
@@ -46,12 +47,20 @@ function getTemplateResponse(rating: number, clientName: string): string {
 /**
  * Attempts to generate a professional response using AI.
  * Falls back to a template response if the AI call fails or the API key is missing.
+ *
+ * The generated text is a reply addressed to the client who wrote the review,
+ * so the request carries only the client's first name (`firstNameForReply`).
+ * The full name (`clientName`) is used only by the template, built on the
+ * server, and never reaches the model.
  */
 async function generateResponseSuggestion(
   review: {
     rating: number;
     comment: string | null;
+    /** Full client name for the template response; not sent to the model. */
     clientName: string;
+    /** First name only, for the request to the model; `null` = no client line. */
+    clientFirstName: string | null;
     serviceName: string;
   },
   openrouterApiKey: string | undefined,
@@ -81,7 +90,7 @@ async function generateResponseSuggestion(
         "Zachowaj dlugosc do 3 zdan.",
       ].join(" "),
       prompt: [
-        `Klient: ${review.clientName}`,
+        ...(review.clientFirstName ? [`Klient: ${review.clientFirstName}`] : []),
         `Usluga: ${review.serviceName}`,
         `Ocena: ${review.rating}/5`,
         `Komentarz: ${review.comment || "(brak komentarza)"}`,
@@ -182,6 +191,7 @@ export async function GET(_request: Request) {
             rating: review.rating!,
             comment: review.comment,
             clientName,
+            clientFirstName: firstNameForReply({ firstName: review.clientFirstName }),
             serviceName,
           },
           openrouterApiKey,

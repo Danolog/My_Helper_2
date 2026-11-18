@@ -26,7 +26,7 @@
 #   Sekret `required: true` bez wersji → błąd PRZED `gcloud run deploy`;
 #   opcjonalny bez wersji → pominięty (moduł wyłącza się sam). Błąd odczytu
 #   (np. brak uprawnień) → błąd, nigdy ciche pominięcie.
-#   Żadnych wersji-zaślepek (K-1, decyzja Olivera).
+#   Żadnych wersji-zaślepek (K-1, przyjęta zasada).
 #   Para STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET: obie z wersją albo żadna (K-1b).
 # - klasa `var` → wartość z otoczenia procesu (workflow podaje ją z `vars.*`);
 #   `required: true` i brak wartości → błąd; opcjonalna i brak → pominięta.

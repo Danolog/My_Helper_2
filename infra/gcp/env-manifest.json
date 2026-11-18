@@ -126,7 +126,7 @@
     },
     "OPENROUTER_API_KEY": {
       "class": "vercel-only",
-      "note": "Poza Secret Manager i Cloud Run: klucz skasowany u dostawcy 14.11; AI wraca przez Vertex w kroku F kontem serwisowym, bez klucza (Oliver 20:36)."
+      "note": "Poza Secret Manager i Cloud Run: zmienna nieprzenoszona; funkcje AI docelowo przez Vertex AI kontem serwisowym, bez klucza."
     },
     "OPENROUTER_MODEL": {
       "class": "var",

@@ -17,7 +17,7 @@
  *    nagłówek (rotacja); token nigdy w argumentach ani na wyjściu;
  *  - BASE_URL wyłącznie główny adres usługi (#143 pkt 1);
  *  - bez zadań mh-notify-* (Oliver, do R3-C).
- * Mutacje (wynik w PR): scratchpad/eva/k3b-mut.py, k3c-mut.py, k3e-mut.py.
+ * Mutacje: wynik w opisie PR.
  */
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";

@@ -4,7 +4,7 @@ Dokument przekazania między sesjami. Cel nadrzędny (goal): **przeprowadzić ws
 z `docs/RAPORT_I_PLAN_NAPRAWY_2026-07.md` do stanu sprzedawalnego do klientów końcowych,
 bez obaw o bezpieczeństwo i problemy techniczne.** — OSIĄGNIĘTY w zakresie kodu.
 
-Projekt: `/mnt/c/Users/D/Desktop/Kodowanie/My_Helper_2_work` · branch `feat/repo-layer-rls`.
+Projekt: My_Helper_2 · branch `feat/repo-layer-rls`.
 Środowisko: WSL, dysk /mnt/c (wolne I/O — długie timeouty, `CI=true` dla pnpm bez TTY,
 pełny `pnpm test` ~16 min; RÓWNOLEGŁY build powoduje losowe timeouty startu workerów vitest
 — to nie regresja, dotknięte pliki przechodzą uruchomione osobno).

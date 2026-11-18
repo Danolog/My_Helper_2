@@ -105,6 +105,8 @@ const SNAPSHOT: Record<string, string[]> = {
     "src/app/api/cron/push-reminders/route.ts",
     "src/app/api/cron/sms-reminders/route.ts",
   ],
+  "plans.ts:ensurePlansExist": ["src/app/api/subscription-plans/route.ts"],
+  "seed.ts:seedDemoData": ["src/app/api/seed/route.ts"],
   "waiting-list.ts:resolveWaitingListToken": ["src/lib/waiting-list.ts"],
   "session.ts:getActiveTemporaryAccess": [
     "src/app/api/temporary-access/check/route.ts",

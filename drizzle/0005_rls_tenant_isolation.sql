@@ -1,5 +1,5 @@
 -- ADR-001 sekcja 3/5.1 — RLS (Row-Level Security) jako druga tama izolacji salonów.
--- WYŁĄCZNIE baza lokalna/test. Produkcja Neon = osobna czerwona linia (sign-off Darka).
+-- WYŁĄCZNIE baza lokalna/test. Produkcja Neon = osobna czerwona linia (zgoda właściciela).
 --
 -- Wzorzec referencyjny (pamięć repo): ENABLE (nie FORCE); rola app bez BYPASSRLS;
 -- izolacja przez rolę myhelper_app + SET LOCAL ROLE + SET LOCAL app.current_salon_id

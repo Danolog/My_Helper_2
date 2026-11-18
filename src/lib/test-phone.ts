@@ -17,7 +17,7 @@ export const TEST_PHONE = "+48 000 600 700";
 
 /**
  * Lista numerów testowych w E.164. Blokada SMS działa dla każdego z nich.
- * Każdy telefon w seedach (`scripts/seed-test.ts`, `src/app/api/seed/route.ts`)
+ * Każdy telefon w seedach (`scripts/seed-test.ts`, `src/lib/server/system/seed.ts`)
  * i w testach E2E (`tests/`) musi być na tej liście — pilnuje tego
  * `__tests__/lib/test-phone-literals.test.ts` (#75).
  *

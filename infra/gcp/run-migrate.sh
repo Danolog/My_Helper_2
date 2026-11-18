@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Migracja bazy przez Cloud Run Job `myhelper-migrate` (brief C §1, decyzja:
 # Job z celu `migrator`, ten sam commit co usługa). NIE URUCHAMIAĆ w kroku C.
-# Migrację produkcyjną uruchamia Ethan (delegacja v1.12) — w workflow tylko
+# Migrację produkcyjną uruchamia osoba upoważniona — w workflow tylko
 # przy wejściu run_migrations=true.
 #
 # Kolejność: (1) kopia zapasowa na żądanie Cloud SQL (bramka b, v1.26),

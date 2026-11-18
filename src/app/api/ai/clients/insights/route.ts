@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { eq, and, desc, count, sql } from "drizzle-orm";
 import { z } from "zod";
+import { buildClientContext } from "@/lib/ai/client-context";
 import {
   createAIClient,
   getAIModel,
@@ -182,19 +183,11 @@ export async function POST(req: Request) {
     const contextParts: string[] = [];
 
     contextParts.push(`Salon: "${salonName}" (${industryLabel})`);
+    // Linie klienta tylko przez pomocnik z białą listą pól; urodziny jako
+    // dzień i miesiąc.
     contextParts.push(
-      `Klient: ${clientData.firstName} ${clientData.lastName}`,
+      ...buildClientContext(clientData, { includeBirthday: true }),
     );
-
-    if (clientData.preferences) {
-      contextParts.push(`Preferencje: ${clientData.preferences}`);
-    }
-    if (clientData.allergies) {
-      contextParts.push(`Alergie: ${clientData.allergies}`);
-    }
-    if (clientData.birthday) {
-      contextParts.push(`Urodziny: ${clientData.birthday}`);
-    }
 
     contextParts.push(
       `\nSTATYSTYKI WIZYT:

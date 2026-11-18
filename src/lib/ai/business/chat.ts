@@ -8,6 +8,7 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { streamText, UIMessage, convertToModelMessages } from "ai";
 import { eq, and, gte, sql, count, desc } from "drizzle-orm";
+import { firstNameForReply } from "@/lib/ai/client-context";
 // ADR-001 R2b grupa B: czyta `salons` (polityka RLS po owner_id) — czeka na akcesor forOwner; świadomie surowe db
  
 import { db } from "@/lib/db";
@@ -195,6 +196,42 @@ export function getIndustryContext(industryType: string | null): IndustryContext
 // ────────────────────────────────────────────────────────────
 // Salon data aggregation for the chat context
 // ────────────────────────────────────────────────────────────
+
+/** Etykieta pracownika bez imienia w danych salonu dla modelu. */
+export const EMPLOYEE_FALLBACK_LABEL = "Pracownik";
+
+export interface EmployeeNameInput {
+  readonly firstName?: string | null;
+  readonly lastName?: string | null;
+}
+
+/**
+ * Etykiety pracowników w danych salonu wysyłanych do modelu (ta sama
+ * kolejność co wejście). Etykieta to pierwszy wyraz imienia; gdy na liście
+ * dwie lub więcej osób mają to samo pierwsze imię (bez rozróżniania wielkości
+ * liter), każda z nich dostaje dodatkowo inicjał nazwiska z kropką
+ * („Anna K.”). Pełne nazwisko nie trafia do etykiety. Brak imienia daje
+ * `EMPLOYEE_FALLBACK_LABEL`.
+ */
+export function employeeLabelsForModel(
+  people: readonly EmployeeNameInput[],
+): string[] {
+  const firstNames = people.map((p) => firstNameForReply(p));
+  const counts = new Map<string, number>();
+  for (const name of firstNames) {
+    if (!name) continue;
+    const key = name.toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return people.map((p, i) => {
+    const name = firstNames[i];
+    if (!name) return EMPLOYEE_FALLBACK_LABEL;
+    if ((counts.get(name.toLowerCase()) ?? 0) < 2) return name;
+    const lastName = typeof p.lastName === "string" ? p.lastName.trim() : "";
+    const initial = Array.from(lastName)[0];
+    return initial ? `${name} ${initial.toUpperCase()}.` : name;
+  });
+}
 
 export interface SalonDataSummary {
   data: string;
@@ -388,10 +425,13 @@ export async function gatherSalonData(salonId: string): Promise<SalonDataSummary
       )
       .join("\n");
 
+    // Pracownicy w tekście dla modelu: etykiety z `employeeLabelsForModel`
+    // (imię, inicjał nazwiska tylko przy powtórzonym imieniu).
+    const employeeLabels = employeeLabelsForModel(topEmployeesList);
     const topEmployeesStr = topEmployeesList
       .map(
         (e, i) =>
-          `  ${i + 1}. ${e.firstName} ${e.lastName} - ${e.count} wizyt`,
+          `  ${i + 1}. ${employeeLabels[i]} - ${e.count} wizyt`,
       )
       .join("\n");
 

@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 import { eq, and, desc } from "drizzle-orm";
 import { z } from "zod";
+import { buildClientContext } from "@/lib/ai/client-context";
 import {
   createAIClient,
   getAIModel,
@@ -13,7 +14,6 @@ import { logger } from "@/lib/logger";
 import {
   appointments,
   clients,
-  employees,
   services,
   treatmentHistory,
   appointmentMaterials,
@@ -53,18 +53,16 @@ export async function POST(req: Request) {
   const { appointmentId } = parsed.data;
 
   try {
-    // Fetch appointment with related data (client, employee, service)
+    // Fetch appointment with related data (client, service)
     const [appointmentData] = await forSalon(salonId).raw((tx) =>
       tx
         .select({
           appointment: appointments,
           client: clients,
-          employee: employees,
           service: services,
         })
         .from(appointments)
         .leftJoin(clients, eq(appointments.clientId, clients.id))
-        .leftJoin(employees, eq(appointments.employeeId, employees.id))
         .leftJoin(services, eq(appointments.serviceId, services.id))
         .where(
           and(
@@ -144,26 +142,12 @@ export async function POST(req: Request) {
       `Usluga: ${appointmentData.service?.name || "Nieznana"} (${appointmentData.service?.basePrice || "?"} PLN, ${appointmentData.service?.baseDuration || "?"} min)`,
     );
 
-    if (appointmentData.employee) {
-      contextParts.push(
-        `Pracownik: ${appointmentData.employee.firstName} ${appointmentData.employee.lastName}`,
-      );
-    }
-    if (appointmentData.client) {
-      contextParts.push(
-        `Klient: ${appointmentData.client.firstName} ${appointmentData.client.lastName}`,
-      );
-      if (appointmentData.client.allergies) {
-        contextParts.push(
-          `Alergie klienta: ${appointmentData.client.allergies}`,
-        );
-      }
-      if (appointmentData.client.preferences) {
-        contextParts.push(
-          `Preferencje klienta: ${appointmentData.client.preferences}`,
-        );
-      }
-    }
+    // Linie klienta tylko przez pomocnik z białą listą pól.
+    contextParts.push(
+      ...buildClientContext(appointmentData.client, {
+        labels: { preferences: "Preferencje klienta" },
+      }),
+    );
     if (appointmentData.appointment.notes) {
       contextParts.push(
         `Notatki z wizyty: ${appointmentData.appointment.notes}`,

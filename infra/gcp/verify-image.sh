@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sprawdzenie ZBUDOWANEGO obrazu (Ryan, #110 P2) — uzupełnia tekstowy G-C1,
+# Sprawdzenie ZBUDOWANEGO obrazu (#110 P2) — uzupełnia tekstowy G-C1,
 # który nie widzi skutków `USER ${ARG}`, `RUN` zapisującego .env, sekretów
 # o nietypowych nazwach itp. Uruchamia go workflow po `docker build`,
 # przed wypchnięciem; można też lokalnie: infra/gcp/verify-image.sh <obraz> [manifest].

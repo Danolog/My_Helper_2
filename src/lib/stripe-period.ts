@@ -1,6 +1,5 @@
 /**
- * Okres rozliczeniowy ze Stripe — jedno miejsce odczytu (T3, warunek Ethana
- * dla 1.1, `scratchpad/ethan/1-1-trial.md` §2).
+ * Okres rozliczeniowy ze Stripe — jedno miejsce odczytu (T3, warunek dla 1.1).
  *
  * Nowsze wersje API Stripe (SDK 20) trzymają `current_period_start/end` na
  * pozycjach subskrypcji (`items.data[0]`), nie na samej subskrypcji. Kod, który

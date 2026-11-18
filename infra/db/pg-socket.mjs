@@ -1,6 +1,6 @@
 // Połączenie z Cloud SQL przez gniazdo uniksowe (K-1, #121 a).
 //
-// Sekret POSTGRES_URL na Cloud Run (decyzja Ethana, #121):
+// Sekret POSTGRES_URL na Cloud Run (decyzja architektoniczna, #121):
 //   postgresql://USER:HASŁO@localhost/BAZA?host=/cloudsql/PROJEKT:REGION:INSTANCJA
 // postgres@3.4.8 ignoruje parametr zapytania `host` jako adres: bierze hosta
 // z części przed `/` (localhost → TCP, odmowa połączenia), a `host` z zapytania

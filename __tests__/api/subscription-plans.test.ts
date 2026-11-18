@@ -7,19 +7,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GET } from "@/app/api/subscription-plans/route";
 import { PLAN_FEATURES } from "@/lib/plan-features";
 
-// vi.hoisted: `vi.mock` jest wynoszone nad importy, więc dane dla atrapy bazy
-// muszą istnieć, zanim trasa zaimportuje `@/lib/db`.
-const { rows } = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>> }));
-
-vi.mock("@/lib/db", () => {
-  const where = vi.fn(async () => rows);
-  return {
-    db: {
-      select: vi.fn(() => ({ from: vi.fn(() => ({ where })) })),
-      insert: vi.fn(() => ({ values: vi.fn(async () => undefined) })),
-    },
-  };
+// vi.hoisted: `vi.mock` jest wynoszone nad importy, więc dane dla atrapy
+// wyjścia systemowego muszą istnieć, zanim trasa zaimportuje rejestr.
+const { rows, ensurePlansExist } = vi.hoisted(() => {
+  const rows = [] as Array<Record<string, unknown>>;
+  return { rows, ensurePlansExist: vi.fn(async () => rows) };
 });
+
+vi.mock("@/lib/server/system", () => ({ ensurePlansExist }));
 
 vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
@@ -76,12 +71,24 @@ describe("GET /api/subscription-plans", () => {
     expect(body.data[0].features).toEqual(["Dedykowany opiekun"]);
   });
 
-  it("błąd bazy -> 500", async () => {
-    const { db } = await import("@/lib/db");
-    vi.mocked(db.select).mockImplementationOnce(() => {
-      throw new Error("db down");
-    });
+  it("trasa bierze plany z wyjścia systemowego ensurePlansExist", async () => {
+    rows.push(row("basic", null));
+    ensurePlansExist.mockClear();
+    await GET();
+    expect(ensurePlansExist).toHaveBeenCalledTimes(1);
+    expect(ensurePlansExist).toHaveBeenCalledWith();
+  });
+
+  it("Basic przed Pro niezależnie od kolejności z bazy", async () => {
+    rows.push(row("pro", null), row("basic", null));
+    const body = await (await GET()).json();
+    expect(body.data.map((p: { slug: string }) => p.slug)).toEqual(["basic", "pro"]);
+  });
+
+  it("błąd wyjścia systemowego -> 500", async () => {
+    ensurePlansExist.mockRejectedValueOnce(new Error("db down"));
     const res = await GET();
     expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ success: false, error: "Failed to fetch subscription plans" });
   });
 });

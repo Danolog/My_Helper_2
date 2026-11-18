@@ -1,27 +1,33 @@
 #!/usr/bin/env bash
-# Test dymny obrazu `runner` (Ethan, #110): serwer z obrazu (`node server.js`
+# Test dymny obrazu `runner` (#110): serwer z obrazu (`node server.js`
 # standalone), nie `pnpm start`. Uruchamia go workflow przed wypchnięciem
 # obrazu; lokalnie: infra/gcp/smoke-container.sh <obraz>.
 #
-# Trzy przypadki, w tej kolejności:
+# Cztery przypadki, w tej kolejności:
 # 1. W1 (K-1b, strażnik sekretów w register()): kontener „jak na Cloud Run”
 #    (K_SERVICE + NODE_ENV=production) z BETTER_AUTH_SECRET równym wartości
 #    testowej jawnej w repozytorium → kontener MUSI się zakończyć kodem 1,
 #    a log MUSI zawierać komunikat strażnika („secret-guard: odmowa startu”,
 #    K-1c) i nazwę zmiennej, i NIE MOŻE zawierać wartości ani jej
 #    skrótu. Sprawdzane PRZED jakimkolwiek /api/health.
-# 2. Kontrola W1: ten sam tryb Cloud Run z losową wartością i jednorazową
+# 2. Tryb limitu prób logowania: ten sam tryb Cloud Run z losowym
+#    BETTER_AUTH_SECRET i niedozwoloną wartością AUTH_RATE_LIMIT_STORE, bez
+#    bazy → kontener MUSI się zakończyć kodem 1, a log MUSI zawierać nazwę
+#    zmiennej AUTH_RATE_LIMIT_STORE i NIE MOŻE zawierać podanej wartości ani
+#    wartości sekretu. Sprawdzane PRZED jakimkolwiek /api/health.
+# 3. Kontrola W1: ten sam tryb Cloud Run z losową wartością i jednorazową
 #    bazą (pgvector w sieci --internal, bez portu na hoście, losowe hasło)
 #    → /api/health = 200 (sonda z wnętrza kontenera).
-# 3. Bez bazy i bez K_SERVICE: kontener ma wstać, a /api/health odpowiedzieć
+# 4. Bez bazy i bez K_SERVICE: kontener ma wstać, a /api/health odpowiedzieć
 #    503 (baza niedostępna) — nie paść przy starcie. Port inny niż 8080
 #    sprawdza, że serwer czyta PORT (Cloud Run go wstrzykuje).
 #
 # Wartość testowa W1 stoi niżej jako literał przypisania (tablica w1_env), więc
 # strażnik G-K1 (__tests__/lib/secret-guard.test.ts) wymaga jej skrótu na
 # liście zakazanej — przypadek 1 nie może po cichu przestać jej używać.
-# Pozostałe wartości (BETTER_AUTH_SECRET kontroli, hasło bazy) są losowe
-# z tego przebiegu. POSTGRES_URL przypadku 3 wskazuje zamknięty port.
+# Pozostałe wartości (BETTER_AUTH_SECRET przypadków 2 i 3, hasło bazy) są
+# losowe z tego przebiegu. POSTGRES_URL przypadków 2 i 4 wskazuje zamknięty
+# port. Niedozwolona wartość trybu limitu to zwykły, nietajny napis.
 # Strażnik skryptu: __tests__/lib/smoke-container.test.ts (fałszywy docker).
 set -euo pipefail
 
@@ -35,11 +41,12 @@ HOST_PORT="${SMOKE_HOST_PORT:-18090}"
 WAIT="${SMOKE_WAIT:-60}"
 name="mh-smoke-$$"
 guard_name="mh-smoke-guard-$$"
+store_name="mh-smoke-store-$$"
 ctl_name="mh-smoke-ctl-$$"
 db_name="mh-smoke-db-$$"
 net="mh-smoke-net-$$"
 cleanup() {
-  docker rm -f "$name" "$guard_name" "$ctl_name" "$db_name" >/dev/null 2>&1 || true
+  docker rm -f "$name" "$guard_name" "$store_name" "$ctl_name" "$db_name" >/dev/null 2>&1 || true
   docker network rm "$net" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -83,7 +90,44 @@ if [[ -n "$w1_fail" ]]; then
 fi
 echo "ok: W1: public test BETTER_AUTH_SECRET → exit 1, log names the variable only"
 
-# --- 2. Kontrola W1: losowa wartość + baza → /api/health 200 ---------------
+# --- 2. Niedozwolona wartość AUTH_RATE_LIMIT_STORE → odmowa startu (kod 1) --
+store_value="redis-not-allowed"
+store_secret="$(rand_hex 32)"
+store_pg="postgresql://smoke:$(rand_hex 16)@127.0.0.1:1/smoke"
+docker run -d --name "$store_name" \
+  -e K_SERVICE=myhelper \
+  -e NODE_ENV=production \
+  -e BETTER_AUTH_SECRET="$store_secret" \
+  -e BETTER_AUTH_URL="http://127.0.0.1:${HOST_PORT}" \
+  -e POSTGRES_URL="$store_pg" \
+  -e AUTH_RATE_LIMIT_STORE="$store_value" \
+  "$IMAGE" >/dev/null
+status=""
+for _ in $(seq 1 "$WAIT"); do
+  status="$(docker inspect -f '{{.State.Status}}' "$store_name" 2>/dev/null || true)"
+  [[ "$status" == "exited" || "$status" == "dead" ]] && break
+  sleep 1
+done
+if [[ "$status" != "exited" && "$status" != "dead" ]]; then
+  echo "FAIL: rate-limit store: container with an invalid AUTH_RATE_LIMIT_STORE still running after ${WAIT}s (startup check did not refuse start)" >&2
+  exit 1
+fi
+store_exit="$(docker inspect -f '{{.State.ExitCode}}' "$store_name")"
+store_log="$(docker logs "$store_name" 2>&1 || true)"
+store_fail=""
+[[ "$store_exit" == "1" ]] || store_fail+=" exit code [$store_exit], expected [1];"
+[[ "$store_log" == *AUTH_RATE_LIMIT_STORE* ]] || store_fail+=" log lacks the variable name AUTH_RATE_LIMIT_STORE;"
+[[ "$store_log" != *"$store_value"* ]] || store_fail+=" log contains the AUTH_RATE_LIMIT_STORE value;"
+[[ "$store_log" != *"$store_secret"* ]] || store_fail+=" log contains the BETTER_AUTH_SECRET value;"
+if [[ -n "$store_fail" ]]; then
+  # Log bez wypisywania: mógłby zawierać wartość.
+  echo "FAIL: rate-limit store:$store_fail" >&2
+  exit 1
+fi
+echo "ok: rate-limit store: invalid AUTH_RATE_LIMIT_STORE → exit 1, log names the variable only"
+docker rm -f "$store_name" >/dev/null 2>&1 || true
+
+# --- 3. Kontrola W1: losowa wartość + baza → /api/health 200 ---------------
 docker network create --internal "$net" >/dev/null
 db_pw="$(rand_hex 16)"
 docker run -d --name "$db_name" --network "$net" \
@@ -122,7 +166,7 @@ fi
 echo "ok: W1 control: random BETTER_AUTH_SECRET in Cloud Run mode → /api/health 200 with database"
 docker rm -f "$ctl_name" "$db_name" >/dev/null 2>&1 || true
 
-# --- 3. Bez bazy: serwer wstaje, /api/health 503 --------------------------
+# --- 4. Bez bazy: serwer wstaje, /api/health 503 --------------------------
 auth_secret="$(rand_hex 32)"
 docker run -d --name "$name" \
   -p "127.0.0.1:${HOST_PORT}:${PORT_IN}" \
