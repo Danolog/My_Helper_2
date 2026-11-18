@@ -3,7 +3,8 @@
  *
  * Zakres przeniesiony z kroku „Verify seed data” w `.github/workflows/quality-gate.yml`
  * (użytkownicy testowi i ich konta z hasłem) i rozszerzony o plany subskrypcji
- * z `./seed-plans`. Przebieg (`runVerifySeed`) dostaje klienta bazy i wyjście
+ * z `./seed-plans` oraz o wiersze subskrypcji salonów seeda (dostęp liczony
+ * `resolveSalonAccess`). Przebieg (`runVerifySeed`) dostaje klienta bazy i wyjście
  * z zewnątrz — `scripts/verify-seed.ts` podpina postgres.js i konsolę.
  *
  * Komunikaty zawierają wyłącznie nazwę kontroli i liczby: bez adresów e-mail,
@@ -17,29 +18,66 @@ import {
   type SeedProbeClient,
 } from "./seed-host-guard";
 import { SEED_PLANS } from "./seed-plans";
+import { resolveSalonAccess, type SalonAccess } from "../src/lib/subscription-predicates";
 
-/** Użytkownicy z `scripts/seed-test.ts` (te same stałe; zgodność pilnuje test). */
+/**
+ * Użytkownicy z `scripts/seed-test.ts` (te same stałe; zgodność pilnuje test).
+ * `label` to nazwa kontroli w komunikatach — rozróżnia obu właścicieli bez e-maila i identyfikatora.
+ */
 export const EXPECTED_SEED_USERS = [
-  { id: "test-owner-user-id-00001", email: "owner@test.com", role: "owner" },
-  { id: "test-client-user-id-00001", email: "client@test.com", role: "client" },
+  { id: "test-owner-user-id-00001", email: "owner@test.com", role: "owner", label: "użytkownik owner" },
+  { id: "test-client-user-id-00001", email: "client@test.com", role: "client", label: "użytkownik client" },
+  { id: "test-owner-user-id-00002", email: "owner-trial-expired@test.com", role: "owner", label: "użytkownik owner (salon po okresie próbnym)" },
 ] as const;
+
+/** Salony z `scripts/seed-test.ts` (te same stałe; zgodność pilnuje test). */
+export const SEED_SALON_IDS = {
+  test: "00000000-0000-4000-8000-000000000001",
+  trialExpired: "00000000-0000-4000-8000-000000000002",
+} as const;
+
+/** Oczekiwany dostęp salonów seeda liczony `resolveSalonAccess`; `planSlug` sprawdzany tylko, gdy podany. */
+const EXPECTED_SEED_ACCESS: ReadonlyArray<{
+  salonId: string;
+  label: string;
+  mode: SalonAccess["mode"];
+  state: SalonAccess["state"];
+  planSlug?: string;
+}> = [
+  { salonId: SEED_SALON_IDS.test, label: "subskrypcja salonu testowego", mode: "full", state: "active", planSlug: "basic" },
+  { salonId: SEED_SALON_IDS.trialExpired, label: "subskrypcja salonu po okresie próbnym", mode: "read_only", state: "expired" },
+];
 
 export type SeedUserRow = { id: string; email: string; email_verified: boolean; role: string | null };
 export type SeedAccountRow = { user_id: string; provider_id: string; has_password: boolean };
 export type SeedPlanRow = { slug: string; name: string; price_monthly: string; is_active: boolean; features_json: unknown };
+export type SeedSubscriptionRow = {
+  salon_id: string;
+  status: string;
+  plan_slug: string;
+  trial_ends_at: Date | null;
+  current_period_start: Date | null;
+  current_period_end: Date | null;
+  created_at: Date;
+};
 
 export type SeedRows = {
   users: readonly SeedUserRow[];
   accounts: readonly SeedAccountRow[];
   plans: readonly SeedPlanRow[];
+  subscriptions: readonly SeedSubscriptionRow[];
 };
 
 export const VERIFY_SEED_USERS_SQL =
-  'select id, email, email_verified, role from "user" where email in (\'owner@test.com\', \'client@test.com\')';
+  'select id, email, email_verified, role from "user" where email in (\'owner@test.com\', \'client@test.com\', \'owner-trial-expired@test.com\')';
 export const VERIFY_SEED_ACCOUNTS_SQL =
   "select user_id, provider_id, (password is not null) as has_password from account " +
-  "where user_id in ('test-owner-user-id-00001', 'test-client-user-id-00001')";
+  "where user_id in ('test-owner-user-id-00001', 'test-client-user-id-00001', 'test-owner-user-id-00002')";
 export const VERIFY_SEED_PLANS_SQL = "select slug, name, price_monthly::text as price_monthly, is_active, features_json from subscription_plans";
+export const VERIFY_SEED_SUBSCRIPTIONS_SQL =
+  "select s.salon_id::text as salon_id, s.status, p.slug as plan_slug, s.trial_ends_at, s.current_period_start, " +
+  "s.current_period_end, s.created_at from salon_subscriptions s join subscription_plans p on p.id = s.plan_id " +
+  `where s.salon_id in ('${SEED_SALON_IDS.test}', '${SEED_SALON_IDS.trialExpired}')`;
 
 /**
  * Lista funkcji dokładnie jak w kodzie: te same pozycje, ta sama kolejność, bez dodatkowych.
@@ -54,13 +92,16 @@ function sameFeatures(stored: unknown, expected: readonly string[]): boolean {
   );
 }
 
-export function checkSeedRows(rows: SeedRows): { ok: boolean; problems: string[] } {
+/**
+ * Dostęp salonów seeda liczy `resolveSalonAccess` w chwili `now` (podawanej z zewnątrz).
+ */
+export function checkSeedRows(rows: SeedRows, now: Date = new Date()): { ok: boolean; problems: string[] } {
   const problems: string[] = [];
 
   // Komunikaty: tylko nazwa kontroli (rola użytkownika testowego, slug planu) i liczby —
   // bez adresów e-mail, identyfikatorów i wartości odczytanych z bazy.
   for (const exp of EXPECTED_SEED_USERS) {
-    const label = `użytkownik ${exp.role}`;
+    const label = exp.label;
     const u = rows.users.find((r) => r.email === exp.email);
     if (!u) {
       problems.push(`${label}: brak`);
@@ -90,6 +131,30 @@ export function checkSeedRows(rows: SeedRows): { ok: boolean; problems: string[]
     if (!sameFeatures(p.features_json, exp.featuresJson)) problems.push(`plan ${exp.slug}: funkcje niezgodne`);
   }
 
+  // Subskrypcje: dokładnie jeden wiersz na salon seeda, dostęp z prawdziwej funkcji dostępu.
+  // Komunikaty: nazwa kontroli, liczby i nazwy trybu/stanu dostępu — bez dat i wartości z bazy.
+  for (const exp of EXPECTED_SEED_ACCESS) {
+    const own = rows.subscriptions.filter((s) => s.salon_id === exp.salonId);
+    if (own.length !== 1) {
+      problems.push(`${exp.label}: wierszy ${own.length}, oczekiwany 1`);
+      continue;
+    }
+    const access = resolveSalonAccess(
+      own.map((s) => ({
+        status: s.status,
+        planSlug: s.plan_slug,
+        trialEndsAt: s.trial_ends_at,
+        currentPeriodStart: s.current_period_start,
+        currentPeriodEnd: s.current_period_end,
+        createdAt: s.created_at,
+      })),
+      now,
+    );
+    if (access.mode !== exp.mode) problems.push(`${exp.label}: dostęp ${access.mode}, oczekiwany ${exp.mode}`);
+    if (access.state !== exp.state) problems.push(`${exp.label}: stan ${access.state}, oczekiwany ${exp.state}`);
+    if (exp.planSlug !== undefined && access.planSlug !== exp.planSlug) problems.push(`${exp.label}: plan niezgodny`);
+  }
+
   return { ok: problems.length === 0, problems };
 }
 
@@ -102,6 +167,8 @@ export type VerifySeedDeps = {
   env: { POSTGRES_URL?: string | undefined; VERCEL_ENV?: string | undefined };
   /** Tworzy klienta bez łączenia się (postgres.js łączy przy pierwszym zapytaniu). */
   connect: (url: string) => VerifySeedClient;
+  /** Chwila, w której liczony jest dostęp salonów seeda (domyślnie bieżący czas). */
+  now?: () => Date;
   log: (line: string) => void;
   error: (line: string) => void;
 };
@@ -135,12 +202,16 @@ export async function runVerifySeed(deps: VerifySeedDeps): Promise<number> {
     const users = (await sql.unsafe(VERIFY_SEED_USERS_SQL)) as unknown as SeedUserRow[];
     const accounts = (await sql.unsafe(VERIFY_SEED_ACCOUNTS_SQL)) as unknown as SeedAccountRow[];
     const plans = (await sql.unsafe(VERIFY_SEED_PLANS_SQL)) as unknown as SeedPlanRow[];
-    const result = checkSeedRows({ users, accounts, plans });
+    const subscriptions = (await sql.unsafe(VERIFY_SEED_SUBSCRIPTIONS_SQL)) as unknown as SeedSubscriptionRow[];
+    const result = checkSeedRows({ users, accounts, plans, subscriptions }, deps.now ? deps.now() : new Date());
     if (!result.ok) {
       for (const p of result.problems) deps.error(`[verify-seed] ${p}`);
       return 1;
     }
-    deps.log(`[verify-seed] OK: użytkownicy testowi ${users.length}, konta credential ${accounts.length}, plany ${plans.length}`);
+    deps.log(
+      `[verify-seed] OK: użytkownicy testowi ${users.length}, konta credential ${accounts.length}, plany ${plans.length}, ` +
+        `subskrypcje ${subscriptions.length}`,
+    );
     return 0;
   } catch (err) {
     deps.error(`[verify-seed] Błąd: ${err instanceof Error ? err.name : "UnknownError"}`);
