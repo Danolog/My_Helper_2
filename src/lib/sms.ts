@@ -1,4 +1,4 @@
-import { hostingPlatform } from "@/lib/hosting";
+import { type HostingPlatform, hostingPlatform } from "@/lib/hosting";
 import { logger } from "@/lib/logger";
 import { maskPhoneNumber, normalizePolishPhoneNumber } from "@/lib/phone";
 import { notifications } from "@/lib/schema";
@@ -145,6 +145,18 @@ async function saveFailedNotification(msg: SmsMessage): Promise<void> {
 }
 
 /**
+ * Czy na tym hostingu brakuje dostawcy SMS? Zwraca nazwę platformy, gdy nie ma
+ * `SMSAPI_TOKEN`, a serwer działa na hostingu (Vercel, Cloud Run); w pozostałych
+ * przypadkach `null` (jest token albo działamy poza hostingiem — lokalnie, w
+ * testach, w CI). Jedno źródło warunku dla `sendSms` i dla tras, które przed
+ * wysyłką wsadową muszą wiedzieć, że wiadomości nie wyjdą.
+ */
+export function smsProviderUnavailablePlatform(): HostingPlatform | null {
+  if (process.env.SMSAPI_TOKEN) return null;
+  return hostingPlatform();
+}
+
+/**
  * Send an SMS message.
  *
  * When `SMSAPI_TOKEN` is configured, the message is sent through the
@@ -192,8 +204,8 @@ export async function sendSms(msg: SmsMessage): Promise<SmsResult> {
   // Na hostingu bez dostawcy wiadomość nie wychodzi, więc nie może zostać
   // zapisana ani zgłoszona jako wysłana. Brak konfiguracji nie jest zdarzeniem
   // jednej wiadomości — bez wpisu w notifications; wołający dostaje błąd.
-  const platform = hostingPlatform();
-  if (!token && platform !== null) {
+  const platform = smsProviderUnavailablePlatform();
+  if (platform !== null) {
     logger.error("SMS not sent: no SMS provider configured on hosting", {
       platform,
       salonId: msg.salonId,
