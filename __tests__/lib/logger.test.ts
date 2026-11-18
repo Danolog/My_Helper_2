@@ -85,9 +85,9 @@ describe("logger — produkcja (JSON structured)", () => {
     expect(typeof entry.error.stack).toBe("string");
   });
 
-  // N3 (Ryan): DrizzleQueryError niesie parametry zapytania (dane gościa)
+  // DrizzleQueryError niesie parametry zapytania (dane gościa)
   // w message i w pierwszej linii stack.
-  it("N3: DrizzleQueryError — parametry wycięte z message i stack, zapytanie i kod błędu zostają", async () => {
+  it("DrizzleQueryError —parametry wycięte z message i stack, zapytanie i kod błędu zostają", async () => {
     const { DrizzleQueryError } = await import("drizzle-orm");
     const logger = await importLoggerWithEnv("production");
     const err = new DrizzleQueryError(
@@ -109,7 +109,7 @@ describe("logger — produkcja (JSON structured)", () => {
     expect(entry.error.causeCode).toBe("23505");
   });
 
-  it("N3: parametr z '\\n    at ' nie skraca wycięcia", async () => {
+  it("parametr z'\\n    at ' nie skraca wycięcia", async () => {
     const { DrizzleQueryError } = await import("drizzle-orm");
     const logger = await importLoggerWithEnv("production");
     logger.error("Padlo", {
@@ -118,7 +118,7 @@ describe("logger — produkcja (JSON structured)", () => {
     expect(errorSpy.mock.calls[0]![0] as string).not.toContain("sekret@poczta.pl");
   });
 
-  it("N3: zalogowany napis error.message z parametrami też jest redagowany", async () => {
+  it("zalogowany napis error.message z parametrami też jest redagowany", async () => {
     const { DrizzleQueryError } = await import("drizzle-orm");
     const logger = await importLoggerWithEnv("production");
     const err = new DrizzleQueryError("insert into x values ($1)", ["anna@test.pl"]);
@@ -183,7 +183,7 @@ describe("logger — development (format czytelny)", () => {
   });
 });
 
-describe("logger — redakcja danych osobowych (hotfix P1)", () => {
+describe("logger — redakcja danych osobowych", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
@@ -764,5 +764,65 @@ describe("logger — redakcja przy serializacji, wpis zastępczy, logger nie rzu
     const dev = await importLoggerWithEnv("development");
     expect(() => dev.error("Padlo", makeCtx())).not.toThrow();
     expect(errorSpy).toHaveBeenNthCalledWith(2, "[ERROR]", "Padlo", { contextError: "unserializable" });
+  });
+
+  it("Date pod kluczem z fragmentem w zwykłym obiekcie i w instancji klasy → napis daty; liczba pod takim kluczem → [redacted]", async () => {
+    const ISO = "2026-01-02T03:04:05.000Z";
+    class Wysylka {
+      emailSentAt = new Date(ISO);
+      emailSentAtMs = 1767323045000;
+    }
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { emailSentAt: new Date(ISO), emailSentAtMs: 1767323045000, wysylka: new Wysylka() });
+
+    expect(JSON.parse(logSpy.mock.calls[0]![0] as string)).toMatchObject({
+      emailSentAt: ISO,
+      emailSentAtMs: "[redacted]",
+      wysylka: { emailSentAt: ISO, emailSentAtMs: "[redacted]" },
+    });
+  });
+
+  class KontekstZGetterem {
+    route = "/api/x";
+  }
+
+  const makeClassCtx = () => {
+    const ctx = new KontekstZGetterem();
+    Object.defineProperty(ctx, "x", {
+      enumerable: true,
+      get() {
+        throw new Error("getter-tekst");
+      },
+    });
+    return ctx as unknown as Record<string, unknown>;
+  };
+
+  it("cały kontekst jako instancja klasy z getterem rzucającym wyjątek → logger nie rzuca (produkcja i development), wpis ostateczny", async () => {
+    const prod = await importLoggerWithEnv("production");
+    expect(() => prod.error("Padlo", makeClassCtx())).not.toThrow();
+    const raw = errorSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("getter-tekst");
+    expect(JSON.parse(raw)).toEqual({
+      level: "error",
+      msg: "Padlo",
+      timestamp: expect.any(String),
+      contextError: "unserializable",
+    });
+
+    const dev = await importLoggerWithEnv("development");
+    expect(() => dev.error("Padlo", makeClassCtx())).not.toThrow();
+  });
+
+  it("cały kontekst jako instancja klasy z getterem rzucającym wyjątek i msg niebędący napisem → logger nie rzuca, msg [unserializable]", async () => {
+    const prod = await importLoggerWithEnv("production");
+    expect(() => prod.error(BigInt(5) as unknown as string, makeClassCtx())).not.toThrow();
+    const raw = errorSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain("getter-tekst");
+    expect(JSON.parse(raw)).toEqual({
+      level: "error",
+      msg: "[unserializable]",
+      timestamp: expect.any(String),
+      contextError: "unserializable",
+    });
   });
 });

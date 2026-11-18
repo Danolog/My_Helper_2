@@ -160,10 +160,14 @@ export function redactLogContext(value: unknown, depth = 0, seen: WeakSet<object
  * wartość pod kluczem z `PII_LOG_KEYS` albo wartość kontaktowa pod kluczem
  * z `PII_LOG_KEY_FRAGMENTS` → `[redacted]`; `bigint` → napis dziesiętny.
  * Dla wyniku `redactLogContext` na zwykłych obiektach nic nie zmienia.
+ * `Date` zostaje datą także pod kluczem z fragmentem (liczbowy znacznik
+ * czasu pod takim kluczem nadal jest redagowany — reguła przy
+ * `PII_LOG_KEY_FRAGMENTS`).
  */
 function logReplacer(this: unknown, key: string, value: unknown): unknown {
   const source = (this as Record<string, unknown>)[key];
   if (source instanceof URL) return urlWithoutCredentials(source);
+  if (source instanceof Date) return value;
   if (key !== "" && isRedactedEntry(key, value)) return REDACTED;
   return typeof value === "bigint" ? value.toString() : value;
 }
@@ -191,30 +195,42 @@ function formatLog(level: LogLevel, message: string, context?: LogContext) {
   }
 
   if (isProduction) {
-    const entry = {
-      level,
-      msg: message,
-      timestamp: new Date().toISOString(),
-      ...normalizedContext,
-    };
+    const timestamp = new Date().toISOString();
 
     let json: string;
     try {
+      const entry = {
+        level,
+        msg: message,
+        timestamp,
+        ...normalizedContext,
+      };
       json = JSON.stringify(entry, logReplacer);
     } catch {
       // Kontekst nieserializowalny (np. cykl w obiekcie niebędącym zwykłym
       // obiektem): wpis zastępczy z polami prostymi pierwszego poziomu
       // kontekstu (napis, liczba, boolean), bez obiektów, tablic i treści
       // wyjątku; level, msg i timestamp wpisu wygrywają z polami kontekstu.
-      const simpleFields = Object.fromEntries(
-        Object.entries(normalizedContext ?? {}).filter(
-          ([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean",
-        ),
-      );
-      json = JSON.stringify(
-        { ...simpleFields, level, msg: message, timestamp: entry.timestamp, contextError: "unserializable" },
-        logReplacer,
-      );
+      // Gdy i on rzuci (getter rzucający wyjątek, msg niebędący napisem) —
+      // wpis ostateczny z samych napisów, bez kontekstu.
+      try {
+        const simpleFields = Object.fromEntries(
+          Object.entries(normalizedContext ?? {}).filter(
+            ([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean",
+          ),
+        );
+        json = JSON.stringify(
+          { ...simpleFields, level, msg: message, timestamp, contextError: "unserializable" },
+          logReplacer,
+        );
+      } catch {
+        json = JSON.stringify({
+          level,
+          msg: typeof message === "string" ? message : "[unserializable]",
+          timestamp,
+          contextError: "unserializable",
+        });
+      }
     }
 
     // Route to the correct console method so Vercel and cloud providers
