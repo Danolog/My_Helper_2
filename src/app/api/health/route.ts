@@ -5,6 +5,9 @@ import { logger } from "@/lib/logger";
 // Health checks must always reflect real-time system state — never cache
 export const dynamic = 'force-dynamic';
 
+// Fixed public text for a failed database check; error details go to the server log only
+const DATABASE_UNAVAILABLE_MESSAGE = 'Database unavailable';
+
 // Helper function to add timeout to promises
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   return Promise.race([
@@ -45,7 +48,7 @@ export async function GET() {
       responseTimeMs: responseTime,
       database: {
         status: 'disconnected',
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: DATABASE_UNAVAILABLE_MESSAGE
       }
     }, { status: 503 });
   }
