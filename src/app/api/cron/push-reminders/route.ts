@@ -17,6 +17,13 @@ export const maxDuration = 300;
 // Górna granica na jedno uruchomienie; cron uruchamiany cyklicznie dogoni resztę
 const BATCH_LIMIT = 200;
 
+// Stałe kody błędu elementu odpowiedzi; szczegół przyczyny tylko w logu serwera
+type PushReminderErrorCode =
+  | "no_user_account"
+  | "no_push_subscriptions"
+  | "send_failed"
+  | "processing_failed";
+
 /**
  * POST /api/cron/push-reminders
  *
@@ -65,13 +72,13 @@ export async function POST(request: Request) {
       upcomingAppointments.map((a) => a.appointmentId)
     );
 
+    // Odpowiedź i logi bez imienia i nazwiska klienta — wpis identyfikuje appointmentId.
     const results: Array<{
       appointmentId: string;
-      clientName: string;
       userId: string | null;
       success: boolean;
       sent: number;
-      error?: string | undefined;
+      error?: PushReminderErrorCode | undefined;
     }> = [];
 
     // Collect all unique userIds to batch-check push subscriptions
@@ -98,11 +105,10 @@ export async function POST(request: Request) {
         });
         results.push({
           appointmentId: appt.appointmentId,
-          clientName,
           userId: null,
           success: false,
           sent: 0,
-          error: "No user account linked",
+          error: "no_user_account",
         });
         continue;
       }
@@ -114,11 +120,10 @@ export async function POST(request: Request) {
         });
         results.push({
           appointmentId: appt.appointmentId,
-          clientName,
           userId,
           success: false,
           sent: 0,
-          error: "No push subscriptions",
+          error: "no_push_subscriptions",
         });
         continue;
       }
@@ -138,17 +143,22 @@ export async function POST(request: Request) {
 
         logger.info("Push reminder sent", {
           appointmentId: appt.appointmentId,
-          clientName,
           devicesSent: pushResult.sent,
         });
 
+        if (!pushResult.success) {
+          logger.warn("Push reminder not delivered", {
+            appointmentId: appt.appointmentId,
+            error: pushResult.error,
+          });
+        }
+
         results.push({
           appointmentId: appt.appointmentId,
-          clientName,
           userId,
           success: pushResult.success,
           sent: pushResult.sent,
-          error: pushResult.error,
+          ...(pushResult.success ? {} : { error: "send_failed" as const }),
         });
       } catch (error) {
         logger.error("Push reminder processing failed", {
@@ -157,11 +167,10 @@ export async function POST(request: Request) {
         });
         results.push({
           appointmentId: appt.appointmentId,
-          clientName,
           userId,
           success: false,
           sent: 0,
-          error: error instanceof Error ? error.message : "Unknown error",
+          error: "processing_failed",
         });
       }
     }

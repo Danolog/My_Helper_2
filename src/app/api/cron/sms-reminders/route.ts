@@ -15,6 +15,10 @@ export const maxDuration = 300;
 // Górna granica na jedno uruchomienie; cron co 5-10 min dogoni resztę
 const BATCH_LIMIT = 200;
 
+// Stałe kody błędu elementu odpowiedzi; szczegół przyczyny tylko w logu serwera.
+// Element pominięty (numer testowy) ma `skipped: true` bez pola `error`.
+type SmsReminderErrorCode = "no_phone_number" | "send_failed" | "processing_failed";
+
 /**
  * POST /api/cron/sms-reminders
  *
@@ -81,13 +85,12 @@ export async function POST(request: Request) {
       upcomingAppointments.map((a) => a.appointmentId)
     );
 
-    // #75 (Ryan): bez imienia i nazwiska klienta w logach i w odpowiedzi crona
-    // (dane osobowe) — identyfikuje appointmentId.
+    // Odpowiedź i logi bez imienia i nazwiska klienta — wpis identyfikuje appointmentId.
     const results: Array<{
       appointmentId: string;
       success: boolean;
       skipped?: boolean | undefined;
-      error?: string | undefined;
+      error?: SmsReminderErrorCode | undefined;
     }> = [];
 
     for (const appt of upcomingAppointments) {
@@ -102,7 +105,7 @@ export async function POST(request: Request) {
         results.push({
           appointmentId: appt.appointmentId,
           success: false,
-          error: "No phone number",
+          error: "no_phone_number",
         });
         continue;
       }
@@ -129,8 +132,11 @@ export async function POST(request: Request) {
         results.push({
           appointmentId: appt.appointmentId,
           success: smsResult.success,
-          ...(smsResult.skipped ? { skipped: true } : {}),
-          error: smsResult.error,
+          ...(smsResult.skipped
+            ? { skipped: true }
+            : smsResult.success
+              ? {}
+              : { error: "send_failed" as const }),
         });
       } catch (error) {
         logger.error("SMS reminder processing failed", {
@@ -140,7 +146,7 @@ export async function POST(request: Request) {
         results.push({
           appointmentId: appt.appointmentId,
           success: false,
-          error: error instanceof Error ? error.message : "Unknown error",
+          error: "processing_failed",
         });
       }
     }
