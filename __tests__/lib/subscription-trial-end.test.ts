@@ -42,7 +42,7 @@ vi.mock("next/headers", () => ({ headers: vi.fn().mockResolvedValue(new Headers(
 vi.mock("@/lib/auth", () => ({ auth: { api: { getSession: vi.fn() } } }));
 
 import { requireProAI } from "@/lib/ai/openrouter";
-import { getCurrentPlan, isProPlan } from "@/lib/subscription";
+import { getCurrentPlan, getSalonAccess, isProPlan } from "@/lib/subscription";
 
 const SALON = "salon-1";
 const NOW = new Date("2026-11-15T12:00:00.000Z");
@@ -54,6 +54,8 @@ function row(status: string, trialEndsAt: Date | null, planSlug = "pro") {
     planName: planSlug === "pro" ? "Pro" : "Basic",
     status,
     trialEndsAt,
+    currentPeriodEnd: trialEndsAt,
+    createdAt: new Date(NOW.getTime() - 20 * DAY),
   };
 }
 
@@ -143,6 +145,32 @@ describe("koniec okresu próbnego — getCurrentPlan / isProPlan", () => {
     mockRows.mockReturnValue([row("trialing", new Date(NOW.getTime() + DAY))]);
     expect(await getCurrentPlan(SALON)).toEqual({ slug: "pro", name: "Pro", status: "trialing" });
     expect(mockWarn).not.toHaveBeenCalled();
+  });
+});
+
+describe("koniec okresu próbnego — getSalonAccess", () => {
+  it("trial w terminie -> trialing, pełny dostęp do trialEndsAt", async () => {
+    const end = new Date(NOW.getTime() + DAY);
+    mockRows.mockReturnValue([row("trialing", end)]);
+    expect(await getSalonAccess(SALON)).toEqual({ state: "trialing", mode: "full", planSlug: "pro", until: end });
+  });
+
+  it("trial po terminie -> expired, tylko do odczytu", async () => {
+    mockRows.mockReturnValue([row("trialing", new Date(NOW.getTime() - DAY))]);
+    expect(await getSalonAccess(SALON)).toEqual({ state: "expired", mode: "read_only", planSlug: null, until: null });
+    expect(mockWarn).not.toHaveBeenCalled();
+  });
+
+  it("trialing bez daty końca -> expired, jeden logger.warn z samym salonId", async () => {
+    mockRows.mockReturnValue([row("trialing", null)]);
+    expect(await getSalonAccess(SALON)).toMatchObject({ state: "expired", mode: "read_only" });
+    expect(mockWarn).toHaveBeenCalledTimes(1);
+    expect(mockWarn).toHaveBeenCalledWith("Trialing subscription without trial end date", { salonId: SALON });
+  });
+
+  it("brak salonu w sesji -> getCurrentPlan zwraca basic ze statusem none", async () => {
+    mockGetUserSalonId.mockResolvedValue(null);
+    expect(await getCurrentPlan()).toEqual({ slug: "basic", name: "Basic", status: "none" });
   });
 });
 
