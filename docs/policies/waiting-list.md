@@ -14,12 +14,17 @@ Lista oczekujących jest modułem, który salon włącza w ustawieniach; domyśl
 ## Zakres danych wpisu
 - klient z kartoteki salonu; do powiadomienia aplikacja używa numeru telefonu (SMS) i adresu e-mail (ustalenie konta klienta dla powiadomienia push);
 - preferencje: usługa, pracownik, preferowana data;
-- przebieg: czas powiadomienia, zaproponowany termin i pracownik, nieodwołana wizyta klienta na tę samą usługę powiązana z propozycją, przyjęcie albo odrzucenie terminu;
+- przebieg: czas powiadomienia, zaproponowany termin i pracownik, powiązana z propozycją zaplanowana albo potwierdzona wizyta klienta na tę samą usługę, zaczynająca się później niż zaproponowany termin, przyjęcie albo odrzucenie terminu;
 - źródło wpisu, czas potwierdzenia prośby klienta i identyfikator konta personelu, z którego dodano wpis.
 
 Po usunięciu konta personelu identyfikator konta jest usuwany z wpisu, a źródło i czas potwierdzenia zostają.
 
-Każda wysłana wiadomość (SMS albo push) jest zapisywana w historii powiadomień salonu: treść, status, czas i powiązanie z klientem. Przyjęcie terminu również dodaje wpis do tej historii. Historia powiadomień nie jest powiązana z wpisem listy oczekujących i nie jest usuwana razem z nim.
+Wysyłka powiadomień jest zapisywana w historii powiadomień salonu. Zapis zawiera rodzaj (SMS albo push), treść, status i powiązanie z klientem, a czas wysyłki — jak niżej:
+- SMS wysłany: status „wysłane” i czas wysyłki. SMS, którego nie udało się wysłać (także z powodu nieprawidłowego numeru): aplikacja próbuje zapisać go ze statusem „nieudane”, bez czasu wysyłki.
+- Push: zapis powstaje, gdy klient ma co najmniej jedno zarejestrowane urządzenie — ze statusem „wysłane”, gdy powiadomienie dotarło do co najmniej jednego urządzenia, w przeciwnym razie „nieudane”; w obu przypadkach z czasem próby. Przy błędzie wysyłki aplikacja próbuje zapisać powiadomienie ze statusem „nieudane”, bez czasu wysyłki. Zapisywany jest tytuł i treść powiadomienia, bez dołączonych do niego identyfikatorów i adresu strony.
+- Wiadomość, która nie jest wysyłana (pora, w której SMS nie wychodzi, brak urządzeń klienta, kanał push nieudostępniony), nie jest zapisywana.
+
+Przyjęcie terminu dodaje do tej historii wpis systemowy ze statusem „wysłane”, czasem zapisu i powiązaniem z klientem; jego treść zawiera identyfikator wizyty, informację, czy wizyta została przeniesiona, czy zarezerwowana, oraz datę i godzinę terminu (czas polski). Historia powiadomień nie jest powiązana z wpisem listy oczekujących i nie jest usuwana razem z nim.
 
 ## Źródło wpisu i potwierdzenie prośby
 Wpis powstaje na dwa sposoby:
@@ -47,7 +52,9 @@ Do jednego zwolnionego terminu aplikacja wybiera najwyżej 5 pasujących wpisów
 
 Wpis, dla którego w danej chwili nie ma żadnego kanału (np. klient ma tylko numer telefonu, a jest pora, w której SMS nie wychodzi), jest pomijany bez zmian i pozostaje oczekujący.
 
-Wpis jest oznaczany jako powiadomiony, gdy co najmniej jedna wiadomość (SMS albo push) zostanie przyjęta do wysyłki. Jeśli żadna nie zostanie przyjęta, wpis pozostaje oczekujący. Wpis oczekujący może dostać propozycję przy następnym zwolnionym terminie.
+Bezpośrednio przed wysyłką aplikacja oznacza wpis jako powiadomiony i zapisuje w nim propozycję (termin, pracownika, powiązaną wizytę). Od tej chwili wpis nie jest wybierany przy innych zwolnionych terminach, a propozycja jest widoczna w portalu klienta. Jeśli oznaczenie wpisu się nie powiedzie, wiadomość nie wychodzi i wpis pozostaje oczekujący.
+
+Wpis pozostaje oznaczony jako powiadomiony, gdy co najmniej jedna wiadomość (SMS albo push) zostanie przyjęta do wysyłki. Jeśli żadna nie zostanie przyjęta, aplikacja usuwa z wpisu oznaczenie i propozycję, o ile wpis nie został w tym czasie przyjęty ani odrzucony, i wpis znów jest oczekujący. Wpis oczekujący może dostać propozycję przy następnym zwolnionym terminie. Jeśli usunięcie oznaczenia się nie powiedzie, wpis pozostaje oznaczony jako powiadomiony, z zapisaną propozycją, mimo że żadna wiadomość nie została przyjęta; aplikacja zapisuje błąd w dzienniku zdarzeń.
 
 ## Treść powiadomień
 SMS zawiera wyłącznie: nazwę salonu, nazwę usługi, datę i godzinę terminu (czas polski), informację, że termin można przyjąć po zalogowaniu w aplikacji na liście oczekujących, oraz numer telefonu salonu, jeśli salon go podał. Treść SMS jest zapisywana bez polskich znaków.
@@ -56,7 +63,7 @@ Powiadomienie push zawiera wyłącznie: tytuł „Zwolnił się termin”, nazw�
 
 Nazwa salonu albo usługi, która wygląda na adres strony internetowej, jest pomijana. Zbyt długie nazwy są skracane.
 
-Powiadomienia nie zawierają imienia, nazwiska ani innych danych osobowych klienta, danych pracownika ani linków. Nie zawierają treści promocyjnych.
+Treść powiadomień nie zawiera imienia, nazwiska ani innych danych osobowych klienta, danych pracownika ani linków. Nie zawiera treści promocyjnych.
 
 ## Przyjęcie i odrzucenie terminu
 Klient przyjmuje albo odrzuca zaproponowany termin w portalu klienta. Wymaga to konta z potwierdzonym adresem e-mail równym adresowi e-mail w kartotece salonu. Klient bez takiego konta może skontaktować się z salonem.
@@ -67,7 +74,12 @@ Przyjęcie jest możliwe tylko, gdy:
 - zaproponowany termin jeszcze się nie rozpoczął i nadal jest wolny u zaproponowanego pracownika;
 - zaproponowany pracownik nadal istnieje w salonie.
 
-Jeśli klient ma w salonie nieodwołaną wizytę na tę samą usługę, powiązaną z propozycją, przyjęcie przenosi tę wizytę na zaproponowany termin. W przeciwnym razie przyjęcie tworzy nową wizytę. Nowa wizyta nie powstaje, jeśli usługa albo klient wymagają zadatku; klient może wtedy zarezerwować termin w portalu z wpłatą zadatku, a wpis pozostaje nierozstrzygnięty.
+Propozycja jest powiązana z wizytą klienta w tym salonie, jeśli przy wysyłce propozycji klient miał zaplanowaną albo potwierdzoną wizytę na tę samą usługę, zaczynającą się później niż zaproponowany termin (przy kilku takich wizytach — z najwcześniejszą). Przy przyjęciu:
+- jeśli powiązana wizyta jest nadal zaplanowana albo potwierdzona i zaczyna się później niż zaproponowany termin, przyjęcie przenosi ją na zaproponowany termin i do zaproponowanego pracownika;
+- jeśli propozycja nie ma powiązanej wizyty albo powiązana wizyta nie istnieje lub została odwołana, przyjęcie tworzy nową wizytę;
+- jeśli powiązana wizyta istnieje, nie jest odwołana, ale nie da się jej już przenieść (np. została zakończona albo zaczyna się nie później niż zaproponowany termin), przyjęcie jest odrzucane: żadna wizyta nie jest tworzona ani przenoszona, a wpis pozostaje nierozstrzygnięty.
+
+Nowa wizyta nie powstaje, jeśli usługa albo klient wymagają zadatku; klient może wtedy zarezerwować termin w portalu z wpłatą zadatku, a wpis pozostaje nierozstrzygnięty.
 
 Odrzucenie terminu jest możliwe, dopóki wpis nie został przyjęty ani odrzucony, także przy wyłączonym module. Odrzucenie kończy obsługę wpisu.
 
