@@ -211,8 +211,8 @@ function formatLog(level: LogLevel, message: string, context?: LogContext) {
       // obiektem): wpis zastępczy z polami prostymi pierwszego poziomu
       // kontekstu (napis, liczba, boolean), bez obiektów, tablic i treści
       // wyjątku; level, msg i timestamp wpisu wygrywają z polami kontekstu.
-      // Gdy i on rzuci (getter rzucający wyjątek, msg niebędący napisem) —
-      // wpis ostateczny z samych napisów, bez kontekstu.
+      // Gdy i on rzuci (np. getter rzucający wyjątek w kontekście niebędącym
+      // zwykłym obiektem) — wpis ostateczny z samych napisów, bez kontekstu.
       try {
         const simpleFields = Object.fromEntries(
           Object.entries(normalizedContext ?? {}).filter(

@@ -87,7 +87,7 @@ describe("logger — produkcja (JSON structured)", () => {
 
   // DrizzleQueryError niesie parametry zapytania (dane gościa)
   // w message i w pierwszej linii stack.
-  it("DrizzleQueryError —parametry wycięte z message i stack, zapytanie i kod błędu zostają", async () => {
+  it("DrizzleQueryError — parametry wycięte z message i stack, zapytanie i kod błędu zostają", async () => {
     const { DrizzleQueryError } = await import("drizzle-orm");
     const logger = await importLoggerWithEnv("production");
     const err = new DrizzleQueryError(
@@ -109,7 +109,7 @@ describe("logger — produkcja (JSON structured)", () => {
     expect(entry.error.causeCode).toBe("23505");
   });
 
-  it("parametr z'\\n    at ' nie skraca wycięcia", async () => {
+  it("parametr z '\\n    at ' nie skraca wycięcia", async () => {
     const { DrizzleQueryError } = await import("drizzle-orm");
     const logger = await importLoggerWithEnv("production");
     logger.error("Padlo", {
