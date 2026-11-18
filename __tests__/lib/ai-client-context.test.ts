@@ -271,7 +271,7 @@ describe("reviewCommentForModel", () => {
   const NEL = "\u{85}";
   const LINE_SEPARATOR = "\u{2028}";
   const PARAGRAPH_SEPARATOR = "\u{2029}";
-  const LINE_BREAKS = /[\r\n\t\u{85}\u{2028}\u{2029}]/u;
+  const LINE_BREAKS = /[\r\n\t\v\f\u{85}\u{2028}\u{2029}]/u;
 
   it("returns null for a missing, empty or whitespace-only comment", () => {
     expect(reviewCommentForModel(null)).toBeNull();
@@ -279,7 +279,7 @@ describe("reviewCommentForModel", () => {
     expect(reviewCommentForModel("")).toBeNull();
     expect(reviewCommentForModel("   ")).toBeNull();
     expect(
-      reviewCommentForModel(` \n\r\n\t${NEL}${LINE_SEPARATOR}${PARAGRAPH_SEPARATOR} `),
+      reviewCommentForModel(` \n\r\n\t\v\f${NEL}${LINE_SEPARATOR}${PARAGRAPH_SEPARATOR} `),
     ).toBeNull();
   });
 
@@ -289,7 +289,7 @@ describe("reviewCommentForModel", () => {
   });
 
   it("turns each kind of line break into a single space", () => {
-    const separators = ["\n", "\r\n", "\t", NEL, LINE_SEPARATOR, PARAGRAPH_SEPARATOR];
+    const separators = ["\n", "\r", "\r\n", "\t", "\v", "\f", NEL, LINE_SEPARATOR, PARAGRAPH_SEPARATOR];
     for (const separator of separators) {
       const result = reviewCommentForModel(`Miła wizyta${separator}polecam`);
       expect(result).toBe("Miła wizyta polecam");
