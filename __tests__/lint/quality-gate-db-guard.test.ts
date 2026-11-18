@@ -69,7 +69,8 @@ const ALLOWED_DB_JOB_LINES: Array<[string, RegExp]> = [
   ["instalacja zależności", /^pnpm install --frozen-lockfile$/],
   ["skrypt z listy dozwolonych", new RegExp(`^pnpm (?:${Object.keys(ALLOWED_DB_JOB_SCRIPTS).join("|")})$`)],
   ["strażnik RLS", /^pnpm exec tsx scripts\/db-rls-guard\.ts$/],
-  ["instalacja przeglądarki", /^pnpm exec playwright install --with-deps chromium$/],
+  // Bez --with-deps: pobieranie pakietów systemowych zjadało limit joba (#268).
+  ["instalacja przeglądarki", /^pnpm exec playwright install chromium$/],
   ["testy E2E", /^pnpm exec playwright test --grep @(?:smoke|full) --workers=\d+ --retries=\d+$/],
 ];
 
@@ -1383,6 +1384,22 @@ describe("stepViolations — zamknięta gramatyka kroku (Ethan O6–O10)", () =>
       base.replace("SELECT", "select"),
       ` ${base}`,
       "psql -c \"SELECT 1;\"",
+    ]) {
+      expect(allowedLine(bad), bad).toBe(false);
+    }
+  });
+
+  it("instalacja przeglądarki: dozwolone wyłącznie `pnpm exec playwright install chromium` (#268)", () => {
+    expect(allowedLine("pnpm exec playwright install chromium")).toBe(true);
+    for (const bad of [
+      "pnpm exec playwright install --with-deps chromium",
+      "pnpm exec playwright install",
+      "pnpm exec playwright install chromium firefox",
+      "pnpm exec playwright install-deps chromium",
+      "pnpm exec playwright install chromium && sudo apt-get install -y fonts-noto",
+      "pnpm exec playwright install chromium || true",
+      "pnpm exec playwright install chromium; sh x.sh",
+      " pnpm exec playwright install chromium",
     ]) {
       expect(allowedLine(bad), bad).toBe(false);
     }
