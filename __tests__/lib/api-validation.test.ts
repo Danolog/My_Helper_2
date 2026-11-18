@@ -10,6 +10,8 @@ import {
   createPromotionSchema,
   depositCreateSessionSchema,
   updateAppointmentSchema,
+  createWaitingListSchema,
+  updateWaitingListSchema,
 } from "@/lib/api-validation";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -818,4 +820,67 @@ describe("isoDateString — nieistniejące daty (#95)", () => {
       expect(parse({ startTime: "2020-01-01T00:00:00Z", endTime: value }).success).toBe(true);
     });
   }
+});
+
+describe("createWaitingListSchema — potwierdzenie prośby klienta (#221)", () => {
+  const CONFIRM_MESSAGE = "Potwierdź, że klient sam poprosił o zapis na listę oczekujących.";
+  const base = {
+    clientId: "33333333-3333-4333-8333-333333333333",
+    serviceId: "44444444-4444-4444-8444-444444444444",
+    preferredEmployeeId: null,
+    preferredDate: "2026-12-01T10:00:00Z",
+  };
+
+  it("komplet pól z clientRequestConfirmed: true przechodzi", () => {
+    expect(validateBody(createWaitingListSchema, { ...base, clientRequestConfirmed: true })).toBeNull();
+  });
+
+  it("samo clientId z potwierdzeniem przechodzi", () => {
+    expect(
+      validateBody(createWaitingListSchema, { clientId: base.clientId, clientRequestConfirmed: true })
+    ).toBeNull();
+  });
+
+  it.each([
+    ["brak pola", undefined],
+    ["false", false],
+    ['"true"', "true"],
+    ["1", 1],
+    ["null", null],
+  ])("clientRequestConfirmed: %s → błąd z komunikatem potwierdzenia", (_label, value) => {
+    const body: Record<string, unknown> = { ...base };
+    if (value !== undefined) body.clientRequestConfirmed = value;
+    const result = validateBody(createWaitingListSchema, body);
+    expect(result).not.toBeNull();
+    expect(result!.details.clientRequestConfirmed).toBe(CONFIRM_MESSAGE);
+  });
+
+  it.each([
+    ["source", "client_portal"],
+    ["source", "staff"],
+    ["createdByUserId", "inny-uzytkownik"],
+    ["clientRequestConfirmedAt", "2026-11-01T10:00:00Z"],
+    ["nieznanePole", "x"],
+  ])("pole %s = %s w treści → błąd", (field, value) => {
+    const result = validateBody(createWaitingListSchema, {
+      ...base,
+      clientRequestConfirmed: true,
+      [field]: value,
+    });
+    expect(result).not.toBeNull();
+  });
+});
+
+describe("updateWaitingListSchema — bez pól źródła i potwierdzenia (#221)", () => {
+  it("wynik parsowania nie zawiera pól źródła ani potwierdzenia", () => {
+    const result = updateWaitingListSchema.safeParse({
+      accepted: true,
+      source: "client_portal",
+      clientRequestConfirmedAt: null,
+      createdByUserId: "inny",
+      clientRequestConfirmed: false,
+    });
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ accepted: true });
+  });
 });

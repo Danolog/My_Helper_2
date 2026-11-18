@@ -7,8 +7,10 @@
  * (bez nowych parametrów), skutek ten sam co przed P5a-1:
  * - `sendSms` / `sendPaymentConfirmationSms`: wiersz `notifications` (sms) w salonie wiadomości;
  * - `sendPushNotification`: wiersz `notifications` (push); 404/410 kasuje tylko tę subskrypcję;
- * - `notifyWaitingList`: `notifiedAt`, `acceptToken`, `offered*`;
- * - `acceptEarlierSlot`: wizyta + `accepted = true`; odmowa przy zadatku (#63);
+ * - `notifyWaitingList`: `notifiedAt`, `acceptToken`, `offered*`; tylko wpisy z potwierdzoną
+ *   prośbą klienta (wpis `legacy` bez potwierdzenia nietknięty, bez wysyłki);
+ * - `acceptEarlierSlot`: wizyta + `accepted = true`; odmowa przy zadatku (#63) i przy
+ *   wyłączonym module listy oczekujących w salonie;
  * - `confirmDepositPayment`: błąd zapisu notyfikacji SMS nie cofa potwierdzenia wpłaty.
  *
  * Wyjścia `system/`:
@@ -108,8 +110,12 @@ const OWNER_A = `it-t3-p5a-a-${RUN}`;
 const OWNER_B = `it-t3-p5a-b-${RUN}`;
 const CLIENT_USER_A = `it-t3-p5a-ca-${RUN}`;
 const CLIENT_USER_B = `it-t3-p5a-cb-${RUN}`;
+const CLIENT_USER_L = `it-t3-p5a-cl-${RUN}`;
 const CLIENT_EMAIL_A = `${CLIENT_USER_A}@example.invalid`;
+const CLIENT_EMAIL_L = `${CLIENT_USER_L}@example.invalid`;
 const PHONE = "+48512345678";
+/** Wpis z potwierdzoną prośbą klienta (dodany przez salon). */
+const CONFIRMED = () => ({ source: "staff", clientRequestConfirmedAt: new Date() });
 
 const ids = {
   salonA: "",
@@ -161,6 +167,7 @@ suite("P5a-1: biblioteki przez forSalon i wyjścia system/ — prawdziwy Postgre
       { id: OWNER_B, name: "IT T3 p5a B", email: `${OWNER_B}@example.invalid` },
       { id: CLIENT_USER_A, name: "IT T3 p5a klient A", email: CLIENT_EMAIL_A, emailVerified: true },
       { id: CLIENT_USER_B, name: "IT T3 p5a klient B", email: `${CLIENT_USER_B}@example.invalid` },
+      { id: CLIENT_USER_L, name: "IT T3 p5a klient L", email: CLIENT_EMAIL_L, emailVerified: true },
     ]);
     // Salon A: moduł listy oczekujących włączony (notifyWaitingList wysyła tylko wtedy).
     const [a] = await db
@@ -205,7 +212,7 @@ suite("P5a-1: biblioteki przez forSalon i wyjścia system/ — prawdziwy Postgre
     if (!h) return;
     try {
       for (const id of [ids.salonA, ids.salonB]) if (id) await h.db.delete(salons).where(eq(salons.id, id));
-      await h.db.delete(user).where(inArray(user.id, [OWNER_A, OWNER_B, CLIENT_USER_A, CLIENT_USER_B]));
+      await h.db.delete(user).where(inArray(user.id, [OWNER_A, OWNER_B, CLIENT_USER_A, CLIENT_USER_B, CLIENT_USER_L]));
     } finally {
       await h.end();
     }
@@ -330,7 +337,7 @@ suite("P5a-1: biblioteki przez forSalon i wyjścia system/ — prawdziwy Postgre
 
   it("notifyWaitingList jak w trasach: notifiedAt, acceptToken, offered* ustawione; wpis salonu B nietknięty", async () => {
     const sub = await pushSub(CLIENT_USER_A, `${VALID_ENDPOINTS.chromeFcm}-wl`);
-    const entryA = await waitingEntry(ids.salonA, ids.clientA, { serviceId: ids.svcA });
+    const entryA = await waitingEntry(ids.salonA, ids.clientA, { serviceId: ids.svcA, ...CONFIRMED() });
     const entryB = await waitingEntry(ids.salonB, ids.clientB, { serviceId: ids.svcB });
     const { start, end } = nextSlot();
 
@@ -358,7 +365,7 @@ suite("P5a-1: biblioteki przez forSalon i wyjścia system/ — prawdziwy Postgre
   it("notifyWaitingList, powiązane konto: odczyt konta przez bramę działa, push dochodzi do skutku", async () => {
     const endpoint = `${VALID_ENDPOINTS.chromeFcm}-linked-${RUN}`;
     const sub = await pushSub(CLIENT_USER_A, endpoint);
-    const entry = await waitingEntry(ids.salonA, ids.clientA, { serviceId: ids.svcA });
+    const entry = await waitingEntry(ids.salonA, ids.clientA, { serviceId: ids.svcA, ...CONFIRMED() });
     const { start, end } = nextSlot();
     const salonName = `IT linked ${RUN}`;
 
@@ -383,6 +390,58 @@ suite("P5a-1: biblioteki przez forSalon i wyjścia system/ — prawdziwy Postgre
     const [after] = await h!.db.select().from(waitingList).where(eq(waitingList.id, entry.id));
     expect(after!.notifiedAt).not.toBeNull();
     await h!.db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub));
+  });
+
+  it("notifyWaitingList: wpis legacy bez potwierdzenia → brak wysyłki i oznaczenia; wpis potwierdzony → powiadomiony", async () => {
+    // Klient wpisu legacy ma zweryfikowane konto z subskrypcją: kanał wysyłki jest dostępny.
+    const [clientL] = await h!.db
+      .insert(clients)
+      .values({ salonId: ids.salonA, firstName: "Lena", lastName: "L", email: CLIENT_EMAIL_L, phone: PHONE })
+      .returning();
+    const endpointL = `${VALID_ENDPOINTS.chromeFcm}-legacy-${RUN}`;
+    const endpointA = `${VALID_ENDPOINTS.chromeFcm}-confirmed-${RUN}`;
+    const subL = await pushSub(CLIENT_USER_L, endpointL);
+    const subA = await pushSub(CLIENT_USER_A, endpointA);
+    const legacy = await waitingEntry(ids.salonA, clientL!.id, { serviceId: ids.svcA });
+    expect(legacy).toMatchObject({ source: "legacy", clientRequestConfirmedAt: null });
+    const confirmed = await waitingEntry(ids.salonA, ids.clientA, { serviceId: ids.svcA, ...CONFIRMED() });
+    const { start, end } = nextSlot();
+    const salonName = `IT legacy ${RUN}`;
+
+    const res = await notifyWaitingList({
+      salonId: ids.salonA,
+      serviceId: ids.svcA,
+      employeeId: ids.empA,
+      startTime: start,
+      endTime: end,
+      serviceName: "IT Usługa A",
+      employeeName: "IT A",
+      salonName,
+    });
+
+    expect(res.notified).toBeGreaterThanOrEqual(1);
+    const endpoints = ctl.webpush.mock.calls.map((c) => (c[0] as { endpoint: string }).endpoint);
+    expect(endpoints).toContain(endpointA);
+    expect(endpoints).not.toContain(endpointL);
+
+    const [l] = await h!.db.select().from(waitingList).where(eq(waitingList.id, legacy.id));
+    expect(l).toMatchObject({
+      notifiedAt: null,
+      acceptToken: null,
+      offeredStartTime: null,
+      offeredEndTime: null,
+      offeredEmployeeId: null,
+      accepted: null,
+    });
+    const pushRows = (await notificationRows(ids.salonA, "push")).filter((r) => r.message.includes(salonName));
+    expect(pushRows.filter((r) => r.clientId === clientL!.id)).toEqual([]);
+    expect(pushRows.some((r) => r.clientId === ids.clientA && r.status === "sent")).toBe(true);
+
+    const [c] = await h!.db.select().from(waitingList).where(eq(waitingList.id, confirmed.id));
+    expect(c!.notifiedAt).not.toBeNull();
+    expect(c!.acceptToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(c).toMatchObject({ offeredStartTime: start, offeredEndTime: end, offeredEmployeeId: ids.empA });
+    await h!.db.delete(pushSubscriptions).where(inArray(pushSubscriptions.id, [subL, subA]));
   });
 
   it("N2: nakładający się insert wizyty w forSalon(...).raw → isAppointmentSlotTaken = true (23P01 przez bramę)", async () => {
@@ -500,6 +559,9 @@ suite("P5a-1: biblioteki przez forSalon i wyjścia system/ — prawdziwy Postgre
     const res = await acceptEarlierSlot(entry.id, entry.acceptToken!);
 
     expect(res.success).toBe(false);
+    expect(res.message).toBe(
+      "Ta rezerwacja wymaga wpłaty zadatku. Zarezerwuj wizytę w portalu salonu z płatnością zadatku."
+    );
     const created = await h!.db
       .select({ id: appointments.id })
       .from(appointments)
@@ -507,5 +569,60 @@ suite("P5a-1: biblioteki przez forSalon i wyjścia system/ — prawdziwy Postgre
     expect(created).toEqual([]);
     const [after] = await h!.db.select().from(waitingList).where(eq(waitingList.id, entry.id));
     expect(after!.accepted).toBeNull();
+  });
+
+  it("acceptEarlierSlot: salon B z modułem listy domyślnie wyłączonym → odmowa, oferta nietknięta, brak wizyty", async () => {
+    // Istniejąca wizyta klienta w salonie B (późniejszy termin) — oferta miałaby ją przenieść.
+    const existingSlot = nextSlot();
+    const offered = nextSlot();
+    const [existing] = await h!.db
+      .insert(appointments)
+      .values({
+        salonId: ids.salonB,
+        clientId: ids.clientB,
+        employeeId: ids.empB,
+        serviceId: ids.svcB,
+        startTime: existingSlot.start,
+        endTime: existingSlot.end,
+        status: "scheduled",
+      })
+      .returning();
+    const notifiedAt = new Date();
+    const entry = await waitingEntry(ids.salonB, ids.clientB, {
+      serviceId: ids.svcB,
+      notifiedAt,
+      acceptToken: `it-b-${randomUUID()}`,
+      offeredStartTime: offered.start,
+      offeredEndTime: offered.end,
+      offeredEmployeeId: ids.empB,
+      existingAppointmentId: existing!.id,
+    });
+
+    const res = await acceptEarlierSlot(entry.id, entry.acceptToken!);
+
+    expect(res).toEqual({ success: false, message: "Oferta nie jest już aktualna" });
+    const [after] = await h!.db.select().from(waitingList).where(eq(waitingList.id, entry.id));
+    expect(after).toMatchObject({
+      accepted: null,
+      acceptToken: entry.acceptToken,
+      notifiedAt: entry.notifiedAt,
+      offeredStartTime: offered.start,
+      offeredEndTime: offered.end,
+      offeredEmployeeId: ids.empB,
+      existingAppointmentId: existing!.id,
+    });
+    const created = await h!.db
+      .select({ id: appointments.id })
+      .from(appointments)
+      .where(and(eq(appointments.salonId, ids.salonB), eq(appointments.startTime, offered.start)));
+    expect(created).toEqual([]);
+    const [moved] = await h!.db.select().from(appointments).where(eq(appointments.id, existing!.id));
+    expect(moved).toMatchObject({
+      startTime: existingSlot.start,
+      endTime: existingSlot.end,
+      employeeId: ids.empB,
+      status: "scheduled",
+      notes: existing!.notes,
+    });
   });
 });

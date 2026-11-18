@@ -601,12 +601,28 @@ export const waitingList = pgTable(
     existingAppointmentId: uuid("existing_appointment_id").references(() => appointments.id, { onDelete: "set null" }),
     // Acceptance token for secure accept/decline links
     acceptToken: text("accept_token"),
+    // Źródło wpisu: 'client_portal' (klient sam), 'staff' (salon na prośbę klienta),
+    // 'legacy' (wpisy sprzed rozróżnienia źródła).
+    source: text("source").notNull().default("legacy"),
+    // Moment potwierdzenia prośby klienta — wymagany dla każdego źródła poza 'legacy'.
+    clientRequestConfirmedAt: timestamp("client_request_confirmed_at"),
+    // Konto, które dodało wpis; po usunięciu konta wpis zostaje bez autora.
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
     index("waiting_list_salon_id_idx").on(table.salonId),
     index("waiting_list_client_id_idx").on(table.clientId),
     index("waiting_list_service_id_idx").on(table.serviceId),
+    index("waiting_list_created_by_user_id_idx").on(table.createdByUserId),
+    check(
+      "waiting_list_source_valid",
+      sql`${table.source} IN ('client_portal', 'staff', 'legacy')`
+    ),
+    check(
+      "waiting_list_client_request_confirmed",
+      sql`${table.source} = 'legacy' OR ${table.clientRequestConfirmedAt} IS NOT NULL`
+    ),
   ]
 );
 
