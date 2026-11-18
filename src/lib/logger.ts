@@ -62,7 +62,21 @@ export const PII_LOG_KEYS: readonly string[] = [
   "responseText",
 ];
 
+/**
+ * Fragmenty nazw kluczy kontaktowych: klucz, którego nazwa zawiera fragment
+ * (bez wielkości liter, np. `guestPhone`, `clientEmail`), ma wartość-napis
+ * zamienianą na `[redacted]`; wartości nienapisowe (`emailSent: true`,
+ * obiekt `emailData`) zostają i są redagowane rekurencyjnie wg tych samych reguł.
+ */
+export const PII_LOG_KEY_FRAGMENTS: readonly string[] = ["phone", "email"];
+
 const PII_KEY_SET = new Set(PII_LOG_KEYS.map((k) => k.toLowerCase()));
+
+function isRedactedEntry(key: string, value: unknown): boolean {
+  const lower = key.toLowerCase();
+  if (PII_KEY_SET.has(lower)) return true;
+  return typeof value === "string" && PII_LOG_KEY_FRAGMENTS.some((f) => lower.includes(f));
+}
 
 /** Granica zagnieżdżenia — głębiej logujemy znacznik, nie wartość. */
 const MAX_REDACTION_DEPTH = 8;
@@ -75,7 +89,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * Siatka na dane osobowe: kopia wartości z wartościami kluczy z
- * `PII_LOG_KEYS` zamienionymi na `[redacted]`. Błędy (`Error`) przechodzą
+ * `PII_LOG_KEYS` oraz napisami pod kluczami z `PII_LOG_KEY_FRAGMENTS`
+ * zamienionymi na `[redacted]`. Błędy (`Error`) przechodzą
  * przez `toSafeErrorMeta` (message, name, stack zostają), napisy — przez
  * redakcję parametrów zapytania. Obiekty niebędące zwykłymi obiektami
  * (Date itp.) zostają bez zmian. Wejście nie jest modyfikowane.
@@ -92,7 +107,7 @@ export function redactLogContext(value: unknown, depth = 0, seen: WeakSet<object
     : Object.fromEntries(
         Object.entries(value).map(([k, v]) => [
           k,
-          PII_KEY_SET.has(k.toLowerCase()) ? REDACTED : redactLogContext(v, depth + 1, seen),
+          isRedactedEntry(k, v) ? REDACTED : redactLogContext(v, depth + 1, seen),
         ]),
       );
   seen.delete(value);
