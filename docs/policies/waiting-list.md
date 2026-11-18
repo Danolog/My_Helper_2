@@ -9,7 +9,7 @@ Powiadomienie klienta, że zwolnił się termin pasujący do jego prośby, i umo
 Art. 6 ust. 1 lit. b RODO: działania podejmowane na żądanie osoby przed zawarciem umowy. Powiadomienie wychodzi wyłącznie z wpisu, przy którym zapisano potwierdzenie, że klient sam poprosił o informację o wolnym terminie. Powiadomienie ma charakter informacyjny i nie zawiera treści promocyjnych.
 
 ## Moduł salonu
-Lista oczekujących jest modułem, który salon włącza w ustawieniach; domyślnie jest wyłączony. Przy wyłączonym module aplikacja nie wysyła powiadomień, nie przyjmuje proponowanych terminów, a personel salonu nie może dodawać, przeglądać, zmieniać ani usuwać wpisów w panelu.
+Lista oczekujących jest modułem, który salon włącza w ustawieniach; domyślnie jest wyłączony. Przy wyłączonym module aplikacja nie wysyła powiadomień, nie przyjmuje proponowanych terminów, a personel salonu nie może dodawać, przeglądać ani zmieniać wpisów. Aplikacja przyjmuje natomiast żądanie usunięcia wpisu z salonu także przy wyłączonym module.
 
 ## Zakres danych wpisu
 - klient z kartoteki salonu; do powiadomienia aplikacja używa numeru telefonu (SMS) i adresu e-mail (ustalenie konta klienta dla powiadomienia push);
@@ -90,7 +90,7 @@ Personel salonu może w panelu zmienić preferencje wpisu (usługę, pracownika,
 ## Wycofanie i usunięcie
 Wycofanie prośby oznacza usunięcie wpisu. Po usunięciu wpis nie jest już używany i żadne powiadomienie z niego nie wychodzi.
 - Klient z kontem (potwierdzony adres e-mail równy adresowi w kartotece salonu) usuwa wpis sam w portalu klienta.
-- Każdy klient może poprosić salon o usunięcie wpisu, np. telefonicznie. Salon usuwa wpis w panelu.
+- Każdy klient może poprosić salon o usunięcie wpisu, np. telefonicznie. Salon usuwa wpis w panelu przy włączonym module; aplikacja przyjmuje żądanie usunięcia wpisu z salonu także przy wyłączonym module.
 
 ## Okres przechowywania
 Wpis jest przechowywany do chwili, gdy usunie go klient albo salon. Wpis jest usuwany automatycznie razem z klientem z kartoteki salonu albo razem z salonem. Aplikacja nie usuwa wpisów automatycznie po upływie określonego czasu.
