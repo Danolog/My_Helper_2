@@ -2,14 +2,16 @@ import { NextResponse } from "next/server";
 import { eq, and, inArray, desc } from "drizzle-orm";
 import { validateBody, subscriptionCheckoutSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
+// Surowe db: odczyt planu (tabela bez salonu) i bieżących wierszy subskrypcji salonu z sesji (plik na przejściowej liście izolacji danych salonu); odczyt wszystkich wierszy salonu idzie przez forSalon
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
+import { hostingPlatform } from "@/lib/hosting";
 import { logger } from "@/lib/logger";
+import { grossGrosze } from "@/lib/plan-price";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { subscriptionPlans, salonSubscriptions } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
-import { getStripe, isStripePricesConfigured } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { retrieveStripeSubscriptionLocked } from "@/lib/subscription-locks";
 import {
   CURRENT_LOCAL_STATUSES,
@@ -34,12 +36,15 @@ const warsawDate = new Intl.DateTimeFormat("pl-PL", {
 const CHECKOUT_SESSION_TTL_SECONDS = 35 * 60;
 
 /**
- * Map plan slugs to their corresponding Stripe price env variables.
+ * Stripe price ID of the purchased plan: STRIPE_PRICE_BASIC for "basic",
+ * STRIPE_PRICE_PRO for "pro", trimmed. Missing or blank value → undefined
+ * (no price). The other plan's variable is not read.
  */
 function getStripePriceId(slug: string): string | undefined {
-  if (slug === "basic") return process.env.STRIPE_PRICE_BASIC || undefined;
-  if (slug === "pro") return process.env.STRIPE_PRICE_PRO || undefined;
-  return undefined;
+  let priceId: string | undefined;
+  if (slug === "basic") priceId = process.env.STRIPE_PRICE_BASIC;
+  else if (slug === "pro") priceId = process.env.STRIPE_PRICE_PRO;
+  return priceId?.trim() || undefined;
 }
 
 function stripeUnavailableResponse() {
@@ -62,8 +67,17 @@ function stripeUnavailableResponse() {
  *
  * This endpoint NEVER writes a subscription or a payment. The subscription
  * is created/updated only by /api/subscriptions/confirm after Stripe reports
- * the Checkout Session as paid. Stripe not configured → 503, Checkout
- * Session creation error → 502; in both cases nothing is granted.
+ * the Checkout Session as paid. Stripe not configured → 503 STRIPE_UNAVAILABLE;
+ * error while building the line item or creating the Checkout Session → 502;
+ * in every case nothing is granted.
+ *
+ * Price: the Stripe price ID of the purchased plan (STRIPE_PRICE_BASIC /
+ * STRIPE_PRICE_PRO, trimmed). On hosting (`hostingPlatform()`: Vercel or
+ * Cloud Run) without that ID → 503 STRIPE_PRICE_NOT_CONFIGURED, checked
+ * right after the Stripe client and before any Stripe call. Off hosting
+ * without that ID the price is created in the request: monthly, PLN,
+ * `unit_amount` = gross amount in grosze (`grossGrosze` of the plan's net
+ * `priceMonthly`).
  *
  * 409 PURCHASE_BLOCKED_UNTIL_PERIOD_END (with `until`): the salon still has
  * full access from a canceled or past_due row with a real Stripe
@@ -112,8 +126,8 @@ export async function POST(request: Request) {
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    // salonId z body (jesli ktos go wysle) jest odrzucany przez schemat —
-    // salon wylacznie z sesji (wyzej).
+    // salonId z body (jesli ktos go wysle) schemat pomija (nieznane pola
+    // znikaja z wyniku parse) — salon wylacznie z sesji (wyzej).
     const { planSlug } = subscriptionCheckoutSchema.parse(body);
 
     // Look up the plan in the database
@@ -231,6 +245,28 @@ export async function POST(request: Request) {
       return stripeUnavailableResponse();
     }
 
+    // Identyfikator ceny Stripe kupowanego planu. Na hostingu (Vercel, Cloud
+    // Run) bez niego trasa odmawia tutaj: przed odczytami subskrypcji w Stripe,
+    // bez sesji Checkout i bez zapisu. Poza hostingiem cena powstaje w żądaniu
+    // (niżej).
+    const priceId = getStripePriceId(plan.slug);
+    const platform = hostingPlatform();
+    if (!priceId && platform) {
+      logger.error("Subscription checkout refused: Stripe price not configured on hosting", {
+        planSlug: plan.slug,
+        platform,
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          code: "STRIPE_PRICE_NOT_CONFIGURED",
+          error:
+            "Zakup planu jest chwilowo niedostępny. Nic nie zostało pobrane — spróbuj ponownie później.",
+        },
+        { status: 503 },
+      );
+    }
+
     // Poprzednie subskrypcje Stripe salonu: wiersze z prawdziwą subskrypcją
     // Stripe i statusem innym niż trialing/active (z odczytu wszystkich
     // wierszy wyżej, każde id raz). Stan każdej czytamy wprost ze Stripe,
@@ -315,7 +351,8 @@ export async function POST(request: Request) {
     }
 
     try {
-      // Determine the price: use configured Stripe price ID or create ad-hoc
+      // Price: the purchased plan's Stripe price ID, or (only off hosting —
+      // on hosting the route refused above) a price created in the request
       let lineItem: {
         price?: string;
         price_data?: {
@@ -327,15 +364,12 @@ export async function POST(request: Request) {
         quantity: number;
       };
 
-      const configuredPriceId = isStripePricesConfigured()
-        ? getStripePriceId(planSlug)
-        : undefined;
-
-      if (configuredPriceId) {
-        lineItem = { price: configuredPriceId, quantity: 1 };
+      if (priceId) {
+        lineItem = { price: priceId, quantity: 1 };
       } else {
-        // Ad-hoc price from the plan's monthly price
-        const unitAmount = Math.round(parseFloat(plan.priceMonthly) * 100);
+        // Price created in the request: gross amount in grosze from the
+        // plan's net monthly price (e.g. "49.00" → 6027)
+        const unitAmount = grossGrosze(plan.priceMonthly);
         lineItem = {
           price_data: {
             currency: "pln",
