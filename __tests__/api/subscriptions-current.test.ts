@@ -20,8 +20,13 @@ const { queue, log, mockForSalon, mockRequireAuth, mockIsAuthError, mockGetUserS
   // Kolejne zapytania `tx.select()` zdejmują wyniki z kolejki (FIFO);
   // Error w kolejce = odrzucone zapytanie.
   queue: [] as (unknown[] | Error)[],
-  // Warunki `where` (wyrenderowane) i argumenty `limit` kolejnych zapytań.
-  log: { where: [] as { sql: string; params: unknown[] }[], limit: [] as number[] },
+  // Warunki `where` i klucze `orderBy` (wyrenderowane) oraz argumenty `limit`
+  // kolejnych zapytań.
+  log: {
+    where: [] as { sql: string; params: unknown[] }[],
+    orderBy: [] as string[][],
+    limit: [] as number[],
+  },
   mockForSalon: vi.fn(),
   mockRequireAuth: vi.fn(),
   mockIsAuthError: vi.fn(),
@@ -69,7 +74,11 @@ function chain() {
   let where: SQL | undefined;
   let limit: number | undefined;
   const builder: Record<string, unknown> = {};
-  for (const method of ["from", "innerJoin", "orderBy"]) builder[method] = () => builder;
+  for (const method of ["from", "innerJoin"]) builder[method] = () => builder;
+  builder.orderBy = (...keys: SQL[]) => {
+    log.orderBy.push(keys.map((k) => dialect.sqlToQuery(k).sql));
+    return builder;
+  };
   builder.where = (cond: SQL) => {
     where = cond;
     const q = dialect.sqlToQuery(cond);
@@ -160,6 +169,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   queue.length = 0;
   log.where.length = 0;
+  log.orderBy.length = 0;
   log.limit.length = 0;
   txSelect.mockClear();
   vi.mocked(getCurrentPlan).mockClear();
@@ -269,6 +279,14 @@ describe("GET /api/subscriptions/current — jeden odczyt przez repozytorium sal
     expect(txSelect).toHaveBeenCalledTimes(1);
     expect(log.where).toEqual([{ sql: '"salon_subscriptions"."salon_id" = $1', params: ["salon-1"] }]);
     expect(log.limit).toEqual([]);
+  });
+
+  it("zapytanie: sortuje po created_at malejąco, potem po id malejąco", async () => {
+    queue.push([row()]);
+    await body();
+    expect(log.orderBy).toEqual([
+      ['"salon_subscriptions"."created_at" desc', '"salon_subscriptions"."id" desc'],
+    ]);
   });
 });
 
@@ -409,6 +427,25 @@ describe("GET /api/subscriptions/current — wiersz karty i access", () => {
     expect(b.effectivePlanSlug).toBe("basic");
     expect(b.access).toEqual({ state: "inactive", mode: "read_only", planSlug: null, until: null });
   });
+
+  it.each([
+    ["canceled pierwszy", "canceled-first"],
+    ["incomplete pierwszy", "incomplete-first"],
+  ])("canceled + incomplete o tym samym createdAt (%s) -> karta i access z pierwszego wiersza zapytania", async (_n, order) => {
+    const canceled = row({ id: "sub-canceled", status: "canceled", createdAt: NEWER });
+    const incomplete = row({ id: "sub-incomplete", status: "incomplete", createdAt: NEWER });
+    queue.push(order === "canceled-first" ? [canceled, incomplete] : [incomplete, canceled]);
+    const b = await body();
+    if (order === "canceled-first") {
+      expect(b.subscription.id).toBe("sub-canceled");
+      expect(b.subscription.status).toBe("canceled");
+      expect(b.access.state).toBe("canceled");
+    } else {
+      expect(b.subscription.id).toBe("sub-incomplete");
+      expect(b.subscription.status).toBe("incomplete");
+      expect(b.access.state).toBe("inactive");
+    }
+  });
 });
 
 describe("GET /api/subscriptions/current — scheduledPlan z wybranego wiersza", () => {
@@ -423,6 +460,7 @@ describe("GET /api/subscriptions/current — scheduledPlan z wybranego wiersza",
       features: [...PLAN_FEATURES.basic],
     });
     expect(txSelect).toHaveBeenCalledTimes(2);
+    expect(log.where[1]).toEqual({ sql: '"subscription_plans"."id" = $1', params: ["plan-basic"] });
     expect(mockForSalon).toHaveBeenCalledTimes(1);
   });
 
