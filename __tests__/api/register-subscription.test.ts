@@ -273,6 +273,7 @@ describe("POST /api/register-subscription — konto tylko z sesji", () => {
     expect(status).toBe(400);
     expect(opLog).toEqual([]);
     expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it('planSlug "pro" (poza PLANS_ON_SALE) => 400 z walidacji, bez zapytań i bez zapisu', async () => {
