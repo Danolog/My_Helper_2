@@ -171,7 +171,7 @@ export async function POST(request: Request) {
     // pełny dostęp z wiersza canceled/past_due z prawdziwą subskrypcją Stripe
     // znaczy, że nowy Checkout założyłby drugą subskrypcję w Stripe, gdy
     // dostęp z pierwszej jeszcze trwa (canceled — druga opłata za te same
-    // dni; past_due — Stripe dalej ponawia płatność starej). Odmawiamy do
+    // dni; past_due — stara subskrypcja w Stripe nie jest zakończona). Odmawiamy do
     // `access.until`, bez wywołania Stripe i bez zapisu.
     const accessRows = await forSalon(salonId).raw(async (tx) => {
       const all = await tx
