@@ -175,6 +175,8 @@ function session(stripeSubId: string, sessionId = `cs_${randomUUID().slice(0, 12
     id: sessionId,
     mode: "subscription",
     payment_status: "paid",
+    amount_total: 14900,
+    currency: "pln",
     metadata: { salonId, planId },
     customer: "cus_it",
     subscription: stripeSubId,

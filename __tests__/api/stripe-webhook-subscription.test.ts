@@ -62,6 +62,8 @@ function webhookSession(overrides: Record<string, unknown> = {}) {
     id: "cs_test_123",
     mode: "subscription",
     payment_status: "paid",
+    amount_total: 14900,
+    currency: "pln",
     metadata: { salonId: "salon-1", planId: PLAN_PRO.id, planSlug: "pro", userId: "owner-1" },
     customer: "cus_1",
     subscription: "sub_1",
@@ -222,6 +224,17 @@ describe("webhook checkout.session.completed — subskrypcja, 200", () => {
     );
   });
 
+  it('checkout.session.completed z amount_total 11920 → 200, wpis płatności amount "119.20", currency "PLN"', async () => {
+    f.selects.push([], [PLAN_PRO], []);
+    expect((await deliver(webhookSession({ amount_total: 11920 }))).status).toBe(200);
+    expect(f.committed.filter((w) => w.table === "subscription_payments")).toEqual([
+      expect.objectContaining({
+        op: "insert",
+        values: expect.objectContaining({ amount: "119.20", currency: "PLN", stripePaymentIntentId: "cs_test_123" }),
+      }),
+    ]);
+  });
+
   it("sesja w trybie payment bez metadata zadatku → pominięta", async () => {
     expect((await deliver(webhookSession({ mode: "payment" }))).status).toBe(200);
     expect(f.committed).toEqual([]);
@@ -242,6 +255,13 @@ describe("webhook checkout.session.completed — subskrypcja, 400/500", () => {
     retrieveSubscription.mockRejectedValue(new Error("network"));
     f.selects.push([], [PLAN_PRO]);
     expect((await deliver(webhookSession())).status).toBe(500);
+    expect(f.committed).toEqual([]);
+  });
+
+  it("checkout.session.completed bez amount_total → 500, zero zapisów", async () => {
+    const { amount_total: _amountTotal, ...session } = webhookSession();
+    f.selects.push([], [PLAN_PRO]);
+    expect((await deliver(session)).status).toBe(500);
     expect(f.committed).toEqual([]);
   });
 

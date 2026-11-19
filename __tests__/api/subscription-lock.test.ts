@@ -63,6 +63,8 @@ const SESSION = {
   id: "cs_test_123",
   mode: "subscription",
   payment_status: "paid",
+  amount_total: 14900,
+  currency: "pln",
   metadata: { salonId: "salon-1", planId: PLAN_PRO.id },
   customer: "cus_1",
   subscription: "sub_1",
