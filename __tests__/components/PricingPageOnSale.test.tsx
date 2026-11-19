@@ -6,11 +6,11 @@
  * data-testid="plan-price", czy na stronie nie ma planu Pro, tekstu „AI”
  * ani opisu PLAN_SUMMARY.basic, jaki adres dostaje router.push po kliknięciu
  * każdego z dwóch przycisków zakupu przez niezalogowanego użytkownika, czy
- * niezalogowany widzi pod kartą tekst o okresie próbnym, jakie nazwy mają oba
- * przyciski dla zalogowanego, czy zalogowany nie widzi tekstu o okresie
- * próbnym i czy kliknięcie przycisku przez zalogowanego woła mutationFetch,
- * a nie router.push, oraz co strona pokazuje, gdy odpowiedź API nie ma planu
- * o slugu SOLD_PLAN_SLUG.
+ * niezalogowany widzi pod przyciskiem karty tekst o okresie próbnym, jakie
+ * nazwy mają oba przyciski dla zalogowanego, czy zalogowany nie widzi tekstu
+ * o okresie próbnym i czy kliknięcie przycisku przez zalogowanego woła
+ * mutationFetch, a nie router.push, oraz co strona pokazuje, gdy odpowiedź
+ * API nie ma planu o slugu SOLD_PLAN_SLUG.
  *
  * Atrapy: globalny fetch (odpowiedź /api/subscription-plans z planami Basic
  * 49.00 i Pro 149.00, w jednym przypadku tylko z planem Pro), next/navigation
