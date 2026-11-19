@@ -185,13 +185,22 @@ function confirm(s: SubscriptionCheckoutSession) {
   return confirmSubscriptionCheckout(fakeStripe as never, s, { expectedSalonId: salonId });
 }
 
-const invoicePaid = (stripeSubId: string) => ({
+type InvoiceLinePeriod = { start: number; end: number };
+
+/** Faktura odnowienia; `linePeriods` = okresy linii faktury (bez parametru — faktura bez linii). */
+const invoicePaid = (stripeSubId: string, linePeriods?: InvoiceLinePeriod[]) => ({
   id: `in_${randomUUID().slice(0, 8)}`,
   subscription: stripeSubId,
   payment_intent: `pi_${randomUUID().slice(0, 12)}`,
   billing_reason: "subscription_cycle",
   amount_paid: 14900,
+  ...(linePeriods ? { lines: { data: linePeriods.map((period) => ({ period })), has_more: false } } : {}),
 });
+
+const DAY = 86_400;
+/** Okres po PERIOD (odnowienie o kolejny cykl). */
+const NEXT_PERIOD = { start: PERIOD.current_period_end, end: PERIOD.current_period_end + 30 * DAY };
+const at = (unixSeconds: number) => new Date(unixSeconds * 1000);
 
 async function rows() {
   return h!.db.select().from(salonSubscriptions).where(eq(salonSubscriptions.salonId, salonId));
@@ -558,6 +567,121 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
         await h!.db.delete(salons).where(eq(salons.ownerId, freshId));
         await h!.db.delete(user).where(eq(user.id, freshId));
       }
+    });
+  });
+
+  describe("invoice.paid — okres z linii opłaconej faktury, nigdy wstecz", () => {
+    const period = async () => (await rows()).map((r) => [r.currentPeriodStart, r.currentPeriodEnd]);
+
+    /** Wiersz bez okresu (current_period_* NULL) powiązany z subskrypcją Stripe. */
+    async function rowWithoutPeriod(sub: string) {
+      await h!.db.insert(salonSubscriptions).values({ salonId, planId, status: "active", stripeSubscriptionId: sub });
+      expect(await period()).toEqual([[null, null]]);
+    }
+
+    it("(p1) odnowienie: faktura z nowszym okresem → okres = okres linii", async () => {
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+      expect(await confirm(session(sub))).toEqual(expect.objectContaining({ ok: true }));
+      expect(await period()).toEqual([[at(PERIOD.current_period_start), at(PERIOD.current_period_end)]]);
+
+      expect((await deliver("invoice.paid", invoicePaid(sub, [NEXT_PERIOD]))).status).toBe(200);
+      expect(await period()).toEqual([[at(NEXT_PERIOD.start), at(NEXT_PERIOD.end)]]);
+      expect((await rows()).map((r) => r.status)).toEqual(["active"]);
+    });
+
+    it("(p2) starsza faktura po nowszej → okres bez zmian", async () => {
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+      expect(await confirm(session(sub))).toEqual(expect.objectContaining({ ok: true }));
+      expect((await deliver("invoice.paid", invoicePaid(sub, [NEXT_PERIOD]))).status).toBe(200);
+
+      const older = { start: PERIOD.current_period_start, end: PERIOD.current_period_end };
+      expect((await deliver("invoice.paid", invoicePaid(sub, [older]))).status).toBe(200);
+      expect(await period()).toEqual([[at(NEXT_PERIOD.start), at(NEXT_PERIOD.end)]]);
+    });
+
+    it("(p3) deleted, potem późna faktura z dalszym okresem → zostaje canceled, okres przedłużony", async () => {
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+      expect(await confirm(session(sub))).toEqual(expect.objectContaining({ ok: true }));
+      setStripe(sub, "canceled", { canceled_at: PERIOD.current_period_start });
+      expect((await deliver("customer.subscription.deleted", { id: sub })).status).toBe(200);
+      const [before] = await rows();
+      expect(before?.status).toBe("canceled");
+
+      const late = invoicePaid(sub, [NEXT_PERIOD]);
+      expect((await deliver("invoice.paid", late)).status).toBe(200);
+
+      const [after] = await rows();
+      expect(after).toEqual({
+        ...before,
+        currentPeriodStart: at(NEXT_PERIOD.start),
+        currentPeriodEnd: at(NEXT_PERIOD.end),
+      });
+      expect((await payments()).map((p) => p.stripePaymentIntentId)).toContain(late.payment_intent);
+    });
+
+    it("(p4) faktura bez linii → okres bez zmian, płatność zapisana, ostrzeżenie", async () => {
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+      expect(await confirm(session(sub))).toEqual(expect.objectContaining({ ok: true }));
+
+      const inv = invoicePaid(sub);
+      const { status, eventId } = await deliver("invoice.paid", inv);
+      expect(status).toBe(200);
+      expect(await period()).toEqual([[at(PERIOD.current_period_start), at(PERIOD.current_period_end)]]);
+      expect((await payments()).map((p) => p.stripePaymentIntentId)).toContain(inv.payment_intent);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining("without a billing period"),
+        expect.objectContaining({ eventId, linesHasMore: false })
+      );
+    });
+
+    it("(p5) wiersz z current_period_end NULL + faktura z okresem → oba pola ustawione", async () => {
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+      await rowWithoutPeriod(sub);
+
+      expect((await deliver("invoice.paid", invoicePaid(sub, [NEXT_PERIOD]))).status).toBe(200);
+      expect(await period()).toEqual([[at(NEXT_PERIOD.start), at(NEXT_PERIOD.end)]]);
+    });
+
+    it("(p6) ponowienie tego samego zdarzenia → wiersz identyczny, jedna płatność", async () => {
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+      expect(await confirm(session(sub))).toEqual(expect.objectContaining({ ok: true }));
+      const inv = invoicePaid(sub, [NEXT_PERIOD]);
+
+      expect((await deliver("invoice.paid", inv)).status).toBe(200);
+      const first = await rows();
+      expect((await deliver("invoice.paid", inv)).status).toBe(200);
+
+      expect(await rows()).toEqual(first);
+      expect(first.map((r) => [r.currentPeriodStart, r.currentPeriodEnd])).toEqual([
+        [at(NEXT_PERIOD.start), at(NEXT_PERIOD.end)],
+      ]);
+      expect((await payments()).filter((p) => p.stripePaymentIntentId === inv.payment_intent)).toHaveLength(1);
+    });
+
+    it("(p7) faktura z tym samym końcem i innym początkiem → current_period_start bez zmian", async () => {
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+      expect(await confirm(session(sub))).toEqual(expect.objectContaining({ ok: true }));
+
+      const sameEnd = { start: PERIOD.current_period_start - DAY, end: PERIOD.current_period_end };
+      expect((await deliver("invoice.paid", invoicePaid(sub, [sameEnd]))).status).toBe(200);
+      expect(await period()).toEqual([[at(PERIOD.current_period_start), at(PERIOD.current_period_end)]]);
+    });
+
+    it("(p8) wiersz z current_period_end NULL + sama pozycja jednorazowa → oba pola NULL", async () => {
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+      await rowWithoutPeriod(sub);
+
+      const oneTime = { start: NEXT_PERIOD.start, end: NEXT_PERIOD.start };
+      expect((await deliver("invoice.paid", invoicePaid(sub, [oneTime]))).status).toBe(200);
+      expect(await period()).toEqual([[null, null]]);
     });
   });
 
