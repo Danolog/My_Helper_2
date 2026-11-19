@@ -261,7 +261,7 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
     }
   }, [fetchSubscription]);
 
-  /** Simulate near-expiry by moving period end to 3 days from now (dev mode). */
+  /** Simulate near-expiry: the server sends a warning for a computed period end 3 days from now; the subscription row is not changed (dev mode). */
   const handleSimulateNearExpiry = useCallback(async () => {
     setSimulateLoading(true);
     try {

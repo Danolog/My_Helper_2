@@ -134,7 +134,7 @@ export async function GET() {
  *
  * Optional body:
  * - warningDays: Override default warning threshold (default 7)
- * - simulate: If true, simulates near-expiry by temporarily adjusting the period end
+ * - simulate: If true, simulates near-expiry with a computed period end (3 days from now); the subscription row is not changed
  *
  * Returns: { success: true, warnings: [...] }
  */
@@ -173,9 +173,8 @@ export async function POST(request: Request) {
 
     const now = new Date();
 
-    // T3b: odczyt „active” i ewentualny zapis symulacji pod blokadą salonu
-    // (jak confirm i webhook) — zapis okresu nie przeplata się z webhookiem,
-    // który w tym czasie zapisuje okres ze Stripe.
+    // T3b: odczyt „active” pod blokadą salonu — trasa pod blokadą tylko czyta,
+    // nie zapisuje salon_subscriptions (także przy simulate).
     let locked;
     try {
       locked = await withSalonSubscriptionLock(salonId, async (tx) => {
@@ -198,27 +197,19 @@ export async function POST(request: Request) {
           );
         if (!activeSub) return null;
 
-        // If simulating, temporarily set the period end to simulate near-expiry
+        // If simulating, use a computed period end (3 days from now) for this request's warnings and response
         let periodEnd = activeSub.subscription.currentPeriodEnd
           ? new Date(activeSub.subscription.currentPeriodEnd)
           : null;
 
         if (simulate && periodEnd) {
-          // Set period end to 3 days from now for simulation
           const simulatedEnd = new Date(now);
           simulatedEnd.setDate(simulatedEnd.getDate() + 3);
-
-          // Actually update the database to move period end closer
-          await tx
-            .update(salonSubscriptions)
-            .set({
-              currentPeriodEnd: simulatedEnd,
-            })
-            .where(eq(salonSubscriptions.id, activeSub.subscription.id));
-
           periodEnd = simulatedEnd;
 
-          logger.info(`[Subscription Warning] SIMULATION: Period end moved to ${simulatedEnd.toISOString()} (${3} days from now)`);
+          logger.info("[Subscription Warning] SIMULATION: using a simulated period end", {
+            simulatedEnd: simulatedEnd.toISOString(),
+          });
         }
         return { activeSub, periodEnd };
       });

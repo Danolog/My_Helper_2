@@ -1,6 +1,7 @@
 /**
- * `subscriptions/downgrade` (POST, DELETE) i `subscriptions/expiration-warning`
- * (POST) — odczyt „active” i zapis pod blokadą salonu (T3b).
+ * `subscriptions/downgrade` (POST, DELETE) — odczyt „active” i zapis pod
+ * blokadą salonu; `subscriptions/expiration-warning` (POST) — odczyt „active”
+ * pod blokadą salonu, bez zapisu `salon_subscriptions` (także przy `simulate`).
  *
  * Bez blokady zapis trasy mógł się przepleść z webhookiem, który w tym czasie
  * zmienia stan tej subskrypcji (utrata zapisu / decyzja na nieaktualnym
@@ -152,17 +153,19 @@ describe("DELETE /api/subscriptions/downgrade — pod blokadą salonu", () => {
   });
 });
 
-describe("POST /api/subscriptions/expiration-warning — zapis symulacji pod blokadą salonu", () => {
-  it("simulate: zapis okresu po blokadzie salonu i commit, powiadomienia dopiero po transakcji", async () => {
+describe("POST /api/subscriptions/expiration-warning — odczyt pod blokadą salonu, bez zapisu subskrypcji", () => {
+  it("simulate: odczyt po blokadzie salonu i commit bez zapisu subskrypcji, powiadomienia po transakcji, termin symulowany w odpowiedzi, nie w wierszu", async () => {
     f.selects.push([{ subscription: ACTIVE, plan: PLAN_PRO }]);
 
     const { status, body } = await call(expirationWarning, "POST", { simulate: true });
 
     expect(status).toBe(200);
     expect(body.isNearExpiry).toBe(true);
-    expect(f.log.slice(0, 5)).toEqual([...LOCKED_PREFIX, "select", "update:salon_subscriptions", "commit"]);
-    expect(f.log.slice(5)).toEqual(["insert:other", "insert:other"]);
-    expect(subWrites()[0]?.values).toEqual({ currentPeriodEnd: expect.any(Date) });
+    expect(f.log).toEqual([...LOCKED_PREFIX, "select", "commit", "insert:other", "insert:other"]);
+    expect(subWrites()).toEqual([]);
+    const simulatedEnd = Date.parse(String(body.currentPeriodEnd));
+    expect(simulatedEnd).not.toBe(PERIOD_END.getTime());
+    expect(Math.abs(simulatedEnd - (Date.now() + 3 * 24 * 3600 * 1000))).toBeLessThan(2 * 3600 * 1000);
   });
 
   it("bez simulate, daleko do końca okresu: odczyt pod blokadą, zero zapisów", async () => {
