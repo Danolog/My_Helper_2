@@ -7,13 +7,13 @@
  * - w jobie z Postgresem pojawi się polecenie spoza LISTY DOZWOLONYCH (linie run:,
  *   także z bloków YAML o dowolnym wskaźniku; skrypty package.json z nazwą i treścią),
  *   albo drizzle-kit wywołany inaczej niż `drizzle-kit migrate` — wprost albo przez
- *   skrypt rozwijany rekurencyjnie (#194: W5, W5c Leo, E12 Ethana, decyzja Olivera);
+ *   skrypt rozwijany rekurencyjnie (#194: W5, W5c, E12);
  * - strażnik `scripts/db-rls-guard.ts` zniknie, zostanie wyciszony albo przesunięty:
  *   musi stać zaraz po `db:migrate` ORAZ jako ostatni krok z `run:` w jobie
  *   (po Playwrightcie, `if: ${{ !cancelled() }}`), tak żeby RLS zdjęte w trakcie
  *   joba w dowolnej postaci dawało czerwony job.
  *
- * Zasada (#194 runda 5, Oliver): CZEGO TEST NIE UMIE SPARSOWAĆ, TO PORAŻKA. Nieznany
+ * Zasada (#194 runda 5): CZEGO TEST NIE UMIE SPARSOWAĆ, TO PORAŻKA. Nieznany
  * kształt nagłówka joba, plik z `jobs:` bez rozpoznanych jobów, kroki w innym stylu
  * wcięć niż w repo, nieznany kształt polecenia pnpm czy wskaźnika bloku — wyjątek,
  * nigdy ciche przepuszczenie.
@@ -40,7 +40,7 @@ const PKG = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { sc
 const GUARD_RUN = "pnpm exec tsx scripts/db-rls-guard.ts";
 const FINAL_IF = "${{ !cancelled() }}";
 /**
- * Lista DOZWOLONYCH skryptów package.json w jobach z bazą (Oliver, #194): nazwa →
+ * Lista DOZWOLONYCH skryptów package.json w jobach z bazą (#194): nazwa →
  * dokładna treść. Każdy inny skrypt (także nowy alias) = porażka testu; zmiana
  * treści któregoś z nich (np. dopięty push) też.
  */
@@ -77,7 +77,7 @@ const ALLOWED_DB_JOB_LINES: Array<[string, RegExp]> = [
 
 /**
  * Czy linia polecenia jest dozwolona. Linia z `psql` — WYŁĄCZNIE dosłowna równość ciągu
- * z SEED_CHECK_LINES (zero wzorca; decyzja Olivera, #194 Ethan O1–O5). Pozostałe — wzorce
+ * z SEED_CHECK_LINES (zero wzorca; #194 O1–O5). Pozostałe — wzorce
  * z ALLOWED_DB_JOB_LINES, które psql nie dopuszczają.
  */
 function allowedLine(line: string): boolean {
@@ -86,7 +86,7 @@ function allowedLine(line: string): boolean {
 }
 
 /**
- * Push w tekście polecenia (po rozwinięciu skryptów), po TOKENACH (#194 runda 4, Oliver):
+ * Push w tekście polecenia (po rozwinięciu skryptów), po TOKENACH (#194 runda 4):
  * w jednym poleceniu (między operatorami powłoki) token `drizzle-kit` — także ze ścieżką
  * (`node_modules/.bin/drizzle-kit`) albo wersją (`drizzle-kit@latest`) — i dalej token
  * `push` (np. `drizzle-kit --config x push --force`). Do tego nazwy `db:push…` i `db:dev`.
@@ -114,7 +114,7 @@ const code = (s: string) =>
 /**
  * Sekcja `jobs:` w tekście workflow: od linii po `jobs:` do pierwszej niepustej linii
  * (nie komentarza) na wcięciu 0 — klucz najwyższego poziomu PO jobach (np. `env:`) nie
- * jest treścią ostatniego joba (#194 runda 5, Ethan C). [start, end) w znakach.
+ * jest treścią ostatniego joba (#194 runda 5, C). [start, end) w znakach.
  */
 function jobsSection(wf: string): [number, number] {
   const at = wf.indexOf("\njobs:\n");
@@ -156,7 +156,7 @@ function jobSpans(wf: string): Array<[string, number, number]> {
 
 /**
  * Kroki joba (każdy zaczyna się od `      - ` pod `    steps:`), bez komentarzy.
- * Fail-closed (#194, G2–G4 Ethana): `steps:` z wartością w tej samej linii (alias, flow),
+ * Fail-closed (#194, G2–G4): `steps:` z wartością w tej samej linii (alias, flow),
  * pierwsza niepusta linia pod `steps:` inna niż `      - ` (np. kroki na wcięciu 4)
  * albo zero kroków = wyjątek. Job bez `steps:` dozwolony tylko z `uses:` joba.
  * Dozwolony sam komentarz końcowy (`steps: # …`, #201 F9).
@@ -188,7 +188,7 @@ const BLOCK_INDICATOR = /^[|>][-+0-9]*$/;
  * `>-`, `>+`, `|2`, `>2-`, …) — wtedy wszystkie linie bloku, czyli linie wcięte
  * głębiej niż klucz `run:`. Wartość zaczynająca się od `|` lub `>`, która nie jest
  * wskaźnikiem bloku, albo pusty blok = wyjątek (porażka testu, nie przepuszczenie;
- * #194 Z1 Leo, W5c).
+ * #194 Z1, W5c).
  */
 function runOf(step: string): string {
   const m = step.match(/^(\s*(?:- )?)run:[ \t]*(.*)$/m);
@@ -208,7 +208,7 @@ function runOf(step: string): string {
 }
 
 /**
- * Zamknięta gramatyka kroku w jobach z bazą (#194 Ethan O6–O10). Własny odczyt linii —
+ * Zamknięta gramatyka kroku w jobach z bazą (#194 O6–O10). Własny odczyt linii —
  * pierwsza warstwa; drzewo YAML (js-yaml, #201) sprawdza osobno yamlViolations. Każda niepusta linia:
  * - pierwsza: `      - <klucz>: …` (krok w stylu flow `- {` = porażka);
  * - kolejne na wcięciu kroku (8): `<klucz>: …` z listy STEP_KEYS (klucz w cudzysłowie,
@@ -220,7 +220,7 @@ function runOf(step: string): string {
 const STEP_KEYS = ["name", "run", "if", "env", "with", "uses", "timeout-minutes"] as const;
 const ALLOWED_ACTIONS = ["actions/checkout@v4", "pnpm/action-setup@v4", "actions/setup-node@v4", "actions/upload-artifact@v4"];
 
-/** Etykieta kroku do komunikatów (L3 Leo): job, numer od 1 i `name` albo `uses`. */
+/** Etykieta kroku do komunikatów (L3): job, numer od 1 i `name` albo `uses`. */
 function stepLabel(job: string, step: string, index: number): string {
   const n = step.match(/^ {6}- name: (.+)$|^ {8}name: (.+)$/m);
   const u = step.match(/^\s*(?:- )?uses: (.+)$/m);
@@ -257,7 +257,7 @@ function stepViolations(step: string, label = "krok"): string[] {
 const FORBIDDEN_EXEC_KEYS = /^\s*(?:- )?["']?(shell|working-directory|defaults)["']?\s*:/m;
 
 /**
- * Lista DOZWOLONYCH (E12 Ethana, N1 Leo): jedyne dopuszczalne wywołanie drizzle-kit
+ * Lista DOZWOLONYCH (E12, N1): jedyne dopuszczalne wywołanie drizzle-kit
  * w jobach z bazą to dokładnie `drizzle-kit migrate` — bez przyrostka wersji
  * (`drizzle-kit@latest`), bez `push`/`drop`/`up`/innych. Do tego zakaz `db:push`
  * i `db:dev` (na wypadek wywołania przez inną nazwę). Zwraca listę naruszeń.
@@ -335,7 +335,7 @@ const WORKFLOWS: Array<[string, string]> = readdirSync(WF_DIR)
   .map((f) => [f, readFileSync(join(WF_DIR, f), "utf8")]);
 
 /**
- * Po czym job jest „jobem z bazą” (#194 runda 4, Oliver + Leo): sam klucz `services:`
+ * Po czym job jest „jobem z bazą” (#194 runda 4): sam klucz `services:`
  * albo `container:` na poziomie joba (bez rozpoznawania obrazów) ALBO klucz bazy z DB_ENV_KEYS
  * (adres bazy albo PG*, #193 P0c-2 W-a/W-b) w env joba lub kroku. Zwraca powody (pusta lista = job bez bazy).
  */
@@ -351,7 +351,7 @@ function dbReasons(body: string): string[] {
 /** Job z bazą poza parą {e2e-smoke, e2e-full} z quality-gate.yml (w każdym pliku workflow). */
 function dbJobViolations(file: string, wf: string): string[] {
   // Klucz bazy poza sekcją jobs: (env workflow, przed albo po jobach) trafia do KAŻDEGO joba —
-  // zakazane w każdym pliku (G1/G5, C CTO; #193 P0c-2: każdy klucz z DB_ENV_KEYS).
+  // zakazane w każdym pliku (G1/G5, C; #193 P0c-2: każdy klucz z DB_ENV_KEYS).
   const top = dbKeyLines(code(outsideJobs(wf)), "\\s*").map((k) => `${file}: ${k} poza jobs: (env workflow) — zakazane`);
   return top.concat([...jobs(wf)].flatMap(([name, body]) => {
     if (file === QG && DB_JOBS.includes(name)) return [];
@@ -392,7 +392,7 @@ function anchorViolations(file: string, wf: string): string[] {
     .flatMap((l) => YAML_ANCHOR.filter(([, re]) => re.test(l)).map(([what]) => `${file}: ${what} YAML: ${l.trim()}`));
 }
 
-// --- Warstwa YAML (#201, decyzja Olivera: js-yaml 4.3.2, `load` ze schematem domyślnym) -----------
+// --- Warstwa YAML (#201: js-yaml 4.3.2, `load` ze schematem domyślnym) -----------
 
 type Y = unknown;
 const isMap = (v: Y): v is Record<string, Y> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -1348,7 +1348,7 @@ describe("expandScripts — rozwijanie skryptów package.json", () => {
   });
 });
 
-describe("stepViolations — zamknięta gramatyka kroku (Ethan O6–O10)", () => {
+describe("stepViolations — zamknięta gramatyka kroku (O6–O10)", () => {
   it.each([
     ["krok run", "      - name: x\n        run: pnpm db:migrate\n"],
     ["krok uses + with z blokiem", "      - uses: actions/upload-artifact@v4\n        if: always()\n        with:\n          name: r\n          path: |\n            a/\n"],
@@ -1625,7 +1625,7 @@ function wfSource(file: string): Source {
 /**
  * #201: sondy na PRAWDZIWYCH plikach workflow (edycja w pamięci, pliki na dysku bez zmian).
  * Grupa A — obejścia, które po #194 przechodziły: test ma padać.
- * Grupa B — poprawne edycje (sondy Leo z recenzji #194), które dawały fałszywy alarm: test ma przechodzić.
+ * Grupa B — poprawne edycje (sondy z recenzji #194), które dawały fałszywy alarm: test ma przechodzić.
  */
 describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
   const FILES = WORKFLOWS.map(([f]) => f);
@@ -1673,9 +1673,9 @@ describe("#201: obejścia (A) padają, poprawne edycje (B) przechodzą", () => {
     expect(fileViolations(file, edited(wfSource(file), find, repl), FILES)).toEqual([]);
   });
 
-  // F5 i F10 dosłownie z sondy Leo to niepoprawny YAML (plain scalar z „: ” w kontekście blokowym) —
+  // F5 i F10 dosłownie z sondy to niepoprawny YAML (plain scalar z „: ” w kontekście blokowym) —
   // GitHub odrzuca taki plik. Test pada czytelnym komunikatem składni, nie rozjazdem niezmiennika
-  // (decyzja Olivera, #201).
+  // (#201).
   it.each([
     ["F5 dosłownie", QG_TC, "      - name: Typecheck, uses: tsc\n        run: pnpm typecheck\n"],
     ["F10 dosłownie", QG_TC, `${QG_TC}      - uses: actions/upload-artifact@v4\n        with:\n          name: x\n          path: a/{run: 1}\n`],
