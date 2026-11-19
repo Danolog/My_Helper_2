@@ -203,7 +203,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ received: true });
   } catch (error) {
-    // N1 (Ryan, #62): ten catch obsługuje też zadatki (dane gości w
+    // N1 (#62): ten catch obsługuje też zadatki (dane gości w
     // parametrach zapytań) — w logu tylko nazwa i kod błędu oraz id
     // zdarzenia (pełne zdarzenie jest w panelu Stripe), bez message/stack.
     logger.error("Stripe webhook processing failed", { ...toErrorIdentity(error), ...received });

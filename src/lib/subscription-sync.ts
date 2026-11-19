@@ -11,15 +11,18 @@ import type Stripe from "stripe";
 
 /**
  * Webhooki zmieniające stan subskrypcji (`customer.subscription.updated`,
- * `customer.subscription.deleted`, `invoice.payment_failed` oraz
- * `invoice.paid` — jedyne z nich, w którym zapisywany jest okres: z linii
- * opłaconej faktury w samym zdarzeniu, nigdy wstecz) traktują zdarzenie
- * TYLKO jako sygnał. Pod blokadą stripe_sub czytany jest BIEŻĄCY stan
- * subskrypcji ze Stripe i z niego pochodzą status, `canceledAt`
- * i `trialEndsAt`. Okresu (`currentPeriodStart/End`) ten moduł nie zapisuje
- * w żadnym z tych zdarzeń.
+ * `customer.subscription.deleted`, `invoice.payment_failed`, `invoice.paid`)
+ * nie zapisują statusu z payloadu zdarzenia. Stripe nie gwarantuje kolejności
+ * dostarczenia: blokada usuwa przeplot, ale nie przywraca kolejności, więc
+ * status z późnego `invoice.paid` albo z `updated: active` po `deleted`
+ * wskrzesiłby anulowaną subskrypcję. Dlatego pod blokadą stripe_sub czytany
+ * jest BIEŻĄCY stan subskrypcji ze Stripe i z niego pochodzą status,
+ * `canceledAt` i `trialEndsAt`. Okresu (`currentPeriodStart/End`) ten moduł
+ * nie zapisuje w żadnym z tych zdarzeń; spośród nich okres zapisuje tylko
+ * obsługa `invoice.paid` — z linii opłaconej faktury w samym zdarzeniu,
+ * nigdy wstecz.
  *
- * Reguła lokalna (T3b, zawężona przez Ethana, przegląd #62 §2b): lokalne
+ * Reguła lokalna (T3b, przegląd #62 §2b): lokalne
  * `canceled` jest końcowe, gdy Stripe to potwierdza — `canceled` /
  * `incomplete_expired` ALBO `cancel_at_period_end === true` (anulowanie
  * z panelu: Stripe ma jeszcze `active` do końca okresu). Wtedy żaden handler
