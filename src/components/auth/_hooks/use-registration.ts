@@ -6,6 +6,7 @@ import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { mutationFetch } from "@/lib/api-client";
 import { signUp } from "@/lib/auth-client";
 import { sanitizeAuthError } from "@/lib/error-messages";
+import { PLANS_ON_SALE, isPlanOnSale, planOnSaleOr } from "@/lib/plan-catalog";
 
 export type Plan = {
   id: string;
@@ -20,9 +21,10 @@ export function useRegistration(preselectedPlan: string | null) {
   const router = useRouter();
 
   // Step management: 1 = plan selection, 2 = account details
-  const [step, setStep] = useState(preselectedPlan ? 2 : 1);
+  const singlePlanOnSale = PLANS_ON_SALE.length === 1;
+  const [step, setStep] = useState(singlePlanOnSale || preselectedPlan ? 2 : 1);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(
-    preselectedPlan
+    singlePlanOnSale || preselectedPlan ? planOnSaleOr(preselectedPlan) : null
   );
 
   // Plans data
@@ -62,7 +64,7 @@ export function useRegistration(preselectedPlan: string | null) {
     if (saved) {
       if (saved.name) setName(saved.name);
       if (saved.email) setEmail(saved.email);
-      if (saved.selectedPlan) setSelectedPlan(saved.selectedPlan);
+      if (saved.selectedPlan) setSelectedPlan(planOnSaleOr(saved.selectedPlan));
       if (saved.step) setStep(saved.step);
     }
   };
@@ -94,7 +96,9 @@ export function useRegistration(preselectedPlan: string | null) {
   }, []);
 
   const basicPlan = plans.find((p) => p.slug === "basic");
-  const proPlan = plans.find((p) => p.slug === "pro");
+  const proPlan = isPlanOnSale("pro")
+    ? plans.find((p) => p.slug === "pro")
+    : undefined;
   const selectedPlanData = plans.find((p) => p.slug === selectedPlan);
 
   const handleSelectPlan = (slug: string) => {
@@ -173,7 +177,7 @@ export function useRegistration(preselectedPlan: string | null) {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                planSlug: selectedPlan,
+                planSlug: planOnSaleOr(selectedPlan),
                 email,
               }),
             });
