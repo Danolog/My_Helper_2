@@ -21,18 +21,7 @@ vi.mock("next/link", () => ({
 
 // Mock lucide-react icons
 vi.mock("lucide-react", () => ({
-  Crown: () => <span data-testid="crown-icon" />,
-  Sparkles: () => <span data-testid="sparkles-icon" />,
-  ArrowRight: () => <span data-testid="arrow-right-icon" />,
   Lock: () => <span data-testid="lock-icon" />,
-}));
-
-// Mock constants
-vi.mock("@/lib/constants", () => ({
-  PLANS: {
-    basic: { slug: "basic", name: "Basic", priceMonthly: 49 },
-    pro: { slug: "pro", name: "Pro", priceMonthly: 149 },
-  },
 }));
 
 // Mock subscription hook
@@ -78,44 +67,43 @@ describe("ProPlanGate", () => {
     expect(container.querySelector("[data-slot='skeleton']")).toBeInTheDocument();
   });
 
-  it("renders upgrade prompt for Basic plan users", () => {
+  it("renders feature name, description and AI unavailability message for Basic plan users", () => {
     render(<ProPlanGate {...defaultProps} />);
 
     expect(screen.getByText("Asystent AI")).toBeInTheDocument();
     expect(
       screen.getByText("Zaawansowany asystent sztucznej inteligencji")
     ).toBeInTheDocument();
-    expect(screen.getByText("Tylko Plan Pro")).toBeInTheDocument();
-  });
-
-  it("renders pro benefits in the upgrade prompt", () => {
-    render(<ProPlanGate {...defaultProps} />);
-
     expect(
-      screen.getByText("Automatyczne odpowiedzi na wiadomosci")
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Generowanie tresci marketingowych")
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Co zyskujesz z Planem Pro:")
+      screen.getByText("Funkcje AI nie są jeszcze dostępne w Twoim planie.")
     ).toBeInTheDocument();
   });
 
-  it("renders upgrade and compare buttons", () => {
+  it("does not render the benefits list or its heading", () => {
     render(<ProPlanGate {...defaultProps} />);
 
-    const upgradeLink = screen.getByText("Zmien na Pro").closest("a");
-    expect(upgradeLink).toHaveAttribute("href", "/dashboard/subscription");
-
-    const compareLink = screen.getByText("Porownaj plany").closest("a");
-    expect(compareLink).toHaveAttribute("href", "/pricing");
+    expect(
+      screen.queryByText("Automatyczne odpowiedzi na wiadomosci")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Generowanie tresci marketingowych")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Co zyskujesz z Planem Pro:")
+    ).not.toBeInTheDocument();
   });
 
-  it("renders pricing information", () => {
-    render(<ProPlanGate {...defaultProps} />);
+  it("does not render any link or button", () => {
+    const { container } = render(<ProPlanGate {...defaultProps} />);
 
-    expect(screen.getByText(/149 PLN\/miesiac/)).toBeInTheDocument();
+    expect(container.querySelector("a")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("does not render the word Pro, PLN, 149 or plan comparison text", () => {
+    const { container } = render(<ProPlanGate {...defaultProps} />);
+
+    expect(container.textContent).not.toMatch(/\bPro\b|PLN|149|Por[oó]wnaj/);
   });
 
   it("does not render benefits section when proBenefits is empty", () => {
