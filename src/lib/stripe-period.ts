@@ -10,6 +10,7 @@
  *
  * Okres opłacony fakturą czytamy z linii faktury (`lines.data[].period`), nie
  * z `period_start/end` samej faktury — tam faktura odnowienia ma okres poprzedni.
+ * Linie o zerowej długości okresu (pozycje jednorazowe) są pomijane.
  */
 
 export interface StripeSubscriptionPeriodSource {
@@ -45,12 +46,17 @@ export interface StripeInvoicePeriodSource {
   } | null;
 }
 
-/** Okres opłacony fakturą: linia o największym `period.end` (start z tej samej linii). */
+/**
+ * Okres opłacony fakturą: linia o największym `period.end` (start z tej samej
+ * linii). Liczą się tylko linie o dodatniej długości okresu (`end > start`) —
+ * pozycje jednorazowe (`start` = `end`) są pomijane.
+ */
 export function paidInvoicePeriod(invoice: StripeInvoicePeriodSource): BillingPeriod | null {
   let best: BillingPeriod | null = null;
   for (const line of invoice.lines?.data ?? []) {
     const period = toPeriod(line.period?.start, line.period?.end);
-    if (period && (!best || period.end.getTime() > best.end.getTime())) best = period;
+    if (!period || period.end.getTime() <= period.start.getTime()) continue;
+    if (!best || period.end.getTime() > best.end.getTime()) best = period;
   }
   return best;
 }
