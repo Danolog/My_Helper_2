@@ -172,6 +172,7 @@ describe("jedno źródło list funkcji planów — to, co widzi użytkownik", ()
         }
         plan={plan as never}
         allPlans={{ basic, pro: plan } as never}
+        access={null}
         changePlanLoading={false}
         downgradeLoading={false}
         cancelLoading={false}
