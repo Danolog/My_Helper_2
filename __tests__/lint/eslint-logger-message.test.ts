@@ -4,8 +4,8 @@
  * `logger.error|warn|info|debug(...)` (komunikat) nie niesie treści błędu.
  * Komunikat nie przechodzi przez redakcję kontekstu, więc treść błędu podaje
  * się w drugim argumencie. Test uruchamia PRAWDZIWĄ konfigurację repo na
- * kodzie w pamięci — zmiana selektora albo poziomu (error → warn/off)
- * czerwieni test.
+ * kodzie w pamięci — obniżenie poziomu (error → warn/off) albo zawężenie
+ * selektora tak, że pomija postać z przypadków poniżej, czerwieni test.
  */
 import path from "node:path";
 import { ESLint } from "eslint";
@@ -32,6 +32,7 @@ describe("komunikat loggera bez treści błędu", () => {
     ["szablon z error.message", "export function f(error: Error) { logger.error(`Padło: ${error.message}`); }"],
     ["szablon z err.stack", "export function f(err: Error) { logger.warn(`Padło: ${err.stack}`); }"],
     ["szablon z x?.message", "export function f(x?: Error) { logger.info(`Padło: ${x?.message}`); }"],
+    ["szablon z x?.stack", "export function f(x?: Error) { logger.info(`Padło: ${x?.stack}`); }"],
     ["szablon z identyfikatorem error", "export function f(error: unknown) { logger.error(`Padło: ${error}`); }"],
     ["szablon z identyfikatorem err", "export function f(err: unknown) { logger.debug(`Padło: ${err}`); }"],
     ["szablon z identyfikatorem e", "export function f(e: unknown) { logger.warn(`Padło: ${e}`); }"],
