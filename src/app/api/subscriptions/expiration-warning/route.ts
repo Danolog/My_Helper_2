@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, or, like, sql } from "drizzle-orm";
 import { expirationWarningSchema, validateBody } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
+// salonId z sesji; surowe db: odczyt aktywnej subskrypcji (GET) i zapis powiadomień (POST);
+// odczyt ostatnich ostrzeżeń idzie przez forSalon
 import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
@@ -11,6 +12,7 @@ import {
   subscriptionPlans,
   notifications,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { isSubscriptionLockFailure, withSalonSubscriptionLock } from "@/lib/subscription-locks";
 
 const DEFAULT_WARNING_DAYS = 7;
@@ -23,7 +25,7 @@ const DEFAULT_WARNING_DAYS = 7;
  * - daysRemaining: Number of days until the subscription expires/renews
  * - warningThreshold: Number of days before expiry to show warning
  * - isNearExpiry: Whether the subscription is near its expiry date
- * - warningsSent: Recent expiration warning notifications
+ * - recentWarnings: Up to 5 newest notifications of the salon whose message matches one of the expiration-warning patterns
  */
 export async function GET() {
   try {
@@ -83,17 +85,23 @@ export async function GET() {
       daysRemaining !== null && daysRemaining <= warningThreshold && daysRemaining >= 0;
 
     // Get recent expiration warning notifications
-    const recentWarnings = await db
-      .select()
-      .from(notifications)
-      .where(
-        and(
-          eq(notifications.salonId, salonId),
-          sql`${notifications.message} LIKE '%wygasa%' OR ${notifications.message} LIKE '%odnowienia%' OR ${notifications.message} LIKE '%expir%'`
+    const recentWarnings = await forSalon(salonId).raw((tx) =>
+      tx
+        .select()
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.salonId, salonId),
+            or(
+              like(notifications.message, "%wygasa%"),
+              like(notifications.message, "%odnowienia%"),
+              like(notifications.message, "%expir%")
+            )
+          )
         )
-      )
-      .orderBy(sql`${notifications.createdAt} DESC`)
-      .limit(5);
+        .orderBy(sql`${notifications.createdAt} DESC`)
+        .limit(5)
+    );
 
     return NextResponse.json({
       success: true,
@@ -129,8 +137,8 @@ export async function GET() {
 /**
  * POST /api/subscriptions/expiration-warning
  *
- * Checks for subscriptions near expiry and creates warning notifications.
- * This can be called by a cron job or manually triggered.
+ * Checks the active subscription of the session's salon and, when it is near expiry,
+ * creates an email and a push warning notification.
  *
  * Optional body:
  * - warningDays: Override default warning threshold (default 7)
