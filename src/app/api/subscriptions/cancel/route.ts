@@ -7,7 +7,7 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions } from "@/lib/schema";
 import { getStripe } from "@/lib/stripe";
-import { stripeSubscriptionPeriod, type BillingPeriod } from "@/lib/stripe-period";
+import { stripeSubscriptionPeriod } from "@/lib/stripe-period";
 import {
   isSubscriptionLockFailure,
   lockSalonSubscriptions,
@@ -35,11 +35,11 @@ function json(status: number, code: string, error: string) {
 /**
  * POST /api/subscriptions/cancel
  *
- * Anuluje bieżącą (active) subskrypcję salonu z sesji (T3b, warunek Ethana
+ * Anuluje bieżącą (active) subskrypcję salonu z sesji (T3b, warunek
  * z przeglądu #62 §2b — przed pierwszym płacącym salonem).
  *
  * Prawdziwa subskrypcja Stripe: `cancel_at_period_end: true` w Stripe
- * (klient zachowuje dostęp do końca opłaconego okresu), a lokalne `canceled`
+ * (Stripe nie odnawia subskrypcji po końcu okresu), a lokalne `canceled`
  * zapisujemy TYLKO, gdy odpowiedź Stripe to potwierdza
  * (`cancel_at_period_end === true` albo stan końcowy). Błąd Stripe → 502,
  * Stripe nieskonfigurowany → 503 — w obu przypadkach bez zapisu: lokalne
@@ -108,7 +108,6 @@ export async function POST() {
       outcome = await db.transaction(async (tx): Promise<CancelOutcome> => {
         await setSubscriptionLockTimeout(tx);
 
-        let period: BillingPeriod | null = null;
         if (stripeSubscriptionId && stripe) {
           await lockStripeSubscription(tx, stripeSubscriptionId);
           const [row] = await tx
@@ -145,7 +144,7 @@ export async function POST() {
             });
             return { stripeNotConfirmed: stripeSub.status };
           }
-          period = stripeSubscriptionPeriod(stripeSub);
+          const period = stripeSubscriptionPeriod(stripeSub);
           logger.info("Stripe subscription set to cancel at period end", {
             stripeSubscriptionId,
             stripeStatus: stripeSub.status,
@@ -167,8 +166,7 @@ export async function POST() {
           .set({
             status: "canceled",
             canceledAt: now,
-            // Koniec dostępu = koniec okresu w Stripe (nie zapisany lokalnie).
-            ...(period ? { currentPeriodStart: period.start, currentPeriodEnd: period.end } : {}),
+            // Okres w wierszu zostaje bez zmian: anulowanie nie zmienia tego, do kiedy subskrypcja jest opłacona.
           })
           .where(eq(salonSubscriptions.id, activeSub.id))
           .returning();

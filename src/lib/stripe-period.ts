@@ -1,12 +1,10 @@
 /**
- * Okres rozliczeniowy ze Stripe — jedno miejsce odczytu (T3, warunek dla 1.1).
+ * Okres rozliczeniowy ze Stripe — jedno miejsce odczytu.
  *
  * Nowsze wersje API Stripe (SDK 20) trzymają `current_period_start/end` na
  * pozycjach subskrypcji (`items.data[0]`), nie na samej subskrypcji. Kod, który
- * czyta tylko poziom subskrypcji, w nowym API nie widzi okresu i zostawia
- * STARĄ datę — `canceled` traci dostęp przed końcem zapłaconego okresu,
- * `past_due` ma nieaktualny termin. Dlatego najpierw `items.data[0]`, potem
- * poziom subskrypcji (zdarzenia w starszej wersji API).
+ * czyta tylko poziom subskrypcji, w nowym API nie widzi okresu. Dlatego
+ * najpierw `items.data[0]`, potem poziom subskrypcji (starsze wersje API).
  *
  * Okres opłacony fakturą czytamy z linii faktury (`lines.data[].period`), nie
  * z `period_start/end` samej faktury — tam faktura odnowienia ma okres poprzedni.

@@ -1,6 +1,6 @@
 /**
  * POST /api/subscriptions/cancel — anulowanie tylko potwierdzone przez Stripe
- * (T3b; warunek Ethana z przeglądu #62 §2b, przed pierwszym płacącym salonem).
+ * (T3b; warunek z przeglądu #62 §2b, przed pierwszym płacącym salonem).
  *
  * Przed poprawką trasa przy błędzie Stripe zapisywała lokalnie `canceled`
  * („Continue with local DB update even if Stripe fails”): Stripe dalej
@@ -8,8 +8,9 @@
  *
  * Kontrakt:
  * - prawdziwa subskrypcja Stripe: `cancel_at_period_end: true` w Stripe pod
- *   blokadą stripe_sub, potem blokada salonu i zapis `canceled` z okresem
- *   ze Stripe — tylko gdy odpowiedź Stripe potwierdza anulowanie,
+ *   blokadą stripe_sub, potem blokada salonu i zapis `canceled` bez pól
+ *   okresu (okres Stripe tylko w logu) — tylko gdy odpowiedź Stripe
+ *   potwierdza anulowanie,
  * - błąd Stripe albo brak potwierdzenia → 502, zero zapisów,
  * - Stripe nieskonfigurowany przy prawdziwej subskrypcji → 503, zero zapisów,
  * - bez prawdziwej subskrypcji (null, `sim_*`) → tylko blokada salonu, zapis lokalny,
@@ -92,7 +93,7 @@ beforeEach(() => {
 });
 
 describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () => {
-  it("200: Stripe potwierdza cancel_at_period_end → canceled z okresem ze Stripe, kolejność blokad stripe_sub → Stripe → salon", async () => {
+  it("200: Stripe potwierdza cancel_at_period_end → canceled bez pól okresu (okres w wierszu bez zmian), kolejność blokad stripe_sub → Stripe → salon", async () => {
     f.selects.push([ACTIVE], [ACTIVE]);
 
     const { status, body } = await cancel();
@@ -104,14 +105,17 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
     expect(subWrites()).toEqual([
       expect.objectContaining({
         op: "update",
-        values: expect.objectContaining({
-          status: "canceled",
-          canceledAt: expect.any(Date),
-          currentPeriodStart: new Date(PERIOD_START * 1000),
-          currentPeriodEnd: new Date(PERIOD_END * 1000),
-        }),
+        values: expect.objectContaining({ status: "canceled", canceledAt: expect.any(Date) }),
       }),
     ]);
+    // Stripe zwraca okres inny niż zapisany w wierszu — zapis go nie przenosi.
+    expect(new Date(PERIOD_END * 1000)).not.toEqual(ACTIVE.currentPeriodEnd);
+    expect(subWrites()[0]?.values).not.toHaveProperty("currentPeriodStart");
+    expect(subWrites()[0]?.values).not.toHaveProperty("currentPeriodEnd");
+    // Odpowiedź nie niesie końca okresu ze Stripe.
+    expect((body.subscription as Record<string, unknown>).currentPeriodEnd).not.toBe(
+      new Date(PERIOD_END * 1000).toISOString(),
+    );
     expect(f.log).toEqual([
       "select",
       "lock_timeout",
@@ -124,6 +128,41 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
     ]);
   });
 
+  it("200: odpowiedź Stripe bez okresu → ten sam zapis canceled bez pól okresu", async () => {
+    mockUpdate.mockResolvedValue({ id: "sub_1", status: "active", cancel_at_period_end: true, items: { data: [] } });
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    const { status } = await cancel();
+
+    expect(status).toBe(200);
+    expect(subWrites()).toEqual([
+      expect.objectContaining({
+        op: "update",
+        values: expect.objectContaining({ status: "canceled", canceledAt: expect.any(Date) }),
+      }),
+    ]);
+    expect(subWrites()[0]?.values).not.toHaveProperty("currentPeriodStart");
+    expect(subWrites()[0]?.values).not.toHaveProperty("currentPeriodEnd");
+    expect(logger.info).toHaveBeenCalledWith("Stripe subscription set to cancel at period end", {
+      stripeSubscriptionId: "sub_1",
+      stripeStatus: "active",
+      currentPeriodEnd: null,
+    });
+  });
+
+  it("log anulowania w Stripe niesie koniec okresu ze Stripe", async () => {
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    const { status } = await cancel();
+
+    expect(status).toBe(200);
+    expect(logger.info).toHaveBeenCalledWith("Stripe subscription set to cancel at period end", {
+      stripeSubscriptionId: "sub_1",
+      stripeStatus: "active",
+      currentPeriodEnd: new Date(PERIOD_END * 1000).toISOString(),
+    });
+  });
+
   it("200: Stripe już canceled (bez cancel_at_period_end) → lokalne canceled", async () => {
     mockUpdate.mockResolvedValue({ ...STRIPE_CANCELED_AT_PERIOD_END, status: "canceled", cancel_at_period_end: false });
     f.selects.push([ACTIVE], [ACTIVE]);
@@ -134,7 +173,7 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
     expect(subWrites().map((w) => w.values.status)).toEqual(["canceled"]);
   });
 
-  it("502: błąd Stripe → zero zapisów, bez blokady salonu (bloker Ethana)", async () => {
+  it("502: błąd Stripe → zero zapisów, bez blokady salonu", async () => {
     mockUpdate.mockRejectedValue(Object.assign(new Error("card_declined: secret detail"), { type: "StripeAPIError" }));
     f.selects.push([ACTIVE], [ACTIVE]);
 
@@ -224,7 +263,7 @@ describe("POST /api/subscriptions/cancel — bez prawdziwej subskrypcji Stripe",
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(f.log).toEqual(["select", "lock_timeout", "lock:salon:salon-1", "select", "update:salon_subscriptions", "commit"]);
     expect(subWrites()[0]?.values).toEqual(expect.objectContaining({ status: "canceled" }));
-    // Bez Stripe okres zostaje zapisany.
+    // Zapis nie zawiera pól okresu — tak samo jak ze Stripe.
     expect(subWrites()[0]?.values).not.toHaveProperty("currentPeriodEnd");
   });
 
