@@ -69,6 +69,7 @@ const ALLOWED_DB_JOB_LINES: Array<[string, RegExp]> = [
   ["instalacja zależności", /^pnpm install --frozen-lockfile$/],
   ["skrypt z listy dozwolonych", new RegExp(`^pnpm (?:${Object.keys(ALLOWED_DB_JOB_SCRIPTS).join("|")})$`)],
   ["strażnik RLS", /^pnpm exec tsx scripts\/db-rls-guard\.ts$/],
+  ["kontrola seeda", /^pnpm exec tsx scripts\/verify-seed\.ts$/],
   // Bez --with-deps: pobieranie pakietów systemowych zjadało limit joba (#268).
   ["instalacja przeglądarki", /^pnpm exec playwright install chromium$/],
   ["testy E2E", /^pnpm exec playwright test --grep @(?:smoke|full) --workers=\d+ --retries=\d+$/],
@@ -1405,6 +1406,23 @@ describe("stepViolations — zamknięta gramatyka kroku (Ethan O6–O10)", () =>
     }
   });
 
+  it("kontrola seeda: dozwolone wyłącznie `pnpm exec tsx scripts/verify-seed.ts`", () => {
+    expect(allowedLine("pnpm exec tsx scripts/verify-seed.ts")).toBe(true);
+    for (const bad of [
+      "pnpm exec tsx scripts/verify-seed.ts --fix",
+      "pnpm exec tsx scripts/verify-seed.ts && sh x.sh",
+      "pnpm exec tsx scripts/verify-seed.ts; sh x.sh",
+      "pnpm exec tsx scripts/verify-seed.ts || true",
+      "pnpm exec tsx scripts/seed-test.ts",
+      "pnpm exec tsx scripts/verify-seed-checks.ts",
+      "pnpm exec tsx ./scripts/verify-seed.ts",
+      "POSTGRES_URL=x pnpm exec tsx scripts/verify-seed.ts",
+      " pnpm exec tsx scripts/verify-seed.ts",
+    ]) {
+      expect(allowedLine(bad), bad).toBe(false);
+    }
+  });
+
   it("L3: komunikat zawiera job, numer i nazwę kroku oraz niedozwolony klucz", () => {
     const step = "      - name: Seed test data\n        run: pnpm db:seed:test\n        shell: sh {0}\n";
     expect(stepViolations(step, stepLabel("e2e-smoke", step, 6))).toEqual([
@@ -1708,7 +1726,7 @@ describe("jedna baza w CI: env kroków, $GITHUB_ENV, serwer E2E (#193 P0c-1, pkt
   /** Adres INNEJ bazy do sond, złożony z części (skaner literałów sekretów; to nie sekret). */
   const OTHER_DB = ["postgresql", "//probe:probe@localhost:5432/other_db"].join(":");
   const SMOKE_PW = "          PLAYWRIGHT_TIMEOUT: 15000\n";
-  const FULL_PW = "          ALLOW_PAYMENT_SIMULATION: \"1\"\n\n      # Strażnik RLS drugi raz, po ostatnim kroku z bazą (#194 Z1) — jak w e2e-smoke.";
+  const FULL_PW = "          ALLOW_PAYMENT_SIMULATION: \"1\"\n\n      # Kontrola seeda drugi raz, po zielonych testach E2E @full: użytkownicy testowi z kontem z hasłem, plany i dostęp salonów testowych nadal zgodne z seedem.";
   const SMOKE_SEED = "      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Verify seed data";
   const PG_ENV_LINE = "          INTEGRATION_POSTGRES_URL: ";
   const PW_IMPORT = "import { defineConfig, devices } from '@playwright/test';\n";
@@ -1753,6 +1771,7 @@ describe("jedna baza w CI: env kroków, $GITHUB_ENV, serwer E2E (#193 P0c-1, pkt
     ["wartość bez normalizacji: ten sam adres z hostem WIELKIMI literami", PG_ENV_LINE, `          INTEGRATION_POSTGRES_URL: ${JOB_URL.replace("localhost", "LOCALHOST")}\n          X: `, at(PG_STEP, /INTEGRATION_POSTGRES_URL /), VALUE],
     ["miejsce: INTEGRATION_POSTGRES_URL z adresem joba w innym kroku (Run smoke tests)", SMOKE_PW, `${SMOKE_PW}          INTEGRATION_POSTGRES_URL: ${JOB_URL}\n`, at(String.raw`e2e-smoke, krok \d+ \(Run smoke tests\)`, /INTEGRATION_POSTGRES_URL /), PLACE],
     ["miejsce: INTEGRATION_POSTGRES_URL z adresem joba w innym jobie (e2e-full)", FULL_PW, FULL_PW.replace('"1"\n', `"1"\n          INTEGRATION_POSTGRES_URL: ${JOB_URL}\n`), at(String.raw`e2e-full, krok \d+ \(Run full E2E tests\)`, /INTEGRATION_POSTGRES_URL /), PLACE],
+    ["POSTGRES_URL innej bazy w env kroku kontroli seeda po E2E (e2e-full)", "      - name: Seed check (after E2E)\n        run: pnpm exec tsx scripts/verify-seed.ts\n", `      - name: Seed check (after E2E)\n        run: pnpm exec tsx scripts/verify-seed.ts\n        env:\n          POSTGRES_URL: ${OTHER_DB}\n`, at(String.raw`e2e-full, krok \d+ \(Seed check \(after E2E\)\)`, /POSTGRES_URL /), PLACE],
     ["miejsce: inna zmienna bazy (DATABASE_URL) z adresem joba w kroku test:pg", PG_ENV_LINE, `          DATABASE_URL: ${JOB_URL}\n          INTEGRATION_POSTGRES_URL: `, at(PG_STEP, /DATABASE_URL /), PLACE],
     ["$GITHUB_ENV: krok pisze POSTGRES_URL innej bazy", SMOKE_SEED, `      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Switch db\n        run: echo "POSTGRES_URL=${OTHER_DB}" >> "$GITHUB_ENV"\n\n      - name: Verify seed data`, /Switch db\): zapis zmiennej bazy do \$GITHUB_ENV/, /./],
     ["$GITHUB_ENV: krok pisze INTEGRATION_POSTGRES_URL (blok run)", SMOKE_SEED, `      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Switch db\n        run: |\n          echo "INTEGRATION_POSTGRES_URL=${OTHER_DB}" >> "$GITHUB_ENV"\n\n      - name: Verify seed data`, /Switch db\): zapis zmiennej bazy do \$GITHUB_ENV/, /./],

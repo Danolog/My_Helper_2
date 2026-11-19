@@ -119,6 +119,8 @@ jobs:
         run: |
           PGPASSWORD=dev_password psql -h localhost -U dev_user -d pos_dev -c "SELECT id, email, email_verified, role FROM \"user\" WHERE email IN ('owner@test.com','client@test.com');"
           PGPASSWORD=dev_password psql -h localhost -U dev_user -d pos_dev -c "SELECT id, provider_id, user_id, CASE WHEN password IS NOT NULL THEN 'SET' ELSE 'NULL' END as pwd FROM account WHERE user_id IN ('test-owner-user-id-00001','test-client-user-id-00001');"
+      - name: Seed check
+        run: pnpm exec tsx scripts/verify-seed.ts
 
       # Bez --with-deps: pobieranie pakietów systemowych (apt) potrafi trwać
       # minuty i zjadało limit joba. Obraz runnera ma biblioteki Chromium;
@@ -209,6 +211,10 @@ jobs:
       - name: Seed test data
         run: pnpm db:seed:test
 
+      # Kontrola seeda — jak w e2e-smoke.
+      - name: Seed check
+        run: pnpm exec tsx scripts/verify-seed.ts
+
       # Bez --with-deps — jak w e2e-smoke.
       - name: Install Chromium (no apt)
         timeout-minutes: 3
@@ -224,6 +230,10 @@ jobs:
         # VERCEL=1 i handler ją ignoruje z błędem w logu).
         env:
           ALLOW_PAYMENT_SIMULATION: "1"
+
+      # Kontrola seeda drugi raz, po zielonych testach E2E @full: użytkownicy testowi z kontem z hasłem, plany i dostęp salonów testowych nadal zgodne z seedem.
+      - name: Seed check (after E2E)
+        run: pnpm exec tsx scripts/verify-seed.ts
 
       # Strażnik RLS drugi raz, po ostatnim kroku z bazą (#194 Z1) — jak w e2e-smoke.
       - name: RLS guard (end of job)

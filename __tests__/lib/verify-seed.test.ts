@@ -178,7 +178,9 @@ describe("zapytania i zgodność ze seedem", () => {
   it("zapytania tylko do odczytu", () => {
     for (const q of [VERIFY_SEED_USERS_SQL, VERIFY_SEED_ACCOUNTS_SQL, VERIFY_SEED_PLANS_SQL, VERIFY_SEED_SUBSCRIPTIONS_SQL]) {
       expect(q).toMatch(/^select /);
-      expect(q).not.toMatch(/\b(insert|update|delete|truncate|drop|alter|grant)\b/i);
+      expect(q).not.toMatch(/\b(insert|update|delete|truncate|drop|alter|grant|create|copy|into|lock|set|comment|vacuum|call|do)\b/i);
+      // Jedno polecenie na zapytanie.
+      expect(q).not.toContain(";");
     }
   });
 
