@@ -1,33 +1,57 @@
 import { NextResponse } from "next/server";
-import { eq, and, desc, inArray } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { eq, desc } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { featuresFor } from "@/lib/plan-features";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
-import { getCurrentPlan } from "@/lib/subscription";
+import { forSalon } from "@/lib/server/repository";
+import {
+  pickSalonAccessRow,
+  resolveSalonAccess,
+  type SalonSubscriptionAccessRow,
+} from "@/lib/subscription-predicates";
+
+type SubscriptionWithPlan = {
+  subscription: typeof salonSubscriptions.$inferSelect;
+  plan: typeof subscriptionPlans.$inferSelect;
+};
+
+type AccessRow = SalonSubscriptionAccessRow & { source: SubscriptionWithPlan };
+
+function toAccessRow(source: SubscriptionWithPlan): AccessRow {
+  const { subscription } = source;
+  return {
+    status: subscription.status,
+    planSlug: source.plan.slug,
+    trialEndsAt: subscription.trialEndsAt,
+    currentPeriodStart: subscription.currentPeriodStart,
+    currentPeriodEnd: subscription.currentPeriodEnd,
+    createdAt: subscription.createdAt,
+    source,
+  };
+}
 
 /**
  * GET /api/subscriptions/current
  *
- * Returns the current active (or most recent) subscription for the
- * authenticated user's salon, joined with plan details so the UI can
- * display plan name, features, and pricing without a second request.
- *
- * Includes "active", "trialing", and "canceled" subscriptions so the
- * UI can show the current plan state (including canceled status with
- * reactivation option).
+ * Karta planu salonu z sesji. Jeden odczyt przez repozytorium salonu:
+ * wszystkie wiersze subskrypcji salonu z planem; karta pokazuje wiersz,
+ * z którego liczony jest dostęp (`pickSalonAccessRow`: bieżący
+ * `trialing`/`active`, a bez niego najnowszy — także `past_due`, `canceled`
+ * i inne statusy). Gdy wybrany wiersz ma zaplanowaną zmianę planu, plan
+ * docelowy jest odczytywany w tym samym odczycie.
  *
  * Response shape:
- *   { subscription: {...} | null, plan: {...} | null, effectivePlanSlug }
+ *   { subscription: {...} | null, plan: {...} | null, scheduledPlan (gdy jest
+ *     wiersz), effectivePlanSlug, access: { state, mode, planSlug, until } }
  *
- * `plan` opisuje zapisany plan (karta planu). `effectivePlanSlug` to plan,
- * który dziś obowiązuje: liczy go `getCurrentPlan` — ta sama funkcja co
- * bramki serwerowe (np. trial po terminie albo `canceled` = "basic").
- * UI decyduje o funkcjach Pro wyłącznie na podstawie `effectivePlanSlug`.
+ * `plan` opisuje plan wybranego wiersza. `access` — stan dostępu wyliczony
+ * tą samą regułą co bramki serwerowe; informacyjny — panel go nie czyta.
+ * Liczy go `resolveSalonAccess` na tych samych wierszach. `effectivePlanSlug`
+ * to plan przy pełnym dostępie, inaczej "basic" (np. trial po terminie albo
+ * `canceled`). UI decyduje o funkcjach Pro wyłącznie na podstawie
+ * `effectivePlanSlug`. Błąd odczytu → 500.
  */
 export async function GET() {
   try {
@@ -42,58 +66,60 @@ export async function GET() {
       );
     }
 
-    // Find the most recent subscription for the salon (active, trialing, or canceled)
-    const results = await db
-      .select({
-        subscription: salonSubscriptions,
-        plan: subscriptionPlans,
-      })
-      .from(salonSubscriptions)
-      .innerJoin(
-        subscriptionPlans,
-        eq(salonSubscriptions.planId, subscriptionPlans.id),
-      )
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          inArray(salonSubscriptions.status, ["active", "trialing", "canceled"]),
-        ),
-      )
-      .orderBy(desc(salonSubscriptions.createdAt))
-      .limit(1);
+    const { rows, picked, targetPlan } = await forSalon(salonId).raw(async (tx) => {
+      const all = await tx
+        .select({
+          subscription: salonSubscriptions,
+          plan: subscriptionPlans,
+        })
+        .from(salonSubscriptions)
+        .innerJoin(
+          subscriptionPlans,
+          eq(salonSubscriptions.planId, subscriptionPlans.id),
+        )
+        .where(eq(salonSubscriptions.salonId, salonId))
+        .orderBy(desc(salonSubscriptions.createdAt));
 
-    const row = results[0];
+      const accessRows = all.map(toAccessRow);
+      const chosen = pickSalonAccessRow(accessRows);
 
-    if (!row) {
+      // Plan docelowy zaplanowanej zmiany — tylko dla wybranego wiersza.
+      // Katalog planów jest globalny (bez salon_id).
+      let target: typeof subscriptionPlans.$inferSelect | undefined;
+      const scheduledPlanId = chosen?.source.subscription.scheduledPlanId;
+      if (scheduledPlanId) {
+        [target] = await tx
+          .select()
+          .from(subscriptionPlans)
+          .where(eq(subscriptionPlans.id, scheduledPlanId));
+      }
+
+      return { rows: accessRows, picked: chosen, targetPlan: target };
+    });
+
+    const access = resolveSalonAccess(rows, new Date());
+    const effectivePlanSlug = access.planSlug ?? "basic";
+
+    if (!picked) {
       return NextResponse.json({
         success: true,
         subscription: null,
         plan: null,
-        effectivePlanSlug: (await getCurrentPlan(salonId)).slug,
+        effectivePlanSlug,
+        access,
       });
     }
 
-    // If there's a scheduled plan change (downgrade), fetch the target plan details
-    let scheduledPlan: { id: string; name: string; slug: string; priceMonthly: string; features: string[] } | null = null;
-    if (row.subscription.scheduledPlanId) {
-      const scheduledPlanAlias = alias(subscriptionPlans, "scheduled_plan");
-      const [targetPlan] = await db
-        .select()
-        .from(scheduledPlanAlias)
-        .where(eq(scheduledPlanAlias.id, row.subscription.scheduledPlanId));
-
-      if (targetPlan) {
-        scheduledPlan = {
+    const row = picked.source;
+    const scheduledPlan = targetPlan
+      ? {
           id: targetPlan.id,
           name: targetPlan.name,
           slug: targetPlan.slug,
           priceMonthly: targetPlan.priceMonthly,
           features: featuresFor(targetPlan.slug, targetPlan.featuresJson),
-        };
-      }
-    }
-
-    const effectivePlanSlug = (await getCurrentPlan(salonId)).slug;
+        }
+      : null;
 
     return NextResponse.json({
       success: true,
@@ -122,6 +148,7 @@ export async function GET() {
       },
       scheduledPlan,
       effectivePlanSlug,
+      access,
     });
   } catch (error) {
     logger.error("[Subscriptions API] Error fetching current subscription", { error: error });
