@@ -6,7 +6,7 @@
  *   `import()`, `require()`, re-eksport) i puli systemowej poza
  *   `server/system/**` daje błąd; plik z listy przejściowej nie (kontrola
  *   fałszywej czerwieni).
- * - pkt 7 (N1 Leo): poziom reguł czytany z konfiguracji WYNIKOWEJ
+ * - pkt 7 (N1): poziom reguł czytany z konfiguracji WYNIKOWEJ
  *   (`calculateConfigForFile`), nie z tekstu pliku.
  * - Z4: lista przejściowa ⊆ BASELINE; każda pozycja istnieje i nadal importuje `db`.
  * - Z5 + W1: w `src/**` żadnego obejścia reguł izolacji komentarzem.
@@ -66,7 +66,7 @@ const LISTED_ROUTE_WITH_ID = listedFile("LISTED_ROUTE_WITH_ID", (f) => f.include
  * per partia. Partia #193 usuwa swoje pliki ze SWOJEJ tablicy w
  * eslint.db-isolation.mjs I stąd w tym samym PR. Dopisanie pozycji albo
  * przeniesienie pliku do innej tablicy bez zmiany tutaj = czerwony test;
- * przeniesienie między partiami = decyzja Ethana, osobny commit.
+ * przeniesienie między partiami = decyzja CTO, osobny commit.
  */
 const BASELINE: Record<string, readonly string[]> = {
   // P0b (#193): wszystkie 7 pozycji zdjęte — zapytania w src/lib/server/system/**.
@@ -155,7 +155,7 @@ const DB_IMPORT_FORMS: [string, string][] = [
   ["import()", 'export async function f() { return (await import("@/lib/db")).db; }'],
   ["import() z szablonem", "export async function f() { return (await import(`@/lib/db`)).db; }"],
   ["require()", 'export const x = require("@/lib/db").db;'],
-  // pkt 5 Olivera: TS `import x = require()` — łapie ją sama no-restricted-imports (osobny test niżej).
+  // pkt 5: TS `import x = require()` — łapie ją sama no-restricted-imports (osobny test niżej).
   ["import x = require()",'import d = require("@/lib/db");\nexport const x = d;'],
 ];
 
@@ -174,7 +174,7 @@ const DB_SYSTEM_FORMS: [string, string][] = [
   ["import x = require()", 'import s = require("@/lib/server/system/db-system");\nexport const x = s;'],
 ];
 
-/** Wymaganie (1) Ethana: własny klient puli (sterownik + adapter drizzle). */
+/** Wymaganie (1): własny klient puli (sterownik + adapter drizzle). */
 const CLIENT_FORMS: [string, string][] = [
   ["postgres", 'import postgres from "postgres";\nexport const c = postgres;'],
   ["drizzle-orm/postgres-js", 'import { drizzle } from "drizzle-orm/postgres-js";\nexport const d = drizzle;'],
@@ -189,7 +189,7 @@ const CLIENT_FORMS: [string, string][] = [
   ["re-eksport", 'export { drizzle } from "drizzle-orm/postgres-js";'],
 ];
 
-describe("pkt 5 Olivera: TS `import x = require()` łapie sama no-restricted-imports", () => {
+describe("pkt 5: TS `import x = require()` łapie sama no-restricted-imports", () => {
   it.each([
     ["db", 'import d = require("@/lib/db");\nexport const x = d;'],
     ["db-system", 'import s = require("@/lib/server/system/db-system");\nexport const x = s;'],
@@ -228,7 +228,7 @@ describe("Z2: każda forma importu puli daje błąd poza listą", () => {
     expect(await isolationErrors(code, SYSTEM_FILE)).toHaveLength(0);
   }, 30_000);
 
-  // Kontrola fałszywej czerwieni (szósty przypadek Leo).
+  // Kontrola fałszywej czerwieni (szósty przypadek z przeglądu).
   it.each([
     ["plik z listy przejściowej", LISTED_ROUTE],
     ["plik z listy z [id] w ścieżce", LISTED_ROUTE_WITH_ID],
@@ -258,7 +258,7 @@ describe("Z2: każda forma importu puli daje błąd poza listą", () => {
   }, 30_000);
 });
 
-describe("wymaganie (1) Ethana: własny klient puli tylko w src/lib/db.ts i system/db-system.ts", () => {
+describe("wymaganie (1): własny klient puli tylko w src/lib/db.ts i system/db-system.ts", () => {
   it.each(CLIENT_FORMS)("%s — nowa trasa, nowy plik src/lib, system/**, plik z listy → błąd", async (_n, code) => {
     for (const file of [NEW_ROUTE, NEW_LIB, SYSTEM_FILE, LISTED_ROUTE, "src/lib/server/repository.ts"]) {
       expect(await isolationErrors(code, file), file).toHaveLength(1);
@@ -278,7 +278,7 @@ describe("wymaganie (1) Ethana: własny klient puli tylko w src/lib/db.ts i syst
     expect(await isolationErrors(DB_SYSTEM_FORMS[0]![1], "src/lib/server/system/db-system.ts")).toHaveLength(0);
   }, 30_000);
 
-  // P0b (decyzja Ethana 16.11): do P6 `dbSystem` to re-eksport `db`, więc wyjątek `db`
+  // P0b (decyzja z 16.11): do P6 `dbSystem` to re-eksport `db`, więc wyjątek `db`
   // ma wyłącznie dosłowny plik db-system.ts. Reszta system/** — nadal zakaz.
   it("P0b: import db w system/db-system.ts → bez błędu; w każdym innym pliku system/** → błąd", async () => {
     const reexport = 'import { db } from "@/lib/db";\nexport const dbSystem: typeof db = db;';
@@ -299,7 +299,7 @@ describe("wymaganie (1) Ethana: własny klient puli tylko w src/lib/db.ts i syst
   });
 });
 
-describe("wymaganie (2) Ethana: plik z wyjątkiem dla db nie wystawia wartości db", () => {
+describe("wymaganie (2): plik z wyjątkiem dla db nie wystawia wartości db", () => {
   const IMPORT = 'import { db } from "@/lib/db";\n';
   it.each([
     ["re-eksport nazwany", 'export { db } from "@/lib/db";'],
@@ -336,7 +336,7 @@ describe("wymaganie (2) Ethana: plik z wyjątkiem dla db nie wystawia wartości 
   }, 120_000);
 });
 
-describe("uwaga Ryana: kod produkcyjny nie importuje plików testowych z src/", () => {
+describe("kod produkcyjny nie importuje plików testowych z src/", () => {
   const TEST_IMPORTS: [string, string][] = [
     ["import z .test", 'import { h } from "./__p0a-helper__.test";\nexport const x = h;'],
     ["import z .spec.tsx", 'import { h } from "@/app/__p0a-helper__.spec.tsx";\nexport const x = h;'],
@@ -371,7 +371,7 @@ describe("uwaga Ryana: kod produkcyjny nie importuje plików testowych z src/", 
   });
 });
 
-describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
+describe("pkt 7 (N1): poziom reguł z konfiguracji wynikowej", () => {
   type RuleEntry = Linter.RuleEntry | undefined;
   const level = (e: RuleEntry) => (Array.isArray(e) ? e[0] : e);
   const regexes = (e: RuleEntry) =>
@@ -427,7 +427,7 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
     ]);
   }, 30_000);
 
-  // B2 (Leo do eb25a47): późniejszy blok z własną regułą dla innego katalogu
+  // B2 (do eb25a47): późniejszy blok z własną regułą dla innego katalogu
   // zastępuje opcje — sprawdzamy KAŻDY plik w src/, nie tylko ścieżki próbne.
   it("każdy plik w src/: poziom i wzorce z konfiguracji wynikowej zgodne z jego klasą", async () => {
     const listed = new Set<string>([...DB_ISOLATION_TRANSITIONAL, ...DB_ISOLATION_PERMANENT]);
@@ -454,7 +454,7 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
         : rel === "src/lib/db.ts"
           ? [DB, SYS, T]
           : rel === "src/lib/server/system/db-system.ts"
-            ? [T] // P0b: do P6 re-eksport `db` (decyzja Ethana 16.11), więc `db: false` tylko tutaj
+            ? [T] // P0b: do P6 re-eksport `db` (decyzja z 16.11), więc `db: false` tylko tutaj
             : listed.has(rel)
               ? [SYS, CLIENT, T]
               : inSystem
@@ -503,7 +503,7 @@ function importsDb(text: string): boolean {
   return importSources(text).some((s) => re.test(s));
 }
 
-describe("B1 (Leo do eb25a47): stałe zbiory plików przypięte", () => {
+describe("B1 (do eb25a47): stałe zbiory plików przypięte", () => {
   it("wyjątek stały, pula systemowa, testy i zakres reguły — dokładne brzmienie", () => {
     // Dopisanie pliku do wyjątków stałych omijałoby zasadę „lista tylko maleje”.
     expect(DB_ISOLATION_PERMANENT).toEqual(["src/lib/server/repository.ts"]);
@@ -531,7 +531,7 @@ describe("Z4: lista przejściowa ⊆ BASELINE (suma i per partia), każda pozycj
 
   it.each(Object.keys(BASELINE).map((k) => [k, k]))("%s ⊆ BASELINE.%s (plik nie przeskakuje między tablicami)", (key) => {
     const moved = (partitions[key] ?? []).filter((f) => !BASELINE[key]!.includes(f));
-    expect(moved, "przeniesienie między partiami = decyzja Ethana i zmiana BASELINE w osobnym commicie").toEqual([]);
+    expect(moved, "przeniesienie między partiami = decyzja CTO i zmiana BASELINE w osobnym commicie").toEqual([]);
   });
 
   it.each([...DB_ISOLATION_TRANSITIONAL, ...DB_ISOLATION_PERMANENT].map((f: string) => [f]))(

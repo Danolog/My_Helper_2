@@ -23,11 +23,11 @@ export const DB_IMPORT_SOURCE_REGEX = "^(@/lib/db|(\\.{1,2}/)+(.*/)?db)(\\.[cm]?
 /** Ścieżka importu puli systemowej (dowolna forma kończąca się na `db-system`). */
 export const DB_SYSTEM_IMPORT_SOURCE_REGEX = "(^|/)db-system(\\.[cm]?[jt]s)?$";
 
-/** Sterownik/klient Postgresa — własny klient puli (wymaganie (1) Ethana do #206). */
+/** Sterownik/klient Postgresa — własny klient puli (wymaganie (1) do #206). */
 export const DB_CLIENT_IMPORT_SOURCE_REGEX =
   "^(postgres|pg|drizzle-orm/(postgres-js|node-postgres|neon-[^/]+)|@neondatabase/serverless)(/.*)?$";
 
-/** Plik testowy (`*.test.*`, `*.spec.*`) — testy w src/ są poza zakazem db, więc kod produkcyjny ich nie importuje (uwaga Ryana do #206). */
+/** Plik testowy (`*.test.*`, `*.spec.*`) — testy w src/ są poza zakazem db, więc kod produkcyjny ich nie importuje (uwaga do #206). */
 export const TEST_FILE_IMPORT_SOURCE_REGEX = "\\.(test|spec)(\\.[cm]?[jt]sx?)?$";
 
 const DB_MESSAGE =
@@ -67,11 +67,11 @@ const DB_SYSTEM_FILE = "src/lib/server/system/db-system.ts";
 
 /**
  * Dług przejściowy (Z3) — wynik reguły bez listy (73 pliki na b3a5faf),
- * podzielony na tablice per partia #193 (decyzja Olivera, P0a pkt 3).
- * Każda strona zmienia WYŁĄCZNIE swoją tablicę (Eva: P5_FILES). Przeniesienie
- * pliku między tablicami = decyzja Ethana + zmiana BASELINE w teście w
- * osobnym commicie. Przydział: zlecenie Ethana §0, §1, §3, §6; P5 wg listy Evy;
- * session.ts → P0 i subscription.ts → P1 (decyzja Ethana).
+ * podzielony na tablice per partia #193 (P0a pkt 3).
+ * Każda partia zmienia WYŁĄCZNIE swoją tablicę (np. P5: P5_FILES). Przeniesienie
+ * pliku między tablicami = decyzja CTO + zmiana BASELINE w teście w
+ * osobnym commicie. Przydział: zlecenie §0, §1, §3, §6; P5 wg osobnej listy;
+ * session.ts → P0 i subscription.ts → P1 (decyzja CTO).
  */
 /** P0b: ustalanie salonu z sesji (w tym requireAdmin), health/diagnostics, adapter Better Auth. */
 export const P0_FILES = [];
@@ -141,7 +141,7 @@ export const P4_FILES = [
   "src/app/api/salons/mine/route.ts",
 ];
 
-/** P5 (Eva): crony, powiadomienia, rejestracja triala, seed, plany, biblioteki powiadomień. */
+/** P5: crony, powiadomienia, rejestracja triala, seed, plany, biblioteki powiadomień. */
 export const P5_FILES = [
   "src/app/api/register-subscription/route.ts",
 ];
@@ -173,7 +173,7 @@ function restrictedSources({ db, dbSystem, client, testFile }) {
 const esq = (src) => src.replaceAll("/", "\\x2F");
 
 /**
- * Wymaganie (2) Ethana do #206: plik z wyjątkiem dla `db` nie wystawia wartości
+ * Wymaganie (2) do #206: plik z wyjątkiem dla `db` nie wystawia wartości
  * `db` dalej (re-eksport, eksport nazwany, `export const x = db`, `export default db`).
  * Eksport typu (`export type …`, `export type { … } from`) przechodzi.
  */
@@ -260,7 +260,7 @@ export function dbIsolationConfig(otherSyntax = []) {
       files: [...DB_ISOLATION_PERMANENT, ...DB_ISOLATION_TRANSITIONAL].map(literalGlob),
       rules: dbIsolationRules({ db: false, dbSystem: true, client: true, testFile: true, exportDb: true }, otherSyntax),
     },
-    // P0b (decyzja Ethana 16.11): do P6 `dbSystem` to re-eksport `db`, więc import `db`
+    // P0b (decyzja z 16.11): do P6 `dbSystem` to re-eksport `db`, więc import `db`
     // wolno WYŁĄCZNIE dosłownemu plikowi db-system.ts (P6: z powrotem `db: true`).
     ...DB_CLIENT_ALLOWED_FILES.map((file) => ({
       files: [literalGlob(file)],
@@ -274,7 +274,7 @@ export function dbIsolationConfig(otherSyntax = []) {
         otherSyntax,
       ),
     })),
-    // Testy w src/ biorą db, ale nie wystawiają go kodowi produkcyjnemu (uwaga Ryana do #206).
+    // Testy w src/ biorą db, ale nie wystawiają go kodowi produkcyjnemu (uwaga do #206).
     {
       files: DB_ISOLATION_TEST_FILES,
       rules: dbIsolationRules({ db: false, dbSystem: false, client: false, exportDb: true }, otherSyntax),
