@@ -6,7 +6,7 @@
  *   `SALON_BOOKING_UNAVAILABLE`,
  * - zapis personelu w takim salonie -> 403 `SUBSCRIPTION_READ_ONLY`,
  * - brak wiersza subskrypcji nie daje pełnego dostępu,
- * - `canceled` zachowuje plan do końca opłaconego okresu.
+ * - `canceled` zachowuje plan do końca okresu zapisanego w wierszu.
  *
  * Stan subskrypcji salonu jest opisany na poziomie bazy (atrapa oddaje wiersze
  * tabeli `salon_subscriptions` po tabeli z `from(...)`), więc test nie zależy
