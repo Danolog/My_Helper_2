@@ -212,7 +212,7 @@ describe("GET /api/subscriptions/expiration-warning — odpowiedzi poza ścieżk
     mockRequireAuth.mockResolvedValueOnce(NextResponse.json({ error: "Unauthorized" }, { status: 401 }));
 
     expect((await callGet()).status).toBe(401);
-    expect(h.state.queries).toEqual([]);
+    expect(h.state.log).toEqual([]);
   });
 
   it("getUserSalonId zwraca null → 404 „Salon not found” bez zapytań do bazy", async () => {
@@ -222,7 +222,7 @@ describe("GET /api/subscriptions/expiration-warning — odpowiedzi poza ścieżk
 
     expect(status).toBe(404);
     expect(body).toEqual({ success: false, error: "Salon not found" });
-    expect(h.state.queries).toEqual([]);
+    expect(h.state.log).toEqual([]);
   });
 
   it("brak aktywnej subskrypcji → 200 z data: null i bez zapytania do notifications", async () => {
