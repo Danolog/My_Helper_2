@@ -4,19 +4,34 @@ import { AlertTriangle, Timer, CreditCard, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TRIAL_DAYS } from "@/lib/constants";
 import { planOnSaleOr } from "@/lib/plan-catalog";
+import { planPriceText } from "@/lib/plan-price";
 import { formatDate } from "../_types";
-import type { SubscriptionData, PlanData } from "../_types";
+import type { SubscriptionData, PlanData, AllPlansMap } from "../_types";
 
 interface TrialNoticeProps {
   subscription: SubscriptionData;
   plan: PlanData;
+  allPlans: AllPlansMap;
   changePlanLoading: boolean;
   onChangePlan: (slug: string) => Promise<void>;
+}
+
+/** planPriceText(price), or null when price is missing or cannot be formatted. */
+function priceTextOrNull(price: string | undefined): string | null {
+  if (price === undefined) {
+    return null;
+  }
+  try {
+    return planPriceText(price);
+  } catch {
+    return null;
+  }
 }
 
 export function TrialNotice({
   subscription,
   plan,
+  allPlans,
   changePlanLoading,
   onChangePlan,
 }: TrialNoticeProps) {
@@ -39,6 +54,8 @@ export function TrialNotice({
     Math.max(0, ((totalTrialDays - daysRemaining) / totalTrialDays) * 100),
   );
   const isNearEnd = daysRemaining <= 3;
+  const soldSlug = planOnSaleOr(plan.slug);
+  const soldPriceText = priceTextOrNull(allPlans[soldSlug]?.priceMonthly);
 
   return (
     <div
@@ -124,7 +141,7 @@ export function TrialNotice({
       <div className="flex items-center gap-3 mt-1">
         <Button
           size="sm"
-          onClick={() => onChangePlan(planOnSaleOr(plan.slug))}
+          onClick={() => onChangePlan(soldSlug)}
           disabled={changePlanLoading}
           className={
             isNearEnd ? "bg-amber-600 hover:bg-amber-700 text-white" : ""
@@ -137,12 +154,13 @@ export function TrialNotice({
           )}
           Wykup subskrypcje
         </Button>
-        <span
-          className={`text-xs ${isNearEnd ? "text-amber-600 dark:text-amber-300" : "text-blue-600 dark:text-blue-300"}`}
-        >
-          {parseFloat(plan.priceMonthly).toFixed(0)} PLN / miesiac po okresie
-          probnym
-        </span>
+        {soldPriceText && (
+          <span
+            className={`text-xs ${isNearEnd ? "text-amber-600 dark:text-amber-300" : "text-blue-600 dark:text-blue-300"}`}
+          >
+            {soldPriceText} / miesiac po okresie probnym
+          </span>
+        )}
       </div>
     </div>
   );
