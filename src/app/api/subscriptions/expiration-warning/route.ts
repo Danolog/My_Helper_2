@@ -181,12 +181,12 @@ export async function POST(request: Request) {
 
     const now = new Date();
 
-    // T3b: odczyt „active” pod blokadą salonu — trasa pod blokadą tylko czyta,
+    // Odczyt „active” pod blokadą salonu — trasa pod blokadą tylko czyta,
     // nie zapisuje salon_subscriptions (także przy simulate).
     let locked;
     try {
       locked = await withSalonSubscriptionLock(salonId, async (tx) => {
-        // Find active subscriptions near expiry
+        // Find the active subscription of the session's salon
         const [activeSub] = await tx
           .select({
             subscription: salonSubscriptions,
