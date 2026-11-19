@@ -48,6 +48,17 @@ export type ExpirationData = {
   }>;
 };
 
+/**
+ * Access state computed by the server (`access` in the current subscription
+ * response). `until` is the end of full access as an ISO string, or null.
+ */
+export type AccessData = {
+  state: string;
+  mode: "full" | "read_only";
+  planSlug: string | null;
+  until: string | null;
+};
+
 /** Format a date string to Polish locale (e.g. "15 marca 2026") */
 export function formatDate(dateStr: string | null): string {
   if (!dateStr) return "-";
@@ -79,6 +90,52 @@ export function cancelSuccessDescription(
     return `Dostep do planu jest aktywny do ${formatDate(currentPeriodEnd)}. Subskrypcja nie zostanie odnowiona.`;
   }
   return "Subskrypcja nie zostanie odnowiona.";
+}
+
+/** Label of the period end tile on the plan card for a subscription status. */
+export function periodEndLabel(status: string): string {
+  switch (status) {
+    case "trialing":
+      return "Koniec okresu probnego";
+    case "canceled":
+    case "past_due":
+      return "Koniec okresu";
+    default:
+      return "Nastepna platnosc";
+  }
+}
+
+/**
+ * Canceled subscription notice. The "access active until <date>" sentence
+ * appears only when the server reports full access in the `canceled` state
+ * with an end date; otherwise there is no statement about access.
+ */
+export function canceledNoticeText(
+  canceledAt: string | null,
+  access: AccessData | null,
+): string {
+  const parts = [
+    canceledAt
+      ? `Anulowano: ${formatDate(canceledAt)}.`
+      : "Twoja subskrypcja zostala anulowana.",
+  ];
+  if (access?.state === "canceled" && access.mode === "full" && access.until) {
+    parts.push(`Dostep do funkcji planu jest aktywny do ${formatDate(access.until)}.`);
+  }
+  parts.push("Mozesz w kazdej chwili ponownie aktywowac plan.");
+  return parts.join(" ");
+}
+
+/**
+ * Past due notice. The "access active until <date>" sentence appears only
+ * when the server reports full access in the `past_due` state with an end date.
+ */
+export function pastDueNoticeText(access: AccessData | null): string {
+  const text = "Ostatnia platnosc nie powiodla sie.";
+  if (access?.state === "past_due" && access.mode === "full" && access.until) {
+    return `${text} Dostep do funkcji planu jest aktywny do ${formatDate(access.until)}.`;
+  }
+  return text;
 }
 
 /** Map subscription status to a Polish label */

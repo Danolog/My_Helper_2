@@ -47,7 +47,8 @@ function toAccessRow(source: SubscriptionWithPlan): AccessRow {
  *     wiersz), effectivePlanSlug, access: { state, mode, planSlug, until } }
  *
  * `plan` opisuje plan wybranego wiersza. `access` — stan dostępu wyliczony
- * tą samą regułą co bramki serwerowe; informacyjny — panel go nie czyta.
+ * tą samą regułą co bramki serwerowe; karta planu w panelu bierze z niego
+ * termin dostępu dla anulowanej i zaległej subskrypcji.
  * Liczy go `resolveSalonAccess` na tych samych wierszach. `effectivePlanSlug`
  * to plan przy pełnym dostępie, inaczej "basic" (np. trial po terminie albo
  * `canceled` po końcu okresu). UI decyduje o funkcjach Pro wyłącznie na podstawie
