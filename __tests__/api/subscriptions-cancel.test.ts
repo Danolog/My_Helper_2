@@ -7,10 +7,16 @@
  * pobierał opłaty, a salon tracił plan na zawsze (`canceled` końcowe).
  *
  * Kontrakt:
- * - prawdziwa subskrypcja Stripe: `cancel_at_period_end: true` w Stripe pod
- *   blokadą stripe_sub, potem blokada salonu i zapis `canceled` bez pól
- *   okresu (okres Stripe tylko w logu) — tylko gdy odpowiedź Stripe
- *   potwierdza anulowanie,
+ * - prawdziwa subskrypcja Stripe: `cancel_at_period_end: true` (z rozwiniętym
+ *   `latest_invoice`) w Stripe pod blokadą stripe_sub, potem blokada salonu
+ *   i zapis `canceled` — tylko gdy odpowiedź Stripe potwierdza anulowanie;
+ *   okres subskrypcji Stripe tylko w logu,
+ * - `latest_invoice` opłacona (`status: "paid"`) z linią o dodatniej długości
+ *   okresu → zapis dostaje też pola okresu z wartością
+ *   `paidPeriodStartSql(okres)` / `paidPeriodEndSql(okres)`, okres z
+ *   `paidInvoicePeriod(faktura)` (moduł atrapowany: atrapa zwraca znacznik
+ *   z okresem, z którym ją wywołano); faktura nieopłacona, nierozwinięta
+ *   albo bez takiej linii → zapis bez pól okresu,
  * - błąd Stripe albo brak potwierdzenia → 502, zero zapisów,
  * - Stripe nieskonfigurowany przy prawdziwej subskrypcji → 503, zero zapisów,
  * - bez prawdziwej subskrypcji (null, `sim_*`) → tylko blokada salonu, zapis lokalny,
@@ -47,9 +53,32 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("@/lib/stripe", () => ({
   getStripe: (...a: unknown[]) => mockGetStripe(...a),
 }));
+vi.mock("@/lib/subscription-paid-period", () => {
+  const marker = (fn: string) => (period: { start: Date; end: Date }) => ({
+    [fn]: { start: period.start.toISOString(), end: period.end.toISOString() },
+  });
+  return { paidPeriodStartSql: marker("paidPeriodStartSql"), paidPeriodEndSql: marker("paidPeriodEndSql") };
+});
 
 const PERIOD_START = 1783296000;
 const PERIOD_END = 1785888000;
+
+// Okres opłaconej faktury (2026-07-01 → 2026-08-01), inny niż okres subskrypcji Stripe powyżej.
+const INVOICE_START = 1782864000;
+const INVOICE_END = 1785542400;
+const INVOICE_PERIOD = {
+  start: new Date(INVOICE_START * 1000).toISOString(),
+  end: new Date(INVOICE_END * 1000).toISOString(),
+};
+const PAID_PERIOD_FIELDS = {
+  currentPeriodStart: { paidPeriodStartSql: INVOICE_PERIOD },
+  currentPeriodEnd: { paidPeriodEndSql: INVOICE_PERIOD },
+};
+const PAID_INVOICE = {
+  id: "in_1",
+  status: "paid",
+  lines: { data: [{ period: { start: INVOICE_START, end: INVOICE_END } }], has_more: false },
+};
 
 const ACTIVE = {
   id: "sub-local",
@@ -93,7 +122,7 @@ beforeEach(() => {
 });
 
 describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () => {
-  it("200: Stripe potwierdza cancel_at_period_end → canceled bez pól okresu (okres w wierszu bez zmian), kolejność blokad stripe_sub → Stripe → salon", async () => {
+  it("200: Stripe potwierdza cancel_at_period_end, odpowiedź bez latest_invoice → canceled bez pól okresu (okres w wierszu bez zmian), kolejność blokad stripe_sub → Stripe → salon", async () => {
     f.selects.push([ACTIVE], [ACTIVE]);
 
     const { status, body } = await cancel();
@@ -101,7 +130,11 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
     expect(status).toBe(200);
     expect(body).toEqual(expect.objectContaining({ success: true, stripeCanceled: true }));
     expect(body).not.toHaveProperty("stripeError");
-    expect(mockUpdate).toHaveBeenCalledWith("sub_1", { cancel_at_period_end: true }, STRIPE_LOCKED_READ_OPTIONS);
+    expect(mockUpdate).toHaveBeenCalledWith(
+      "sub_1",
+      { cancel_at_period_end: true, expand: ["latest_invoice"] },
+      STRIPE_LOCKED_READ_OPTIONS,
+    );
     expect(subWrites()).toEqual([
       expect.objectContaining({
         op: "update",
@@ -245,6 +278,224 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
     expect(status).toBe(500);
     expect(f.committed).toEqual([]);
     expect(f.state.rolledBack).toBe(1);
+  });
+});
+
+describe("POST /api/subscriptions/cancel — okres z latest_invoice", () => {
+  function stripeReturns(latestInvoice: unknown, overrides: Record<string, unknown> = {}) {
+    mockUpdate.mockImplementation(async () => {
+      f.log.push("stripe.update");
+      return { ...STRIPE_CANCELED_AT_PERIOD_END, latest_invoice: latestInvoice, ...overrides };
+    });
+  }
+  const periodWrite = () => subWrites()[0]?.values;
+  const paymentWrites = () => f.committed.filter((w) => w.table === "subscription_payments");
+
+  it("Stripe dostaje cancel_at_period_end: true, expand: [\"latest_invoice\"] i opcje odczytu pod blokadą", async () => {
+    stripeReturns(PAID_INVOICE);
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    await cancel();
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate).toHaveBeenCalledWith(
+      "sub_1",
+      { cancel_at_period_end: true, expand: ["latest_invoice"] },
+      STRIPE_LOCKED_READ_OPTIONS,
+    );
+  });
+
+  it("200: faktura paid z linią [start, end] → zapis canceled z paidPeriodStartSql/paidPeriodEndSql wołanymi z okresem tej linii", async () => {
+    stripeReturns(PAID_INVOICE);
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    const { status } = await cancel();
+
+    expect(status).toBe(200);
+    expect(subWrites()).toHaveLength(1);
+    expect(periodWrite()).toEqual(
+      expect.objectContaining({ status: "canceled", canceledAt: expect.any(Date), ...PAID_PERIOD_FIELDS }),
+    );
+  });
+
+  it("200: faktura open → zapis canceled bez pól okresu", async () => {
+    stripeReturns({ ...PAID_INVOICE, status: "open" });
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    const { status } = await cancel();
+
+    expect(status).toBe(200);
+    expect(periodWrite()).toEqual(expect.objectContaining({ status: "canceled" }));
+    expect(periodWrite()).not.toHaveProperty("currentPeriodStart");
+    expect(periodWrite()).not.toHaveProperty("currentPeriodEnd");
+  });
+
+  it.each([
+    ["string (nierozwinięta)", "in_1"],
+    ["null", null],
+  ])("200: latest_invoice = %s → zapis bez pól okresu + warn", async (_n, latestInvoice) => {
+    stripeReturns(latestInvoice);
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    const { status } = await cancel();
+
+    expect(status).toBe(200);
+    expect(periodWrite()).toEqual(expect.objectContaining({ status: "canceled" }));
+    expect(periodWrite()).not.toHaveProperty("currentPeriodStart");
+    expect(periodWrite()).not.toHaveProperty("currentPeriodEnd");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Latest invoice not available"),
+      expect.objectContaining({ subscriptionId: "sub-local", stripeSubscriptionId: "sub_1" }),
+    );
+  });
+
+  it.each([
+    ["bez linii", { data: [] }],
+    ["tylko linia o zerowej długości okresu", { data: [{ period: { start: INVOICE_END, end: INVOICE_END } }] }],
+  ])("200: faktura paid %s → zapis bez pól okresu + warn", async (_n, lines) => {
+    stripeReturns({ ...PAID_INVOICE, lines });
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    const { status } = await cancel();
+
+    expect(status).toBe(200);
+    expect(periodWrite()).toEqual(expect.objectContaining({ status: "canceled" }));
+    expect(periodWrite()).not.toHaveProperty("currentPeriodStart");
+    expect(periodWrite()).not.toHaveProperty("currentPeriodEnd");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("without a billing period"),
+      expect.objectContaining({ subscriptionId: "sub-local" }),
+    );
+  });
+
+  it("200: linia jednorazowa (później) + linia okresu → okres z linii okresu", async () => {
+    const oneOff = INVOICE_END + 86400;
+    stripeReturns({
+      ...PAID_INVOICE,
+      lines: {
+        data: [{ period: { start: oneOff, end: oneOff } }, { period: { start: INVOICE_START, end: INVOICE_END } }],
+      },
+    });
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    await cancel();
+
+    expect(periodWrite()).toEqual(expect.objectContaining(PAID_PERIOD_FIELDS));
+  });
+
+  it("200: Stripe canceled (bez cancel_at_period_end) + faktura paid → okres zapisany", async () => {
+    stripeReturns(PAID_INVOICE, { status: "canceled", cancel_at_period_end: false });
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    const { status } = await cancel();
+
+    expect(status).toBe(200);
+    expect(periodWrite()).toEqual(expect.objectContaining({ status: "canceled", ...PAID_PERIOD_FIELDS }));
+  });
+
+  it("502: Stripe nie potwierdza anulowania przy fakturze paid → zero zapisów", async () => {
+    stripeReturns(PAID_INVOICE, { cancel_at_period_end: false });
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    const { status } = await cancel();
+
+    expect(status).toBe(502);
+    expect(f.committed).toEqual([]);
+  });
+
+  it("odpowiedź oddaje currentPeriodEnd z wiersza zwróconego przez zapis (returning)", async () => {
+    stripeReturns(PAID_INVOICE);
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    const { body } = await cancel();
+
+    expect((body.subscription as Record<string, unknown>).currentPeriodEnd).toEqual(
+      PAID_PERIOD_FIELDS.currentPeriodEnd,
+    );
+  });
+
+  it("faktura paid → brak zapisu do subscription_payments (żadnego insertu)", async () => {
+    stripeReturns(PAID_INVOICE);
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    await cancel();
+
+    expect(paymentWrites()).toEqual([]);
+    expect(f.log.filter((op) => op.startsWith("insert:"))).toEqual([]);
+  });
+
+  it("faktura paid → kolejność: stripe_sub → stripe.update → salon → update", async () => {
+    stripeReturns(PAID_INVOICE);
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    await cancel();
+
+    expect(f.log).toEqual([
+      "select",
+      "lock_timeout",
+      "lock:stripe_sub:sub_1",
+      "select",
+      "stripe.update",
+      "lock:salon:salon-1",
+      "update:salon_subscriptions",
+      "commit",
+    ]);
+  });
+
+  it("koniec opłaconego okresu późniejszy niż w wierszu pod blokadą → log info „Paid period ahead of row”", async () => {
+    stripeReturns(PAID_INVOICE);
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    await cancel();
+
+    expect(logger.info).toHaveBeenCalledWith("Paid period ahead of row", {
+      subscriptionId: "sub-local",
+      stripeSubscriptionId: "sub_1",
+      paidPeriodEnd: INVOICE_PERIOD.end,
+      rowPeriodEnd: ACTIVE.currentPeriodEnd.toISOString(),
+    });
+  });
+
+  it("koniec opłaconego okresu równy końcowi w wierszu pod blokadą → bez logu „Paid period ahead of row”, pola okresu w zapisie", async () => {
+    const row = { ...ACTIVE, currentPeriodEnd: new Date(INVOICE_END * 1000) };
+    stripeReturns(PAID_INVOICE);
+    f.selects.push([row], [row]);
+
+    await cancel();
+
+    expect(logger.info).not.toHaveBeenCalledWith("Paid period ahead of row", expect.anything());
+    expect(periodWrite()).toEqual(expect.objectContaining(PAID_PERIOD_FIELDS));
+  });
+
+  it("faktura paid z lines.has_more → warn, okres z obecnych linii", async () => {
+    stripeReturns({ ...PAID_INVOICE, lines: { ...PAID_INVOICE.lines, has_more: true } });
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    await cancel();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("line list incomplete"),
+      expect.objectContaining({ subscriptionId: "sub-local", linesHasMore: true }),
+    );
+    expect(periodWrite()).toEqual(expect.objectContaining(PAID_PERIOD_FIELDS));
+  });
+
+  it.each([
+    ["null", null],
+    ["sim_*", "sim_sub_1"],
+  ])("stripeSubscriptionId = %s → zapis bez obu pól okresu, Stripe nie wołany", async (_n, id) => {
+    const row = { ...ACTIVE, stripeSubscriptionId: id };
+    f.selects.push([row], [row]);
+
+    const { status } = await cancel();
+
+    expect(status).toBe(200);
+    expect(mockGetStripe).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(periodWrite()).toEqual(expect.objectContaining({ status: "canceled" }));
+    expect(periodWrite()).not.toHaveProperty("currentPeriodStart");
+    expect(periodWrite()).not.toHaveProperty("currentPeriodEnd");
+    expect(paymentWrites()).toEqual([]);
   });
 });
 

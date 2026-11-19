@@ -13,10 +13,15 @@
  * Kontrakt okresu: `currentPeriodStart` / `currentPeriodEnd` to ostatni
  * opłacony okres, a w subskrypcji w okresie próbnym — okres próbny. W treści
  * `.set(…)`/`.values(…)` występują tylko w potwierdzeniu Checkoutu,
- * w rejestracji (okres próbny) i w webhooku — tam wyłącznie w
- * `handleInvoicePaid`, z wartością `paidPeriodStartSql(…)` /
- * `paidPeriodEndSql(…)`. Obie funkcje są zdefiniowane wyłącznie w
- * `src/lib/subscription-paid-period.ts`. Typ `SubscriptionStateUpdate` (zapis `.set(state)`)
+ * w rejestracji (okres próbny), w webhooku — tam wyłącznie w
+ * `handleInvoicePaid` — i w trasie anulowania. W webhooku i w trasie
+ * anulowania pole okresu ma wartość `paidPeriodStartSql(…)` /
+ * `paidPeriodEndSql(…)`; w trasie anulowania argument tych wywołań to
+ * zmienna przypisywana tylko z `null` albo `paidInvoicePeriod(…)`, a przed
+ * tym przypisaniem w pliku stoi warunek `.status === "paid"`. Obie funkcje są
+ * zdefiniowane wyłącznie w `src/lib/subscription-paid-period.ts`, a napis
+ * w cudzysłowie kończący się na `subscription-paid-period` (ścieżka modułu)
+ * występuje poza samym modułem tylko w plikach z listy zapisujących okres. Typ `SubscriptionStateUpdate` (zapis `.set(state)`)
  * nie obejmuje pól okresu, a surowy SQL poza schematem nie używa nazw kolumn
  * okresu.
  *
@@ -164,7 +169,8 @@ describe("niezmiennik T3b: zapisy salon_subscriptions tylko w transakcji z bloka
 });
 
 const WEBHOOK = "src/app/api/stripe/webhook/route.ts";
-const PERIOD_WRITERS = [ALLOWED_WRITER, WEBHOOK, "src/app/api/register-subscription/route.ts"];
+const CANCEL = "src/app/api/subscriptions/cancel/route.ts";
+const PERIOD_WRITERS = [ALLOWED_WRITER, WEBHOOK, "src/app/api/register-subscription/route.ts", CANCEL];
 const PAID_PERIOD_MODULE = "src/lib/subscription-paid-period.ts";
 const hasPeriodField = (text: string) => /\bcurrentPeriod(?:Start|End)\b/.test(text);
 
@@ -183,20 +189,20 @@ function resolvedPayload(w: SubscriptionWrite): string {
   return [w.payload, ...literals].join("\n");
 }
 
-describe("kontrakt: okres rozliczeniowy (currentPeriodStart/End) zapisują tylko potwierdzenie, invoice.paid i rejestracja", () => {
+describe("kontrakt: okres rozliczeniowy (currentPeriodStart/End) zapisują tylko potwierdzenie, invoice.paid, anulowanie (wartość z tych samych funkcji co invoice.paid) i rejestracja", () => {
   const writes = subscriptionWrites();
   const periodWrites = writes.filter((w) => hasPeriodField(resolvedPayload(w)));
   const periodFiles = [...new Set(periodWrites.map((w) => w.file))];
 
-  it("pola currentPeriodStart/currentPeriodEnd w treści set/values występują tylko w potwierdzeniu, webhooku i rejestracji", () => {
+  it("pola currentPeriodStart/currentPeriodEnd w treści set/values występują tylko w potwierdzeniu, webhooku, trasie anulowania i rejestracji", () => {
     expect(periodFiles.filter((file) => !PERIOD_WRITERS.includes(file))).toEqual([]);
   });
 
-  it("kontrakt nie jest pusty: zapis pola okresu jest w każdym z trzech dozwolonych plików", () => {
+  it("kontrakt nie jest pusty: zapis pola okresu jest w każdym z czterech dozwolonych plików", () => {
     expect(PERIOD_WRITERS.filter((file) => !periodFiles.includes(file))).toEqual([]);
   });
 
-  it("w webhooku każdy zapis z polem okresu leży w handleInvoicePaid, a pole okresu ma wartość tylko z paidPeriodStartSql( / paidPeriodEndSql(", () => {
+  it("w webhooku i w trasie anulowania pole okresu w treści zapisu ma wartość tylko z paidPeriodStartSql( / paidPeriodEndSql(; w webhooku każdy zapis z polem okresu leży w handleInvoicePaid", () => {
     const text = readSource(WEBHOOK);
     const fn = text.indexOf("async function handleInvoicePaid(");
     expect(fn).toBeGreaterThan(-1);
@@ -209,7 +215,9 @@ describe("kontrakt: okres rozliczeniowy (currentPeriodStart/End) zapisują tylko
     const outside = webhookPeriodWrites.filter((w) => w.index < bodyOpen || w.index > bodyEnd);
     expect(outside.map((w) => w.payload.trim())).toEqual([]);
 
-    const badValues = webhookPeriodWrites.flatMap((w) =>
+    const sqlValueWrites = periodWrites.filter((w) => w.file === WEBHOOK || w.file === CANCEL);
+    expect(sqlValueWrites.some((w) => w.file === CANCEL)).toBe(true);
+    const badValues = sqlValueWrites.flatMap((w) =>
       [...resolvedPayload(w).matchAll(/\bcurrentPeriod(?:Start|End)\b[^,\n}]*/g)]
         .map((m) => m[0])
         .filter(
@@ -235,6 +243,39 @@ describe("kontrakt: okres rozliczeniowy (currentPeriodStart/End) zapisują tylko
     const paramsOpen = text.indexOf("(", fn);
     const bodyOpen = text.indexOf("{", paramsOpen + balanced(text, paramsOpen).length + 2);
     expect(balanced(text, bodyOpen, "{}")).toContain("greatest(");
+  });
+
+  it('w trasie anulowania argument paidPeriodStartSql( / paidPeriodEndSql( w treści zapisu to zmienna, której każde przypisanie w pliku to null albo paidInvoicePeriod(; przed każdym przypisaniem z paidInvoicePeriod( w pliku stoi .status === "paid"; w treści zapisu nie ma stripeSubscriptionPeriod(', () => {
+    const text = readSource(CANCEL);
+    const payloads = periodWrites.filter((w) => w.file === CANCEL).map(resolvedPayload);
+    expect(payloads.length).toBeGreaterThan(0);
+    expect(payloads.filter((p) => p.includes("stripeSubscriptionPeriod("))).toEqual([]);
+
+    const args = [
+      ...new Set(payloads.flatMap((p) => [...p.matchAll(/\bpaidPeriod(?:Start|End)Sql\(([^)]*)\)/g)].map((m) => m[1]!.trim()))),
+    ];
+    expect(args.length).toBeGreaterThan(0);
+    for (const arg of args) {
+      expect(arg).toMatch(/^[A-Za-z_$][\w$]*$/);
+      const assignments = [
+        ...text.matchAll(new RegExp(`\\b${arg}\\b\\s*(?::[^=;\\n]+)?=(?![=>])\\s*([^;\\n]+)`, "g")),
+      ].map((m) => ({ value: m[1]!.trim(), index: m.index }));
+      expect(assignments.filter((a) => a.value !== "null" && !a.value.startsWith("paidInvoicePeriod("))).toEqual([]);
+      const fromInvoice = assignments.filter((a) => a.value.startsWith("paidInvoicePeriod("));
+      expect(fromInvoice.length, arg).toBeGreaterThan(0);
+      for (const a of fromInvoice) {
+        expect(text.lastIndexOf('.status === "paid"', a.index), a.value).toBeGreaterThan(-1);
+      }
+    }
+  });
+
+  it("każdy plik w src/ poza samym modułem, w którym jest napis w cudzysłowie kończący się na subscription-paid-period, jest na liście PERIOD_WRITERS", () => {
+    const importers = sourceFiles(SRC)
+      .map((p) => relative(ROOT, p))
+      .filter((file) => file !== PAID_PERIOD_MODULE)
+      .filter((file) => /["'`][^"'`\n]*subscription-paid-period(?:\.ts)?["'`]/.test(readSource(file)));
+    expect(importers).toEqual(expect.arrayContaining([WEBHOOK, CANCEL]));
+    expect(importers.filter((file) => !PERIOD_WRITERS.includes(file))).toEqual([]);
   });
 
   it("treść zapisu, która nie jest literałem obiektu, to tylko `state` w webhooku albo zapis w potwierdzeniu", () => {
