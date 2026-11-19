@@ -12,7 +12,7 @@
  * po zweryfikowanej płatności (payment_status === "paid").
  * Stripe niedostępny → 503, błąd Stripe → 502, w obu przypadkach zero zapisów.
  *
- * Kontrakt wejścia (PR #32 d) = body z UI: `{ planSlug }` z
+ * Kontrakt wejścia = body z UI: `{ planSlug }` z
  * src/app/(site)/pricing/page.tsx i
  * src/app/dashboard/subscription/_hooks/use-subscription-data.ts.
  * Salon wyłącznie z sesji — `salonId` w body nie jest częścią kontraktu.
@@ -231,7 +231,7 @@ describe("POST /api/subscriptions/checkout", () => {
     mockTransaction.mockReset();
     mockRequireAuth
       .mockReset()
-      .mockResolvedValue({ user: { id: "user-1", email: "wlasciciel@test.pl" } });
+      .mockResolvedValue({ user: { id: "user-1", email: "wlasciciel@example.com" } });
     mockIsAuthError.mockReset().mockReturnValue(false);
     mockGetUserSalonId.mockReset().mockResolvedValue("salon-1");
     mockGetStripe.mockReset().mockReturnValue(null);
@@ -296,7 +296,7 @@ describe("POST /api/subscriptions/checkout", () => {
     });
   });
 
-  // T3b: ten sam predykat konfliktu co confirm (`isCurrentPaidStripeRow`) —
+  // Ten sam predykat konfliktu co confirm (`isCurrentPaidStripeRow`) —
   // klient dowiaduje się o konflikcie PRZED pobraniem pieniędzy.
   describe("(e) predykat konfliktu jak w confirm: trialing z prawdziwą subskrypcją Stripe", () => {
     it("trial prowadzony przez Stripe (prawdziwe id), inny plan: 409 PLAN_CHANGE_UNSUPPORTED, bez sesji Stripe", async () => {
@@ -605,7 +605,7 @@ describe("POST /api/subscriptions/checkout", () => {
         url: "https://checkout.stripe.com/c/pay/cs_test_1",
       });
       const params = mockSessionsCreate.mock.calls[0]![0];
-      expect(params.customer_email).toBe("wlasciciel@test.pl");
+      expect(params.customer_email).toBe("wlasciciel@example.com");
       expect(params.success_url).toContain("/dashboard/subscription/success?session_id=");
       expectNoWrites();
     });
@@ -677,7 +677,7 @@ describe("POST /api/subscriptions/checkout", () => {
       const res = await POST(checkoutRequest("basic"));
       const body = await res.json();
 
-      // Bez Stripe: 503 z #36, a nie 400 ze schematu.
+      // Bez Stripe: 503 STRIPE_UNAVAILABLE, a nie 400 ze schematu.
       expect(res.status).toBe(503);
       expect(body.code).toBe("STRIPE_UNAVAILABLE");
       expectNoWrites();
@@ -800,7 +800,7 @@ describe("POST /api/subscriptions/checkout", () => {
         "https://app.example.test/dashboard/subscription/success?session_id={CHECKOUT_SESSION_ID}",
       );
       expect(params.cancel_url).toBe("https://app.example.test/pricing");
-      expect(params.customer_email).toBe("wlasciciel@test.pl");
+      expect(params.customer_email).toBe("wlasciciel@example.com");
       expect(params.metadata).toEqual({
         salonId: "salon-1",
         planId: PLAN_BASIC.id,
@@ -854,7 +854,7 @@ describe("POST /api/subscriptions/checkout", () => {
         "https://app.example.test/dashboard/subscription/success?session_id={CHECKOUT_SESSION_ID}",
       );
       expect(params.cancel_url).toBe("https://app.example.test/pricing");
-      expect(params.customer_email).toBe("wlasciciel@test.pl");
+      expect(params.customer_email).toBe("wlasciciel@example.com");
       expect(params.metadata).toEqual({
         salonId: "salon-1",
         planId: plan.id,
