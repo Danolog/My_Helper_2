@@ -43,10 +43,10 @@ describe("ProPlanGate — plan efektywny", () => {
     global.fetch = mockFetch as unknown as typeof fetch;
   });
 
-  it("zapisany Pro, efektywny Basic (trial po terminie): ekran Tylko Plan Pro, bez treści Pro", async () => {
+  it("zapisany Pro, efektywny Basic (trial po terminie): komunikat o niedostępności funkcji AI, bez treści Pro", async () => {
     mockFetch.mockResolvedValueOnce(currentResponse("basic"));
     renderGate();
-    await waitFor(() => expect(screen.getByText("Tylko Plan Pro")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Funkcje AI nie są jeszcze dostępne w Twoim planie.")).toBeTruthy());
     expect(screen.queryByTestId("pro-content")).toBeNull();
     expect(mockFetch).toHaveBeenCalledWith("/api/subscriptions/current", { cache: "no-store" });
   });
@@ -55,6 +55,6 @@ describe("ProPlanGate — plan efektywny", () => {
     mockFetch.mockResolvedValueOnce(currentResponse("pro"));
     renderGate();
     await waitFor(() => expect(screen.getByTestId("pro-content")).toBeTruthy());
-    expect(screen.queryByText("Tylko Plan Pro")).toBeNull();
+    expect(screen.queryByText("Funkcje AI nie są jeszcze dostępne w Twoim planie.")).toBeNull();
   });
 });

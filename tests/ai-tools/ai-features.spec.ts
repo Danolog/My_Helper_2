@@ -108,7 +108,7 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
       const chatInput = page.locator(
         'textarea, input[type="text"][placeholder*="pytanie"], input[placeholder*="wpisz"], input[placeholder*="message"]'
       ).first();
-      const proGate = page.getByText(/wymaga planu pro|plan pro|upgrade/i).first();
+      const proGate = page.getByText('Funkcje AI nie są jeszcze dostępne w Twoim planie.');
 
       await expect(
         chatInput.or(proGate).first()
@@ -120,13 +120,15 @@ test.describe('Flow 6: AI Tools (Pro Plan)', () => {
 
   test.describe('Error path', () => {
     test('should show Pro plan gate for Basic plan users', { tag: '@full' }, async ({ page }) => {
-      // If user is on Basic plan, AI features should show upgrade prompt
+      // If user is on Basic plan, AI features should show the gate message
       await page.goto('/dashboard/ai-assistant/business');
       await page.waitForLoadState('domcontentloaded');
 
-      // Should either show chat (Pro user) or upgrade gate (Basic user)
+      // Should either show chat (Pro user) or the gate message (Basic user)
       await expect(
-        page.getByText(/czat|chat|pro|upgrade|wymaga/i).first()
+        page.getByText(/czat|chat/i).first()
+          .or(page.getByText('Funkcje AI nie są jeszcze dostępne w Twoim planie.'))
+          .first()
       ).toBeVisible({ timeout: 5000 });
     });
 
