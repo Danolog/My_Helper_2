@@ -10,8 +10,11 @@
  * Kontrakt po poprawce: endpoint nigdy nie zapisuje subskrypcji ani płatności.
  * Tworzy tylko sesję Stripe Checkout; subskrypcję zapisuje /api/subscriptions/confirm
  * po zweryfikowanej płatności (payment_status === "paid").
- * Stripe nieskonfigurowany albo błąd odczytu subskrypcji w Stripe → 503, błąd
- * tworzenia sesji Checkout → 502, w każdym z tych przypadków zero zapisów.
+ * Stripe nieskonfigurowany, brak identyfikatora ceny Stripe kupowanego planu na
+ * hostingu (VERCEL=1 albo K_SERVICE) albo błąd odczytu subskrypcji w Stripe → 503,
+ * błąd tworzenia sesji Checkout → 502, w każdym z tych przypadków zero zapisów.
+ * Zmienne VERCEL, K_SERVICE, STRIPE_PRICE_BASIC i STRIPE_PRICE_PRO są w każdym
+ * przypadku ustawione jawnie (domyślnie puste).
  *
  * Kontrakt wejścia = body z UI: `{ planSlug }` z
  * src/app/(site)/pricing/page.tsx i
@@ -39,7 +42,6 @@ const {
   mockIsAuthError,
   mockGetUserSalonId,
   mockGetStripe,
-  mockIsStripePricesConfigured,
   mockSessionsCreate,
   mockSubscriptionsRetrieve,
   mockRateLimitCheck,
@@ -60,7 +62,6 @@ const {
   mockIsAuthError: vi.fn(),
   mockGetUserSalonId: vi.fn(),
   mockGetStripe: vi.fn(),
-  mockIsStripePricesConfigured: vi.fn(),
   mockSessionsCreate: vi.fn(),
   mockSubscriptionsRetrieve: vi.fn(),
   mockRateLimitCheck: vi.fn(),
@@ -166,7 +167,6 @@ vi.mock("@/lib/rate-limit", () => ({
 // Atrapa klienta Stripe — zero wywołań sieciowych.
 vi.mock("@/lib/stripe", () => ({
   getStripe: (...a: unknown[]) => mockGetStripe(...a),
-  isStripePricesConfigured: (...a: unknown[]) => mockIsStripePricesConfigured(...a),
 }));
 
 const PLAN_BASIC = {
@@ -230,6 +230,11 @@ function expectNoWrites() {
 
 describe("POST /api/subscriptions/checkout", () => {
   beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("VERCEL", "");
+    vi.stubEnv("K_SERVICE", "");
+    vi.stubEnv("STRIPE_PRICE_BASIC", "");
+    vi.stubEnv("STRIPE_PRICE_PRO", "");
     selectQueue.length = 0;
     selectWheres.length = 0;
     accessQueue.length = 0;
@@ -244,7 +249,6 @@ describe("POST /api/subscriptions/checkout", () => {
     mockIsAuthError.mockReset().mockReturnValue(false);
     mockGetUserSalonId.mockReset().mockResolvedValue("salon-1");
     mockGetStripe.mockReset().mockReturnValue(null);
-    mockIsStripePricesConfigured.mockReset().mockReturnValue(false);
     mockSessionsCreate.mockReset().mockResolvedValue({
       id: "cs_test_1",
       url: "https://checkout.stripe.com/c/pay/cs_test_1",
@@ -254,6 +258,10 @@ describe("POST /api/subscriptions/checkout", () => {
     vi.mocked(logger.error).mockClear();
     vi.mocked(logger.warn).mockClear();
     mockRateLimitCheck.mockReset().mockReturnValue({ success: true, remaining: 4, reset: 60000 });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   describe("(a) zmiana planu istniejącej aktywnej subskrypcji", () => {
@@ -798,7 +806,7 @@ describe("POST /api/subscriptions/checkout", () => {
       expect(ttl).toBeLessThan(86400);
     });
 
-    it("mode, line_items, success_url, cancel_url, customer_email i metadata sesji mają dotychczasowe wartości", async () => {
+    it("bez hostingu i bez STRIPE_PRICE_*: mode, line_items z price_data (unit_amount 6027 dla priceMonthly \"49.00\"), success_url, cancel_url, customer_email i metadata sesji równe oczekiwanym", async () => {
       const params = await createdSessionParams();
 
       expect(params.mode).toBe("subscription");
@@ -810,7 +818,7 @@ describe("POST /api/subscriptions/checkout", () => {
               name: "MyHelper Basic",
               description: "Subskrypcja miesięczna planu Basic",
             },
-            unit_amount: 4900,
+            unit_amount: 6027,
             recurring: { interval: "month" },
           },
           quantity: 1,
@@ -830,9 +838,10 @@ describe("POST /api/subscriptions/checkout", () => {
     });
   });
 
-  // Identyfikatory cen Stripe z konfiguracji: `isStripePricesConfigured` (atrapa
-  // modułu Stripe) zwraca true, a identyfikator planu trasa czyta ze zmiennych
-  // STRIPE_PRICE_BASIC / STRIPE_PRICE_PRO (ustawione na czas przypadku).
+  // Identyfikatory cen Stripe z konfiguracji: bez hostingu trasa czyta
+  // identyfikator kupowanego planu ze zmiennej STRIPE_PRICE_BASIC /
+  // STRIPE_PRICE_PRO. Pomocnik ustawia obie zmienne (price_test_basic,
+  // price_test_pro), potem obie na pusty napis (cena tworzona z planu).
   describe("(h) cena z konfiguracji Stripe", () => {
     const NOW = new Date("2026-11-19T10:00:00.000Z");
     const EXPIRES_AT = 1795084500;
@@ -841,8 +850,6 @@ describe("POST /api/subscriptions/checkout", () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(NOW);
       vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.test");
-      vi.stubEnv("STRIPE_PRICE_BASIC", "price_test_basic");
-      vi.stubEnv("STRIPE_PRICE_PRO", "price_test_pro");
       mockGetStripe.mockReturnValue(stripeClient());
     });
 
@@ -853,11 +860,13 @@ describe("POST /api/subscriptions/checkout", () => {
 
     // Ta sama trasa dwa razy: z ceną z konfiguracji i z ceną tworzoną z planu.
     async function sessionParamsWithAndWithoutConfiguredPrice(plan: typeof PLAN_BASIC, slug: "basic" | "pro") {
-      mockIsStripePricesConfigured.mockReturnValue(true);
+      vi.stubEnv("STRIPE_PRICE_BASIC", "price_test_basic");
+      vi.stubEnv("STRIPE_PRICE_PRO", "price_test_pro");
       selectQueue.push([plan], []);
       expect((await POST(checkoutRequest(slug))).status).toBe(200);
 
-      mockIsStripePricesConfigured.mockReturnValue(false);
+      vi.stubEnv("STRIPE_PRICE_BASIC", "");
+      vi.stubEnv("STRIPE_PRICE_PRO", "");
       selectQueue.push([plan], []);
       expect((await POST(checkoutRequest(slug))).status).toBe(200);
 
@@ -902,6 +911,164 @@ describe("POST /api/subscriptions/checkout", () => {
         expectSharedParams(adHoc, plan);
       },
     );
+  });
+
+  // Identyfikator ceny Stripe = zmienna kupowanego planu (STRIPE_PRICE_BASIC /
+  // STRIPE_PRICE_PRO) po trim(). Hosting = VERCEL=1 albo niepusty K_SERVICE.
+  // Na hostingu bez identyfikatora trasa odmawia 503 STRIPE_PRICE_NOT_CONFIGURED;
+  // bez hostingu i bez identyfikatora tworzy cenę z planu w kwocie brutto.
+  describe("cena Stripe kupowanego planu i odmowa na hostingu bez ceny", () => {
+    const PRICE_ERROR =
+      "Zakup planu jest chwilowo niedostępny. Nic nie zostało pobrane — spróbuj ponownie później.";
+    const PRICE_LOG = "Subscription checkout refused: Stripe price not configured on hosting";
+
+    beforeEach(() => {
+      mockGetStripe.mockReturnValue(stripeClient());
+    });
+
+    async function expectPriceRefusal(slug: "basic" | "pro") {
+      const res = await POST(checkoutRequest(slug));
+      const body = await res.json();
+      expect(res.status).toBe(503);
+      expect(body).toEqual({
+        success: false,
+        code: "STRIPE_PRICE_NOT_CONFIGURED",
+        error: PRICE_ERROR,
+      });
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
+      expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+      expectNoWrites();
+    }
+
+    async function createdLineItems(slug: "basic" | "pro") {
+      const res = await POST(checkoutRequest(slug));
+      expect(res.status).toBe(200);
+      expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
+      expectNoWrites();
+      return mockSessionsCreate.mock.calls[0]![0].line_items;
+    }
+
+    it("K_SERVICE ustawiony, STRIPE_PRICE_BASIC pusty, plan basic → 503 STRIPE_PRICE_NOT_CONFIGURED, sessions.create i subscriptions.retrieve niewywołane, zero zapisów", async () => {
+      vi.stubEnv("K_SERVICE", "myhelper");
+      selectQueue.push([PLAN_BASIC], []);
+
+      await expectPriceRefusal("basic");
+    });
+
+    it("VERCEL=1, STRIPE_PRICE_BASIC pusty, plan basic → 503 STRIPE_PRICE_NOT_CONFIGURED, sessions.create i subscriptions.retrieve niewywołane, zero zapisów", async () => {
+      vi.stubEnv("VERCEL", "1");
+      selectQueue.push([PLAN_BASIC], []);
+
+      await expectPriceRefusal("basic");
+    });
+
+    it('VERCEL=1, STRIPE_PRICE_BASIC = "   ", plan basic → 503 STRIPE_PRICE_NOT_CONFIGURED', async () => {
+      vi.stubEnv("VERCEL", "1");
+      vi.stubEnv("STRIPE_PRICE_BASIC", "   ");
+      selectQueue.push([PLAN_BASIC], []);
+
+      await expectPriceRefusal("basic");
+    });
+
+    it('VERCEL=1, STRIPE_PRICE_BASIC = "price_test_basic", STRIPE_PRICE_PRO pusty, plan basic → 200, line_items = [{ price: "price_test_basic", quantity: 1 }]', async () => {
+      vi.stubEnv("VERCEL", "1");
+      vi.stubEnv("STRIPE_PRICE_BASIC", "price_test_basic");
+      selectQueue.push([PLAN_BASIC], []);
+
+      expect(await createdLineItems("basic")).toEqual([{ price: "price_test_basic", quantity: 1 }]);
+    });
+
+    it('VERCEL=1, STRIPE_PRICE_BASIC = "price_test_basic", STRIPE_PRICE_PRO pusty, plan pro → 503 STRIPE_PRICE_NOT_CONFIGURED', async () => {
+      vi.stubEnv("VERCEL", "1");
+      vi.stubEnv("STRIPE_PRICE_BASIC", "price_test_basic");
+      selectQueue.push([PLAN_PRO], []);
+
+      await expectPriceRefusal("pro");
+    });
+
+    it('VERCEL=1, STRIPE_PRICE_BASIC = "  price_test_basic  ", plan basic → line_items = [{ price: "price_test_basic", quantity: 1 }]', async () => {
+      vi.stubEnv("VERCEL", "1");
+      vi.stubEnv("STRIPE_PRICE_BASIC", "  price_test_basic  ");
+      selectQueue.push([PLAN_BASIC], []);
+
+      expect(await createdLineItems("basic")).toEqual([{ price: "price_test_basic", quantity: 1 }]);
+    });
+
+    it.each([
+      ["basic", 6027, PLAN_BASIC],
+      ["pro", 18327, PLAN_PRO],
+    ] as const)(
+      "bez hostingu, bez STRIPE_PRICE_*, plan %s → price_data.unit_amount = %s",
+      async (slug, unitAmount, plan) => {
+        selectQueue.push([plan], []);
+
+        const lineItems = await createdLineItems(slug);
+
+        expect(lineItems).toHaveLength(1);
+        expect(lineItems[0]).not.toHaveProperty("price");
+        expect(lineItems[0].price_data.unit_amount).toBe(unitAmount);
+      },
+    );
+
+    it.each([
+      ["basic", "STRIPE_PRICE_BASIC", "price_test_basic", PLAN_BASIC],
+      ["pro", "STRIPE_PRICE_PRO", "price_test_pro", PLAN_PRO],
+    ] as const)(
+      "bez hostingu, plan %s, ustawiony tylko %s = %s → line_items = [{ price: wartość tej zmiennej, quantity: 1 }]",
+      async (slug, variable, priceId, plan) => {
+        vi.stubEnv(variable, priceId);
+        selectQueue.push([plan], []);
+
+        expect(await createdLineItems(slug)).toEqual([{ price: priceId, quantity: 1 }]);
+      },
+    );
+
+    it.each([
+      ["K_SERVICE", "myhelper", "Cloud Run"],
+      ["VERCEL", "1", "Vercel"],
+    ] as const)(
+      "%s=%s, STRIPE_PRICE_BASIC pusty, plan basic → logger.error z tekstem odmowy, planSlug basic i platform %s",
+      async (variable, value, platform) => {
+        vi.stubEnv(variable, value);
+        selectQueue.push([PLAN_BASIC], []);
+
+        await expectPriceRefusal("basic");
+        expect(logger.error).toHaveBeenCalledWith(PRICE_LOG, { planSlug: "basic", platform });
+      },
+    );
+
+    it("VERCEL=1, STRIPE_PRICE_PRO pusty, salon z wierszem canceled z prawdziwą subskrypcją Stripe po końcu okresu → 503 STRIPE_PRICE_NOT_CONFIGURED, subscriptions.retrieve niewywołane", async () => {
+      vi.stubEnv("VERCEL", "1");
+      selectQueue.push([PLAN_PRO], []);
+      accessQueue.push([
+        {
+          subscription: subscriptionRow({
+            id: "sub-row-old",
+            status: "canceled",
+            stripeSubscriptionId: "sub_old",
+            currentPeriodEnd: new Date("2026-01-01T00:00:00.000Z"),
+            createdAt: new Date("2025-12-01T00:00:00.000Z"),
+          }),
+          plan: PLAN_BASIC,
+        },
+      ]);
+
+      await expectPriceRefusal("pro");
+    });
+
+    it("K_SERVICE ustawiony, STRIPE_PRICE_BASIC pusty, getStripe() → null, plan basic → 503 STRIPE_UNAVAILABLE", async () => {
+      vi.stubEnv("K_SERVICE", "myhelper");
+      mockGetStripe.mockReturnValue(null);
+      selectQueue.push([PLAN_BASIC], []);
+
+      const res = await POST(checkoutRequest("basic"));
+      const body = await res.json();
+
+      expect(res.status).toBe(503);
+      expect(body.code).toBe("STRIPE_UNAVAILABLE");
+      expect(logger.error).not.toHaveBeenCalledWith(PRICE_LOG, expect.anything());
+      expectNoWrites();
+    });
   });
 
   // Wiersze salonu z prawdziwą subskrypcją Stripe i statusem innym niż
