@@ -18,7 +18,9 @@ import type Stripe from "stripe";
  * przywraca kolejności, więc późne `invoice.paid` albo `updated: active` po
  * `deleted` wskrzesiłoby anulowaną subskrypcję. Dlatego pod blokadą
  * stripe_sub czytamy BIEŻĄCY stan ze Stripe i zapisujemy jego, a nie payload
- * zdarzenia.
+ * zdarzenia. Wyjątek: okres w `invoice.paid` pochodzi z linii opłaconej
+ * faktury w zdarzeniu i nie jest cofany; status także tam jest z bieżącego
+ * odczytu.
  *
  * Reguła lokalna (T3b, zawężona przez Ethana, przegląd #62 §2b): lokalne
  * `canceled` jest końcowe, gdy Stripe to potwierdza — `canceled` /

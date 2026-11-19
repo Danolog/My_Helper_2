@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import Stripe from "stripe";
 // ADR-001 sekcja 4: webhook Stripe — kontekst salonu z danych zdarzenia, nie z sesji; świadomie surowe db
 import { db } from "@/lib/db";
@@ -14,6 +14,7 @@ import {
   subscriptionPlans,
 } from "@/lib/schema";
 import { getStripe, getStripeWebhookSecret } from "@/lib/stripe";
+import { type BillingPeriod, paidInvoicePeriod, type StripeInvoicePeriodSource } from "@/lib/stripe-period";
 import {
   confirmSubscriptionCheckout,
   type SubscriptionCheckoutSession,
@@ -39,6 +40,8 @@ interface RawInvoiceData {
       subscription?: string | { id: string };
     };
   };
+  // Invoice lines (the paid period is read from them); `has_more` = list truncated in the event
+  lines?: (NonNullable<StripeInvoicePeriodSource["lines"]> & { has_more?: boolean }) | null;
 }
 
 /**
@@ -104,7 +107,7 @@ function getPaymentIntentIdFromInvoice(invoice: RawInvoiceData, fallback: string
  * POST /api/stripe/webhook
  *
  * Stripe webhook endpoint that handles subscription lifecycle events:
- * - invoice.paid: renewal payment recorded, state synced from Stripe
+ * - invoice.paid: renewal payment recorded, status synced from Stripe, paid period from the invoice lines
  * - invoice.payment_failed: failed payment recorded, state synced from Stripe
  * - customer.subscription.updated / deleted: state synced from Stripe
  *   (the event is only a signal — see src/lib/subscription-sync.ts)
@@ -221,10 +224,30 @@ function logNoLocalSubscription(event: Stripe.Event, stripeSubscriptionId: strin
 }
 
 /**
- * Handle invoice.paid — renewal. The event is only a signal (T3): under the
- * stripe_sub lock the CURRENT state and period are read from Stripe, never
- * a hard-coded "active" (a late invoice.paid after deleted must not revive
- * a canceled subscription). The payment is always recorded (idempotent).
+ * Paid period written in SQL under the row lock (the row passed to the handler
+ * is read before the salon lock, so the comparison cannot be done in JS):
+ * the end never moves back (`greatest` skips NULL), the start follows only a
+ * strictly later end — a retried event or an older invoice changes nothing.
+ */
+function paidPeriodEndSql(period: BillingPeriod) {
+  return sql`greatest(${salonSubscriptions.currentPeriodEnd}, ${period.end.toISOString()}::timestamp)`;
+}
+
+function paidPeriodStartSql(period: BillingPeriod) {
+  const end = sql`${period.end.toISOString()}::timestamp`;
+  const storedEnd = salonSubscriptions.currentPeriodEnd;
+  return sql`case when ${storedEnd} is null or ${end} > ${storedEnd} then ${period.start.toISOString()}::timestamp else ${salonSubscriptions.currentPeriodStart} end`;
+}
+
+/**
+ * Handle invoice.paid — renewal. The status does not come from the event (T3): under the
+ * stripe_sub lock the CURRENT status is read from Stripe, never a hard-coded
+ * "active" (a late invoice.paid after deleted must not revive a canceled
+ * subscription). The period comes from the lines of the PAID invoice (not
+ * from the current Stripe period, not from `invoice.period_*`) and never moves
+ * back; a canceled final row is only extended to the end of the paid period.
+ * Lines without a full period → stored period unchanged + warn; a truncated
+ * line list (`has_more`) → warn. The payment is always recorded (idempotent).
  */
 async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
   const invoice = event.data.object as unknown as RawInvoiceData;
@@ -242,9 +265,17 @@ async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
   }
 
   const paymentIntentId = getPaymentIntentIdFromInvoice(invoice, `stripe_pi_${event.id}`);
+  const paidPeriod = paidInvoicePeriod(invoice);
+  const linesHasMore = invoice.lines?.has_more === true;
 
   const result = await withLockedStripeSubscriptionRow(stripe, stripeSubscriptionId, async (tx, sub, stripeSub) => {
     const state = subscriptionStateFromStripe(sub, stripeSub);
+    const logContext = { eventId: event.id, subscriptionId: sub.id, linesHasMore };
+    if (!paidPeriod) {
+      logger.warn("Paid invoice without a billing period on its lines — keeping stored period", logContext);
+    } else if (linesHasMore) {
+      logger.warn("Paid invoice line list incomplete in the event — period taken from the lines present", logContext);
+    }
 
     // Scheduled plan change (downgrade) — only on a live subscription.
     let newPlanId = sub.planId;
@@ -257,13 +288,26 @@ async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
     const amount = plan ? plan.priceMonthly : (invoice.amount_paid / 100).toFixed(2);
 
     if (state) {
+      // Status from Stripe; the Stripe period (state.currentPeriod*) is not written here.
+      const { status, canceledAt, trialEndsAt } = state;
       await tx
         .update(salonSubscriptions)
         .set({
-          ...state,
+          status,
+          canceledAt,
+          ...(trialEndsAt !== undefined ? { trialEndsAt } : {}),
+          ...(paidPeriod
+            ? { currentPeriodStart: paidPeriodStartSql(paidPeriod), currentPeriodEnd: paidPeriodEndSql(paidPeriod) }
+            : {}),
           planId: newPlanId,
           ...(newPlanId !== sub.planId ? { scheduledPlanId: null, scheduledChangeAt: null } : {}),
         })
+        .where(eq(salonSubscriptions.id, sub.id));
+    } else if (paidPeriod) {
+      // Final row (canceled, confirmed by Stripe): only the paid period, no revival.
+      await tx
+        .update(salonSubscriptions)
+        .set({ currentPeriodStart: paidPeriodStartSql(paidPeriod), currentPeriodEnd: paidPeriodEndSql(paidPeriod) })
         .where(eq(salonSubscriptions.id, sub.id));
     }
 
