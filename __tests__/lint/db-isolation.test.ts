@@ -228,7 +228,7 @@ describe("Z2: każda forma importu puli daje błąd poza listą", () => {
     expect(await isolationErrors(code, SYSTEM_FILE)).toHaveLength(0);
   }, 30_000);
 
-  // Kontrola fałszywej czerwieni (szósty przypadek).
+  // Kontrola fałszywej czerwieni (szósty przypadek z przeglądu).
   it.each([
     ["plik z listy przejściowej", LISTED_ROUTE],
     ["plik z listy z [id] w ścieżce", LISTED_ROUTE_WITH_ID],

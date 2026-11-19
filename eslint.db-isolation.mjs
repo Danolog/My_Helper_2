@@ -68,7 +68,7 @@ const DB_SYSTEM_FILE = "src/lib/server/system/db-system.ts";
 /**
  * Dług przejściowy (Z3) — wynik reguły bez listy (73 pliki na b3a5faf),
  * podzielony na tablice per partia #193 (P0a pkt 3).
- * Każda strona zmienia WYŁĄCZNIE swoją tablicę (np. P5: P5_FILES). Przeniesienie
+ * Każda partia zmienia WYŁĄCZNIE swoją tablicę (np. P5: P5_FILES). Przeniesienie
  * pliku między tablicami = decyzja CTO + zmiana BASELINE w teście w
  * osobnym commicie. Przydział: zlecenie §0, §1, §3, §6; P5 wg osobnej listy;
  * session.ts → P0 i subscription.ts → P1 (decyzja CTO).
