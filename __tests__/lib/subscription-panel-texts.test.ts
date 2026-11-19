@@ -9,7 +9,6 @@ import {
   periodEndLabel,
   planFeaturesHeading,
   purchaseBlockedText,
-  purchaseBlockedUntil,
   type AccessData,
 } from "@/app/dashboard/subscription/_types";
 
@@ -222,31 +221,6 @@ describe("pastDueNoticeText", () => {
 
 const REAL_ID = "sub_1Real";
 const SIM_ID = "sim_sub_1";
-
-describe("purchaseBlockedUntil", () => {
-  it.each<[string, string | null, AccessData | null, string | null]>([
-    ["canceled, full, until, real Stripe id", REAL_ID, access({}), UNTIL],
-    ["past_due, full, until, real Stripe id", REAL_ID, pastDueAccess({}), UNTIL],
-    ["active, full, until, real Stripe id", REAL_ID, access({ state: "active" }), null],
-    ["trialing, full, until, real Stripe id", REAL_ID, access({ state: "trialing" }), null],
-    ["expired, read_only, no until", REAL_ID, access({ state: "expired", mode: "read_only", planSlug: null, until: null }), null],
-    ["inactive, full, until, real Stripe id", REAL_ID, access({ state: "inactive" }), null],
-    ["canceled, read_only, no until", REAL_ID, access({ mode: "read_only", planSlug: null, until: null }), null],
-    ["canceled, read_only, non-null until", REAL_ID, access({ mode: "read_only" }), null],
-    ["past_due, read_only, non-null until", REAL_ID, pastDueAccess({ mode: "read_only" }), null],
-    ["canceled, full, null until", REAL_ID, access({ until: null }), null],
-    ["canceled, full, empty until", REAL_ID, access({ until: "" }), null],
-    ["past_due, full, null until", REAL_ID, pastDueAccess({ until: null }), null],
-    ["canceled, full, until, null Stripe id", null, access({}), null],
-    ["canceled, full, until, sim_ Stripe id", SIM_ID, access({}), null],
-    ["canceled, full, until, empty Stripe id", "", access({}), null],
-    ["past_due, full, until, null Stripe id", null, pastDueAccess({}), null],
-    ["past_due, full, until, sim_ Stripe id", SIM_ID, pastDueAccess({}), null],
-    ["null access, real Stripe id", REAL_ID, null, null],
-  ])("%s", (_name, stripeSubscriptionId, accessData, expected) => {
-    expect(purchaseBlockedUntil(stripeSubscriptionId, accessData)).toBe(expected);
-  });
-});
 
 describe("purchaseBlockedText", () => {
   it("returns the new purchase text with the formatted date", () => {

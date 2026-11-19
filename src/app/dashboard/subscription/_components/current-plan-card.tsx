@@ -36,7 +36,6 @@ import {
   pastDueNoticeText,
   periodEndLabel,
   planFeaturesHeading,
-  purchaseBlockedUntil,
   statusColor,
   statusLabel,
 } from "../_types";
@@ -56,6 +55,8 @@ interface CurrentPlanCardProps {
   allPlans: AllPlansMap;
   scheduledPlan: ScheduledPlanData;
   access: AccessData | null;
+  /** End of the period in which the purchase route refuses a new purchase (from the server), or null. */
+  purchaseBlockedUntil: string | null;
   changePlanLoading: boolean;
   downgradeLoading: boolean;
   cancelLoading: boolean;
@@ -73,6 +74,7 @@ export function CurrentPlanCard({
   allPlans,
   scheduledPlan,
   access,
+  purchaseBlockedUntil,
   changePlanLoading,
   downgradeLoading,
   cancelLoading,
@@ -83,10 +85,6 @@ export function CurrentPlanCard({
   onCancelDowngrade,
   onRefresh,
 }: CurrentPlanCardProps) {
-  const blockedUntil = purchaseBlockedUntil(
-    subscription.stripeSubscriptionId,
-    access,
-  );
   return (
     <Card>
       <CardHeader>
@@ -169,7 +167,7 @@ export function CurrentPlanCard({
                 Subskrypcja anulowana
               </p>
               <p className="text-sm text-red-600 dark:text-red-300">
-                {canceledNoticeText(subscription.canceledAt, access, blockedUntil)}
+                {canceledNoticeText(subscription.canceledAt, access, purchaseBlockedUntil)}
               </p>
             </div>
           </div>
@@ -184,7 +182,7 @@ export function CurrentPlanCard({
                 Zalegla platnosc
               </p>
               <p className="text-sm text-amber-600 dark:text-amber-300">
-                {pastDueNoticeText(access, blockedUntil)}
+                {pastDueNoticeText(access, purchaseBlockedUntil)}
               </p>
             </div>
           </div>
@@ -220,7 +218,7 @@ export function CurrentPlanCard({
           subscription={subscription}
           plan={plan}
           allPlans={allPlans}
-          access={access}
+          purchaseBlockedUntil={purchaseBlockedUntil}
           changePlanLoading={changePlanLoading}
           downgradeLoading={downgradeLoading}
           cancelLoading={cancelLoading}

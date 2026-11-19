@@ -107,27 +107,6 @@ export function periodEndLabel(status: string): string {
   }
 }
 
-/**
- * End of the period in which the purchase route refuses a new purchase
- * (409 PURCHASE_BLOCKED_UNTIL_PERIOD_END), or null. Same condition as the
- * route: full access in the `canceled` or `past_due` state with an end date,
- * and the row the access is computed from has a real Stripe subscription.
- */
-export function purchaseBlockedUntil(
-  stripeSubscriptionId: string | null,
-  access: AccessData | null,
-): string | null {
-  if (
-    access?.mode === "full" &&
-    (access.state === "canceled" || access.state === "past_due") &&
-    access.until &&
-    hasRealStripeSubscription(stripeSubscriptionId)
-  ) {
-    return access.until;
-  }
-  return null;
-}
-
 /** Text shown instead of the reactivation button while a new purchase is refused. */
 export function purchaseBlockedText(blockedUntil: string): string {
   return `Nowy zakup bedzie mozliwy po ${formatDate(blockedUntil)}.`;

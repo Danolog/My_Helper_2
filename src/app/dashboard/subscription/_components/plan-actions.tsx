@@ -32,10 +32,8 @@ import {
   cancelDialogRepurchaseText,
   formatDate,
   purchaseBlockedText,
-  purchaseBlockedUntil,
 } from "../_types";
 import type {
-  AccessData,
   SubscriptionData,
   PlanData,
   AllPlansMap,
@@ -45,7 +43,8 @@ interface PlanActionsProps {
   subscription: SubscriptionData;
   plan: PlanData;
   allPlans: AllPlansMap;
-  access: AccessData | null;
+  /** End of the period in which the purchase route refuses a new purchase (from the server), or null. */
+  purchaseBlockedUntil: string | null;
   changePlanLoading: boolean;
   downgradeLoading: boolean;
   cancelLoading: boolean;
@@ -59,7 +58,7 @@ export function PlanActions({
   subscription,
   plan,
   allPlans,
-  access,
+  purchaseBlockedUntil,
   changePlanLoading,
   downgradeLoading,
   cancelLoading,
@@ -70,10 +69,6 @@ export function PlanActions({
 }: PlanActionsProps) {
   const isActiveOrTrialing =
     subscription.status === "active" || subscription.status === "trialing";
-  const blockedUntil = purchaseBlockedUntil(
-    subscription.stripeSubscriptionId,
-    access,
-  );
 
   return (
     <div className="flex flex-wrap gap-3 pt-4 border-t">
@@ -111,14 +106,14 @@ export function PlanActions({
       )}
 
       {/* New purchase refused until the end of access: date instead of a button */}
-      {blockedUntil && (
+      {purchaseBlockedUntil && (
         <p className="self-center text-sm text-muted-foreground">
-          {purchaseBlockedText(blockedUntil)}
+          {purchaseBlockedText(purchaseBlockedUntil)}
         </p>
       )}
 
       {/* Reactivate subscription if canceled and a new purchase is possible */}
-      {subscription.status === "canceled" && !blockedUntil && (
+      {subscription.status === "canceled" && !purchaseBlockedUntil && (
         <Button asChild>
           <Link href="/pricing">
             <ArrowUpRight className="h-4 w-4 mr-2" />
