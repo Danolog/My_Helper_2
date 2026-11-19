@@ -322,7 +322,7 @@ describe("prawda w marketingu", () => {
       expect(source).not.toMatch(/Pe[łl]ne zarz[ąa]dzanie salonem|Pe[łl]na funkcjonalno[śs][ćc]/);
     });
 
-    /** Źródło bez komentarzy — słowo w komentarzu nie jest wywołaniem. */
+    /** Źródło bez komentarzy blokowych i bez linii zaczynających się od // — słowo w takim komentarzu nie jest wywołaniem; komentarz // na końcu linii z kodem zostaje. */
     const code = (relPath: string) =>
       read(relPath)
         .replace(/\/\*[\s\S]*?\*\//g, "")
