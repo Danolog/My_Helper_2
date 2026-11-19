@@ -988,8 +988,11 @@ export const clientWaitingListResponseSchema = z.object({
 
 // Konto bierze trasa z sesji. `email` zostaje opcjonalne tylko dla zgodnosci
 // ze starszymi klientami (UI go wysyla), trasa go IGNORUJE.
+// Dozwolone wartosci planSlug to elementy PLANS_ON_SALE z @/lib/plan-catalog.
 export const registerSubscriptionSchema = z.object({
-  planSlug: z.string().min(1, "planSlug is required"),
+  planSlug: z.enum(PLANS_ON_SALE, {
+    message: `planSlug musi byc jednym z: ${PLANS_ON_SALE.join(", ")}`,
+  }),
   email: z.string().optional(),
 });
 

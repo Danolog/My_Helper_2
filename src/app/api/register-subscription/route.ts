@@ -37,7 +37,8 @@ function alreadySubscribed() {
  *    zwraca 401 (UI traktuje to jako niekrytyczne),
  *  - CreateSalonPrompt w panelu, gdy zalogowane konto nie ma salonu.
  *
- * Body: { planSlug: "basic" | "pro", email?: string } — `email` jest
+ * Body: { planSlug, email?: string } — planSlug to element PLANS_ON_SALE
+ * z @/lib/plan-catalog, inna wartość → 400 z walidacji. `email` jest
  * ignorowany: konto zawsze z sesji (authResult.user). Istniejącej
  * subskrypcji ta trasa nie zmienia (409) — zmiana planu tylko przez Stripe
  * (/api/subscriptions/checkout, /api/subscriptions/downgrade).
