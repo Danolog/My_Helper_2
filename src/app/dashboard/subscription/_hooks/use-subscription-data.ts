@@ -19,6 +19,7 @@ interface UseSubscriptionDataReturn {
   allPlans: AllPlansMap;
   scheduledPlan: ScheduledPlanData;
   access: AccessData | null;
+  purchaseBlockedUntil: string | null;
   loading: boolean;
   error: string | null;
   expirationData: ExpirationData | null;
@@ -48,6 +49,9 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
   const [allPlans, setAllPlans] = useState<AllPlansMap>({});
   const [scheduledPlan, setScheduledPlan] = useState<ScheduledPlanData>(null);
   const [access, setAccess] = useState<AccessData | null>(null);
+  const [purchaseBlockedUntil, setPurchaseBlockedUntil] = useState<
+    string | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
@@ -101,6 +105,7 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
         setPlan(subData.plan ?? null);
         setScheduledPlan(subData.scheduledPlan ?? null);
         setAccess(subData.access ?? null);
+        setPurchaseBlockedUntil(subData.purchaseBlockedUntil ?? null);
 
         // Build a map of all plans by slug for price comparison
         if (plansData.success && Array.isArray(plansData.data)) {
@@ -376,6 +381,7 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
     allPlans,
     scheduledPlan,
     access,
+    purchaseBlockedUntil,
     loading,
     error,
     expirationData,

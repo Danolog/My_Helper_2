@@ -20,6 +20,7 @@ export default function SubscriptionPage() {
     allPlans,
     scheduledPlan,
     access,
+    purchaseBlockedUntil,
     loading,
     error,
     expirationData,
@@ -77,6 +78,7 @@ export default function SubscriptionPage() {
             allPlans={allPlans}
             scheduledPlan={scheduledPlan}
             access={access}
+            purchaseBlockedUntil={purchaseBlockedUntil}
             changePlanLoading={changePlanLoading}
             downgradeLoading={downgradeLoading}
             cancelLoading={cancelLoading}
