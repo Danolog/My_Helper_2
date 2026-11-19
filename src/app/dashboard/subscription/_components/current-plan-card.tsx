@@ -154,6 +154,7 @@ export function CurrentPlanCard({
         <TrialNotice
           subscription={subscription}
           plan={plan}
+          allPlans={allPlans}
           changePlanLoading={changePlanLoading}
           onChangePlan={onChangePlan}
         />
