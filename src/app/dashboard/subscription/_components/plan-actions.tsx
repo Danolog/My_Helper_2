@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { PLANS } from "@/lib/constants";
+import { isPlanOnSale } from "@/lib/plan-catalog";
 import { PRO_INCLUDES_BASIC, proOnlyFeatures } from "@/lib/plan-features";
 import {
   cancelDialogAccessText,
@@ -72,8 +73,8 @@ export function PlanActions({
 
   return (
     <div className="flex flex-wrap gap-3 pt-4 border-t">
-      {/* Upgrade: Basic -> Pro */}
-      {isActiveOrTrialing && plan.slug === "basic" && (
+      {/* Upgrade: Basic -> Pro (only if "pro" is in PLANS_ON_SALE) */}
+      {isActiveOrTrialing && plan.slug === "basic" && isPlanOnSale("pro") && (
         <UpgradeDialog
           plan={plan}
           allPlans={allPlans}
