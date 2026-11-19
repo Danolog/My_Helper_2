@@ -24,7 +24,7 @@ interface LogContext {
 
 const isProduction = process.env.NODE_ENV === "production";
 
-/** N3: redakcja parametrów zapytania i `detail` — wspólny helper `@/lib/safe-error`. */
+/** Redakcja parametrów zapytania i `detail` — wspólny helper `@/lib/safe-error`. */
 const serializeError = toSafeErrorMeta;
 
 /** Wartość zastępująca dane osobowe w kontekście logu. */
@@ -64,9 +64,11 @@ export const PII_LOG_KEYS: readonly string[] = [
 /**
  * Fragmenty nazw kluczy kontaktowych: klucz, którego nazwa zawiera fragment
  * (bez wielkości liter, np. `guestPhone`, `clientEmail`), ma zamienianą na
- * `[redacted]` wartość: napis, liczbę całkowitą o co najmniej 7 cyfrach albo
+ * `[redacted]` wartość: napis (także `URL` i obiekt `String`), bajty (`Buffer`,
+ * tablica typowana), liczbę całkowitą
+ * (także obiekt `Number`) o co najmniej 7 cyfrach albo
  * `bigint` (numer telefonu zapisany liczbą) oraz tablicę, w której choć jeden
- * element jest napisem albo taką liczbą, także w tablicy zagnieżdżonej (bez
+ * element jest napisem, `URL` albo taką liczbą, także w tablicy zagnieżdżonej (bez
  * wchodzenia w obiekty) — cała tablica. Pozostałe wartości
  * zostają: liczniki i małe liczby (`emailCount: 3`), `boolean`, `null`, pusta
  * tablica; obiekt (`emailData`) i tablica samych obiektów są redagowane
@@ -85,19 +87,24 @@ const PII_KEY_SET = new Set(PII_LOG_KEYS.map((k) => k.toLowerCase()));
 const PHONE_LIKE_NUMBER_MIN = 1_000_000;
 
 function isContactScalar(value: unknown): boolean {
-  if (typeof value === "string" || typeof value === "bigint") return true;
-  return typeof value === "number" && Number.isInteger(value) && Math.abs(value) >= PHONE_LIKE_NUMBER_MIN;
+  if (value instanceof String || ArrayBuffer.isView(value)) return true;
+  const v = value instanceof Number ? Number(value) : value;
+  if (typeof v === "string" || typeof v === "bigint" || v instanceof URL) return true;
+  return typeof v === "number" && Number.isInteger(v) && Math.abs(v) >= PHONE_LIKE_NUMBER_MIN;
 }
 
 /** Granica zagnieżdżenia — głębiej logujemy znacznik, nie wartość. */
 const MAX_REDACTION_DEPTH = 8;
 
-/** Wartość kontaktowa albo tablica, która ją zawiera — także w tablicy zagnieżdżonej (bez wchodzenia w obiekty). */
-function isContactValue(value: unknown, depth = 0): boolean {
+/**
+ * Wartość kontaktowa albo tablica, która ją zawiera — także w tablicy zagnieżdżonej (bez wchodzenia w obiekty).
+ * Tablica już odwiedzona w tym przeglądzie nie jest przeglądana ponownie.
+ */
+function isContactValue(value: unknown, depth = 0, seen: WeakSet<object> = new WeakSet()): boolean {
   if (isContactScalar(value)) return true;
-  return (
-    Array.isArray(value) && depth < MAX_REDACTION_DEPTH && value.some((item) => isContactValue(item, depth + 1))
-  );
+  if (!Array.isArray(value) || depth >= MAX_REDACTION_DEPTH || seen.has(value)) return false;
+  seen.add(value);
+  return value.some((item) => isContactValue(item, depth + 1, seen));
 }
 
 function isRedactedEntry(key: string, value: unknown): boolean {
@@ -112,16 +119,27 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
+/** Napis adresu bez nazwy użytkownika i hasła, po tej samej redakcji co inne napisy. */
+function urlWithoutCredentials(url: URL): unknown {
+  const copy = new URL(url.href);
+  copy.username = "";
+  copy.password = "";
+  return serializeError(copy.href);
+}
+
 /**
  * Siatka na dane osobowe: kopia wartości z wartościami kluczy z
  * `PII_LOG_KEYS` oraz wartościami kontaktowymi pod kluczami z
  * `PII_LOG_KEY_FRAGMENTS` (reguła przy tej stałej) zamienionymi na `[redacted]`. Błędy (`Error`) przechodzą
  * przez `toSafeErrorMeta` (message, name, stack zostają), napisy — przez
- * redakcję parametrów zapytania. Obiekty niebędące zwykłymi obiektami
- * (Date itp.) zostają bez zmian. Wejście nie jest modyfikowane.
+ * redakcję parametrów zapytania, `URL` — na napis adresu bez nazwy
+ * użytkownika i hasła. Inne obiekty niebędące zwykłymi obiektami (Date,
+ * instancje klas itp.) zostają bez zmian; w produkcji ich pola redaguje
+ * druga linia przy serializacji (`logReplacer`). Wejście nie jest modyfikowane.
  */
 export function redactLogContext(value: unknown, depth = 0, seen: WeakSet<object> = new WeakSet()): unknown {
   if (value instanceof Error || typeof value === "string") return serializeError(value);
+  if (value instanceof URL) return urlWithoutCredentials(value);
   if (value === null || typeof value !== "object") return value;
   if (!Array.isArray(value) && !isPlainObject(value)) return value;
   if (seen.has(value)) return "[circular]";
@@ -139,9 +157,28 @@ export function redactLogContext(value: unknown, depth = 0, seen: WeakSet<object
   return out;
 }
 
-/** Replacer `JSON.stringify`: `bigint` (na każdym poziomie) → napis dziesiętny. */
-function bigintToString(_key: string, value: unknown): unknown {
-  return typeof value === "bigint" ? value.toString() : value;
+/**
+ * Replacer `JSON.stringify` — druga linia redakcji przy serializacji, na
+ * każdym poziomie, także w polach obiektów niebędących zwykłymi obiektami
+ * (instancje klas). Kolejność: wartość pod kluczem z `PII_LOG_KEYS` →
+ * `[redacted]` niezależnie od typu; `Error` → `toSafeErrorMeta`; `Date`
+ * zostaje datą (także pod kluczem z fragmentem; liczbowy znacznik czasu pod
+ * takim kluczem nadal jest redagowany — reguła przy `PII_LOG_KEY_FRAGMENTS`);
+ * `URL` → napis adresu bez nazwy użytkownika i hasła; wartość kontaktowa
+ * (także ten napis adresu) pod kluczem z `PII_LOG_KEY_FRAGMENTS` →
+ * `[redacted]`; `bigint` → napis dziesiętny.
+ * Dla wyniku `redactLogContext` na zwykłych obiektach replacer może jedynie
+ * zredagować więcej: tablicę pod kluczem z fragmentem, w której pierwsza
+ * linia zostawiła napis (znacznik cyklu albo znacznik głębokości).
+ */
+function logReplacer(this: unknown, key: string, value: unknown): unknown {
+  const source = (this as Record<string, unknown>)[key];
+  if (key !== "" && PII_KEY_SET.has(key.toLowerCase())) return REDACTED;
+  if (source instanceof Error) return serializeError(source);
+  if (source instanceof Date) return value;
+  const out = source instanceof URL ? urlWithoutCredentials(source) : value;
+  if (key !== "" && isRedactedEntry(key, ArrayBuffer.isView(source) ? source : out)) return REDACTED;
+  return typeof out === "bigint" ? out.toString() : out;
 }
 
 /**
@@ -156,26 +193,53 @@ function bigintToString(_key: string, value: unknown): unknown {
 function formatLog(level: LogLevel, message: string, context?: LogContext) {
   // Normalize error objects in context so they serialize properly
   // Błędy serializowane (message/name/stack), dane osobowe zredagowane po
-  // nazwie klucza na każdym poziomie (redactLogContext).
-  const normalizedContext = context
-    ? (redactLogContext(context) as LogContext)
-    : undefined;
+  // nazwie klucza na każdym poziomie (redactLogContext). Gdy redakcja rzuci
+  // (getter rzucający wyjątek, Proxy), kontekst wpisu to sam znacznik —
+  // logger nie rzuca do wywołującego.
+  let normalizedContext: LogContext | undefined;
+  try {
+    normalizedContext = context ? (redactLogContext(context) as LogContext) : undefined;
+  } catch {
+    normalizedContext = { contextError: "unserializable" };
+  }
 
   if (isProduction) {
-    const entry = {
-      level,
-      msg: message,
-      timestamp: new Date().toISOString(),
-      ...normalizedContext,
-    };
+    const timestamp = new Date().toISOString();
 
     let json: string;
     try {
-      json = JSON.stringify(entry, bigintToString);
+      const entry = {
+        level,
+        msg: message,
+        timestamp,
+        ...normalizedContext,
+      };
+      json = JSON.stringify(entry, logReplacer);
     } catch {
       // Kontekst nieserializowalny (np. cykl w obiekcie niebędącym zwykłym
-      // obiektem): wpis zastępczy bez kontekstu i bez treści wyjątku.
-      json = JSON.stringify({ level, msg: message, timestamp: entry.timestamp, contextError: "unserializable" });
+      // obiektem): wpis zastępczy z polami prostymi pierwszego poziomu
+      // kontekstu (napis, liczba, boolean), bez obiektów, tablic i treści
+      // wyjątku; level, msg i timestamp wpisu wygrywają z polami kontekstu.
+      // Gdy i on rzuci (np. getter rzucający wyjątek w kontekście niebędącym
+      // zwykłym obiektem) — wpis ostateczny z samych napisów, bez kontekstu.
+      try {
+        const simpleFields = Object.fromEntries(
+          Object.entries(normalizedContext ?? {}).filter(
+            ([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean",
+          ),
+        );
+        json = JSON.stringify(
+          { ...simpleFields, level, msg: message, timestamp, contextError: "unserializable" },
+          logReplacer,
+        );
+      } catch {
+        json = JSON.stringify({
+          level,
+          msg: typeof message === "string" ? message : "[unserializable]",
+          timestamp,
+          contextError: "unserializable",
+        });
+      }
     }
 
     // Route to the correct console method so Vercel and cloud providers

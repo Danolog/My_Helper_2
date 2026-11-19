@@ -1,5 +1,5 @@
 /**
- * Bezpieczna postać błędu do logów (N3, Ryan; #65/#67).
+ * Bezpieczna postać błędu do logów.
  *
  * DrizzleQueryError ma w `message` (a przez to w pierwszej linii `stack`)
  * parametry zapytania — "Failed query: insert ...\nparams: Anna,
@@ -8,7 +8,7 @@
  *
  * Czysty moduł bez zależności: używa go `logger` (każde `logger.*({ error })`
  * jest redagowane automatycznie) i może go wołać kod, który buduje metadane
- * błędu sam (np. catch webhooka Stripe — T3b).
+ * błędu sam (np. catch webhooka Stripe).
  */
 
 export const QUERY_PARAMS_MARKER = "\nparams: ";
@@ -93,8 +93,8 @@ export interface ErrorIdentity {
 }
 
 /**
- * Sama tożsamość błędu — nazwa i kod, BEZ message, stack i treści zapytania
- * (N1, Ryan, przegląd #62). Dla `catch`, który obsługuje wiele ścieżek naraz
+ * Sama tożsamość błędu — nazwa i kod, BEZ message, stack i treści zapytania.
+ * Dla `catch`, który obsługuje wiele ścieżek naraz
  * (webhook Stripe: subskrypcje i zadatki z danymi gości) — tam nawet tekst
  * zapytania z placeholderami nie jest potrzebny do diagnozy.
  */
