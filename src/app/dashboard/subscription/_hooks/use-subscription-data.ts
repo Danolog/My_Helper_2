@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
-import { cancelSuccessDescription, formatDate } from "../_types";
+import { cancelSuccessDescription } from "../_types";
 import type {
   AccessData,
   SubscriptionData,
@@ -27,17 +27,11 @@ interface UseSubscriptionDataReturn {
   changePlanLoading: boolean;
   downgradeLoading: boolean;
   cancelDowngradeLoading: boolean;
-  renewLoading: boolean;
-  simulateLoading: boolean;
-  sendWarningLoading: boolean;
   fetchSubscription: (signal?: AbortSignal | null) => Promise<void>;
   handleCancel: () => Promise<void>;
   handleChangePlan: (targetSlug: string) => Promise<void>;
   handleDowngrade: (targetSlug: string) => Promise<void>;
   handleCancelDowngrade: () => Promise<void>;
-  handleSimulateNearExpiry: () => Promise<void>;
-  handleSendWarning: () => Promise<void>;
-  handleSimulateRenewal: () => Promise<void>;
   setLoading: (loading: boolean) => void;
 }
 
@@ -58,12 +52,9 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
   const [changePlanLoading, setChangePlanLoading] = useState(false);
   const [downgradeLoading, setDowngradeLoading] = useState(false);
   const [cancelDowngradeLoading, setCancelDowngradeLoading] = useState(false);
-  const [renewLoading, setRenewLoading] = useState(false);
   const [expirationData, setExpirationData] = useState<ExpirationData | null>(
     null,
   );
-  const [simulateLoading, setSimulateLoading] = useState(false);
-  const [sendWarningLoading, setSendWarningLoading] = useState(false);
 
   const fetchExpirationWarning = useCallback(
     async (signal: AbortSignal | null = null) => {
@@ -276,109 +267,6 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
     }
   }, [fetchSubscription]);
 
-  /** Simulate near-expiry: the server sends a warning for a computed period end 3 days from now; the subscription row is not changed (dev mode). */
-  const handleSimulateNearExpiry = useCallback(async () => {
-    setSimulateLoading(true);
-    try {
-      const res = await mutationFetch(
-        "/api/subscriptions/expiration-warning",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ simulate: true }),
-        },
-      );
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        toast.error(data.error || "Nie udalo sie zasymulowac wygasniecia");
-        return;
-      }
-
-      toast.success("Symulacja wygasniecia aktywowana!", {
-        description: `Subskrypcja wygasa za ${data.daysRemaining} dni. Ostrzezenie zostalo wyslane.`,
-      });
-
-      // Refresh all data
-      setLoading(true);
-      await Promise.all([fetchSubscription(), fetchExpirationWarning()]);
-    } catch {
-      toast.error("Wystapil blad podczas symulacji wygasniecia");
-    } finally {
-      setSimulateLoading(false);
-    }
-  }, [fetchSubscription, fetchExpirationWarning]);
-
-  /** Manually send expiration warning notification. */
-  const handleSendWarning = useCallback(async () => {
-    setSendWarningLoading(true);
-    try {
-      const res = await mutationFetch(
-        "/api/subscriptions/expiration-warning",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ warningDays: 30 }),
-        },
-      );
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        toast.error(data.error || "Nie udalo sie wyslac ostrzezenia");
-        return;
-      }
-
-      if (data.warnings && data.warnings.length > 0) {
-        toast.success("Ostrzezenie wyslane!", {
-          description: `Wyslano ${data.warnings.length} powiadomien. Subskrypcja wygasa za ${data.daysRemaining} dni.`,
-        });
-      } else {
-        toast.info("Brak potrzeby ostrzezenia", {
-          description: data.message,
-        });
-      }
-
-      await fetchExpirationWarning();
-    } catch {
-      toast.error("Wystapil blad podczas wysylania ostrzezenia");
-    } finally {
-      setSendWarningLoading(false);
-    }
-  }, [fetchExpirationWarning]);
-
-  /**
-   * Simulate automatic subscription renewal (dev mode).
-   * In production, this is handled by Stripe webhooks (invoice.paid).
-   */
-  const handleSimulateRenewal = useCallback(async () => {
-    setRenewLoading(true);
-    try {
-      const res = await mutationFetch("/api/subscriptions/renew", {
-        method: "POST",
-      });
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        toast.error(data.error || "Nie udalo sie odnowic subskrypcji");
-        return;
-      }
-
-      toast.success("Subskrypcja odnowiona!", {
-        description: data.planChanged
-          ? `Plan zmieniony z ${data.previousPlan} na ${data.newPlan}. Nowy okres do ${formatDate(data.subscription?.currentPeriodEnd)}.`
-          : `Nowy okres rozliczeniowy do ${formatDate(data.subscription?.currentPeriodEnd)}. Oplata: ${data.subscription?.amount} PLN.`,
-      });
-
-      // Refresh subscription data
-      setLoading(true);
-      await fetchSubscription();
-    } catch {
-      toast.error("Wystapil blad podczas odnawiania subskrypcji");
-    } finally {
-      setRenewLoading(false);
-    }
-  }, [fetchSubscription]);
-
   return {
     subscription,
     plan,
@@ -393,17 +281,11 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
     changePlanLoading,
     downgradeLoading,
     cancelDowngradeLoading,
-    renewLoading,
-    simulateLoading,
-    sendWarningLoading,
     fetchSubscription,
     handleCancel,
     handleChangePlan,
     handleDowngrade,
     handleCancelDowngrade,
-    handleSimulateNearExpiry,
-    handleSendWarning,
-    handleSimulateRenewal,
     setLoading,
   };
 }

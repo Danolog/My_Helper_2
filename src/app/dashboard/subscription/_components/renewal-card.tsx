@@ -1,8 +1,7 @@
 "use client";
 
-import { CalendarDays, Loader2, RefreshCw } from "lucide-react";
+import { CalendarDays, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -17,16 +16,12 @@ interface RenewalCardProps {
   subscription: SubscriptionData;
   plan: PlanData;
   scheduledPlan: ScheduledPlanData;
-  renewLoading: boolean;
-  onSimulateRenewal: () => Promise<void>;
 }
 
 export function RenewalCard({
   subscription,
   plan,
   scheduledPlan,
-  renewLoading,
-  onSimulateRenewal,
 }: RenewalCardProps) {
   return (
     <Card>
@@ -87,33 +82,6 @@ export function RenewalCard({
               : `${parseFloat(plan.priceMonthly).toFixed(2)} PLN`}{" "}
             zostanie pobrana automatycznie z Twojej metody platnosci.
           </span>
-        </div>
-
-        {/* Dev mode: Simulate renewal button */}
-        <div className="pt-2 border-t">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                Tryb deweloperski
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Symuluj automatyczne odnowienie subskrypcji
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onSimulateRenewal}
-              disabled={renewLoading}
-            >
-              {renewLoading ? (
-                <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3 w-3 mr-2" />
-              )}
-              Symuluj odnowienie
-            </Button>
-          </div>
         </div>
       </CardContent>
     </Card>

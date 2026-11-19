@@ -28,17 +28,11 @@ export default function SubscriptionPage() {
     changePlanLoading,
     downgradeLoading,
     cancelDowngradeLoading,
-    renewLoading,
-    simulateLoading,
-    sendWarningLoading,
     fetchSubscription,
     handleCancel,
     handleChangePlan,
     handleDowngrade,
     handleCancelDowngrade,
-    handleSimulateNearExpiry,
-    handleSendWarning,
-    handleSimulateRenewal,
     setLoading,
   } = useSubscriptionData();
 
@@ -102,12 +96,6 @@ export default function SubscriptionPage() {
               <ExpirationWarningCard
                 subscription={subscription}
                 expirationData={expirationData}
-                renewLoading={renewLoading}
-                simulateLoading={simulateLoading}
-                sendWarningLoading={sendWarningLoading}
-                onSimulateRenewal={handleSimulateRenewal}
-                onSimulateNearExpiry={handleSimulateNearExpiry}
-                onSendWarning={handleSendWarning}
               />
             )}
 
@@ -117,8 +105,6 @@ export default function SubscriptionPage() {
               subscription={subscription}
               plan={plan}
               scheduledPlan={scheduledPlan}
-              renewLoading={renewLoading}
-              onSimulateRenewal={handleSimulateRenewal}
             />
           )}
 
