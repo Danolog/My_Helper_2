@@ -8,7 +8,7 @@
  */
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterAll, beforeEach, afterEach } from "vitest";
 import { CurrentPlanCard } from "@/app/dashboard/subscription/_components/current-plan-card";
 import { formatDate } from "@/app/dashboard/subscription/_types";
 import type {
@@ -105,6 +105,14 @@ function renderCard(
 function reactivateLink() {
   return screen.queryByRole("link", { name: /Aktywuj ponownie/ });
 }
+
+// Panel formatuje daty w strefie procesu; oczekiwane teksty są zapisane dla Europe/Warsaw.
+// Przypięcie przy imporcie, a nie w beforeAll, bo część stałych oczekiwanych tekstów liczy formatDate przy imporcie pliku.
+vi.stubEnv("TZ", "Europe/Warsaw");
+
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
 
 beforeEach(() => {
   // Only Date is faked, so user-event timers keep working.
