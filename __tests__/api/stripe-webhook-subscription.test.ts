@@ -393,18 +393,15 @@ describe("webhook — zdarzenie tylko jako sygnał: stan bieżący ze Stripe, ca
     expect(payments()).toHaveLength(1);
   });
 
-  it("invoice.paid: status i okres z bieżącego stanu Stripe (świeży odczyt pod blokadą)", async () => {
+  it("invoice.paid: status z bieżącego stanu Stripe (świeży odczyt pod blokadą); okres bieżącej subskrypcji Stripe nie jest zapisywany", async () => {
     retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "past_due" });
     f.selects.push([LOCAL], [PLAN_PRO]);
     await deliver(INVOICE_PAID, "invoice.paid");
     expect(retrieveSubscription).toHaveBeenCalledWith("sub_1", {}, STRIPE_LOCKED_READ_OPTIONS);
-    expect(subWrites()[0]?.values).toEqual(
-      expect.objectContaining({
-        status: "past_due",
-        currentPeriodStart: new Date(PERIOD_START * 1000),
-        currentPeriodEnd: new Date(PERIOD_END * 1000),
-      })
-    );
+    const written = subWrites()[0]?.values;
+    expect(written).toEqual(expect.objectContaining({ status: "past_due" }));
+    expect(written).not.toHaveProperty("currentPeriodStart");
+    expect(written).not.toHaveProperty("currentPeriodEnd");
   });
 
   it.each([

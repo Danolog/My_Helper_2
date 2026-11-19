@@ -229,14 +229,14 @@ function logNoLocalSubscription(event: Stripe.Event, stripeSubscriptionId: strin
  * the end never moves back (`greatest` skips NULL), the start follows only a
  * strictly later end — a retried event or an older invoice changes nothing.
  */
-function paidPeriodSet(period: BillingPeriod) {
+function paidPeriodEndSql(period: BillingPeriod) {
+  return sql`greatest(${salonSubscriptions.currentPeriodEnd}, ${period.end.toISOString()}::timestamp)`;
+}
+
+function paidPeriodStartSql(period: BillingPeriod) {
   const end = sql`${period.end.toISOString()}::timestamp`;
-  const start = sql`${period.start.toISOString()}::timestamp`;
   const storedEnd = salonSubscriptions.currentPeriodEnd;
-  return {
-    currentPeriodStart: sql`case when ${storedEnd} is null or ${end} > ${storedEnd} then ${start} else ${salonSubscriptions.currentPeriodStart} end`,
-    currentPeriodEnd: sql`greatest(${storedEnd}, ${end})`,
-  };
+  return sql`case when ${storedEnd} is null or ${end} > ${storedEnd} then ${period.start.toISOString()}::timestamp else ${salonSubscriptions.currentPeriodStart} end`;
 }
 
 /**
@@ -276,7 +276,6 @@ async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
     } else if (linesHasMore) {
       logger.warn("Paid invoice line list incomplete in the event — period taken from the lines present", logContext);
     }
-    const periodSet = paidPeriod ? paidPeriodSet(paidPeriod) : {};
 
     // Scheduled plan change (downgrade) — only on a live subscription.
     let newPlanId = sub.planId;
@@ -297,14 +296,19 @@ async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
           status,
           canceledAt,
           ...(trialEndsAt !== undefined ? { trialEndsAt } : {}),
-          ...periodSet,
+          ...(paidPeriod
+            ? { currentPeriodStart: paidPeriodStartSql(paidPeriod), currentPeriodEnd: paidPeriodEndSql(paidPeriod) }
+            : {}),
           planId: newPlanId,
           ...(newPlanId !== sub.planId ? { scheduledPlanId: null, scheduledChangeAt: null } : {}),
         })
         .where(eq(salonSubscriptions.id, sub.id));
     } else if (paidPeriod) {
       // Final row (canceled, confirmed by Stripe): only the paid period, no revival.
-      await tx.update(salonSubscriptions).set(paidPeriodSet(paidPeriod)).where(eq(salonSubscriptions.id, sub.id));
+      await tx
+        .update(salonSubscriptions)
+        .set({ currentPeriodStart: paidPeriodStartSql(paidPeriod), currentPeriodEnd: paidPeriodEndSql(paidPeriod) })
+        .where(eq(salonSubscriptions.id, sub.id));
     }
 
     // Stripe retry tego samego eventu nie może zdublować historii płatności
