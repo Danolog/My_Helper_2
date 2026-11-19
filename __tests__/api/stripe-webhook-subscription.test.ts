@@ -344,7 +344,7 @@ describe("webhook — kolejność zdarzeń (ostrzeżenie [MEDIUM] fail-open stat
   });
 });
 
-describe("webhook — zdarzenie tylko jako sygnał: stan bieżący ze Stripe, canceled końcowe", () => {
+describe("webhook — status z bieżącego stanu Stripe, nie ze zdarzenia; canceled końcowe", () => {
   const LOCAL = {
     id: "sub-local",
     salonId: "salon-1",

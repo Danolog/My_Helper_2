@@ -107,7 +107,7 @@ function getPaymentIntentIdFromInvoice(invoice: RawInvoiceData, fallback: string
  * POST /api/stripe/webhook
  *
  * Stripe webhook endpoint that handles subscription lifecycle events:
- * - invoice.paid: renewal payment recorded, state synced from Stripe
+ * - invoice.paid: renewal payment recorded, status synced from Stripe, paid period from the invoice lines
  * - invoice.payment_failed: failed payment recorded, state synced from Stripe
  * - customer.subscription.updated / deleted: state synced from Stripe
  *   (the event is only a signal — see src/lib/subscription-sync.ts)
@@ -240,7 +240,7 @@ function paidPeriodStartSql(period: BillingPeriod) {
 }
 
 /**
- * Handle invoice.paid — renewal. The event is only a signal (T3): under the
+ * Handle invoice.paid — renewal. The status does not come from the event (T3): under the
  * stripe_sub lock the CURRENT status is read from Stripe, never a hard-coded
  * "active" (a late invoice.paid after deleted must not revive a canceled
  * subscription). The period comes from the lines of the PAID invoice (not

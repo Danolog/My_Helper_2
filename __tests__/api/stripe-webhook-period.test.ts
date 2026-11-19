@@ -7,9 +7,9 @@
  * (`canceled` tracił dostęp przed końcem zapłaconego okresu). Odczyt jest
  * teraz w jednym miejscu (`@/lib/stripe-period`), wspólnym z confirm i cancel.
  *
- * Od ostrzeżenia #3 (kolejność zdarzeń) handlery traktują zdarzenie tylko jako
- * sygnał: stan pochodzi z BIEŻĄCEGO odczytu subskrypcji ze Stripe pod
- * blokadą (`stripe.subscriptions.retrieve`), a nie z payloadu zdarzenia.
+ * Od ostrzeżenia #3 (kolejność zdarzeń) status pochodzi z BIEŻĄCEGO odczytu
+ * subskrypcji ze Stripe pod blokadą (`stripe.subscriptions.retrieve`), a nie
+ * z payloadu zdarzenia.
  *
  * `invoice.paid` zapisuje okres OPŁACONY: z linii faktury (`lines.data[].period`),
  * nie z bieżącej subskrypcji Stripe i nie z `invoice.period_*` (faktura
