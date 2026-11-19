@@ -2,7 +2,6 @@
 
 import {
   AlertTriangle,
-  Bell,
   Clock,
   ShieldAlert,
   Timer,
@@ -118,11 +117,6 @@ export function ExpirationWarningCard({
         {expirationData.isNearExpiry && (
           <NearExpiryBanner expirationData={expirationData} />
         )}
-
-        {/* Recent warnings */}
-        {expirationData.recentWarnings.length > 0 && (
-          <RecentWarnings warnings={expirationData.recentWarnings} />
-        )}
       </CardContent>
     </Card>
   );
@@ -155,75 +149,6 @@ function NearExpiryBanner({ expirationData }: NearExpiryBannerProps) {
           </span>
           .
         </p>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Recent warnings list                                                */
-/* ------------------------------------------------------------------ */
-
-interface RecentWarningsProps {
-  warnings: ExpirationData["recentWarnings"];
-}
-
-function RecentWarnings({ warnings }: RecentWarningsProps) {
-  return (
-    <div>
-      <h4 className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-1.5">
-        <Bell className="h-3.5 w-3.5" />
-        Ostatnie ostrzezenia
-      </h4>
-      <div className="space-y-2">
-        {warnings.map((warning) => (
-          <div
-            key={warning.id}
-            className="flex items-start gap-3 p-3 rounded-lg border text-sm"
-          >
-            <div
-              className={`mt-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${
-                warning.type === "email"
-                  ? "bg-blue-100 text-blue-700"
-                  : warning.type === "push"
-                    ? "bg-purple-100 text-purple-700"
-                    : "bg-gray-100 text-gray-700"
-              }`}
-            >
-              {warning.type === "email"
-                ? "Email"
-                : warning.type === "push"
-                  ? "Push"
-                  : warning.type.toUpperCase()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-muted-foreground line-clamp-2">
-                {warning.message}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                {warning.sentAt
-                  ? formatDate(warning.sentAt)
-                  : formatDate(warning.createdAt)}
-              </p>
-            </div>
-            <Badge
-              variant="outline"
-              className={
-                warning.status === "sent"
-                  ? "bg-green-50 text-green-700 border-green-200"
-                  : warning.status === "pending"
-                    ? "bg-amber-50 text-amber-700 border-amber-200"
-                    : "bg-red-50 text-red-700 border-red-200"
-              }
-            >
-              {warning.status === "sent"
-                ? "Wyslano"
-                : warning.status === "pending"
-                  ? "Oczekuje"
-                  : "Blad"}
-            </Badge>
-          </div>
-        ))}
       </div>
     </div>
   );

@@ -90,11 +90,7 @@ const FROZEN_MODULE_PROMISES: Record<string, RegExp> = {
  * Wyjątki od wzorców modułów zamrożonych w plikach oferty — z powodem.
  * Wpis zwalnia jeden plik z jednego wzorca, nic więcej.
  */
-const FROZEN_PROMISE_EXCEPTIONS: Record<string, string[]> = {
-  // Etykieta kanału, którym wysłano ostrzeżenie o wygasającej subskrypcji
-  // (historia wysyłek), nie opis oferty.
-  "src/app/dashboard/subscription/_components/expiration-warning-card.tsx": ["pushNotifications"],
-};
+const FROZEN_PROMISE_EXCEPTIONS: Record<string, string[]> = {};
 
 // Huby panelu z kafelkami funkcji i bramką planu Pro.
 const HUB_FILES = [
