@@ -183,6 +183,10 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
 
         if (!res.ok || !data.success) {
           toast.error(data.error || "Nie udalo sie zmienic planu");
+          // 409: the purchase was refused; refresh the current subscription data.
+          if (res.status === 409) {
+            await fetchSubscription();
+          }
           return;
         }
 
