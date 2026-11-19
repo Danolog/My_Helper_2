@@ -53,34 +53,31 @@ test.describe('Flow 9: Subscriptions & Stripe', () => {
 
     test('should show upgrade button for Basic users', { tag: '@full' }, async ({ page }) => {
       await navigateToSubscription(page);
-      const upgradeBtn = page.getByRole('button', { name: /upgrade|uaktualnij|zmie[nń] na pro/i });
-      // Upgrade button may or may not be visible depending on current plan
-      if (await upgradeBtn.isVisible()) {
-        await expect(upgradeBtn).toBeEnabled();
-      }
+      // Salon testowy ma po seedzie aktywny plan Basic, więc przycisk przejścia na Pro jest na stronie.
+      const upgradeBtn = page.getByRole('button', { name: 'Zmien na Pro', exact: true });
+      await expect(upgradeBtn).toBeVisible();
+      await expect(upgradeBtn).toBeEnabled();
     });
 
-    test('should show downgrade button for Pro users', { tag: '@full' }, async ({ page }) => {
+    test('should not show downgrade button on Basic plan', { tag: '@full' }, async ({ page }) => {
       await navigateToSubscription(page);
-      const downgradeBtn = page.getByRole('button', { name: /downgrade|obni[zż]|zmie[nń] na basic/i });
-      // May or may not be visible depending on plan
-      if (await downgradeBtn.isVisible()) {
-        await expect(downgradeBtn).toBeEnabled();
-      }
+      // Najpierw karta planu (koniec ładowania), potem brak przycisku obniżenia planu.
+      await expect(page.getByRole('button', { name: 'Zmien na Pro', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Zmien na Basic', exact: true })).toHaveCount(0);
     });
 
     test('should show cancel subscription option', { tag: '@full' }, async ({ page }) => {
       await navigateToSubscription(page);
-      const cancelBtn = page.getByRole('button', { name: /anuluj subskrypcj|cancel subscription/i });
-      if (await cancelBtn.isVisible()) {
-        await cancelBtn.click();
-        // Should show confirmation dialog
-        await expect(
-          page.locator('[role="alertdialog"], [role="dialog"]')
-            .or(page.getByText(/czy na pewno|are you sure|potwierd[zź]/i).first())
-            .first()
-        ).toBeVisible({ timeout: 3000 });
-      }
+      const cancelBtn = page.getByRole('button', { name: 'Anuluj subskrypcje', exact: true });
+      await expect(cancelBtn).toBeVisible();
+      await cancelBtn.click();
+
+      const dialog = page.getByRole('alertdialog');
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole('button', { name: 'Tak, anuluj subskrypcje', exact: true })).toBeVisible();
+      // Okno zamykane rezygnacją: subskrypcja zostaje bez zmian.
+      await dialog.getByRole('button', { name: 'Nie, zachowaj', exact: true }).click();
+      await expect(dialog).toBeHidden();
     });
 
     test('should navigate to payment history', { tag: '@full' }, async ({ page }) => {
@@ -91,24 +88,24 @@ test.describe('Flow 9: Subscriptions & Stripe', () => {
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should display trial information for new users', { tag: '@full' }, async ({ page }) => {
+    test('should not show trial information for active subscription', { tag: '@full' }, async ({ page }) => {
       await navigateToSubscription(page);
-      // If user is on trial, should show trial info
-      // UI: "Okres probny" (no diacritics)
-      const trialInfo = page.getByText(/trial|pr[oó]bn|14 dni|testow/i);
-      if (await trialInfo.first().isVisible()) {
-        await expect(trialInfo.first()).toBeVisible();
-      }
+      // Subskrypcja aktywna: status „Aktywna”, bez informacji o okresie próbnym i bez przycisku zakupu z okresu próbnego.
+      await expect(page.getByText('Aktywna', { exact: true })).toBeVisible();
+      await expect(page.getByText(/Okres probny/)).toHaveCount(0);
+      await expect(page.getByText('Koniec okresu probnego', { exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Wykup subskrypcje', exact: true })).toHaveCount(0);
     });
 
-    test('should display next billing date', { tag: '@full' }, async ({ page }) => {
+    test('should show next payment label without a date when period has no dates', { tag: '@full' }, async ({ page }) => {
       await navigateToSubscription(page);
-      // If subscribed, should show next billing date
-      // UI: "Nastepna platnosc" / "Nastepne odnowienie" (no diacritics)
-      const billingDate = page.getByText(/nast[eę]pna p[lł]atno|next billing|rozliczeni|odnowienie/i);
-      if (await billingDate.first().isVisible()) {
-        await expect(billingDate.first()).toBeVisible();
-      }
+      // Subskrypcja bez dat okresu: etykiety płatności i odnowienia są, w miejscu daty „-”.
+      const nextPayment = page.getByText('Nastepna platnosc', { exact: true });
+      await expect(nextPayment).toBeVisible();
+      await expect(nextPayment.locator('xpath=following-sibling::p[1]')).toHaveText('-');
+      const nextRenewal = page.getByText('Nastepne odnowienie', { exact: true });
+      await expect(nextRenewal).toBeVisible();
+      await expect(nextRenewal.locator('xpath=following-sibling::span[1]')).toHaveText('-');
     });
   });
 
@@ -132,16 +129,16 @@ test.describe('Flow 9: Subscriptions & Stripe', () => {
       await newContext.close();
     });
 
-    test('should handle Stripe checkout errors gracefully', { tag: '@full' }, async ({ page }) => {
+    test('should not offer plan selection for active subscription', { tag: '@full' }, async ({ page }) => {
       await navigateToSubscription(page);
 
-      // Try to initiate checkout (if button available)
-      const checkoutBtn = page.getByRole('button', { name: /wybierz|choose|subscribe|aktywuj/i }).first();
-      if (await checkoutBtn.isVisible()) {
-        await checkoutBtn.click();
-        // Should either redirect to Stripe or show error — NOT crash
-        await expect(page.locator('body')).not.toContainText(/Internal Server Error|unexpected/i);
-      }
+      // Subskrypcja aktywna: karta planu zamiast wyboru planu, bez ponownej aktywacji i bez zakupu z okresu próbnego.
+      await expect(page.getByRole('button', { name: 'Anuluj subskrypcje', exact: true })).toBeVisible();
+      await expect(page.getByText('Brak aktywnej subskrypcji', { exact: true })).toHaveCount(0);
+      await expect(page.getByRole('link', { name: 'Wybierz plan', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('link', { name: 'Aktywuj ponownie', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Wykup subskrypcje', exact: true })).toHaveCount(0);
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error|unexpected/i);
     });
   });
 
@@ -151,11 +148,23 @@ test.describe('Flow 9: Subscriptions & Stripe', () => {
     test('should handle double-click on upgrade button', { tag: '@full' }, async ({ page }) => {
       await navigateToSubscription(page);
 
-      const upgradeBtn = page.getByRole('button', { name: /upgrade|uaktualnij|zmie[nń] na pro/i });
-      if (await upgradeBtn.isVisible()) {
-        await upgradeBtn.dblclick();
-        await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
-      }
+      const upgradeBtn = page.getByRole('button', { name: 'Zmien na Pro', exact: true });
+      await expect(upgradeBtn).toBeVisible();
+      await upgradeBtn.dblclick();
+      await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
+
+      // Podwójne kliknięcie otwiera jedno okno potwierdzenia; zamknięcie rezygnacją, bez zmiany planu.
+      const dialog = page.getByRole('alertdialog');
+      await expect(dialog).toHaveCount(1);
+      await expect(dialog.getByRole('button', { name: 'Potwierdz upgrade do Pro', exact: true })).toBeVisible();
+      await dialog.getByRole('button', { name: 'Anuluj', exact: true }).click();
+      await expect(dialog).toBeHidden();
+
+      const res = await page.request.get('/api/subscriptions/current');
+      expect(res.ok()).toBeTruthy();
+      const body = await res.json();
+      expect(body.subscription?.status).toBe('active');
+      expect(body.plan?.slug).toBe('basic');
     });
 
     test('should display subscription success page', { tag: '@full' }, async ({ page }) => {
