@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, desc } from "drizzle-orm";
 import { validateBody, subscriptionCheckoutSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
@@ -8,12 +8,26 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { subscriptionPlans, salonSubscriptions } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { getStripe, isStripePricesConfigured } from "@/lib/stripe";
 import {
   CURRENT_LOCAL_STATUSES,
+  hasRealStripeSubscription,
   isCurrentLocalStatus,
   isCurrentPaidStripeRow,
+  pickSalonAccessRow,
+  resolveSalonAccess,
+  type SalonSubscriptionAccessRow,
 } from "@/lib/subscription-predicates";
+
+type AccessRow = SalonSubscriptionAccessRow & { stripeSubscriptionId: string | null };
+
+const warsawDate = new Intl.DateTimeFormat("pl-PL", {
+  timeZone: "Europe/Warsaw",
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
 
 /**
  * Map plan slugs to their corresponding Stripe price env variables.
@@ -45,6 +59,12 @@ function stripeUnavailableResponse() {
  * is created/updated only by /api/subscriptions/confirm after Stripe reports
  * the Checkout Session as paid. Stripe not configured → 503, Stripe error
  * → 502; in both cases nothing is granted.
+ *
+ * 409 PURCHASE_BLOCKED_UNTIL_PERIOD_END (with `until`): the salon still has
+ * full access from a canceled or past_due row with a real Stripe
+ * subscription (`resolveSalonAccess` over all salon rows). A new Checkout
+ * would create a second Stripe subscription while access from the first one
+ * lasts; a new purchase is possible after `until`.
  *
  * Request body: { planSlug: "basic" | "pro" }
  * Response:     { url: string }
@@ -146,6 +166,61 @@ export async function POST(request: Request) {
     // Wiersz bez prawdziwego Stripe (nasz trial z rejestracji, dawne `sim_*`):
     // nowy plan tylko przez Checkout, planId zmienia confirm po opłaceniu —
     // ten sam wiersz, bez drugiego.
+
+    // Dostęp z wszystkich wierszy salonu (ta sama reguła co bramki):
+    // pełny dostęp z wiersza canceled/past_due z prawdziwą subskrypcją Stripe
+    // znaczy, że nowy Checkout założyłby drugą subskrypcję w Stripe, gdy
+    // dostęp z pierwszej jeszcze trwa (canceled — druga opłata za te same
+    // dni; past_due — Stripe dalej ponawia płatność starej). Odmawiamy do
+    // `access.until`, bez wywołania Stripe i bez zapisu.
+    const accessRows = await forSalon(salonId).raw(async (tx) => {
+      const all = await tx
+        .select({
+          subscription: salonSubscriptions,
+          plan: subscriptionPlans,
+        })
+        .from(salonSubscriptions)
+        .innerJoin(
+          subscriptionPlans,
+          eq(salonSubscriptions.planId, subscriptionPlans.id),
+        )
+        .where(eq(salonSubscriptions.salonId, salonId))
+        .orderBy(desc(salonSubscriptions.createdAt), desc(salonSubscriptions.id));
+      return all.map(
+        ({ subscription, plan: rowPlan }): AccessRow => ({
+          status: subscription.status,
+          planSlug: rowPlan.slug,
+          trialEndsAt: subscription.trialEndsAt,
+          currentPeriodStart: subscription.currentPeriodStart,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+          createdAt: subscription.createdAt,
+          stripeSubscriptionId: subscription.stripeSubscriptionId,
+        }),
+      );
+    });
+    const picked = pickSalonAccessRow(accessRows);
+    const access = resolveSalonAccess(accessRows, new Date());
+    if (
+      access.mode === "full" &&
+      (access.state === "canceled" || access.state === "past_due") &&
+      access.until &&
+      picked &&
+      hasRealStripeSubscription(picked.stripeSubscriptionId)
+    ) {
+      const untilText = warsawDate.format(access.until);
+      return NextResponse.json(
+        {
+          success: false,
+          code: "PURCHASE_BLOCKED_UNTIL_PERIOD_END",
+          until: access.until.toISOString(),
+          error:
+            access.state === "canceled"
+              ? `Subskrypcja jest anulowana, ale dostęp trwa do ${untilText}. Nowy zakup będzie możliwy po tym terminie.`
+              : `Płatność za subskrypcję jest zaległa. Nowy zakup będzie możliwy po ${untilText}. W sprawie zaległej płatności skontaktuj się z obsługą.`,
+        },
+        { status: 409 },
+      );
+    }
 
     // Attempt to create a real Stripe Checkout Session
     const stripe = getStripe();

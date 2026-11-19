@@ -19,12 +19,15 @@
  */
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { POST } from "@/app/api/subscriptions/checkout/route";
 
 const {
   selectQueue,
   selectWheres,
+  accessQueue,
+  accessWheres,
+  mockForSalon,
   mockUpdate,
   mockInsert,
   mockTransaction,
@@ -40,6 +43,11 @@ const {
   selectQueue: [] as unknown[][],
   // Argumenty `.where(...)` kolejnych SELECT-ów (filtr renderowany przez PgDialect).
   selectWheres: [] as unknown[],
+  // Odczyt przez repozytorium salonu (`forSalon(salonId).raw`): wszystkie
+  // wiersze subskrypcji salonu z planem. Error w kolejce = odrzucone zapytanie.
+  accessQueue: [] as (unknown[] | Error)[],
+  accessWheres: [] as unknown[],
+  mockForSalon: vi.fn(),
   mockUpdate: vi.fn(),
   mockInsert: vi.fn(),
   mockTransaction: vi.fn(),
@@ -98,6 +106,35 @@ vi.mock("@/lib/db", () => {
         mockTransaction();
         return fn(tx);
       },
+    },
+  };
+});
+
+vi.mock("@/lib/server/repository", () => {
+  const accessChain = () => {
+    const builder: Record<string, unknown> = {};
+    for (const method of ["from", "innerJoin", "orderBy", "limit"]) {
+      builder[method] = () => builder;
+    }
+    builder.where = (cond: unknown) => {
+      accessWheres.push(cond);
+      return builder;
+    };
+    builder.then = (
+      resolve: (value: unknown[]) => unknown,
+      reject: (reason: unknown) => unknown,
+    ) => {
+      const next = accessQueue.shift() ?? [];
+      if (next instanceof Error) return Promise.reject(next).then(resolve, reject);
+      return Promise.resolve(next).then(resolve, reject);
+    };
+    return builder;
+  };
+  const tx = { select: () => accessChain() };
+  return {
+    forSalon: (salonId: string) => {
+      mockForSalon(salonId);
+      return { raw: (fn: (t: typeof tx) => unknown) => fn(tx), salonId };
     },
   };
 });
@@ -186,6 +223,9 @@ describe("POST /api/subscriptions/checkout", () => {
   beforeEach(() => {
     selectQueue.length = 0;
     selectWheres.length = 0;
+    accessQueue.length = 0;
+    accessWheres.length = 0;
+    mockForSalon.mockReset();
     mockUpdate.mockReset();
     mockInsert.mockReset();
     mockTransaction.mockReset();
@@ -311,16 +351,199 @@ describe("POST /api/subscriptions/checkout", () => {
       expect(params).toEqual(expect.arrayContaining(["salon-1", "trialing", "active"]));
     });
 
-    it("wiersz canceled z prawdziwym id (historia) nie blokuje nowego Checkoutu", async () => {
+    it("wiersz canceled z prawdziwym id bez końca okresu (historia) nie blokuje nowego Checkoutu", async () => {
       mockGetStripe.mockReturnValue(stripeClient());
-      // Zapytanie filtruje trialing/active; gdyby atrapa zwróciła historię,
-      // trasa i tak jej nie liczy.
-      selectQueue.push([PLAN_PRO], [subscriptionRow({ status: "canceled", stripeSubscriptionId: "sub_old" })]);
+      // Zapytanie o wiersze bieżące filtruje trialing/active; gdyby atrapa
+      // zwróciła historię, ta reguła jej nie liczy. Odczyt wszystkich wierszy
+      // widzi ten wiersz, ale bez końca okresu nie daje on pełnego dostępu.
+      const historic = subscriptionRow({ status: "canceled", stripeSubscriptionId: "sub_old" });
+      selectQueue.push([PLAN_PRO], [historic]);
+      accessQueue.push([{ subscription: { ...historic, createdAt: new Date("2026-01-01T00:00:00.000Z") }, plan: PLAN_BASIC }]);
 
       const res = await POST(checkoutRequest("pro"));
 
       expect(res.status).toBe(200);
       expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Pełny dostęp z anulowanej albo zaległej subskrypcji Stripe (reguła
+  // `resolveSalonAccess` na wszystkich wierszach salonu): nowy Checkout
+  // założyłby drugą subskrypcję w Stripe, więc trasa odmawia do końca dostępu.
+  describe("(f) pełny dostęp z anulowanej albo zaległej subskrypcji Stripe", () => {
+    const NOW = new Date("2026-11-19T10:00:00.000Z");
+    const DAY = 86_400_000;
+
+    function accessRow(overrides: Record<string, unknown> = {}) {
+      return {
+        subscription: subscriptionRow({
+          status: "canceled",
+          stripeSubscriptionId: "sub_1Real",
+          createdAt: new Date("2026-10-01T10:00:00.000Z"),
+          ...overrides,
+        }),
+        plan: PLAN_BASIC,
+      };
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+      mockGetStripe.mockReturnValue(stripeClient());
+      // Zapytanie o wiersze bieżące (trialing/active) nie widzi canceled/past_due.
+      selectQueue.push([PLAN_PRO], []);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function expectCheckoutCreated() {
+      const res = await POST(checkoutRequest("pro"));
+      expect(res.status).toBe(200);
+      expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
+      expectNoWrites();
+    }
+
+    it("canceled z prawdziwą subskrypcją Stripe, koniec okresu w przyszłości: 409 PURCHASE_BLOCKED_UNTIL_PERIOD_END z until = koniec okresu, bez sesji Stripe i zapisów", async () => {
+      const periodEnd = new Date("2026-12-01T10:00:00.000Z");
+      accessQueue.push([accessRow({ currentPeriodEnd: periodEnd })]);
+
+      const res = await POST(checkoutRequest("pro"));
+      const body = await res.json();
+
+      expect(res.status).toBe(409);
+      expect(body).toEqual({
+        success: false,
+        code: "PURCHASE_BLOCKED_UNTIL_PERIOD_END",
+        until: "2026-12-01T10:00:00.000Z",
+        error: "Subskrypcja jest anulowana, ale dostęp trwa do 01.12.2026. Nowy zakup będzie możliwy po tym terminie.",
+      });
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
+      expectNoWrites();
+      // Odczyt przez repozytorium salonu z sesji, z jawnym filtrem salonu.
+      expect(mockForSalon).toHaveBeenCalledWith("salon-1");
+      const { params } = new PgDialect().sqlToQuery(accessWheres[0] as SQL);
+      expect(params).toEqual(["salon-1"]);
+    });
+
+    it("canceled z prawdziwą subskrypcją Stripe, koniec okresu w przeszłości: sesja Checkout (200)", async () => {
+      accessQueue.push([accessRow({ currentPeriodEnd: new Date(NOW.getTime() - DAY) })]);
+      await expectCheckoutCreated();
+    });
+
+    it("canceled z prawdziwą subskrypcją Stripe, koniec okresu równy chwili bieżącej: sesja Checkout (200)", async () => {
+      accessQueue.push([accessRow({ currentPeriodEnd: new Date(NOW.getTime()) })]);
+      await expectCheckoutCreated();
+    });
+
+    it("canceled z prawdziwą subskrypcją Stripe bez końca okresu: sesja Checkout (200)", async () => {
+      accessQueue.push([accessRow({ currentPeriodEnd: null })]);
+      await expectCheckoutCreated();
+    });
+
+    it("canceled w okresie ze stripeSubscriptionId = null: sesja Checkout (200)", async () => {
+      accessQueue.push([accessRow({ stripeSubscriptionId: null, currentPeriodEnd: new Date(NOW.getTime() + DAY) })]);
+      await expectCheckoutCreated();
+    });
+
+    it("canceled w okresie ze stripeSubscriptionId sim_…: sesja Checkout (200)", async () => {
+      accessQueue.push([accessRow({ stripeSubscriptionId: "sim_sub_1", currentPeriodEnd: new Date(NOW.getTime() + DAY) })]);
+      await expectCheckoutCreated();
+    });
+
+    it("past_due z prawdziwą subskrypcją Stripe po końcu okresu, w 7 dniach karencji: 409 z until = koniec okresu + 7 dni i tekstem o zaległej płatności", async () => {
+      const periodEnd = new Date("2026-11-17T10:00:00.000Z");
+      accessQueue.push([accessRow({ status: "past_due", currentPeriodEnd: periodEnd })]);
+
+      const res = await POST(checkoutRequest("pro"));
+      const body = await res.json();
+
+      expect(res.status).toBe(409);
+      expect(body).toEqual({
+        success: false,
+        code: "PURCHASE_BLOCKED_UNTIL_PERIOD_END",
+        until: "2026-11-24T10:00:00.000Z",
+        error:
+          "Płatność za subskrypcję jest zaległa. Nowy zakup będzie możliwy po 24.11.2026. W sprawie zaległej płatności skontaktuj się z obsługą.",
+      });
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
+      expectNoWrites();
+    });
+
+    it("past_due z prawdziwą subskrypcją Stripe po końcu okresu + 7 dni: sesja Checkout (200)", async () => {
+      accessQueue.push([accessRow({ status: "past_due", currentPeriodEnd: new Date(NOW.getTime() - 8 * DAY) })]);
+      await expectCheckoutCreated();
+    });
+
+    it("past_due w karencji bez prawdziwej subskrypcji Stripe (null): sesja Checkout (200)", async () => {
+      accessQueue.push([
+        accessRow({ status: "past_due", stripeSubscriptionId: null, currentPeriodEnd: new Date(NOW.getTime() - 2 * DAY) }),
+      ]);
+      await expectCheckoutCreated();
+    });
+
+    it("nowszy canceled w okresie z prawdziwą subskrypcją + starszy canceled po okresie: 409", async () => {
+      accessQueue.push([
+        accessRow({ id: "sub-new", createdAt: new Date("2026-10-01T10:00:00.000Z"), currentPeriodEnd: new Date(NOW.getTime() + DAY) }),
+        accessRow({ id: "sub-old", createdAt: new Date("2026-08-01T10:00:00.000Z"), currentPeriodEnd: new Date(NOW.getTime() - DAY) }),
+      ]);
+
+      const res = await POST(checkoutRequest("pro"));
+      const body = await res.json();
+
+      expect(res.status).toBe(409);
+      expect(body.code).toBe("PURCHASE_BLOCKED_UNTIL_PERIOD_END");
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
+      expectNoWrites();
+    });
+
+    it("nowszy canceled po okresie + starszy canceled w okresie z prawdziwą subskrypcją: sesja Checkout (200), liczy się najnowszy wiersz", async () => {
+      accessQueue.push([
+        accessRow({ id: "sub-new", createdAt: new Date("2026-10-01T10:00:00.000Z"), currentPeriodEnd: new Date(NOW.getTime() - DAY) }),
+        accessRow({ id: "sub-old", createdAt: new Date("2026-08-01T10:00:00.000Z"), currentPeriodEnd: new Date(NOW.getTime() + DAY) }),
+      ]);
+      await expectCheckoutCreated();
+    });
+
+    it("wiersz bieżący trialing bez prawdziwego Stripe + starszy canceled w okresie z prawdziwą subskrypcją: sesja Checkout (200), liczy się wiersz bieżący", async () => {
+      const trial = subscriptionRow({
+        id: "sub-trial",
+        status: "trialing",
+        stripeSubscriptionId: null,
+        trialEndsAt: new Date(NOW.getTime() + 10 * DAY),
+        createdAt: new Date("2026-11-10T10:00:00.000Z"),
+      });
+      selectQueue.length = 0;
+      selectQueue.push([PLAN_PRO], [trial]);
+      accessQueue.push([
+        { subscription: trial, plan: PLAN_BASIC },
+        accessRow({ id: "sub-old", createdAt: new Date("2026-08-01T10:00:00.000Z"), currentPeriodEnd: new Date(NOW.getTime() + DAY) }),
+      ]);
+      await expectCheckoutCreated();
+    });
+
+    it("data w tekście odmowy w strefie Europe/Warsaw: koniec okresu 23:30 UTC daje dzień następny", async () => {
+      accessQueue.push([accessRow({ currentPeriodEnd: new Date("2026-12-01T23:30:00.000Z") })]);
+
+      const res = await POST(checkoutRequest("pro"));
+      const body = await res.json();
+
+      expect(res.status).toBe(409);
+      expect(body.until).toBe("2026-12-01T23:30:00.000Z");
+      expect(body.error).toBe(
+        "Subskrypcja jest anulowana, ale dostęp trwa do 02.12.2026. Nowy zakup będzie możliwy po tym terminie.",
+      );
+    });
+
+    it("błąd odczytu wszystkich wierszy subskrypcji: 500, bez sesji Stripe i zapisów", async () => {
+      accessQueue.push(new Error("connection reset"));
+
+      const res = await POST(checkoutRequest("pro"));
+
+      expect(res.status).toBe(500);
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
+      expectNoWrites();
     });
   });
 
