@@ -5,8 +5,7 @@
  * planIncludesAI przy mode "full" zwraca true. Moduł nie ma importów.
  * Przynależność do listy to dokładne porównanie napisu (bez przycinania
  * i bez zmiany wielkości liter). Moduł odpowiada tylko na pytanie dla
- * podanych danych i niczego sam nie wymusza: poza testem jego stałych
- * i funkcji nie używa żaden plik.
+ * podanych danych i niczego sam nie wymusza.
  */
 
 /** Slugi, dla których isPlanOnSale zwraca true. */

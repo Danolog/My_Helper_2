@@ -93,7 +93,7 @@ function stripeUnavailableResponse() {
  * (`resource_missing`) counts as ended, any other read error → 503
  * STRIPE_UNAVAILABLE.
  *
- * Request body: { planSlug: "basic" | "pro" }
+ * Request body: { planSlug } — one of PLANS_ON_SALE (src/lib/plan-catalog.ts)
  * Response:     { url: string }
  */
 export async function POST(request: Request) {
