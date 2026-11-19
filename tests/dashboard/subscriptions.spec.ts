@@ -51,18 +51,18 @@ test.describe('Flow 9: Subscriptions & Stripe', () => {
       ).toBeVisible({ timeout: 5000 });
     });
 
-    test('should show upgrade button for Basic users', { tag: '@full' }, async ({ page }) => {
+    test('should not show upgrade button for Basic users when pro is not on sale', { tag: '@full' }, async ({ page }) => {
       await navigateToSubscription(page);
-      // Salon testowy ma po seedzie aktywny plan Basic, więc przycisk przejścia na Pro jest na stronie.
-      const upgradeBtn = page.getByRole('button', { name: 'Zmien na Pro', exact: true });
-      await expect(upgradeBtn).toBeVisible();
-      await expect(upgradeBtn).toBeEnabled();
+      // Salon testowy ma po seedzie aktywny plan Basic, a "pro" nie jest na liście PLANS_ON_SALE:
+      // najpierw karta planu (przycisk anulowania), potem brak przycisku przejścia na Pro.
+      await expect(page.getByRole('button', { name: 'Anuluj subskrypcje', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Zmien na Pro', exact: true })).toHaveCount(0);
     });
 
     test('should not show downgrade button on Basic plan', { tag: '@full' }, async ({ page }) => {
       await navigateToSubscription(page);
-      // Najpierw karta planu (koniec ładowania), potem brak przycisku obniżenia planu.
-      await expect(page.getByRole('button', { name: 'Zmien na Pro', exact: true })).toBeVisible();
+      // Najpierw karta planu (przycisk anulowania, koniec ładowania), potem brak przycisku obniżenia planu.
+      await expect(page.getByRole('button', { name: 'Anuluj subskrypcje', exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Zmien na Basic', exact: true })).toHaveCount(0);
     });
 
@@ -145,19 +145,19 @@ test.describe('Flow 9: Subscriptions & Stripe', () => {
   // ── Edge cases ──────────────────────────────────────────────────────────
 
   test.describe('Edge cases', () => {
-    test('should handle double-click on upgrade button', { tag: '@full' }, async ({ page }) => {
+    test('should open one dialog on double-click of cancel subscription button', { tag: '@full' }, async ({ page }) => {
       await navigateToSubscription(page);
 
-      const upgradeBtn = page.getByRole('button', { name: 'Zmien na Pro', exact: true });
-      await expect(upgradeBtn).toBeVisible();
-      await upgradeBtn.dblclick();
+      const cancelBtn = page.getByRole('button', { name: 'Anuluj subskrypcje', exact: true });
+      await expect(cancelBtn).toBeVisible();
+      await cancelBtn.dblclick();
       await expect(page.locator('body')).not.toContainText(/Internal Server Error/i);
 
-      // Podwójne kliknięcie otwiera jedno okno potwierdzenia; zamknięcie rezygnacją, bez zmiany planu.
+      // Podwójne kliknięcie otwiera jedno okno anulowania; zamknięcie rezygnacją, bez potwierdzenia anulowania.
       const dialog = page.getByRole('alertdialog');
       await expect(dialog).toHaveCount(1);
-      await expect(dialog.getByRole('button', { name: 'Potwierdz upgrade do Pro', exact: true })).toBeVisible();
-      await dialog.getByRole('button', { name: 'Anuluj', exact: true }).click();
+      await expect(dialog.getByRole('button', { name: 'Tak, anuluj subskrypcje', exact: true })).toBeVisible();
+      await dialog.getByRole('button', { name: 'Nie, zachowaj', exact: true }).click();
       await expect(dialog).toBeHidden();
 
       const res = await page.request.get('/api/subscriptions/current');
