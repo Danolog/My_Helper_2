@@ -3,10 +3,10 @@
  * `currency`) — jedno miejsce przeliczenia.
  *
  * Stripe podaje kwotę w najmniejszych jednostkach waluty (liczba całkowita,
- * np. grosze). Napis kwoty powstaje z arytmetyki całkowitej, bez liczb
- * zmiennoprzecinkowych. Kwota spoza zakresu kolumny, niecałkowita albo nie
- * będąca liczbą, waluta inna niż trzy litery oraz waluta z poniższego zbioru
- * → `null` (wpisu z takich danych nie da się poprawnie zapisać).
+ * np. grosze). Napis kwoty powstaje z ilorazu całkowitego i reszty z dzielenia
+ * przez 100, bez zaokrąglania ułamka. Kwota spoza zakresu kolumny, niecałkowita
+ * albo nie będąca liczbą, waluta inna niż trzy litery oraz waluta z poniższego
+ * zbioru → `null` (wpisu z takich danych nie da się poprawnie zapisać).
  */
 
 /** Najwyższa kwota w najmniejszych jednostkach, która mieści się w numeric(10,2). */

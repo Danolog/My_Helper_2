@@ -110,8 +110,8 @@ function getPaymentIntentIdFromInvoice(invoice: RawInvoiceData, fallback: string
  * POST /api/stripe/webhook
  *
  * Stripe webhook endpoint that handles subscription lifecycle events:
- * - invoice.paid: renewal payment recorded, status synced from Stripe, paid period from the invoice lines
- * - invoice.payment_failed: failed payment recorded, state synced from Stripe
+ * - invoice.paid: renewal payment recorded when the invoice amount and currency can be converted (otherwise an error is logged), status synced from Stripe, paid period from the invoice lines
+ * - invoice.payment_failed: failed payment recorded when the invoice amount and currency can be converted (otherwise an error is logged), state synced from Stripe
  * - customer.subscription.updated / deleted: state synced from Stripe
  *   (the event is only a signal — see src/lib/subscription-sync.ts)
  *
