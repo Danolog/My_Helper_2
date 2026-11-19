@@ -35,6 +35,8 @@ import {
   formatDate,
   pastDueNoticeText,
   periodEndLabel,
+  planFeaturesHeading,
+  purchaseBlockedUntil,
   statusColor,
   statusLabel,
 } from "../_types";
@@ -81,6 +83,10 @@ export function CurrentPlanCard({
   onCancelDowngrade,
   onRefresh,
 }: CurrentPlanCardProps) {
+  const blockedUntil = purchaseBlockedUntil(
+    subscription.stripeSubscriptionId,
+    access,
+  );
   return (
     <Card>
       <CardHeader>
@@ -163,7 +169,7 @@ export function CurrentPlanCard({
                 Subskrypcja anulowana
               </p>
               <p className="text-sm text-red-600 dark:text-red-300">
-                {canceledNoticeText(subscription.canceledAt, access)}
+                {canceledNoticeText(subscription.canceledAt, access, blockedUntil)}
               </p>
             </div>
           </div>
@@ -178,7 +184,7 @@ export function CurrentPlanCard({
                 Zalegla platnosc
               </p>
               <p className="text-sm text-amber-600 dark:text-amber-300">
-                {pastDueNoticeText(access)}
+                {pastDueNoticeText(access, blockedUntil)}
               </p>
             </div>
           </div>
@@ -197,7 +203,7 @@ export function CurrentPlanCard({
         {/* Plan Features */}
         <div>
           <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wider mb-3">
-            Funkcje w Twoim planie
+            {planFeaturesHeading(plan.name, access)}
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {plan.features.map((feature, idx) => (
@@ -214,6 +220,7 @@ export function CurrentPlanCard({
           subscription={subscription}
           plan={plan}
           allPlans={allPlans}
+          access={access}
           changePlanLoading={changePlanLoading}
           downgradeLoading={downgradeLoading}
           cancelLoading={cancelLoading}

@@ -1,10 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
+  cancelDialogAccessText,
+  cancelDialogRepurchaseText,
   cancelSuccessDescription,
   canceledNoticeText,
   formatDate,
   pastDueNoticeText,
   periodEndLabel,
+  planFeaturesHeading,
+  purchaseBlockedText,
+  purchaseBlockedUntil,
   type AccessData,
 } from "@/app/dashboard/subscription/_types";
 
@@ -82,6 +87,7 @@ describe("periodEndLabel", () => {
 const UNTIL = "2026-12-19T12:00:00.000Z";
 const CANCELED_AT = "2026-11-10T12:00:00.000Z";
 const REACTIVATE_TEXT = "Mozesz w kazdej chwili ponownie aktywowac plan.";
+const NEW_PURCHASE_AFTER_TEXT = "Nowy zakup bedzie mozliwy po tym terminie.";
 
 function access(overrides: Partial<AccessData>): AccessData {
   return { state: "canceled", mode: "full", planSlug: "pro", until: UNTIL, ...overrides };
@@ -93,86 +99,222 @@ function accessUntilText(until: string): string {
 
 describe("canceledNoticeText", () => {
   it("with cancel date and full canceled access returns cancel date, access end date and reactivation text", () => {
-    expect(canceledNoticeText(CANCELED_AT, access({}))).toBe(
+    expect(canceledNoticeText(CANCELED_AT, access({}), null)).toBe(
       `Anulowano: ${formatDate(CANCELED_AT)}. ${accessUntilText(UNTIL)} ${REACTIVATE_TEXT}`,
     );
   });
 
   it("without cancel date and with full canceled access returns generic cancel text, access end date and reactivation text", () => {
-    expect(canceledNoticeText(null, access({}))).toBe(
+    expect(canceledNoticeText(null, access({}), null)).toBe(
       `Twoja subskrypcja zostala anulowana. ${accessUntilText(UNTIL)} ${REACTIVATE_TEXT}`,
     );
   });
 
   it("with cancel date and null access returns cancel date and reactivation text without an access sentence", () => {
-    expect(canceledNoticeText(CANCELED_AT, null)).toBe(
+    expect(canceledNoticeText(CANCELED_AT, null, null)).toBe(
       `Anulowano: ${formatDate(CANCELED_AT)}. ${REACTIVATE_TEXT}`,
     );
   });
 
   it("without cancel date and null access returns generic cancel text and reactivation text without an access sentence", () => {
-    expect(canceledNoticeText(null, null)).toBe(
+    expect(canceledNoticeText(null, null, null)).toBe(
       `Twoja subskrypcja zostala anulowana. ${REACTIVATE_TEXT}`,
     );
   });
 
   it("read_only access returns the text without an access sentence", () => {
     expect(
-      canceledNoticeText(CANCELED_AT, access({ mode: "read_only", planSlug: null, until: null })),
+      canceledNoticeText(CANCELED_AT, access({ mode: "read_only", planSlug: null, until: null }), null),
     ).toBe(`Anulowano: ${formatDate(CANCELED_AT)}. ${REACTIVATE_TEXT}`);
   });
 
   it("read_only access with a non-null until returns the text without an access sentence", () => {
-    expect(canceledNoticeText(CANCELED_AT, access({ mode: "read_only" }))).toBe(
+    expect(canceledNoticeText(CANCELED_AT, access({ mode: "read_only" }), null)).toBe(
       `Anulowano: ${formatDate(CANCELED_AT)}. ${REACTIVATE_TEXT}`,
     );
   });
 
   it("full canceled access with null until returns the text without an access sentence", () => {
-    expect(canceledNoticeText(CANCELED_AT, access({ until: null }))).toBe(
+    expect(canceledNoticeText(CANCELED_AT, access({ until: null }), null)).toBe(
       `Anulowano: ${formatDate(CANCELED_AT)}. ${REACTIVATE_TEXT}`,
     );
   });
 
   it("full access in a state other than canceled returns the text without an access sentence", () => {
-    expect(canceledNoticeText(CANCELED_AT, access({ state: "active" }))).toBe(
+    expect(canceledNoticeText(CANCELED_AT, access({ state: "active" }), null)).toBe(
       `Anulowano: ${formatDate(CANCELED_AT)}. ${REACTIVATE_TEXT}`,
+    );
+  });
+
+  it("with a blocked purchase ends with the new purchase text instead of the reactivation text", () => {
+    expect(canceledNoticeText(CANCELED_AT, access({}), UNTIL)).toBe(
+      `Anulowano: 10 listopada 2026. Dostep do funkcji planu jest aktywny do 19 grudnia 2026. ${NEW_PURCHASE_AFTER_TEXT}`,
+    );
+  });
+
+  it("without cancel date and with a blocked purchase ends with the new purchase text", () => {
+    expect(canceledNoticeText(null, access({}), UNTIL)).toBe(
+      `Twoja subskrypcja zostala anulowana. Dostep do funkcji planu jest aktywny do 19 grudnia 2026. ${NEW_PURCHASE_AFTER_TEXT}`,
+    );
+  });
+
+  it("empty blocked date ends with the reactivation text", () => {
+    expect(canceledNoticeText(CANCELED_AT, access({}), "")).toBe(
+      `Anulowano: 10 listopada 2026. Dostep do funkcji planu jest aktywny do 19 grudnia 2026. ${REACTIVATE_TEXT}`,
     );
   });
 });
 
 const PAST_DUE_TEXT = "Ostatnia platnosc nie powiodla sie.";
+const CONTACT_SUPPORT_TEXT = "W sprawie zaleglej platnosci skontaktuj sie z obsluga.";
 
 function pastDueAccess(overrides: Partial<AccessData>): AccessData {
   return access({ state: "past_due", ...overrides });
 }
 
 describe("pastDueNoticeText", () => {
-  it("full past_due access with until returns the failed payment text and access end date", () => {
-    expect(pastDueNoticeText(pastDueAccess({}))).toBe(
-      `${PAST_DUE_TEXT} ${accessUntilText(UNTIL)}`,
+  it("full past_due access with until returns the failed payment text, access end date and support text", () => {
+    expect(pastDueNoticeText(pastDueAccess({}), null)).toBe(
+      `${PAST_DUE_TEXT} ${accessUntilText(UNTIL)} ${CONTACT_SUPPORT_TEXT}`,
     );
   });
 
-  it("null access returns only the failed payment text", () => {
-    expect(pastDueNoticeText(null)).toBe(PAST_DUE_TEXT);
+  it("null access returns the failed payment text and support text", () => {
+    expect(pastDueNoticeText(null, null)).toBe(`${PAST_DUE_TEXT} ${CONTACT_SUPPORT_TEXT}`);
   });
 
-  it("read_only past_due access returns only the failed payment text", () => {
+  it("read_only past_due access returns the failed payment text and support text", () => {
     expect(
-      pastDueNoticeText(pastDueAccess({ mode: "read_only", planSlug: null, until: null })),
-    ).toBe(PAST_DUE_TEXT);
+      pastDueNoticeText(pastDueAccess({ mode: "read_only", planSlug: null, until: null }), null),
+    ).toBe(`${PAST_DUE_TEXT} ${CONTACT_SUPPORT_TEXT}`);
   });
 
-  it("read_only past_due access with a non-null until returns only the failed payment text", () => {
-    expect(pastDueNoticeText(pastDueAccess({ mode: "read_only" }))).toBe(PAST_DUE_TEXT);
+  it("read_only past_due access with a non-null until returns the failed payment text and support text", () => {
+    expect(pastDueNoticeText(pastDueAccess({ mode: "read_only" }), null)).toBe(
+      `${PAST_DUE_TEXT} ${CONTACT_SUPPORT_TEXT}`,
+    );
   });
 
-  it("full past_due access with null until returns only the failed payment text", () => {
-    expect(pastDueNoticeText(pastDueAccess({ until: null }))).toBe(PAST_DUE_TEXT);
+  it("full past_due access with null until returns the failed payment text and support text", () => {
+    expect(pastDueNoticeText(pastDueAccess({ until: null }), null)).toBe(
+      `${PAST_DUE_TEXT} ${CONTACT_SUPPORT_TEXT}`,
+    );
   });
 
-  it("full access in a state other than past_due returns only the failed payment text", () => {
-    expect(pastDueNoticeText(pastDueAccess({ state: "canceled" }))).toBe(PAST_DUE_TEXT);
+  it("full access in a state other than past_due returns the failed payment text and support text", () => {
+    expect(pastDueNoticeText(pastDueAccess({ state: "canceled" }), null)).toBe(
+      `${PAST_DUE_TEXT} ${CONTACT_SUPPORT_TEXT}`,
+    );
+  });
+
+  it("with a blocked purchase adds the new purchase text before the support text", () => {
+    expect(pastDueNoticeText(pastDueAccess({}), UNTIL)).toBe(
+      `${PAST_DUE_TEXT} Dostep do funkcji planu jest aktywny do 19 grudnia 2026. ${NEW_PURCHASE_AFTER_TEXT} ${CONTACT_SUPPORT_TEXT}`,
+    );
+  });
+
+  it("empty blocked date returns the text without the new purchase text", () => {
+    expect(pastDueNoticeText(pastDueAccess({}), "")).toBe(
+      `${PAST_DUE_TEXT} Dostep do funkcji planu jest aktywny do 19 grudnia 2026. ${CONTACT_SUPPORT_TEXT}`,
+    );
+  });
+});
+
+const REAL_ID = "sub_1Real";
+const SIM_ID = "sim_sub_1";
+
+describe("purchaseBlockedUntil", () => {
+  it.each<[string, string | null, AccessData | null, string | null]>([
+    ["canceled, full, until, real Stripe id", REAL_ID, access({}), UNTIL],
+    ["past_due, full, until, real Stripe id", REAL_ID, pastDueAccess({}), UNTIL],
+    ["active, full, until, real Stripe id", REAL_ID, access({ state: "active" }), null],
+    ["trialing, full, until, real Stripe id", REAL_ID, access({ state: "trialing" }), null],
+    ["expired, read_only, no until", REAL_ID, access({ state: "expired", mode: "read_only", planSlug: null, until: null }), null],
+    ["inactive, full, until, real Stripe id", REAL_ID, access({ state: "inactive" }), null],
+    ["canceled, read_only, no until", REAL_ID, access({ mode: "read_only", planSlug: null, until: null }), null],
+    ["canceled, read_only, non-null until", REAL_ID, access({ mode: "read_only" }), null],
+    ["past_due, read_only, non-null until", REAL_ID, pastDueAccess({ mode: "read_only" }), null],
+    ["canceled, full, null until", REAL_ID, access({ until: null }), null],
+    ["canceled, full, empty until", REAL_ID, access({ until: "" }), null],
+    ["past_due, full, null until", REAL_ID, pastDueAccess({ until: null }), null],
+    ["canceled, full, until, null Stripe id", null, access({}), null],
+    ["canceled, full, until, sim_ Stripe id", SIM_ID, access({}), null],
+    ["canceled, full, until, empty Stripe id", "", access({}), null],
+    ["past_due, full, until, null Stripe id", null, pastDueAccess({}), null],
+    ["past_due, full, until, sim_ Stripe id", SIM_ID, pastDueAccess({}), null],
+    ["null access, real Stripe id", REAL_ID, null, null],
+  ])("%s", (_name, stripeSubscriptionId, accessData, expected) => {
+    expect(purchaseBlockedUntil(stripeSubscriptionId, accessData)).toBe(expected);
+  });
+});
+
+describe("purchaseBlockedText", () => {
+  it("returns the new purchase text with the formatted date", () => {
+    expect(purchaseBlockedText(UNTIL)).toBe("Nowy zakup bedzie mozliwy po 19 grudnia 2026.");
+  });
+});
+
+const DIALOG_ACCESS_TEXT =
+  "Zachowasz dostep do wszystkich funkcji planu Pro do konca biezacego okresu rozliczeniowego (19 grudnia 2026). Po tym terminie subskrypcja nie zostanie odnowiona.";
+
+describe("cancelDialogAccessText", () => {
+  it("period end in the future returns the access text with the plan name and end date", () => {
+    expect(cancelDialogAccessText("Pro", UNTIL, NOW)).toBe(DIALOG_ACCESS_TEXT);
+  });
+
+  it("period end in the past returns only the not renewed text", () => {
+    expect(cancelDialogAccessText("Pro", "2026-10-19T12:00:00.000Z", NOW)).toBe(NOT_RENEWED_TEXT);
+  });
+
+  it("period end equal to now returns only the not renewed text", () => {
+    expect(cancelDialogAccessText("Pro", NOW.toISOString(), NOW)).toBe(NOT_RENEWED_TEXT);
+  });
+
+  it("null period end returns only the not renewed text", () => {
+    expect(cancelDialogAccessText("Pro", null, NOW)).toBe(NOT_RENEWED_TEXT);
+  });
+
+  it("empty period end returns only the not renewed text", () => {
+    expect(cancelDialogAccessText("Pro", "", NOW)).toBe(NOT_RENEWED_TEXT);
+  });
+
+  it("invalid date period end returns only the not renewed text", () => {
+    expect(cancelDialogAccessText("Pro", "not-a-date", NOW)).toBe(NOT_RENEWED_TEXT);
+  });
+});
+
+const DIALOG_REACTIVATE_TEXT = "Mozesz ponownie aktywowac subskrypcje w dowolnym momencie.";
+
+describe("cancelDialogRepurchaseText", () => {
+  it.each<[string, string | null, string | null, string]>([
+    ["real Stripe id, period end in the future", REAL_ID, UNTIL, NEW_PURCHASE_AFTER_TEXT],
+    ["real Stripe id, period end in the past", REAL_ID, "2026-10-19T12:00:00.000Z", DIALOG_REACTIVATE_TEXT],
+    ["real Stripe id, period end equal to now", REAL_ID, NOW.toISOString(), DIALOG_REACTIVATE_TEXT],
+    ["real Stripe id, null period end", REAL_ID, null, DIALOG_REACTIVATE_TEXT],
+    ["real Stripe id, invalid period end", REAL_ID, "not-a-date", DIALOG_REACTIVATE_TEXT],
+    ["null Stripe id, period end in the future", null, UNTIL, DIALOG_REACTIVATE_TEXT],
+    ["null Stripe id, period end in the past", null, "2026-10-19T12:00:00.000Z", DIALOG_REACTIVATE_TEXT],
+    ["null Stripe id, null period end", null, null, DIALOG_REACTIVATE_TEXT],
+    ["sim_ Stripe id, period end in the future", SIM_ID, UNTIL, DIALOG_REACTIVATE_TEXT],
+    ["sim_ Stripe id, period end in the past", SIM_ID, "2026-10-19T12:00:00.000Z", DIALOG_REACTIVATE_TEXT],
+    ["sim_ Stripe id, null period end", SIM_ID, null, DIALOG_REACTIVATE_TEXT],
+  ])("%s", (_name, stripeSubscriptionId, periodEnd, expected) => {
+    expect(cancelDialogRepurchaseText(stripeSubscriptionId, periodEnd, NOW)).toBe(expected);
+  });
+});
+
+describe("planFeaturesHeading", () => {
+  it("read_only access names the plan of the row", () => {
+    expect(planFeaturesHeading("Pro", access({ mode: "read_only", planSlug: null, until: null }))).toBe(
+      "Funkcje planu Pro",
+    );
+  });
+
+  it("full access returns the current plan heading", () => {
+    expect(planFeaturesHeading("Pro", access({}))).toBe("Funkcje w Twoim planie");
+  });
+
+  it("null access returns the current plan heading", () => {
+    expect(planFeaturesHeading("Pro", null)).toBe("Funkcje w Twoim planie");
   });
 });

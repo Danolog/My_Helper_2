@@ -27,13 +27,25 @@ import {
 import { Button } from "@/components/ui/button";
 import { PLANS } from "@/lib/constants";
 import { PRO_INCLUDES_BASIC, proOnlyFeatures } from "@/lib/plan-features";
-import { formatDate } from "../_types";
-import type { SubscriptionData, PlanData, AllPlansMap } from "../_types";
+import {
+  cancelDialogAccessText,
+  cancelDialogRepurchaseText,
+  formatDate,
+  purchaseBlockedText,
+  purchaseBlockedUntil,
+} from "../_types";
+import type {
+  AccessData,
+  SubscriptionData,
+  PlanData,
+  AllPlansMap,
+} from "../_types";
 
 interface PlanActionsProps {
   subscription: SubscriptionData;
   plan: PlanData;
   allPlans: AllPlansMap;
+  access: AccessData | null;
   changePlanLoading: boolean;
   downgradeLoading: boolean;
   cancelLoading: boolean;
@@ -47,6 +59,7 @@ export function PlanActions({
   subscription,
   plan,
   allPlans,
+  access,
   changePlanLoading,
   downgradeLoading,
   cancelLoading,
@@ -57,6 +70,10 @@ export function PlanActions({
 }: PlanActionsProps) {
   const isActiveOrTrialing =
     subscription.status === "active" || subscription.status === "trialing";
+  const blockedUntil = purchaseBlockedUntil(
+    subscription.stripeSubscriptionId,
+    access,
+  );
 
   return (
     <div className="flex flex-wrap gap-3 pt-4 border-t">
@@ -83,8 +100,8 @@ export function PlanActions({
           />
         )}
 
-      {/* Cancel subscription */}
-      {isActiveOrTrialing && (
+      {/* Cancel subscription: available for an active subscription */}
+      {subscription.status === "active" && (
         <CancelDialog
           subscription={subscription}
           plan={plan}
@@ -93,8 +110,15 @@ export function PlanActions({
         />
       )}
 
-      {/* Reactivate subscription if canceled */}
-      {subscription.status === "canceled" && (
+      {/* New purchase refused until the end of access: date instead of a button */}
+      {blockedUntil && (
+        <p className="self-center text-sm text-muted-foreground">
+          {purchaseBlockedText(blockedUntil)}
+        </p>
+      )}
+
+      {/* Reactivate subscription if canceled and a new purchase is possible */}
+      {subscription.status === "canceled" && !blockedUntil && (
         <Button asChild>
           <Link href="/pricing">
             <ArrowUpRight className="h-4 w-4 mr-2" />
@@ -379,6 +403,7 @@ function CancelDialog({
   cancelLoading,
   onCancel,
 }: CancelDialogProps) {
+  const now = new Date();
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -403,16 +428,19 @@ function CancelDialog({
               <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 dark:bg-blue-950/20 dark:border-blue-800">
                 <CalendarDays className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
                 <p className="text-sm text-blue-700 dark:text-blue-300">
-                  Zachowasz dostep do wszystkich funkcji planu {plan.name} do
-                  konca biezacego okresu rozliczeniowego
-                  {subscription.currentPeriodEnd
-                    ? ` (${formatDate(subscription.currentPeriodEnd)})`
-                    : ""}
-                  . Po tym terminie subskrypcja nie zostanie odnowiona.
+                  {cancelDialogAccessText(
+                    plan.name,
+                    subscription.currentPeriodEnd,
+                    now,
+                  )}
                 </p>
               </div>
               <p className="text-sm text-muted-foreground">
-                Mozesz ponownie aktywowac subskrypcje w dowolnym momencie.
+                {cancelDialogRepurchaseText(
+                  subscription.stripeSubscriptionId,
+                  subscription.currentPeriodEnd,
+                  now,
+                )}
               </p>
             </div>
           </AlertDialogDescription>

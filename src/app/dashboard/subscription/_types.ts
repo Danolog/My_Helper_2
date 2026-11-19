@@ -1,3 +1,5 @@
+import { hasRealStripeSubscription } from "@/lib/subscription-predicates";
+
 export type SubscriptionData = {
   id: string;
   salonId: string;
@@ -106,13 +108,44 @@ export function periodEndLabel(status: string): string {
 }
 
 /**
+ * End of the period in which the purchase route refuses a new purchase
+ * (409 PURCHASE_BLOCKED_UNTIL_PERIOD_END), or null. Same condition as the
+ * route: full access in the `canceled` or `past_due` state with an end date,
+ * and the row the access is computed from has a real Stripe subscription.
+ */
+export function purchaseBlockedUntil(
+  stripeSubscriptionId: string | null,
+  access: AccessData | null,
+): string | null {
+  if (
+    access?.mode === "full" &&
+    (access.state === "canceled" || access.state === "past_due") &&
+    access.until &&
+    hasRealStripeSubscription(stripeSubscriptionId)
+  ) {
+    return access.until;
+  }
+  return null;
+}
+
+/** Text shown instead of the reactivation button while a new purchase is refused. */
+export function purchaseBlockedText(blockedUntil: string): string {
+  return `Nowy zakup bedzie mozliwy po ${formatDate(blockedUntil)}.`;
+}
+
+const NEW_PURCHASE_AFTER_TEXT = "Nowy zakup bedzie mozliwy po tym terminie.";
+
+/**
  * Canceled subscription notice. The "access active until <date>" sentence
  * appears only when the server reports full access in the `canceled` state
- * with an end date; otherwise there is no statement about access.
+ * with an end date; otherwise there is no statement about access. Ends with
+ * the "new purchase after that date" sentence when `blockedUntil` is set,
+ * otherwise with the reactivation sentence.
  */
 export function canceledNoticeText(
   canceledAt: string | null,
   access: AccessData | null,
+  blockedUntil: string | null,
 ): string {
   const parts = [
     canceledAt
@@ -122,20 +155,86 @@ export function canceledNoticeText(
   if (access?.state === "canceled" && access.mode === "full" && access.until) {
     parts.push(`Dostep do funkcji planu jest aktywny do ${formatDate(access.until)}.`);
   }
-  parts.push("Mozesz w kazdej chwili ponownie aktywowac plan.");
+  parts.push(
+    blockedUntil
+      ? NEW_PURCHASE_AFTER_TEXT
+      : "Mozesz w kazdej chwili ponownie aktywowac plan.",
+  );
   return parts.join(" ");
 }
 
 /**
  * Past due notice. The "access active until <date>" sentence appears only
- * when the server reports full access in the `past_due` state with an end date.
+ * when the server reports full access in the `past_due` state with an end
+ * date; the "new purchase after that date" sentence only when `blockedUntil`
+ * is set. Always ends with the instruction to contact support.
  */
-export function pastDueNoticeText(access: AccessData | null): string {
-  const text = "Ostatnia platnosc nie powiodla sie.";
+export function pastDueNoticeText(
+  access: AccessData | null,
+  blockedUntil: string | null,
+): string {
+  const parts = ["Ostatnia platnosc nie powiodla sie."];
   if (access?.state === "past_due" && access.mode === "full" && access.until) {
-    return `${text} Dostep do funkcji planu jest aktywny do ${formatDate(access.until)}.`;
+    parts.push(`Dostep do funkcji planu jest aktywny do ${formatDate(access.until)}.`);
   }
-  return text;
+  if (blockedUntil) {
+    parts.push(NEW_PURCHASE_AFTER_TEXT);
+  }
+  parts.push("W sprawie zaleglej platnosci skontaktuj sie z obsluga.");
+  return parts.join(" ");
+}
+
+/** True when the period end is a valid date strictly later than `now`. */
+function isPeriodEndInFuture(currentPeriodEnd: string | null, now: Date): boolean {
+  if (!currentPeriodEnd) return false;
+  return new Date(currentPeriodEnd).getTime() > now.getTime();
+}
+
+/**
+ * Access sentence in the cancel dialog: access until the period end only
+ * when the period end is a valid date strictly later than `now` (as in
+ * `cancelSuccessDescription`); otherwise only the "will not be renewed" text.
+ */
+export function cancelDialogAccessText(
+  planName: string,
+  currentPeriodEnd: string | null,
+  now: Date,
+): string {
+  if (isPeriodEndInFuture(currentPeriodEnd, now)) {
+    return `Zachowasz dostep do wszystkich funkcji planu ${planName} do konca biezacego okresu rozliczeniowego (${formatDate(currentPeriodEnd)}). Po tym terminie subskrypcja nie zostanie odnowiona.`;
+  }
+  return "Subskrypcja nie zostanie odnowiona.";
+}
+
+/**
+ * Repurchase sentence in the cancel dialog: with a real Stripe subscription
+ * and the period end strictly later than `now`, a new purchase is possible
+ * only after that date; otherwise reactivation is possible at any time.
+ */
+export function cancelDialogRepurchaseText(
+  stripeSubscriptionId: string | null,
+  currentPeriodEnd: string | null,
+  now: Date,
+): string {
+  if (
+    hasRealStripeSubscription(stripeSubscriptionId) &&
+    isPeriodEndInFuture(currentPeriodEnd, now)
+  ) {
+    return NEW_PURCHASE_AFTER_TEXT;
+  }
+  return "Mozesz ponownie aktywowac subskrypcje w dowolnym momencie.";
+}
+
+/**
+ * Heading of the plan features list. With read-only access the list
+ * describes the plan of the row, so the heading names that plan.
+ */
+export function planFeaturesHeading(
+  planName: string,
+  access: AccessData | null,
+): string {
+  if (access?.mode === "read_only") return `Funkcje planu ${planName}`;
+  return "Funkcje w Twoim planie";
 }
 
 /** Map subscription status to a Polish label */
