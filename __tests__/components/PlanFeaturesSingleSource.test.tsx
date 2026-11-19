@@ -16,7 +16,6 @@ import { CreateSalonPrompt } from "@/components/dashboard/create-salon-prompt";
 import { isPlanOnSale } from "@/lib/plan-catalog";
 import {
   PLAN_FEATURES,
-  PLAN_SUMMARY,
   featuresFor,
   planHighlights,
   proOnlyFeatures,
@@ -71,15 +70,41 @@ afterEach(() => {
 });
 
 describe("jedno źródło list funkcji planów — to, co widzi użytkownik", () => {
-  it("strona sprzedażowa: karty planów pokazują skrót z plan-features", () => {
+  it("strona sprzedażowa: karta planu w sprzedaży pokazuje skrót z plan-features", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          success: true,
+          data: [
+            {
+              id: "p1",
+              name: "Basic",
+              slug: "basic",
+              priceMonthly: "49.00",
+              features: ["Pozycja z bazy"],
+              isActive: true,
+            },
+            {
+              id: "p2",
+              name: "Pro",
+              slug: "pro",
+              priceMonthly: "149.00",
+              features: ["Pozycja z bazy"],
+              isActive: true,
+            },
+          ],
+        }),
+      }))
+    );
     render(<DlaSalonowPricing />);
 
-    expect(texts(screen.getAllByTestId("plan-feature-basic"))).toEqual(
-      planHighlights("basic", 5)
-    );
-    expect(texts(screen.getAllByTestId("plan-feature-pro"))).toEqual(planHighlights("pro", 4));
-    expect(screen.getByText(PLAN_SUMMARY.basic)).toBeInTheDocument();
-    expect(screen.getByText(PLAN_SUMMARY.pro)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("plan-feature").length).toBeGreaterThan(0);
+    });
+
+    expect(texts(screen.getAllByTestId("plan-feature"))).toEqual(planHighlights("basic", 5));
   });
 
   it("tworzenie salonu: karty planów z PLANS_ON_SALE pokazują skrót z plan-features", () => {
