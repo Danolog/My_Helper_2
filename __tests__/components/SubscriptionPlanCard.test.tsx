@@ -266,7 +266,7 @@ describe("karta planu: nagłówek listy funkcji", () => {
   });
 });
 
-// Daty z formatDate, więc oczekiwane teksty nie zależą od strefy czasowej przebiegu.
+// Daty z formatDate, liczone przy imporcie pliku w strefie przypiętej wyżej (Europe/Warsaw), tej samej, w której renderuje się karta.
 const CANCELED_AT_TEXT = `Anulowano: ${formatDate("2026-11-10T12:00:00.000Z")}.`;
 const ACCESS_UNTIL_TEXT = `Dostep do funkcji planu jest aktywny do ${formatDate(UNTIL)}.`;
 const BLOCKED_UNTIL_TEXT = `Nowy zakup bedzie mozliwy po ${formatDate(UNTIL)}.`;
