@@ -15,7 +15,8 @@
  *     potem confirm 409 bez zapisu; deleted → późne invoice.paid = canceled;
  *     lokalne canceled + Stripe active → zostaje canceled; 50 iteracji
  *     confirm ‖ updated ‖ invoice.paid z losowymi opóźnieniami = zero 40P01
- *     i stan zgodny z atrapą Stripe.
+ *     i stan zgodny z atrapą Stripe. Okres próbny na jednym planie i confirm
+ *     sesji z innym planem → ten sam wiersz active z planem z sesji.
  * (T3b) Prawdziwa trasa `subscriptions/cancel` (502 przy błędzie Stripe,
  *     `canceled` tylko po potwierdzeniu, cancel ‖ updated), bliźniak (c3'')
  *     bez potwierdzenia, indeksy unikalne 0008 i równoległa rejestracja.
@@ -324,6 +325,42 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
     expect(r2).toEqual(expect.objectContaining({ ok: true, alreadyConfirmed: true }));
     expect((await rows()).map((r) => r.status)).toEqual(["active"]);
     expect(await payments()).toHaveLength(1);
+  });
+
+  it("okres próbny na jednym planie, potwierdzenie sesji z innym planem → ten sam wiersz: active, planId z sesji, jedna płatność", async () => {
+    const db = h!.db;
+    const [planB] = await db
+      .insert(subscriptionPlans)
+      .values({ name: "IT T3 B", slug: `${testPlanSlug}-b`, priceMonthly: "49.00" })
+      .returning();
+    try {
+      const [trial] = await db
+        .insert(salonSubscriptions)
+        .values({ salonId, planId, status: "trialing", trialEndsAt: new Date(Date.now() + 7 * DAY * 1000) })
+        .returning();
+      const sub = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(sub, "active");
+
+      const result = await confirm({ ...session(sub), metadata: { salonId, planId: planB!.id } });
+
+      expect(result).toEqual(expect.objectContaining({ ok: true, alreadyConfirmed: false }));
+      expect(result.ok && result.plan?.id).toBe(planB!.id);
+      const all = await rows();
+      expect(all).toHaveLength(1);
+      expect(all[0]!.id).toBe(trial!.id);
+      expect(all[0]!.status).toBe("active");
+      expect(all[0]!.planId).toBe(planB!.id);
+      expect(all[0]!.stripeSubscriptionId).toBe(sub);
+      expect(all[0]!.trialEndsAt).toBeNull();
+      expect(all[0]!.currentPeriodStart).toEqual(at(PERIOD.current_period_start));
+      expect(all[0]!.currentPeriodEnd).toEqual(at(PERIOD.current_period_end));
+      const paid = await payments();
+      expect(paid).toHaveLength(1);
+      expect(paid[0]!.subscriptionId).toBe(trial!.id);
+    } finally {
+      await db.delete(salonSubscriptions).where(eq(salonSubscriptions.salonId, salonId));
+      await db.delete(subscriptionPlans).where(eq(subscriptionPlans.id, planB!.id));
+    }
   });
 
   it("(c1) confirm, potem deleted w trakcie: deleted czeka na blokadę, wynik canceled", async () => {
