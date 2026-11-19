@@ -23,7 +23,7 @@
  * `it-t3-exp-1-…` i `it-t3-exp-2-…` (prefiksy z notatki sprzątania w pg-harness.ts),
  * trzy wiersze `salon_subscriptions`. `afterAll` usuwa salony (kaskada zabiera
  * subskrypcje), potem plany, potem użytkowników.
- * Uruchomienie: `INTEGRATION_POSTGRES_URL=postgresql://…@localhost:5432/<baza> pnpm test:pg -- __tests__/pg/subscription-expiration-warning.pg.test.ts`.
+ * Uruchomienie samego pliku (`pnpm test:pg -- <plik>` nie zawęża przebiegu — biegną wszystkie testy pg): `INTEGRATION_POSTGRES_URL=postgresql://…@localhost:5432/pos_dev pnpm exec vitest run --config vitest.pg.config.ts __tests__/pg/subscription-expiration-warning.pg.test.ts`.
  * Wymaga bazy po `pnpm db:migrate` (RLS i rola `myhelper_app`).
  */
 import { randomUUID } from "node:crypto";
