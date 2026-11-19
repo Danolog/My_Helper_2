@@ -322,7 +322,7 @@ describe("prawda w marketingu", () => {
       expect(source).not.toMatch(/Pe[łl]ne zarz[ąa]dzanie salonem|Pe[łl]na funkcjonalno[śs][ćc]/);
     });
 
-    /** Źródło bez komentarzy — słowo w komentarzu nie jest wywołaniem. */
+    /** Źródło bez komentarzy blokowych i bez linii zaczynających się od // — słowo w takim komentarzu nie jest wywołaniem; komentarz // na końcu linii z kodem zostaje. */
     const code = (relPath: string) =>
       read(relPath)
         .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -350,6 +350,27 @@ describe("prawda w marketingu", () => {
 
     it("cennik nie wspomina planu Pro ani AI", () => {
       const source = code("src/app/(site)/pricing/page.tsx");
+      expect(source).not.toMatch(/\bPro\b|["']pro["']|\bAI\b|asystent/i);
+    });
+
+    it("sekcja cennika /dla-salonow woła planPriceText i nie ma tekstu „PLN / mies.”", () => {
+      const source = code("src/app/(site)/dla-salonow/_components/DlaSalonowPricing.tsx");
+      expect(source).toMatch(/\bplanPriceText\(/);
+      expect(source).not.toMatch(/PLN\s*\/\s*mies/);
+    });
+
+    it("sekcja cennika /dla-salonow ma tekst „ / mies.”", () => {
+      const source = code("src/app/(site)/dla-salonow/_components/DlaSalonowPricing.tsx");
+      expect(source).toMatch(/ \/ mies\./);
+    });
+
+    it("sekcja cennika /dla-salonow nie wspomina planu Pro ani AI", () => {
+      const source = code("src/app/(site)/dla-salonow/_components/DlaSalonowPricing.tsx");
+      expect(source).not.toMatch(/\bPro\b|["']pro["']|\bAI\b|asystent/i);
+    });
+
+    it("pasek /dla-salonow nie wspomina planu Pro ani AI", () => {
+      const source = code("src/app/(site)/dla-salonow/_components/DlaSalonowTrustBar.tsx");
       expect(source).not.toMatch(/\bPro\b|["']pro["']|\bAI\b|asystent/i);
     });
   });
