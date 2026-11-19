@@ -197,10 +197,21 @@ describe("webhook — wiersz szukany pod blokadą stripe_sub, odczyt Stripe prze
   it.each([
     ["customer.subscription.updated", { id: "sub_1" }, [[LOCAL_ACTIVE]]],
     ["customer.subscription.deleted", { id: "sub_1" }, [[LOCAL_ACTIVE]]],
-    ["invoice.payment_failed", { id: "in_1", subscription: "sub_1", payment_intent: "pi_1" }, [[LOCAL_ACTIVE], [PLAN_PRO]]],
+    [
+      "invoice.payment_failed",
+      { id: "in_1", subscription: "sub_1", payment_intent: "pi_1", amount_remaining: 14900, currency: "pln" },
+      [[LOCAL_ACTIVE], [PLAN_PRO]],
+    ],
     [
       "invoice.paid",
-      { id: "in_1", subscription: "sub_1", payment_intent: "pi_1", billing_reason: "subscription_cycle", amount_paid: 14900 },
+      {
+        id: "in_1",
+        subscription: "sub_1",
+        payment_intent: "pi_1",
+        billing_reason: "subscription_cycle",
+        amount_paid: 14900,
+        currency: "pln",
+      },
       [[LOCAL_ACTIVE], [PLAN_PRO]],
     ],
   ] as const)("%s: lock_timeout → stripe_sub → select → Stripe → salon → zapis", async (type, object, selects) => {

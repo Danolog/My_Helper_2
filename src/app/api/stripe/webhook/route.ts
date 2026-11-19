@@ -11,9 +11,9 @@ import {
   depositPayments,
   salonSubscriptions,
   subscriptionPayments,
-  subscriptionPlans,
 } from "@/lib/schema";
 import { getStripe, getStripeWebhookSecret } from "@/lib/stripe";
+import { stripeAmountToColumns } from "@/lib/stripe-amount";
 import { paidInvoicePeriod, type StripeInvoicePeriodSource } from "@/lib/stripe-period";
 import {
   confirmSubscriptionCheckout,
@@ -31,6 +31,8 @@ import { subscriptionStateFromStripe, withLockedStripeSubscriptionRow } from "@/
 interface RawInvoiceData {
   id: string;
   amount_paid: number;
+  amount_remaining?: number;
+  currency?: string;
   billing_reason: string | null;
   // Stripe v1 API: top-level subscription field
   subscription?: string | { id: string };
@@ -108,8 +110,8 @@ function getPaymentIntentIdFromInvoice(invoice: RawInvoiceData, fallback: string
  * POST /api/stripe/webhook
  *
  * Stripe webhook endpoint that handles subscription lifecycle events:
- * - invoice.paid: renewal payment recorded, status synced from Stripe, paid period from the invoice lines
- * - invoice.payment_failed: failed payment recorded, state synced from Stripe
+ * - invoice.paid: renewal payment recorded when the invoice amount and currency can be converted (otherwise an error is logged), status synced from Stripe, paid period from the invoice lines
+ * - invoice.payment_failed: failed payment recorded when the invoice amount and currency can be converted (otherwise an error is logged), state synced from Stripe
  * - customer.subscription.updated / deleted: state synced from Stripe
  *   (the event is only a signal — see src/lib/subscription-sync.ts)
  *
@@ -225,6 +227,38 @@ function logNoLocalSubscription(event: Stripe.Event, stripeSubscriptionId: strin
 }
 
 /**
+ * Amount and currency of the payment record, taken from the invoice
+ * (`minor` = amount in the smallest currency unit). When they cannot be
+ * converted → null + error (no payment record; manual handling). A currency
+ * other than PLN is recorded as is + warn.
+ */
+function invoicePaymentColumns(
+  event: Stripe.Event,
+  invoice: RawInvoiceData,
+  sub: { id: string; salonId: string },
+  minor: unknown
+) {
+  const columns = stripeAmountToColumns(minor, invoice.currency);
+  if (!columns) {
+    logger.error("Subscription payment NOT recorded — invoice amount or currency unreadable, manual handling", {
+      eventId: event.id,
+      invoiceId: invoice.id,
+      salonId: sub.salonId,
+      subscriptionId: sub.id,
+    });
+    return null;
+  }
+  if (columns.currency !== "PLN") {
+    logger.warn("Subscription payment recorded in a currency other than PLN", {
+      eventId: event.id,
+      invoiceId: invoice.id,
+      currency: columns.currency,
+    });
+  }
+  return columns;
+}
+
+/**
  * Handle invoice.paid — renewal. The status does not come from the event (T3): under the
  * stripe_sub lock the CURRENT status is read from Stripe, never a hard-coded
  * "active" (a late invoice.paid after deleted must not revive a canceled
@@ -232,7 +266,9 @@ function logNoLocalSubscription(event: Stripe.Event, stripeSubscriptionId: strin
  * from the current Stripe period, not from `invoice.period_*`) and never moves
  * back; a canceled final row is only extended to the end of the paid period.
  * Lines without a full period → stored period unchanged + warn; a truncated
- * line list (`has_more`) → warn. The payment is always recorded (idempotent).
+ * line list (`has_more`) → warn. The payment is recorded (idempotent) with the
+ * invoice `amount_paid` and `currency`; when they cannot be converted, the row is
+ * still written as above, no payment is recorded and an error is logged.
  */
 async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
   const invoice = event.data.object as unknown as RawInvoiceData;
@@ -269,8 +305,7 @@ async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
       logger.info("Applying scheduled plan change", { subscriptionId: sub.id });
     }
 
-    const [plan] = await tx.select().from(subscriptionPlans).where(eq(subscriptionPlans.id, newPlanId));
-    const amount = plan ? plan.priceMonthly : (invoice.amount_paid / 100).toFixed(2);
+    const paid = invoicePaymentColumns(event, invoice, sub, invoice.amount_paid);
 
     if (state) {
       // Status from Stripe; the period comes only from the lines of the paid invoice.
@@ -297,18 +332,20 @@ async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
     }
 
     // Stripe retry tego samego eventu nie może zdublować historii płatności
-    await tx
-      .insert(subscriptionPayments)
-      .values({
-        subscriptionId: sub.id,
-        salonId: sub.salonId,
-        amount,
-        currency: "PLN",
-        stripePaymentIntentId: paymentIntentId,
-        status: "succeeded",
-        paidAt: new Date(),
-      })
-      .onConflictDoNothing({ target: subscriptionPayments.stripePaymentIntentId });
+    if (paid) {
+      await tx
+        .insert(subscriptionPayments)
+        .values({
+          subscriptionId: sub.id,
+          salonId: sub.salonId,
+          amount: paid.amount,
+          currency: paid.currency,
+          stripePaymentIntentId: paymentIntentId,
+          status: "succeeded",
+          paidAt: new Date(),
+        })
+        .onConflictDoNothing({ target: subscriptionPayments.stripePaymentIntentId });
+    }
 
     return { subscriptionId: sub.id, status: state?.status ?? sub.status, final: !state };
   });
@@ -323,7 +360,9 @@ async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
 /**
  * Handle invoice.payment_failed — record the failed attempt; the status comes
  * from Stripe (a late payment_failed after a later invoice.paid must not
- * give a false past_due).
+ * give a false past_due). The record carries the invoice `amount_remaining`
+ * and `currency`; when they cannot be converted, the state is still written,
+ * no payment is recorded and an error is logged.
  */
 async function handleInvoicePaymentFailed(event: Stripe.Event, stripe: Stripe) {
   const invoice = event.data.object as unknown as RawInvoiceData;
@@ -335,24 +374,26 @@ async function handleInvoicePaymentFailed(event: Stripe.Event, stripe: Stripe) {
 
   const result = await withLockedStripeSubscriptionRow(stripe, stripeSubscriptionId, async (tx, sub, stripeSub) => {
     const state = subscriptionStateFromStripe(sub, stripeSub);
-    const [plan] = await tx.select().from(subscriptionPlans).where(eq(subscriptionPlans.id, sub.planId));
+    const unpaid = invoicePaymentColumns(event, invoice, sub, invoice.amount_remaining);
 
     if (state) {
       await tx.update(salonSubscriptions).set(state).where(eq(salonSubscriptions.id, sub.id));
     }
 
-    await tx
-      .insert(subscriptionPayments)
-      .values({
-        subscriptionId: sub.id,
-        salonId: sub.salonId,
-        amount: plan ? plan.priceMonthly : "0.00",
-        currency: "PLN",
-        stripePaymentIntentId: paymentIntentId,
-        status: "failed",
-        paidAt: null,
-      })
-      .onConflictDoNothing({ target: subscriptionPayments.stripePaymentIntentId });
+    if (unpaid) {
+      await tx
+        .insert(subscriptionPayments)
+        .values({
+          subscriptionId: sub.id,
+          salonId: sub.salonId,
+          amount: unpaid.amount,
+          currency: unpaid.currency,
+          stripePaymentIntentId: paymentIntentId,
+          status: "failed",
+          paidAt: null,
+        })
+        .onConflictDoNothing({ target: subscriptionPayments.stripePaymentIntentId });
+    }
 
     return { subscriptionId: sub.id, status: state?.status ?? sub.status, final: !state };
   });
