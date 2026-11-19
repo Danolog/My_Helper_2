@@ -1,6 +1,8 @@
 /**
  * Karta ostrzeżenia o wygaśnięciu i karta automatycznego odnowienia
- * w panelu subskrypcji: obie karty bez elementów o roli button.
+ * w panelu subskrypcji: obie karty bez elementów o roli button; karta
+ * ostrzeżenia z banerem bliskiego wygaśnięcia i kwotą odnowienia, bez tekstu
+ * „Ostatnie ostrzezenia” i bez treści wpisu z `recentWarnings`.
  */
 import { render, screen, within } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
@@ -98,19 +100,7 @@ describe("karta ostrzeżenia o wygaśnięciu", () => {
     expect(within(bannerText.parentElement!).getByText("149.00 PLN")).toBeInTheDocument();
   });
 
-  it("isNearExpiry: true — lista „Ostatnie ostrzezenia” z treścią ostrzeżenia", () => {
-    render(
-      <ExpirationWarningCard
-        subscription={SUBSCRIPTION}
-        expirationData={expirationData({})}
-      />,
-    );
-
-    expect(screen.getByText("Ostatnie ostrzezenia")).toBeInTheDocument();
-    expect(screen.getByText(WARNING_MESSAGE)).toBeInTheDocument();
-  });
-
-  it("isNearExpiry: false — brak przycisków i tekstów „Tryb deweloperski”, „Symuluj”, „Wyslij ostrzezenie”, „Odnow teraz”, „Sprawdz metode platnosci”; lista „Ostatnie ostrzezenia” z treścią ostrzeżenia", () => {
+  it("isNearExpiry: false — brak przycisków i tekstów „Tryb deweloperski”, „Symuluj”, „Wyslij ostrzezenie”, „Odnow teraz”, „Sprawdz metode platnosci”", () => {
     render(
       <ExpirationWarningCard
         subscription={SUBSCRIPTION}
@@ -119,9 +109,25 @@ describe("karta ostrzeżenia o wygaśnięciu", () => {
     );
 
     expectNoButtonsAndNoRemovedTexts();
-    expect(screen.getByText("Ostatnie ostrzezenia")).toBeInTheDocument();
-    expect(screen.getByText(WARNING_MESSAGE)).toBeInTheDocument();
   });
+
+  it.each([
+    { isNearExpiry: true, daysRemaining: 3 },
+    { isNearExpiry: false, daysRemaining: 20 },
+  ])(
+    "isNearExpiry: $isNearExpiry, recentWarnings z jednym wpisem — brak tekstu „Ostatnie ostrzezenia” i treści wpisu",
+    (overrides) => {
+      render(
+        <ExpirationWarningCard
+          subscription={SUBSCRIPTION}
+          expirationData={expirationData(overrides)}
+        />,
+      );
+
+      expect(screen.queryByText("Ostatnie ostrzezenia")).toBeNull();
+      expect(screen.queryByText(WARNING_MESSAGE)).toBeNull();
+    },
+  );
 });
 
 describe("karta automatycznego odnowienia", () => {
