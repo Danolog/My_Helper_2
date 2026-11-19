@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import Stripe from "stripe";
 // ADR-001 sekcja 4: webhook Stripe — kontekst salonu z danych zdarzenia, nie z sesji; świadomie surowe db
 import { db } from "@/lib/db";
@@ -14,11 +14,12 @@ import {
   subscriptionPlans,
 } from "@/lib/schema";
 import { getStripe, getStripeWebhookSecret } from "@/lib/stripe";
-import { type BillingPeriod, paidInvoicePeriod, type StripeInvoicePeriodSource } from "@/lib/stripe-period";
+import { paidInvoicePeriod, type StripeInvoicePeriodSource } from "@/lib/stripe-period";
 import {
   confirmSubscriptionCheckout,
   type SubscriptionCheckoutSession,
 } from "@/lib/subscription-confirmation";
+import { paidPeriodEndSql, paidPeriodStartSql } from "@/lib/subscription-paid-period";
 import { subscriptionStateFromStripe, withLockedStripeSubscriptionRow } from "@/lib/subscription-sync";
 
 /**
@@ -221,22 +222,6 @@ function logNoLocalSubscription(event: Stripe.Event, stripeSubscriptionId: strin
     eventType: event.type,
     stripeSubscriptionId,
   });
-}
-
-/**
- * Paid period written in SQL under the row lock (the row passed to the handler
- * is read before the salon lock, so the comparison cannot be done in JS):
- * the end never moves back (`greatest` skips NULL), the start follows only a
- * strictly later end — a retried event or an older invoice changes nothing.
- */
-function paidPeriodEndSql(period: BillingPeriod) {
-  return sql`greatest(${salonSubscriptions.currentPeriodEnd}, ${period.end.toISOString()}::timestamp)`;
-}
-
-function paidPeriodStartSql(period: BillingPeriod) {
-  const end = sql`${period.end.toISOString()}::timestamp`;
-  const storedEnd = salonSubscriptions.currentPeriodEnd;
-  return sql`case when ${storedEnd} is null or ${end} > ${storedEnd} then ${period.start.toISOString()}::timestamp else ${salonSubscriptions.currentPeriodStart} end`;
 }
 
 /**
