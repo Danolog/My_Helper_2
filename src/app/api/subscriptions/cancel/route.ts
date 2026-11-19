@@ -7,7 +7,7 @@ import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions } from "@/lib/schema";
 import { getStripe } from "@/lib/stripe";
-import { stripeSubscriptionPeriod } from "@/lib/stripe-period";
+import { paidInvoicePeriod, stripeSubscriptionPeriod, type BillingPeriod } from "@/lib/stripe-period";
 import {
   isSubscriptionLockFailure,
   lockSalonSubscriptions,
@@ -15,6 +15,7 @@ import {
   setSubscriptionLockTimeout,
   STRIPE_LOCKED_READ_OPTIONS,
 } from "@/lib/subscription-locks";
+import { paidPeriodEndSql, paidPeriodStartSql } from "@/lib/subscription-paid-period";
 import { hasRealStripeSubscription } from "@/lib/subscription-predicates";
 
 type SubscriptionRow = typeof salonSubscriptions.$inferSelect;
@@ -45,6 +46,14 @@ function json(status: number, code: string, error: string) {
  * Stripe nieskonfigurowany → 503 — w obu przypadkach bez zapisu: lokalne
  * `canceled` przy aktywnej subskrypcji w Stripe to dryf (Stripe dalej
  * pobiera opłaty, a salon nie ma planu).
+ *
+ * Okres w wierszu: odpowiedź Stripe niesie rozwiniętą `latest_invoice`; gdy
+ * ta faktura jest opłacona (`status === "paid"`), zapis dostaje okres z jej
+ * linii (`paidInvoicePeriod`) przez te same `paidPeriodStartSql` /
+ * `paidPeriodEndSql` co przy opłaconej fakturze w webhooku (koniec nigdy się
+ * nie cofa). Faktura nieopłacona, nierozwinięta albo bez linii z okresem →
+ * okres w wierszu bez zmian. Okres subskrypcji Stripe trafia tylko do logu.
+ * Anulowanie nie zapisuje płatności.
  *
  * Blokady jak w webhooku (`subscription-locks.ts`): lock_timeout →
  * stripe_sub → (wywołanie Stripe) → salon. Webhook tej subskrypcji czeka
@@ -108,6 +117,7 @@ export async function POST() {
       outcome = await db.transaction(async (tx): Promise<CancelOutcome> => {
         await setSubscriptionLockTimeout(tx);
 
+        let paid: BillingPeriod | null = null;
         if (stripeSubscriptionId && stripe) {
           await lockStripeSubscription(tx, stripeSubscriptionId);
           const [row] = await tx
@@ -124,7 +134,7 @@ export async function POST() {
             // po błędzie niczego nie podwaja.
             stripeSub = await stripe.subscriptions.update(
               stripeSubscriptionId,
-              { cancel_at_period_end: true },
+              { cancel_at_period_end: true, expand: ["latest_invoice"] },
               STRIPE_LOCKED_READ_OPTIONS,
             );
           } catch (error) {
@@ -150,6 +160,34 @@ export async function POST() {
             stripeStatus: stripeSub.status,
             currentPeriodEnd: period?.end.toISOString() ?? null,
           });
+
+          const invoice = stripeSub.latest_invoice;
+          if (!invoice || typeof invoice === "string") {
+            logger.warn("Latest invoice not available in the Stripe response — keeping stored period", {
+              subscriptionId: activeSub.id,
+              stripeSubscriptionId,
+            });
+          } else if (invoice.status === "paid") {
+            paid = paidInvoicePeriod(invoice);
+            const logContext = {
+              subscriptionId: activeSub.id,
+              stripeSubscriptionId,
+              linesHasMore: invoice.lines?.has_more === true,
+            };
+            if (!paid) {
+              logger.warn("Paid invoice without a billing period on its lines — keeping stored period", logContext);
+            } else if (logContext.linesHasMore) {
+              logger.warn("Paid invoice line list incomplete in the Stripe response — period taken from the lines present", logContext);
+            }
+            if (paid && row.currentPeriodEnd && paid.end.getTime() > row.currentPeriodEnd.getTime()) {
+              logger.info("Paid period ahead of row", {
+                subscriptionId: activeSub.id,
+                stripeSubscriptionId,
+                paidPeriodEnd: paid.end.toISOString(),
+                rowPeriodEnd: row.currentPeriodEnd.toISOString(),
+              });
+            }
+          }
         }
 
         await lockSalonSubscriptions(tx, salonId);
@@ -166,7 +204,7 @@ export async function POST() {
           .set({
             status: "canceled",
             canceledAt: now,
-            // Okres w wierszu zostaje bez zmian: anulowanie nie zmienia tego, do kiedy subskrypcja jest opłacona.
+            ...(paid ? { currentPeriodStart: paidPeriodStartSql(paid), currentPeriodEnd: paidPeriodEndSql(paid) } : {}),
           })
           .where(eq(salonSubscriptions.id, activeSub.id))
           .returning();
