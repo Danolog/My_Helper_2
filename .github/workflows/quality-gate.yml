@@ -231,7 +231,7 @@ jobs:
         env:
           ALLOW_PAYMENT_SIMULATION: "1"
 
-      # Kontrola seeda drugi raz, po zielonych testach E2E @full: testy nie zmieniły użytkowników testowych, planów ani dostępu salonów testowych.
+      # Kontrola seeda drugi raz, po zielonych testach E2E @full: użytkownicy testowi z kontem z hasłem, plany i dostęp salonów testowych nadal zgodne z seedem.
       - name: Seed check (after E2E)
         run: pnpm exec tsx scripts/verify-seed.ts
 

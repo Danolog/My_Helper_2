@@ -1726,7 +1726,7 @@ describe("jedna baza w CI: env kroków, $GITHUB_ENV, serwer E2E (#193 P0c-1, pkt
   /** Adres INNEJ bazy do sond, złożony z części (skaner literałów sekretów; to nie sekret). */
   const OTHER_DB = ["postgresql", "//probe:probe@localhost:5432/other_db"].join(":");
   const SMOKE_PW = "          PLAYWRIGHT_TIMEOUT: 15000\n";
-  const FULL_PW = "          ALLOW_PAYMENT_SIMULATION: \"1\"\n\n      # Kontrola seeda drugi raz, po zielonych testach E2E @full: testy nie zmieniły użytkowników testowych, planów ani dostępu salonów testowych.";
+  const FULL_PW = "          ALLOW_PAYMENT_SIMULATION: \"1\"\n\n      # Kontrola seeda drugi raz, po zielonych testach E2E @full: użytkownicy testowi z kontem z hasłem, plany i dostęp salonów testowych nadal zgodne z seedem.";
   const SMOKE_SEED = "      - name: Seed test data\n        run: pnpm db:seed:test\n\n      - name: Verify seed data";
   const PG_ENV_LINE = "          INTEGRATION_POSTGRES_URL: ";
   const PW_IMPORT = "import { defineConfig, devices } from '@playwright/test';\n";
