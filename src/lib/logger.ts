@@ -64,7 +64,8 @@ export const PII_LOG_KEYS: readonly string[] = [
 /**
  * Fragmenty nazw kluczy kontaktowych: klucz, którego nazwa zawiera fragment
  * (bez wielkości liter, np. `guestPhone`, `clientEmail`), ma zamienianą na
- * `[redacted]` wartość: napis (także `URL` i obiekt `String`), liczbę całkowitą
+ * `[redacted]` wartość: napis (także `URL` i obiekt `String`), bajty (`Buffer`,
+ * tablica typowana), liczbę całkowitą
  * (także obiekt `Number`) o co najmniej 7 cyfrach albo
  * `bigint` (numer telefonu zapisany liczbą) oraz tablicę, w której choć jeden
  * element jest napisem, `URL` albo taką liczbą, także w tablicy zagnieżdżonej (bez
@@ -86,7 +87,8 @@ const PII_KEY_SET = new Set(PII_LOG_KEYS.map((k) => k.toLowerCase()));
 const PHONE_LIKE_NUMBER_MIN = 1_000_000;
 
 function isContactScalar(value: unknown): boolean {
-  const v = value instanceof String || value instanceof Number ? value.valueOf() : value;
+  if (value instanceof String || ArrayBuffer.isView(value)) return true;
+  const v = value instanceof Number ? Number(value) : value;
   if (typeof v === "string" || typeof v === "bigint" || v instanceof URL) return true;
   return typeof v === "number" && Number.isInteger(v) && Math.abs(v) >= PHONE_LIKE_NUMBER_MIN;
 }
@@ -175,7 +177,7 @@ function logReplacer(this: unknown, key: string, value: unknown): unknown {
   if (source instanceof Error) return serializeError(source);
   if (source instanceof Date) return value;
   const out = source instanceof URL ? urlWithoutCredentials(source) : value;
-  if (key !== "" && isRedactedEntry(key, out)) return REDACTED;
+  if (key !== "" && isRedactedEntry(key, ArrayBuffer.isView(source) ? source : out)) return REDACTED;
   return typeof out === "bigint" ? out.toString() : out;
 }
 

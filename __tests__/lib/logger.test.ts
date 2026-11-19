@@ -921,4 +921,53 @@ describe("logger — redakcja przy serializacji, wpis zastępczy, logger nie rzu
     logger.info("x", { emailCount: new Number(3) });
     expect(JSON.parse(logSpy.mock.calls[0]![0] as string).emailCount).toBe(3);
   });
+
+  it("bajty (Buffer, tablica typowana) pod kluczem z fragmentem → [redacted]", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { clientEmail: Buffer.from(EMAIL), guestEmail: new TextEncoder().encode(EMAIL) });
+
+    const parsed = JSON.parse(logSpy.mock.calls[0]![0] as string);
+    expect(parsed.clientEmail).toBe("[redacted]");
+    expect(parsed.guestEmail).toBe("[redacted]");
+  });
+
+  it("Buffer pod kluczem z fragmentem w instancji klasy → [redacted]", async () => {
+    class Adresat {
+      clientEmail = Buffer.from(EMAIL);
+    }
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { adresat: new Adresat() });
+
+    expect(JSON.parse(logSpy.mock.calls[0]![0] as string).adresat).toEqual({ clientEmail: "[redacted]" });
+  });
+
+  it("tryb deweloperski: Buffer pod kluczem z fragmentem → [redacted]", async () => {
+    const logger = await importLoggerWithEnv("development");
+    logger.info("x", { clientEmail: Buffer.from(EMAIL) });
+    expect(logSpy).toHaveBeenCalledWith("[INFO]", "x", { clientEmail: "[redacted]" });
+  });
+
+  it("Buffer pod kluczem spoza list i fragmentów zostaje bez zmian", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { payload: Buffer.from("x") });
+    expect(JSON.parse(logSpy.mock.calls[0]![0] as string).payload).toEqual({ type: "Buffer", data: [120] });
+  });
+
+  it("obiekt String z własnym valueOf pod kluczem z fragmentem → [redacted]", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { clientEmail: Object.assign(new String(EMAIL), { valueOf: () => 3 }) });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain(EMAIL);
+    expect(JSON.parse(raw).clientEmail).toBe("[redacted]");
+  });
+
+  it("tablica obiektów String pod kluczem z fragmentem → cała tablica [redacted]", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { clientEmails: [new String(EMAIL)] });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain(EMAIL);
+    expect(JSON.parse(raw).clientEmails).toBe("[redacted]");
+  });
 });
