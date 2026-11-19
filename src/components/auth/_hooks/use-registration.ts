@@ -17,6 +17,15 @@ export type Plan = {
   isActive: boolean;
 };
 
+// Form has data when name or email is filled, or — only when PLANS_ON_SALE
+// does not hold exactly one plan — a plan is selected.
+function hasFormData(
+  state: { selectedPlan: string | null; name: string; email: string },
+  singlePlanOnSale: boolean
+): boolean {
+  return !!state.name || !!state.email || (!singlePlanOnSale && !!state.selectedPlan);
+}
+
 export function useRegistration(preselectedPlan: string | null) {
   const router = useRouter();
 
@@ -58,6 +67,11 @@ export function useRegistration(preselectedPlan: string | null) {
     warnOnUnload: true,
   });
 
+  // Recovery banner only when the saved state contains form data
+  const recoveredState = wasRecovered ? getRecoveredState() : null;
+  const recoveredWithData =
+    recoveredState !== null && hasFormData(recoveredState, singlePlanOnSale);
+
   // Recovery handler: restores form fields from localStorage
   const handleRestoreForm = () => {
     const saved = getRecoveredState();
@@ -71,7 +85,7 @@ export function useRegistration(preselectedPlan: string | null) {
 
   // Save form state on every change (debounced inside hook)
   useEffect(() => {
-    const hasData = !!name || !!email || (!singlePlanOnSale && !!selectedPlan);
+    const hasData = hasFormData({ selectedPlan, name, email }, singlePlanOnSale);
     saveFormState({ step, selectedPlan, name, email });
     setDirty(hasData);
   }, [step, selectedPlan, name, email, singlePlanOnSale, saveFormState, setDirty]);
@@ -170,7 +184,7 @@ export function useRegistration(preselectedPlan: string | null) {
       if (result.error) {
         setError(sanitizeAuthError(result.error.message, "Nie udalo sie utworzyc konta"));
       } else {
-        // After signup, create salon subscription with selected plan
+        // After signup, create salon subscription with planOnSaleOr(selectedPlan)
         if (selectedPlan) {
           try {
             await mutationFetch("/api/register-subscription", {
@@ -224,7 +238,7 @@ export function useRegistration(preselectedPlan: string | null) {
     showVerificationMessage,
 
     // Form recovery
-    wasRecovered,
+    wasRecovered: recoveredWithData,
     clearSavedForm,
 
     // Actions

@@ -6,8 +6,9 @@ import { PLANS_ON_SALE } from "@/lib/plan-catalog";
 
 // Hak formularza rejestracji: krok i plan na starcie, plan po przywróceniu
 // formularza, planSlug wysyłany do /api/register-subscription, plan Pro
-// zwracany do kroku wyboru planu i argument setDirty z atrapy
-// use-form-recovery. Grupa główna biegnie na prawdziwej liście
+// zwracany do kroku wyboru planu, argument setDirty z atrapy
+// use-form-recovery i wasRecovered zwracane przez hak przy zapisanym stanie
+// z danymi, bez danych i bez zapisanego stanu. Grupa główna biegnie na prawdziwej liście
 // PLANS_ON_SALE; ostatnia grupa na czas swoich przypadków dopisuje "pro" do
 // tablicy PLANS_ON_SALE prawdziwego modułu (lista ["basic", "pro"]) i potem ją przywraca.
 
@@ -178,6 +179,23 @@ describe("useRegistration — lista PLANS_ON_SALE z modułu", () => {
     });
     expect(vi.mocked(recovery.setDirty).mock.calls.at(-1)).toEqual([true]);
   });
+
+  it('zapisany stan { step: 2, selectedPlan: "basic", name: "", email: "" }: wasRecovered false', async () => {
+    recovery.state = { step: 2, selectedPlan: "basic", name: "", email: "" };
+    const { result } = await renderLoaded(null);
+    expect(result.current.wasRecovered).toBe(false);
+  });
+
+  it('zapisany stan { step: 2, selectedPlan: "basic", name: "Anna Nowak", email: "" }: wasRecovered true', async () => {
+    recovery.state = { step: 2, selectedPlan: "basic", name: "Anna Nowak", email: "" };
+    const { result } = await renderLoaded(null);
+    expect(result.current.wasRecovered).toBe(true);
+  });
+
+  it("brak zapisanego stanu: wasRecovered false", async () => {
+    const { result } = await renderLoaded(null);
+    expect(result.current.wasRecovered).toBe(false);
+  });
 });
 
 describe('useRegistration — PLANS_ON_SALE podmieniona na ["basic", "pro"]', () => {
@@ -212,5 +230,11 @@ describe('useRegistration — PLANS_ON_SALE podmieniona na ["basic", "pro"]', ()
   it('useRegistration("pro") bez wpisu: ostatnie wywołanie setDirty z true', async () => {
     await renderLoaded("pro");
     expect(vi.mocked(recovery.setDirty).mock.calls.at(-1)).toEqual([true]);
+  });
+
+  it('zapisany stan { step: 1, selectedPlan: "pro", name: "", email: "" }: wasRecovered true', async () => {
+    recovery.state = { step: 1, selectedPlan: "pro", name: "", email: "" };
+    const { result } = await renderLoaded(null);
+    expect(result.current.wasRecovered).toBe(true);
   });
 });

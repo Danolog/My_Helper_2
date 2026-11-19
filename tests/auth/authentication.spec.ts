@@ -55,7 +55,7 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should go back from account form to plan selection and continue to account form', { tag: '@full' }, async ({ page }) => {
       await page.goto('/register');
-      // Wait for the account form to render and hydrate
+      // Wait for the account form submit button, then 500 ms
       await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
       await page.waitForTimeout(500);
       await page.getByRole('button', { name: /wstecz/i }).click();
@@ -69,7 +69,7 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should register a new owner account', { tag: '@smoke' }, async ({ page }) => {
       await page.goto('/register');
-      // Step 2 - fill form (wait for form to be fully rendered and interactive)
+      // Step 2 - fill form (wait for the submit button, then 500 ms)
       await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
       await page.waitForTimeout(500);
       await page.fill('#name', TEST_USER.name);
