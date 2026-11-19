@@ -727,4 +727,86 @@ describe("POST /api/subscriptions/checkout", () => {
       expectNoWrites();
     });
   });
+
+  // Trasa ustawia `expires_at` sesji Checkout na 35 minut (2100 s) po chwili
+  // utworzenia sesji; `expires_at` to czas uniksowy w sekundach.
+  describe("(g) czas życia sesji Checkout", () => {
+    // 2026-11-19T10:00:00.000Z = 1795082400 s
+    const NOW = new Date("2026-11-19T10:00:00.000Z");
+    const NOW_SECONDS = 1795082400;
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+      vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.test");
+      mockGetStripe.mockReturnValue(stripeClient());
+      selectQueue.push([PLAN_BASIC], []);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    });
+
+    async function createdSessionParams() {
+      const res = await POST(checkoutRequest("basic"));
+      expect(res.status).toBe(200);
+      expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
+      return mockSessionsCreate.mock.calls[0]![0];
+    }
+
+    it("expires_at = sekunda chwili utworzenia + 2100 (1795084500 dla 2026-11-19T10:00:00.000Z)", async () => {
+      const params = await createdSessionParams();
+
+      expect(params.expires_at).toBe(1795084500);
+    });
+
+    it("chwila z ułamkiem sekundy (10:00:59.789Z): expires_at jest liczbą całkowitą = sekunda zaokrąglona w dół + 2100", async () => {
+      vi.setSystemTime(new Date("2026-11-19T10:00:59.789Z"));
+
+      const params = await createdSessionParams();
+
+      expect(Number.isInteger(params.expires_at)).toBe(true);
+      expect(params.expires_at).toBe(1795084559);
+    });
+
+    it("expires_at minus sekunda chwili utworzenia mieści się ściśle między 1800 a 86400", async () => {
+      const params = await createdSessionParams();
+      const ttl = params.expires_at - NOW_SECONDS;
+
+      expect(ttl).toBeGreaterThan(1800);
+      expect(ttl).toBeLessThan(86400);
+    });
+
+    it("mode, line_items, success_url, cancel_url, customer_email i metadata sesji mają dotychczasowe wartości", async () => {
+      const params = await createdSessionParams();
+
+      expect(params.mode).toBe("subscription");
+      expect(params.line_items).toEqual([
+        {
+          price_data: {
+            currency: "pln",
+            product_data: {
+              name: "MyHelper Basic",
+              description: "Subskrypcja miesięczna planu Basic",
+            },
+            unit_amount: 4900,
+            recurring: { interval: "month" },
+          },
+          quantity: 1,
+        },
+      ]);
+      expect(params.success_url).toBe(
+        "https://app.example.test/dashboard/subscription/success?session_id={CHECKOUT_SESSION_ID}",
+      );
+      expect(params.cancel_url).toBe("https://app.example.test/pricing");
+      expect(params.customer_email).toBe("wlasciciel@test.pl");
+      expect(params.metadata).toEqual({
+        salonId: "salon-1",
+        planId: PLAN_BASIC.id,
+        planSlug: PLAN_BASIC.slug,
+        userId: "user-1",
+      });
+    });
+  });
 });
