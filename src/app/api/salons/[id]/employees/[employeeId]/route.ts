@@ -126,8 +126,6 @@ export async function GET(
         role: employee.role,
         photoUrl: employee.photoUrl,
         color: employee.color,
-        phone: employee.phone,
-        email: employee.email,
         salon: {
           id: salon.id,
           name: salon.name,

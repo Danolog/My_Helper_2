@@ -56,8 +56,6 @@ interface EmployeeDetail {
   role: string;
   photoUrl: string | null;
   color: string | null;
-  phone: string | null;
-  email: string | null;
   salon: {
     id: string;
     name: string;
