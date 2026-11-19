@@ -10,7 +10,8 @@
  * Kontrakt po poprawce: endpoint nigdy nie zapisuje subskrypcji ani płatności.
  * Tworzy tylko sesję Stripe Checkout; subskrypcję zapisuje /api/subscriptions/confirm
  * po zweryfikowanej płatności (payment_status === "paid").
- * Stripe niedostępny → 503, błąd Stripe → 502, w obu przypadkach zero zapisów.
+ * Stripe nieskonfigurowany albo błąd odczytu subskrypcji w Stripe → 503, błąd
+ * tworzenia sesji Checkout → 502, w każdym z tych przypadków zero zapisów.
  *
  * Kontrakt wejścia = body z UI: `{ planSlug }` z
  * src/app/(site)/pricing/page.tsx i
@@ -363,7 +364,7 @@ describe("POST /api/subscriptions/checkout", () => {
       expect(params).toEqual(expect.arrayContaining(["salon-1", "trialing", "active"]));
     });
 
-    it("wiersz canceled z prawdziwym id bez końca okresu (historia) nie blokuje nowego Checkoutu", async () => {
+    it("wiersz canceled z prawdziwym id bez końca okresu (historia), Stripe canceled: nie blokuje nowego Checkoutu", async () => {
       mockGetStripe.mockReturnValue(stripeClient());
       // Zapytanie o wiersze bieżące filtruje trialing/active; gdyby atrapa
       // zwróciła historię, ta reguła jej nie liczy. Odczyt wszystkich wierszy
@@ -440,19 +441,19 @@ describe("POST /api/subscriptions/checkout", () => {
       expect(params).toEqual(["salon-1"]);
     });
 
-    it("canceled z prawdziwą subskrypcją Stripe, koniec okresu w przeszłości: sesja Checkout (200)", async () => {
+    it("canceled z prawdziwą subskrypcją Stripe, koniec okresu w przeszłości, Stripe canceled: sesja Checkout (200)", async () => {
       accessQueue.push([accessRow({ currentPeriodEnd: new Date(NOW.getTime() - DAY) })]);
       mockSubscriptionsRetrieve.mockResolvedValue({ id: "sub_1Real", status: "canceled" });
       await expectCheckoutCreated();
     });
 
-    it("canceled z prawdziwą subskrypcją Stripe, koniec okresu równy chwili bieżącej: sesja Checkout (200)", async () => {
+    it("canceled z prawdziwą subskrypcją Stripe, koniec okresu równy chwili bieżącej, Stripe canceled: sesja Checkout (200)", async () => {
       accessQueue.push([accessRow({ currentPeriodEnd: new Date(NOW.getTime()) })]);
       mockSubscriptionsRetrieve.mockResolvedValue({ id: "sub_1Real", status: "canceled" });
       await expectCheckoutCreated();
     });
 
-    it("canceled z prawdziwą subskrypcją Stripe bez końca okresu: sesja Checkout (200)", async () => {
+    it("canceled z prawdziwą subskrypcją Stripe bez końca okresu, Stripe canceled: sesja Checkout (200)", async () => {
       accessQueue.push([accessRow({ currentPeriodEnd: null })]);
       mockSubscriptionsRetrieve.mockResolvedValue({ id: "sub_1Real", status: "canceled" });
       await expectCheckoutCreated();
@@ -487,7 +488,7 @@ describe("POST /api/subscriptions/checkout", () => {
       expectNoWrites();
     });
 
-    it("past_due z prawdziwą subskrypcją Stripe po końcu okresu + 7 dni: sesja Checkout (200)", async () => {
+    it("past_due z prawdziwą subskrypcją Stripe po końcu okresu + 7 dni, Stripe canceled: sesja Checkout (200)", async () => {
       accessQueue.push([accessRow({ status: "past_due", currentPeriodEnd: new Date(NOW.getTime() - 8 * DAY) })]);
       mockSubscriptionsRetrieve.mockResolvedValue({ id: "sub_1Real", status: "canceled" });
       await expectCheckoutCreated();
@@ -515,7 +516,7 @@ describe("POST /api/subscriptions/checkout", () => {
       expectNoWrites();
     });
 
-    it("nowszy canceled po okresie + starszy canceled w okresie z prawdziwą subskrypcją: sesja Checkout (200), liczy się najnowszy wiersz", async () => {
+    it("nowszy canceled po okresie + starszy canceled w okresie z prawdziwą subskrypcją, Stripe canceled: sesja Checkout (200), liczy się najnowszy wiersz", async () => {
       accessQueue.push([
         accessRow({ id: "sub-new", createdAt: new Date("2026-10-01T10:00:00.000Z"), currentPeriodEnd: new Date(NOW.getTime() - DAY) }),
         accessRow({ id: "sub-old", createdAt: new Date("2026-08-01T10:00:00.000Z"), currentPeriodEnd: new Date(NOW.getTime() + DAY) }),
@@ -524,7 +525,7 @@ describe("POST /api/subscriptions/checkout", () => {
       await expectCheckoutCreated();
     });
 
-    it("wiersz bieżący trialing bez prawdziwego Stripe + starszy canceled w okresie z prawdziwą subskrypcją: sesja Checkout (200), liczy się wiersz bieżący", async () => {
+    it("wiersz bieżący trialing bez prawdziwego Stripe + starszy canceled w okresie z prawdziwą subskrypcją, Stripe canceled: sesja Checkout (200), liczy się wiersz bieżący", async () => {
       const trial = subscriptionRow({
         id: "sub-trial",
         status: "trialing",
