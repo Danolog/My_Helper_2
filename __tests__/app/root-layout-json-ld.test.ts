@@ -27,7 +27,7 @@ const jsonLdLiteral = source.match(JSON_LD_LITERAL)?.[0] ?? "";
 describe("JSON-LD w src/app/layout.tsx", () => {
   it("w źródle jest niepusty literał obiektu przypisany do const jsonLd", () => {
     expect(jsonLdLiteral).not.toBe("");
-    expect(jsonLdLiteral.length).toBeGreaterThan("const jsonLd = {\n};".length);
+    expect(jsonLdLiteral.replace(/\s/g, "")).not.toBe("constjsonLd={};");
   });
 
   it("literał jsonLd nie ma klucza offers", () => {
