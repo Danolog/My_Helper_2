@@ -2,8 +2,9 @@
  * Okno tworzenia salonu (CreateSalonPrompt) a lista PLANS_ON_SALE.
  *
  * Test renderuje CreateSalonPrompt i sprawdza, karty których planów są
- * pokazane, czy przycisk tworzenia salonu jest aktywny przed kliknięciem
- * karty oraz jaki planSlug trafia w body wywołania mutationFetch na adres
+ * pokazane, który z dwóch tekstów o okresie próbnym jest w oknie, czy
+ * przycisk tworzenia salonu jest aktywny przed kliknięciem karty oraz jaki
+ * planSlug trafia w body wywołania mutationFetch na adres
  * /api/register-subscription. Atrapą jest tylko @/lib/api-client
  * (mutationFetch zwraca odpowiedź, której json() daje { success: true }).
  * Moduł @/lib/plan-catalog jest prawdziwy: pierwsza grupa biegnie na liście
@@ -17,7 +18,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from "vitest";
 import { CreateSalonPrompt } from "@/components/dashboard/create-salon-prompt";
 import { mutationFetch } from "@/lib/api-client";
-import { PLANS } from "@/lib/constants";
+import { PLANS, TRIAL_DAYS } from "@/lib/constants";
 import { PLANS_ON_SALE } from "@/lib/plan-catalog";
 import { planHighlights } from "@/lib/plan-features";
 
@@ -28,6 +29,8 @@ vi.mock("@/lib/api-client", () => ({
 const BASIC_CARD = new RegExp(`^${PLANS.basic.name}`);
 const PRO_CARD = new RegExp(`^${PLANS.pro.name}`);
 const CREATE_BUTTON = /Utworz salon z/;
+const SHORT_TEXT = `Rozpocznij ${TRIAL_DAYS}-dniowy okres probny`;
+const LONG_TEXT = `Wybierz plan i rozpocznij ${TRIAL_DAYS}-dniowy okres probny`;
 
 function renderPrompt() {
   const onCreated = vi.fn();
@@ -81,6 +84,13 @@ describe("CreateSalonPrompt — lista PLANS_ON_SALE z modułu", () => {
     const grid = screen.getByRole("button", { name: BASIC_CARD }).parentElement;
     expect(grid).not.toHaveClass("sm:grid-cols-2");
   });
+
+  it(`jest element o całym tekście „${SHORT_TEXT}”, elementu o całym tekście „${LONG_TEXT}” nie ma`, () => {
+    renderPrompt();
+
+    expect(screen.getByText(SHORT_TEXT, { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText(LONG_TEXT, { exact: true })).not.toBeInTheDocument();
+  });
 });
 
 describe('CreateSalonPrompt — PLANS_ON_SALE podmieniona na ["basic", "pro"]', () => {
@@ -119,5 +129,12 @@ describe('CreateSalonPrompt — PLANS_ON_SALE podmieniona na ["basic", "pro"]', 
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledTimes(1));
     expect(sentPlanSlug()).toBe("basic");
+  });
+
+  it(`jest element o całym tekście „${LONG_TEXT}”, elementu o całym tekście „${SHORT_TEXT}” nie ma`, () => {
+    renderPrompt();
+
+    expect(screen.getByText(LONG_TEXT, { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText(SHORT_TEXT, { exact: true })).not.toBeInTheDocument();
   });
 });

@@ -81,7 +81,9 @@ export function CreateSalonPrompt({ session, onCreated }: CreateSalonPromptProps
             </div>
             <CardTitle>Utworz swoj salon</CardTitle>
             <p className="text-muted-foreground text-sm">
-              Wybierz plan i rozpocznij {TRIAL_DAYS}-dniowy okres probny
+              {plans.length === 1
+                ? `Rozpocznij ${TRIAL_DAYS}-dniowy okres probny`
+                : `Wybierz plan i rozpocznij ${TRIAL_DAYS}-dniowy okres probny`}
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
