@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
-import { formatDate } from "../_types";
+import { cancelSuccessDescription, formatDate } from "../_types";
 import type {
   SubscriptionData,
   PlanData,
@@ -140,9 +140,11 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
       }
 
       toast.success("Subskrypcja anulowana", {
-        description: subscription?.currentPeriodEnd
-          ? `Dostep do planu jest aktywny do ${formatDate(subscription.currentPeriodEnd)}. Subskrypcja nie zostanie odnowiona.`
-          : "Twoja subskrypcja zostala pomyslnie anulowana.",
+        description: cancelSuccessDescription(
+          data.subscription?.currentPeriodEnd ??
+            subscription?.currentPeriodEnd,
+          new Date(),
+        ),
       });
 
       // Refresh subscription data
