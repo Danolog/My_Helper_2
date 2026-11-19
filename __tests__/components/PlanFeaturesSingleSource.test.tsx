@@ -17,7 +17,7 @@ import { isPlanOnSale } from "@/lib/plan-catalog";
 import {
   PLAN_FEATURES,
   PLAN_SUMMARY,
-  planComparison,
+  featuresFor,
   planHighlights,
   proOnlyFeatures,
 } from "@/lib/plan-features";
@@ -110,7 +110,7 @@ describe("jedno źródło list funkcji planów — to, co widzi użytkownik", ()
                 name: "Basic",
                 slug: "basic",
                 priceMonthly: "49.00",
-                features: [...PLAN_FEATURES.basic],
+                features: ["Pozycja z bazy"],
                 isActive: true,
               },
               {
@@ -127,20 +127,17 @@ describe("jedno źródło list funkcji planów — to, co widzi użytkownik", ()
       );
     });
 
-    it("tabela porównania pokazuje wiersze z plan-features, bez własnych", async () => {
+    it('karta planu pokazuje listę featuresFor("basic", …), a nie listę features z odpowiedzi API', async () => {
       render(<PricingPage />);
 
       await waitFor(() => {
-        expect(screen.getAllByTestId("comparison-feature").length).toBeGreaterThan(0);
+        expect(screen.getAllByTestId("plan-feature").length).toBeGreaterThan(0);
       });
 
-      const expected = planComparison().flatMap((c) => c.features.map((f) => f.name));
-      expect(texts(screen.getAllByTestId("comparison-feature"))).toEqual(expected);
-      expect(texts(screen.getAllByTestId("comparison-category"))).toEqual(
-        planComparison().map((c) => c.category)
+      expect(texts(screen.getAllByTestId("plan-feature"))).toEqual(
+        featuresFor("basic", ["Pozycja z bazy"])
       );
-      expect(screen.getByText(PLAN_SUMMARY.basic)).toBeInTheDocument();
-      expect(screen.getByText(PLAN_SUMMARY.pro)).toBeInTheDocument();
+      expect(screen.queryByText("Pozycja z bazy")).not.toBeInTheDocument();
     });
   });
 

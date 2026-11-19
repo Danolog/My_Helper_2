@@ -309,7 +309,7 @@ describe("prawda w marketingu", () => {
       // Seed zapisuje plany przez scripts/seed-plans.ts (seed-test.ts tylko woła seedPlans — pilnuje __tests__/lib/seed-plans.test.ts).
       ["scripts/seed-plans.ts", /PLAN_FEATURES\[slug\]|PLAN_FEATURES\.(basic|pro)/],
       ["src/app/(site)/dla-salonow/_components/DlaSalonowPricing.tsx", /\bplanHighlights\(/],
-      ["src/app/(site)/pricing/page.tsx", /\bplanComparison\(/],
+      ["src/app/(site)/pricing/page.tsx", /\bfeaturesFor\(/],
       ["src/components/dashboard/create-salon-prompt.tsx", /\bplanHighlights\(/],
       ["src/app/dashboard/subscription/_components/plan-actions.tsx", /\bproOnlyFeatures\(/],
       ["src/components/auth/_components/StepPlanSelection.tsx", /PLAN_SUMMARY\.(basic|pro)/],
@@ -340,6 +340,17 @@ describe("prawda w marketingu", () => {
       // tabeli porównania `{ name: "…", basic: …, pro: … }`.
       expect(source).not.toMatch(/features:\s*\[\s*["'`]/);
       expect(source).not.toMatch(/name:\s*["'`][^"'`]+["'`],\s*basic:/);
+    });
+
+    it("cennik woła planPriceText i nie ma ceny wpisanej ręcznie", () => {
+      const source = code("src/app/(site)/pricing/page.tsx");
+      expect(source).toMatch(/\bplanPriceText\(/);
+      expect(source).not.toMatch(/PLN\s*\/\s*mies/);
+    });
+
+    it("cennik nie wspomina planu Pro ani AI", () => {
+      const source = code("src/app/(site)/pricing/page.tsx");
+      expect(source).not.toMatch(/\bPro\b|["']pro["']|\bAI\b|asystent/i);
     });
   });
 });
