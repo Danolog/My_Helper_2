@@ -4,14 +4,10 @@ import {
   AlertTriangle,
   Bell,
   Clock,
-  CreditCard,
-  Loader2,
-  RefreshCw,
   ShieldAlert,
   Timer,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -25,23 +21,11 @@ import type { SubscriptionData, ExpirationData } from "../_types";
 interface ExpirationWarningCardProps {
   subscription: SubscriptionData;
   expirationData: ExpirationData;
-  renewLoading: boolean;
-  simulateLoading: boolean;
-  sendWarningLoading: boolean;
-  onSimulateRenewal: () => Promise<void>;
-  onSimulateNearExpiry: () => Promise<void>;
-  onSendWarning: () => Promise<void>;
 }
 
 export function ExpirationWarningCard({
   subscription,
   expirationData,
-  renewLoading,
-  simulateLoading,
-  sendWarningLoading,
-  onSimulateRenewal,
-  onSimulateNearExpiry,
-  onSendWarning,
 }: ExpirationWarningCardProps) {
   return (
     <Card
@@ -132,52 +116,13 @@ export function ExpirationWarningCard({
 
         {/* Near expiry warning banner */}
         {expirationData.isNearExpiry && (
-          <NearExpiryBanner
-            expirationData={expirationData}
-            renewLoading={renewLoading}
-            onSimulateRenewal={onSimulateRenewal}
-          />
+          <NearExpiryBanner expirationData={expirationData} />
         )}
 
         {/* Recent warnings */}
         {expirationData.recentWarnings.length > 0 && (
           <RecentWarnings warnings={expirationData.recentWarnings} />
         )}
-
-        {/* Dev mode: Simulation controls */}
-        <div className="pt-2 border-t">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-            Tryb deweloperski
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onSimulateNearExpiry}
-              disabled={simulateLoading}
-            >
-              {simulateLoading ? (
-                <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-              ) : (
-                <ShieldAlert className="h-3 w-3 mr-2" />
-              )}
-              Symuluj wygasniecie (3 dni)
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onSendWarning}
-              disabled={sendWarningLoading}
-            >
-              {sendWarningLoading ? (
-                <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-              ) : (
-                <Bell className="h-3 w-3 mr-2" />
-              )}
-              Wyslij ostrzezenie
-            </Button>
-          </div>
-        </div>
       </CardContent>
     </Card>
   );
@@ -189,15 +134,9 @@ export function ExpirationWarningCard({
 
 interface NearExpiryBannerProps {
   expirationData: ExpirationData;
-  renewLoading: boolean;
-  onSimulateRenewal: () => Promise<void>;
 }
 
-function NearExpiryBanner({
-  expirationData,
-  renewLoading,
-  onSimulateRenewal,
-}: NearExpiryBannerProps) {
+function NearExpiryBanner({ expirationData }: NearExpiryBannerProps) {
   return (
     <div className="flex items-start gap-3 p-4 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800">
       <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
@@ -216,28 +155,6 @@ function NearExpiryBanner({
           </span>
           .
         </p>
-        <div className="mt-3 flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="border-amber-300 text-amber-700 hover:bg-amber-100"
-          >
-            <CreditCard className="h-3 w-3 mr-2" />
-            Sprawdz metode platnosci
-          </Button>
-          <Button
-            size="sm"
-            onClick={onSimulateRenewal}
-            disabled={renewLoading}
-          >
-            {renewLoading ? (
-              <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3 w-3 mr-2" />
-            )}
-            Odnow teraz
-          </Button>
-        </div>
       </div>
     </div>
   );
