@@ -20,6 +20,10 @@
  * src/app/(site)/pricing/page.tsx i
  * src/app/dashboard/subscription/_hooks/use-subscription-data.ts.
  * Salon wyłącznie z sesji — `salonId` w body nie jest częścią kontraktu.
+ *
+ * W tym pliku lista PLANS_ON_SALE z @/lib/plan-catalog jest podmieniona na
+ * ["basic", "pro"]; zachowanie schematu dla prawdziwej listy sprawdza
+ * __tests__/lib/plans-on-sale-schemas.test.ts.
  */
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -167,6 +171,12 @@ vi.mock("@/lib/rate-limit", () => ({
 // Atrapa klienta Stripe — zero wywołań sieciowych.
 vi.mock("@/lib/stripe", () => ({
   getStripe: (...a: unknown[]) => mockGetStripe(...a),
+}));
+
+// Prawdziwy moduł katalogu planów z PLANS_ON_SALE podmienionym na ["basic", "pro"].
+vi.mock("@/lib/plan-catalog", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/plan-catalog")>()),
+  PLANS_ON_SALE: ["basic", "pro"],
 }));
 
 const PLAN_BASIC = {

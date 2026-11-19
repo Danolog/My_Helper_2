@@ -13,6 +13,7 @@ import {
 } from "@/lib/push-subscription";
 import { APPOINTMENT_NOTES_MAX_LENGTH } from "@/lib/appointment-limits";
 import { normalizePolishPhoneNumber } from "@/lib/phone";
+import { PLANS_ON_SALE } from "@/lib/plan-catalog";
 import { isOwnUploadUrl } from "@/lib/upload-url";
 
 // ==========================================
@@ -924,14 +925,14 @@ export const depositConfirmSchema = z.object({
 // Kontrakt = body z UI: src/app/(site)/pricing/page.tsx oraz
 // src/app/dashboard/subscription/_hooks/use-subscription-data.ts → { planSlug }.
 // Salon wylacznie z sesji (getUserSalonId), wiec salonId nie jest czescia body.
-// Plany sprzedawane online = sloty cen Stripe (STRIPE_PRICE_BASIC/PRO); trasa
-// i tak sprawdza w bazie, czy plan jest aktywny.
-export const CHECKOUT_PLAN_SLUGS = ["basic", "pro"] as const;
+// Dozwolone wartosci planSlug to elementy PLANS_ON_SALE z @/lib/plan-catalog;
+// trasa i tak sprawdza w bazie, czy plan jest aktywny.
+export const CHECKOUT_PLAN_SLUGS = PLANS_ON_SALE;
 export type CheckoutPlanSlug = (typeof CHECKOUT_PLAN_SLUGS)[number];
 
 export const subscriptionCheckoutSchema = z.object({
   planSlug: z.enum(CHECKOUT_PLAN_SLUGS, {
-    message: "planSlug musi byc 'basic' lub 'pro'",
+    message: `planSlug musi byc jednym z: ${CHECKOUT_PLAN_SLUGS.join(", ")}`,
   }),
 });
 
