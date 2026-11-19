@@ -142,7 +142,7 @@ export async function GET() {
  *
  * Optional body:
  * - warningDays: Override default warning threshold (default 7)
- * - simulate: If true, simulates near-expiry with a computed period end (3 days from now); the subscription row is not changed
+ * - simulate: If true and the active subscription has a period end, simulates near-expiry with a computed period end (3 days from now); the subscription row is not changed
  *
  * Returns: { success: true, warnings: [...] }
  */
@@ -205,7 +205,7 @@ export async function POST(request: Request) {
           );
         if (!activeSub) return null;
 
-        // If simulating, use a computed period end (3 days from now) for this request's warnings and response
+        // If simulating and the subscription has a period end, use a computed period end (3 days from now) for this request's warnings and response
         let periodEnd = activeSub.subscription.currentPeriodEnd
           ? new Date(activeSub.subscription.currentPeriodEnd)
           : null;
