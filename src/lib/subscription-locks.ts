@@ -95,8 +95,7 @@ export function withStripeSubscriptionLock<T>(
 
 /**
  * Transakcja z limitem czekania i TYLKO blokadą salonu — dla trasy, która
- * zmienia wiersz salonu bez wywołania Stripe (downgrade), oraz dla odczytu
- * „active” w expiration-warning.
+ * zmienia wiersz salonu bez wywołania Stripe (downgrade).
  * Webhook i confirm biorą tę samą blokadę salonu przed zapisem, więc odczyt
  * „active” i zapis nie przeplatają się z nimi. Reguła kolejności zachowana (brak stripe_sub).
  */

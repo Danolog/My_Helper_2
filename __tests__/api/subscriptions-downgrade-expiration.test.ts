@@ -1,17 +1,17 @@
 /**
  * `subscriptions/downgrade` (POST, DELETE) — odczyt „active” i zapis pod
- * blokadą salonu; `subscriptions/expiration-warning` (POST) — odczyt „active”
- * pod blokadą salonu, bez zapisu `salon_subscriptions` (także przy `simulate`).
+ * blokadą salonu; moduł `subscriptions/expiration-warning/route` — eksporty
+ * (brak POST, GET jest funkcją).
  *
- * Bez blokady zapis trasy mógł się przepleść z webhookiem, który w tym czasie
+ * Bez blokady zapis trasy downgrade mógł się przepleść z webhookiem, który w tym czasie
  * zmienia stan tej subskrypcji (utrata zapisu / decyzja na nieaktualnym
- * „active”). Te trasy nie wołają Stripe, więc biorą TYLKO blokadę salonu —
+ * „active”). Ta trasa nie woła Stripe, więc bierze TYLKO blokadę salonu —
  * zgodnie z regułą kolejności (`subscription-locks.ts`).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
 import { DELETE as cancelDowngrade, POST as downgrade } from "@/app/api/subscriptions/downgrade/route";
-import { POST as expirationWarning } from "@/app/api/subscriptions/expiration-warning/route";
+import * as expirationWarningRoute from "@/app/api/subscriptions/expiration-warning/route";
 import { createMockRequest } from "./helpers";
 
 const f = await vi.hoisted(async () =>
@@ -153,54 +153,10 @@ describe("DELETE /api/subscriptions/downgrade — pod blokadą salonu", () => {
   });
 });
 
-describe("POST /api/subscriptions/expiration-warning — odczyt pod blokadą salonu, bez zapisu subskrypcji", () => {
-  it("simulate: odczyt po blokadzie salonu i commit bez zapisu subskrypcji, powiadomienia po transakcji, termin symulowany w odpowiedzi, nie w wierszu", async () => {
-    f.selects.push([{ subscription: ACTIVE, plan: PLAN_PRO }]);
-
-    const { status, body } = await call(expirationWarning, "POST", { simulate: true });
-
-    expect(status).toBe(200);
-    expect(body.isNearExpiry).toBe(true);
-    expect(f.log).toEqual([...LOCKED_PREFIX, "select", "commit", "insert:other", "insert:other"]);
-    expect(subWrites()).toEqual([]);
-    const simulatedEnd = Date.parse(String(body.currentPeriodEnd));
-    expect(simulatedEnd).not.toBe(PERIOD_END.getTime());
-    expect(Math.abs(simulatedEnd - (Date.now() + 3 * 24 * 3600 * 1000))).toBeLessThan(2 * 3600 * 1000);
-  });
-
-  it("bez simulate, daleko do końca okresu: odczyt pod blokadą, zero zapisów", async () => {
-    f.selects.push([{ subscription: ACTIVE, plan: PLAN_PRO }]);
-
-    const { status, body } = await call(expirationWarning, "POST", {});
-
-    expect(status).toBe(200);
-    expect(body.warnings).toEqual([]);
-    expect(f.log).toEqual([...LOCKED_PREFIX, "select", "commit"]);
-    expect(f.committed).toEqual([]);
-  });
-
-  it("brak aktywnej subskrypcji → 200 bez zapisu", async () => {
-    f.selects.push([]);
-    const { status, body } = await call(expirationWarning, "POST", { simulate: true });
-    expect(status).toBe(200);
-    expect(body.message).toBe("Brak aktywnej subskrypcji");
-    expect(f.committed).toEqual([]);
-  });
-
-  it("503: 40P01 przy blokadzie → LOCK_BUSY, bez zapisu i bez powiadomień", async () => {
-    f.state.failNextLock = { code: "40P01" };
-    f.selects.push([{ subscription: ACTIVE, plan: PLAN_PRO }]);
-
-    const { status, body } = await call(expirationWarning, "POST", { simulate: true });
-
-    expect(status).toBe(503);
-    expect(body.code).toBe("LOCK_BUSY");
-    expect(f.committed).toEqual([]);
-  });
-
-  it("400 przy niepoprawnym body — bez transakcji", async () => {
-    const { status } = await call(expirationWarning, "POST", { warningDays: "dużo" });
-    expect(status).toBe(400);
-    expect(f.state.transactions).toBe(0);
+describe("moduł expiration-warning/route — eksporty", () => {
+  it("nie eksportuje POST, a GET jest funkcją", () => {
+    const m: Record<string, unknown> = expirationWarningRoute;
+    expect(m.POST).toBeUndefined();
+    expect(typeof m.GET).toBe("function");
   });
 });
