@@ -78,7 +78,7 @@ export async function GET() {
           eq(salonSubscriptions.planId, subscriptionPlans.id),
         )
         .where(eq(salonSubscriptions.salonId, salonId))
-        .orderBy(desc(salonSubscriptions.createdAt));
+        .orderBy(desc(salonSubscriptions.createdAt), desc(salonSubscriptions.id));
 
       const accessRows = all.map(toAccessRow);
       const chosen = pickSalonAccessRow(accessRows);
