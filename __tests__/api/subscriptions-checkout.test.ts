@@ -31,6 +31,7 @@ import Stripe from "stripe";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { POST } from "@/app/api/subscriptions/checkout/route";
 import { logger } from "@/lib/logger";
+import { SOLD_PLAN_SLUG } from "@/lib/plan-catalog";
 import { STRIPE_LOCKED_READ_OPTIONS } from "@/lib/subscription-locks";
 
 const {
@@ -699,11 +700,11 @@ describe("POST /api/subscriptions/checkout", () => {
   });
 
   describe("(d) kontrakt wejścia z UI", () => {
-    it("body z UI { planSlug } przechodzi walidację (nie 400)", async () => {
+    it("body z UI { planSlug: SOLD_PLAN_SLUG } przechodzi walidację (nie 400)", async () => {
       mockGetStripe.mockReturnValue(stripeClient());
-      selectQueue.push([PLAN_PRO], []);
+      selectQueue.push([PLAN_BASIC], []);
 
-      const res = await POST(checkoutRequest("pro"));
+      const res = await POST(checkoutRequest(SOLD_PLAN_SLUG));
 
       expect(res.status).toBe(200);
       expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
