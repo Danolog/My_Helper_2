@@ -12,6 +12,10 @@ describe("stripeAmountToColumns", () => {
     expect(stripeAmountToColumns(14900, "pln")).toEqual({ amount: "149.00", currency: "PLN" });
   });
 
+  it('stripeAmountToColumns: 500 + "ugx" → { amount: "5.00", currency: "UGX" }', () => {
+    expect(stripeAmountToColumns(500, "ugx")).toEqual({ amount: "5.00", currency: "UGX" });
+  });
+
   it('stripeAmountToColumns: granice groszy 0→"0.00", 1→"0.01", 1005→"10.05", 9999999999→"99999999.99"', () => {
     expect(stripeAmountToColumns(0, "pln")).toEqual({ amount: "0.00", currency: "PLN" });
     expect(stripeAmountToColumns(1, "pln")).toEqual({ amount: "0.01", currency: "PLN" });

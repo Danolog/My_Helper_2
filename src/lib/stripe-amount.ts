@@ -17,7 +17,7 @@ const MAX_MINOR_UNITS = 9_999_999_999;
  * 1/100): bez miejsc po przecinku oraz z trzema miejscami po przecinku.
  */
 const NOT_CONVERTED_CURRENCIES = new Set([
-  "bif", "clp", "djf", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf", "ugx", "vnd", "vuv", "xaf", "xof", "xpf",
+  "bif", "clp", "djf", "gnf", "jpy", "kmf", "krw", "mga", "pyg", "rwf", "vnd", "vuv", "xaf", "xof", "xpf",
   "bhd", "jod", "kwd", "omr", "tnd",
 ]);
 
