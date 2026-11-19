@@ -3,6 +3,7 @@
 import { AlertTriangle, Timer, CreditCard, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TRIAL_DAYS } from "@/lib/constants";
+import { planOnSaleOr } from "@/lib/plan-catalog";
 import { formatDate } from "../_types";
 import type { SubscriptionData, PlanData } from "../_types";
 
@@ -123,7 +124,7 @@ export function TrialNotice({
       <div className="flex items-center gap-3 mt-1">
         <Button
           size="sm"
-          onClick={() => onChangePlan(plan.slug)}
+          onClick={() => onChangePlan(planOnSaleOr(plan.slug))}
           disabled={changePlanLoading}
           className={
             isNearEnd ? "bg-amber-600 hover:bg-amber-700 text-white" : ""
