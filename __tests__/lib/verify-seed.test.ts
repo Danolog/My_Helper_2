@@ -148,6 +148,7 @@ describe("checkSeedRows — subskrypcje salonów seeda (dostęp liczony resolveS
     ["salon testowy: trialing po terminie", (r) => forSalon(r, T, [subRow(T, { status: "trialing", trial_ends_at: PAST })]), /subskrypcja salonu testowego: dostęp read_only, oczekiwany full/],
     ["salon testowy: canceled", (r) => forSalon(r, T, [subRow(T, { status: "canceled" })]), /subskrypcja salonu testowego: dostęp read_only, oczekiwany full/],
     ["salon testowy: active z planem pro", (r) => forSalon(r, T, [subRow(T, { plan_slug: "pro" })]), /subskrypcja salonu testowego: plan niezgodny/],
+    ["salon testowy: trialing z terminem w przyszłości", (r) => forSalon(r, T, [subRow(T, { status: "trialing", trial_ends_at: FUTURE })]), /subskrypcja salonu testowego: stan trialing, oczekiwany active/],
     ["salon po okresie próbnym: brak wiersza", (r) => forSalon(r, E, []), /subskrypcja salonu po okresie próbnym: wierszy 0, oczekiwany 1/],
     ["salon po okresie próbnym: trialing z terminem w przyszłości", (r) => forSalon(r, E, [subRow(E, { status: "trialing", trial_ends_at: FUTURE })]), /subskrypcja salonu po okresie próbnym: dostęp full, oczekiwany read_only/],
     ["salon po okresie próbnym: active", (r) => forSalon(r, E, [subRow(E, { status: "active" })]), /subskrypcja salonu po okresie próbnym: dostęp full, oczekiwany read_only/],
