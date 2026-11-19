@@ -19,6 +19,7 @@ export default function SubscriptionPage() {
     plan,
     allPlans,
     scheduledPlan,
+    access,
     loading,
     error,
     expirationData,
@@ -75,6 +76,7 @@ export default function SubscriptionPage() {
             plan={plan}
             allPlans={allPlans}
             scheduledPlan={scheduledPlan}
+            access={access}
             changePlanLoading={changePlanLoading}
             downgradeLoading={downgradeLoading}
             cancelLoading={cancelLoading}

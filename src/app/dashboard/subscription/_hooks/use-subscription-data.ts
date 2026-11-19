@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
 import { cancelSuccessDescription, formatDate } from "../_types";
 import type {
+  AccessData,
   SubscriptionData,
   PlanData,
   ScheduledPlanData,
@@ -17,6 +18,7 @@ interface UseSubscriptionDataReturn {
   plan: PlanData | null;
   allPlans: AllPlansMap;
   scheduledPlan: ScheduledPlanData;
+  access: AccessData | null;
   loading: boolean;
   error: string | null;
   expirationData: ExpirationData | null;
@@ -45,6 +47,7 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [allPlans, setAllPlans] = useState<AllPlansMap>({});
   const [scheduledPlan, setScheduledPlan] = useState<ScheduledPlanData>(null);
+  const [access, setAccess] = useState<AccessData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
@@ -97,6 +100,7 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
         setSubscription(subData.subscription ?? null);
         setPlan(subData.plan ?? null);
         setScheduledPlan(subData.scheduledPlan ?? null);
+        setAccess(subData.access ?? null);
 
         // Build a map of all plans by slug for price comparison
         if (plansData.success && Array.isArray(plansData.data)) {
@@ -371,6 +375,7 @@ export function useSubscriptionData(): UseSubscriptionDataReturn {
     plan,
     allPlans,
     scheduledPlan,
+    access,
     loading,
     error,
     expirationData,

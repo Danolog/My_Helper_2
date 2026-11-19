@@ -30,10 +30,18 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { formatDate, statusColor, statusLabel } from "../_types";
+import {
+  canceledNoticeText,
+  formatDate,
+  pastDueNoticeText,
+  periodEndLabel,
+  statusColor,
+  statusLabel,
+} from "../_types";
 import { PlanActions } from "./plan-actions";
 import { TrialNotice } from "./trial-notice";
 import type {
+  AccessData,
   SubscriptionData,
   PlanData,
   ScheduledPlanData,
@@ -45,6 +53,7 @@ interface CurrentPlanCardProps {
   plan: PlanData;
   allPlans: AllPlansMap;
   scheduledPlan: ScheduledPlanData;
+  access: AccessData | null;
   changePlanLoading: boolean;
   downgradeLoading: boolean;
   cancelLoading: boolean;
@@ -61,6 +70,7 @@ export function CurrentPlanCard({
   plan,
   allPlans,
   scheduledPlan,
+  access,
   changePlanLoading,
   downgradeLoading,
   cancelLoading,
@@ -111,9 +121,7 @@ export function CurrentPlanCard({
             <CalendarDays className="h-5 w-5 text-muted-foreground mt-0.5" />
             <div>
               <p className="text-sm font-medium">
-                {subscription.status === "trialing"
-                  ? "Koniec okresu probnego"
-                  : "Nastepna platnosc"}
+                {periodEndLabel(subscription.status)}
               </p>
               <p className="text-sm text-muted-foreground">
                 {subscription.status === "trialing" &&
@@ -155,14 +163,22 @@ export function CurrentPlanCard({
                 Subskrypcja anulowana
               </p>
               <p className="text-sm text-red-600 dark:text-red-300">
-                {subscription.canceledAt
-                  ? `Anulowano: ${formatDate(subscription.canceledAt)}. `
-                  : "Twoja subskrypcja zostala anulowana. "}
-                {subscription.currentPeriodEnd &&
-                new Date(subscription.currentPeriodEnd) > new Date()
-                  ? `Dostep do funkcji planu jest aktywny do ${formatDate(subscription.currentPeriodEnd)}.`
-                  : "Dostep do funkcji planu zakonczyl sie."}
-                {" "}Mozesz w kazdej chwili ponownie aktywowac plan.
+                {canceledNoticeText(subscription.canceledAt, access)}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Past due notice */}
+        {subscription.status === "past_due" && (
+          <div className="flex items-start gap-3 p-4 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-800">
+            <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
+                Zalegla platnosc
+              </p>
+              <p className="text-sm text-amber-600 dark:text-amber-300">
+                {pastDueNoticeText(access)}
               </p>
             </div>
           </div>
