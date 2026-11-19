@@ -7,12 +7,15 @@
  * + 7 dni — a status `unpaid` zapisany w wierszu oznacza w niej od razu tylko
  * odczyt), wyliczenie `canceledAt` i `trialEndsAt`, brak okresu
  * rozliczeniowego w wyniku oraz regułę końcowego lokalnego `canceled`.
+ * `isStripeSubscriptionEnded` — stany końcowe Stripe (`canceled`,
+ * `incomplete_expired`).
  * Bez bazy: połączenie z bazą powstaje dopiero przy pierwszym zapytaniu,
  * a ta funkcja żadnego nie wykonuje.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { logger } from "@/lib/logger";
 import {
+  isStripeSubscriptionEnded,
   subscriptionStateFromStripe,
   type StripeSubscriptionState,
   type SubscriptionRow,
@@ -67,6 +70,27 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe("isStripeSubscriptionEnded", () => {
+  it.each(["canceled", "incomplete_expired"])("Stripe %s → true", (stripeStatus) => {
+    expect(isStripeSubscriptionEnded(stripeStatus)).toBe(true);
+  });
+
+  it.each([
+    ["active", "active"],
+    ["past_due", "past_due"],
+    ["unpaid", "unpaid"],
+    ["incomplete", "incomplete"],
+    ["trialing", "trialing"],
+    ["paused", "paused"],
+    ["pusty status", ""],
+    ["nieznany status", "ended"],
+    ["null", null],
+    ["brak statusu", undefined],
+  ])("Stripe %s → false", (_label, stripeStatus) => {
+    expect(isStripeSubscriptionEnded(stripeStatus)).toBe(false);
+  });
 });
 
 describe("subscriptionStateFromStripe — odwzorowanie stanu Stripe", () => {

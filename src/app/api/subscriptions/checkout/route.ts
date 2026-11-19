@@ -10,13 +10,16 @@ import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { subscriptionPlans, salonSubscriptions } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { getStripe, isStripePricesConfigured } from "@/lib/stripe";
+import { retrieveStripeSubscriptionLocked } from "@/lib/subscription-locks";
 import {
   CURRENT_LOCAL_STATUSES,
+  hasRealStripeSubscription,
   isCurrentLocalStatus,
   isCurrentPaidStripeRow,
   purchaseBlock,
   toSalonPurchaseAccessRow,
 } from "@/lib/subscription-predicates";
+import { isStripeSubscriptionEnded } from "@/lib/subscription-sync";
 
 const warsawDate = new Intl.DateTimeFormat("pl-PL", {
   timeZone: "Europe/Warsaw",
@@ -59,14 +62,22 @@ function stripeUnavailableResponse() {
  *
  * This endpoint NEVER writes a subscription or a payment. The subscription
  * is created/updated only by /api/subscriptions/confirm after Stripe reports
- * the Checkout Session as paid. Stripe not configured → 503, Stripe error
- * → 502; in both cases nothing is granted.
+ * the Checkout Session as paid. Stripe not configured → 503, Checkout
+ * Session creation error → 502; in both cases nothing is granted.
  *
  * 409 PURCHASE_BLOCKED_UNTIL_PERIOD_END (with `until`): the salon still has
  * full access from a canceled or past_due row with a real Stripe
  * subscription (`resolveSalonAccess` over all salon rows). A new Checkout
  * would create a second Stripe subscription while access from the first one
  * lasts; a new purchase is possible after `until`.
+ *
+ * 409 PURCHASE_BLOCKED_STRIPE_SUBSCRIPTION_LIVE (no `until`): a salon row with
+ * a real Stripe subscription and a status other than trialing/active points
+ * to a Stripe subscription that is not in a final Stripe state (`canceled`,
+ * `incomplete_expired`). Each such subscription is read from Stripe before
+ * the Checkout Session is created; a subscription Stripe reports as missing
+ * (`resource_missing`) counts as ended, any other read error → 503
+ * STRIPE_UNAVAILABLE.
  *
  * Request body: { planSlug: "basic" | "pro" }
  * Response:     { url: string }
@@ -189,9 +200,10 @@ export async function POST(request: Request) {
         )
         .where(eq(salonSubscriptions.salonId, salonId))
         .orderBy(desc(salonSubscriptions.createdAt), desc(salonSubscriptions.id));
-      return all.map(({ subscription, plan: rowPlan }) =>
-        toSalonPurchaseAccessRow(subscription, rowPlan.slug),
-      );
+      return all.map(({ subscription, plan: rowPlan }) => ({
+        ...toSalonPurchaseAccessRow(subscription, rowPlan.slug),
+        id: subscription.id,
+      }));
     });
     const block = purchaseBlock(accessRows, new Date());
     if (block) {
@@ -217,6 +229,89 @@ export async function POST(request: Request) {
         planSlug: plan.slug,
       });
       return stripeUnavailableResponse();
+    }
+
+    // Poprzednie subskrypcje Stripe salonu: wiersze z prawdziwą subskrypcją
+    // Stripe i statusem innym niż trialing/active (z odczytu wszystkich
+    // wierszy wyżej, każde id raz). Stan każdej czytamy wprost ze Stripe,
+    // równolegle, bez blokady i poza transakcją. Nowy Checkout tylko wtedy,
+    // gdy każda jest w stanie końcowym (`canceled`/`incomplete_expired`);
+    // zaplanowane anulowanie (`cancel_at_period_end`) nim nie jest. Brak
+    // subskrypcji w Stripe (`resource_missing`) = zakończona. Każdy inny błąd
+    // odczytu → 503, bez sesji.
+    const previousStripeSubscriptions = new Map<string, string>();
+    for (const row of accessRows) {
+      if (
+        row.stripeSubscriptionId &&
+        hasRealStripeSubscription(row.stripeSubscriptionId) &&
+        !isCurrentLocalStatus(row.status) &&
+        !previousStripeSubscriptions.has(row.stripeSubscriptionId)
+      ) {
+        previousStripeSubscriptions.set(row.stripeSubscriptionId, row.id);
+      }
+    }
+    if (previousStripeSubscriptions.size > 0) {
+      let liveSubscriptions: {
+        subscriptionId: string;
+        stripeSubscriptionId: string;
+        stripeStatus: string;
+        cancelAtPeriodEnd: boolean;
+      }[];
+      try {
+        const states = await Promise.all(
+          [...previousStripeSubscriptions].map(async ([stripeSubscriptionId, subscriptionId]) => {
+            try {
+              const stripeSub = await retrieveStripeSubscriptionLocked(stripe, stripeSubscriptionId);
+              return {
+                subscriptionId,
+                stripeSubscriptionId,
+                ended: isStripeSubscriptionEnded(stripeSub.status),
+                stripeStatus: stripeSub.status,
+                cancelAtPeriodEnd: stripeSub.cancel_at_period_end,
+              };
+            } catch (retrieveError) {
+              if (
+                typeof retrieveError === "object" &&
+                retrieveError !== null &&
+                (retrieveError as { code?: unknown }).code === "resource_missing"
+              ) {
+                logger.warn("Subscription checkout: previous Stripe subscription not found in Stripe, treated as ended", {
+                  subscriptionId,
+                  stripeSubscriptionId,
+                });
+                return { subscriptionId, stripeSubscriptionId, ended: true, stripeStatus: "", cancelAtPeriodEnd: false };
+              }
+              throw retrieveError;
+            }
+          }),
+        );
+        liveSubscriptions = states.filter((s) => !s.ended);
+      } catch (stripeError) {
+        logger.error("Subscription checkout refused: Stripe subscription read failed", {
+          error: stripeError instanceof Error ? stripeError.message : stripeError,
+          planSlug: plan.slug,
+        });
+        return stripeUnavailableResponse();
+      }
+      if (liveSubscriptions.length > 0) {
+        for (const live of liveSubscriptions) {
+          logger.error("Subscription checkout refused: previous Stripe subscription still live, manual handling", {
+            subscriptionId: live.subscriptionId,
+            stripeSubscriptionId: live.stripeSubscriptionId,
+            stripeStatus: live.stripeStatus,
+            cancelAtPeriodEnd: live.cancelAtPeriodEnd,
+          });
+        }
+        return NextResponse.json(
+          {
+            success: false,
+            code: "PURCHASE_BLOCKED_STRIPE_SUBSCRIPTION_LIVE",
+            error:
+              "Poprzednia subskrypcja jest jeszcze otwarta w systemie płatności. Nowy zakup będzie możliwy po jej zamknięciu. Jeśli to się przedłuża, skontaktuj się z obsługą.",
+          },
+          { status: 409 },
+        );
+      }
     }
 
     try {
