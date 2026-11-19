@@ -216,6 +216,31 @@ describe("resolveSalonAccess — past_due (łaska 7 dni od currentPeriodEnd)", (
       resolveSalonAccess([row("past_due", { currentPeriodStart: at(-DAY), currentPeriodEnd: at(-8 * DAY) })], NOW)
     ).toEqual(READ_ONLY);
   });
+
+  it("past_due z końcem okresu równym końcowi okresu próbnego 3 dni temu -> pełny dostęp do końca okresu + 7 dni", () => {
+    const end = at(-3 * DAY);
+    expect(
+      resolveSalonAccess(
+        [row("past_due", { trialEndsAt: end, currentPeriodStart: at(-17 * DAY), currentPeriodEnd: end })],
+        NOW
+      )
+    ).toEqual({
+      state: "past_due",
+      mode: "full",
+      planSlug: "pro",
+      until: new Date(end.getTime() + GRACE),
+    });
+  });
+
+  it("past_due z końcem okresu równym końcowi okresu próbnego 8 dni temu -> tylko do odczytu", () => {
+    const end = at(-8 * DAY);
+    expect(
+      resolveSalonAccess(
+        [row("past_due", { trialEndsAt: end, currentPeriodStart: at(-22 * DAY), currentPeriodEnd: end })],
+        NOW
+      )
+    ).toEqual(READ_ONLY);
+  });
 });
 
 describe("resolveSalonAccess — canceled (pełny dostęp do currentPeriodEnd)", () => {
