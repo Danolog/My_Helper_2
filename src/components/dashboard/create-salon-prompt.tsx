@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { mutationFetch } from "@/lib/api-client";
 import { PLANS, TRIAL_DAYS } from "@/lib/constants";
+import { isPlanOnSale } from "@/lib/plan-catalog";
 import { planHighlights } from "@/lib/plan-features";
 
 interface CreateSalonPromptProps {
@@ -15,12 +16,9 @@ interface CreateSalonPromptProps {
 }
 
 export function CreateSalonPrompt({ session, onCreated }: CreateSalonPromptProps) {
-  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-  const [error, setError] = useState("");
-
   // Listy funkcji pochodza z src/lib/plan-features.ts — tu nie wpisujemy
   // wlasnych pozycji (pilnuje PlanFeaturesSingleSource.test.tsx).
+  // Karty sa tylko dla planow, dla ktorych isPlanOnSale zwraca true.
   const plans = [
     {
       slug: PLANS.basic.slug,
@@ -34,7 +32,13 @@ export function CreateSalonPrompt({ session, onCreated }: CreateSalonPromptProps
       price: PLANS.pro.priceLabel,
       features: planHighlights("pro", 4),
     },
-  ];
+  ].filter((plan) => isPlanOnSale(plan.slug));
+
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(
+    plans.length === 1 ? (plans[0]?.slug ?? null) : null
+  );
+  const [isCreating, setIsCreating] = useState(false);
+  const [error, setError] = useState("");
 
   const handleCreate = async () => {
     if (!selectedPlan) return;
@@ -81,7 +85,7 @@ export function CreateSalonPrompt({ session, onCreated }: CreateSalonPromptProps
             </p>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className={`grid grid-cols-1 gap-4${plans.length > 1 ? " sm:grid-cols-2" : ""}`}>
               {plans.map((plan) => (
                 <button
                   key={plan.slug}
