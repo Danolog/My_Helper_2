@@ -6,6 +6,7 @@ import { useFormRecovery } from "@/hooks/use-form-recovery";
 import { mutationFetch } from "@/lib/api-client";
 import { signUp } from "@/lib/auth-client";
 import { sanitizeAuthError } from "@/lib/error-messages";
+import { PLANS_ON_SALE, isPlanOnSale, planOnSaleOr } from "@/lib/plan-catalog";
 
 export type Plan = {
   id: string;
@@ -16,13 +17,23 @@ export type Plan = {
   isActive: boolean;
 };
 
+// Form has data when name or email is filled, or — only when PLANS_ON_SALE
+// does not hold exactly one plan — a plan is selected.
+function hasFormData(
+  state: { selectedPlan: string | null; name: string; email: string },
+  singlePlanOnSale: boolean
+): boolean {
+  return !!state.name || !!state.email || (!singlePlanOnSale && !!state.selectedPlan);
+}
+
 export function useRegistration(preselectedPlan: string | null) {
   const router = useRouter();
 
   // Step management: 1 = plan selection, 2 = account details
-  const [step, setStep] = useState(preselectedPlan ? 2 : 1);
+  const singlePlanOnSale = PLANS_ON_SALE.length === 1;
+  const [step, setStep] = useState(singlePlanOnSale || preselectedPlan ? 2 : 1);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(
-    preselectedPlan
+    singlePlanOnSale || preselectedPlan ? planOnSaleOr(preselectedPlan) : null
   );
 
   // Plans data
@@ -56,23 +67,28 @@ export function useRegistration(preselectedPlan: string | null) {
     warnOnUnload: true,
   });
 
+  // Recovery banner only when the saved state contains form data
+  const recoveredState = wasRecovered ? getRecoveredState() : null;
+  const recoveredWithData =
+    recoveredState !== null && hasFormData(recoveredState, singlePlanOnSale);
+
   // Recovery handler: restores form fields from localStorage
   const handleRestoreForm = () => {
     const saved = getRecoveredState();
     if (saved) {
       if (saved.name) setName(saved.name);
       if (saved.email) setEmail(saved.email);
-      if (saved.selectedPlan) setSelectedPlan(saved.selectedPlan);
+      if (saved.selectedPlan) setSelectedPlan(planOnSaleOr(saved.selectedPlan));
       if (saved.step) setStep(saved.step);
     }
   };
 
   // Save form state on every change (debounced inside hook)
   useEffect(() => {
-    const hasData = !!name || !!email || !!selectedPlan;
+    const hasData = hasFormData({ selectedPlan, name, email }, singlePlanOnSale);
     saveFormState({ step, selectedPlan, name, email });
     setDirty(hasData);
-  }, [step, selectedPlan, name, email, saveFormState, setDirty]);
+  }, [step, selectedPlan, name, email, singlePlanOnSale, saveFormState, setDirty]);
 
   // Fetch subscription plans
   useEffect(() => {
@@ -94,7 +110,9 @@ export function useRegistration(preselectedPlan: string | null) {
   }, []);
 
   const basicPlan = plans.find((p) => p.slug === "basic");
-  const proPlan = plans.find((p) => p.slug === "pro");
+  const proPlan = isPlanOnSale("pro")
+    ? plans.find((p) => p.slug === "pro")
+    : undefined;
   const selectedPlanData = plans.find((p) => p.slug === selectedPlan);
 
   const handleSelectPlan = (slug: string) => {
@@ -166,14 +184,14 @@ export function useRegistration(preselectedPlan: string | null) {
       if (result.error) {
         setError(sanitizeAuthError(result.error.message, "Nie udalo sie utworzyc konta"));
       } else {
-        // After signup, create salon subscription with selected plan
+        // After signup, create salon subscription with planOnSaleOr(selectedPlan)
         if (selectedPlan) {
           try {
             await mutationFetch("/api/register-subscription", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                planSlug: selectedPlan,
+                planSlug: planOnSaleOr(selectedPlan),
                 email,
               }),
             });
@@ -220,7 +238,7 @@ export function useRegistration(preselectedPlan: string | null) {
     showVerificationMessage,
 
     // Form recovery
-    wasRecovered,
+    wasRecovered: recoveredWithData,
     clearSavedForm,
 
     // Actions

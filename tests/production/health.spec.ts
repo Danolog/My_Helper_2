@@ -25,8 +25,10 @@ test.describe('Production Health Checks', () => {
 
   test('should load the registration page', { tag: '@production' }, async ({ page }) => {
     await page.goto('/register');
-    await expect(page.getByRole('heading', { name: /basic/i })).toBeVisible({ timeout: 10000 });
-    await expect(page.getByRole('heading', { name: /pro/i })).toBeVisible();
+    // Registration opens on the account form
+    await expect(page.locator('#name')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#email')).toBeVisible();
+    await expect(page.locator('#password')).toBeVisible();
   });
 
   test('should return 200 from health endpoint', { tag: '@production' }, async ({ request }) => {

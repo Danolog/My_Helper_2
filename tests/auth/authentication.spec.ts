@@ -44,47 +44,32 @@ test.describe('Flow 1: Authentication', () => {
       await expect(page.getByRole('button', { name: /^zaloguj sie$/i })).toBeVisible();
     });
 
-    test('should display registration page with plan selection', { tag: '@full' }, async ({ page }) => {
+    test('should display account form fields on registration page', { tag: '@full' }, async ({ page }) => {
       await page.goto('/register');
-      // Step 1 - plan selection should be visible
-      await expect(page.getByText(/basic/i).first()).toBeVisible({ timeout: 10000 });
-      await expect(page.getByText(/pro/i).first()).toBeVisible({ timeout: 10000 });
-      await expect(page.getByRole('button', { name: /dalej/i })).toBeVisible({ timeout: 10000 });
-    });
-
-    test('should navigate from plan selection to account form', { tag: '@full' }, async ({ page }) => {
-      await page.goto('/register');
-      // Wait for plans to load and hydrate
-      const basicCard = page.getByText(/basic/i).first();
-      await expect(basicCard).toBeVisible({ timeout: 15000 });
-      const dalej = page.getByRole('button', { name: /dalej/i });
-      await expect(dalej).toBeVisible({ timeout: 10000 });
-      await page.waitForTimeout(500);
-      await basicCard.click();
-      await expect(dalej).toBeEnabled({ timeout: 5000 });
-      await dalej.click();
-      // Step 2 - account form should appear
+      // Registration opens on the account form
       await expect(page.locator('#name')).toBeVisible({ timeout: 10000 });
       await expect(page.locator('#email')).toBeVisible();
       await expect(page.locator('#password')).toBeVisible();
       await expect(page.locator('#confirmPassword')).toBeVisible();
     });
 
-    test('should register a new owner account', { tag: '@smoke' }, async ({ page }) => {
+    test('should go back from account form to plan selection and continue to account form', { tag: '@full' }, async ({ page }) => {
       await page.goto('/register');
-      // Wait for plans to load from API and render
-      const basicCard = page.getByText(/basic/i).first();
-      await expect(basicCard).toBeVisible({ timeout: 15000 });
-      // Wait for Dalej button to exist (confirms React hydration)
+      // Wait for the account form submit button, then 500 ms
+      await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
+      await page.waitForTimeout(500);
+      await page.getByRole('button', { name: /wstecz/i }).click();
+      // Plan selection - plan is already selected, so Dalej is enabled
       const dalej = page.getByRole('button', { name: /dalej/i });
       await expect(dalej).toBeVisible({ timeout: 10000 });
-      await page.waitForTimeout(500);
-      // Select plan and proceed
-      await basicCard.click();
-      // Wait for Dalej to become enabled (selectedPlan set)
       await expect(dalej).toBeEnabled({ timeout: 5000 });
       await dalej.click();
-      // Step 2 - fill form (wait for form to be fully rendered and interactive)
+      await expect(page.locator('#name')).toBeVisible({ timeout: 10000 });
+    });
+
+    test('should register a new owner account', { tag: '@smoke' }, async ({ page }) => {
+      await page.goto('/register');
+      // Step 2 - fill form (wait for the submit button, then 500 ms)
       await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 15000 });
       await page.waitForTimeout(500);
       await page.fill('#name', TEST_USER.name);
@@ -103,7 +88,7 @@ test.describe('Flow 1: Authentication', () => {
     // SwRegister przeladowywal wtedy strone: znikal wybrany plan ("Dalej" wracal
     // do disabled), kasowaly sie wpisane dane, a trwajace logowanie bylo zrywane.
     // Test jest deterministyczny — nie zalezy od tego, czy przeladowanie trafi
-    // akurat w klikniecie: liczy ladowania dokumentu do chwili po przejeciu strony.
+    // akurat we wpisywanie: liczy ladowania dokumentu do chwili po przejeciu strony.
     test('should not reload the page when the service worker takes control on first visit', { tag: '@smoke' }, async ({ page }) => {
       test.skip(!process.env.CI, 'Service worker rejestruje sie tylko w buildzie produkcyjnym (CI: pnpm start)');
 
@@ -115,13 +100,16 @@ test.describe('Flow 1: Authentication', () => {
       });
 
       await page.goto('/register');
-      const basicCard = page.getByText(/basic/i).first();
-      await expect(basicCard).toBeVisible({ timeout: 15000 });
-      const dalej = page.getByRole('button', { name: /dalej/i });
-      // Wybor planu ponawiany do skutku: klik przed hydratacja nie ustawia stanu.
+      const nameInput = page.locator('#name');
+      const emailInput = page.locator('#email');
+      await expect(nameInput).toBeVisible({ timeout: 15000 });
+      // Wpis ponawiany do skutku: wpis przed hydratacja moze zniknac.
       await expect(async () => {
-        await basicCard.click();
-        await expect(dalej).toBeEnabled({ timeout: 1000 });
+        await nameInput.fill('Test User');
+        await emailInput.fill('test@example.com');
+        await page.waitForTimeout(500);
+        await expect(nameInput).toHaveValue('Test User', { timeout: 1000 });
+        await expect(emailInput).toHaveValue('test@example.com', { timeout: 1000 });
       }).toPass({ timeout: 15000 });
 
       // Czekamy, az service worker faktycznie przejmie strone...
@@ -133,12 +121,11 @@ test.describe('Flow 1: Authentication', () => {
 
       expect(
         documentLoads,
-        'strona przeladowala sie po przejeciu przez service worker — uzytkowniczka traci wybrany plan i wpisane dane'
+        'strona przeladowala sie po przejeciu przez service worker — uzytkowniczka traci wpisane dane'
       ).toBe(1);
-      // Zachowanie widziane przez uzytkowniczke: plan nadal wybrany, mozna isc dalej.
-      await expect(dalej).toBeEnabled();
-      await dalej.click();
-      await expect(page.locator('#name')).toBeVisible({ timeout: 10000 });
+      // Zachowanie widziane przez uzytkowniczke: wpisane dane nadal w polach.
+      await expect(nameInput).toHaveValue('Test User');
+      await expect(emailInput).toHaveValue('test@example.com');
     });
 
     test('should login with valid credentials and redirect to dashboard', { tag: ['@smoke', '@csp'] }, async ({ page }) => {
@@ -263,14 +250,6 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should show error for password mismatch during registration', { tag: '@full' }, async ({ page }) => {
       await page.goto('/register');
-      const basicCard = page.getByText(/basic/i).first();
-      await expect(basicCard).toBeVisible({ timeout: 15000 });
-      const dalej = page.getByRole('button', { name: /dalej/i });
-      await expect(dalej).toBeVisible({ timeout: 10000 });
-      await page.waitForTimeout(500);
-      await basicCard.click();
-      await expect(dalej).toBeEnabled({ timeout: 5000 });
-      await dalej.click();
       await page.waitForSelector('#name', { state: 'visible', timeout: 10000 });
       await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 10000 });
       await page.waitForTimeout(500);
@@ -287,14 +266,6 @@ test.describe('Flow 1: Authentication', () => {
 
     test('should reject password shorter than 8 characters', { tag: '@full' }, async ({ page }) => {
       await page.goto('/register');
-      const basicCard = page.getByText(/basic/i).first();
-      await expect(basicCard).toBeVisible({ timeout: 15000 });
-      const dalej = page.getByRole('button', { name: /dalej/i });
-      await expect(dalej).toBeVisible({ timeout: 10000 });
-      await page.waitForTimeout(500);
-      await basicCard.click();
-      await expect(dalej).toBeEnabled({ timeout: 5000 });
-      await dalej.click();
       await page.waitForSelector('#name', { state: 'visible', timeout: 10000 });
       await page.waitForSelector('form button[type="submit"]', { state: 'visible', timeout: 10000 });
       await page.waitForTimeout(500);
