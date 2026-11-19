@@ -1,5 +1,5 @@
 /**
- * Strażnik jednego źródła list funkcji planów (review PR #16, krok B1).
+ * Strażnik jednego źródła list funkcji planów.
  *
  * Każde miejsce interfejsu, które pokazuje listę funkcji planu, renderuje
  * DOKŁADNIE to, co zwraca `src/lib/plan-features.ts` — bez pozycji wpisanych

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import {
   cancelDialogAccessText,
   cancelDialogRepurchaseText,
@@ -11,6 +11,15 @@ import {
   purchaseBlockedText,
   type AccessData,
 } from "@/app/dashboard/subscription/_types";
+
+// formatDate formats in the process time zone; the expected texts are written for Europe/Warsaw.
+beforeAll(() => {
+  vi.stubEnv("TZ", "Europe/Warsaw");
+});
+
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
 
 const NOW = new Date("2026-11-19T12:00:00.000Z");
 const NOT_RENEWED_TEXT = "Subskrypcja nie zostanie odnowiona.";
