@@ -71,6 +71,35 @@ export type SalonSubscriptionAccessRow = {
   createdAt: Date;
 };
 
+/** Wiersz dostępu z identyfikatorem subskrypcji Stripe (wejście `purchaseBlock`). */
+export type SalonPurchaseAccessRow = SalonSubscriptionAccessRow & { stripeSubscriptionId: string | null };
+
+/**
+ * Wiersz subskrypcji salonu (kolumny jak w `salon_subscriptions`) i slug jego
+ * planu → wiersz dostępu z identyfikatorem Stripe. Inne pola wiersza pomija.
+ */
+export function toSalonPurchaseAccessRow(
+  subscription: {
+    status: string;
+    trialEndsAt: Date | null;
+    currentPeriodStart: Date | null;
+    currentPeriodEnd: Date | null;
+    createdAt: Date;
+    stripeSubscriptionId: string | null;
+  },
+  planSlug: string
+): SalonPurchaseAccessRow {
+  return {
+    status: subscription.status,
+    planSlug,
+    trialEndsAt: subscription.trialEndsAt,
+    currentPeriodStart: subscription.currentPeriodStart,
+    currentPeriodEnd: subscription.currentPeriodEnd,
+    createdAt: subscription.createdAt,
+    stripeSubscriptionId: subscription.stripeSubscriptionId,
+  };
+}
+
 /** Dostęp, gdy subskrypcji salonu nie udało się odczytać. */
 export const SALON_ACCESS_UNAVAILABLE: SalonAccess = {
   state: "unavailable",
@@ -140,6 +169,33 @@ export function resolveSalonAccess(rows: readonly SalonSubscriptionAccessRow[], 
     default:
       return readOnly("inactive");
   }
+}
+
+/** Odmowa nowego zakupu: stan dostępu i termin, do którego trwa. */
+export type PurchaseBlock = { state: "canceled" | "past_due"; until: Date };
+
+/**
+ * Odmowa nowego zakupu w chwili `now`: `{ state, until }`, gdy
+ * `resolveSalonAccess` daje pełny dostęp w stanie `canceled` albo `past_due`
+ * z terminem `until`, a wiersz, z którego liczony jest dostęp
+ * (`pickSalonAccessRow`), ma prawdziwą subskrypcję Stripe; inaczej `null`.
+ * `until` to `access.until`. Korzysta z niej trasa zakupu
+ * (`subscriptions/checkout`, 409 PURCHASE_BLOCKED_UNTIL_PERIOD_END) i trasa
+ * bieżącej subskrypcji (`subscriptions/current`, pole `purchaseBlockedUntil`).
+ */
+export function purchaseBlock(rows: readonly SalonPurchaseAccessRow[], now: Date): PurchaseBlock | null {
+  const access = resolveSalonAccess(rows, now);
+  const picked = pickSalonAccessRow(rows);
+  if (
+    access.mode === "full" &&
+    (access.state === "canceled" || access.state === "past_due") &&
+    access.until &&
+    picked &&
+    hasRealStripeSubscription(picked.stripeSubscriptionId)
+  ) {
+    return { state: access.state, until: access.until };
+  }
+  return null;
 }
 
 /**

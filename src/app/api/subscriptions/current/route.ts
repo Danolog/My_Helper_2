@@ -8,8 +8,10 @@ import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import {
   pickSalonAccessRow,
+  purchaseBlock,
   resolveSalonAccess,
-  type SalonSubscriptionAccessRow,
+  toSalonPurchaseAccessRow,
+  type SalonPurchaseAccessRow,
 } from "@/lib/subscription-predicates";
 
 type SubscriptionWithPlan = {
@@ -17,19 +19,10 @@ type SubscriptionWithPlan = {
   plan: typeof subscriptionPlans.$inferSelect;
 };
 
-type AccessRow = SalonSubscriptionAccessRow & { source: SubscriptionWithPlan };
+type AccessRow = SalonPurchaseAccessRow & { source: SubscriptionWithPlan };
 
 function toAccessRow(source: SubscriptionWithPlan): AccessRow {
-  const { subscription } = source;
-  return {
-    status: subscription.status,
-    planSlug: source.plan.slug,
-    trialEndsAt: subscription.trialEndsAt,
-    currentPeriodStart: subscription.currentPeriodStart,
-    currentPeriodEnd: subscription.currentPeriodEnd,
-    createdAt: subscription.createdAt,
-    source,
-  };
+  return { ...toSalonPurchaseAccessRow(source.subscription, source.plan.slug), source };
 }
 
 /**
@@ -44,7 +37,8 @@ function toAccessRow(source: SubscriptionWithPlan): AccessRow {
  *
  * Response shape:
  *   { subscription: {...} | null, plan: {...} | null, scheduledPlan (gdy jest
- *     wiersz), effectivePlanSlug, access: { state, mode, planSlug, until } }
+ *     wiersz), effectivePlanSlug, access: { state, mode, planSlug, until },
+ *     purchaseBlockedUntil: string | null }
  *
  * `plan` opisuje plan wybranego wiersza. `access` — stan dostępu wyliczony
  * tą samą regułą co bramki serwerowe; karta planu w panelu bierze z niego
@@ -52,7 +46,10 @@ function toAccessRow(source: SubscriptionWithPlan): AccessRow {
  * Liczy go `resolveSalonAccess` na tych samych wierszach. `effectivePlanSlug`
  * to plan przy pełnym dostępie, inaczej "basic" (np. trial po terminie albo
  * `canceled` po końcu okresu). UI decyduje o funkcjach Pro wyłącznie na podstawie
- * `effectivePlanSlug`. Błąd odczytu → 500.
+ * `effectivePlanSlug`. `purchaseBlockedUntil` (ISO albo null) to termin, do
+ * którego trasa zakupu odmawia nowego zakupu; liczy go `purchaseBlock`, ta
+ * sama funkcja co odmowę, na tych samych wierszach i w tej samej chwili co
+ * `access`. Błąd odczytu → 500.
  */
 export async function GET() {
   try {
@@ -98,8 +95,10 @@ export async function GET() {
       return { rows: accessRows, picked: chosen, targetPlan: target };
     });
 
-    const access = resolveSalonAccess(rows, new Date());
+    const now = new Date();
+    const access = resolveSalonAccess(rows, now);
     const effectivePlanSlug = access.planSlug ?? "basic";
+    const purchaseBlockedUntil = purchaseBlock(rows, now)?.until.toISOString() ?? null;
 
     if (!picked) {
       return NextResponse.json({
@@ -108,6 +107,7 @@ export async function GET() {
         plan: null,
         effectivePlanSlug,
         access,
+        purchaseBlockedUntil,
       });
     }
 
@@ -150,6 +150,7 @@ export async function GET() {
       scheduledPlan,
       effectivePlanSlug,
       access,
+      purchaseBlockedUntil,
     });
   } catch (error) {
     logger.error("[Subscriptions API] Error fetching current subscription", { error: error });

@@ -298,6 +298,7 @@ describe("GET /api/subscriptions/current — wiersz karty i access", () => {
       plan: null,
       effectivePlanSlug: "basic",
       access: { state: "none", mode: "read_only", planSlug: null, until: null },
+      purchaseBlockedUntil: null,
     });
   });
 
@@ -519,12 +520,12 @@ describe("GET /api/subscriptions/current — scheduledPlan z wybranego wiersza",
 });
 
 describe("GET /api/subscriptions/current — kształt odpowiedzi", () => {
-  it("klucze dokładnie dotychczasowe + access; until jako ISO", async () => {
+  it("klucze dokładnie dotychczasowe + access + purchaseBlockedUntil; until jako ISO", async () => {
     const end = new Date(NOW.getTime() + 20 * DAY);
     queue.push([row({ currentPeriodEnd: end })]);
     const b = await body();
     expect(Object.keys(b).sort()).toEqual(
-      ["access", "effectivePlanSlug", "plan", "scheduledPlan", "subscription", "success"].sort(),
+      ["access", "effectivePlanSlug", "plan", "purchaseBlockedUntil", "scheduledPlan", "subscription", "success"].sort(),
     );
     expect(Object.keys(b.subscription).sort()).toEqual(Object.keys(subscriptionRow()).sort());
     expect(Object.keys(b.plan).sort()).toEqual(["features", "id", "isActive", "name", "priceMonthly", "slug"]);
@@ -534,6 +535,96 @@ describe("GET /api/subscriptions/current — kształt odpowiedzi", () => {
 
   it("brak wiersza: bez klucza scheduledPlan", async () => {
     const b = await body();
-    expect(Object.keys(b).sort()).toEqual(["access", "effectivePlanSlug", "plan", "subscription", "success"]);
+    expect(Object.keys(b).sort()).toEqual([
+      "access",
+      "effectivePlanSlug",
+      "plan",
+      "purchaseBlockedUntil",
+      "subscription",
+      "success",
+    ]);
+  });
+});
+
+describe("GET /api/subscriptions/current — purchaseBlockedUntil", () => {
+  // NOW = 2026-11-19T10:00:00.000Z
+  const REAL_ID = "sub_test_1";
+
+  it("canceled z prawdziwym identyfikatorem Stripe w okresie -> ISO końca okresu, równe access.until", async () => {
+    queue.push([
+      row({
+        status: "canceled",
+        stripeSubscriptionId: REAL_ID,
+        currentPeriodEnd: new Date("2026-11-29T10:00:00.000Z"),
+      }),
+    ]);
+    const b = await body();
+    expect(b.purchaseBlockedUntil).toBe("2026-11-29T10:00:00.000Z");
+    expect(b.purchaseBlockedUntil).toBe(b.access.until);
+  });
+
+  it("past_due w łasce z prawdziwym identyfikatorem Stripe -> ISO końca okresu + 7 dni", async () => {
+    queue.push([
+      row({
+        status: "past_due",
+        stripeSubscriptionId: REAL_ID,
+        currentPeriodEnd: new Date("2026-11-17T10:00:00.000Z"),
+      }),
+    ]);
+    const b = await body();
+    expect(b.purchaseBlockedUntil).toBe("2026-11-24T10:00:00.000Z");
+    expect(b.access.until).toBe("2026-11-24T10:00:00.000Z");
+  });
+
+  it("canceled z prawdziwym identyfikatorem Stripe po końcu okresu -> null", async () => {
+    queue.push([
+      row({
+        status: "canceled",
+        stripeSubscriptionId: REAL_ID,
+        currentPeriodEnd: new Date("2026-11-18T10:00:00.000Z"),
+      }),
+    ]);
+    expect((await body()).purchaseBlockedUntil).toBeNull();
+  });
+
+  it("canceled w okresie z identyfikatorem sim_… -> null przy access.until ustawionym", async () => {
+    queue.push([
+      row({
+        status: "canceled",
+        stripeSubscriptionId: "sim_sub_test_1",
+        currentPeriodEnd: new Date("2026-11-29T10:00:00.000Z"),
+      }),
+    ]);
+    const b = await body();
+    expect(b.access.until).toBe("2026-11-29T10:00:00.000Z");
+    expect(b.purchaseBlockedUntil).toBeNull();
+  });
+
+  it("active z prawdziwym identyfikatorem Stripe i końcem okresu w przyszłości -> null przy access.until ustawionym", async () => {
+    queue.push([
+      row({
+        status: "active",
+        stripeSubscriptionId: REAL_ID,
+        currentPeriodEnd: new Date("2026-12-19T10:00:00.000Z"),
+      }),
+    ]);
+    const b = await body();
+    expect(b.access.until).toBe("2026-12-19T10:00:00.000Z");
+    expect(b.purchaseBlockedUntil).toBeNull();
+  });
+
+  it("trialing w terminie bez subskrypcji Stripe -> null przy access.until ustawionym", async () => {
+    queue.push([
+      row({ status: "trialing", stripeSubscriptionId: null, trialEndsAt: new Date("2026-11-26T10:00:00.000Z") }),
+    ]);
+    const b = await body();
+    expect(b.access.until).toBe("2026-11-26T10:00:00.000Z");
+    expect(b.purchaseBlockedUntil).toBeNull();
+  });
+
+  it("brak wierszy -> pole obecne i równe null", async () => {
+    const b = await body();
+    expect(b).toHaveProperty("purchaseBlockedUntil");
+    expect(b.purchaseBlockedUntil).toBeNull();
   });
 });
