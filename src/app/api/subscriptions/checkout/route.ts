@@ -29,6 +29,11 @@ const warsawDate = new Intl.DateTimeFormat("pl-PL", {
   year: "numeric",
 });
 
+// Czas życia sesji Checkout (`expires_at`, sekundy). Stripe przyjmuje od
+// 30 minut do 24 godzin od utworzenia sesji; 5 minut ponad dolną granicę to
+// zapas na opóźnienie żądania i różnicę zegarów.
+const CHECKOUT_SESSION_TTL_SECONDS = 35 * 60;
+
 /**
  * Map plan slugs to their corresponding Stripe price env variables.
  */
@@ -53,7 +58,8 @@ function stripeUnavailableResponse() {
 /**
  * POST /api/subscriptions/checkout
  *
- * Creates a Stripe Checkout Session for a subscription plan.
+ * Creates a Stripe Checkout Session for a subscription plan. The session's
+ * `expires_at` is set to 35 minutes after the moment it is created.
  *
  * This endpoint NEVER writes a subscription or a payment. The subscription
  * is created/updated only by /api/subscriptions/confirm after Stripe reports
@@ -277,6 +283,7 @@ export async function POST(request: Request) {
         success_url: `${origin}/dashboard/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/pricing`,
         customer_email: user.email,
+        expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_SESSION_TTL_SECONDS,
         metadata: {
           salonId: salonId,
           planId: plan.id,
