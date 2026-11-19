@@ -41,6 +41,8 @@ export interface SubscriptionCheckoutSession {
   id: string;
   mode?: string | null;
   payment_status?: string | null;
+  amount_total?: number | null;
+  currency?: string | null;
   metadata?: Record<string, string> | null;
   subscription?: string | RawStripeSubscription | null;
   customer?: string | { id: string } | null;

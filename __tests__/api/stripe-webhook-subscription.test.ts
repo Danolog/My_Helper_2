@@ -62,6 +62,8 @@ function webhookSession(overrides: Record<string, unknown> = {}) {
     id: "cs_test_123",
     mode: "subscription",
     payment_status: "paid",
+    amount_total: 14900,
+    currency: "pln",
     metadata: { salonId: "salon-1", planId: PLAN_PRO.id, planSlug: "pro", userId: "owner-1" },
     customer: "cus_1",
     subscription: "sub_1",
