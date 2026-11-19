@@ -363,6 +363,7 @@ describe("webhook — status z bieżącego stanu Stripe, nie ze zdarzenia; cance
     payment_intent: "pi_2",
     billing_reason: "subscription_cycle",
     amount_paid: 14900,
+    currency: "pln",
   };
   const subWrites = () => f.committed.filter((w) => w.table === "salon_subscriptions");
   const payments = () => f.committed.filter((w) => w.table === "subscription_payments");
@@ -408,7 +409,11 @@ describe("webhook — status z bieżącego stanu Stripe, nie ze zdarzenia; cance
     ["customer.subscription.updated", { id: "sub_1", status: "active" }, []],
     ["customer.subscription.deleted", { id: "sub_1", status: "canceled" }, []],
     ["invoice.paid", INVOICE_PAID, [[PLAN_PRO]]],
-    ["invoice.payment_failed", { id: "in_3", subscription: "sub_1", payment_intent: "pi_3" }, [[PLAN_PRO]]],
+    [
+      "invoice.payment_failed",
+      { id: "in_3", subscription: "sub_1", payment_intent: "pi_3", amount_remaining: 14900, currency: "pln" },
+      [[PLAN_PRO]],
+    ],
   ] as const)(
     "lokalne canceled (subscriptions/cancel), Stripe active z cancel_at_period_end=true → %s nie wskrzesza",
     async (type, object, extra) => {
@@ -427,7 +432,11 @@ describe("webhook — status z bieżącego stanu Stripe, nie ze zdarzenia; cance
   it.each([
     ["customer.subscription.updated", { id: "sub_1", status: "active" }, []],
     ["invoice.paid", INVOICE_PAID, [[PLAN_PRO]]],
-    ["invoice.payment_failed", { id: "in_3", subscription: "sub_1", payment_intent: "pi_3" }, [[PLAN_PRO]]],
+    [
+      "invoice.payment_failed",
+      { id: "in_3", subscription: "sub_1", payment_intent: "pi_3", amount_remaining: 14900, currency: "pln" },
+      [[PLAN_PRO]],
+    ],
   ] as const)(
     "lokalne canceled, Stripe active z cancel_at_period_end=false → %s zapisuje stan ze Stripe + logger.error",
     async (type, object, extra) => {
@@ -464,7 +473,10 @@ describe("webhook — status z bieżącego stanu Stripe, nie ze zdarzenia; cance
   it("późne invoice.payment_failed po invoice.paid: Stripe mówi active → bez fałszywego past_due", async () => {
     retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "active" });
     f.selects.push([LOCAL], [PLAN_PRO]);
-    await deliver({ id: "in_3", subscription: "sub_1", payment_intent: "pi_3" }, "invoice.payment_failed");
+    await deliver(
+      { id: "in_3", subscription: "sub_1", payment_intent: "pi_3", amount_remaining: 14900, currency: "pln" },
+      "invoice.payment_failed"
+    );
     expect(subWrites().map((w) => w.values.status)).toEqual(["active"]);
     expect(payments()[0]?.values).toEqual(expect.objectContaining({ status: "failed" }));
   });

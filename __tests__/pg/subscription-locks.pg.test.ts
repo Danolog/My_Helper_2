@@ -194,6 +194,7 @@ const invoicePaid = (stripeSubId: string, linePeriods?: InvoiceLinePeriod[]) => 
   payment_intent: `pi_${randomUUID().slice(0, 12)}`,
   billing_reason: "subscription_cycle",
   amount_paid: 14900,
+  currency: "pln",
   ...(linePeriods ? { lines: { data: linePeriods.map((period) => ({ period })), has_more: false } } : {}),
 });
 

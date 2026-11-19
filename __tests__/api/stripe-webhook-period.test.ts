@@ -193,6 +193,8 @@ describe("customer.subscription.deleted i invoice.payment_failed — okres", () 
       await deliver("invoice.payment_failed", {
         id: "in_failed",
         amount_paid: 0,
+        amount_remaining: 14900,
+        currency: "pln",
         billing_reason: "subscription_cycle",
         subscription: "sub_1",
         payment_intent: "pi_failed",
@@ -212,6 +214,7 @@ describe("invoice.paid (odnowienie) — okres", () => {
   const invoice = {
     id: "in_1",
     amount_paid: 14900,
+    currency: "pln",
     billing_reason: "subscription_cycle",
     subscription: "sub_1",
     payment_intent: "pi_1",
