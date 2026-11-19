@@ -20,7 +20,7 @@ const USER_A = { id: "user-a", name: "Anna", email: "anna@example.com", emailVer
 const EMAIL_B = "bartek@example.com";
 const SALON_A = crypto.randomUUID();
 const SALON_B = crypto.randomUUID();
-const PLAN_PRO = { id: crypto.randomUUID(), slug: "pro", name: "Pro" };
+const PLAN_BASIC = { id: crypto.randomUUID(), slug: "basic", name: "Basic" };
 
 // Stan "bazy": wynik db.select(...) zależy od tabeli w `from` (mock ignoruje
 // where — co trasa filtruje, sprawdzamy przez wywołania eq).
@@ -186,7 +186,7 @@ describe("POST /api/register-subscription — konto tylko z sesji", () => {
   it("(a) konto A z e-mailem B w body nie dotyka salonu ani subskrypcji B", async () => {
     // Baza: konto B ma salon z aktywną subskrypcją Basic.
     tableRows = {
-      subscriptionPlans: [PLAN_PRO],
+      subscriptionPlans: [PLAN_BASIC],
       user: [{ id: "user-b", email: EMAIL_B, name: "Bartek" }],
       salons: [],
       salonSubscriptions: [],
@@ -199,7 +199,7 @@ describe("POST /api/register-subscription — konto tylko z sesji", () => {
     // Mock nie filtruje po where, więc o tym, CZYJ salon trasa czyta,
     // rozstrzygają wywołania eq: musi szukać po koncie z sesji (A).
 
-    await post({ planSlug: "pro", email: EMAIL_B });
+    await post({ planSlug: "basic", email: EMAIL_B });
 
     expect(selectedTables).not.toContain("user");
     expect(mockEq).not.toHaveBeenCalledWith("user.email", EMAIL_B);
@@ -208,15 +208,15 @@ describe("POST /api/register-subscription — konto tylko z sesji", () => {
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it("(b) konto A nie przestawia własnej subskrypcji na Pro bez płatności — 409, bez zapisu", async () => {
+  it("(b) konto A z istniejącą subskrypcją: trasa jej nie zmienia — 409, bez zapisu", async () => {
     tableRows = {
-      subscriptionPlans: [PLAN_PRO],
+      subscriptionPlans: [PLAN_BASIC],
       user: [{ id: USER_A.id, email: USER_A.email, name: USER_A.name }],
       salons: [{ id: SALON_A, ownerId: USER_A.id }],
       salonSubscriptions: [{ id: crypto.randomUUID(), salonId: SALON_A, status: "active", planId: "basic" }],
     };
 
-    const { status, body } = await post({ planSlug: "pro", email: USER_A.email });
+    const { status, body } = await post({ planSlug: "basic", email: USER_A.email });
 
     expect(status).toBe(409);
     expect(body.success).toBe(false);
@@ -227,16 +227,16 @@ describe("POST /api/register-subscription — konto tylko z sesji", () => {
   it("(c) odpowiedź nie zdradza, czy konto o e-mailu z body istnieje", async () => {
     // A bez salonu. Main: e-mail nieistniejący => 404 "User not found",
     // e-mail istniejący => 200 — różnica zdradza istnienie konta.
-    tableRows = { subscriptionPlans: [PLAN_PRO], user: [], salons: [], salonSubscriptions: [] };
-    const r1 = await post({ planSlug: "pro", email: "nie-istnieje@example.com" });
+    tableRows = { subscriptionPlans: [PLAN_BASIC], user: [], salons: [], salonSubscriptions: [] };
+    const r1 = await post({ planSlug: "basic", email: "nie-istnieje@example.com" });
 
     tableRows = {
-      subscriptionPlans: [PLAN_PRO],
+      subscriptionPlans: [PLAN_BASIC],
       user: [{ id: "user-b", email: EMAIL_B, name: "Bartek" }],
       salons: [],
       salonSubscriptions: [],
     };
-    const r2 = await post({ planSlug: "pro", email: EMAIL_B });
+    const r2 = await post({ planSlug: "basic", email: EMAIL_B });
 
     expect(r1.status).toBe(200);
     expect(r2.status).toBe(r1.status);
@@ -245,9 +245,9 @@ describe("POST /api/register-subscription — konto tylko z sesji", () => {
   });
 
   it("konto bez salonu: tworzy salon dla konta z sesji i subskrypcję trialing", async () => {
-    tableRows = { subscriptionPlans: [PLAN_PRO], user: [{ id: USER_A.id, email: USER_A.email, name: USER_A.name }] };
+    tableRows = { subscriptionPlans: [PLAN_BASIC], user: [{ id: USER_A.id, email: USER_A.email, name: USER_A.name }] };
 
-    const { status, body } = await post({ planSlug: "pro", email: USER_A.email });
+    const { status, body } = await post({ planSlug: "basic", email: USER_A.email });
 
     expect(status).toBe(200);
     expect(body.success).toBe(true);
@@ -258,36 +258,49 @@ describe("POST /api/register-subscription — konto tylko z sesji", () => {
     );
     expect(mockInsertValues).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ salonId: SALON_A, planId: PLAN_PRO.id, status: "trialing" })
+      expect.objectContaining({ salonId: SALON_A, planId: PLAN_BASIC.id, status: "trialing" })
     );
   });
 
   it("body bez e-maila jest poprawne (e-mail nie jest już częścią kontraktu)", async () => {
-    tableRows = { subscriptionPlans: [PLAN_PRO] };
-    const { status } = await post({ planSlug: "pro" });
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
+    const { status } = await post({ planSlug: "basic" });
     expect(status).toBe(200);
   });
 
-  it("nieznany plan => 404", async () => {
+  it('plan spoza PLANS_ON_SALE ("gold") => 400 z walidacji, bez zapytań i bez zapisu', async () => {
     const { status } = await post({ planSlug: "gold" });
-    expect(status).toBe(404);
+    expect(status).toBe(400);
+    expect(opLog).toEqual([]);
     expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('planSlug "pro" (poza PLANS_ON_SALE) => 400 z walidacji, bez zapytań i bez zapisu', async () => {
+    tableRows = { subscriptionPlans: [{ id: crypto.randomUUID(), slug: "pro", name: "Pro" }] };
+
+    const { status } = await post({ planSlug: "pro" });
+
+    expect(status).toBe(400);
+    expect(opLog).toEqual([]);
+    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it("brak sesji => 401", async () => {
     mockRequireAuth.mockResolvedValue(
       NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
     );
-    const { status } = await post({ planSlug: "pro" });
+    const { status } = await post({ planSlug: "basic" });
     expect(status).toBe(401);
   });
 });
 
 describe("POST /api/register-subscription — T3b: jedna transakcja, blokada salonu, indeksy unikalne", () => {
   it("salon i trial w JEDNEJ transakcji; blokada salonu przed odczytem jego wierszy", async () => {
-    tableRows = { subscriptionPlans: [PLAN_PRO] };
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
 
-    const { status } = await post({ planSlug: "pro" });
+    const { status } = await post({ planSlug: "basic" });
 
     expect(status).toBe(200);
     expect(opLog).toEqual([
@@ -305,9 +318,9 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
   });
 
   it("istniejący salon bez subskrypcji (np. z POST /api/salons): blokada jego id, trial, bez drugiego salonu", async () => {
-    tableRows = { subscriptionPlans: [PLAN_PRO], salons: [{ id: SALON_B, ownerId: USER_A.id }] };
+    tableRows = { subscriptionPlans: [PLAN_BASIC], salons: [{ id: SALON_B, ownerId: USER_A.id }] };
 
-    const { status } = await post({ planSlug: "pro" });
+    const { status } = await post({ planSlug: "basic" });
 
     expect(status).toBe(200);
     expect(mockInsert).not.toHaveBeenCalledWith("salons");
@@ -316,10 +329,10 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
   });
 
   it("błąd zapisu subskrypcji → rollback całej transakcji (salon nie zostaje bez wiersza), 500", async () => {
-    tableRows = { subscriptionPlans: [PLAN_PRO] };
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
     failInsert = { table: "salonSubscriptions", error: Object.assign(new Error("boom"), { code: "XX000" }) };
 
-    const { status } = await post({ planSlug: "pro" });
+    const { status } = await post({ planSlug: "basic" });
 
     expect(status).toBe(500);
     expect(opLog).toContain("insert:salons");
@@ -331,10 +344,10 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
     ["salons_owner_id_uq (równoległe utworzenie salonu)", "salons"],
     ["salon_subscriptions_salon_current_uq (równoległy trial)", "salonSubscriptions"],
   ])("23505 z %s → 409, rollback", async (_name, table) => {
-    tableRows = { subscriptionPlans: [PLAN_PRO] };
+    tableRows = { subscriptionPlans: [PLAN_BASIC] };
     failInsert = { table, error: Object.assign(new Error("db"), { cause: { code: "23505" } }) };
 
-    const { status, body } = await post({ planSlug: "pro" });
+    const { status, body } = await post({ planSlug: "basic" });
 
     expect(status).toBe(409);
     expect(body.success).toBe(false);
@@ -342,10 +355,10 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
   });
 
   it.each(["40P01", "55P03"])("%s przy blokadzie salonu → 503 LOCK_BUSY, rollback", async (code) => {
-    tableRows = { subscriptionPlans: [PLAN_PRO], salons: [{ id: SALON_A, ownerId: USER_A.id }] };
+    tableRows = { subscriptionPlans: [PLAN_BASIC], salons: [{ id: SALON_A, ownerId: USER_A.id }] };
     lockFailure.next = { code };
 
-    const { status, body } = await post({ planSlug: "pro" });
+    const { status, body } = await post({ planSlug: "basic" });
 
     expect(status).toBe(503);
     expect(body.code).toBe("LOCK_BUSY");
@@ -356,7 +369,7 @@ describe("POST /api/register-subscription — T3b: jedna transakcja, blokada sal
   it("tylko aktywny plan: zapytanie filtruje isActive = true; plan wycofany (brak w wyniku) → 404 bez transakcji", async () => {
     tableRows = { subscriptionPlans: [] };
 
-    const { status } = await post({ planSlug: "pro" });
+    const { status } = await post({ planSlug: "basic" });
 
     expect(status).toBe(404);
     expect(mockEq).toHaveBeenCalledWith("subscriptionPlans.isActive", true);

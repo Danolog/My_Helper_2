@@ -59,7 +59,14 @@ vi.mock("@/lib/stripe", () => ({
 vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
-// Tylko sesja jest atrapą — trasy cancel/register-subscription działają na prawdziwej bazie.
+// Atrapami są m.in. sesja (auth-middleware, get-user-salon), Stripe, logger i lista PLANS_ON_SALE — trasy cancel/register-subscription działają na prawdziwej bazie.
+// Atrapa podmienia tylko eksport PLANS_ON_SALE na listę ze slugiem planu testowego, bo schemat
+// body trasy register-subscription przyjmuje wyłącznie elementy tej listy; reszta modułu jest prawdziwa.
+const { testPlanSlug } = vi.hoisted(() => ({ testPlanSlug: `it-t3-${crypto.randomUUID().slice(0, 8)}` }));
+vi.mock("@/lib/plan-catalog", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/plan-catalog")>()),
+  PLANS_ON_SALE: [testPlanSlug],
+}));
 const { sessionUser, sessionSalonId } = vi.hoisted(() => ({
   sessionUser: { current: { id: "", name: "IT", email: "it@example.invalid" } },
   sessionSalonId: { current: "" },
@@ -259,7 +266,7 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
     const [salon] = await db.insert(salons).values({ name: `IT T3 ${RUN}`, ownerId: USER_ID }).returning();
     const [plan] = await db
       .insert(subscriptionPlans)
-      .values({ name: "IT T3", slug: `it-t3-${RUN}`, priceMonthly: "149.00" })
+      .values({ name: "IT T3", slug: testPlanSlug, priceMonthly: "149.00" })
       .returning();
     salonId = salon!.id;
     planId = plan!.id;
