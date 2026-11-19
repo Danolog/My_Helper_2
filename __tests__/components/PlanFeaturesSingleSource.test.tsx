@@ -13,6 +13,7 @@ import { DlaSalonowPricing } from "@/app/(site)/dla-salonow/_components/DlaSalon
 import PricingPage from "@/app/(site)/pricing/page";
 import { PlanActions } from "@/app/dashboard/subscription/_components/plan-actions";
 import { CreateSalonPrompt } from "@/components/dashboard/create-salon-prompt";
+import { isPlanOnSale } from "@/lib/plan-catalog";
 import {
   PLAN_FEATURES,
   PLAN_SUMMARY,
@@ -81,7 +82,7 @@ describe("jedno źródło list funkcji planów — to, co widzi użytkownik", ()
     expect(screen.getByText(PLAN_SUMMARY.pro)).toBeInTheDocument();
   });
 
-  it("tworzenie salonu: karty planów pokazują skrót z plan-features", () => {
+  it("tworzenie salonu: karty planów z PLANS_ON_SALE pokazują skrót z plan-features", () => {
     render(
       <CreateSalonPrompt
         session={{ user: { name: "Anna", email: "anna@example.com" } }}
@@ -89,10 +90,10 @@ describe("jedno źródło list funkcji planów — to, co widzi użytkownik", ()
       />
     );
 
-    expect(texts(screen.getAllByRole("listitem"))).toEqual([
-      ...planHighlights("basic", 4),
-      ...planHighlights("pro", 4),
-    ]);
+    const onSale = (["basic", "pro"] as const).filter((slug) => isPlanOnSale(slug));
+    expect(texts(screen.getAllByRole("listitem"))).toEqual(
+      onSale.flatMap((slug) => planHighlights(slug, 4))
+    );
   });
 
   describe("cennik", () => {
