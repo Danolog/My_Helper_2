@@ -109,6 +109,7 @@ describe("PricingPage — SOLD_PLAN_SLUG z modułu", () => {
 
     expect((await screen.findByTestId("plan-price")).textContent).toBe("49 zł netto + 23% VAT");
     expect(document.body.textContent).not.toMatch(/49 PLN|149/);
+    expect(screen.queryAllByText(/49 PLN|149/)).toHaveLength(0);
   });
 
   it("brak PLAN_SUMMARY.pro, przycisku z „Pro” w nazwie i tekstu /\\bPro\\b/", async () => {
@@ -118,6 +119,7 @@ describe("PricingPage — SOLD_PLAN_SLUG z modułu", () => {
     expect(screen.queryByText(PLAN_SUMMARY.pro)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Pro/ })).not.toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/\bPro\b/);
+    expect(screen.queryAllByText(/\bPro\b/)).toHaveLength(0);
   });
 
   it.each([CARD_BUTTON, BOTTOM_BUTTON])(
