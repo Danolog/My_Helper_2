@@ -5,8 +5,9 @@ import { mutationFetch } from "@/lib/api-client";
 import { PLANS_ON_SALE } from "@/lib/plan-catalog";
 
 // Hak formularza rejestracji: krok i plan na starcie, plan po przywróceniu
-// formularza, planSlug wysyłany do /api/register-subscription i plan Pro
-// zwracany do kroku wyboru planu. Grupa główna biegnie na prawdziwej liście
+// formularza, planSlug wysyłany do /api/register-subscription, plan Pro
+// zwracany do kroku wyboru planu i argument setDirty z atrapy
+// use-form-recovery. Grupa główna biegnie na prawdziwej liście
 // PLANS_ON_SALE; ostatnia grupa na czas swoich przypadków dopisuje "pro" do
 // tablicy PLANS_ON_SALE prawdziwego modułu (lista ["basic", "pro"]) i potem ją przywraca.
 
@@ -20,7 +21,7 @@ type Recovered = {
 const recovery = vi.hoisted(() => ({
   state: null as Recovered | null,
   saveFormState: () => {},
-  setDirty: () => {},
+  setDirty: vi.fn(),
   clearSavedForm: () => {},
 }));
 
@@ -159,6 +160,24 @@ describe("useRegistration — lista PLANS_ON_SALE z modułu", () => {
     expect(result.current.basicPlan).toEqual(PLAN_BASIC);
     expect(result.current.proPlan).toBeUndefined();
   });
+
+  it('useRegistration(null), handleSelectPlan("pro") i handleSubmit z poprawnymi danymi: jedno wywołanie mutationFetch z /api/register-subscription i planSlug "basic"', async () => {
+    const { result } = await renderLoaded(null);
+    act(() => {
+      result.current.handleSelectPlan("pro");
+    });
+    await fillAndSubmit(result);
+    expect(sentPlanSlug()).toBe("basic");
+  });
+
+  it('useRegistration(null) bez wpisu: ostatnie wywołanie setDirty z false; po setName("Anna"): z true', async () => {
+    const { result } = await renderLoaded(null);
+    expect(vi.mocked(recovery.setDirty).mock.calls.at(-1)).toEqual([false]);
+    act(() => {
+      result.current.setName("Anna");
+    });
+    expect(vi.mocked(recovery.setDirty).mock.calls.at(-1)).toEqual([true]);
+  });
 });
 
 describe('useRegistration — PLANS_ON_SALE podmieniona na ["basic", "pro"]', () => {
@@ -188,5 +207,10 @@ describe('useRegistration — PLANS_ON_SALE podmieniona na ["basic", "pro"]', ()
   it("odpowiedź /api/subscription-plans z planami basic i pro: proPlan zdefiniowany", async () => {
     const { result } = await renderLoaded(null);
     expect(result.current.proPlan).toEqual(PLAN_PRO);
+  });
+
+  it('useRegistration("pro") bez wpisu: ostatnie wywołanie setDirty z true', async () => {
+    await renderLoaded("pro");
+    expect(vi.mocked(recovery.setDirty).mock.calls.at(-1)).toEqual([true]);
   });
 });

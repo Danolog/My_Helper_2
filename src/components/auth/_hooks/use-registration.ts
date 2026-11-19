@@ -71,10 +71,10 @@ export function useRegistration(preselectedPlan: string | null) {
 
   // Save form state on every change (debounced inside hook)
   useEffect(() => {
-    const hasData = !!name || !!email || !!selectedPlan;
+    const hasData = !!name || !!email || (!singlePlanOnSale && !!selectedPlan);
     saveFormState({ step, selectedPlan, name, email });
     setDirty(hasData);
-  }, [step, selectedPlan, name, email, saveFormState, setDirty]);
+  }, [step, selectedPlan, name, email, singlePlanOnSale, saveFormState, setDirty]);
 
   // Fetch subscription plans
   useEffect(() => {
