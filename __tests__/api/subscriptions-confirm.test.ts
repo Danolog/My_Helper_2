@@ -12,7 +12,10 @@
  *   unikalnym indeksie) → alreadyConfirmed, transakcja wycofana, bez duplikatu,
  * - trial → płatny plan: wiersz `trialing` przechodzi w `active`, bez drugiego
  *   wiersza; inne wiersze `trialing` salonu są zamykane,
- * - salon płacący już za INNĄ subskrypcję Stripe → 409, bez nadpisania.
+ * - salon płacący już za INNĄ subskrypcję Stripe → 409, bez nadpisania,
+ * - kwota i waluta wpisu płatności z `amount_total` i `currency` sesji; ich
+ *   brak albo wartości nie do przeliczenia → 502 STRIPE_AMOUNT_MISSING bez
+ *   transakcji i bez odczytu subskrypcji Stripe.
  * Bez Stripe → 503 STRIPE_UNAVAILABLE (bez zmian od #37).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -511,5 +514,115 @@ describe("POST /api/subscriptions/confirm — stan subskrypcji w Stripe (ostrze�
     f.selects.push([], [PLAN_PRO], [{ id: "sub-trial", status: "trialing", stripeSubscriptionId: null }]);
     expect((await confirm()).status).toBe(200);
     expect(subWrites()[0]?.values).toEqual(expect.objectContaining({ status: "active", trialEndsAt: null }));
+  });
+});
+
+describe("POST /api/subscriptions/confirm — kwota i waluta wpisu płatności z sesji Checkout", () => {
+  /** Sesja bez wskazanego pola (pole nieobecne, nie `undefined` w nadpisaniu). */
+  function sessionWithout(key: string): Record<string, unknown> {
+    const s: Record<string, unknown> = checkoutSession();
+    delete s[key];
+    return s;
+  }
+  const currencyWarns = () =>
+    vi.mocked(logger.warn).mock.calls.filter(([m]) => String(m).includes("currency other than PLN"));
+
+  it('amount_total 11920 + "pln" przy planie 149.00 → 200, wpis amount "119.20", currency "PLN", bez ostrzeżenia o walucie', async () => {
+    withStripe(checkoutSession({ amount_total: 11920, currency: "pln" }));
+    f.selects.push([], [PLAN_PRO], []);
+
+    expect((await confirm()).status).toBe(200);
+    expect(paymentWrites()).toEqual([
+      expect.objectContaining({
+        op: "insert",
+        values: expect.objectContaining({ amount: "119.20", currency: "PLN", stripePaymentIntentId: "cs_test_123" }),
+      }),
+    ]);
+    expect(currencyWarns()).toEqual([]);
+  });
+
+  it('amount_total 3500 + "eur" → 200, wpis amount "35.00", currency "EUR" i logger.warn „currency other than PLN” z sessionId, salonId, currency', async () => {
+    withStripe(checkoutSession({ amount_total: 3500, currency: "eur" }));
+    f.selects.push([], [PLAN_PRO], []);
+
+    expect((await confirm()).status).toBe(200);
+    expect(paymentWrites()).toEqual([
+      expect.objectContaining({ values: expect.objectContaining({ amount: "35.00", currency: "EUR" }) }),
+    ]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("currency other than PLN"),
+      expect.objectContaining({ sessionId: "cs_test_123", salonId: "salon-1", currency: "EUR" })
+    );
+  });
+
+  it('"eur" i wyścig na wpisie płatności (wpis innego potwierdzenia) → alreadyConfirmed, transakcja wycofana, bez ostrzeżenia o walucie', async () => {
+    withStripe(checkoutSession({ amount_total: 3500, currency: "eur" }));
+    f.state.paymentInsertResult = [];
+    f.selects.push([], [PLAN_PRO], [], [{ id: "pay-w", subscriptionId: "sub-w" }], [{ id: "sub-w" }]);
+
+    const { status, body } = await confirm();
+
+    expect(status).toBe(200);
+    expect(body.alreadyConfirmed).toBe(true);
+    expect(f.state.rolledBack).toBe(1);
+    expect(currencyWarns()).toEqual([]);
+  });
+
+  it('"eur" i subskrypcja Stripe canceled → 409, bez zapisu, bez ostrzeżenia o walucie', async () => {
+    withStripe(checkoutSession({ amount_total: 3500, currency: "eur" }), "canceled");
+    f.selects.push([], [PLAN_PRO], []);
+
+    expect((await confirm()).status).toBe(409);
+    expectNoWrites();
+    expect(currencyWarns()).toEqual([]);
+  });
+
+  it.each([
+    ["brak amount_total", () => sessionWithout("amount_total")],
+    ["amount_total null", () => checkoutSession({ amount_total: null })],
+    ["amount_total 12.5", () => checkoutSession({ amount_total: 12.5 })],
+    ["brak currency", () => sessionWithout("currency")],
+    ['currency "jpy"', () => checkoutSession({ currency: "jpy" })],
+  ])(
+    "%s → 502 STRIPE_AMOUNT_MISSING, zero zapisów, transakcja nie zaczęta, zero odczytów subskrypcji Stripe, logger.error z sessionId i salonId",
+    async (_name, build) => {
+      withStripe(build());
+      f.selects.push([], [PLAN_PRO]);
+
+      const { status, body } = await confirm();
+
+      expect(status).toBe(502);
+      expect(body.code).toBe("STRIPE_AMOUNT_MISSING");
+      expectNoWrites();
+      expect(f.state.transactions).toBe(0);
+      expect(retrieveSubscription).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ sessionId: "cs_test_123", salonId: "salon-1" })
+      );
+    }
+  );
+
+  it("sesja już potwierdzona (wpis istnieje), brak amount_total → 200 alreadyConfirmed, nie 502", async () => {
+    withStripe(sessionWithout("amount_total"));
+    f.selects.push([{ id: "pay-1", subscriptionId: "sub-1", salonId: "salon-1" }], [{ id: "sub-1" }]);
+
+    const { status, body } = await confirm();
+
+    expect(status).toBe(200);
+    expect(body).toEqual({ success: true, alreadyConfirmed: true, subscription: { id: "sub-1" } });
+    expectNoWrites();
+  });
+
+  it('payment_status "unpaid", brak amount_total → 400 NOT_PAID, nie 502', async () => {
+    const s = sessionWithout("amount_total");
+    s.payment_status = "unpaid";
+    withStripe(s);
+
+    const { status, body } = await confirm();
+
+    expect(status).toBe(400);
+    expect(body.code).toBe("NOT_PAID");
+    expectNoWrites();
   });
 });

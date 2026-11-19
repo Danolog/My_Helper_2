@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions, subscriptionPayments, subscriptionPlans } from "@/lib/schema";
+import { stripeAmountToColumns } from "@/lib/stripe-amount";
 import { stripeSubscriptionPeriod, type StripeSubscriptionPeriodSource } from "@/lib/stripe-period";
 import {
   isSubscriptionLockFailure,
@@ -32,11 +33,20 @@ import type Stripe from "stripe";
  * do salonu. Kto przyjdzie drugi (strona sukcesu albo webhook, także
  * równolegle), dostaje `alreadyConfirmed`, a nie drugi wiersz.
  *
+ * Kwota i waluta wpisu płatności pochodzą z `amount_total` i `currency` sesji
+ * (`stripeAmountToColumns`). Gdy nie da się ich przeliczyć → 502
+ * STRIPE_AMOUNT_MISSING bez zapisu i bez odczytu subskrypcji Stripe; waluta
+ * inna niż PLN jest zapisywana taka, jaka jest, z ostrzeżeniem w logu.
+ *
  * Surowe `db` świadomie (ADR-001 sekcja 4): ścieżka płatności, salon
  * z danych Stripe, porównany z sesją tam, gdzie sesja jest.
  */
 
-/** Minimalny kształt sesji Checkout, z którego korzystamy (SDK i surowy webhook). */
+/**
+ * Minimalny kształt sesji Checkout, z którego korzystamy (SDK i surowy webhook).
+ * `amount_total` — kwota w najmniejszych jednostkach waluty, `currency` — kod
+ * waluty; oba trafiają do wpisu płatności przez `stripeAmountToColumns`.
+ */
 export interface SubscriptionCheckoutSession {
   id: string;
   mode?: string | null;
@@ -165,6 +175,17 @@ export async function confirmSubscriptionCheckout(
 
   const stripeCustomerId =
     typeof session.customer === "string" ? session.customer : (session.customer?.id ?? null);
+
+  // Kwota i waluta wpisu płatności z sesji Checkout, nigdy z cennika. Bez nich
+  // nie ma wpisu, a wpis jest kluczem idempotencji — więc odmowa bez zapisu.
+  const paymentColumns = stripeAmountToColumns(session.amount_total, session.currency);
+  if (!paymentColumns) {
+    logger.error("Subscription checkout NOT confirmed — session amount or currency unreadable, manual handling", {
+      sessionId: session.id,
+      salonId,
+    });
+    return fail(502, "STRIPE_AMOUNT_MISSING", "Stripe nie zwrocil kwoty platnosci");
+  }
 
   try {
     const result = await db.transaction(async (tx) => {
@@ -303,13 +324,14 @@ export async function confirmSubscriptionCheckout(
           .where(inArray(salonSubscriptions.id, otherTrials));
       }
 
+      // Kwota i waluta z `amount_total` i `currency` sesji (przeliczone przed transakcją).
       const inserted = await tx
         .insert(subscriptionPayments)
         .values({
           subscriptionId: record.id,
           salonId,
-          amount: plan.priceMonthly,
-          currency: "PLN",
+          amount: paymentColumns.amount,
+          currency: paymentColumns.currency,
           stripePaymentIntentId: session.id,
           status: "succeeded",
           paidAt: new Date(),
@@ -350,6 +372,15 @@ export async function confirmSubscriptionCheckout(
         "SUBSCRIPTION_CONFLICT",
         "Salon ma juz inna oplacona subskrypcje. Skontaktuj sie z obsluga."
       );
+    }
+
+    // Dopiero po zatwierdzeniu transakcji z nowym wpisem płatności.
+    if (paymentColumns.currency !== "PLN") {
+      logger.warn("Subscription payment recorded in a currency other than PLN", {
+        sessionId: session.id,
+        salonId,
+        currency: paymentColumns.currency,
+      });
     }
 
     logger.info("Subscription confirmed", {
