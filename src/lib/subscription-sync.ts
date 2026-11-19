@@ -63,6 +63,14 @@ export const FINAL_LOCAL_STATUS = "canceled";
 const STRIPE_ENDED_STATUSES = new Set(["canceled", "incomplete_expired"]);
 
 /**
+ * Subskrypcja w stanie końcowym Stripe (`canceled`, `incomplete_expired`).
+ * Zaplanowane anulowanie (`cancel_at_period_end`) nie jest stanem końcowym.
+ */
+export function isStripeSubscriptionEnded(status: string | null | undefined): boolean {
+  return STRIPE_ENDED_STATUSES.has(status ?? "");
+}
+
+/**
  * Lokalne `canceled` potwierdzone przez Stripe: subskrypcja zakończona albo
  * ustawiona na koniec okresu. Tylko wtedy `canceled` jest końcowe.
  */

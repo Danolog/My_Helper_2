@@ -10,17 +10,21 @@
  * Kontrakt po poprawce: endpoint nigdy nie zapisuje subskrypcji ani płatności.
  * Tworzy tylko sesję Stripe Checkout; subskrypcję zapisuje /api/subscriptions/confirm
  * po zweryfikowanej płatności (payment_status === "paid").
- * Stripe niedostępny → 503, błąd Stripe → 502, w obu przypadkach zero zapisów.
+ * Stripe nieskonfigurowany albo błąd odczytu subskrypcji w Stripe → 503, błąd
+ * tworzenia sesji Checkout → 502, w każdym z tych przypadków zero zapisów.
  *
- * Kontrakt wejścia (PR #32 d) = body z UI: `{ planSlug }` z
+ * Kontrakt wejścia = body z UI: `{ planSlug }` z
  * src/app/(site)/pricing/page.tsx i
  * src/app/dashboard/subscription/_hooks/use-subscription-data.ts.
  * Salon wyłącznie z sesji — `salonId` w body nie jest częścią kontraktu.
  */
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
+import Stripe from "stripe";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { POST } from "@/app/api/subscriptions/checkout/route";
+import { logger } from "@/lib/logger";
+import { STRIPE_LOCKED_READ_OPTIONS } from "@/lib/subscription-locks";
 
 const {
   selectQueue,
@@ -37,6 +41,7 @@ const {
   mockGetStripe,
   mockIsStripePricesConfigured,
   mockSessionsCreate,
+  mockSubscriptionsRetrieve,
   mockRateLimitCheck,
 } = vi.hoisted(() => ({
   // Kolejne `db.select()` / `tx.select()` zdejmują wyniki z kolejki (FIFO).
@@ -57,6 +62,7 @@ const {
   mockGetStripe: vi.fn(),
   mockIsStripePricesConfigured: vi.fn(),
   mockSessionsCreate: vi.fn(),
+  mockSubscriptionsRetrieve: vi.fn(),
   mockRateLimitCheck: vi.fn(),
 }));
 
@@ -210,7 +216,10 @@ function checkoutRequest(planSlug: string) {
 }
 
 function stripeClient() {
-  return { checkout: { sessions: { create: mockSessionsCreate } } };
+  return {
+    checkout: { sessions: { create: mockSessionsCreate } },
+    subscriptions: { retrieve: mockSubscriptionsRetrieve },
+  };
 }
 
 function expectNoWrites() {
@@ -231,7 +240,7 @@ describe("POST /api/subscriptions/checkout", () => {
     mockTransaction.mockReset();
     mockRequireAuth
       .mockReset()
-      .mockResolvedValue({ user: { id: "user-1", email: "wlasciciel@test.pl" } });
+      .mockResolvedValue({ user: { id: "user-1", email: "wlasciciel@example.com" } });
     mockIsAuthError.mockReset().mockReturnValue(false);
     mockGetUserSalonId.mockReset().mockResolvedValue("salon-1");
     mockGetStripe.mockReset().mockReturnValue(null);
@@ -240,6 +249,10 @@ describe("POST /api/subscriptions/checkout", () => {
       id: "cs_test_1",
       url: "https://checkout.stripe.com/c/pay/cs_test_1",
     });
+    // Bez odpowiedzi ustawionej w przypadku odczyt subskrypcji Stripe jest odrzucany.
+    mockSubscriptionsRetrieve.mockReset().mockRejectedValue(new Error("unexpected subscriptions.retrieve"));
+    vi.mocked(logger.error).mockClear();
+    vi.mocked(logger.warn).mockClear();
     mockRateLimitCheck.mockReset().mockReturnValue({ success: true, remaining: 4, reset: 60000 });
   });
 
@@ -296,7 +309,7 @@ describe("POST /api/subscriptions/checkout", () => {
     });
   });
 
-  // T3b: ten sam predykat konfliktu co confirm (`isCurrentPaidStripeRow`) —
+  // Ten sam predykat konfliktu co confirm (`isCurrentPaidStripeRow`) —
   // klient dowiaduje się o konflikcie PRZED pobraniem pieniędzy.
   describe("(e) predykat konfliktu jak w confirm: trialing z prawdziwą subskrypcją Stripe", () => {
     it("trial prowadzony przez Stripe (prawdziwe id), inny plan: 409 PLAN_CHANGE_UNSUPPORTED, bez sesji Stripe", async () => {
@@ -351,7 +364,7 @@ describe("POST /api/subscriptions/checkout", () => {
       expect(params).toEqual(expect.arrayContaining(["salon-1", "trialing", "active"]));
     });
 
-    it("wiersz canceled z prawdziwym id bez końca okresu (historia) nie blokuje nowego Checkoutu", async () => {
+    it("wiersz canceled z prawdziwym id bez końca okresu (historia), Stripe canceled: nie blokuje nowego Checkoutu", async () => {
       mockGetStripe.mockReturnValue(stripeClient());
       // Zapytanie o wiersze bieżące filtruje trialing/active; gdyby atrapa
       // zwróciła historię, ta reguła jej nie liczy. Odczyt wszystkich wierszy
@@ -359,6 +372,7 @@ describe("POST /api/subscriptions/checkout", () => {
       const historic = subscriptionRow({ status: "canceled", stripeSubscriptionId: "sub_old" });
       selectQueue.push([PLAN_PRO], [historic]);
       accessQueue.push([{ subscription: { ...historic, createdAt: new Date("2026-01-01T00:00:00.000Z") }, plan: PLAN_BASIC }]);
+      mockSubscriptionsRetrieve.mockResolvedValue({ id: "sub_old", status: "canceled" });
 
       const res = await POST(checkoutRequest("pro"));
 
@@ -427,18 +441,21 @@ describe("POST /api/subscriptions/checkout", () => {
       expect(params).toEqual(["salon-1"]);
     });
 
-    it("canceled z prawdziwą subskrypcją Stripe, koniec okresu w przeszłości: sesja Checkout (200)", async () => {
+    it("canceled z prawdziwą subskrypcją Stripe, koniec okresu w przeszłości, Stripe canceled: sesja Checkout (200)", async () => {
       accessQueue.push([accessRow({ currentPeriodEnd: new Date(NOW.getTime() - DAY) })]);
+      mockSubscriptionsRetrieve.mockResolvedValue({ id: "sub_1Real", status: "canceled" });
       await expectCheckoutCreated();
     });
 
-    it("canceled z prawdziwą subskrypcją Stripe, koniec okresu równy chwili bieżącej: sesja Checkout (200)", async () => {
+    it("canceled z prawdziwą subskrypcją Stripe, koniec okresu równy chwili bieżącej, Stripe canceled: sesja Checkout (200)", async () => {
       accessQueue.push([accessRow({ currentPeriodEnd: new Date(NOW.getTime()) })]);
+      mockSubscriptionsRetrieve.mockResolvedValue({ id: "sub_1Real", status: "canceled" });
       await expectCheckoutCreated();
     });
 
-    it("canceled z prawdziwą subskrypcją Stripe bez końca okresu: sesja Checkout (200)", async () => {
+    it("canceled z prawdziwą subskrypcją Stripe bez końca okresu, Stripe canceled: sesja Checkout (200)", async () => {
       accessQueue.push([accessRow({ currentPeriodEnd: null })]);
+      mockSubscriptionsRetrieve.mockResolvedValue({ id: "sub_1Real", status: "canceled" });
       await expectCheckoutCreated();
     });
 
@@ -471,8 +488,9 @@ describe("POST /api/subscriptions/checkout", () => {
       expectNoWrites();
     });
 
-    it("past_due z prawdziwą subskrypcją Stripe po końcu okresu + 7 dni: sesja Checkout (200)", async () => {
+    it("past_due z prawdziwą subskrypcją Stripe po końcu okresu + 7 dni, Stripe canceled: sesja Checkout (200)", async () => {
       accessQueue.push([accessRow({ status: "past_due", currentPeriodEnd: new Date(NOW.getTime() - 8 * DAY) })]);
+      mockSubscriptionsRetrieve.mockResolvedValue({ id: "sub_1Real", status: "canceled" });
       await expectCheckoutCreated();
     });
 
@@ -498,15 +516,16 @@ describe("POST /api/subscriptions/checkout", () => {
       expectNoWrites();
     });
 
-    it("nowszy canceled po okresie + starszy canceled w okresie z prawdziwą subskrypcją: sesja Checkout (200), liczy się najnowszy wiersz", async () => {
+    it("nowszy canceled po okresie + starszy canceled w okresie z prawdziwą subskrypcją, Stripe canceled: sesja Checkout (200), liczy się najnowszy wiersz", async () => {
       accessQueue.push([
         accessRow({ id: "sub-new", createdAt: new Date("2026-10-01T10:00:00.000Z"), currentPeriodEnd: new Date(NOW.getTime() - DAY) }),
         accessRow({ id: "sub-old", createdAt: new Date("2026-08-01T10:00:00.000Z"), currentPeriodEnd: new Date(NOW.getTime() + DAY) }),
       ]);
+      mockSubscriptionsRetrieve.mockResolvedValue({ id: "sub_1Real", status: "canceled" });
       await expectCheckoutCreated();
     });
 
-    it("wiersz bieżący trialing bez prawdziwego Stripe + starszy canceled w okresie z prawdziwą subskrypcją: sesja Checkout (200), liczy się wiersz bieżący", async () => {
+    it("wiersz bieżący trialing bez prawdziwego Stripe + starszy canceled w okresie z prawdziwą subskrypcją, Stripe canceled: sesja Checkout (200), liczy się wiersz bieżący", async () => {
       const trial = subscriptionRow({
         id: "sub-trial",
         status: "trialing",
@@ -520,6 +539,7 @@ describe("POST /api/subscriptions/checkout", () => {
         { subscription: trial, plan: PLAN_BASIC },
         accessRow({ id: "sub-old", createdAt: new Date("2026-08-01T10:00:00.000Z"), currentPeriodEnd: new Date(NOW.getTime() + DAY) }),
       ]);
+      mockSubscriptionsRetrieve.mockResolvedValue({ id: "sub_1Real", status: "canceled" });
       await expectCheckoutCreated();
     });
 
@@ -605,7 +625,7 @@ describe("POST /api/subscriptions/checkout", () => {
         url: "https://checkout.stripe.com/c/pay/cs_test_1",
       });
       const params = mockSessionsCreate.mock.calls[0]![0];
-      expect(params.customer_email).toBe("wlasciciel@test.pl");
+      expect(params.customer_email).toBe("wlasciciel@example.com");
       expect(params.success_url).toContain("/dashboard/subscription/success?session_id=");
       expectNoWrites();
     });
@@ -677,7 +697,7 @@ describe("POST /api/subscriptions/checkout", () => {
       const res = await POST(checkoutRequest("basic"));
       const body = await res.json();
 
-      // Bez Stripe: 503 z #36, a nie 400 ze schematu.
+      // Bez Stripe: 503 STRIPE_UNAVAILABLE, a nie 400 ze schematu.
       expect(res.status).toBe(503);
       expect(body.code).toBe("STRIPE_UNAVAILABLE");
       expectNoWrites();
@@ -800,7 +820,7 @@ describe("POST /api/subscriptions/checkout", () => {
         "https://app.example.test/dashboard/subscription/success?session_id={CHECKOUT_SESSION_ID}",
       );
       expect(params.cancel_url).toBe("https://app.example.test/pricing");
-      expect(params.customer_email).toBe("wlasciciel@test.pl");
+      expect(params.customer_email).toBe("wlasciciel@example.com");
       expect(params.metadata).toEqual({
         salonId: "salon-1",
         planId: PLAN_BASIC.id,
@@ -854,7 +874,7 @@ describe("POST /api/subscriptions/checkout", () => {
         "https://app.example.test/dashboard/subscription/success?session_id={CHECKOUT_SESSION_ID}",
       );
       expect(params.cancel_url).toBe("https://app.example.test/pricing");
-      expect(params.customer_email).toBe("wlasciciel@test.pl");
+      expect(params.customer_email).toBe("wlasciciel@example.com");
       expect(params.metadata).toEqual({
         salonId: "salon-1",
         planId: plan.id,
@@ -882,5 +902,282 @@ describe("POST /api/subscriptions/checkout", () => {
         expectSharedParams(adHoc, plan);
       },
     );
+  });
+
+  // Wiersze salonu z prawdziwą subskrypcją Stripe i statusem innym niż
+  // trialing/active: trasa czyta stan każdej z tych subskrypcji w Stripe
+  // (`subscriptions.retrieve`, atrapa) i tworzy sesję Checkout tylko wtedy,
+  // gdy każda jest w Stripe `canceled` albo `incomplete_expired`.
+  describe("(i) poprzednia subskrypcja salonu w Stripe", () => {
+    const NOW = new Date("2026-11-19T10:00:00.000Z");
+    const DAY = 86_400_000;
+    const LIVE_ERROR =
+      "Poprzednia subskrypcja jest jeszcze otwarta w systemie płatności. Nowy zakup będzie możliwy po jej zamknięciu. Jeśli to się przedłuża, skontaktuj się z obsługą.";
+    const LIVE_LOG = "Subscription checkout refused: previous Stripe subscription still live, manual handling";
+
+    // Wiersz canceled z prawdziwą subskrypcją Stripe po końcu okresu: lokalnie
+    // nic nie odmawia zakupu.
+    function accessRow(overrides: Record<string, unknown> = {}) {
+      return {
+        subscription: subscriptionRow({
+          id: "sub-row-old",
+          status: "canceled",
+          stripeSubscriptionId: "sub_old",
+          currentPeriodEnd: new Date(NOW.getTime() - 3 * DAY),
+          createdAt: new Date("2026-08-01T10:00:00.000Z"),
+          ...overrides,
+        }),
+        plan: PLAN_BASIC,
+      };
+    }
+
+    function stripeSubscription(id: string, overrides: Record<string, unknown> = {}) {
+      return { id, object: "subscription", status: "canceled", cancel_at_period_end: false, ...overrides };
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+      mockGetStripe.mockReturnValue(stripeClient());
+      // Zapytanie o wiersze bieżące (trialing/active) nie widzi canceled/past_due.
+      selectQueue.push([PLAN_PRO], []);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function expectLiveRefusal() {
+      const res = await POST(checkoutRequest("pro"));
+      const body = await res.json();
+      expect(res.status).toBe(409);
+      expect(body).toEqual({
+        success: false,
+        code: "PURCHASE_BLOCKED_STRIPE_SUBSCRIPTION_LIVE",
+        error: LIVE_ERROR,
+      });
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
+      expectNoWrites();
+    }
+
+    async function expectCheckoutCreated() {
+      const res = await POST(checkoutRequest("pro"));
+      expect(res.status).toBe(200);
+      expect(mockSessionsCreate).toHaveBeenCalledTimes(1);
+      expectNoWrites();
+    }
+
+    async function expectStripeUnavailable() {
+      const res = await POST(checkoutRequest("pro"));
+      const body = await res.json();
+      expect(res.status).toBe(503);
+      expect(body).toEqual({
+        success: false,
+        code: "STRIPE_UNAVAILABLE",
+        error: "Płatności online są chwilowo niedostępne. Plan nie został zmieniony — spróbuj ponownie później.",
+      });
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
+      expectNoWrites();
+    }
+
+    it("canceled po końcu okresu, Stripe past_due z cancel_at_period_end: true: 409 PURCHASE_BLOCKED_STRIPE_SUBSCRIPTION_LIVE bez until, bez sesji Stripe i zapisów, logger.error z id wiersza i id subskrypcji", async () => {
+      accessQueue.push([accessRow()]);
+      mockSubscriptionsRetrieve.mockResolvedValue(
+        stripeSubscription("sub_old", { status: "past_due", cancel_at_period_end: true }),
+      );
+
+      await expectLiveRefusal();
+      expect(logger.error).toHaveBeenCalledWith(LIVE_LOG, {
+        subscriptionId: "sub-row-old",
+        stripeSubscriptionId: "sub_old",
+        stripeStatus: "past_due",
+        cancelAtPeriodEnd: true,
+      });
+    });
+
+    it("Stripe active z cancel_at_period_end: true: 409 PURCHASE_BLOCKED_STRIPE_SUBSCRIPTION_LIVE, bez sesji Stripe", async () => {
+      accessQueue.push([accessRow()]);
+      mockSubscriptionsRetrieve.mockResolvedValue(
+        stripeSubscription("sub_old", { status: "active", cancel_at_period_end: true }),
+      );
+
+      await expectLiveRefusal();
+    });
+
+    it("Stripe canceled: sesja Checkout (200); retrieve raz, z id subskrypcji, {} i STRIPE_LOCKED_READ_OPTIONS", async () => {
+      accessQueue.push([accessRow()]);
+      mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription("sub_old", { status: "canceled" }));
+
+      await expectCheckoutCreated();
+      expect(mockSubscriptionsRetrieve).toHaveBeenCalledTimes(1);
+      expect(mockSubscriptionsRetrieve).toHaveBeenCalledWith("sub_old", {}, STRIPE_LOCKED_READ_OPTIONS);
+      expect(STRIPE_LOCKED_READ_OPTIONS).toEqual({ timeout: 8_000 });
+    });
+
+    it("Stripe incomplete_expired: sesja Checkout (200)", async () => {
+      accessQueue.push([accessRow()]);
+      mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription("sub_old", { status: "incomplete_expired" }));
+
+      await expectCheckoutCreated();
+    });
+
+    it.each(["unpaid", "incomplete", "trialing", "paused"])(
+      "Stripe %s: 409 PURCHASE_BLOCKED_STRIPE_SUBSCRIPTION_LIVE, bez sesji Stripe",
+      async (stripeStatus) => {
+        accessQueue.push([accessRow()]);
+        mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription("sub_old", { status: stripeStatus }));
+
+        await expectLiveRefusal();
+      },
+    );
+
+    it("past_due po końcu okresu + 7 dni, Stripe past_due: 409 PURCHASE_BLOCKED_STRIPE_SUBSCRIPTION_LIVE, bez sesji Stripe", async () => {
+      accessQueue.push([accessRow({ status: "past_due", currentPeriodEnd: new Date(NOW.getTime() - 8 * DAY) })]);
+      mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription("sub_old", { status: "past_due" }));
+
+      await expectLiveRefusal();
+    });
+
+    it("retrieve odrzuca StripeInvalidRequestError z code resource_missing (404): sesja Checkout (200) i logger.warn z id wiersza i id subskrypcji", async () => {
+      accessQueue.push([accessRow()]);
+      mockSubscriptionsRetrieve.mockRejectedValue(
+        new Stripe.errors.StripeInvalidRequestError({
+          message: "No such subscription: 'sub_old'",
+          type: "invalid_request_error",
+          code: "resource_missing",
+          statusCode: 404,
+        }),
+      );
+
+      await expectCheckoutCreated();
+      expect(logger.warn).toHaveBeenCalledWith(
+        "Subscription checkout: previous Stripe subscription not found in Stripe, treated as ended",
+        { subscriptionId: "sub-row-old", stripeSubscriptionId: "sub_old" },
+      );
+    });
+
+    it.each([
+      [
+        "StripeInvalidRequestError 404 bez code resource_missing",
+        () =>
+          new Stripe.errors.StripeInvalidRequestError({
+            message: "Not found",
+            type: "invalid_request_error",
+            statusCode: 404,
+          }),
+      ],
+      [
+        "StripeAuthenticationError",
+        () => new Stripe.errors.StripeAuthenticationError({ message: "Invalid API Key provided", type: "authentication_error" }),
+      ],
+      [
+        "StripeConnectionError (przekroczony czas)",
+        () => new Stripe.errors.StripeConnectionError({ message: "Request aborted due to timeout being reached (8000ms)", type: "api_error" }),
+      ],
+      [
+        "StripeAPIError",
+        () => new Stripe.errors.StripeAPIError({ message: "Internal error", type: "api_error", statusCode: 500 }),
+      ],
+    ])("retrieve odrzuca %s: 503 STRIPE_UNAVAILABLE, bez sesji Stripe i zapisów", async (_label, makeError) => {
+      accessQueue.push([accessRow()]);
+      mockSubscriptionsRetrieve.mockRejectedValue(makeError());
+
+      await expectStripeUnavailable();
+    });
+
+    it("tylko wiersze ze stripeSubscriptionId null i sim_…: retrieve niewołane, sesja Checkout (200)", async () => {
+      accessQueue.push([
+        accessRow({ id: "sub-row-null", stripeSubscriptionId: null }),
+        accessRow({ id: "sub-row-sim", stripeSubscriptionId: "sim_sub_1", createdAt: new Date("2026-07-01T10:00:00.000Z") }),
+      ]);
+
+      await expectCheckoutCreated();
+      expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+    });
+
+    it("dwa wiersze: nowszy zakończony w Stripe, starszy żyje w Stripe: 409 PURCHASE_BLOCKED_STRIPE_SUBSCRIPTION_LIVE; retrieve raz dla każdego z dwóch id", async () => {
+      accessQueue.push([
+        accessRow({ id: "sub-row-new", stripeSubscriptionId: "sub_new", createdAt: new Date("2026-10-01T10:00:00.000Z") }),
+        accessRow({ id: "sub-row-old", stripeSubscriptionId: "sub_old", createdAt: new Date("2026-08-01T10:00:00.000Z") }),
+      ]);
+      mockSubscriptionsRetrieve.mockImplementation(async (id: string) =>
+        id === "sub_new"
+          ? stripeSubscription("sub_new", { status: "canceled" })
+          : stripeSubscription("sub_old", { status: "past_due" }),
+      );
+
+      await expectLiveRefusal();
+      expect(mockSubscriptionsRetrieve).toHaveBeenCalledTimes(2);
+      expect(mockSubscriptionsRetrieve).toHaveBeenCalledWith("sub_new", {}, STRIPE_LOCKED_READ_OPTIONS);
+      expect(mockSubscriptionsRetrieve).toHaveBeenCalledWith("sub_old", {}, STRIPE_LOCKED_READ_OPTIONS);
+      expect(logger.error).toHaveBeenCalledWith(LIVE_LOG, {
+        subscriptionId: "sub-row-old",
+        stripeSubscriptionId: "sub_old",
+        stripeStatus: "past_due",
+        cancelAtPeriodEnd: false,
+      });
+    });
+
+    it("dwa wiersze z tym samym id subskrypcji Stripe: retrieve raz, sesja Checkout (200) przy Stripe canceled", async () => {
+      accessQueue.push([
+        accessRow({ id: "sub-row-new", createdAt: new Date("2026-10-01T10:00:00.000Z") }),
+        accessRow({ id: "sub-row-old", createdAt: new Date("2026-08-01T10:00:00.000Z") }),
+      ]);
+      mockSubscriptionsRetrieve.mockResolvedValue(stripeSubscription("sub_old", { status: "canceled" }));
+
+      await expectCheckoutCreated();
+      expect(mockSubscriptionsRetrieve).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["trialing", "active"])(
+      "wiersz %s z prawdziwym id w odczycie wszystkich wierszy i wiersz canceled po końcu okresu: retrieve tylko dla id wiersza canceled",
+      async (status) => {
+        accessQueue.push([
+          accessRow({
+            id: "sub-row-current",
+            status,
+            stripeSubscriptionId: "sub_current",
+            trialEndsAt: new Date(NOW.getTime() + 10 * DAY),
+            currentPeriodEnd: new Date(NOW.getTime() + 20 * DAY),
+            createdAt: new Date("2026-11-10T10:00:00.000Z"),
+          }),
+          accessRow(),
+        ]);
+        mockSubscriptionsRetrieve.mockImplementation(async (id: string) =>
+          stripeSubscription(id, { status: id === "sub_old" ? "canceled" : "active" }),
+        );
+
+        await expectCheckoutCreated();
+        expect(mockSubscriptionsRetrieve.mock.calls).toEqual([["sub_old", {}, STRIPE_LOCKED_READ_OPTIONS]]);
+      },
+    );
+
+    it("canceled z końcem okresu w przyszłości: 409 PURCHASE_BLOCKED_UNTIL_PERIOD_END z until, retrieve niewołane", async () => {
+      accessQueue.push([accessRow({ currentPeriodEnd: new Date("2026-12-01T10:00:00.000Z") })]);
+
+      const res = await POST(checkoutRequest("pro"));
+      const body = await res.json();
+
+      expect(res.status).toBe(409);
+      expect(body.code).toBe("PURCHASE_BLOCKED_UNTIL_PERIOD_END");
+      expect(body.until).toBe("2026-12-01T10:00:00.000Z");
+      expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
+    });
+
+    it("wiersz bieżący z prawdziwą subskrypcją Stripe, inny plan, obok wiersza canceled z prawdziwym id: 409 PLAN_CHANGE_UNSUPPORTED, retrieve niewołane", async () => {
+      const current = subscriptionRow({ id: "sub-row-current", status: "active", stripeSubscriptionId: "sub_current" });
+      selectQueue.length = 0;
+      selectQueue.push([PLAN_PRO], [current]);
+      accessQueue.push([accessRow()]);
+
+      const res = await POST(checkoutRequest("pro"));
+      const body = await res.json();
+
+      expect(res.status).toBe(409);
+      expect(body.code).toBe("PLAN_CHANGE_UNSUPPORTED");
+      expect(mockSubscriptionsRetrieve).not.toHaveBeenCalled();
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
+    });
   });
 });
