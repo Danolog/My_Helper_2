@@ -80,13 +80,6 @@ const jsonLd = {
     "MyHelper - aplikacja do zarzadzania salonem uslugowym z asystentem AI",
   applicationCategory: "BusinessApplication",
   operatingSystem: "Any",
-  offers: {
-    "@type": "AggregateOffer",
-    lowPrice: "49",
-    highPrice: "149",
-    priceCurrency: "PLN",
-    offerCount: "2",
-  },
   author: {
     "@type": "Person",
     name: "MyHelper Team",
