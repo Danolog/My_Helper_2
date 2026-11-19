@@ -263,7 +263,7 @@ describe("POST /api/subscriptions/cancel — bez prawdziwej subskrypcji Stripe",
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(f.log).toEqual(["select", "lock_timeout", "lock:salon:salon-1", "select", "update:salon_subscriptions", "commit"]);
     expect(subWrites()[0]?.values).toEqual(expect.objectContaining({ status: "canceled" }));
-    // Bez Stripe okres zostaje zapisany.
+    // Zapis nie zawiera pól okresu — tak samo jak ze Stripe.
     expect(subWrites()[0]?.values).not.toHaveProperty("currentPeriodEnd");
   });
 

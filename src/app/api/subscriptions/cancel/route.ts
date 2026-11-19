@@ -39,7 +39,7 @@ function json(status: number, code: string, error: string) {
  * z przeglądu #62 §2b — przed pierwszym płacącym salonem).
  *
  * Prawdziwa subskrypcja Stripe: `cancel_at_period_end: true` w Stripe
- * (klient zachowuje dostęp do końca opłaconego okresu), a lokalne `canceled`
+ * (Stripe nie odnawia subskrypcji po końcu okresu), a lokalne `canceled`
  * zapisujemy TYLKO, gdy odpowiedź Stripe to potwierdza
  * (`cancel_at_period_end === true` albo stan końcowy). Błąd Stripe → 502,
  * Stripe nieskonfigurowany → 503 — w obu przypadkach bez zapisu: lokalne
