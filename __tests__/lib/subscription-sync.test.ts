@@ -3,8 +3,9 @@
  * w Stripe + wiersz `salon_subscriptions` → wartości do zapisania albo `null`.
  *
  * Przypina odwzorowanie stanu Stripe na stan lokalny (w tym `unpaid` →
- * `past_due`: wiersz `past_due` ma termin dostępu, lokalne `unpaid` nie ma
- * odpowiednika), wyliczenie `canceledAt` i `trialEndsAt`, brak okresu
+ * `past_due`: reguła dostępu daje wierszowi `past_due` termin — koniec okresu
+ * + 7 dni — a status `unpaid` zapisany w wierszu oznacza w niej od razu tylko
+ * odczyt), wyliczenie `canceledAt` i `trialEndsAt`, brak okresu
  * rozliczeniowego w wyniku oraz regułę końcowego lokalnego `canceled`.
  * Bez bazy: połączenie z bazą powstaje dopiero przy pierwszym zapytaniu,
  * a ta funkcja żadnego nie wykonuje.
