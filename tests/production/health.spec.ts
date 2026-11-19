@@ -25,7 +25,7 @@ test.describe('Production Health Checks', () => {
 
   test('should load the registration page', { tag: '@production' }, async ({ page }) => {
     await page.goto('/register');
-    // Wait for client component hydration before checking the account form fields
+    // Registration opens on the account form
     await expect(page.locator('#name')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('#email')).toBeVisible();
     await expect(page.locator('#password')).toBeVisible();
