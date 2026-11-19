@@ -65,8 +65,8 @@ export function formatDate(dateStr: string | null): string {
 /**
  * Toast description after a successful cancellation: the "active until <date>"
  * text only when the period end is a valid date strictly later than `now`;
- * otherwise (missing, empty, invalid, equal to or before `now`) the
- * "access ended" text.
+ * otherwise (missing, empty, invalid, equal to or before `now`) only the
+ * "will not be renewed" text, with no statement about access.
  */
 export function cancelSuccessDescription(
   currentPeriodEnd: string | null | undefined,
@@ -78,7 +78,7 @@ export function cancelSuccessDescription(
   if (currentPeriodEnd && periodEndMs > now.getTime()) {
     return `Dostep do planu jest aktywny do ${formatDate(currentPeriodEnd)}. Subskrypcja nie zostanie odnowiona.`;
   }
-  return "Dostep do funkcji planu zakonczyl sie. Subskrypcja nie zostanie odnowiona.";
+  return "Subskrypcja nie zostanie odnowiona.";
 }
 
 /** Map subscription status to a Polish label */

@@ -5,8 +5,7 @@ import {
 } from "@/app/dashboard/subscription/_types";
 
 const NOW = new Date("2026-11-19T12:00:00.000Z");
-const ENDED_TEXT =
-  "Dostep do funkcji planu zakonczyl sie. Subskrypcja nie zostanie odnowiona.";
+const NOT_RENEWED_TEXT = "Subskrypcja nie zostanie odnowiona.";
 
 function activeText(periodEnd: string): string {
   return `Dostep do planu jest aktywny do ${formatDate(periodEnd)}. Subskrypcja nie zostanie odnowiona.`;
@@ -27,29 +26,29 @@ describe("cancelSuccessDescription", () => {
     );
   });
 
-  it("period end equal to now returns the ended-access text", () => {
-    expect(cancelSuccessDescription(NOW.toISOString(), NOW)).toBe(ENDED_TEXT);
+  it("period end equal to now returns the text without an access date", () => {
+    expect(cancelSuccessDescription(NOW.toISOString(), NOW)).toBe(NOT_RENEWED_TEXT);
   });
 
-  it("period end in the past returns the ended-access text", () => {
+  it("period end in the past returns the text without an access date", () => {
     expect(
       cancelSuccessDescription("2026-10-19T12:00:00.000Z", NOW),
-    ).toBe(ENDED_TEXT);
+    ).toBe(NOT_RENEWED_TEXT);
   });
 
-  it("null period end returns the ended-access text", () => {
-    expect(cancelSuccessDescription(null, NOW)).toBe(ENDED_TEXT);
+  it("null period end returns the text without an access date", () => {
+    expect(cancelSuccessDescription(null, NOW)).toBe(NOT_RENEWED_TEXT);
   });
 
-  it("undefined period end returns the ended-access text", () => {
-    expect(cancelSuccessDescription(undefined, NOW)).toBe(ENDED_TEXT);
+  it("undefined period end returns the text without an access date", () => {
+    expect(cancelSuccessDescription(undefined, NOW)).toBe(NOT_RENEWED_TEXT);
   });
 
-  it("empty string period end returns the ended-access text", () => {
-    expect(cancelSuccessDescription("", NOW)).toBe(ENDED_TEXT);
+  it("empty string period end returns the text without an access date", () => {
+    expect(cancelSuccessDescription("", NOW)).toBe(NOT_RENEWED_TEXT);
   });
 
-  it("invalid date period end returns the ended-access text", () => {
-    expect(cancelSuccessDescription("not-a-date", NOW)).toBe(ENDED_TEXT);
+  it("invalid date period end returns the text without an access date", () => {
+    expect(cancelSuccessDescription("not-a-date", NOW)).toBe(NOT_RENEWED_TEXT);
   });
 });
