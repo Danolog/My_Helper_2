@@ -885,4 +885,40 @@ describe("logger — redakcja przy serializacji, wpis zastępczy, logger nie rzu
     logger.info("x", { emailLinks: [new URL("mailto:" + EMAIL)] });
     expect(logSpy).toHaveBeenCalledWith("[INFO]", "x", { emailLinks: "[redacted]" });
   });
+
+  it("obiekt String i obiekt Number pod kluczem z fragmentem → [redacted]", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { clientEmail: new String(EMAIL), guestPhone: new Number(48500100200) });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain(EMAIL);
+    expect(raw).not.toContain("48500100200");
+    const parsed = JSON.parse(raw);
+    expect(parsed.clientEmail).toBe("[redacted]");
+    expect(parsed.guestPhone).toBe("[redacted]");
+  });
+
+  it("obiekt String pod kluczem z fragmentem w instancji klasy → [redacted]", async () => {
+    class Adresat {
+      clientEmail = new String(EMAIL);
+    }
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { adresat: new Adresat() });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain(EMAIL);
+    expect(JSON.parse(raw).adresat).toEqual({ clientEmail: "[redacted]" });
+  });
+
+  it("tryb deweloperski: obiekt String pod kluczem z fragmentem → [redacted]", async () => {
+    const logger = await importLoggerWithEnv("development");
+    logger.info("x", { clientEmail: new String(EMAIL) });
+    expect(logSpy).toHaveBeenCalledWith("[INFO]", "x", { clientEmail: "[redacted]" });
+  });
+
+  it("licznik w obiekcie Number pod kluczem z fragmentem zostaje liczbą", async () => {
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { emailCount: new Number(3) });
+    expect(JSON.parse(logSpy.mock.calls[0]![0] as string).emailCount).toBe(3);
+  });
 });

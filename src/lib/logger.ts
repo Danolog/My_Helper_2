@@ -64,7 +64,8 @@ export const PII_LOG_KEYS: readonly string[] = [
 /**
  * Fragmenty nazw kluczy kontaktowych: klucz, którego nazwa zawiera fragment
  * (bez wielkości liter, np. `guestPhone`, `clientEmail`), ma zamienianą na
- * `[redacted]` wartość: napis (także `URL`), liczbę całkowitą o co najmniej 7 cyfrach albo
+ * `[redacted]` wartość: napis (także `URL` i obiekt `String`), liczbę całkowitą
+ * (także obiekt `Number`) o co najmniej 7 cyfrach albo
  * `bigint` (numer telefonu zapisany liczbą) oraz tablicę, w której choć jeden
  * element jest napisem, `URL` albo taką liczbą, także w tablicy zagnieżdżonej (bez
  * wchodzenia w obiekty) — cała tablica. Pozostałe wartości
@@ -85,8 +86,9 @@ const PII_KEY_SET = new Set(PII_LOG_KEYS.map((k) => k.toLowerCase()));
 const PHONE_LIKE_NUMBER_MIN = 1_000_000;
 
 function isContactScalar(value: unknown): boolean {
-  if (typeof value === "string" || typeof value === "bigint" || value instanceof URL) return true;
-  return typeof value === "number" && Number.isInteger(value) && Math.abs(value) >= PHONE_LIKE_NUMBER_MIN;
+  const v = value instanceof String || value instanceof Number ? value.valueOf() : value;
+  if (typeof v === "string" || typeof v === "bigint" || v instanceof URL) return true;
+  return typeof v === "number" && Number.isInteger(v) && Math.abs(v) >= PHONE_LIKE_NUMBER_MIN;
 }
 
 /** Granica zagnieżdżenia — głębiej logujemy znacznik, nie wartość. */
@@ -165,7 +167,7 @@ export function redactLogContext(value: unknown, depth = 0, seen: WeakSet<object
  * `[redacted]`; `bigint` → napis dziesiętny.
  * Dla wyniku `redactLogContext` na zwykłych obiektach replacer może jedynie
  * zredagować więcej: tablicę pod kluczem z fragmentem, w której pierwsza
- * linia zostawiła napis (znacznik cyklu, znacznik głębokości albo adres z `URL`).
+ * linia zostawiła napis (znacznik cyklu albo znacznik głębokości).
  */
 function logReplacer(this: unknown, key: string, value: unknown): unknown {
   const source = (this as Record<string, unknown>)[key];
