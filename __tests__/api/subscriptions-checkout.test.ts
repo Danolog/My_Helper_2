@@ -809,4 +809,78 @@ describe("POST /api/subscriptions/checkout", () => {
       });
     });
   });
+
+  // Identyfikatory cen Stripe z konfiguracji: `isStripePricesConfigured` (atrapa
+  // modułu Stripe) zwraca true, a identyfikator planu trasa czyta ze zmiennych
+  // STRIPE_PRICE_BASIC / STRIPE_PRICE_PRO (ustawione na czas przypadku).
+  describe("(h) cena z konfiguracji Stripe", () => {
+    const NOW = new Date("2026-11-19T10:00:00.000Z");
+    const EXPIRES_AT = 1795084500;
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+      vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.example.test");
+      vi.stubEnv("STRIPE_PRICE_BASIC", "price_test_basic");
+      vi.stubEnv("STRIPE_PRICE_PRO", "price_test_pro");
+      mockGetStripe.mockReturnValue(stripeClient());
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    });
+
+    // Ta sama trasa dwa razy: z ceną z konfiguracji i z ceną tworzoną z planu.
+    async function sessionParamsWithAndWithoutConfiguredPrice(plan: typeof PLAN_BASIC, slug: "basic" | "pro") {
+      mockIsStripePricesConfigured.mockReturnValue(true);
+      selectQueue.push([plan], []);
+      expect((await POST(checkoutRequest(slug))).status).toBe(200);
+
+      mockIsStripePricesConfigured.mockReturnValue(false);
+      selectQueue.push([plan], []);
+      expect((await POST(checkoutRequest(slug))).status).toBe(200);
+
+      expect(mockSessionsCreate).toHaveBeenCalledTimes(2);
+      return {
+        configured: mockSessionsCreate.mock.calls[0]![0],
+        adHoc: mockSessionsCreate.mock.calls[1]![0],
+      };
+    }
+
+    function expectSharedParams(params: Record<string, unknown>, plan: typeof PLAN_BASIC) {
+      expect(params.mode).toBe("subscription");
+      expect(params.success_url).toBe(
+        "https://app.example.test/dashboard/subscription/success?session_id={CHECKOUT_SESSION_ID}",
+      );
+      expect(params.cancel_url).toBe("https://app.example.test/pricing");
+      expect(params.customer_email).toBe("wlasciciel@test.pl");
+      expect(params.metadata).toEqual({
+        salonId: "salon-1",
+        planId: plan.id,
+        planSlug: plan.slug,
+        userId: "user-1",
+      });
+      expect(Number.isInteger(params.expires_at)).toBe(true);
+      expect(params.expires_at).toBe(EXPIRES_AT);
+    }
+
+    it.each([
+      ["basic", PLAN_BASIC, "price_test_basic"],
+      ["pro", PLAN_PRO, "price_test_pro"],
+    ] as const)(
+      "plan %s: line_items = [{ price: identyfikator ceny planu z konfiguracji, quantity: 1 }] bez price_data; pozostałe parametry sesji takie jak przy cenie tworzonej z planu",
+      async (slug, plan, priceId) => {
+        const { configured, adHoc } = await sessionParamsWithAndWithoutConfiguredPrice(plan, slug);
+
+        expect(configured.line_items).toEqual([{ price: priceId, quantity: 1 }]);
+        expect(configured.line_items[0]).not.toHaveProperty("price_data");
+        expect(adHoc.line_items[0]).toHaveProperty("price_data");
+        expect(adHoc.line_items[0]).not.toHaveProperty("price");
+
+        expectSharedParams(configured, plan);
+        expectSharedParams(adHoc, plan);
+      },
+    );
+  });
 });

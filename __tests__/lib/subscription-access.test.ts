@@ -9,7 +9,10 @@ import { describe, expect, it } from "vitest";
 import {
   PAST_DUE_GRACE_DAYS,
   SALON_ACCESS_UNAVAILABLE,
+  purchaseBlock,
   resolveSalonAccess,
+  toSalonPurchaseAccessRow,
+  type SalonPurchaseAccessRow,
   type SalonSubscriptionAccessRow,
 } from "@/lib/subscription-predicates";
 
@@ -378,5 +381,166 @@ describe("resolveSalonAccess — wybór wiersza", () => {
         until: at(5 * DAY),
       });
     }
+  });
+});
+
+describe("purchaseBlock — termin odmowy nowego zakupu", () => {
+  // NOW = 2026-11-15T12:00:00.000Z
+  const PERIOD_END_FUTURE = new Date("2026-11-25T12:00:00.000Z");
+  const PERIOD_END_PAST = new Date("2026-11-14T12:00:00.000Z");
+  // past_due: koniec okresu 3 dni temu, łaska 7 dni -> koniec łaski za 4 dni.
+  const PAST_DUE_PERIOD_END = new Date("2026-11-12T12:00:00.000Z");
+  const PAST_DUE_GRACE_END = new Date("2026-11-19T12:00:00.000Z");
+  // past_due: koniec okresu 8 dni temu -> łaska skończyła się wczoraj.
+  const PAST_DUE_PERIOD_END_OLD = new Date("2026-11-07T12:00:00.000Z");
+  const REAL_ID = "sub_test_1";
+
+  function purchaseRow(
+    status: string,
+    stripeSubscriptionId: string | null,
+    dates: { trialEndsAt?: Date | null; currentPeriodEnd?: Date | null; createdAt?: Date } = {}
+  ): SalonPurchaseAccessRow {
+    return { ...row(status, dates), stripeSubscriptionId };
+  }
+
+  it("canceled z prawdziwym identyfikatorem Stripe, koniec okresu w przyszłości -> { canceled, until = koniec okresu }", () => {
+    expect(purchaseBlock([purchaseRow("canceled", REAL_ID, { currentPeriodEnd: PERIOD_END_FUTURE })], NOW)).toEqual({
+      state: "canceled",
+      until: new Date("2026-11-25T12:00:00.000Z"),
+    });
+  });
+
+  it("past_due w łasce z prawdziwym identyfikatorem Stripe -> { past_due, until = koniec okresu + 7 dni }", () => {
+    expect(purchaseBlock([purchaseRow("past_due", REAL_ID, { currentPeriodEnd: PAST_DUE_PERIOD_END })], NOW)).toEqual({
+      state: "past_due",
+      until: PAST_DUE_GRACE_END,
+    });
+  });
+
+  it("canceled z prawdziwym identyfikatorem Stripe po końcu okresu -> null", () => {
+    expect(purchaseBlock([purchaseRow("canceled", REAL_ID, { currentPeriodEnd: PERIOD_END_PAST })], NOW)).toBeNull();
+  });
+
+  it("past_due z prawdziwym identyfikatorem Stripe po łasce -> null", () => {
+    expect(
+      purchaseBlock([purchaseRow("past_due", REAL_ID, { currentPeriodEnd: PAST_DUE_PERIOD_END_OLD })], NOW)
+    ).toBeNull();
+  });
+
+  it.each([
+    ["null", null],
+    ["sim_sub_test_1", "sim_sub_test_1"],
+  ])("canceled w okresie z identyfikatorem %s -> null", (_n, id) => {
+    expect(purchaseBlock([purchaseRow("canceled", id, { currentPeriodEnd: PERIOD_END_FUTURE })], NOW)).toBeNull();
+  });
+
+  it("past_due w łasce bez identyfikatora Stripe (null) -> null", () => {
+    expect(purchaseBlock([purchaseRow("past_due", null, { currentPeriodEnd: PAST_DUE_PERIOD_END })], NOW)).toBeNull();
+  });
+
+  it("active z prawdziwym identyfikatorem Stripe i końcem okresu w przyszłości -> null", () => {
+    expect(purchaseBlock([purchaseRow("active", REAL_ID, { currentPeriodEnd: PERIOD_END_FUTURE })], NOW)).toBeNull();
+  });
+
+  it("trialing w terminie z prawdziwym identyfikatorem Stripe -> null", () => {
+    expect(purchaseBlock([purchaseRow("trialing", REAL_ID, { trialEndsAt: PERIOD_END_FUTURE })], NOW)).toBeNull();
+  });
+
+  it("brak wierszy -> null", () => {
+    expect(purchaseBlock([], NOW)).toBeNull();
+  });
+
+  it.each([
+    ["null", null],
+    ["sim_sub_test_2", "sim_sub_test_2"],
+  ])(
+    "dostęp z nowszego canceled w okresie z identyfikatorem %s, starszy niewybrany canceled w okresie ma prawdziwy -> null",
+    (_n, id) => {
+      const newer = purchaseRow("canceled", id, {
+        currentPeriodEnd: PERIOD_END_FUTURE,
+        createdAt: new Date("2026-11-01T12:00:00.000Z"),
+      });
+      const older = purchaseRow("canceled", REAL_ID, {
+        currentPeriodEnd: PERIOD_END_FUTURE,
+        createdAt: new Date("2026-09-01T12:00:00.000Z"),
+      });
+      expect(purchaseBlock([newer, older], NOW)).toBeNull();
+      expect(purchaseBlock([older, newer], NOW)).toBeNull();
+    }
+  );
+
+  it("dostęp z nowszego canceled w okresie z prawdziwym identyfikatorem, starszy canceled bez identyfikatora -> { canceled, until z nowszego }", () => {
+    const newer = purchaseRow("canceled", REAL_ID, {
+      currentPeriodEnd: PERIOD_END_FUTURE,
+      createdAt: new Date("2026-11-01T12:00:00.000Z"),
+    });
+    const older = purchaseRow("canceled", null, {
+      currentPeriodEnd: new Date("2026-11-20T12:00:00.000Z"),
+      createdAt: new Date("2026-09-01T12:00:00.000Z"),
+    });
+    expect(purchaseBlock([older, newer], NOW)).toEqual({
+      state: "canceled",
+      until: new Date("2026-11-25T12:00:00.000Z"),
+    });
+  });
+
+  it("granica: canceled z końcem okresu równym chwili now -> null (resolveSalonAccess daje tylko odczyt)", () => {
+    expect(
+      purchaseBlock([purchaseRow("canceled", REAL_ID, { currentPeriodEnd: new Date("2026-11-15T12:00:00.000Z") })], NOW)
+    ).toBeNull();
+  });
+
+  it("granica: canceled z końcem okresu 1 ms po chwili now -> { canceled, until = koniec okresu }", () => {
+    expect(
+      purchaseBlock([purchaseRow("canceled", REAL_ID, { currentPeriodEnd: new Date("2026-11-15T12:00:00.001Z") })], NOW)
+    ).toEqual({ state: "canceled", until: new Date("2026-11-15T12:00:00.001Z") });
+  });
+
+  it("granica: past_due z końcem łaski równym chwili now -> null (resolveSalonAccess daje tylko odczyt)", () => {
+    // koniec okresu 2026-11-08T12:00Z + 7 dni = 2026-11-15T12:00Z = NOW
+    expect(
+      purchaseBlock([purchaseRow("past_due", REAL_ID, { currentPeriodEnd: new Date("2026-11-08T12:00:00.000Z") })], NOW)
+    ).toBeNull();
+  });
+});
+
+describe("toSalonPurchaseAccessRow — mapowanie wiersza subskrypcji", () => {
+  it("przenosi status, daty, identyfikator Stripe i slug planu; inne pola wiersza pomija", () => {
+    const source = {
+      id: "sub-row-1",
+      salonId: "salon-test-1",
+      status: "canceled",
+      trialEndsAt: new Date("2026-10-01T00:00:00.000Z"),
+      currentPeriodStart: new Date("2026-10-15T00:00:00.000Z"),
+      currentPeriodEnd: new Date("2026-11-15T00:00:00.000Z"),
+      createdAt: new Date("2026-09-17T00:00:00.000Z"),
+      stripeSubscriptionId: "sub_test_1",
+      stripeCustomerId: "cus_test_1",
+    };
+    expect(toSalonPurchaseAccessRow(source, "pro")).toEqual({
+      status: "canceled",
+      planSlug: "pro",
+      trialEndsAt: new Date("2026-10-01T00:00:00.000Z"),
+      currentPeriodStart: new Date("2026-10-15T00:00:00.000Z"),
+      currentPeriodEnd: new Date("2026-11-15T00:00:00.000Z"),
+      createdAt: new Date("2026-09-17T00:00:00.000Z"),
+      stripeSubscriptionId: "sub_test_1",
+    });
+  });
+
+  it("identyfikator Stripe null zostaje null", () => {
+    const mapped = toSalonPurchaseAccessRow(
+      {
+        status: "trialing",
+        trialEndsAt: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        createdAt: new Date("2026-09-17T00:00:00.000Z"),
+        stripeSubscriptionId: null,
+      },
+      "basic"
+    );
+    expect(mapped.stripeSubscriptionId).toBeNull();
+    expect(mapped.planSlug).toBe("basic");
   });
 });

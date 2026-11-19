@@ -12,15 +12,11 @@ import { forSalon } from "@/lib/server/repository";
 import { getStripe, isStripePricesConfigured } from "@/lib/stripe";
 import {
   CURRENT_LOCAL_STATUSES,
-  hasRealStripeSubscription,
   isCurrentLocalStatus,
   isCurrentPaidStripeRow,
-  pickSalonAccessRow,
-  resolveSalonAccess,
-  type SalonSubscriptionAccessRow,
+  purchaseBlock,
+  toSalonPurchaseAccessRow,
 } from "@/lib/subscription-predicates";
-
-type AccessRow = SalonSubscriptionAccessRow & { stripeSubscriptionId: string | null };
 
 const warsawDate = new Intl.DateTimeFormat("pl-PL", {
   timeZone: "Europe/Warsaw",
@@ -177,8 +173,9 @@ export async function POST(request: Request) {
     // pełny dostęp z wiersza canceled/past_due z prawdziwą subskrypcją Stripe
     // znaczy, że nowy Checkout założyłby drugą subskrypcję w Stripe, gdy
     // dostęp z pierwszej jeszcze trwa (canceled — druga opłata za te same
-    // dni; past_due — stara subskrypcja w Stripe nie jest zakończona). Odmawiamy do
-    // `access.until`, bez wywołania Stripe i bez zapisu.
+    // dni; past_due — stara subskrypcja w Stripe nie jest zakończona). Warunek
+    // i termin liczy `purchaseBlock`; odmawiamy do `access.until`, bez
+    // wywołania Stripe i bez zapisu.
     const accessRows = await forSalon(salonId).raw(async (tx) => {
       const all = await tx
         .select({
@@ -192,35 +189,20 @@ export async function POST(request: Request) {
         )
         .where(eq(salonSubscriptions.salonId, salonId))
         .orderBy(desc(salonSubscriptions.createdAt), desc(salonSubscriptions.id));
-      return all.map(
-        ({ subscription, plan: rowPlan }): AccessRow => ({
-          status: subscription.status,
-          planSlug: rowPlan.slug,
-          trialEndsAt: subscription.trialEndsAt,
-          currentPeriodStart: subscription.currentPeriodStart,
-          currentPeriodEnd: subscription.currentPeriodEnd,
-          createdAt: subscription.createdAt,
-          stripeSubscriptionId: subscription.stripeSubscriptionId,
-        }),
+      return all.map(({ subscription, plan: rowPlan }) =>
+        toSalonPurchaseAccessRow(subscription, rowPlan.slug),
       );
     });
-    const picked = pickSalonAccessRow(accessRows);
-    const access = resolveSalonAccess(accessRows, new Date());
-    if (
-      access.mode === "full" &&
-      (access.state === "canceled" || access.state === "past_due") &&
-      access.until &&
-      picked &&
-      hasRealStripeSubscription(picked.stripeSubscriptionId)
-    ) {
-      const untilText = warsawDate.format(access.until);
+    const block = purchaseBlock(accessRows, new Date());
+    if (block) {
+      const untilText = warsawDate.format(block.until);
       return NextResponse.json(
         {
           success: false,
           code: "PURCHASE_BLOCKED_UNTIL_PERIOD_END",
-          until: access.until.toISOString(),
+          until: block.until.toISOString(),
           error:
-            access.state === "canceled"
+            block.state === "canceled"
               ? `Subskrypcja jest anulowana, ale dostęp trwa do ${untilText}. Nowy zakup będzie możliwy po tym terminie.`
               : `Płatność za subskrypcję jest zaległa. Nowy zakup będzie możliwy po ${untilText}. W sprawie zaległej płatności skontaktuj się z obsługą.`,
         },
