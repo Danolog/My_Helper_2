@@ -221,7 +221,7 @@ describe("kontrakt: okres rozliczeniowy (currentPeriodStart/End) zapisują tylko
     expect(badValues).toEqual([]);
   });
 
-  it("paidPeriodStartSql i paidPeriodEndSql zdefiniowane dokładnie raz w src/, w src/lib/subscription-paid-period.ts; ciało paidPeriodEndSql zawiera greatest(", () => {
+  it("paidPeriodStartSql i paidPeriodEndSql: dokładnie jedna deklaracja function w src/, w src/lib/subscription-paid-period.ts; ciało paidPeriodEndSql zawiera greatest(", () => {
     const declarations = (name: string) =>
       sourceFiles(SRC).flatMap((path) =>
         [...readSource(path).matchAll(new RegExp(`\\bfunction ${name}\\b`, "g"))].map(() => relative(ROOT, path))
