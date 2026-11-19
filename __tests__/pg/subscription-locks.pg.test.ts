@@ -4,8 +4,8 @@
  *
  * (a) Ścieżka produkcyjna: prawdziwe `confirmSubscriptionCheckout` i
  *     prawdziwe handlery webhooka (`POST /api/stripe/webhook`) na prawdziwej
- *     bazie, z prawdziwym `pg_advisory_xact_lock`. Atrapa dotyczy tylko Stripe
- *     (i weryfikacji podpisu zdarzenia).
+ *     bazie, z prawdziwym `pg_advisory_xact_lock`. Atrapami są Stripe (z weryfikacją
+ *     podpisu zdarzenia), logger, sesja i lista `PLANS_ON_SALE`.
  * (b) Czekanie drugiego połączenia jest dowiedzione przez `pg_locks`
  *     (`granted = false` w przestrzeni blokady), nie przez `sleep`: pierwszy
  *     uczestnik trzyma blokadę na barierze (odczyt Stripe albo jawna
@@ -22,7 +22,7 @@
  *     bez potwierdzenia, indeksy unikalne 0008 i równoległa rejestracja.
  * (d) Baza z `INTEGRATION_POSTGRES_URL` + ochrona hosta z seeda (#56)
  *     (`pg-harness.ts`); przy `CI=true` bez adresu — błąd, nie skip. Własne
- *     wiersze (user, salon, plan) z unikalnymi id, sprzątane w `afterAll`.
+ *     wiersze (user, salon, plan) z unikalnymi id, sprzątane w `afterAll` albo w `finally` przypadku, który je wstawia.
  *
  * Uruchomienie: `INTEGRATION_POSTGRES_URL=postgresql://…@localhost:5432/pos_dev pnpm test:pg`
  * (baza z zastosowanymi migracjami; test nie uruchamia `db:*` ani seeda).
