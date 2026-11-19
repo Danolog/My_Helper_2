@@ -1,6 +1,7 @@
 /**
- * Cena planu: wejściem jest cena netto planu w złotych — napis
- * (np. "49.00") albo liczba (np. 49). Rachunek idzie na groszach jako
+ * Cena planu: netGrosze, grossGrosze, planPriceText i planGrossText przyjmują
+ * cenę netto planu w złotych — napis (np. "49.00") albo liczbę (np. 49);
+ * vatSplitFromGross i formatZl przyjmują kwotę w groszach. Rachunek idzie na groszach jako
  * liczbach całkowitych: kwota netto powstaje z części całkowitej
  * i ułamkowej napisu. Brutto i netto z podziału brutto to Math.floor
  * z ilorazu, w którego liczniku dodana jest połowa dzielnika (w podziale
