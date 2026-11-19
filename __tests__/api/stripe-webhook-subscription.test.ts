@@ -529,3 +529,144 @@ describe("webhook — status z bieżącego stanu Stripe, nie ze zdarzenia; cance
     expect(f.committed).toEqual([]);
   });
 });
+
+describe("webhook — kwota i waluta wpisu płatności z faktury Stripe", () => {
+  const LOCAL = {
+    id: "sub-local",
+    salonId: "salon-1",
+    planId: PLAN_PRO.id,
+    status: "active",
+    stripeSubscriptionId: "sub_1",
+    currentPeriodStart: new Date(PERIOD_START * 1000),
+    currentPeriodEnd: new Date(PERIOD_END * 1000),
+    canceledAt: null,
+    scheduledPlanId: null,
+    scheduledChangeAt: null,
+  };
+  const NEXT_LINE = { period: { start: PERIOD_END, end: PERIOD_END + 30 * 86_400 } };
+  const invoicePaid = (extra: Record<string, unknown>) => ({
+    id: "in_amount",
+    subscription: "sub_1",
+    payment_intent: "pi_amount",
+    billing_reason: "subscription_cycle",
+    lines: { data: [NEXT_LINE], has_more: false },
+    ...extra,
+  });
+  const invoiceFailed = (extra: Record<string, unknown>) => ({
+    id: "in_failed",
+    subscription: "sub_1",
+    payment_intent: "pi_failed",
+    billing_reason: "subscription_cycle",
+    ...extra,
+  });
+  const subWrites = () => f.committed.filter((w) => w.table === "salon_subscriptions");
+  const payments = () => f.committed.filter((w) => w.table === "subscription_payments");
+
+  beforeEach(() => {
+    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "active" });
+    // Plan salonu w bazie (149.00) — kwota wpisu nie może z niego pochodzić.
+    f.selects.push([LOCAL], [PLAN_PRO]);
+  });
+
+  it("invoice.paid z rabatem: wpis ma amount_paid (119.20), nie cenę planu (149.00) ani total faktury", async () => {
+    expect(
+      (await deliver(invoicePaid({ amount_paid: 11920, total: 14900, currency: "pln" }), "invoice.paid")).status
+    ).toBe(200);
+    expect(payments()).toEqual([
+      expect.objectContaining({
+        op: "insert",
+        values: expect.objectContaining({ amount: "119.20", currency: "PLN", status: "succeeded" }),
+      }),
+    ]);
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('invoice.paid w "eur": wpis z walutą "EUR" i warn o walucie innej niż PLN', async () => {
+    expect((await deliver(invoicePaid({ amount_paid: 3500, currency: "eur" }), "invoice.paid")).status).toBe(200);
+    expect(payments()).toEqual([
+      expect.objectContaining({ values: expect.objectContaining({ amount: "35.00", currency: "EUR" }) }),
+    ]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("currency other than PLN"),
+      expect.objectContaining({ eventId: "evt_1", invoiceId: "in_amount", currency: "EUR" })
+    );
+  });
+
+  it('invoice.paid 0 zł: wpis succeeded "0.00", zapis wiersza z polami okresu', async () => {
+    expect((await deliver(invoicePaid({ amount_paid: 0, currency: "pln" }), "invoice.paid")).status).toBe(200);
+    expect(payments()).toEqual([
+      expect.objectContaining({
+        values: expect.objectContaining({ amount: "0.00", currency: "PLN", status: "succeeded" }),
+      }),
+    ]);
+    expect(subWrites()[0]?.values).toHaveProperty("currentPeriodEnd");
+    expect(subWrites()[0]?.values).toHaveProperty("currentPeriodStart");
+  });
+
+  it("invoice.paid bez amount_paid: zapis wiersza z końcem okresu, brak wpisu płatności, error z eventId, invoiceId, salonId, subscriptionId", async () => {
+    expect((await deliver(invoicePaid({ currency: "pln" }), "invoice.paid")).status).toBe(200);
+    expect(subWrites()).toHaveLength(1);
+    expect(subWrites()[0]?.values).toEqual(expect.objectContaining({ status: "active" }));
+    expect(subWrites()[0]?.values).toHaveProperty("currentPeriodEnd");
+    expect(payments()).toEqual([]);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        eventId: "evt_1",
+        invoiceId: "in_amount",
+        salonId: "salon-1",
+        subscriptionId: "sub-local",
+      })
+    );
+  });
+
+  it('invoice.payment_failed: wpis failed z amount_remaining, nie z ceny planu ani "0.00"', async () => {
+    expect(
+      (
+        await deliver(
+          invoiceFailed({ amount_paid: 10000, amount_remaining: 4900, total: 14900, currency: "pln" }),
+          "invoice.payment_failed"
+        )
+      ).status
+    ).toBe(200);
+    expect(payments()).toEqual([
+      expect.objectContaining({
+        op: "insert",
+        values: expect.objectContaining({ amount: "49.00", currency: "PLN", status: "failed" }),
+      }),
+    ]);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('invoice.payment_failed w "eur": wpis failed z walutą "EUR" i warn o walucie innej niż PLN', async () => {
+    expect(
+      (await deliver(invoiceFailed({ amount_remaining: 3500, currency: "eur" }), "invoice.payment_failed")).status
+    ).toBe(200);
+    expect(payments()).toEqual([
+      expect.objectContaining({
+        values: expect.objectContaining({ amount: "35.00", currency: "EUR", status: "failed" }),
+      }),
+    ]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("currency other than PLN"),
+      expect.objectContaining({ eventId: "evt_1", invoiceId: "in_failed", currency: "EUR" })
+    );
+  });
+
+  it("invoice.payment_failed bez amount_remaining: stan zapisany, brak wpisu płatności, error z eventId, invoiceId, salonId, subscriptionId", async () => {
+    retrieveSubscription.mockResolvedValue({ ...STRIPE_SUB, status: "past_due" });
+    expect((await deliver(invoiceFailed({ currency: "pln" }), "invoice.payment_failed")).status).toBe(200);
+    expect(subWrites().map((w) => w.values.status)).toEqual(["past_due"]);
+    expect(payments()).toEqual([]);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        eventId: "evt_1",
+        invoiceId: "in_failed",
+        salonId: "salon-1",
+        subscriptionId: "sub-local",
+      })
+    );
+  });
+});
