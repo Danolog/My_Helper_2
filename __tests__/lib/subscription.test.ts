@@ -53,6 +53,7 @@ vi.mock("drizzle-orm", () => ({
 // Mock schema
 vi.mock("@/lib/schema", () => ({
   salonSubscriptions: {
+    id: "salonSubscriptions.id",
     salonId: "salonSubscriptions.salonId",
     planId: "salonSubscriptions.planId",
     status: "salonSubscriptions.status",
@@ -163,7 +164,7 @@ describe("getCurrentPlan", () => {
     expect(plan).toEqual({ slug: "pro", name: "Pro", status: "trialing" });
   });
 
-  it("zapytanie pobiera daty i wszystkie wiersze salonu od najnowszego (desc createdAt)", async () => {
+  it("zapytanie pobiera daty i wszystkie wiersze salonu od najnowszego (desc createdAt, potem desc id)", async () => {
     mockDbOrderBy.mockResolvedValue([]);
     await getCurrentPlan("salon-123");
     expect(mockDbSelect).toHaveBeenCalledWith(
@@ -175,7 +176,10 @@ describe("getCurrentPlan", () => {
         createdAt: "salonSubscriptions.createdAt",
       }),
     );
-    expect(mockDbOrderBy).toHaveBeenCalledWith({ type: "desc", col: "salonSubscriptions.createdAt" });
+    expect(mockDbOrderBy).toHaveBeenCalledWith(
+      { type: "desc", col: "salonSubscriptions.createdAt" },
+      { type: "desc", col: "salonSubscriptions.id" },
+    );
   });
 
   it("zapytanie filtruje tylko po salonie (bez filtra statusu)", async () => {
@@ -265,6 +269,15 @@ describe("getCurrentPlan", () => {
       row("active", "pro", { currentPeriodEnd: at(20 * DAY), createdAt: at(-90 * DAY) }),
     ]);
     expect(await getCurrentPlan("salon-123")).toEqual({ slug: "pro", name: "Pro", status: "active" });
+  });
+
+  it("dwa wiersze past_due w łasce z tym samym createdAt -> plan z pierwszego wiersza zwróconego przez zapytanie", async () => {
+    const dates = { currentPeriodStart: at(-3 * DAY), currentPeriodEnd: at(27 * DAY), createdAt: at(-5 * DAY) };
+    mockDbOrderBy.mockResolvedValue([row("past_due", "pro", dates), row("past_due", "basic", dates)]);
+    expect(await getCurrentPlan("salon-123")).toEqual({ slug: "pro", name: "Pro", status: "past_due" });
+
+    mockDbOrderBy.mockResolvedValue([row("past_due", "basic", dates), row("past_due", "pro", dates)]);
+    expect(await getCurrentPlan("salon-123")).toEqual({ slug: "basic", name: "Basic", status: "past_due" });
   });
 
   it("żadna ścieżka bez pełnego dostępu nie zwraca statusu active", async () => {

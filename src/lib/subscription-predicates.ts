@@ -89,8 +89,9 @@ function full(state: SalonAccessState, planSlug: string, until: Date | null): Sa
 
 /**
  * Wiersz, z którego liczony jest dostęp: bieżący (`trialing`/`active`, co
- * najwyżej jeden), a bez niego najnowszy po `createdAt`. Kolejność wejścia
- * nie ma znaczenia.
+ * najwyżej jeden), a bez niego najnowszy po `createdAt`. Przy tym samym
+ * `createdAt` wygrywa pierwszy wiersz wejścia (dlatego odczyty sortują także
+ * po `id`).
  */
 export function pickSalonAccessRow<R extends SalonSubscriptionAccessRow>(rows: readonly R[]): R | undefined {
   const current = rows.find((r) => isCurrentLocalStatus(r.status));

@@ -25,6 +25,7 @@ type AccessRead = { access: SalonAccess; row: AccessRow | undefined };
 
 /**
  * Jeden odczyt: wszystkie wiersze subskrypcji salonu z planem, od najnowszego.
+ * Przy tym samym `createdAt` kolejność ustala `id`, malejąco.
  * Dostęp liczy `resolveSalonAccess` w chwili odczytu. Błąd odczytu →
  * `unavailable` (tylko odczyt), bez wyjątku.
  */
@@ -43,7 +44,7 @@ async function readSalonAccess(salonId: string): Promise<AccessRead> {
       .from(salonSubscriptions)
       .innerJoin(subscriptionPlans, eq(salonSubscriptions.planId, subscriptionPlans.id))
       .where(eq(salonSubscriptions.salonId, salonId))
-      .orderBy(desc(salonSubscriptions.createdAt));
+      .orderBy(desc(salonSubscriptions.createdAt), desc(salonSubscriptions.id));
 
     const row = pickSalonAccessRow(rows);
     if (row?.status === "trialing" && !row.trialEndsAt) {
