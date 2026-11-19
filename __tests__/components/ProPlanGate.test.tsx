@@ -100,10 +100,10 @@ describe("ProPlanGate", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("does not render the word Pro, PLN, 149 or plan comparison text", () => {
-    const { container } = render(<ProPlanGate {...defaultProps} />);
+  it("renders no element whose text contains the word Pro, PLN, 149 or plan comparison", () => {
+    render(<ProPlanGate {...defaultProps} />);
 
-    expect(container.textContent).not.toMatch(/\bPro\b|PLN|149|Por[oó]wnaj/);
+    expect(screen.queryAllByText(/\bPro\b|PLN|149|Por[oó]wnaj/)).toHaveLength(0);
   });
 
   it("does not render benefits section when proBenefits is empty", () => {
