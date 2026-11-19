@@ -201,14 +201,16 @@ export default function PricingPage() {
                     </>
                   ) : (
                     <>
-                      Zacznij za darmo
+                      {session?.user ? "Wykup subskrypcje" : "Zacznij za darmo"}
                       <ArrowRight className="h-4 w-4 ml-2" />
                     </>
                   )}
                 </Button>
-                <p className="text-xs text-center text-muted-foreground mt-2">
-                  14 dni okresu probnego bez zobowiazan
-                </p>
+                {!session?.user && (
+                  <p className="text-xs text-center text-muted-foreground mt-2">
+                    14 dni okresu probnego bez zobowiazan
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -251,7 +253,7 @@ export default function PricingPage() {
               {checkoutLoading === SOLD_PLAN_SLUG ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : null}
-              Zacznij {TRIAL_DAYS} dni za darmo
+              {session?.user ? "Wykup subskrypcje" : `Zacznij ${TRIAL_DAYS} dni za darmo`}
             </Button>
           </div>
         </div>
