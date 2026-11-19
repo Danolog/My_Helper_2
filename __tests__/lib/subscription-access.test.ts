@@ -136,114 +136,171 @@ describe("resolveSalonAccess — active", () => {
   });
 });
 
-describe("resolveSalonAccess — past_due (łaska 7 dni od currentPeriodStart)", () => {
-  it("w łasce -> past_due, pełny dostęp do currentPeriodStart + 7 dni", () => {
-    const start = at(-3 * DAY);
+describe("resolveSalonAccess — past_due (łaska 7 dni od currentPeriodEnd)", () => {
+  const READ_ONLY = { state: "past_due", mode: "read_only", planSlug: null, until: null };
+
+  it("currentPeriodEnd w przyszłości -> past_due, pełny dostęp do currentPeriodEnd + 7 dni", () => {
+    const end = at(20 * DAY);
     expect(
-      resolveSalonAccess([row("past_due", { currentPeriodStart: start, currentPeriodEnd: at(27 * DAY) })], NOW)
+      resolveSalonAccess([row("past_due", { currentPeriodStart: at(-10 * DAY), currentPeriodEnd: end })], NOW)
     ).toEqual({
       state: "past_due",
       mode: "full",
       planSlug: "pro",
-      until: new Date(start.getTime() + GRACE),
+      until: new Date(end.getTime() + GRACE),
     });
   });
 
-  it("currentPeriodEnd za miesiąc, currentPeriodStart 8 dni temu -> tylko do odczytu", () => {
+  it("currentPeriodEnd 3 dni temu -> past_due, pełny dostęp do currentPeriodEnd + 7 dni", () => {
+    const end = at(-3 * DAY);
     expect(
-      resolveSalonAccess([row("past_due", { currentPeriodStart: at(-8 * DAY), currentPeriodEnd: at(30 * DAY) })], NOW)
+      resolveSalonAccess([row("past_due", { currentPeriodStart: at(-33 * DAY), currentPeriodEnd: end }, "basic")], NOW)
     ).toEqual({
       state: "past_due",
-      mode: "read_only",
-      planSlug: null,
-      until: null,
+      mode: "full",
+      planSlug: "basic",
+      until: new Date(end.getTime() + GRACE),
     });
   });
 
-  it("po łasce -> past_due, tylko do odczytu", () => {
-    expect(resolveSalonAccess([row("past_due", { currentPeriodStart: at(-8 * DAY) })], NOW)).toEqual({
-      state: "past_due",
-      mode: "read_only",
-      planSlug: null,
-      until: null,
-    });
-  });
-
-  it("bez currentPeriodStart, z currentPeriodEnd w przyszłości -> past_due, tylko do odczytu", () => {
+  it("currentPeriodEnd 8 dni temu -> past_due, tylko do odczytu", () => {
     expect(
-      resolveSalonAccess([row("past_due", { currentPeriodStart: null, currentPeriodEnd: at(20 * DAY) })], NOW)
-    ).toEqual({
-      state: "past_due",
-      mode: "read_only",
-      planSlug: null,
-      until: null,
-    });
+      resolveSalonAccess([row("past_due", { currentPeriodStart: at(-38 * DAY), currentPeriodEnd: at(-8 * DAY) })], NOW)
+    ).toEqual(READ_ONLY);
+  });
+
+  it("bez currentPeriodEnd, z currentPeriodStart wczoraj -> past_due, tylko do odczytu", () => {
+    expect(
+      resolveSalonAccess([row("past_due", { currentPeriodStart: at(-DAY), currentPeriodEnd: null })], NOW)
+    ).toEqual(READ_ONLY);
   });
 
   it("bez currentPeriodStart i bez currentPeriodEnd -> past_due, tylko do odczytu", () => {
-    expect(resolveSalonAccess([row("past_due", { currentPeriodStart: null, currentPeriodEnd: null })], NOW)).toEqual({
-      state: "past_due",
-      mode: "read_only",
-      planSlug: null,
-      until: null,
-    });
+    expect(resolveSalonAccess([row("past_due", { currentPeriodStart: null, currentPeriodEnd: null })], NOW)).toEqual(
+      READ_ONLY
+    );
   });
 
-  it("granica: teraz == currentPeriodStart + 7 dni -> tylko do odczytu", () => {
-    expect(
-      resolveSalonAccess([row("past_due", { currentPeriodStart: at(-GRACE), currentPeriodEnd: at(20 * DAY) })], NOW)
-    ).toMatchObject({
-      state: "past_due",
-      mode: "read_only",
-    });
+  it("granica: teraz == currentPeriodEnd + 7 dni -> tylko do odczytu", () => {
+    expect(resolveSalonAccess([row("past_due", { currentPeriodEnd: at(-GRACE) })], NOW)).toEqual(READ_ONLY);
   });
 
-  it("granica: teraz == currentPeriodStart + 7 dni - 1 ms -> pełny dostęp", () => {
-    expect(
-      resolveSalonAccess([row("past_due", { currentPeriodStart: at(-GRACE + 1), currentPeriodEnd: at(20 * DAY) })], NOW)
-    ).toMatchObject({
+  it("granica: teraz == currentPeriodEnd + 7 dni - 1 ms -> pełny dostęp do currentPeriodEnd + 7 dni", () => {
+    const end = at(-GRACE + 1);
+    expect(resolveSalonAccess([row("past_due", { currentPeriodEnd: end })], NOW)).toEqual({
       state: "past_due",
       mode: "full",
+      planSlug: "pro",
+      until: new Date(end.getTime() + GRACE),
     });
   });
 
-  it("granica: teraz == currentPeriodStart + 7 dni + 1 ms -> tylko do odczytu", () => {
+  it("granica: teraz == currentPeriodEnd + 7 dni + 1 ms -> tylko do odczytu", () => {
+    expect(resolveSalonAccess([row("past_due", { currentPeriodEnd: at(-GRACE - 1) })], NOW)).toEqual(READ_ONLY);
+  });
+
+  it("currentPeriodStart bez wpływu: start 8 dni temu, currentPeriodEnd w przyszłości -> pełny dostęp", () => {
+    const end = at(22 * DAY);
     expect(
-      resolveSalonAccess([row("past_due", { currentPeriodStart: at(-GRACE - 1), currentPeriodEnd: at(20 * DAY) })], NOW)
-    ).toMatchObject({
+      resolveSalonAccess([row("past_due", { currentPeriodStart: at(-8 * DAY), currentPeriodEnd: end })], NOW)
+    ).toEqual({
       state: "past_due",
-      mode: "read_only",
+      mode: "full",
+      planSlug: "pro",
+      until: new Date(end.getTime() + GRACE),
     });
+  });
+
+  it("currentPeriodStart bez wpływu: start wczoraj, currentPeriodEnd 8 dni temu -> tylko do odczytu", () => {
+    expect(
+      resolveSalonAccess([row("past_due", { currentPeriodStart: at(-DAY), currentPeriodEnd: at(-8 * DAY) })], NOW)
+    ).toEqual(READ_ONLY);
+  });
+
+  it("past_due z końcem okresu równym końcowi okresu próbnego 3 dni temu -> pełny dostęp do końca okresu + 7 dni", () => {
+    const end = at(-3 * DAY);
+    expect(
+      resolveSalonAccess(
+        [row("past_due", { trialEndsAt: end, currentPeriodStart: at(-17 * DAY), currentPeriodEnd: end })],
+        NOW
+      )
+    ).toEqual({
+      state: "past_due",
+      mode: "full",
+      planSlug: "pro",
+      until: new Date(end.getTime() + GRACE),
+    });
+  });
+
+  it("past_due z końcem okresu równym końcowi okresu próbnego 8 dni temu -> tylko do odczytu", () => {
+    const end = at(-8 * DAY);
+    expect(
+      resolveSalonAccess(
+        [row("past_due", { trialEndsAt: end, currentPeriodStart: at(-22 * DAY), currentPeriodEnd: end })],
+        NOW
+      )
+    ).toEqual(READ_ONLY);
   });
 });
 
-describe("resolveSalonAccess — canceled (zawsze tylko do odczytu)", () => {
-  it("currentPeriodEnd w przyszłości -> canceled, tylko do odczytu", () => {
+describe("resolveSalonAccess — canceled (pełny dostęp do currentPeriodEnd)", () => {
+  const READ_ONLY = { state: "canceled", mode: "read_only", planSlug: null, until: null };
+
+  it("currentPeriodEnd w przyszłości -> canceled, pełny dostęp z planem wiersza do currentPeriodEnd", () => {
+    const end = at(10 * DAY);
     expect(
-      resolveSalonAccess([row("canceled", { currentPeriodStart: at(-5 * DAY), currentPeriodEnd: at(10 * DAY) })], NOW)
+      resolveSalonAccess([row("canceled", { currentPeriodStart: at(-20 * DAY), currentPeriodEnd: end })], NOW)
     ).toEqual({
       state: "canceled",
-      mode: "read_only",
-      planSlug: null,
-      until: null,
+      mode: "full",
+      planSlug: "pro",
+      until: end,
     });
   });
 
   it("currentPeriodEnd w przeszłości -> canceled, tylko do odczytu", () => {
-    expect(resolveSalonAccess([row("canceled", { currentPeriodEnd: at(-DAY) })], NOW)).toEqual({
-      state: "canceled",
-      mode: "read_only",
-      planSlug: null,
-      until: null,
-    });
+    expect(resolveSalonAccess([row("canceled", { currentPeriodEnd: at(-DAY) })], NOW)).toEqual(READ_ONLY);
   });
 
   it("bez dat okresu -> canceled, tylko do odczytu", () => {
-    expect(resolveSalonAccess([row("canceled", { currentPeriodStart: null, currentPeriodEnd: null })], NOW)).toEqual({
+    expect(resolveSalonAccess([row("canceled", { currentPeriodStart: null, currentPeriodEnd: null })], NOW)).toEqual(
+      READ_ONLY
+    );
+  });
+
+  it("granica: currentPeriodEnd == teraz -> tylko do odczytu", () => {
+    expect(resolveSalonAccess([row("canceled", { currentPeriodEnd: at(0) })], NOW)).toEqual(READ_ONLY);
+  });
+
+  it("granica: currentPeriodEnd == teraz + 1 ms -> pełny dostęp do currentPeriodEnd", () => {
+    const end = at(1);
+    expect(resolveSalonAccess([row("canceled", { currentPeriodEnd: end }, "basic")], NOW)).toEqual({
       state: "canceled",
-      mode: "read_only",
-      planSlug: null,
-      until: null,
+      mode: "full",
+      planSlug: "basic",
+      until: end,
+    });
+  });
+
+  it("granica: currentPeriodEnd == teraz - 1 ms -> tylko do odczytu", () => {
+    expect(resolveSalonAccess([row("canceled", { currentPeriodEnd: at(-1) })], NOW)).toEqual(READ_ONLY);
+  });
+
+  it("trialEndsAt w przyszłości bez currentPeriodEnd -> tylko do odczytu", () => {
+    expect(resolveSalonAccess([row("canceled", { trialEndsAt: at(5 * DAY), currentPeriodEnd: null })], NOW)).toEqual(
+      READ_ONLY
+    );
+  });
+
+  it("bez currentPeriodStart, z currentPeriodEnd w przyszłości -> pełny dostęp do currentPeriodEnd", () => {
+    const end = at(3 * DAY);
+    expect(
+      resolveSalonAccess([row("canceled", { currentPeriodStart: null, currentPeriodEnd: end })], NOW)
+    ).toEqual({
+      state: "canceled",
+      mode: "full",
+      planSlug: "pro",
+      until: end,
     });
   });
 });
@@ -271,26 +328,39 @@ describe("resolveSalonAccess — wybór wiersza", () => {
     expect(resolveSalonAccess([current, newer], NOW)).toMatchObject({ state: "expired", mode: "read_only" });
   });
 
-  it("nowszy past_due w łasce obok starszego canceled -> wynik z nowszego (pełny dostęp)", () => {
+  it("nowszy past_due w łasce obok starszego canceled w opłaconym okresie -> wynik z nowszego (past_due)", () => {
     const older = row("canceled", { currentPeriodEnd: at(10 * DAY), createdAt: at(-60 * DAY) });
-    const start = at(-3 * DAY);
+    const end = at(-3 * DAY);
     const newer = row(
       "past_due",
-      { currentPeriodStart: start, currentPeriodEnd: at(27 * DAY), createdAt: at(-20 * DAY) },
+      { currentPeriodStart: at(-33 * DAY), currentPeriodEnd: end, createdAt: at(-20 * DAY) },
       "basic"
     );
-    const expected = { state: "past_due", mode: "full", planSlug: "basic", until: new Date(start.getTime() + GRACE) };
+    const expected = { state: "past_due", mode: "full", planSlug: "basic", until: new Date(end.getTime() + GRACE) };
     expect(resolveSalonAccess([older, newer], NOW)).toEqual(expected);
     expect(resolveSalonAccess([newer, older], NOW)).toEqual(expected);
   });
 
-  it("nowszy canceled obok starszego past_due w łasce -> wynik z nowszego (tylko do odczytu)", () => {
+  it("nowszy canceled w opłaconym okresie obok starszego past_due w łasce -> wynik z nowszego (canceled, pełny dostęp)", () => {
     const older = row(
       "past_due",
-      { currentPeriodStart: at(-3 * DAY), currentPeriodEnd: at(27 * DAY), createdAt: at(-60 * DAY) },
+      { currentPeriodStart: at(-33 * DAY), currentPeriodEnd: at(-3 * DAY), createdAt: at(-60 * DAY) },
       "basic"
     );
-    const newer = row("canceled", { currentPeriodEnd: at(10 * DAY), createdAt: at(-20 * DAY) });
+    const end = at(10 * DAY);
+    const newer = row("canceled", { currentPeriodEnd: end, createdAt: at(-20 * DAY) });
+    const expected = { state: "canceled", mode: "full", planSlug: "pro", until: end };
+    expect(resolveSalonAccess([older, newer], NOW)).toEqual(expected);
+    expect(resolveSalonAccess([newer, older], NOW)).toEqual(expected);
+  });
+
+  it("nowszy canceled po końcu okresu obok starszego past_due w łasce -> wynik z nowszego (tylko do odczytu)", () => {
+    const older = row(
+      "past_due",
+      { currentPeriodStart: at(-33 * DAY), currentPeriodEnd: at(-3 * DAY), createdAt: at(-60 * DAY) },
+      "basic"
+    );
+    const newer = row("canceled", { currentPeriodEnd: at(-DAY), createdAt: at(-20 * DAY) });
     const expected = { state: "canceled", mode: "read_only", planSlug: null, until: null };
     expect(resolveSalonAccess([older, newer], NOW)).toEqual(expected);
     expect(resolveSalonAccess([newer, older], NOW)).toEqual(expected);

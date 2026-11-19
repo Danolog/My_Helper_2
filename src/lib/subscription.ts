@@ -74,7 +74,7 @@ function basicPlan(status: string): CurrentPlan {
  * Plan salonu (podanego albo z sesji) liczony ze stanu dostępu.
  *
  * Pełny dostęp → plan z wybranego wiersza ze statusem wiersza (`active`,
- * `trialing`, `past_due`). Bez pełnego dostępu → `basic` ze
+ * `trialing`, `past_due`, `canceled` przed końcem okresu). Bez pełnego dostępu → `basic` ze
  * statusem stanu dostępu (`trial_expired` dla zakończonego triala, inaczej
  * `none`, `unavailable`, `past_due`, `canceled`, `inactive`). Brak salonu
  * w sesji → `basic` / `none`.

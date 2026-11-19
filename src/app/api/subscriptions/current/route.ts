@@ -50,7 +50,7 @@ function toAccessRow(source: SubscriptionWithPlan): AccessRow {
  * tą samą regułą co bramki serwerowe; informacyjny — panel go nie czyta.
  * Liczy go `resolveSalonAccess` na tych samych wierszach. `effectivePlanSlug`
  * to plan przy pełnym dostępie, inaczej "basic" (np. trial po terminie albo
- * `canceled`). UI decyduje o funkcjach Pro wyłącznie na podstawie
+ * `canceled` po końcu okresu). UI decyduje o funkcjach Pro wyłącznie na podstawie
  * `effectivePlanSlug`. Błąd odczytu → 500.
  */
 export async function GET() {

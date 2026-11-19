@@ -346,9 +346,11 @@ describe("GET /api/subscriptions/current — wiersz karty i access", () => {
     expect(basic.access).toEqual({ state: "active", mode: "full", planSlug: "basic", until: null });
   });
 
-  it("past_due w łasce -> karta past_due, pełny dostęp do start + 7 dni, plan wiersza", async () => {
-    const start = new Date(NOW.getTime() - 2 * DAY);
-    queue.push([row({ status: "past_due", currentPeriodStart: start })]);
+  it("past_due w łasce -> karta past_due, pełny dostęp do końca okresu + 7 dni, plan wiersza", async () => {
+    const end = new Date(NOW.getTime() - 2 * DAY);
+    queue.push([
+      row({ status: "past_due", currentPeriodStart: new Date(NOW.getTime() - 32 * DAY), currentPeriodEnd: end }),
+    ]);
     const b = await body();
     expect(b.subscription.status).toBe("past_due");
     expect(b.plan.slug).toBe("pro");
@@ -357,28 +359,59 @@ describe("GET /api/subscriptions/current — wiersz karty i access", () => {
       state: "past_due",
       mode: "full",
       planSlug: "pro",
-      until: new Date(start.getTime() + 7 * DAY).toISOString(),
+      until: new Date(end.getTime() + 7 * DAY).toISOString(),
     });
   });
 
-  it("past_due po łasce -> karta past_due, tylko odczyt, basic", async () => {
-    queue.push([row({ status: "past_due", currentPeriodStart: new Date(NOW.getTime() - 8 * DAY) })]);
+  it("past_due po łasce (8 dni po końcu okresu) -> karta past_due, tylko odczyt, basic", async () => {
+    queue.push([
+      row({
+        status: "past_due",
+        currentPeriodStart: new Date(NOW.getTime() - 38 * DAY),
+        currentPeriodEnd: new Date(NOW.getTime() - 8 * DAY),
+      }),
+    ]);
     const b = await body();
     expect(b.subscription.status).toBe("past_due");
     expect(b.effectivePlanSlug).toBe("basic");
     expect(b.access).toEqual({ state: "past_due", mode: "read_only", planSlug: null, until: null });
   });
 
-  it("past_due bez currentPeriodStart -> karta past_due, tylko odczyt, basic", async () => {
-    queue.push([row({ status: "past_due" })]);
+  it("past_due bez currentPeriodEnd (currentPeriodStart wczoraj) -> karta past_due, tylko odczyt, basic", async () => {
+    queue.push([row({ status: "past_due", currentPeriodStart: new Date(NOW.getTime() - DAY) })]);
     const b = await body();
     expect(b.subscription.status).toBe("past_due");
     expect(b.effectivePlanSlug).toBe("basic");
     expect(b.access).toEqual({ state: "past_due", mode: "read_only", planSlug: null, until: null });
   });
 
-  it("sam canceled Pro -> karta canceled/Pro, tylko odczyt, basic", async () => {
+  it("sam canceled Pro bez końca okresu -> karta canceled/Pro, tylko odczyt, basic", async () => {
     queue.push([row({ status: "canceled", canceledAt: new Date(NOW.getTime() - DAY) })]);
+    const b = await body();
+    expect(b.subscription.status).toBe("canceled");
+    expect(b.plan.slug).toBe("pro");
+    expect(b.effectivePlanSlug).toBe("basic");
+    expect(b.access).toEqual({ state: "canceled", mode: "read_only", planSlug: null, until: null });
+  });
+
+  it("sam canceled Pro z końcem okresu w przyszłości -> karta canceled/Pro, pełny dostęp do końca okresu, pro", async () => {
+    const end = new Date(NOW.getTime() + 10 * DAY);
+    queue.push([row({ status: "canceled", canceledAt: new Date(NOW.getTime() - DAY), currentPeriodEnd: end })]);
+    const b = await body();
+    expect(b.subscription.status).toBe("canceled");
+    expect(b.plan.slug).toBe("pro");
+    expect(b.effectivePlanSlug).toBe("pro");
+    expect(b.access).toEqual({ state: "canceled", mode: "full", planSlug: "pro", until: end.toISOString() });
+  });
+
+  it("sam canceled Pro po końcu okresu -> karta canceled/Pro, tylko odczyt, basic", async () => {
+    queue.push([
+      row({
+        status: "canceled",
+        canceledAt: new Date(NOW.getTime() - 10 * DAY),
+        currentPeriodEnd: new Date(NOW.getTime() - DAY),
+      }),
+    ]);
     const b = await body();
     expect(b.subscription.status).toBe("canceled");
     expect(b.plan.slug).toBe("pro");
@@ -401,9 +434,9 @@ describe("GET /api/subscriptions/current — wiersz karty i access", () => {
   });
 
   it("starszy canceled + nowszy past_due -> karta past_due", async () => {
-    const start = new Date(NOW.getTime() - DAY);
+    const end = new Date(NOW.getTime() - DAY);
     queue.push([
-      row({ id: "sub-past-due", status: "past_due", currentPeriodStart: start, createdAt: NEWER }),
+      row({ id: "sub-past-due", status: "past_due", currentPeriodEnd: end, createdAt: NEWER }),
       row({ id: "sub-canceled", status: "canceled", createdAt: OLDER }),
     ]);
     const b = await body();
@@ -412,7 +445,7 @@ describe("GET /api/subscriptions/current — wiersz karty i access", () => {
       state: "past_due",
       mode: "full",
       planSlug: "pro",
-      until: new Date(start.getTime() + 7 * DAY).toISOString(),
+      until: new Date(end.getTime() + 7 * DAY).toISOString(),
     });
   });
 
