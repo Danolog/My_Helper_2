@@ -1,7 +1,6 @@
 import { eq } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions } from "@/lib/schema";
-import { stripeSubscriptionPeriod, type StripeSubscriptionPeriodSource } from "@/lib/stripe-period";
 import {
   lockSalonSubscriptions,
   retrieveStripeSubscriptionLocked,
@@ -12,17 +11,18 @@ import type Stripe from "stripe";
 
 /**
  * Webhooki zmieniające stan subskrypcji (`customer.subscription.updated`,
- * `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`)
- * traktują zdarzenie TYLKO jako sygnał (T3, kolejność zdarzeń). Stripe nie
- * gwarantuje kolejności dostarczenia: blokada usuwa przeplot, ale nie
- * przywraca kolejności, więc późne `invoice.paid` albo `updated: active` po
- * `deleted` wskrzesiłoby anulowaną subskrypcję. Dlatego pod blokadą
- * stripe_sub czytamy BIEŻĄCY stan ze Stripe i zapisujemy jego, a nie payload
- * zdarzenia. Wyjątek: okres w `invoice.paid` pochodzi z linii opłaconej
- * faktury w zdarzeniu i nie jest cofany; status także tam jest z bieżącego
- * odczytu.
+ * `customer.subscription.deleted`, `invoice.payment_failed`, `invoice.paid`)
+ * nie zapisują statusu z payloadu zdarzenia. Stripe nie gwarantuje kolejności
+ * dostarczenia: blokada usuwa przeplot, ale nie przywraca kolejności, więc
+ * status z późnego `invoice.paid` albo z `updated: active` po `deleted`
+ * wskrzesiłby anulowaną subskrypcję. Dlatego pod blokadą stripe_sub czytany
+ * jest BIEŻĄCY stan subskrypcji ze Stripe i z niego pochodzą status,
+ * `canceledAt` i `trialEndsAt`. Okresu (`currentPeriodStart/End`) ten moduł
+ * nie zapisuje w żadnym z tych zdarzeń; spośród nich okres zapisuje tylko
+ * obsługa `invoice.paid` — z linii opłaconej faktury w samym zdarzeniu,
+ * nigdy wstecz.
  *
- * Reguła lokalna (T3b, zawężona przez Ethana, przegląd #62 §2b): lokalne
+ * Reguła lokalna (T3b, przegląd #62 §2b): lokalne
  * `canceled` jest końcowe, gdy Stripe to potwierdza — `canceled` /
  * `incomplete_expired` ALBO `cancel_at_period_end === true` (anulowanie
  * z panelu: Stripe ma jeszcze `active` do końca okresu). Wtedy żaden handler
@@ -34,7 +34,7 @@ import type Stripe from "stripe";
 
 export type SubscriptionRow = typeof salonSubscriptions.$inferSelect;
 
-export interface StripeSubscriptionState extends StripeSubscriptionPeriodSource {
+export interface StripeSubscriptionState {
   id: string;
   status?: string | null;
   canceled_at?: number | null;
@@ -108,7 +108,7 @@ export function withLockedStripeSubscriptionRow<T>(
 }
 
 export type SubscriptionStateUpdate = Partial<
-  Pick<SubscriptionRow, "status" | "currentPeriodStart" | "currentPeriodEnd" | "canceledAt" | "trialEndsAt">
+  Pick<SubscriptionRow, "status" | "canceledAt" | "trialEndsAt">
 >;
 
 /**
@@ -142,14 +142,6 @@ export function subscriptionStateFromStripe(
   }
   const status = mapped ?? row.status;
 
-  // Okres z items.data[0] (nowsze API) albo z poziomu subskrypcji (starsze).
-  const period = stripeSubscriptionPeriod(stripeSub);
-  if (!period) {
-    logger.warn("Stripe subscription without billing period — keeping stored period", {
-      stripeSubscriptionId: stripeSub.id,
-    });
-  }
-
   const canceledAt =
     typeof stripeSub.canceled_at === "number"
       ? new Date(stripeSub.canceled_at * 1000)
@@ -159,8 +151,6 @@ export function subscriptionStateFromStripe(
 
   return {
     status,
-    currentPeriodStart: period?.start ?? row.currentPeriodStart,
-    currentPeriodEnd: period?.end ?? row.currentPeriodEnd,
     canceledAt,
     // Trial po stronie Stripe: koniec ze Stripe, nie z rejestracji.
     ...(status === "trialing" && typeof stripeSub.trial_end === "number"

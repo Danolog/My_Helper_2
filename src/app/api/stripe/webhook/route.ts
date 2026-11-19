@@ -203,7 +203,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ received: true });
   } catch (error) {
-    // N1 (Ryan, #62): ten catch obsługuje też zadatki (dane gości w
+    // N1 (#62): ten catch obsługuje też zadatki (dane gości w
     // parametrach zapytań) — w logu tylko nazwa i kod błędu oraz id
     // zdarzenia (pełne zdarzenie jest w panelu Stripe), bez message/stack.
     logger.error("Stripe webhook processing failed", { ...toErrorIdentity(error), ...received });
@@ -288,7 +288,7 @@ async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
     const amount = plan ? plan.priceMonthly : (invoice.amount_paid / 100).toFixed(2);
 
     if (state) {
-      // Status from Stripe; the Stripe period (state.currentPeriod*) is not written here.
+      // Status from Stripe; the period comes only from the lines of the paid invoice.
       const { status, canceledAt, trialEndsAt } = state;
       await tx
         .update(salonSubscriptions)

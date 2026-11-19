@@ -1,15 +1,13 @@
 /**
- * Okres rozliczeniowy w handlerach webhooka Stripe (T3, warunek dla 1.1).
+ * Okres rozliczeniowy w handlerach webhooka Stripe.
  *
- * Nowsze API Stripe nie ma `current_period_*` na poziomie subskrypcji, tylko
- * w `items.data[0]`. Przed poprawką `customer.subscription.updated` czytał
- * wyłącznie poziom subskrypcji i w nowym API zostawiał STARY okres
- * (`canceled` tracił dostęp przed końcem zapłaconego okresu). Odczyt jest
- * teraz w jednym miejscu (`@/lib/stripe-period`), wspólnym z confirm i cancel.
+ * Status pochodzi z BIEŻĄCEGO odczytu subskrypcji ze Stripe pod blokadą
+ * (`stripe.subscriptions.retrieve`), a nie z payloadu zdarzenia.
  *
- * Od ostrzeżenia #3 (kolejność zdarzeń) status pochodzi z BIEŻĄCEGO odczytu
- * subskrypcji ze Stripe pod blokadą (`stripe.subscriptions.retrieve`), a nie
- * z payloadu zdarzenia.
+ * `customer.subscription.updated` / `customer.subscription.deleted`
+ * i `invoice.payment_failed` nie zapisują okresu (`currentPeriodStart/End`)
+ * — ani z `items.data[0]`, ani z poziomu subskrypcji Stripe; brak okresu
+ * w Stripe nie daje ostrzeżenia.
  *
  * `invoice.paid` zapisuje okres OPŁACONY: z linii faktury (`lines.data[].period`),
  * nie z bieżącej subskrypcji Stripe i nie z `invoice.period_*` (faktura
@@ -93,8 +91,15 @@ beforeEach(() => {
   });
 });
 
+const NO_PERIOD_FIELDS = ["currentPeriodStart", "currentPeriodEnd"];
+
+function expectNoPeriodFields(set: Record<string, unknown> | undefined) {
+  expect(set).toBeDefined();
+  for (const k of NO_PERIOD_FIELDS) expect(set).not.toHaveProperty(k);
+}
+
 describe("customer.subscription.updated — okres", () => {
-  it("nowe API: brak current_period_* na subskrypcji → okres z items.data[0], nie stary", async () => {
+  it("nowy okres Stripe w items.data[0] → status ze Stripe zapisany, bez pól okresu", async () => {
     f.selects.push([LOCAL_SUB]);
     stripeSays({
       status: "canceled",
@@ -104,16 +109,12 @@ describe("customer.subscription.updated — okres", () => {
     });
     const status = await deliver("customer.subscription.updated", { id: "sub_1" });
     expect(status).toBe(200);
-    expect(subUpdate()).toEqual(
-      expect.objectContaining({
-        status: "canceled",
-        currentPeriodStart: new Date(NEW_START * 1000),
-        currentPeriodEnd: new Date(NEW_END * 1000),
-      })
-    );
+    const set = subUpdate();
+    expect(set).toEqual(expect.objectContaining({ status: "canceled" }));
+    expectNoPeriodFields(set);
   });
 
-  it("starsze API: okres na poziomie subskrypcji nadal działa", async () => {
+  it("nowy okres Stripe na poziomie subskrypcji → status ze Stripe zapisany, bez pól okresu", async () => {
     f.selects.push([LOCAL_SUB]);
     stripeSays({
       status: "past_due",
@@ -123,16 +124,19 @@ describe("customer.subscription.updated — okres", () => {
       current_period_end: NEW_END,
     });
     await deliver("customer.subscription.updated", { id: "sub_1" });
-    expect(subUpdate()?.currentPeriodEnd).toEqual(new Date(NEW_END * 1000));
+    const set = subUpdate();
+    expect(set).toEqual(expect.objectContaining({ status: "past_due" }));
+    expectNoPeriodFields(set);
   });
 
-  it("brak okresu w obu miejscach → zostaje zapisany okres (z ostrzeżeniem), status się zmienia", async () => {
+  it("Stripe bez okresu w obu miejscach → status ze Stripe zapisany, bez pól okresu, bez ostrzeżenia", async () => {
     f.selects.push([LOCAL_SUB]);
     stripeSays({ status: "past_due", canceled_at: null, cancel_at_period_end: false });
     await deliver("customer.subscription.updated", { id: "sub_1" });
-    expect(subUpdate()).toEqual(
-      expect.objectContaining({ status: "past_due", currentPeriodEnd: OLD_END })
-    );
+    const set = subUpdate();
+    expect(set).toEqual(expect.objectContaining({ status: "past_due" }));
+    expectNoPeriodFields(set);
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it("trialing ze Stripe: trialEndsAt z trial_end, nie z rejestracji", async () => {
@@ -159,6 +163,47 @@ describe("customer.subscription.updated — okres", () => {
     });
     await deliver("customer.subscription.updated", { id: "sub_1" });
     expect(subUpdate()).not.toHaveProperty("trialEndsAt");
+  });
+});
+
+describe("customer.subscription.deleted i invoice.payment_failed — okres", () => {
+  it("customer.subscription.deleted (Stripe canceled) → status canceled zapisany, bez pól okresu", async () => {
+    f.selects.push([LOCAL_SUB]);
+    stripeSays({
+      status: "canceled",
+      canceled_at: NEW_START,
+      cancel_at_period_end: false,
+      items: { data: [{ current_period_start: NEW_START, current_period_end: NEW_END }] },
+    });
+    expect(await deliver("customer.subscription.deleted", { id: "sub_1" })).toBe(200);
+    const set = subUpdate();
+    expect(set).toEqual(expect.objectContaining({ status: "canceled", canceledAt: new Date(NEW_START * 1000) }));
+    expectNoPeriodFields(set);
+  });
+
+  it("invoice.payment_failed (Stripe past_due, okres przesunięty do przodu) → status past_due zapisany, bez pól okresu, płatność failed zapisana", async () => {
+    f.selects.push([LOCAL_SUB], [{ id: "plan-pro", priceMonthly: "149.00" }]);
+    stripeSays({
+      status: "past_due",
+      canceled_at: null,
+      cancel_at_period_end: false,
+      items: { data: [{ current_period_start: NEW_START, current_period_end: NEW_END }] },
+    });
+    expect(
+      await deliver("invoice.payment_failed", {
+        id: "in_failed",
+        amount_paid: 0,
+        billing_reason: "subscription_cycle",
+        subscription: "sub_1",
+        payment_intent: "pi_failed",
+      })
+    ).toBe(200);
+    const set = subUpdate();
+    expect(set).toEqual(expect.objectContaining({ status: "past_due" }));
+    expectNoPeriodFields(set);
+    expect(f.committed.find((w) => w.table === "subscription_payments")?.values).toEqual(
+      expect.objectContaining({ stripePaymentIntentId: "pi_failed", status: "failed" })
+    );
   });
 });
 
@@ -234,6 +279,38 @@ describe("invoice.paid (odnowienie) — okres", () => {
     expectPaidPeriodWritten(set);
     expect(logger.warn).not.toHaveBeenCalled();
     expect(payment()?.values).toEqual(expect.objectContaining({ stripePaymentIntentId: "pi_1", status: "succeeded" }));
+  });
+
+  it("Stripe trialing z trial_end → status trialing, trialEndsAt z trial_end, okres z linii faktury", async () => {
+    f.selects.push([{ ...LOCAL_SUB, status: "trialing" }], [PLAN]);
+    stripeSays({
+      status: "trialing",
+      trial_end: NEW_END,
+      items: { data: [{ current_period_start: STRIPE_START, current_period_end: STRIPE_END }] },
+    });
+    expect(await deliver("invoice.paid", paidInvoice({ data: [PLAN_LINE] }))).toBe(200);
+    const set = subUpdate();
+    expect(set).toEqual(
+      expect.objectContaining({ status: "trialing", trialEndsAt: new Date(NEW_END * 1000) })
+    );
+    expectPaidPeriodWritten(set);
+  });
+
+  it("Stripe active → set bez trialEndsAt", async () => {
+    f.selects.push([LOCAL_SUB], [PLAN]);
+    stripeSays({ status: "active", trial_end: NEW_START });
+    expect(await deliver("invoice.paid", paidInvoice({ data: [PLAN_LINE] }))).toBe(200);
+    const set = subUpdate();
+    expect(set).toEqual(expect.objectContaining({ status: "active" }));
+    expect(set).not.toHaveProperty("trialEndsAt");
+  });
+
+  it("subskrypcja Stripe bez okresu (ani w items, ani na poziomie subskrypcji) → okres z linii faktury zapisany, bez ostrzeżenia", async () => {
+    f.selects.push([LOCAL_SUB], [PLAN]);
+    stripeSays({ status: "active", canceled_at: null, cancel_at_period_end: false });
+    expect(await deliver("invoice.paid", paidInvoice({ data: [PLAN_LINE] }))).toBe(200);
+    expectPaidPeriodWritten(subUpdate());
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it("faktura bez linii → status zapisany, okres bez zmian (bez pól okresu w set), ostrzeżenie, płatność zapisana", async () => {
