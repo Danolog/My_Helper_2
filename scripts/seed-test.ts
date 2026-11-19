@@ -8,6 +8,7 @@
  * a localhost tunnel) and VERCEL_ENV=preview/production are refused.
  */
 
+import { and, inArray, notInArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { hashPassword } from "better-auth/crypto";
@@ -24,6 +25,7 @@ import {
   workSchedules,
   promotions,
   promoCodes,
+  salonSubscriptions,
 } from "../src/lib/schema";
 import {
   checkSeedClientOptions,
@@ -56,6 +58,27 @@ const db = drizzle(sql);
 const OWNER_USER_ID = "test-owner-user-id-00001";
 const CLIENT_USER_ID = "test-client-user-id-00001";
 const SALON_ID = "00000000-0000-4000-8000-000000000001";
+// Drugi właściciel i jego salon w stanie „okres próbny zakończony” (tylko odczyt).
+const TRIAL_EXPIRED_OWNER_USER_ID = "test-owner-user-id-00002";
+const TRIAL_EXPIRED_SALON_ID = "00000000-0000-4000-8000-000000000002";
+
+// Po jednym wierszu subskrypcji na salon seeda, plan Basic, bez identyfikatorów Stripe.
+// Salon testowy: active bez dat okresu (pełny dostęp niezależnie od dat). Salon po okresie
+// próbnym: trialing ze stałym terminem w przeszłości.
+const SEED_SUBSCRIPTIONS = [
+  {
+    id: "00000000-0000-4000-8000-5b5000000001",
+    salonId: SALON_ID,
+    status: "active",
+    trialEndsAt: null,
+  },
+  {
+    id: "00000000-0000-4000-8000-5b5000000002",
+    salonId: TRIAL_EXPIRED_SALON_ID,
+    status: "trialing",
+    trialEndsAt: new Date("2026-01-01T00:00:00.000Z"),
+  },
+] as const;
 
 // Dane E2E zadatku i promocji zamrozonych (tests/client-portal/deposit-frozen-happy-hours.spec.ts,
 // tests/dashboard/frozen-promotions.spec.ts). Stale ID — te same co w testach (testy NIE importuja
@@ -485,6 +508,116 @@ async function seed() {
   }
 
   console.log("[seed-test] Created E2E deposit service + employee schedule, 3 promotions (2 frozen), 2 promo codes");
+
+  // 9. Drugi właściciel i salon po okresie próbnym. Właściciela z salonem wiąże
+  // salons.ownerId (logowanie do panelu) — bez pracowników, usług i klientów.
+  const trialExpiredOwnerPasswordHash = await hashPassword("TestPassword123!");
+
+  await db
+    .insert(user)
+    .values({
+      id: TRIAL_EXPIRED_OWNER_USER_ID,
+      name: "Test Owner Trial Expired",
+      email: "owner-trial-expired@test.com",
+      emailVerified: true,
+      role: "owner",
+    })
+    .onConflictDoUpdate({
+      target: user.id,
+      set: { name: "Test Owner Trial Expired", emailVerified: true, role: "owner" },
+    });
+
+  await db
+    .insert(account)
+    .values({
+      id: "test-owner-account-00002",
+      accountId: TRIAL_EXPIRED_OWNER_USER_ID,
+      providerId: "credential",
+      userId: TRIAL_EXPIRED_OWNER_USER_ID,
+      password: trialExpiredOwnerPasswordHash,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: account.id,
+      set: { password: trialExpiredOwnerPasswordHash, updatedAt: new Date() },
+    });
+
+  await db
+    .insert(verification)
+    .values({
+      id: "test-owner-email-verify-002",
+      identifier: "owner-trial-expired@test.com",
+      value: "email-verified",
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: verification.id,
+      set: { identifier: "owner-trial-expired@test.com", updatedAt: new Date() },
+    });
+
+  // Bez adresu i telefonu: salon nie trafia na publiczną listę salonów, z której testy klienta biorą pierwszy salon.
+  await db
+    .insert(salons)
+    .values({
+      id: TRIAL_EXPIRED_SALON_ID,
+      name: "Salon Po Okresie Probnym",
+      phone: null,
+      address: null,
+      ownerId: TRIAL_EXPIRED_OWNER_USER_ID,
+    })
+    .onConflictDoUpdate({
+      target: salons.id,
+      set: { name: "Salon Po Okresie Probnym", phone: null, address: null, ownerId: TRIAL_EXPIRED_OWNER_USER_ID },
+    });
+
+  console.log("[seed-test] Created trial-expired owner + salon");
+
+  // 10. Subskrypcje salonów seeda: po seedzie każdy z dwóch salonów ma dokładnie jeden
+  // wiersz — ten z SEED_SUBSCRIPTIONS. W jednej transakcji: usunięcie pozostałych wierszy
+  // TYLKO tych dwóch salonów (indeks częściowy: jeden trialing/active na salon), potem
+  // wstawienie albo nadpisanie po stałym identyfikatorze.
+  // Identyfikator planu odczytany po slug (plan mógł istnieć przed seedPlans z innym id).
+  const [basicPlan] = await sql<{ id: string }[]>`select id from subscription_plans where slug = 'basic' limit 1`;
+  if (!basicPlan) throw new Error("Brak planu basic po seedPlans");
+
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(salonSubscriptions)
+      .where(
+        and(
+          inArray(salonSubscriptions.salonId, [SALON_ID, TRIAL_EXPIRED_SALON_ID]),
+          notInArray(
+            salonSubscriptions.id,
+            SEED_SUBSCRIPTIONS.map((s) => s.id),
+          ),
+        ),
+      );
+
+    for (const sub of SEED_SUBSCRIPTIONS) {
+      const row = {
+        salonId: sub.salonId,
+        planId: basicPlan.id,
+        stripeSubscriptionId: null,
+        stripeCustomerId: null,
+        status: sub.status,
+        trialEndsAt: sub.trialEndsAt,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+        canceledAt: null,
+        scheduledPlanId: null,
+        scheduledChangeAt: null,
+      };
+      await tx
+        .insert(salonSubscriptions)
+        .values({ id: sub.id, ...row })
+        .onConflictDoUpdate({ target: salonSubscriptions.id, set: row });
+    }
+  });
+
+  console.log("[seed-test] Ensured 2 salon subscriptions (active Basic, trialing Basic after trial end)");
 
   console.log("[seed-test] Seed completed successfully!");
   await sql.end();

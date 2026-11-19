@@ -168,17 +168,20 @@ test.describe('Flow 9: Subscriptions & Stripe', () => {
     test('should handle cancel confirmation dialog - dismiss', { tag: '@full' }, async ({ page }) => {
       await navigateToSubscription(page);
 
-      const cancelBtn = page.getByRole('button', { name: /anuluj subskrypcj|cancel subscription/i });
-      if (await cancelBtn.isVisible()) {
-        await cancelBtn.click();
+      // Salon testowy ma po seedzie aktywną subskrypcję, więc przycisk jest na stronie.
+      await page.getByRole('button', { name: 'Anuluj subskrypcje', exact: true }).click();
 
-        // Dismiss the dialog
-        const dismissBtn = page.getByRole('button', { name: /nie|cancel|anuluj|wr[oó][cć]/i }).last();
-        if (await dismissBtn.isVisible()) {
-          await dismissBtn.click();
-          // Dialog should close, subscription unchanged
-        }
-      }
+      const dialog = page.getByRole('alertdialog');
+      await expect(dialog).toBeVisible();
+      // Zamknięcie po dokładnej nazwie: w oknie jest też przycisk potwierdzenia anulowania.
+      await dialog.getByRole('button', { name: 'Nie, zachowaj', exact: true }).click();
+      await expect(dialog).toBeHidden();
+
+      // Subskrypcja bez zmian.
+      const res = await page.request.get('/api/subscriptions/current');
+      expect(res.ok()).toBeTruthy();
+      const body = await res.json();
+      expect(body.subscription?.status).toBe('active');
     });
 
     test('should show plan features list', { tag: '@full' }, async ({ page }) => {

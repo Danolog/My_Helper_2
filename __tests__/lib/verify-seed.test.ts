@@ -11,10 +11,13 @@ import {
   checkSeedRows,
   EXPECTED_SEED_USERS,
   runVerifySeed,
+  SEED_SALON_IDS,
   VERIFY_SEED_ACCOUNTS_SQL,
   VERIFY_SEED_PLANS_SQL,
+  VERIFY_SEED_SUBSCRIPTIONS_SQL,
   VERIFY_SEED_USERS_SQL,
   type SeedRows,
+  type SeedSubscriptionRow,
 } from "../../scripts/verify-seed-checks";
 
 const ROOT = join(__dirname, "..", "..");
@@ -28,6 +31,28 @@ function goodRows(): SeedRows {
     users: EXPECTED_SEED_USERS.map((u) => ({ id: u.id, email: u.email, email_verified: true, role: u.role })),
     accounts: EXPECTED_SEED_USERS.map((u) => ({ user_id: u.id, provider_id: "credential", has_password: true })),
     plans: SEED_PLANS.map((p) => ({ slug: p.slug, name: p.name, price_monthly: p.priceMonthly, is_active: true, features_json: [...p.featuresJson] })),
+    subscriptions: [
+      subRow(SEED_SALON_IDS.test, { status: "active" }),
+      subRow(SEED_SALON_IDS.trialExpired, { status: "trialing", trial_ends_at: PAST }),
+    ],
+  };
+}
+
+/** Chwila kontroli podawana z zewnątrz i daty fikcyjne względem niej. */
+const NOW = new Date("2020-06-01T12:00:00.000Z");
+const PAST = new Date("2020-01-01T00:00:00.000Z");
+const FUTURE = new Date("2020-07-01T00:00:00.000Z");
+
+function subRow(salonId: string, over: Partial<SeedSubscriptionRow>): SeedSubscriptionRow {
+  return {
+    salon_id: salonId,
+    status: "active",
+    plan_slug: "basic",
+    trial_ends_at: null,
+    current_period_start: null,
+    current_period_end: null,
+    created_at: PAST,
+    ...over,
   };
 }
 
@@ -81,6 +106,66 @@ describe("checkSeedRows", () => {
     const text = checkSeedRows(mutate(goodRows())).problems.join("\n");
     for (const marker of LEAK_MARKERS) expect(text).not.toContain(marker);
   });
+
+  // Drugi właściciel (salon po okresie próbnym): etykieta inna niż pierwszego, bez e-maila i identyfikatora.
+  const secondOwner = () => EXPECTED_SEED_USERS[2];
+  const secondOwnerCases: Case[] = [
+    ["brak drugiego właściciela", (r) => ({ ...r, users: r.users.filter((u) => u.email !== secondOwner().email) }), /użytkownik owner \(salon po okresie próbnym\): brak/],
+    ["drugi właściciel niezweryfikowany", (r) => ({ ...r, users: r.users.map((u) => (u.email === secondOwner().email ? { ...u, email_verified: false } : u)) }), /użytkownik owner \(salon po okresie próbnym\): e-mail niezweryfikowany/],
+    ["drugi właściciel bez konta credential", (r) => ({ ...r, accounts: r.accounts.filter((a) => a.user_id !== secondOwner().id) }), /użytkownik owner \(salon po okresie próbnym\): kont credential 0/],
+  ];
+  it.each(secondOwnerCases)("%s → problem z etykietą drugiego właściciela", (_label, mutate, problem) => {
+    const result = checkSeedRows(mutate(goodRows()), NOW);
+    expect(result.ok).toBe(false);
+    const text = result.problems.join("\n");
+    expect(text).toMatch(problem);
+    expect(text).not.toMatch(/użytkownik owner:/);
+    for (const marker of LEAK_MARKERS) expect(text).not.toContain(marker);
+  });
+});
+
+describe("checkSeedRows — subskrypcje salonów seeda (dostęp liczony resolveSalonAccess w podanej chwili)", () => {
+  const forSalon = (r: SeedRows, salonId: string, rows: SeedSubscriptionRow[]): SeedRows => ({
+    ...r,
+    subscriptions: [...r.subscriptions.filter((s) => s.salon_id !== salonId), ...rows],
+  });
+  const T = SEED_SALON_IDS.test;
+  const E = SEED_SALON_IDS.trialExpired;
+
+  it("poprawny seed z wierszami subskrypcji → ok w podanej chwili", () => {
+    expect(checkSeedRows(goodRows(), NOW)).toEqual({ ok: true, problems: [] });
+  });
+
+  it("granica: koniec okresu próbnego równy chwili kontroli → expired (termin wyłączny) → ok", () => {
+    const rows = forSalon(goodRows(), E, [subRow(E, { status: "trialing", trial_ends_at: new Date(NOW.getTime()) })]);
+    expect(checkSeedRows(rows, NOW)).toEqual({ ok: true, problems: [] });
+  });
+
+  type SubCase = [string, (r: SeedRows) => SeedRows, RegExp];
+  const subCases: SubCase[] = [
+    ["salon testowy: brak wiersza", (r) => forSalon(r, T, []), /subskrypcja salonu testowego: wierszy 0, oczekiwany 1/],
+    ["salon testowy: dwa wiersze", (r) => forSalon(r, T, [subRow(T, {}), subRow(T, {})]), /subskrypcja salonu testowego: wierszy 2, oczekiwany 1/],
+    ["salon testowy: trialing po terminie", (r) => forSalon(r, T, [subRow(T, { status: "trialing", trial_ends_at: PAST })]), /subskrypcja salonu testowego: dostęp read_only, oczekiwany full/],
+    ["salon testowy: canceled", (r) => forSalon(r, T, [subRow(T, { status: "canceled" })]), /subskrypcja salonu testowego: dostęp read_only, oczekiwany full/],
+    ["salon testowy: active z planem pro", (r) => forSalon(r, T, [subRow(T, { plan_slug: "pro" })]), /subskrypcja salonu testowego: plan niezgodny/],
+    ["salon po okresie próbnym: brak wiersza", (r) => forSalon(r, E, []), /subskrypcja salonu po okresie próbnym: wierszy 0, oczekiwany 1/],
+    ["salon po okresie próbnym: trialing z terminem w przyszłości", (r) => forSalon(r, E, [subRow(E, { status: "trialing", trial_ends_at: FUTURE })]), /subskrypcja salonu po okresie próbnym: dostęp full, oczekiwany read_only/],
+    ["salon po okresie próbnym: active", (r) => forSalon(r, E, [subRow(E, { status: "active" })]), /subskrypcja salonu po okresie próbnym: dostęp full, oczekiwany read_only/],
+  ];
+
+  it.each(subCases)("%s → nie ok, z konkretnym problemem", (_label, mutate, problem) => {
+    const result = checkSeedRows(mutate(goodRows()), NOW);
+    expect(result.ok).toBe(false);
+    expect(result.problems.join("\n")).toMatch(problem);
+  });
+
+  // Komunikaty: bez identyfikatorów salonów, adresów e-mail i dat.
+  const SUB_LEAK_MARKERS = [SEED_SALON_IDS.test, SEED_SALON_IDS.trialExpired, "@", "2020", "T00:00", "T12:00"];
+  it.each(subCases)("%s → komunikat bez identyfikatorów, adresów i dat", (_label, mutate) => {
+    const text = checkSeedRows(mutate(goodRows()), NOW).problems.join("\n");
+    expect(text.length).toBeGreaterThan(0);
+    for (const marker of SUB_LEAK_MARKERS) expect(text).not.toContain(marker);
+  });
 });
 
 describe("zapytania i zgodność ze seedem", () => {
@@ -90,7 +175,7 @@ describe("zapytania i zgodność ze seedem", () => {
   });
 
   it("zapytania tylko do odczytu", () => {
-    for (const q of [VERIFY_SEED_USERS_SQL, VERIFY_SEED_ACCOUNTS_SQL, VERIFY_SEED_PLANS_SQL]) {
+    for (const q of [VERIFY_SEED_USERS_SQL, VERIFY_SEED_ACCOUNTS_SQL, VERIFY_SEED_PLANS_SQL, VERIFY_SEED_SUBSCRIPTIONS_SQL]) {
       expect(q).toMatch(/^select /);
       expect(q).not.toMatch(/\b(insert|update|delete|truncate|drop|alter|grant)\b/i);
     }
@@ -111,6 +196,31 @@ describe("zapytania i zgodność ze seedem", () => {
       expect(seed).toContain(`email: "${u.email}"`);
       expect(seed).toContain(`role: "${u.role}"`);
     }
+  });
+
+  it("zapytanie o subskrypcje filtruje po obu identyfikatorach salonów seeda i czyta kolumny dostępu", () => {
+    const where = VERIFY_SEED_SUBSCRIPTIONS_SQL.slice(VERIFY_SEED_SUBSCRIPTIONS_SQL.search(/\bwhere\b/i));
+    expect(where).toMatch(/^where /);
+    expect(where).toContain(`'${SEED_SALON_IDS.test}'`);
+    expect(where).toContain(`'${SEED_SALON_IDS.trialExpired}'`);
+    expect(where).not.toMatch(/\bor\b/i);
+    for (const col of ["status", "slug", "trial_ends_at", "current_period_start", "current_period_end", "created_at"]) {
+      expect(VERIFY_SEED_SUBSCRIPTIONS_SQL).toMatch(new RegExp(`\\b${col}\\b`));
+    }
+  });
+
+  it("salony, statusy subskrypcji i usuwanie wierszy subskrypcji zgodne z seed-test.ts", () => {
+    const seed = code("scripts/seed-test.ts");
+    expect(seed).toContain(`const SALON_ID = "${SEED_SALON_IDS.test}";`);
+    expect(seed).toContain(`const TRIAL_EXPIRED_SALON_ID = "${SEED_SALON_IDS.trialExpired}";`);
+    expect(seed).toMatch(/salonId: SALON_ID,\s*status: "active",/);
+    expect(seed).toMatch(/salonId: TRIAL_EXPIRED_SALON_ID,\s*status: "trialing",/);
+    // Każde usuwanie w seedzie dotyczy wyłącznie wierszy subskrypcji dwóch salonów seeda.
+    const deletes = seed.match(/\.delete\(/g) ?? [];
+    const scoped =
+      seed.match(/\.delete\(salonSubscriptions\)\s*\.where\(\s*and\(\s*inArray\(salonSubscriptions\.salonId, \[SALON_ID, TRIAL_EXPIRED_SALON_ID\]\),/g) ?? [];
+    expect(deletes.length).toBeGreaterThan(0);
+    expect(scoped.length).toBe(deletes.length);
   });
 
   it("verify-seed.ts tylko podpina klienta, wyjście i kod wyjścia — logika w runVerifySeed", () => {
@@ -140,6 +250,7 @@ function fakeDb(opts: {
       if (q === VERIFY_SEED_USERS_SQL) return rows.users;
       if (q === VERIFY_SEED_ACCOUNTS_SQL) return rows.accounts;
       if (q === VERIFY_SEED_PLANS_SQL) return rows.plans;
+      if (q === VERIFY_SEED_SUBSCRIPTIONS_SQL) return rows.subscriptions;
       throw new Error("nieoczekiwane zapytanie");
     },
     end: async () => {
@@ -151,7 +262,7 @@ function fakeDb(opts: {
 
 const SECRET_URL = "postgres://tajny-uzytkownik:tajne-haslo@localhost:5432/pos_dev";
 const REMOTE_URL = "postgres://tajny-uzytkownik:tajne-haslo@zdalny-host.example.net:5432/pos_dev";
-const DATA_QUERIES = [VERIFY_SEED_USERS_SQL, VERIFY_SEED_ACCOUNTS_SQL, VERIFY_SEED_PLANS_SQL];
+const DATA_QUERIES = [VERIFY_SEED_USERS_SQL, VERIFY_SEED_ACCOUNTS_SQL, VERIFY_SEED_PLANS_SQL, VERIFY_SEED_SUBSCRIPTIONS_SQL];
 
 async function run(env: { POSTGRES_URL?: string; VERCEL_ENV?: string }, db: ReturnType<typeof fakeDb>) {
   const out: string[] = [];
@@ -218,7 +329,34 @@ describe("runVerifySeed — przebieg i wyjście", () => {
     expect(r.code).toBe(0);
     expect(db.queries).toEqual([SEED_SERVER_PROBE_SQL, ...DATA_QUERIES]);
     expect(db.ended()).toBeGreaterThan(0);
-    expect(r.out).toEqual(["log [verify-seed] OK: użytkownicy testowi 2, konta credential 2, plany 2"]);
+    expect(r.out).toEqual(["log [verify-seed] OK: użytkownicy testowi 3, konta credential 3, plany 2, subskrypcje 2"]);
+  });
+
+  it("chwila kontroli z deps.now: trial salonu po okresie próbnym jeszcze trwa → kod 1", async () => {
+    const rows = goodRows();
+    rows.subscriptions = rows.subscriptions.map((s) =>
+      s.salon_id === SEED_SALON_IDS.trialExpired ? { ...s, trial_ends_at: FUTURE } : s,
+    );
+    const out: string[] = [];
+    const code = await runVerifySeed({
+      env: { POSTGRES_URL: SECRET_URL },
+      connect: () => fakeDb({ rows }).client,
+      now: () => NOW,
+      log: (line) => out.push(`log ${line}`),
+      error: (line) => out.push(`err ${line}`),
+    });
+    expect(code).toBe(1);
+    expect(out).toContain("err [verify-seed] subskrypcja salonu po okresie próbnym: dostęp full, oczekiwany read_only");
+  });
+
+  it("niezgodność subskrypcji: kod 1, problem w osobnej linii", async () => {
+    const rows = goodRows();
+    rows.subscriptions = rows.subscriptions.filter((s) => s.salon_id !== SEED_SALON_IDS.test);
+    const db = fakeDb({ rows });
+    const r = await run({ POSTGRES_URL: SECRET_URL }, db);
+    expect(r.code).toBe(1);
+    expect(db.queries).toEqual([SEED_SERVER_PROBE_SQL, ...DATA_QUERIES]);
+    expect(r.out).toEqual(["err [verify-seed] subskrypcja salonu testowego: wierszy 0, oczekiwany 1"]);
   });
 
   it("niezgodność: kod 1, każdy problem w osobnej linii", async () => {
@@ -254,6 +392,7 @@ describe("runVerifySeed — przebieg i wyjście", () => {
   const OUTPUT_LEAKS = [
     "@", "tajne-haslo", "tajny-uzytkownik", "zdalny-host", "pos_reset_test", "pos_dev", "localhost",
     "test-owner", "test-client", "ECONNREFUSED", "funkcja-obca", "59.00",
+    SEED_SALON_IDS.test, SEED_SALON_IDS.trialExpired, "2020",
   ];
   const scenarios: Array<[string, () => Promise<{ out: string[] }>]> = [
     ["etap 1", () => run({ POSTGRES_URL: REMOTE_URL }, fakeDb())],
@@ -265,6 +404,7 @@ describe("runVerifySeed — przebieg i wyjście", () => {
       const rows = goodRows();
       rows.users = rows.users.map((u) => ({ ...u, id: "obcy-id-123", role: "admin" }));
       rows.plans = rows.plans.map((p) => ({ ...p, price_monthly: "59.00", features_json: ["funkcja-obca"] }));
+      rows.subscriptions = rows.subscriptions.map((s) => ({ ...s, status: "canceled" }));
       return run({ POSTGRES_URL: SECRET_URL }, fakeDb({ rows }));
     }],
   ];
