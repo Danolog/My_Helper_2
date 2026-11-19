@@ -7,6 +7,9 @@
  * STARĄ datę — `canceled` traci dostęp przed końcem zapłaconego okresu,
  * `past_due` ma nieaktualny termin. Dlatego najpierw `items.data[0]`, potem
  * poziom subskrypcji (zdarzenia w starszej wersji API).
+ *
+ * Okres opłacony fakturą czytamy z linii faktury (`lines.data[].period`), nie
+ * z `period_start/end` samej faktury — tam faktura odnowienia ma okres poprzedni.
  */
 
 export interface StripeSubscriptionPeriodSource {
@@ -34,4 +37,20 @@ export function stripeSubscriptionPeriod(sub: StripeSubscriptionPeriodSource): B
     toPeriod(item?.current_period_start, item?.current_period_end) ??
     toPeriod(sub.current_period_start, sub.current_period_end)
   );
+}
+
+export interface StripeInvoicePeriodSource {
+  lines?: {
+    data?: Array<{ period?: { start?: number | null; end?: number | null } | null }> | null;
+  } | null;
+}
+
+/** Okres opłacony fakturą: linia o największym `period.end` (start z tej samej linii). */
+export function paidInvoicePeriod(invoice: StripeInvoicePeriodSource): BillingPeriod | null {
+  let best: BillingPeriod | null = null;
+  for (const line of invoice.lines?.data ?? []) {
+    const period = toPeriod(line.period?.start, line.period?.end);
+    if (period && (!best || period.end.getTime() > best.end.getTime())) best = period;
+  }
+  return best;
 }
