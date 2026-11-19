@@ -1,6 +1,6 @@
 /**
  * POST /api/subscriptions/cancel — anulowanie tylko potwierdzone przez Stripe
- * (T3b; warunek Ethana z przeglądu #62 §2b, przed pierwszym płacącym salonem).
+ * (T3b; warunek z przeglądu #62 §2b, przed pierwszym płacącym salonem).
  *
  * Przed poprawką trasa przy błędzie Stripe zapisywała lokalnie `canceled`
  * („Continue with local DB update even if Stripe fails”): Stripe dalej
@@ -112,7 +112,7 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
     expect(new Date(PERIOD_END * 1000)).not.toEqual(ACTIVE.currentPeriodEnd);
     expect(subWrites()[0]?.values).not.toHaveProperty("currentPeriodStart");
     expect(subWrites()[0]?.values).not.toHaveProperty("currentPeriodEnd");
-    // Odpowiedź niesie koniec okresu zwrócony przez zapis, nie okres Stripe.
+    // Odpowiedź nie niesie końca okresu ze Stripe.
     expect((body.subscription as Record<string, unknown>).currentPeriodEnd).not.toBe(
       new Date(PERIOD_END * 1000).toISOString(),
     );
@@ -173,7 +173,7 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
     expect(subWrites().map((w) => w.values.status)).toEqual(["canceled"]);
   });
 
-  it("502: błąd Stripe → zero zapisów, bez blokady salonu (bloker Ethana)", async () => {
+  it("502: błąd Stripe → zero zapisów, bez blokady salonu", async () => {
     mockUpdate.mockRejectedValue(Object.assign(new Error("card_declined: secret detail"), { type: "StripeAPIError" }));
     f.selects.push([ACTIVE], [ACTIVE]);
 

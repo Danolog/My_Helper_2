@@ -35,7 +35,7 @@ function json(status: number, code: string, error: string) {
 /**
  * POST /api/subscriptions/cancel
  *
- * Anuluje bieżącą (active) subskrypcję salonu z sesji (T3b, warunek Ethana
+ * Anuluje bieżącą (active) subskrypcję salonu z sesji (T3b, warunek
  * z przeglądu #62 §2b — przed pierwszym płacącym salonem).
  *
  * Prawdziwa subskrypcja Stripe: `cancel_at_period_end: true` w Stripe
