@@ -15,7 +15,8 @@
  * `.set(…)`/`.values(…)` występują tylko w potwierdzeniu Checkoutu,
  * w rejestracji (okres próbny) i w webhooku — tam wyłącznie w
  * `handleInvoicePaid`, z wartością `paidPeriodStartSql(…)` /
- * `paidPeriodEndSql(…)`. Typ `SubscriptionStateUpdate` (zapis `.set(state)`)
+ * `paidPeriodEndSql(…)`. Obie funkcje są zdefiniowane wyłącznie w
+ * `src/lib/subscription-paid-period.ts`. Typ `SubscriptionStateUpdate` (zapis `.set(state)`)
  * nie obejmuje pól okresu, a surowy SQL poza schematem nie używa nazw kolumn
  * okresu.
  *
@@ -164,6 +165,7 @@ describe("niezmiennik T3b: zapisy salon_subscriptions tylko w transakcji z bloka
 
 const WEBHOOK = "src/app/api/stripe/webhook/route.ts";
 const PERIOD_WRITERS = [ALLOWED_WRITER, WEBHOOK, "src/app/api/register-subscription/route.ts"];
+const PAID_PERIOD_MODULE = "src/lib/subscription-paid-period.ts";
 const hasPeriodField = (text: string) => /\bcurrentPeriod(?:Start|End)\b/.test(text);
 
 /**
@@ -217,6 +219,22 @@ describe("kontrakt: okres rozliczeniowy (currentPeriodStart/End) zapisują tylko
         )
     );
     expect(badValues).toEqual([]);
+  });
+
+  it("paidPeriodStartSql i paidPeriodEndSql zdefiniowane dokładnie raz w src/, w src/lib/subscription-paid-period.ts; ciało paidPeriodEndSql zawiera greatest(", () => {
+    const declarations = (name: string) =>
+      sourceFiles(SRC).flatMap((path) =>
+        [...readSource(path).matchAll(new RegExp(`\\bfunction ${name}\\b`, "g"))].map(() => relative(ROOT, path))
+      );
+    expect(declarations("paidPeriodStartSql")).toEqual([PAID_PERIOD_MODULE]);
+    expect(declarations("paidPeriodEndSql")).toEqual([PAID_PERIOD_MODULE]);
+
+    const text = readSource(PAID_PERIOD_MODULE);
+    const fn = text.indexOf("function paidPeriodEndSql(");
+    expect(fn).toBeGreaterThan(-1);
+    const paramsOpen = text.indexOf("(", fn);
+    const bodyOpen = text.indexOf("{", paramsOpen + balanced(text, paramsOpen).length + 2);
+    expect(balanced(text, bodyOpen, "{}")).toContain("greatest(");
   });
 
   it("treść zapisu, która nie jest literałem obiektu, to tylko `state` w webhooku albo zapis w potwierdzeniu", () => {
