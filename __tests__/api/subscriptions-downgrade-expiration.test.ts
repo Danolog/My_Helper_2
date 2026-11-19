@@ -154,7 +154,7 @@ describe("DELETE /api/subscriptions/downgrade — pod blokadą salonu", () => {
 });
 
 describe("POST /api/subscriptions/expiration-warning — odczyt pod blokadą salonu, bez zapisu subskrypcji", () => {
-  it("simulate: odczyt po blokadzie salonu i commit bez zapisu subskrypcji, powiadomienia po transakcji, termin symulowany tylko w odpowiedzi", async () => {
+  it("simulate: odczyt po blokadzie salonu i commit bez zapisu subskrypcji, powiadomienia po transakcji, termin symulowany w odpowiedzi, nie w wierszu", async () => {
     f.selects.push([{ subscription: ACTIVE, plan: PLAN_PRO }]);
 
     const { status, body } = await call(expirationWarning, "POST", { simulate: true });
