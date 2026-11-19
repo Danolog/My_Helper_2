@@ -977,11 +977,6 @@ export const downgradeSubscriptionSchema = z.object({
   targetPlanSlug: z.string().min(1, "targetPlanSlug is required"),
 });
 
-export const expirationWarningSchema = z.object({
-  warningDays: z.number().int().min(1).max(30).optional(),
-  simulate: z.boolean().optional(),
-});
-
 // ==========================================
 // Client Portal Schemas (additional)
 // ==========================================
