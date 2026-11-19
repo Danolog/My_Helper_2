@@ -825,4 +825,46 @@ describe("logger — redakcja przy serializacji, wpis zastępczy, logger nie rzu
       contextError: "unserializable",
     });
   });
+
+  it("URL i Date pod kluczem z listy oraz URL pod kluczem z fragmentem w instancji klasy → [redacted]", async () => {
+    class Adresat {
+      address = new URL(DB_URL);
+      emailLink = new URL("mailto:" + EMAIL);
+      note = new Date("2026-01-02T03:04:05.000Z");
+    }
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { adresat: new Adresat() });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain(EMAIL);
+    expect(raw).not.toContain("db.example.com");
+    expect(raw).not.toContain("2026-01-02");
+    expect(JSON.parse(raw).adresat).toEqual({
+      address: "[redacted]",
+      emailLink: "[redacted]",
+      note: "[redacted]",
+    });
+  });
+
+  it("błąd zapytania w polu instancji klasy → bezpieczny zapis błędu, parametry nie trafiają do logu", async () => {
+    const { DrizzleQueryError } = await import("drizzle-orm");
+    class Zadanie {
+      id = "z-1";
+      cause = new DrizzleQueryError("insert into x values ($1)", [EMAIL]);
+    }
+    const logger = await importLoggerWithEnv("production");
+    logger.error("Padlo", { zadanie: new Zadanie() });
+
+    const raw = errorSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain(EMAIL);
+    const cause = JSON.parse(raw).zadanie.cause;
+    expect(cause).toHaveProperty("message");
+    expect(cause).toHaveProperty("name");
+  });
+
+  it("tryb deweloperski: URL pod kluczem z fragmentem w zwykłym obiekcie → [redacted]", async () => {
+    const logger = await importLoggerWithEnv("development");
+    logger.info("x", { emailLink: new URL("mailto:" + EMAIL) });
+    expect(logSpy).toHaveBeenCalledWith("[INFO]", "x", { emailLink: "[redacted]" });
+  });
 });

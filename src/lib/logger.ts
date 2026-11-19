@@ -146,7 +146,7 @@ export function redactLogContext(value: unknown, depth = 0, seen: WeakSet<object
     : Object.fromEntries(
         Object.entries(value).map(([k, v]) => [
           k,
-          isRedactedEntry(k, v) ? REDACTED : redactLogContext(v, depth + 1, seen),
+          isRedactedEntry(k, v instanceof URL ? v.href : v) ? REDACTED : redactLogContext(v, depth + 1, seen),
         ]),
       );
   seen.delete(value);
@@ -156,20 +156,25 @@ export function redactLogContext(value: unknown, depth = 0, seen: WeakSet<object
 /**
  * Replacer `JSON.stringify` — druga linia redakcji przy serializacji, na
  * każdym poziomie, także w polach obiektów niebędących zwykłymi obiektami
- * (instancje klas): `URL` → napis adresu bez nazwy użytkownika i hasła;
- * wartość pod kluczem z `PII_LOG_KEYS` albo wartość kontaktowa pod kluczem
- * z `PII_LOG_KEY_FRAGMENTS` → `[redacted]`; `bigint` → napis dziesiętny.
- * Dla wyniku `redactLogContext` na zwykłych obiektach nic nie zmienia.
- * `Date` zostaje datą także pod kluczem z fragmentem (liczbowy znacznik
- * czasu pod takim kluczem nadal jest redagowany — reguła przy
- * `PII_LOG_KEY_FRAGMENTS`).
+ * (instancje klas). Kolejność: wartość pod kluczem z `PII_LOG_KEYS` →
+ * `[redacted]` niezależnie od typu; `Error` → `toSafeErrorMeta`; `Date`
+ * zostaje datą (także pod kluczem z fragmentem; liczbowy znacznik czasu pod
+ * takim kluczem nadal jest redagowany — reguła przy `PII_LOG_KEY_FRAGMENTS`);
+ * `URL` → napis adresu bez nazwy użytkownika i hasła; wartość kontaktowa
+ * (także ten napis adresu) pod kluczem z `PII_LOG_KEY_FRAGMENTS` →
+ * `[redacted]`; `bigint` → napis dziesiętny.
+ * Dla wyniku `redactLogContext` na zwykłych obiektach replacer może jedynie
+ * zredagować więcej: tablicę pod kluczem z fragmentem, w której pierwsza
+ * linia zostawiła napis (znacznik cyklu, znacznik głębokości albo adres z `URL`).
  */
 function logReplacer(this: unknown, key: string, value: unknown): unknown {
   const source = (this as Record<string, unknown>)[key];
-  if (source instanceof URL) return urlWithoutCredentials(source);
+  if (key !== "" && PII_KEY_SET.has(key.toLowerCase())) return REDACTED;
+  if (source instanceof Error) return serializeError(source);
   if (source instanceof Date) return value;
-  if (key !== "" && isRedactedEntry(key, value)) return REDACTED;
-  return typeof value === "bigint" ? value.toString() : value;
+  const out = source instanceof URL ? urlWithoutCredentials(source) : value;
+  if (key !== "" && isRedactedEntry(key, out)) return REDACTED;
+  return typeof out === "bigint" ? out.toString() : out;
 }
 
 /**
