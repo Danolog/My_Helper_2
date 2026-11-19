@@ -1,12 +1,12 @@
 /**
- * `GET /api/subscriptions/expiration-warning` — odczyt ostatnich ostrzeżeń
- * o wygaśnięciu: warunek salonu z sesji ORAZ alternatywa trzech wzorców treści.
+ * `GET /api/subscriptions/expiration-warning` — odpowiedzi 401, 404, 200
+ * z danymi aktywnej subskrypcji, 200 z `data: null` i 500.
  *
- * Atrapa `db` zapisuje argumenty `where`, `orderBy` i `limit` każdego zapytania;
- * warunek renderowany do SQL prawdziwym `PgDialect` (bez bazy).
+ * Atrapa `db` zapisuje tabelę każdego zapytania (`notifications` albo inna)
+ * oraz wpisy `select:…` i — w transakcji — `begin`, `execute:…`, `commit`
+ * albo `rollback`.
  */
 import { NextResponse } from "next/server";
-import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GET } from "@/app/api/subscriptions/expiration-warning/route";
 import type { SQL } from "drizzle-orm";
@@ -23,7 +23,6 @@ const h = await vi.hoisted(async () => {
     queries: [] as Query[],
     log: [] as string[],
     subscriptionRows: [] as unknown[],
-    warningRows: [] as unknown[],
     failSelect: null as Error | null,
   };
 
@@ -51,7 +50,7 @@ const h = await vi.hoisted(async () => {
       state.queries.push(q);
       state.log.push(`select:${q.table}`);
       if (state.failSelect) return Promise.reject(state.failSelect).then(resolve, reject);
-      const rows = q.table === "notifications" ? state.warningRows : state.subscriptionRows;
+      const rows = q.table === "notifications" ? [] : state.subscriptionRows;
       return Promise.resolve(rows).then(resolve, reject);
     };
     return chain;
@@ -84,7 +83,6 @@ const h = await vi.hoisted(async () => {
     state.queries.length = 0;
     state.log.length = 0;
     state.subscriptionRows = [];
-    state.warningRows = [];
     state.failSelect = null;
   }
 
@@ -108,8 +106,6 @@ vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
 
-const render = (q: unknown) => new PgDialect().sqlToQuery(q as SQL);
-
 const PLAN_PRO = { id: "plan-pro", name: "Pro", slug: "pro", priceMonthly: "149.00" };
 const ACTIVE = {
   id: "sub-local",
@@ -118,22 +114,6 @@ const ACTIVE = {
   status: "active",
   currentPeriodEnd: new Date(Date.now() + 20 * 24 * 3600 * 1000),
 };
-const SENT_AT = new Date("2026-11-10T08:00:00.000Z");
-const CREATED_AT = new Date("2026-11-10T08:00:01.000Z");
-const WARNING_ROW = {
-  id: "n-1",
-  salonId: "salon-1",
-  clientId: null,
-  type: "email",
-  message: "Twoja subskrypcja planu Pro wygasa za 3 dni",
-  status: "sent",
-  sentAt: SENT_AT,
-  createdAt: CREATED_AT,
-};
-
-const WARNINGS_WHERE_SQL =
-  '("notifications"."salon_id" = $1 and (' +
-  '"notifications"."message" like $2 or "notifications"."message" like $3 or "notifications"."message" like $4))';
 
 const warningsQuery = () => h.state.queries.find((q) => q.table === "notifications");
 
@@ -148,66 +128,9 @@ beforeEach(() => {
   mockRequireAuth.mockResolvedValue({ user: { id: "user-1" } });
   mockGetUserSalonId.mockResolvedValue("salon-1");
   h.state.subscriptionRows = [{ subscription: ACTIVE, plan: PLAN_PRO }];
-  h.state.warningRows = [WARNING_ROW];
 });
 
-describe("GET /api/subscriptions/expiration-warning — zapytanie o ostatnie ostrzeżenia", () => {
-  it("warunek zapytania do notifications wyrenderowany do SQL: salon = $1 and (trzy wzorce like połączone or, w nawiasie); parametry: salon z sesji i trzy wzorce", async () => {
-    await callGet();
-
-    const q = render(warningsQuery()?.where);
-    expect(q.sql).toBe(WARNINGS_WHERE_SQL);
-    expect(q.params).toEqual(["salon-1", "%wygasa%", "%odnowienia%", "%expir%"]);
-  });
-
-  it("inny salon w sesji → jego identyfikator jest parametrem warunku salonu i kontekstu transakcji", async () => {
-    mockGetUserSalonId.mockResolvedValue("salon-2");
-
-    await callGet();
-
-    const q = render(warningsQuery()?.where);
-    expect(q.sql).toBe(WARNINGS_WHERE_SQL);
-    expect(q.params[0]).toBe("salon-2");
-    expect(q.params).not.toContain("salon-1");
-    expect(h.state.log).toContainEqual(expect.stringMatching(/^execute:select set_config\('app\.current_salon_id', \$1, true\) \["salon-2"\]$/));
-  });
-
-  it("zapytanie do notifications biegnie w transakcji po przełączeniu roli i ustawieniu kontekstu salonu z sesji", async () => {
-    await callGet();
-
-    expect(h.state.log).toEqual([
-      "select:other",
-      "begin",
-      expect.stringMatching(/^execute:set local role [a-z_][a-z0-9_]* \[\]$/),
-      'execute:select set_config(\'app.current_salon_id\', $1, true) ["salon-1"]',
-      "select:notifications",
-      "commit",
-    ]);
-  });
-
-  it("200: odpowiedź mapuje wiersze atrapy na id, type, message, status, sentAt, createdAt; zapytanie ma limit 5 i sortowanie malejąco po created_at", async () => {
-    const { status, body } = await callGet();
-
-    expect(status).toBe(200);
-    const data = body.data as Record<string, unknown>;
-    expect(data.recentWarnings).toEqual([
-      {
-        id: "n-1",
-        type: "email",
-        message: WARNING_ROW.message,
-        status: "sent",
-        sentAt: SENT_AT.toISOString(),
-        createdAt: CREATED_AT.toISOString(),
-      },
-    ]);
-    const q = warningsQuery();
-    expect(q?.limit).toBe(5);
-    expect(q?.orderBy).toHaveLength(1);
-    expect(render(q?.orderBy[0]).sql).toMatch(/^"notifications"\."created_at" desc$/i);
-  });
-});
-
-describe("GET /api/subscriptions/expiration-warning — odpowiedzi poza ścieżką ostrzeżeń", () => {
+describe("GET /api/subscriptions/expiration-warning — odpowiedzi", () => {
   it("requireAuth zwraca odpowiedź 401 → trasa zwraca 401 bez zapytań do bazy", async () => {
     mockRequireAuth.mockResolvedValueOnce(NextResponse.json({ error: "Unauthorized" }, { status: 401 }));
 
@@ -223,6 +146,28 @@ describe("GET /api/subscriptions/expiration-warning — odpowiedzi poza ścieżk
     expect(status).toBe(404);
     expect(body).toEqual({ success: false, error: "Salon not found" });
     expect(h.state.log).toEqual([]);
+  });
+
+  it("aktywna subskrypcja → 200: data ma dokładnie klucze subscriptionId, planName, planSlug, status, currentPeriodEnd, daysRemaining, warningThreshold, isNearExpiry, renewalAmount; żadne zapytanie do notifications i żaden wpis begin w logu atrapy", async () => {
+    const { status, body } = await callGet();
+
+    expect(status).toBe(200);
+    const data = body.data as Record<string, unknown>;
+    expect(Object.keys(data).sort()).toEqual(
+      [
+        "subscriptionId",
+        "planName",
+        "planSlug",
+        "status",
+        "currentPeriodEnd",
+        "daysRemaining",
+        "warningThreshold",
+        "isNearExpiry",
+        "renewalAmount",
+      ].sort(),
+    );
+    expect(h.state.queries.filter((q) => q.table === "notifications")).toEqual([]);
+    expect(h.state.log).not.toContain("begin");
   });
 
   it("brak aktywnej subskrypcji → 200 z data: null i bez zapytania do notifications", async () => {

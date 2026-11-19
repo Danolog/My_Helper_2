@@ -1,8 +1,7 @@
 /**
  * Karta ostrzeżenia o wygaśnięciu i karta automatycznego odnowienia
  * w panelu subskrypcji: obie karty bez elementów o roli button; karta
- * ostrzeżenia z banerem bliskiego wygaśnięcia i kwotą odnowienia, bez tekstu
- * „Ostatnie ostrzezenia” i bez treści wpisu z `recentWarnings`.
+ * ostrzeżenia z banerem bliskiego wygaśnięcia i kwotą odnowienia.
  */
 import { render, screen, within } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
@@ -39,24 +38,12 @@ const PLAN: PlanData = {
   isActive: true,
 };
 
-const WARNING_MESSAGE = "Przypomnienie o odnowieniu subskrypcji.";
-
 function expirationData(overrides: Partial<ExpirationData>): ExpirationData {
   return {
     daysRemaining: 3,
     warningThreshold: 7,
     isNearExpiry: true,
     renewalAmount: "149",
-    recentWarnings: [
-      {
-        id: "warning-1",
-        type: "email",
-        message: WARNING_MESSAGE,
-        status: "sent",
-        sentAt: "2026-11-19T12:00:00.000Z",
-        createdAt: "2026-11-19T12:00:00.000Z",
-      },
-    ],
     ...overrides,
   };
 }
@@ -110,24 +97,6 @@ describe("karta ostrzeżenia o wygaśnięciu", () => {
 
     expectNoButtonsAndNoRemovedTexts();
   });
-
-  it.each([
-    { isNearExpiry: true, daysRemaining: 3 },
-    { isNearExpiry: false, daysRemaining: 20 },
-  ])(
-    "isNearExpiry: $isNearExpiry, recentWarnings z jednym wpisem — brak tekstu „Ostatnie ostrzezenia” i treści wpisu",
-    (overrides) => {
-      render(
-        <ExpirationWarningCard
-          subscription={SUBSCRIPTION}
-          expirationData={expirationData(overrides)}
-        />,
-      );
-
-      expect(screen.queryByText("Ostatnie ostrzezenia")).toBeNull();
-      expect(screen.queryByText(WARNING_MESSAGE)).toBeNull();
-    },
-  );
 });
 
 describe("karta automatycznego odnowienia", () => {

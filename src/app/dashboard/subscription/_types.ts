@@ -40,14 +40,6 @@ export type ExpirationData = {
   warningThreshold: number;
   isNearExpiry: boolean;
   renewalAmount: string | null;
-  recentWarnings: Array<{
-    id: string;
-    type: string;
-    message: string;
-    status: string;
-    sentAt: string | null;
-    createdAt: string;
-  }>;
 };
 
 /**
