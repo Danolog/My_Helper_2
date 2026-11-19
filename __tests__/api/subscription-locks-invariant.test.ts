@@ -11,9 +11,10 @@
  * `stripeSubscriptionId` (np. przywrócona symulacja `sim_*`), ten test pada.
  *
  * Kontrakt okresu: `currentPeriodStart` / `currentPeriodEnd` to ostatni
- * opłacony okres. W treści `.set(…)`/`.values(…)` występują tylko w
- * potwierdzeniu Checkoutu, w rejestracji (okres próbny) i w webhooku — tam
- * wyłącznie w `handleInvoicePaid`, z wartością `paidPeriodStartSql(…)` /
+ * opłacony okres, a w subskrypcji w okresie próbnym — okres próbny. W treści
+ * `.set(…)`/`.values(…)` występują tylko w potwierdzeniu Checkoutu,
+ * w rejestracji (okres próbny) i w webhooku — tam wyłącznie w
+ * `handleInvoicePaid`, z wartością `paidPeriodStartSql(…)` /
  * `paidPeriodEndSql(…)`. Typ `SubscriptionStateUpdate` (zapis `.set(state)`)
  * nie obejmuje pól okresu, a surowy SQL poza schematem nie używa nazw kolumn
  * okresu.
