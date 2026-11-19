@@ -8,6 +8,8 @@
  * select().from().where()…, schema jako Proxy, drizzle-orm jako atrapy).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+// vi.mock niżej jest hoistowany przez vitest — trasa importuje już atrapy.
+import { GET } from "@/app/api/salons/[id]/employees/[employeeId]/route";
 
 const mockDbSelect = vi.fn();
 
@@ -55,8 +57,6 @@ function chainMock(result: unknown[] = []) {
   (chain as Record<string, unknown>).then = (resolve: (v: unknown[]) => unknown) => resolve(result);
   return chain;
 }
-
-import { GET } from "@/app/api/salons/[id]/employees/[employeeId]/route";
 
 const SALON_ID = "salon-1";
 const EMPLOYEE_ID = "employee-1";
