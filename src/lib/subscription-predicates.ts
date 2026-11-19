@@ -1,9 +1,10 @@
 /**
- * Wspólne predykaty subskrypcji salonu (T3b). Ten sam warunek konfliktu
+ * Wspólne predykaty subskrypcji salonu. Ten sam warunek konfliktu
  * w `subscriptions/checkout` (przed utworzeniem sesji Stripe) i w
  * `confirmSubscriptionCheckout` (po płatności): dzięki temu 409 w confirm
  * jest ostatnią linią obrony, a nie miejscem, gdzie klient dowiaduje się
- * o konflikcie już po pobraniu pieniędzy (Ethan, przegląd #62 §6).
+ * o konflikcie już po pobraniu pieniędzy. Tu też wybór wiersza i stan
+ * dostępu salonu (`pickSalonAccessRow`, `resolveSalonAccess`).
  *
  * Bez importu `db` — używają go też atrapy w testach.
  */
