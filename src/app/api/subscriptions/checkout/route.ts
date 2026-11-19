@@ -174,8 +174,8 @@ export async function POST(request: Request) {
     // znaczy, że nowy Checkout założyłby drugą subskrypcję w Stripe, gdy
     // dostęp z pierwszej jeszcze trwa (canceled — druga opłata za te same
     // dni; past_due — stara subskrypcja w Stripe nie jest zakończona). Warunek
-    // i termin liczy `purchaseBlock`; odmawiamy do `access.until`, bez
-    // wywołania Stripe i bez zapisu.
+    // i termin liczy `purchaseBlock`; odmawiamy do `block.until` (termin
+    // pełnego dostępu), bez wywołania Stripe i bez zapisu.
     const accessRows = await forSalon(salonId).raw(async (tx) => {
       const all = await tx
         .select({

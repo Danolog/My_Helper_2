@@ -869,7 +869,7 @@ describe("POST /api/subscriptions/checkout", () => {
       ["basic", PLAN_BASIC, "price_test_basic"],
       ["pro", PLAN_PRO, "price_test_pro"],
     ] as const)(
-      "plan %s: line_items = [{ price: identyfikator ceny planu z konfiguracji, quantity: 1 }] bez price_data; pozostałe parametry sesji takie jak przy cenie tworzonej z planu",
+      "plan %s: line_items = [{ price: identyfikator ceny planu z konfiguracji, quantity: 1 }] bez price_data; mode, success_url, cancel_url, customer_email, metadata i expires_at takie jak przy cenie tworzonej z planu",
       async (slug, plan, priceId) => {
         const { configured, adHoc } = await sessionParamsWithAndWithoutConfiguredPrice(plan, slug);
 
