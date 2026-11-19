@@ -232,11 +232,11 @@ describe("getCurrentPlan", () => {
     expect(mockGetUserSalonId).toHaveBeenCalled();
   });
 
-  it("canceled z currentPeriodEnd w przyszłości -> basic ze statusem canceled", async () => {
+  it("canceled z currentPeriodEnd w przyszłości -> plan z wiersza ze statusem canceled", async () => {
     mockDbOrderBy.mockResolvedValue([
       row("canceled", "pro", { currentPeriodStart: at(-5 * DAY), currentPeriodEnd: at(10 * DAY) }),
     ]);
-    expect(await getCurrentPlan("salon-123")).toEqual({ slug: "basic", name: "Basic", status: "canceled" });
+    expect(await getCurrentPlan("salon-123")).toEqual({ slug: "pro", name: "Pro", status: "canceled" });
   });
 
   it("canceled po końcu okresu -> basic ze statusem canceled", async () => {
@@ -244,16 +244,16 @@ describe("getCurrentPlan", () => {
     expect(await getCurrentPlan("salon-123")).toEqual({ slug: "basic", name: "Basic", status: "canceled" });
   });
 
-  it("past_due w łasce (7 dni od początku okresu) -> plan z wiersza ze statusem past_due", async () => {
+  it("past_due w łasce (3 dni po końcu okresu) -> plan z wiersza ze statusem past_due", async () => {
     mockDbOrderBy.mockResolvedValue([
-      row("past_due", "pro", { currentPeriodStart: at(-3 * DAY), currentPeriodEnd: at(27 * DAY) }),
+      row("past_due", "pro", { currentPeriodStart: at(-33 * DAY), currentPeriodEnd: at(-3 * DAY) }),
     ]);
     expect(await getCurrentPlan("salon-123")).toEqual({ slug: "pro", name: "Pro", status: "past_due" });
   });
 
-  it("past_due po łasce (currentPeriodEnd w przyszłości) -> basic ze statusem past_due", async () => {
+  it("past_due po łasce (8 dni po końcu okresu) -> basic ze statusem past_due", async () => {
     mockDbOrderBy.mockResolvedValue([
-      row("past_due", "pro", { currentPeriodStart: at(-8 * DAY), currentPeriodEnd: at(22 * DAY) }),
+      row("past_due", "pro", { currentPeriodStart: at(-38 * DAY), currentPeriodEnd: at(-8 * DAY) }),
     ]);
     expect(await getCurrentPlan("salon-123")).toEqual({ slug: "basic", name: "Basic", status: "past_due" });
   });
@@ -286,9 +286,10 @@ describe("getCurrentPlan", () => {
       () => mockDbOrderBy.mockRejectedValue(new Error("DB error")),
       () => mockDbOrderBy.mockResolvedValue([row("trialing", "pro", { trialEndsAt: at(-DAY) })]),
       () => mockDbOrderBy.mockResolvedValue([row("past_due", "pro", { currentPeriodEnd: at(-30 * DAY) })]),
-      () => mockDbOrderBy.mockResolvedValue([row("past_due", "pro", { currentPeriodEnd: at(20 * DAY) })]),
+      () => mockDbOrderBy.mockResolvedValue([row("past_due", "pro", { currentPeriodEnd: at(-7 * DAY) })]),
+      () => mockDbOrderBy.mockResolvedValue([row("past_due", "pro", { currentPeriodStart: at(-DAY), currentPeriodEnd: null })]),
       () => mockDbOrderBy.mockResolvedValue([row("canceled", "pro", { currentPeriodEnd: null })]),
-      () => mockDbOrderBy.mockResolvedValue([row("canceled", "pro", { currentPeriodEnd: at(10 * DAY) })]),
+      () => mockDbOrderBy.mockResolvedValue([row("canceled", "pro", { currentPeriodEnd: at(0) })]),
       () => mockDbOrderBy.mockResolvedValue([row("paused", "pro")]),
     ];
     for (const setup of cases) {
@@ -320,8 +321,19 @@ describe("getSalonAccess", () => {
     expect(mockLoggerError).toHaveBeenCalledWith(expect.any(String), { error, salonId: "salon-123" });
   });
 
-  it("canceled z currentPeriodEnd w przyszłości -> tylko do odczytu", async () => {
-    mockDbOrderBy.mockResolvedValue([row("canceled", "pro", { currentPeriodEnd: at(10 * DAY) })]);
+  it("canceled z currentPeriodEnd w przyszłości -> pełny dostęp do końca okresu", async () => {
+    const end = at(10 * DAY);
+    mockDbOrderBy.mockResolvedValue([row("canceled", "pro", { currentPeriodEnd: end })]);
+    expect(await getSalonAccess("salon-123")).toEqual({
+      state: "canceled",
+      mode: "full",
+      planSlug: "pro",
+      until: end,
+    });
+  });
+
+  it("canceled po końcu okresu -> tylko do odczytu", async () => {
+    mockDbOrderBy.mockResolvedValue([row("canceled", "pro", { currentPeriodEnd: at(-DAY) })]);
     expect(await getSalonAccess("salon-123")).toEqual({
       state: "canceled",
       mode: "read_only",
@@ -330,20 +342,20 @@ describe("getSalonAccess", () => {
     });
   });
 
-  it("past_due w łasce -> pełny dostęp do początku okresu + 7 dni", async () => {
-    const start = at(-3 * DAY);
-    mockDbOrderBy.mockResolvedValue([row("past_due", "basic", { currentPeriodStart: start, currentPeriodEnd: at(27 * DAY) })]);
+  it("past_due w łasce -> pełny dostęp do końca okresu + 7 dni", async () => {
+    const end = at(-3 * DAY);
+    mockDbOrderBy.mockResolvedValue([row("past_due", "basic", { currentPeriodStart: at(-33 * DAY), currentPeriodEnd: end })]);
     expect(await getSalonAccess("salon-123")).toEqual({
       state: "past_due",
       mode: "full",
       planSlug: "basic",
-      until: new Date(start.getTime() + 7 * DAY),
+      until: new Date(end.getTime() + 7 * DAY),
     });
   });
 
   it("past_due po łasce -> tylko do odczytu", async () => {
     mockDbOrderBy.mockResolvedValue([
-      row("past_due", "basic", { currentPeriodStart: at(-8 * DAY), currentPeriodEnd: at(22 * DAY) }),
+      row("past_due", "basic", { currentPeriodStart: at(-38 * DAY), currentPeriodEnd: at(-8 * DAY) }),
     ]);
     expect(await getSalonAccess("salon-123")).toEqual({
       state: "past_due",
@@ -387,8 +399,20 @@ describe("isProPlan", () => {
     expect(result).toBe(false);
   });
 
-  it("anulowany Pro z currentPeriodEnd w przyszłości -> false", async () => {
+  it("anulowany Pro z currentPeriodEnd w przyszłości -> true", async () => {
     mockDbOrderBy.mockResolvedValue([row("canceled", "pro", { currentPeriodEnd: at(10 * DAY) })]);
+    expect(await isProPlan("salon-123")).toBe(true);
+  });
+
+  it("anulowany Pro po końcu okresu -> false", async () => {
+    mockDbOrderBy.mockResolvedValue([row("canceled", "pro", { currentPeriodEnd: at(-DAY) })]);
+    expect(await isProPlan("salon-123")).toBe(false);
+  });
+
+  it("past_due Pro w łasce (3 dni po końcu okresu) -> true; po łasce (8 dni po końcu okresu) -> false", async () => {
+    mockDbOrderBy.mockResolvedValue([row("past_due", "pro", { currentPeriodEnd: at(-3 * DAY) })]);
+    expect(await isProPlan("salon-123")).toBe(true);
+    mockDbOrderBy.mockResolvedValue([row("past_due", "pro", { currentPeriodEnd: at(-8 * DAY) })]);
     expect(await isProPlan("salon-123")).toBe(false);
   });
 });

@@ -33,7 +33,7 @@ export function isCurrentPaidStripeRow(row: { status: string; stripeSubscription
   return isCurrentLocalStatus(row.status) && hasRealStripeSubscription(row.stripeSubscriptionId);
 }
 
-/** Dni pełnego dostępu dla wiersza `past_due` (liczone od `currentPeriodStart`). */
+/** Dni pełnego dostępu dla wiersza `past_due` (liczone od `currentPeriodEnd`). */
 export const PAST_DUE_GRACE_DAYS = 7;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -109,10 +109,12 @@ export function pickSalonAccessRow<R extends SalonSubscriptionAccessRow>(rows: r
  * - brak wierszy → `none`, tylko odczyt;
  * - `trialing` → pełny dostęp do `trialEndsAt`; po nim albo bez daty → `expired`;
  * - `active` → pełny dostęp niezależnie od dat;
- * - `past_due` → pełny dostęp do `currentPeriodStart` + `PAST_DUE_GRACE_DAYS`;
- *   po nim albo bez `currentPeriodStart` → tylko odczyt;
- * - `canceled` → tylko odczyt;
+ * - `past_due` → pełny dostęp do `currentPeriodEnd` + `PAST_DUE_GRACE_DAYS`;
+ *   po nim albo bez `currentPeriodEnd` → tylko odczyt;
+ * - `canceled` → pełny dostęp do `currentPeriodEnd`; po nim albo bez
+ *   `currentPeriodEnd` → tylko odczyt;
  * - inny status → `inactive`, tylko odczyt.
+ * `currentPeriodStart` nie wpływa na wynik.
  */
 export function resolveSalonAccess(rows: readonly SalonSubscriptionAccessRow[], now: Date): SalonAccess {
   const row = pickSalonAccessRow(rows);
@@ -127,12 +129,14 @@ export function resolveSalonAccess(rows: readonly SalonSubscriptionAccessRow[], 
     case "active":
       return full("active", row.planSlug, row.currentPeriodEnd);
     case "past_due": {
-      if (!row.currentPeriodStart) return readOnly("past_due");
-      const graceEnd = new Date(row.currentPeriodStart.getTime() + PAST_DUE_GRACE_DAYS * DAY_MS);
+      if (!row.currentPeriodEnd) return readOnly("past_due");
+      const graceEnd = new Date(row.currentPeriodEnd.getTime() + PAST_DUE_GRACE_DAYS * DAY_MS);
       return nowMs < graceEnd.getTime() ? full("past_due", row.planSlug, graceEnd) : readOnly("past_due");
     }
     case "canceled":
-      return readOnly("canceled");
+      return row.currentPeriodEnd && row.currentPeriodEnd.getTime() > nowMs
+        ? full("canceled", row.planSlug, row.currentPeriodEnd)
+        : readOnly("canceled");
     default:
       return readOnly("inactive");
   }

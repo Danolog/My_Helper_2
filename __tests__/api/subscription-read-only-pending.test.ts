@@ -192,7 +192,16 @@ describe("getCurrentPlan — brak wiersza, anulowanie z opłaconym okresem", () 
     expect(logger.error).not.toHaveBeenCalled();
   });
 
-  it.todo("anulowana subskrypcja Pro z opłaconym okresem w przyszłości zachowuje plan Pro do końca okresu");
+  it("anulowana subskrypcja Pro z opłaconym okresem w przyszłości zachowuje plan Pro do końca okresu", async () => {
+    const end = new Date(NOW.getTime() + 10 * DAY);
+    mockSubscriptionRows.mockReturnValue([
+      subscriptionRow("canceled", "pro", { currentPeriodEnd: end, canceledAt: new Date(NOW.getTime() - DAY) }),
+    ]);
+    expect(await getCurrentPlan(SALON)).toEqual({ slug: "pro", name: "Pro", status: "canceled" });
+
+    vi.setSystemTime(end);
+    expect(await getCurrentPlan(SALON)).toEqual({ slug: "basic", name: "Basic", status: "canceled" });
+  });
 });
 
 describe("zapis personelu a subskrypcja salonu", () => {
