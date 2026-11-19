@@ -591,7 +591,8 @@ describe("POST /api/subscriptions/checkout", () => {
     });
 
     it("trial 14 dni: 503 i trial zostaje nietknięty (brak reaktywacji na active)", async () => {
-      // Zapytanie o status "active" nie widzi subskrypcji w trialu.
+      // Odczyt bieżących wierszy (trialing/active) zwraca tu pustą listę; wiersz
+      // trialing w trzecim elemencie kolejki trasa nie czyta.
       selectQueue.push([PLAN_PRO], [], [subscriptionRow({ status: "trialing" })]);
 
       const res = await POST(checkoutRequest("pro"));
@@ -914,7 +915,8 @@ describe("POST /api/subscriptions/checkout", () => {
   });
 
   // Identyfikator ceny Stripe = zmienna kupowanego planu (STRIPE_PRICE_BASIC /
-  // STRIPE_PRICE_PRO) po trim(). Hosting = VERCEL=1 albo niepusty K_SERVICE.
+  // STRIPE_PRICE_PRO) po trim(). Hosting = VERCEL=1 albo K_SERVICE niepusty
+  // po trim().
   // Na hostingu bez identyfikatora trasa odmawia 503 STRIPE_PRICE_NOT_CONFIGURED;
   // bez hostingu i bez identyfikatora tworzy cenę z planu w kwocie brutto.
   describe("cena Stripe kupowanego planu i odmowa na hostingu bez ceny", () => {
