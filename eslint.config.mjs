@@ -4,7 +4,7 @@ import { dbIsolationConfig } from "./eslint.db-isolation.mjs";
 const D1_MESSAGE =
   "Parametry zapytania i `detail` Postgresa zawierają dane osobowe; loguj `error` przez `logger` (redakcja w `safe-error.ts`)";
 
-// D1 (Ryan, #64/#67): parametry zapytania (`params`) i `detail` błędu
+// D1 (#64/#67): parametry zapytania (`params`) i `detail` błędu
 // Postgresa niosą dane osobowe (imię, telefon, e-mail z INSERT-a). Nie
 // wyciągamy ich ręcznie z obiektu błędu — `logger` redaguje błąd
 // centralnie (safe-error.ts). `routeCtx.params` (parametry trasy) nie

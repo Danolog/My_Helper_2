@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * D1 (Ryan): reguła `no-restricted-syntax` z eslint.config.mjs blokuje ręczne
+ * D1: reguła `no-restricted-syntax` z eslint.config.mjs blokuje ręczne
  * wyciąganie `params`/`detail` z obiektu błędu (dane osobowe z INSERT-a).
  * Test uruchamia PRAWDZIWĄ konfigurację repo na kodzie w pamięci — zmiana
  * selektora albo poziomu (error → warn/off) czerwieni test.
