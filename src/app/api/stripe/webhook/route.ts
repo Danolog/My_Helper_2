@@ -288,7 +288,7 @@ async function handleInvoicePaid(event: Stripe.Event, stripe: Stripe) {
     const amount = plan ? plan.priceMonthly : (invoice.amount_paid / 100).toFixed(2);
 
     if (state) {
-      // Status from Stripe; the Stripe period (state.currentPeriod*) is not written here.
+      // Status from Stripe; the period comes only from the lines of the paid invoice.
       const { status, canceledAt, trialEndsAt } = state;
       await tx
         .update(salonSubscriptions)
