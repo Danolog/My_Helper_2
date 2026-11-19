@@ -15,7 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ESLint, type Linter } from "eslint";
 import { beforeAll, describe, expect, it } from "vitest";
-import config, { D1_SELECTORS } from "../../eslint.config.mjs";
+import config, { D1_SELECTORS, ISOLATION_BLOCK_SELECTORS } from "../../eslint.config.mjs";
 import {
   DB_CLIENT_ALLOWED_FILES,
   DB_CLIENT_IMPORT_SOURCE_REGEX,
@@ -477,7 +477,8 @@ describe("pkt 7 (N1 Leo): poziom reguł z konfiguracji wynikowej", () => {
   }, 300_000);
 
   it("bloki izolacji są ostatnie w konfiguracji; żaden inny blok nie ustawia reguł izolacji", () => {
-    const iso = dbIsolationConfig(D1_SELECTORS);
+    for (const d1 of D1_SELECTORS) expect(ISOLATION_BLOCK_SELECTORS).toContainEqual(d1);
+    const iso = dbIsolationConfig(ISOLATION_BLOCK_SELECTORS);
     const all = config as Linter.Config[];
     expect(all.slice(-iso.length)).toEqual(iso);
     for (const block of all.slice(0, -iso.length)) {
