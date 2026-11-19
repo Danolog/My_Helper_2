@@ -352,5 +352,26 @@ describe("prawda w marketingu", () => {
       const source = code("src/app/(site)/pricing/page.tsx");
       expect(source).not.toMatch(/\bPro\b|["']pro["']|\bAI\b|asystent/i);
     });
+
+    it("sekcja cennika /dla-salonow woła planPriceText i nie ma tekstu „PLN / mies.”", () => {
+      const source = code("src/app/(site)/dla-salonow/_components/DlaSalonowPricing.tsx");
+      expect(source).toMatch(/\bplanPriceText\(/);
+      expect(source).not.toMatch(/PLN\s*\/\s*mies/);
+    });
+
+    it("sekcja cennika /dla-salonow ma tekst „ / mies.” obok ceny", () => {
+      const source = code("src/app/(site)/dla-salonow/_components/DlaSalonowPricing.tsx");
+      expect(source).toMatch(/ \/ mies\./);
+    });
+
+    it("sekcja cennika /dla-salonow nie wspomina planu Pro ani AI", () => {
+      const source = code("src/app/(site)/dla-salonow/_components/DlaSalonowPricing.tsx");
+      expect(source).not.toMatch(/\bPro\b|["']pro["']|\bAI\b|asystent/i);
+    });
+
+    it("pasek /dla-salonow nie wspomina planu Pro ani AI", () => {
+      const source = code("src/app/(site)/dla-salonow/_components/DlaSalonowTrustBar.tsx");
+      expect(source).not.toMatch(/\bPro\b|["']pro["']|\bAI\b|asystent/i);
+    });
   });
 });

@@ -4,7 +4,7 @@ import { TRIAL_DAYS } from "@/lib/constants";
 
 const TRUST_STATS = [
   { value: `${TRIAL_DAYS} dni`, label: "Okres próbny za darmo" },
-  { value: "AI", label: "Asystent biznesowy w planie Pro" },
+  { value: "1 plan", label: "Wszystkie funkcje w cenie" },
   { value: "24/7", label: "Rezerwacje online" },
   { value: "100%", label: "Polski produkt" },
 ] as const;
