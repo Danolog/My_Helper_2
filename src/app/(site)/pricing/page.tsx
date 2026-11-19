@@ -18,7 +18,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -26,7 +25,7 @@ import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
 import { TRIAL_DAYS } from "@/lib/constants";
 import { SOLD_PLAN_SLUG } from "@/lib/plan-catalog";
-import { PLAN_SUMMARY, featuresFor } from "@/lib/plan-features";
+import { featuresFor } from "@/lib/plan-features";
 import { planPriceText } from "@/lib/plan-price";
 
 type Plan = {
@@ -165,9 +164,6 @@ export default function PricingPage() {
                 </div>
                 <CardTitle className="text-2xl">{soldPlan.name}</CardTitle>
               </div>
-              <CardDescription className="text-base">
-                {PLAN_SUMMARY.basic}
-              </CardDescription>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col">
               <div className="mb-6">

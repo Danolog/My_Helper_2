@@ -342,7 +342,7 @@ describe("prawda w marketingu", () => {
       expect(source).not.toMatch(/name:\s*["'`][^"'`]+["'`],\s*basic:/);
     });
 
-    it("cennik woła planPriceText i nie ma ceny wpisanej ręcznie", () => {
+    it("cennik woła planPriceText i nie ma tekstu „PLN / mies.”", () => {
       const source = code("src/app/(site)/pricing/page.tsx");
       expect(source).toMatch(/\bplanPriceText\(/);
       expect(source).not.toMatch(/PLN\s*\/\s*mies/);

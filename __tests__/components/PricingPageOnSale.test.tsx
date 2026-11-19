@@ -3,10 +3,10 @@
  *
  * Test renderuje PricingPage i sprawdza, który plan z odpowiedzi
  * /api/subscription-plans trafia na kartę, jaki tekst ceny stoi w
- * data-testid="plan-price", czy na stronie nie ma planu Pro, jaki adres
- * dostaje router.push po kliknięciu każdego z dwóch przycisków zakupu przez
- * niezalogowanego użytkownika oraz co strona pokazuje, gdy odpowiedź API nie
- * ma planu o slugu SOLD_PLAN_SLUG.
+ * data-testid="plan-price", czy na stronie nie ma planu Pro, tekstu „AI”
+ * ani opisu PLAN_SUMMARY.basic, jaki adres dostaje router.push po kliknięciu
+ * każdego z dwóch przycisków zakupu przez niezalogowanego użytkownika oraz co
+ * strona pokazuje, gdy odpowiedź API nie ma planu o slugu SOLD_PLAN_SLUG.
  *
  * Atrapy: globalny fetch (odpowiedź /api/subscription-plans z planami Basic
  * 49.00 i Pro 149.00, w jednym przypadku tylko z planem Pro), next/navigation
@@ -120,6 +120,15 @@ describe("PricingPage — SOLD_PLAN_SLUG z modułu", () => {
     expect(screen.queryByRole("button", { name: /Pro/ })).not.toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/\bPro\b/);
     expect(screen.queryAllByText(/\bPro\b/)).toHaveLength(0);
+  });
+
+  it("na stronie brak tekstu pasującego do /\\bAI\\b/ i opisu PLAN_SUMMARY.basic", async () => {
+    render(<PricingPage />);
+
+    await screen.findByTestId("plan-price");
+    expect(document.body.textContent).not.toMatch(/\bAI\b/);
+    expect(screen.queryAllByText(/\bAI\b/)).toHaveLength(0);
+    expect(screen.queryByText(PLAN_SUMMARY.basic)).not.toBeInTheDocument();
   });
 
   it.each([CARD_BUTTON, BOTTOM_BUTTON])(
