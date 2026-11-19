@@ -16,9 +16,8 @@ export async function GET(_request: Request) {
     return NextResponse.json(result);
   } catch (error) {
     logger.error("[AI Business Trends] Error", { error: error });
-    const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
-      { error: "Failed to compute business trends", details: message },
+      { error: "Failed to compute business trends" },
       { status: 500 }
     );
   }

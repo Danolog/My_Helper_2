@@ -290,13 +290,8 @@ Wygeneruj TEMAT: na poczatku (jedna linia), potem pusta linia, potem tresc newsl
     });
   } catch (error: unknown) {
     logger.error("[AI Newsletter] Error generating newsletter", { error: error });
-    const errorMessage =
-      error instanceof Error ? error.message : "Unknown error";
     return Response.json(
-      {
-        error: "Blad podczas generowania newslettera. Sprobuj ponownie.",
-        details: errorMessage,
-      },
+      { error: "Blad podczas generowania newslettera. Sprobuj ponownie." },
       { status: 500 }
     );
   }
