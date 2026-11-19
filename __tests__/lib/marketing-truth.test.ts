@@ -359,7 +359,7 @@ describe("prawda w marketingu", () => {
       expect(source).not.toMatch(/PLN\s*\/\s*mies/);
     });
 
-    it("sekcja cennika /dla-salonow ma tekst „ / mies.” obok ceny", () => {
+    it("sekcja cennika /dla-salonow ma tekst „ / mies.”", () => {
       const source = code("src/app/(site)/dla-salonow/_components/DlaSalonowPricing.tsx");
       expect(source).toMatch(/ \/ mies\./);
     });
