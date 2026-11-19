@@ -64,9 +64,9 @@ export const PII_LOG_KEYS: readonly string[] = [
 /**
  * Fragmenty nazw kluczy kontaktowych: klucz, którego nazwa zawiera fragment
  * (bez wielkości liter, np. `guestPhone`, `clientEmail`), ma zamienianą na
- * `[redacted]` wartość: napis, liczbę całkowitą o co najmniej 7 cyfrach albo
+ * `[redacted]` wartość: napis (także `URL`), liczbę całkowitą o co najmniej 7 cyfrach albo
  * `bigint` (numer telefonu zapisany liczbą) oraz tablicę, w której choć jeden
- * element jest napisem albo taką liczbą, także w tablicy zagnieżdżonej (bez
+ * element jest napisem, `URL` albo taką liczbą, także w tablicy zagnieżdżonej (bez
  * wchodzenia w obiekty) — cała tablica. Pozostałe wartości
  * zostają: liczniki i małe liczby (`emailCount: 3`), `boolean`, `null`, pusta
  * tablica; obiekt (`emailData`) i tablica samych obiektów są redagowane
@@ -85,7 +85,7 @@ const PII_KEY_SET = new Set(PII_LOG_KEYS.map((k) => k.toLowerCase()));
 const PHONE_LIKE_NUMBER_MIN = 1_000_000;
 
 function isContactScalar(value: unknown): boolean {
-  if (typeof value === "string" || typeof value === "bigint") return true;
+  if (typeof value === "string" || typeof value === "bigint" || value instanceof URL) return true;
   return typeof value === "number" && Number.isInteger(value) && Math.abs(value) >= PHONE_LIKE_NUMBER_MIN;
 }
 
@@ -146,7 +146,7 @@ export function redactLogContext(value: unknown, depth = 0, seen: WeakSet<object
     : Object.fromEntries(
         Object.entries(value).map(([k, v]) => [
           k,
-          isRedactedEntry(k, v instanceof URL ? v.href : v) ? REDACTED : redactLogContext(v, depth + 1, seen),
+          isRedactedEntry(k, v) ? REDACTED : redactLogContext(v, depth + 1, seen),
         ]),
       );
   seen.delete(value);

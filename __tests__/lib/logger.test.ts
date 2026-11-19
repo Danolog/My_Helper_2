@@ -867,4 +867,22 @@ describe("logger — redakcja przy serializacji, wpis zastępczy, logger nie rzu
     logger.info("x", { emailLink: new URL("mailto:" + EMAIL) });
     expect(logSpy).toHaveBeenCalledWith("[INFO]", "x", { emailLink: "[redacted]" });
   });
+
+  it("tablica URL pod kluczem z fragmentem w instancji klasy → cała tablica [redacted]", async () => {
+    class Adresat {
+      emailLinks = [new URL("mailto:" + EMAIL)];
+    }
+    const logger = await importLoggerWithEnv("production");
+    logger.info("x", { adresat: new Adresat() });
+
+    const raw = logSpy.mock.calls[0]![0] as string;
+    expect(raw).not.toContain(EMAIL);
+    expect(JSON.parse(raw).adresat).toEqual({ emailLinks: "[redacted]" });
+  });
+
+  it("tryb deweloperski: tablica URL pod kluczem z fragmentem w zwykłym obiekcie → [redacted]", async () => {
+    const logger = await importLoggerWithEnv("development");
+    logger.info("x", { emailLinks: [new URL("mailto:" + EMAIL)] });
+    expect(logSpy).toHaveBeenCalledWith("[INFO]", "x", { emailLinks: "[redacted]" });
+  });
 });
