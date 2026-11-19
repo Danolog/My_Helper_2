@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// salonId z sesji; surowe db: odczyt aktywnej subskrypcji
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import {
   salonSubscriptions,
   subscriptionPlans,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 const DEFAULT_WARNING_DAYS = 7;
 
@@ -35,22 +34,24 @@ export async function GET() {
     }
 
     // Find the current active subscription
-    const [activeSub] = await db
-      .select({
-        subscription: salonSubscriptions,
-        plan: subscriptionPlans,
-      })
-      .from(salonSubscriptions)
-      .innerJoin(
-        subscriptionPlans,
-        eq(salonSubscriptions.planId, subscriptionPlans.id)
-      )
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          eq(salonSubscriptions.status, "active")
+    const [activeSub] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          subscription: salonSubscriptions,
+          plan: subscriptionPlans,
+        })
+        .from(salonSubscriptions)
+        .innerJoin(
+          subscriptionPlans,
+          eq(salonSubscriptions.planId, subscriptionPlans.id)
         )
-      );
+        .where(
+          and(
+            eq(salonSubscriptions.salonId, salonId),
+            eq(salonSubscriptions.status, "active")
+          )
+        )
+    );
 
     if (!activeSub) {
       return NextResponse.json({

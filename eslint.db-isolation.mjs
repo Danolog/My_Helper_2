@@ -83,7 +83,6 @@ export const P1_FILES = [
   "src/app/api/stripe/webhook/route.ts",
   "src/app/api/subscriptions/cancel/route.ts",
   "src/app/api/subscriptions/checkout/route.ts",
-  "src/app/api/subscriptions/expiration-warning/route.ts",
   "src/app/api/subscriptions/payments/[id]/receipt/route.ts",
   "src/app/api/subscriptions/payments/route.ts",
   "src/app/api/subscriptions/renew/route.ts",
