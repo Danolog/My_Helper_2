@@ -108,6 +108,17 @@ const TEMPLATES: Record<string, (mod: typeof sms, salonName: string) => Promise<
       amount: 50,
       title: "Zadatek MH-A1B2C3",
     }),
+  sendAppointmentReminder24hSms: (mod, salonName) =>
+    mod.sendAppointmentReminder24hSms({
+      clientPhone: PHONE,
+      clientName: "Jan Kowalski",
+      serviceName: "Strzyzenie",
+      employeeName: "Anna Nowak",
+      appointmentDate: DATE,
+      salonName,
+      salonId: SALON_ID,
+      clientId: "client-1",
+    }),
 };
 
 const mockFetch = vi.fn();
@@ -538,6 +549,199 @@ describe("SMS przypomnienia i potwierdzeń: imię, usługa i pracownik przez fil
   it.each(NAMES)("%s: nazwa pracownika ponad limit → skrócona z „...”", async (name) => {
     const message = await messageOf(name, { employeeName: "Anna " + "x".repeat(60) });
     expect(message).toContain(` u Anna ${"x".repeat(32)}... w Salon Uroda`);
+  });
+});
+
+/**
+ * Przypomnienie na dobę przed wizytą (trasa /api/reminders/appointment): treść
+ * wyłącznie z buildAppointmentReminder24hSms, z regułami imienia, usługi,
+ * pracownika, salonu i daty.
+ */
+describe("SMS przypomnienia 24 h (buildAppointmentReminder24hSms)", () => {
+  /** Niezależna kopia podstawowej tabeli GSM 03.38 (bez LF, CR, ESC). */
+  const GSM7 = new Set(
+    "@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?" +
+      "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà"
+  );
+
+  const params = (
+    patch: Partial<sms.AppointmentReminder24hSmsParams> = {}
+  ): sms.AppointmentReminder24hSmsParams => ({
+    clientPhone: PHONE,
+    clientName: "Jan Kowalski",
+    serviceName: "Strzyzenie",
+    employeeName: "Anna Nowak",
+    // 13:00 UTC = 14:00 w Warszawie (zima, UTC+1), wtorek.
+    appointmentDate: new Date("2030-01-15T13:00:00.000Z"),
+    salonName: "Salon Uroda",
+    salonId: SALON_ID,
+    clientId: "client-1",
+    ...patch,
+  });
+
+  const build = (patch: Partial<sms.AppointmentReminder24hSmsParams> = {}) =>
+    sms.buildAppointmentReminder24hSms(params(patch));
+
+  const FULL =
+    'Przypomnienie: Jan Kowalski, Twoja wizyta "Strzyzenie" w Salon Uroda u Anna Nowak ' +
+    "odbedzie sie wtorek, 15 stycznia 2030 o godz. 14:00. Do zobaczenia!";
+
+  /** Pełna treść bez powitania — imię pominięte, reszta bez zmian. */
+  const WITHOUT_GREETING =
+    'Przypomnienie: Twoja wizyta "Strzyzenie" w Salon Uroda u Anna Nowak ' +
+    "odbedzie sie wtorek, 15 stycznia 2030 o godz. 14:00. Do zobaczenia!";
+
+  it("zwykłe wartości → brzmienie jak dotąd w trasie (salon przed pracownikiem)", () => {
+    expect(build()).toBe(FULL);
+  });
+
+  it("data z polskim znakiem w dniu i miesiącu (środa, październik) → sroda, pazdziernika", () => {
+    // 10:00 UTC = 12:00 w Warszawie (lato, UTC+2), środa 16 października 2030.
+    const message = build({ appointmentDate: new Date("2030-10-16T10:00:00.000Z") });
+    expect(message).toContain("odbedzie sie sroda, 16 pazdziernika 2030 o godz. 12:00. Do zobaczenia!");
+    expect(message).not.toMatch(/[śź]/);
+  });
+
+  it("godzina w strefie Warszawy także po północy UTC (następny dzień)", () => {
+    expect(build({ appointmentDate: new Date("2030-01-15T23:30:00.000Z") })).toContain(
+      "odbedzie sie sroda, 16 stycznia 2030 o godz. 00:30."
+    );
+  });
+
+  it.each([
+    ["polskie znaki w dacie", params({ appointmentDate: new Date("2030-10-16T10:00:00.000Z") })],
+    ["polskie znaki, nowe linie i emoji w polach", params({
+      clientName: "Zoś\nka 💅",
+      serviceName: "Manicure ✨ ąę",
+      employeeName: "Ćma\tŻak",
+      salonName: "Salon 💇‍♀️ Źródło",
+    })],
+    ["wroga nazwa salonu", params({ salonName: "Salon 💇‍♀️ Uroda " + "x".repeat(60) })],
+  ])("wyłącznie znaki GSM-7: %s", (_n, p) => {
+    const message = sms.buildAppointmentReminder24hSms(p);
+    expect([...message].filter((c) => !GSM7.has(c))).toEqual([]);
+  });
+
+  it("pola z polskimi znakami → po oczyszczeniu", () => {
+    expect(
+      build({ clientName: "Józef Żółć", serviceName: "Strzyżenie", employeeName: "Łucja Nowak", salonName: "Salon Źródło" })
+    ).toBe(
+      'Przypomnienie: Jozef Zolc, Twoja wizyta "Strzyzenie" w Salon Zrodlo u Lucja Nowak ' +
+        "odbedzie sie wtorek, 15 stycznia 2030 o godz. 14:00. Do zobaczenia!"
+    );
+  });
+
+  it.each([
+    ["adres www.", "Jan www.oplaty-salon.pl"],
+    ["adres https://", "https://oplata.example/zadatek"],
+    ["domena dopiero po oczyszczeniu", "Jan oplata.​com"],
+    ["adres numeryczny", "192.168.10.20"],
+    ["cyfra (telefon)", "Jan 600123456"],
+    ["jedna cyfra", "Jan2"],
+    ["cyfry pełnoszerokie", "Jan ６００１２３"],
+    ["cyfra widoczna dopiero po oczyszczeniu", "Jan ㏠"],
+    ["ponad 30 znaków", "Aleksandra Wisniewska-Kowalskaa"],
+  ])("imię (%s) → bez powitania, reszta treści bez zmian", (_n, clientName) => {
+    expect(build({ clientName })).toBe(WITHOUT_GREETING);
+  });
+
+  it("imię dokładnie w limicie 30 znaków → zostaje; 31 znaków → pominięte w całości", () => {
+    const atLimit = "Aleksandra Wisniewska-Kowalska";
+    expect(atLimit).toHaveLength(30);
+    expect(build({ clientName: atLimit })).toContain(`Przypomnienie: ${atLimit}, Twoja wizyta`);
+    expect(build({ clientName: `${atLimit}a` })).toBe(WITHOUT_GREETING);
+  });
+
+  it("limit działa na imieniu i nazwisku połączonym (jak w trasie), nie na każdym osobno", () => {
+    // Każda część osobno mieści się w limicie, razem 31 znaków.
+    const firstName = "Aleksandra";
+    const lastName = "Wisniewska-Kowalskaa";
+    expect(`${firstName} ${lastName}`).toHaveLength(31);
+    expect(build({ clientName: `${firstName} ${lastName}` })).toBe(WITHOUT_GREETING);
+  });
+
+  it("imię z wstrzykniętym numerem → numer nie trafia do treści", () => {
+    const PRIVATE_DIGITS = "799888777";
+    for (const clientName of [
+      `Wplac na ${PRIVATE_DIGITS.replace(/(\d{3})(?=\d)/g, "$1 ")}`,
+      `Wplac na ${PRIVATE_DIGITS}`,
+      "Wplac na ７９９８８８７７７",
+    ]) {
+      const message = build({ clientName });
+      expect(message.replace(/\D/g, "")).not.toContain(PRIVATE_DIGITS);
+      expect(message).not.toMatch(/Wplac na/);
+    }
+  });
+
+  it.each([
+    ["usługa", { serviceName: "www.promo.pl" }],
+    ["usługa", { serviceName: "Promocja https://oplata.example" }],
+    ["pracownik", { employeeName: "Anna www.oplaty-salon.pl" }],
+    ["pracownik", { employeeName: "Oplata.com" }],
+    ["salon", { salonName: "Salon www.uroda-ania.pl" }],
+    ["salon", { salonName: "Oplata.com" }],
+  ] as const)("%s wyglądająca na adres → pominięta", (_n, patch) => {
+    const message = build(patch);
+    expect(message).not.toMatch(/\.pl\b|\.com\b|https?:\/\/|www\.|oplat/i);
+    expect(message).toMatch(/^Przypomnienie: Jan Kowalski, Twoja wizyta/);
+    expect(message).toMatch(/ odbedzie sie wtorek, 15 stycznia 2030 o godz\. 14:00\. Do zobaczenia!$/);
+  });
+
+  it("nazwy usługi, salonu i pracownika ponad limit → skrócone do 40 znaków z „...”", () => {
+    const long = "Anna " + "x".repeat(60);
+    expect(build({ employeeName: long })).toContain(` w Salon Uroda u Anna ${"x".repeat(32)}... odbedzie sie`);
+    expect(build({ serviceName: long })).toContain(`Twoja wizyta "Anna ${"x".repeat(32)}..." w Salon Uroda`);
+    expect(build({ salonName: long })).toContain(` w Anna ${"x".repeat(32)}... u Anna Nowak`);
+  });
+
+  it("puste pola (imię, usługa, pracownik, salon) → treść gramatyczna bez tych fragmentów", () => {
+    const expected =
+      "Przypomnienie: Twoja wizyta odbedzie sie wtorek, 15 stycznia 2030 o godz. 14:00. Do zobaczenia!";
+    expect(build({ clientName: "", serviceName: "", employeeName: "", salonName: "" })).toBe(expected);
+    expect(build({ clientName: "", serviceName: null, employeeName: "", salonName: null })).toBe(expected);
+    expect(build({ clientName: "", serviceName: undefined, employeeName: "", salonName: undefined })).toBe(expected);
+  });
+
+  it.each([
+    ["bez usługi", { serviceName: null }, 'Przypomnienie: Jan Kowalski, Twoja wizyta w Salon Uroda u Anna Nowak odbedzie sie '],
+    ["bez salonu", { salonName: null }, 'Przypomnienie: Jan Kowalski, Twoja wizyta "Strzyzenie" u Anna Nowak odbedzie sie '],
+    ["bez pracownika", { employeeName: "" }, 'Przypomnienie: Jan Kowalski, Twoja wizyta "Strzyzenie" w Salon Uroda odbedzie sie '],
+  ] as const)("pojedyncze puste pole (%s) → bez tego fragmentu", (_n, patch, prefix) => {
+    expect(build(patch).startsWith(prefix)).toBe(true);
+  });
+
+  it("wrogie wszystkie pola → treść jak przy pustych, bez podwójnych spacji i pustych cudzysłowów", () => {
+    const hostile = build({
+      clientName: "Jan 600123456",
+      serviceName: "www.promo.pl",
+      employeeName: "Oplata.com",
+      salonName: "Uroda.com",
+    });
+    expect(hostile).toBe(build({ clientName: "", serviceName: "", employeeName: "", salonName: "" }));
+    expect(hostile).not.toMatch(/ {2}|""|: ,| u odbedzie| w odbedzie/);
+  });
+
+  it("sendAppointmentReminder24hSms wysyła treść z buildera przez sendSms (zapis w notifications, z clientId)", async () => {
+    const p = params();
+    const result = await sms.sendAppointmentReminder24hSms(p);
+    expect(result.success).toBe(true);
+    expect(sentMessage()).toBe(FULL);
+    expect(mockDbValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        salonId: SALON_ID,
+        clientId: "client-1",
+        type: "sms",
+        message: FULL,
+        status: "sent",
+      })
+    );
+  });
+
+  it("numer testowy klienta → bez wysyłki i bez zapisu", async () => {
+    const result = await sms.sendAppointmentReminder24hSms(params({ clientPhone: TEST_PHONE_NUMBERS[0]! }));
+    expect(result).toMatchObject({ success: false, skipped: "test_phone" });
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockDbValues).not.toHaveBeenCalled();
   });
 });
 
