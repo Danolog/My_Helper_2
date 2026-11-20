@@ -2,7 +2,7 @@
 /**
  * #193 L7: migawka importerów wyjść rejestru systemowego `src/lib/server/system/**`.
  *
- * Wyjścia przyjmują `userId`/`salonId`. Każdy nowy importer wyjścia ma być widoczny
+ * Część wyjść przyjmuje `userId`/`salonId`. Każdy nowy importer wyjścia ma być widoczny
  * w diffie jako zmiana tej migawki, żeby recenzja sprawdziła pochodzenie argumentu.
  *
  * Mechanizm: program TS na `src/` i checker. Każdy importowany (lub re-eksportowany)
@@ -70,6 +70,8 @@ const SNAPSHOT: Record<string, string[]> = {
   "auth-throttle.ts:clearSignInFailures": ["src/lib/auth-rate-limit-options.ts"],
   "auth-throttle.ts:consumeAuthRateLimit": ["src/lib/auth-rate-limit-options.ts"],
   "auth-throttle.ts:reserveAccountSignInAttempt": ["src/lib/auth-rate-limit-options.ts"],
+  // Publiczna lista salonów: bez argumentów (brak userId/salonId), tylko odczyt.
+  "catalog.ts:listPublicSalonCatalog": ["src/app/api/salons/route.ts"],
   "cron.ts:cleanupExpiredTemporaryAccess": [
     "src/app/api/cron/cleanup-temporary-access/route.ts",
     "src/lib/temporary-access.ts",

@@ -11,74 +11,25 @@
  * HTTP: metoda nieeksportowana => Next.js odpowiada 405, a żaden salon nie
  * znika — niezależnie od tego, kto pyta.
  *
- * Baza to atrapa w pamięci: `eq`/`and` z drizzle-orm budują predykaty, które
- * atrapa naprawdę stosuje do wierszy. Dzięki temu test łapie brak warunku
- * właściciela w WHERE, a nie tylko „czy zawołano db.delete”.
+ * GET (publiczna lista salonów) czyta wyłącznie przez funkcję systemową
+ * `listPublicSalonCatalog` — tu atrapa; zapytania i listę kolumn sprawdza
+ * `__tests__/lib/system-catalog.test.ts`. Trasa nie importuje surowego `db`,
+ * więc „magazyn” salonów poniżej to tylko fikstura: test sprawdza, że żadna
+ * metoda HTTP go nie zmienia.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as route from "@/app/api/salons/route";
+import { logger } from "@/lib/logger";
+import { listPublicSalonCatalog } from "@/lib/server/system";
 import { createMockRequest } from "./helpers";
 
-// -------------------------------------------------------
-// Atrapa bazy w pamięci
-// -------------------------------------------------------
-
 type Row = Record<string, unknown>;
-type Pred = (row: Row) => boolean;
 
 const store: { salons: Row[] } = { salons: [] };
 
-vi.mock("drizzle-orm", () => {
-  const col = (c: unknown) => String(c).split(".")[1]!;
-  return {
-    eq: (c: unknown, v: unknown): Pred => (row) => row[col(c)] === v,
-    and: (...ps: Pred[]): Pred => (row) => ps.every((p) => p(row)),
-    ne: (c: unknown, v: unknown): Pred => (row) => row[col(c)] !== v,
-    isNotNull: (c: unknown): Pred => (row) => row[col(c)] != null,
-    inArray: (c: unknown, vs: unknown[]): Pred => (row) => vs.includes(row[col(c)]),
-    count: vi.fn(),
-    avg: vi.fn(),
-  };
-});
-
-vi.mock("@/lib/schema", () => {
-  const table = (name: string) =>
-    new Proxy({}, { get: (_t, prop) => (prop === "_table" ? name : `${name}.${String(prop)}`) });
-  return { salons: table("salons"), services: table("services"), reviews: table("reviews") };
-});
-
-vi.mock("@/lib/db", () => ({
-  db: {
-    delete: () => ({
-      where: (pred: Pred) => ({
-        returning: async () => {
-          const removed = store.salons.filter(pred);
-          store.salons = store.salons.filter((r) => !pred(r));
-          return removed;
-        },
-      }),
-    }),
-    insert: () => ({
-      values: (v: Row) => ({
-        returning: async () => {
-          const row = { id: "new-salon", ...v };
-          store.salons.push(row);
-          return [row];
-        },
-      }),
-    }),
-    select: () => ({
-      from: () => ({
-        where: (pred: Pred) => {
-          const rows = () => store.salons.filter(pred);
-          return Object.assign(Promise.resolve(rows()), {
-            limit: async (n: number) => rows().slice(0, n),
-          });
-        },
-      }),
-    }),
-  },
-}));
+vi.mock("@/lib/server/system", () => ({ listPublicSalonCatalog: vi.fn() }));
 
 // Sesja: null => brak logowania (401), inaczej konto o danym id.
 let sessionUserId: string | null = null;
@@ -204,5 +155,66 @@ describe("POST /api/salons — trasa zdjęta, salon bez subskrypcji nie powstaje
 
   it("GET (publiczny katalog) zostaje", () => {
     expect(typeof route.GET).toBe("function");
+  });
+});
+
+// -------------------------------------------------------
+// GET — publiczna lista salonów przez funkcję systemową
+// -------------------------------------------------------
+
+const CATALOG_ENTRY = {
+  id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  name: "Salon A",
+  phone: "+48500000000",
+  email: "a@example.com",
+  address: "Ul. Testowa 1",
+  industryType: "spa",
+  serviceCount: 2,
+  averageRating: 4.5,
+  reviewCount: 2,
+};
+
+describe("GET /api/salons — lista przez listPublicSalonCatalog", () => {
+  beforeEach(() => {
+    vi.mocked(listPublicSalonCatalog).mockReset();
+    vi.mocked(logger.error).mockClear();
+  });
+
+  it("200 — kształt odpowiedzi bez zmian (success, data, count)", async () => {
+    vi.mocked(listPublicSalonCatalog).mockResolvedValue([CATALOG_ENTRY]);
+    const res = await route.GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true, data: [CATALOG_ENTRY], count: 1 });
+    expect(listPublicSalonCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it("200 — pusta lista: data [] i count 0", async () => {
+    vi.mocked(listPublicSalonCatalog).mockResolvedValue([]);
+    const res = await route.GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: true, data: [], count: 0 });
+  });
+
+  it("500 przy błędzie funkcji; log z samą tożsamością błędu, bez obiektu i treści błędu", async () => {
+    const err = Object.assign(new Error("Failed query: select ...\nparams: +48500000000"), { code: "57P01" });
+    vi.mocked(listPublicSalonCatalog).mockRejectedValue(err);
+    const res = await route.GET();
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ success: false, error: "Failed to fetch salons" });
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    const [, meta] = vi.mocked(logger.error).mock.calls[0]!;
+    expect(meta).toEqual({ errorName: "Error", errorCode: "57P01" });
+    expect(JSON.stringify(meta)).not.toContain("params");
+  });
+
+  it("revalidate = 60 bez zmian", () => {
+    expect(route.revalidate).toBe(60);
+  });
+
+  it("trasa nie importuje surowego db (żadna forma)", () => {
+    const text = fs.readFileSync(path.resolve(__dirname, "../../src/app/api/salons/route.ts"), "utf8");
+    expect(text).not.toMatch(/["'`]@\/lib\/db["'`]/);
+    expect(text).not.toMatch(/["'`][./]*lib\/db["'`]/);
+    expect(text).toMatch(/from "@\/lib\/server\/system"/);
   });
 });

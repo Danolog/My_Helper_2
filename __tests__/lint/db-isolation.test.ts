@@ -97,8 +97,6 @@ const BASELINE: Record<string, readonly string[]> = {
     "src/app/api/promotions/check-happy-hours/route.ts",
     "src/app/api/promotions/check-package/route.ts",
     "src/app/api/promotions/check/route.ts",
-    "src/app/api/salons/[id]/gallery/route.ts",
-    "src/app/api/salons/route.ts",
   ],
   P4_FILES: [
     "src/app/api/client/appointments/[id]/cancel/route.ts",

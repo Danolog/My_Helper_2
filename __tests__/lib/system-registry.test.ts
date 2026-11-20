@@ -59,6 +59,8 @@ const WAITING_LIST_EXPORTS = ["resolveWaitingListToken"];
 const DEPOSITS_CLEANUP_EXPORTS = ["cleanupStaleDepositBookings"];
 /** #193 P5b: globalny cennik planów z dosiewaniem (bez danych najemcy). */
 const PLANS_EXPORTS = ["ensurePlansExist"];
+/** Publiczna lista salonów (z natury wiele salonów; jawne kolumny, bez settingsJson). */
+const CATALOG_EXPORTS = ["listPublicSalonCatalog"];
 /** #193 P5b: seed danych demonstracyjnych z blokadą celu (poza produkcją). */
 const SEED_EXPORTS = ["seedDemoData"];
 /** Pliki re-eksportowane przez rejestr `index.ts` w całości. */
@@ -68,6 +70,7 @@ const REGISTRY_SOURCES = [
   "health.ts",
   "deposits-cleanup.ts",
   "plans.ts",
+  "catalog.ts",
   "seed.ts",
   "notifications.ts",
   "waiting-list.ts",
@@ -76,6 +79,7 @@ const REGISTRY_SOURCES = [
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts": ["authAdapter"],
   "auth-throttle.ts": AUTH_THROTTLE_EXPORTS,
+  "catalog.ts": CATALOG_EXPORTS,
   "cron.ts": CRON_EXPORTS,
   "db-system.ts": ["dbSystem"],
   "deposits-cleanup.ts": DEPOSITS_CLEANUP_EXPORTS,
@@ -86,6 +90,7 @@ const SNAPSHOT: Record<string, string[]> = {
     ...HEALTH_EXPORTS,
     ...DEPOSITS_CLEANUP_EXPORTS,
     ...PLANS_EXPORTS,
+    ...CATALOG_EXPORTS,
     ...SEED_EXPORTS,
     ...NOTIFICATIONS_EXPORTS,
     ...WAITING_LIST_EXPORTS,

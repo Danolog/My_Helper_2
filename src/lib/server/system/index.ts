@@ -25,6 +25,8 @@ export { clearSignInFailures, consumeAuthRateLimit, reserveAccountSignInAttempt 
 export { cleanupStaleDepositBookings } from "./deposits-cleanup";
 export type { StaleDepositCleanupResult } from "./deposits-cleanup";
 export { ensurePlansExist } from "./plans";
+export { listPublicSalonCatalog } from "./catalog";
+export type { PublicSalonCatalogEntry } from "./catalog";
 export { seedDemoData } from "./seed";
 export type { SeedDemoRefusal, SeedDemoResult } from "./seed";
 export {

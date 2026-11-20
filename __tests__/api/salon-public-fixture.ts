@@ -1,6 +1,6 @@
 /**
  * Atrapa bazy dla publicznych tras katalogu salonu (`salons/[id]`, usługa,
- * profil pracownika) czytających przez `forSalon(id).raw(tx => …)`.
+ * profil pracownika, galeria) czytających przez `forSalon(id).raw(tx => …)`.
  *
  * Tabele to fikstury w pamięci. Każde `tx.select(cols)` wykonuje ZBUDOWANY
  * przez trasę warunek WHERE i warunki złączeń (operatory drizzle są atrapami
@@ -82,6 +82,8 @@ function matches(node: unknown, row: JoinedRow, inQuery: Set<string>): boolean {
       return value(a, row, inQuery) === value(b, row, inQuery);
     case "inArray":
       return (b as unknown[]).includes(value(a, row, inQuery));
+    case "isNotNull":
+      return value(a, row, inQuery) != null;
     case "sql": {
       const [strings, ...values] = node.args as [TemplateStringsArray, ...unknown[]];
       const text = Array.from(strings).join("?");
@@ -176,6 +178,16 @@ function select(cols?: Record<string, unknown>) {
       out = rows.map((r) =>
         Object.fromEntries(Object.entries(cols).map(([k, c]) => [k, value(c, r, inQuery)]))
       );
+      // GROUP BY bez agregatów (lista DISTINCT): jeden wiersz na grupę.
+      if (groupBy.length > 0) {
+        const seen = new Set<string>();
+        out = out.filter((_, i) => {
+          const key = JSON.stringify(groupBy.map((g) => value(g, rows[i]!, inQuery)));
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
     }
     return limit === undefined ? out : out.slice(0, limit);
   };
@@ -296,6 +308,7 @@ export const drizzleMock = {
   eq: node("eq"),
   and: node("and"),
   inArray: node("inArray"),
+  isNotNull: node("isNotNull"),
   avg: node("avg"),
   count: node("count"),
   desc: node("desc"),
