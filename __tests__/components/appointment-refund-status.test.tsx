@@ -57,7 +57,7 @@ function expectNoRefundWording(container: HTMLElement) {
 }
 
 describe("wizyta anulowana, zadatek poza MyHelper", () => {
-  it("wpłacony → tekst „poza MyHelper”, kwota, bez słownictwa zwrotu i metody płatności", () => {
+  it("wpłacony → tekst „poza MyHelper”, kwota, bez statusów zwrotu/przepadku i metody płatności", () => {
     const { container } = render(
       <AppointmentRefundStatus appointment={appointment({ depositPaid: true })} refundStatus={outsideApp(true)} />
     );
