@@ -160,6 +160,8 @@ jobs:
         env:
           IMAGE: ${{ steps.img.outputs.runner }}
           REVISION_TAG: ${{ steps.img.outputs.tag }}
+          # Numer projektu do deterministycznego tag_url (allowlista e2e-production.yml).
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
           # Zmienne usługi (klasa `var` w infra/gcp/env-manifest.json) — z vars.*
           BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL }}
           STORAGE_DRIVER: ${{ vars.STORAGE_DRIVER }}

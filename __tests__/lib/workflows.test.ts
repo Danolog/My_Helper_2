@@ -57,6 +57,22 @@ const code = (text: string) =>
     .filter((l) => !l.trim().startsWith("#"))
     .join("\n");
 
+/**
+ * Wykonuje w bash skrypt kroku-allowlisty e2e-production.yml („Cloud Run mode must
+ * target our tagged Cloud Run URL") dla podanego BASE_URL. Wspólne dla testów
+ * allowlisty i testów run-deploy.sh (tag_url musi przejść tę samą allowlistę).
+ */
+function runE2eGuard(url: string) {
+  const at = E2E.indexOf("Cloud Run mode must target our tagged Cloud Run URL");
+  if (at < 0) throw new Error("Brak kroku allowlisty w e2e-production.yml");
+  const lines = E2E.slice(at, E2E.indexOf("\n\n", at)).split("\n");
+  const script = lines
+    .slice(lines.findIndex((l) => l.trim() === "run: |") + 1)
+    .map((l) => l.replace(/^ {10}/, ""))
+    .join("\n");
+  return spawnSync("bash", ["-c", script], { env: { NODE_ENV: "test", BASE_URL: url }, encoding: "utf8" });
+}
+
 describe("G-C6: deploy-cloud-run.yml", () => {
   it("jedyny wyzwalacz: workflow_dispatch (push: main dopiero w C4)", () => {
     expect(triggers(DEPLOY)).toEqual(["workflow_dispatch"]);
@@ -350,13 +366,7 @@ describe("G-C6: e2e-production.yml", () => {
     ["https://a..run.app", 1],
     ["https://SHA-99FE315---myhelper-843777043748.europe-central2.run.app", 1],
   ])("allowlista (wykonana w bash): %j → exit %i", (url, exit) => {
-    const { step } = guardStep();
-    const script = step
-      .split("\n")
-      .slice(step.split("\n").findIndex((l) => l.trim() === "run: |") + 1)
-      .map((l) => l.replace(/^ {10}/, ""))
-      .join("\n");
-    const r = spawnSync("bash", ["-c", script], { env: { NODE_ENV: "test", BASE_URL: url }, encoding: "utf8" });
+    const r = runE2eGuard(url);
     expect(r.status, r.stderr).toBe(exit);
   });
 
@@ -474,7 +484,9 @@ case "$*" in
     case "$*" in *"--sort-by=~createTime"*) hist=$(printf '%s\\n' "$hist" | awk '{a[NR]=$0} END{for(i=NR;i>0;i--)print a[i]}') ;; esac
     case "$*" in *"--limit=1"*) hist=$(printf '%s\\n' "$hist" | head -n1) ;; esac
     printf '%s\\n' "$hist" ;;
-  *"run services describe"*) echo "https://sha-1234567---myhelper-843777043748.europe-central2.run.app" ;;
+  # Jak prawdziwy gcloud (przebieg 44821507855): status.traffic[].url w starej,
+  # haszowanej postaci, wpisy rozdzielone średnikiem; FAKE_TRAFFIC nadpisuje.
+  *"run services describe"*) printf '%s\\n' "\${FAKE_TRAFFIC-https://sha-0abcdef---myhelper-7jt2j6wqsa-lm.a.run.app;https://sha-1234567---myhelper-7jt2j6wqsa-lm.a.run.app}" ;;
   *" run deploy "*)
     f=$(printf '%s\n' "$@" | sed -n 's/^--env-vars-file=//p')
     [ -n "$f" ] && sed 's/^/ENVFILE /' "$f" >> "$FAKE_LOG" ;;
@@ -483,6 +495,9 @@ exit 0
 `,
   );
   chmodSync(join(dir, "gcloud"), 0o755);
+  // Postać, jaką wypisuje bootstrap.sh (GCP_WIF_PROVIDER=projects/<numer>/...).
+  const WIF_PROVIDER = "projects/843777043748/locations/global/workloadIdentityPools/github/providers/github-actions";
+  const TAG_URL = "https://sha-1234567---myhelper-843777043748.europe-central2.run.app";
   let n = 0;
   const deploy = (secrets: string, extra: Record<string, string> = {}) => {
     const log = join(dir, `log-${n++}`);
@@ -500,6 +515,7 @@ exit 0
         IMAGE: "europe-central2-docker.pkg.dev/my-helper-2-488419/myhelper/myhelper:abc",
         RUNTIME_SA: "myhelper-runtime@my-helper-2-488419.iam.gserviceaccount.com",
         REVISION_TAG: "sha-1234567",
+        GCP_WIF_PROVIDER: WIF_PROVIDER,
         SQL_INSTANCE: "myhelper-pg",
         BETTER_AUTH_URL: "https://example.test",
         STORAGE_DRIVER: "gcs",
@@ -667,7 +683,59 @@ exit 0
     const r = deploy(REQUIRED);
     expect(r.run).toContain("--set-cloudsql-instances=my-helper-2-488419:europe-central2:myhelper-pg");
     expect(r.run).not.toMatch(/allow-unauthenticated/);
-    expect(r.stdout).toContain("tag_url=https://sha-1234567---myhelper-843777043748.europe-central2.run.app");
+    expect(r.stdout).toContain(`tag_url=${TAG_URL}`);
+  });
+
+  // Przebieg 44821507855: gcloud zwrócił tag_url w haszowanej postaci
+  // (…---myhelper-7jt2j6wqsa-lm.a.run.app) i allowlista e2e go odrzuciła.
+  // tag_url ma postać deterministyczną i przechodzi tę samą allowlistę.
+  it("tag_url: postać deterministyczna z numerem projektu z GCP_WIF_PROVIDER; przechodzi allowlistę e2e", () => {
+    const r = deploy(REQUIRED);
+    expect(r.status, r.stderr).toBe(0);
+    const urls = r.stdout.split("\n").filter((l) => l.startsWith("tag_url="));
+    expect(urls).toEqual([`tag_url=${TAG_URL}`]);
+    expect(r.stdout).not.toContain("a.run.app");
+    const guard = runE2eGuard(urls[0]!.slice("tag_url=".length));
+    expect(guard.status, guard.stdout + guard.stderr).toBe(0);
+  });
+
+  it("workflow: krok deploy dostaje GCP_WIF_PROVIDER z vars.* (źródło numeru projektu)", () => {
+    const at = DEPLOY.indexOf("- name: Deploy new revision without traffic");
+    expect(at).toBeGreaterThan(0);
+    const step = code(DEPLOY.slice(at, DEPLOY.indexOf("\n\n", at)));
+    expect(step).toContain("GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}");
+    expect(step).toContain("infra/gcp/run-deploy.sh deploy");
+  });
+
+  it("tag_url: sam PROJECT_NUMBER (bez GCP_WIF_PROVIDER, uruchomienie z terminala) wystarcza", () => {
+    const r = deploy(REQUIRED, { GCP_WIF_PROVIDER: "", PROJECT_NUMBER: "843777043748" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain(`tag_url=${TAG_URL}`);
+  });
+
+  it.each([
+    ["brak numeru projektu", { GCP_WIF_PROVIDER: "" }, /missing or invalid PROJECT_NUMBER/],
+    ["nieliczbowy PROJECT_NUMBER", { GCP_WIF_PROVIDER: "", PROJECT_NUMBER: "my-helper-2-488419" }, /missing or invalid PROJECT_NUMBER/],
+    ["GCP_WIF_PROVIDER w złej postaci", { GCP_WIF_PROVIDER: "projects/abc/locations/global/workloadIdentityPools/github/providers/x" }, /GCP_WIF_PROVIDER must match/],
+    ["GCP_WIF_PROVIDER z doklejonym sufiksem", { GCP_WIF_PROVIDER: `${WIF_PROVIDER}/x` }, /GCP_WIF_PROVIDER must match/],
+    ["PROJECT_NUMBER inny niż w GCP_WIF_PROVIDER", { PROJECT_NUMBER: "111111111111" }, /differs from GCP_WIF_PROVIDER project \(843777043748\)/],
+  ])("numer projektu: %s → kod 2 przed pierwszym gcloud", (_l, extra, message) => {
+    const r = deploy(REQUIRED, extra);
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(message);
+    expect(r.calls).toEqual([]);
+  });
+
+  // Istnienie taga nadal sprawdzane w ruchu usługi (status.traffic[].url).
+  it.each([
+    ["tylko inny tag", "https://sha-0abcdef---myhelper-7jt2j6wqsa-lm.a.run.app"],
+    ["pusty ruch", ""],
+    ["tag jako przedrostek innego taga", "https://sha-1234567x---myhelper-7jt2j6wqsa-lm.a.run.app"],
+  ])("tag nieobecny w ruchu usługi (%s) → kod 1, bez tag_url", (_l, traffic) => {
+    const r = deploy(REQUIRED, { FAKE_TRAFFIC: traffic });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("error: tagged revision URL not found for sha-1234567");
+    expect(r.stdout).not.toContain("tag_url=");
   });
 
   // Ryan (#144): mapowane są tylko klasy secret (→ --set-secrets) i var
