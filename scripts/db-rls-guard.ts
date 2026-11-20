@@ -35,7 +35,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import postgres from "postgres";
 
-/** Plik migracji, z którego wyprowadzana jest lista tabel z RLS. */
+/** Plik migracji 0005, z którego wyprowadzana jest bazowa lista tabel z RLS (kolejne pliki: RLS_EXTRA_MIGRATION_FILES). */
 export const RLS_MIGRATION_FILE = "drizzle/0005_rls_tenant_isolation.sql";
 
 /** Tabela z RLS i nazwa polityki, której wymaga migracja 0005 albo plik z RLS_EXTRA_MIGRATION_FILES. */
