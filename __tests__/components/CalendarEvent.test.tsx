@@ -462,4 +462,78 @@ describe("CalendarEventComponent", () => {
       expect(mockOnClick).toHaveBeenCalledWith(event);
     });
   });
+
+  describe("deposit pending marker", () => {
+    function renderEvent(appointmentOverrides: Partial<CalendarEvent["appointment"]>) {
+      const event = createMockEvent({ appointmentOverrides });
+      return render(
+        <CalendarEventComponent
+          event={event}
+          onDragStart={mockOnDragStart}
+          onDragEnd={mockOnDragEnd}
+          onClick={mockOnClick}
+        />
+      );
+    }
+
+    function eventLabel(): string {
+      return screen.getByRole("button", { name: /Strzyzenie damskie/ }).getAttribute("aria-label") ?? "";
+    }
+
+    it.each(["scheduled", "confirmed"] as const)(
+      "shows the marker for an unpaid deposit on a %s visit",
+      (status) => {
+        renderEvent({ status, depositAmount: "50.00", depositPaid: false });
+
+        const marker = screen.getByTestId("deposit-pending-marker");
+        expect(marker).toHaveAttribute("title", "Czeka na zadatek");
+        expect(marker).toHaveTextContent("Czeka na zadatek");
+        expect(eventLabel()).toContain(", czeka na zadatek");
+      }
+    );
+
+    it("removes the marker after the deposit is marked as paid (rerender)", () => {
+      const pending = createMockEvent({
+        appointmentOverrides: { depositAmount: "50.00", depositPaid: false },
+      });
+      const { rerender } = render(
+        <CalendarEventComponent
+          event={pending}
+          onDragStart={mockOnDragStart}
+          onDragEnd={mockOnDragEnd}
+          onClick={mockOnClick}
+        />
+      );
+      expect(screen.getByTestId("deposit-pending-marker")).toBeInTheDocument();
+
+      const paid = createMockEvent({
+        appointmentOverrides: { depositAmount: "50.00", depositPaid: true },
+      });
+      rerender(
+        <CalendarEventComponent
+          event={paid}
+          onDragStart={mockOnDragStart}
+          onDragEnd={mockOnDragEnd}
+          onClick={mockOnClick}
+        />
+      );
+
+      expect(screen.queryByTestId("deposit-pending-marker")).not.toBeInTheDocument();
+      expect(eventLabel()).not.toContain("czeka na zadatek");
+    });
+
+    it.each<[string, Partial<CalendarEvent["appointment"]>]>([
+      ["paid deposit", { depositAmount: "50.00", depositPaid: true }],
+      ["zero deposit", { depositAmount: "0.00", depositPaid: false }],
+      ["no deposit", { depositAmount: null, depositPaid: false }],
+      ["cancelled visit", { status: "cancelled", depositAmount: "50.00", depositPaid: false }],
+      ["completed visit", { status: "completed", depositAmount: "50.00", depositPaid: false }],
+      ["no_show visit", { status: "no_show", depositAmount: "50.00", depositPaid: false }],
+    ])("does not show the marker for %s", (_name, overrides) => {
+      renderEvent(overrides);
+
+      expect(screen.queryByTestId("deposit-pending-marker")).not.toBeInTheDocument();
+      expect(eventLabel()).not.toContain("czeka na zadatek");
+    });
+  });
 });

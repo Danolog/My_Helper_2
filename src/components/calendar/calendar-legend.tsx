@@ -1,10 +1,24 @@
 "use client";
 
+import { Coins } from "lucide-react";
 import { STATUS_COLORS, STATUS_LABELS } from "./calendar-event";
 
 interface CalendarLegendProps {
   colorMode: "employee" | "status";
   employees?: Array<{ id: string; firstName: string; lastName: string; color: string | null }>;
+}
+
+// The deposit marker is shown in both color modes, so both legends explain it.
+// Its look mirrors the marker in calendar-event.tsx.
+function DepositPendingLegendItem() {
+  return (
+    <div className="flex items-center gap-1.5" data-testid="legend-deposit-pending">
+      <span className="w-4 h-4 rounded-full bg-white text-amber-700 border border-border flex items-center justify-center">
+        <Coins className="w-3 h-3" aria-hidden="true" />
+      </span>
+      <span className="text-xs">Czeka na zadatek</span>
+    </div>
+  );
 }
 
 export function CalendarLegend({ colorMode, employees = [] }: CalendarLegendProps) {
@@ -27,6 +41,7 @@ export function CalendarLegend({ colorMode, employees = [] }: CalendarLegendProp
             <span className="text-xs">{STATUS_LABELS[status]}</span>
           </div>
         ))}
+        <DepositPendingLegendItem />
       </div>
     );
   }
@@ -46,6 +61,7 @@ export function CalendarLegend({ colorMode, employees = [] }: CalendarLegendProp
           </span>
         </div>
       ))}
+      <DepositPendingLegendItem />
     </div>
   );
 }

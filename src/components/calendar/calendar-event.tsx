@@ -1,6 +1,7 @@
 "use client";
 
 import { memo } from "react";
+import { Coins } from "lucide-react";
 import { useDraggable } from "@/hooks/use-draggable";
 import type { CalendarEvent } from "@/types/calendar";
 
@@ -98,6 +99,17 @@ export const CalendarEventComponent = memo(function CalendarEventComponent({
   const isCancellable = status === "scheduled" || status === "confirmed";
   const isCompletable = status === "scheduled" || status === "confirmed";
 
+  // Same deposit-amount check as the deposit card in the appointment window,
+  // so the calendar and the window never disagree about whether a deposit exists.
+  const hasDeposit = Boolean(
+    event.appointment.depositAmount && parseFloat(event.appointment.depositAmount) > 0
+  );
+  // Only scheduled or confirmed visits get the marker; completed, cancelled and no-show visits never show it.
+  const isDepositPending =
+    hasDeposit &&
+    event.appointment.depositPaid === false &&
+    (status === "scheduled" || status === "confirmed");
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Only keys pressed on the event itself. Enter/Space on the inner complete/cancel
     // buttons must keep their native click instead of opening details (#164).
@@ -112,7 +124,7 @@ export const CalendarEventComponent = memo(function CalendarEventComponent({
   const clientName = event.appointment.client
     ? `${event.appointment.client.firstName} ${event.appointment.client.lastName}`
     : "";
-  const ariaLabel = `${event.title}, ${formatTime(startTime)}-${formatTime(endTime)}${clientName ? `, ${clientName}` : ""}, ${STATUS_LABELS[status]}`;
+  const ariaLabel = `${event.title}, ${formatTime(startTime)}-${formatTime(endTime)}${clientName ? `, ${clientName}` : ""}, ${STATUS_LABELS[status]}${isDepositPending ? ", czeka na zadatek" : ""}`;
 
   return (
     <div
@@ -147,6 +159,17 @@ export const CalendarEventComponent = memo(function CalendarEventComponent({
     >
       <div className="flex items-center gap-1">
         <div className="font-medium truncate flex-1">{event.title}</div>
+        {/* Deposit pending marker - in the title row so it stays visible on short visits */}
+        {isDepositPending && (
+          <span
+            className="shrink-0 w-4 h-4 rounded-full bg-white text-amber-700 flex items-center justify-center"
+            title="Czeka na zadatek"
+            data-testid="deposit-pending-marker"
+          >
+            <Coins className="w-3 h-3" aria-hidden="true" />
+            <span className="sr-only">Czeka na zadatek</span>
+          </span>
+        )}
         {/* Complete button - appears on hover for completable appointments */}
         {isCompletable && onComplete && (
           <button
@@ -206,6 +229,9 @@ export const CalendarEventComponent = memo(function CalendarEventComponent({
   return (
     prev.event.id === next.event.id &&
     prev.event.appointment.status === next.event.appointment.status &&
+    // Deposit fields drive the pending marker; without them a marked payment would not re-render.
+    prev.event.appointment.depositAmount === next.event.appointment.depositAmount &&
+    prev.event.appointment.depositPaid === next.event.appointment.depositPaid &&
     prev.event.employeeColor === next.event.employeeColor &&
     prev.colorMode === next.colorMode &&
     prev.onDragStart === next.onDragStart &&
