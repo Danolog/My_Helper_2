@@ -22,8 +22,8 @@ import { isValidUuid } from "@/lib/validations";
  * (w dowolnym statusie) — inaczej 409 `DEPOSIT_ONLINE_PAYMENT`. Bez płatności
  * online nie ma czego zwracać przez Stripe: `refundAppointmentDeposits` zwraca
  * „Brak zadatku do zwrotu”, a anulowanie przez salon trafia w wariant `manual`
- * (zwrot ustala salon sam). Recepcja to osoba, która przy BLIK realnie widzi
- * wpłatę na telefonie salonu. Pracownik (`employee`) — 403.
+ * (zwrot ustala salon sam). Wpłatę BLIK widzi posiadacz konta przypisanego do
+ * numeru; recepcja oznacza ją, gdy ma ten wgląd albo jego potwierdzenie. Pracownik (`employee`) — 403.
  *
  * Trasa NIE wysyła SMS do klienta (ani przy oznaczeniu, ani przy cofnięciu).
  *
