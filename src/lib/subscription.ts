@@ -1,8 +1,8 @@
 import { eq, desc } from "drizzle-orm";
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import {
   SALON_ACCESS_UNAVAILABLE,
   pickSalonAccessRow,
@@ -28,23 +28,29 @@ type AccessRead = { access: SalonAccess; row: AccessRow | undefined };
  * Przy tym samym `createdAt` kolejność ustala `id`, malejąco.
  * Dostęp liczy `resolveSalonAccess` w chwili odczytu. Błąd odczytu →
  * `unavailable` (tylko odczyt), bez wyjątku.
+ *
+ * Odczyt idzie przez `forSalon(salonId).raw` (rola aplikacji + RLS salonu).
+ * Wywołanie `forSalon` stoi wewnątrz `try`: przy pustym `salonId` rzuca ono
+ * synchronicznie i wynik ma być `unavailable`, jak przy błędzie zapytania.
  */
 async function readSalonAccess(salonId: string): Promise<AccessRead> {
   try {
-    const rows: AccessRow[] = await db
-      .select({
-        planSlug: subscriptionPlans.slug,
-        planName: subscriptionPlans.name,
-        status: salonSubscriptions.status,
-        trialEndsAt: salonSubscriptions.trialEndsAt,
-        currentPeriodStart: salonSubscriptions.currentPeriodStart,
-        currentPeriodEnd: salonSubscriptions.currentPeriodEnd,
-        createdAt: salonSubscriptions.createdAt,
-      })
-      .from(salonSubscriptions)
-      .innerJoin(subscriptionPlans, eq(salonSubscriptions.planId, subscriptionPlans.id))
-      .where(eq(salonSubscriptions.salonId, salonId))
-      .orderBy(desc(salonSubscriptions.createdAt), desc(salonSubscriptions.id));
+    const rows: AccessRow[] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({
+          planSlug: subscriptionPlans.slug,
+          planName: subscriptionPlans.name,
+          status: salonSubscriptions.status,
+          trialEndsAt: salonSubscriptions.trialEndsAt,
+          currentPeriodStart: salonSubscriptions.currentPeriodStart,
+          currentPeriodEnd: salonSubscriptions.currentPeriodEnd,
+          createdAt: salonSubscriptions.createdAt,
+        })
+        .from(salonSubscriptions)
+        .innerJoin(subscriptionPlans, eq(salonSubscriptions.planId, subscriptionPlans.id))
+        .where(eq(salonSubscriptions.salonId, salonId))
+        .orderBy(desc(salonSubscriptions.createdAt), desc(salonSubscriptions.id))
+    );
 
     const row = pickSalonAccessRow(rows);
     if (row?.status === "trialing" && !row.trialEndsAt) {

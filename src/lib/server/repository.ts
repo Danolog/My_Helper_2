@@ -13,7 +13,7 @@
  *      więc baza (RLS, ADR sekcja 3) odrzuca cudzy wiersz nawet, gdyby filtr
  *      aplikacyjny zawiódł.
  *
- * DLACZEGO `SET LOCAL ROLE` (naprawa W1 z review Ryana, ADR-001-ryan-review-rls):
+ * DLACZEGO `SET LOCAL ROLE` (naprawa W1 z review, ADR-001-ryan-review-rls):
  * pula połączeń aplikacji loguje się rolą OWNER (`dev_user`/prod owner). Pod
  * `ENABLE`-not-`FORCE` owner OMIJA polityki RLS. Gdyby transakcja żądania jechała
  * ownerem, RLS byłby martwą literą na ścieżce żądania — izolację dawałby tylko
@@ -67,6 +67,9 @@ type SalonScoped = PgTable & { id: AnyColumn; salonId: AnyColumn };
 
 /** Klient transakcyjny postgres-js (parametr callbacku db.transaction). */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/** Typ klienta transakcyjnego do sygnatur poza repozytorium — importować przez `import type`. */
+export type DbTx = Tx;
 
 /**
  * Uruchom funkcję w transakcji z ustawionym kontekstem RLS dla salonu.

@@ -10,14 +10,23 @@ const {
   mockDbSelect,
   mockLoggerError,
   mockLoggerWarn,
+  mockForSalon,
+  mockRaw,
 } = vi.hoisted(() => {
-  // select().from().innerJoin().where().orderBy() -> wiersze (bez limit: wszystkie wiersze salonu)
+  // tx.select().from().innerJoin().where().orderBy() -> wiersze (bez limit: wszystkie wiersze salonu)
   const mockDbOrderBy = vi.fn();
   const mockDbWhere = vi.fn().mockReturnValue({ orderBy: mockDbOrderBy });
   const mockDbInnerJoin = vi.fn().mockReturnValue({ where: mockDbWhere });
   const mockDbFrom = vi.fn().mockReturnValue({ innerJoin: mockDbInnerJoin });
   const mockDbSelect = vi.fn().mockReturnValue({ from: mockDbFrom });
   const mockGetUserSalonId = vi.fn();
+  // raw(fn) woła fn z klientem transakcyjnym, jak `withSalonContext` w repozytorium.
+  const mockRaw = vi.fn((fn: (tx: unknown) => Promise<unknown>) => fn({ select: mockDbSelect }));
+  // Jak prawdziwe `forSalon`: pusty salonId rzuca synchronicznie (przed `raw`).
+  const mockForSalon = vi.fn((salonId: string) => {
+    if (!salonId) throw new Error("repository.forSalon: salonId wymagany");
+    return { raw: mockRaw, salonId };
+  });
   return {
     mockGetUserSalonId,
     mockDbOrderBy,
@@ -27,6 +36,8 @@ const {
     mockDbSelect,
     mockLoggerError: vi.fn(),
     mockLoggerWarn: vi.fn(),
+    mockForSalon,
+    mockRaw,
   };
 });
 
@@ -35,11 +46,22 @@ vi.mock("@/lib/get-user-salon", () => ({
   getUserSalonId: () => mockGetUserSalonId(),
 }));
 
-// Mock database
+// Odczyt idzie przez repozytorium (`forSalon(salonId).raw`), nie przez surowe `db`.
+vi.mock("@/lib/server/repository", () => ({
+  forSalon: (salonId: string) => mockForSalon(salonId),
+}));
+
+// Surowe `db` nie może być użyte przez `@/lib/subscription` — każde wywołanie to błąd testu.
 vi.mock("@/lib/db", () => ({
-  db: {
-    select: (...args: unknown[]) => mockDbSelect(...args),
-  },
+  db: new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (typeof prop === "symbol" || prop === "then") return undefined;
+        throw new Error(`@/lib/subscription użył surowego db.${String(prop)}`);
+      },
+    }
+  ),
 }));
 
 // Mock drizzle-orm
@@ -116,6 +138,11 @@ function row(
 
 function resetChain() {
   vi.clearAllMocks();
+  mockRaw.mockImplementation((fn: (tx: unknown) => Promise<unknown>) => fn({ select: mockDbSelect }));
+  mockForSalon.mockImplementation((salonId: string) => {
+    if (!salonId) throw new Error("repository.forSalon: salonId wymagany");
+    return { raw: mockRaw, salonId };
+  });
   mockDbSelect.mockReturnValue({ from: mockDbFrom });
   mockDbFrom.mockReturnValue({ innerJoin: mockDbInnerJoin });
   mockDbInnerJoin.mockReturnValue({ where: mockDbWhere });
@@ -371,6 +398,69 @@ describe("getSalonAccess", () => {
     expect(mockDbSelect).toHaveBeenCalledTimes(1);
     expect(mockDbWhere).toHaveBeenCalledWith({ type: "eq", args: ["salonSubscriptions.salonId", "salon-456"] });
     expect(mockGetUserSalonId).not.toHaveBeenCalled();
+  });
+});
+
+describe("#193 S1a: odczyt przez forSalon(salonId).raw", () => {
+  it("getSalonAccess: forSalon dostaje podany salonId, zapytanie biegnie w raw, jawne eq(salonId) zostaje", async () => {
+    mockDbOrderBy.mockResolvedValue([row("active", "pro", { currentPeriodEnd: at(20 * DAY) })]);
+    expect(await getSalonAccess("salon-789")).toMatchObject({ state: "active", mode: "full", planSlug: "pro" });
+    expect(mockForSalon).toHaveBeenCalledTimes(1);
+    expect(mockForSalon).toHaveBeenCalledWith("salon-789");
+    expect(mockRaw).toHaveBeenCalledTimes(1);
+    expect(mockDbSelect).toHaveBeenCalledTimes(1);
+    expect(mockDbWhere).toHaveBeenCalledWith({ type: "eq", args: ["salonSubscriptions.salonId", "salon-789"] });
+  });
+
+  it("getCurrentPlan bez salonId: forSalon dostaje salon z sesji", async () => {
+    mockGetUserSalonId.mockResolvedValue("resolved-salon");
+    mockDbOrderBy.mockResolvedValue([row("active", "pro", { currentPeriodEnd: at(20 * DAY) })]);
+    expect(await getCurrentPlan()).toEqual({ slug: "pro", name: "Pro", status: "active" });
+    expect(mockForSalon).toHaveBeenCalledWith("resolved-salon");
+    expect(mockForSalon).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["active Pro", [row("active", "pro", { currentPeriodEnd: at(20 * DAY) })], { slug: "pro", name: "Pro", status: "active" }],
+    ["trialing z przyszłą datą", [row("trialing", "basic", { trialEndsAt: at(3 * DAY) })], { slug: "basic", name: "Basic", status: "trialing" }],
+    ["trial wygasły", [row("trialing", "pro", { trialEndsAt: at(-DAY) })], { slug: "basic", name: "Basic", status: "trial_expired" }],
+    ["canceled przed końcem okresu", [row("canceled", "pro", { currentPeriodEnd: at(4 * DAY) })], { slug: "pro", name: "Pro", status: "canceled" }],
+    ["brak wierszy", [], { slug: "basic", name: "Basic", status: "none" }],
+  ])("getCurrentPlan przez forSalon: %s", async (_n, rows, expected) => {
+    mockDbOrderBy.mockResolvedValue(rows);
+    expect(await getCurrentPlan("salon-123")).toEqual(expected);
+    expect(mockForSalon).toHaveBeenCalledWith("salon-123");
+    expect(mockDbOrderBy).toHaveBeenCalledTimes(1);
+    expect(mockLoggerError).not.toHaveBeenCalled();
+  });
+
+  it("forSalon rzuca synchronicznie (pusty salonId) -> unavailable, logger.error, bez wyjątku", async () => {
+    await expect(getSalonAccess("")).resolves.toEqual({
+      state: "unavailable",
+      mode: "read_only",
+      planSlug: null,
+      until: null,
+    });
+    expect(mockForSalon).toHaveBeenCalledWith("");
+    expect(mockRaw).not.toHaveBeenCalled();
+    expect(mockLoggerError).toHaveBeenCalledTimes(1);
+    expect(mockLoggerError).toHaveBeenCalledWith(expect.any(String), { error: expect.any(Error), salonId: "" });
+  });
+
+  it("raw odrzuca (np. brak roli aplikacji / SET LOCAL) -> getCurrentPlan basic/unavailable, isProPlan false", async () => {
+    const error = new Error('role "myhelper_app" does not exist');
+    mockRaw.mockRejectedValue(error);
+    expect(await getCurrentPlan("salon-123")).toEqual({ slug: "basic", name: "Basic", status: "unavailable" });
+    expect(await isProPlan("salon-123")).toBe(false);
+    expect(mockForSalon).toHaveBeenCalledWith("salon-123");
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockLoggerError).toHaveBeenCalledWith(expect.any(String), { error, salonId: "salon-123" });
+  });
+
+  it("getCurrentPlan() bez salonu w sesji -> basic/none, bez forSalon", async () => {
+    mockGetUserSalonId.mockResolvedValue(null);
+    expect(await getCurrentPlan()).toEqual({ slug: "basic", name: "Basic", status: "none" });
+    expect(mockForSalon).not.toHaveBeenCalled();
   });
 });
 

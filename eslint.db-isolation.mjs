@@ -88,7 +88,6 @@ export const P1_FILES = [
   "src/lib/refund.ts",
   "src/lib/subscription-confirmation.ts",
   "src/lib/subscription-locks.ts",
-  "src/lib/subscription.ts",
 ];
 
 /** P2: ścieżka właściciela. */
@@ -105,7 +104,6 @@ export const P2_FILES = [
   "src/lib/ai/business/chat.ts",
   "src/lib/ai/openrouter.ts",
   "src/lib/ai/usage-limits.ts",
-  "src/lib/salon-cancellation.ts",
 ];
 
 /** P3: publiczna rezerwacja i katalog. */

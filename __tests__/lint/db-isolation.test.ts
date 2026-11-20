@@ -82,7 +82,6 @@ const BASELINE: Record<string, readonly string[]> = {
     "src/lib/refund.ts",
     "src/lib/subscription-confirmation.ts",
     "src/lib/subscription-locks.ts",
-    "src/lib/subscription.ts",
   ],
   P2_FILES: [
     "src/app/api/ai/content/newsletter/route.ts",
@@ -97,7 +96,6 @@ const BASELINE: Record<string, readonly string[]> = {
     "src/lib/ai/business/chat.ts",
     "src/lib/ai/openrouter.ts",
     "src/lib/ai/usage-limits.ts",
-    "src/lib/salon-cancellation.ts",
   ],
   P3_FILES: [
     "src/app/api/available-slots/route.ts",

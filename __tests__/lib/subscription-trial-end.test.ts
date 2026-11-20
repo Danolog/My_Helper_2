@@ -11,22 +11,27 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockRows, mockGetUserSalonId, mockRequireAuth, mockRateCheck, mockBudget } = vi.hoisted(() => ({
+const { mockRows, mockGetUserSalonId, mockRequireAuth, mockRateCheck, mockBudget, mockTransaction } = vi.hoisted(() => ({
   mockRows: vi.fn(),
   mockGetUserSalonId: vi.fn(),
   mockRequireAuth: vi.fn(),
   mockRateCheck: vi.fn(),
   mockBudget: vi.fn(),
+  mockTransaction: vi.fn(),
 }));
 
-// Łańcuch select().from().innerJoin().where().orderBy().limit() -> wiersze przypadku
+// Łańcuch select().from().innerJoin().where().orderBy().limit() -> wiersze przypadku.
+// Odczyt idzie przez prawdziwe `forSalon(salonId).raw` (#193 S1a): transakcja
+// z `execute` (SET LOCAL ROLE, set_config) i tym samym łańcuchem na `tx`.
 vi.mock("@/lib/db", () => {
   const chain: Record<string, unknown> = {};
   for (const m of ["from", "innerJoin", "leftJoin", "where", "orderBy"]) chain[m] = () => chain;
   chain.limit = () => Promise.resolve(mockRows());
   chain.then = (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) =>
     Promise.resolve(mockRows()).then(res, rej);
-  return { db: { select: () => chain } };
+  const client = { select: () => chain, execute: () => Promise.resolve([]) };
+  mockTransaction.mockImplementation((fn: (tx: unknown) => Promise<unknown>) => fn(client));
+  return { db: { ...client, transaction: (fn: (tx: unknown) => Promise<unknown>) => mockTransaction(fn) } };
 });
 
 vi.mock("@/lib/get-user-salon", () => ({ getUserSalonId: () => mockGetUserSalonId() }));
@@ -159,6 +164,7 @@ describe("koniec okresu próbnego — getSalonAccess", () => {
     mockRows.mockReturnValue([row("trialing", new Date(NOW.getTime() - DAY))]);
     expect(await getSalonAccess(SALON)).toEqual({ state: "expired", mode: "read_only", planSlug: null, until: null });
     expect(mockWarn).not.toHaveBeenCalled();
+    expect(mockRows).toHaveBeenCalledTimes(1);
   });
 
   it("trialing bez daty końca -> expired, jeden logger.warn z samym salonId", async () => {
@@ -184,11 +190,16 @@ describe("koniec okresu próbnego — requireProAI", () => {
     expect(await res.json()).toMatchObject({ code: "PLAN_UPGRADE_REQUIRED" });
     expect(mockRateCheck).not.toHaveBeenCalled();
     expect(mockBudget).not.toHaveBeenCalled();
+    // Odmowa z odczytanego wiersza, nie z błędu odczytu (inaczej 403 byłoby fałszywie zielone).
+    expect(mockTransaction).toHaveBeenCalled();
+    expect(mockRows).toHaveBeenCalledTimes(1);
   });
 
   it("trialing bez daty końca -> 403", async () => {
     mockRows.mockReturnValue([row("trialing", null)]);
     expect(((await requireProAI()) as Response).status).toBe(403);
+    expect(mockRows).toHaveBeenCalledTimes(1);
+    expect(mockWarn).toHaveBeenCalledWith("Trialing subscription without trial end date", { salonId: SALON });
   });
 
   it("trial w terminie -> dostęp ({ salonId })", async () => {
