@@ -285,8 +285,8 @@ export function useBookingData(): UseBookingDataReturn {
 
   const fetchAvailableSlots = useCallback(
     async (employeeId: string, date: string, duration: number, signal?: AbortSignal) => {
-      // Wolne terminy sa liczone w obrebie salonu z adresu, wiec bez niego
-      // nie ma czego pytac.
+      // Bez salonu z adresu nie pytamy o terminy — trasa bedzie je liczyc
+      // w obrebie salonu.
       if (!salonId || !employeeId || !date || !duration) {
         setSlotsData(null);
         return;

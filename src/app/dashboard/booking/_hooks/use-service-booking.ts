@@ -116,7 +116,7 @@ export function useServiceBooking({ salonId }: UseServiceBookingParams) {
   }, []);
 
   const fetchAvailableSlots = useCallback(async (employeeId: string, date: string, duration: number, signal: AbortSignal | null = null) => {
-    // Bez salonu z sesji nie pytamy o terminy — trasa liczy je w obrebie salonu.
+    // Bez salonu z sesji nie pytamy o terminy — trasa bedzie je liczyc w obrebie salonu.
     if (!salonId || !employeeId || !date || !duration) {
       setSlotsData(null);
       return;

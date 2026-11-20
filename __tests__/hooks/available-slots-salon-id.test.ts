@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Kazdy wolajacy /api/available-slots wysyla salonId swojego kontekstu
 // (salon z sesji panelu albo params.id portalu klienta), a bez salonu
-// nie pyta trasy wcale. Trasa sprawdza pracownika w obrebie tego salonu.
+// nie pyta trasy wcale. Trasa jeszcze nie czyta tego parametru.
 
 const SALON_ID = "11111111-1111-4111-8111-111111111111";
 const SERVICE_ID = "service-1";
@@ -29,7 +29,7 @@ vi.mock("@/lib/api-client", () => ({
   mutationFetch: vi.fn(),
 }));
 
-// Pakiety sa zamrozone w produkcji; tu odmrazamy je, zeby dojsc do zapytania
+// Pakiety sa zamrozone (FROZEN_PROMOTION_TYPES); tu odmrazamy je, zeby dojsc do zapytania
 // o terminy w hooku pakietow.
 vi.mock("@/lib/features", () => ({
   isPromotionTypeFrozen: () => false,

@@ -61,7 +61,7 @@ export function usePackageBooking({ salonId, selectedClientId }: UsePackageBooki
   }, [salonId]);
 
   const fetchPackageSlots = useCallback(async (empId: string, date: string, duration: number, signal: AbortSignal | null = null) => {
-    // Bez salonu z sesji nie pytamy o terminy — trasa liczy je w obrebie salonu.
+    // Bez salonu z sesji nie pytamy o terminy — trasa bedzie je liczyc w obrebie salonu.
     if (!salonId || !empId || !date || !duration) {
       setPackageSlotsData(null);
       return;
