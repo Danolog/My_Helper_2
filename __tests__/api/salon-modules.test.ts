@@ -158,10 +158,16 @@ describe("/api/salons/[id]/modules", () => {
     expect(status).toBe(200);
     expect(body.success).toBe(true);
 
-    // Do settingsJson.modules trafil TYLKO przelaczalny klucz.
-    expect(updateChain.set).toHaveBeenCalledWith({
-      settingsJson: { modules: { products: true } },
-    });
+    // Do settingsJson.modules trafil TYLKO przelaczalny klucz — jako wartosc
+    // jsonb_set na kluczu `modules` (SQL renderowany sprawdza
+    // salon-settings-atomic-write.test.ts; tu drizzle-orm jest zmockowany).
+    expect(updateChain.set).toHaveBeenCalledTimes(1);
+    const setArg = updateChain.set!.mock.calls[0]![0] as {
+      settingsJson: { type: string; args: unknown[] };
+    };
+    expect(Object.keys(setArg)).toEqual(["settingsJson"]);
+    expect(setArg.settingsJson.type).toBe("sql");
+    expect(setArg.settingsJson.args).toContain(JSON.stringify({ products: true }));
 
     // Odpowiedz zwraca rozwiazany stan: products wlaczony, hardOff nadal false.
     const data = body.data as Record<string, boolean>;
