@@ -2,8 +2,9 @@
  * POST /api/deposits/blik-booking — rezerwacja z zadatkiem płatnym BLIK-iem
  * na telefon salonu.
  *
- * Trasa: limit IP → schemat → gość/sesja → przynależność refów → kwota z
- * serwera → numer BLIK salonu → kolizja i blokady → zapis wizyty
+ * Trasa: limit IP → schemat → termin nie w przeszłości → gość/sesja →
+ * przynależność refów → kwota z serwera → salon z długością usługi (długość
+ * wizyty = usługa + wariant) → numer BLIK salonu → kolizja i blokady → zapis wizyty
  * `scheduled/false` (bez wiersza `deposit_payments`) w transakcji forSalon.
  *
  * Wiersze-fikstury przechodzą przez WHERE trasy (prawdziwy drizzle,
@@ -16,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // vi.mock niżej jest wynoszony nad importy — trasa ładuje się już z atrapami.
 import { POST } from "@/app/api/deposits/blik-booking/route";
 import { appointments, depositPayments } from "@/lib/schema";
+import { SMS_PROVIDER_UNAVAILABLE_ERROR, SMS_SEND_FAILED_ERROR, SMS_TEST_PHONE_ERROR } from "@/lib/sms";
 import { TEST_PHONE } from "@/lib/test-phone";
 import { deadlock, wrapped } from "./deadlock-fixture";
 import { createChainMock, createMockRequest, parseResponse } from "./helpers";
@@ -35,6 +37,10 @@ const BLIK_PHONE = "+48000600703";
 const SALON_PHONE = "+48000600704";
 const GUEST_PHONE_E164 = "+48000600700";
 const SALON_NAME = "Salon Testowy";
+
+const SERVICE_UNAVAILABLE = "Wybrana usluga nie jest juz dostepna. Odswiez strone i wybierz ponownie.";
+const VARIANT_UNAVAILABLE = "Wybrany wariant uslugi nie jest juz dostepny. Odswiez strone i wybierz ponownie.";
+const PAST_START_MESSAGE = "Wybrany termin juz minal. Wybierz inny termin.";
 
 const h = vi.hoisted(() => ({
   /** Wyniki kolejnych select w transakcjach forSalon (każdy filtrowany przez WHERE). */
@@ -132,10 +138,20 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/logger", () => ({ logger: h.logger }));
 // Argumenty atrapy SMS nie są logami — strażnik prywatności ich nie sprawdza.
-vi.mock("@/lib/sms", () => ({ sendBlikDepositBookingSms: (...a: unknown[]) => h.sms(...a) }));
+// Atrapa częściowa: stałe błędów SMS prawdziwe, bo trasa porównuje z nimi wynik.
+vi.mock("@/lib/sms", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sms")>()),
+  sendBlikDepositBookingSms: (...a: unknown[]) => h.sms(...a),
+}));
+
+/** Zegar testu: termin `validBody` (10:00–11:00 tego dnia) jest w przyszłości. */
+const NOW = new Date("2026-12-01T09:00:00.000Z");
+const MINUTE_MS = 60_000;
 
 const at = (hm: string) => new Date(`2026-12-01T${hm}:00.000Z`);
 const iso = (hm: string) => at(hm).toISOString();
+/** Chwila przesunięta względem NOW o podaną liczbę ms, jako ISO z `Z`. */
+const isoFromNow = (offsetMs: number) => new Date(NOW.getTime() + offsetMs).toISOString();
 
 const GUEST = { guestName: "Jan Testowy", guestPhone: TEST_PHONE };
 const validBody = {
@@ -148,12 +164,18 @@ const validBody = {
   ...GUEST,
 };
 
-/** Wiersz salonu (WHERE po `id`) z poddrzewem `deposits.blikPhone`. */
+/**
+ * Wiersz salonu (WHERE po `id`) z poddrzewem `deposits.blikPhone` i długością
+ * usługi z joinu (60 min = `validBody` 10:00–11:00, bez wariantu).
+ */
 const salonRow = (blikPhone: unknown = BLIK_PHONE, phone: string | null = SALON_PHONE) => ({
   id: SALON,
   name: SALON_NAME,
   phone,
   blikPhone,
+  serviceDuration: 60 as number | null,
+  variantRowId: null as string | null,
+  variantDurationModifier: null as number | null,
 });
 /** Wizyta w nazwach kolumn bazy (WHERE kolizji). */
 const appt = (start: string, end: string, extra: Record<string, unknown> = {}) => ({
@@ -216,6 +238,9 @@ function primeHappyPath(details: Record<string, unknown>[] = [detailsRow()]) {
 const insertedTables = () => h.insert.mock.calls.map((c) => c[0]);
 
 beforeEach(() => {
+  // Stały zegar: bez niego terminy z 2026-12-01 stałyby się przeszłością.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
   vi.clearAllMocks();
   h.queue.length = 0;
   h.selectArgs.length = 0;
@@ -260,6 +285,10 @@ afterEach(() => {
   expect(h.dbTouched).not.toHaveBeenCalled();
   // Nigdy, w żadnej ścieżce, wiersz płatności zadatku.
   expect(insertedTables()).not.toContain(depositPayments);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ─── Kontrola strażnika logów ───────────────────────────────────────────────
@@ -363,7 +392,7 @@ describe("201 — wizyta scheduled/false z danymi BLIK", () => {
   });
 
   it("assertSalonRefs dostaje salonId z body i wszystkie refy (z wariantem)", async () => {
-    primeHappyPath();
+    h.queue.push([{ ...salonRow(), variantRowId: VARIANT }], [], [], [detailsRow()]);
     await post({ ...validBody, variantId: VARIANT });
     expect(h.refs).toHaveBeenCalledWith(SALON, {
       clientId: null,
@@ -655,8 +684,8 @@ describe("400 — walidacja, kwota, brak wymogu zadatku, obce refy", () => {
 
 describe("404 — usługa, wariant, salon", () => {
   it.each([
-    ["service_not_found", "Service not found"],
-    ["variant_not_found", "Variant not found"],
+    ["service_not_found", SERVICE_UNAVAILABLE],
+    ["variant_not_found", VARIANT_UNAVAILABLE],
   ])("%s → 404", async (error, msg) => {
     h.calc.mockResolvedValue({ ok: false, error });
     const { status, body } = await parseResponse<Err>(await post());
@@ -667,9 +696,225 @@ describe("404 — usługa, wariant, salon", () => {
 
   it("salon niewidoczny w kontekście forSalon → 404, bez zapisu", async () => {
     h.queue.push([]);
-    const { status } = await parseResponse<Err>(await post());
+    const { status, body } = await parseResponse<Err>(await post());
     expect(status).toBe(404);
+    expect(body.error).toBe("Nie znaleziono salonu.");
     expect(h.insert).not.toHaveBeenCalled();
+  });
+
+  it("wariant w body, a odczyt salonu go nie widzi → 404 z tekstem wariantu, bez zapisu", async () => {
+    h.queue.push([salonRow()]);
+    const { status, body } = await parseResponse<Err>(await post({ ...validBody, variantId: VARIANT }));
+    expect(status).toBe(404);
+    expect(body).toEqual({ success: false, error: VARIANT_UNAVAILABLE });
+    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.sms).not.toHaveBeenCalled();
+  });
+
+  it("usługa niewidoczna w odczycie salonu → 404 z tekstem usługi, bez zapisu", async () => {
+    h.queue.push([{ ...salonRow(), serviceDuration: null }]);
+    const { status, body } = await parseResponse<Err>(await post());
+    expect(status).toBe(404);
+    expect(body).toEqual({ success: false, error: SERVICE_UNAVAILABLE });
+    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.sms).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Termin w przeszłości ───────────────────────────────────────────────────
+
+const PAST_START_BODY = {
+  success: false,
+  error: PAST_START_MESSAGE,
+  code: "VALIDATION_FAILED",
+  details: { startTime: PAST_START_MESSAGE },
+};
+
+/** Body z początkiem przesuniętym względem NOW i wizytą 60 min. */
+const bodyStartingAt = (offsetMs: number) => ({
+  ...validBody,
+  startTime: isoFromNow(offsetMs),
+  endTime: isoFromNow(offsetMs + 60 * MINUTE_MS),
+});
+
+describe("termin w przeszłości — tolerancja 5 min względem zegara serwera", () => {
+  it.each([
+    ["dokładnie 5 min temu", -5 * MINUTE_MS],
+    ["za minutę", MINUTE_MS],
+  ])("początek %s → 201", async (_n, offset) => {
+    primeHappyPath();
+    expect((await post(bodyStartingAt(offset))).status).toBe(201);
+  });
+
+  it("początek 5 min i 1 ms temu → 400 VALIDATION_FAILED przed sesją i bazą", async () => {
+    primeHappyPath();
+    const { status, body } = await parseResponse<Err>(await post(bodyStartingAt(-5 * MINUTE_MS - 1)));
+    expect(status).toBe(400);
+    expect(body).toEqual(PAST_START_BODY);
+    expect(h.session).not.toHaveBeenCalled();
+    expect(h.forSalon).not.toHaveBeenCalled();
+    expect(h.calc).not.toHaveBeenCalled();
+    expect(h.refs).not.toHaveBeenCalled();
+    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.sms).not.toHaveBeenCalled();
+    const call = h.logger.warn.mock.calls.find((c) => String(c[0]).includes("Validation failed"));
+    expect(call?.[1]).toEqual({ fields: ["startTime"] });
+  });
+
+  it("przeszłość i zła kwota → 400 z tekstem przeszłości, nie kwoty", async () => {
+    h.calc.mockResolvedValue({ ok: true, required: true, amount: 60, serviceName: "Strzyzenie" });
+    const { status, body } = await parseResponse<Err>(await post(bodyStartingAt(-60 * MINUTE_MS)));
+    expect(status).toBe(400);
+    expect(body).toEqual(PAST_START_BODY);
+  });
+});
+
+// ─── Długość wizyty z usługi i wariantu ─────────────────────────────────────
+
+const DURATION_MISMATCH_BODY = {
+  success: false,
+  error: "Czas wizyty nie zgadza sie z wybrana usluga. Odswiez strone i sprobuj ponownie.",
+  code: "BOOKING_DURATION_MISMATCH",
+};
+
+describe("długość wizyty = baseDuration usługi + durationModifier wariantu z bazy", () => {
+  it.each([
+    ["59 min", "10:59"],
+    ["61 min", "11:01"],
+  ])("usługa 60 min, wizyta %s → 400 BOOKING_DURATION_MISMATCH przed kalendarzem", async (_n, end) => {
+    primeHappyPath();
+    const { status, body } = await parseResponse<Err>(await post({ ...validBody, endTime: iso(end) }));
+    expect(status).toBe(400);
+    expect(body).toEqual(DURATION_MISMATCH_BODY);
+    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.sms).not.toHaveBeenCalled();
+    expect(h.selectCalls).toBe(1); // kalendarz nieodpytywany
+  });
+
+  it("log niezgodności: salonId, serviceId, długość żądana i oczekiwana", async () => {
+    primeHappyPath();
+    await post({ ...validBody, endTime: iso("10:59") });
+    const call = h.logger.warn.mock.calls.find((c) => String(c[0]).includes("duration mismatch"));
+    expect(call?.[1]).toEqual({ salonId: SALON, serviceId: SERVICE, requestedMinutes: 59, expectedMinutes: 60 });
+  });
+
+  it("usługa 60 min, wizyta 60 min → 201", async () => {
+    primeHappyPath();
+    expect((await post()).status).toBe(201);
+  });
+
+  it.each<[string, number | null, string, number]>([
+    ["modyfikator 15, wizyta 75 min", 15, "11:15", 201],
+    ["modyfikator 15, wizyta 60 min", 15, "11:00", 400],
+    ["modyfikator null, wizyta 60 min", null, "11:00", 201],
+  ])("wariant: %s → %i", async (_n, modifier, end, expectedStatus) => {
+    h.queue.push(
+      [{ ...salonRow(), variantRowId: VARIANT, variantDurationModifier: modifier }],
+      [],
+      [],
+      [detailsRow()]
+    );
+    const res = await post({ ...validBody, variantId: VARIANT, endTime: iso(end) });
+    expect(res.status).toBe(expectedStatus);
+    if (expectedStatus === 400) {
+      expect(await res.json()).toEqual(DURATION_MISMATCH_BODY);
+      expect(h.insert).not.toHaveBeenCalled();
+    }
+  });
+
+  it("zła długość i brak numeru BLIK → 400 długości, nie 409", async () => {
+    h.queue.push([salonRow(null)]);
+    const { status, body } = await parseResponse<Err>(await post({ ...validBody, endTime: iso("10:59") }));
+    expect(status).toBe(400);
+    expect(body).toEqual(DURATION_MISMATCH_BODY);
+  });
+
+  it("odczyt salonu: numer, dane odbiorcy i długość usługi w jednym zapytaniu", async () => {
+    primeHappyPath();
+    await post();
+    expect(Object.keys(h.selectArgs[0] as object).sort()).toEqual([
+      "blikPhone",
+      "name",
+      "phone",
+      "serviceDuration",
+      "variantDurationModifier",
+      "variantRowId",
+    ]);
+  });
+});
+
+// ─── Log wyniku SMS ─────────────────────────────────────────────────────────
+
+const OK_BODY = {
+  success: true,
+  data: {
+    appointmentId: APPOINTMENT,
+    startTime: iso("10:00"),
+    endTime: iso("11:00"),
+    depositAmount: 50,
+    blik: { phone: BLIK_PHONE, recipient: SALON_NAME, title: "Zadatek MH-A1B2C3" },
+    status: "scheduled",
+    depositPaid: false,
+  },
+};
+
+const logCallsMatching = (fn: typeof h.logger.warn, text: string) =>
+  fn.mock.calls.filter((c) => String(c[0]).includes(text));
+
+describe("log wyniku SMS — id wizyty i powód z zamkniętej listy", () => {
+  it.each<[string, Record<string, unknown>, string]>([
+    ["numer testowy", { success: false, skipped: "test_phone", error: SMS_TEST_PHONE_ERROR }, "test_phone"],
+    ["brak dostawcy", { success: false, error: SMS_PROVIDER_UNAVAILABLE_ERROR }, "provider_unavailable"],
+    ["błąd wysyłki", { success: false, error: SMS_SEND_FAILED_ERROR }, "send_failed"],
+    [
+      "zły numer",
+      { success: false, error: "Invalid phone number: +48 *** *** 700. Expected 9 digits or +48 followed by 9 digits." },
+      "rejected",
+    ],
+  ])("%s → 201 bez zmian; warn z appointmentId i powodem", async (_n, result, reason) => {
+    h.sms.mockResolvedValue(result);
+    primeHappyPath();
+    const { status, body } = await parseResponse<Ok>(await post());
+
+    expect(status).toBe(201);
+    expect(body).toEqual(OK_BODY);
+    const calls = logCallsMatching(h.logger.warn, "Booking SMS not sent");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![1]).toEqual({ appointmentId: APPOINTMENT, reason });
+    const logged = serializeLogCalls(Object.values(h.logger).flatMap((fn) => fn.mock.calls));
+    expect(logged).not.toContain("Invalid phone");
+    expect(logged).not.toContain("***");
+  });
+
+  it.each<[string, unknown]>([
+    ["SMS wysłany", { success: true, notificationId: "notif-1" }],
+    ["atrapa bez wyniku (undefined, jak w teście pg)", undefined],
+  ])("%s → 201 bez wpisu o błędzie, niewysłaniu ani pominięciu", async (_n, result) => {
+    h.sms.mockResolvedValue(result);
+    primeHappyPath();
+    const { status, body } = await parseResponse<Ok>(await post());
+    expect(status).toBe(201);
+    expect(body).toEqual(OK_BODY);
+    expect(logCallsMatching(h.logger.warn, "Booking SMS failed")).toHaveLength(0);
+    expect(logCallsMatching(h.logger.warn, "Booking SMS not sent")).toHaveLength(0);
+    expect(logCallsMatching(h.logger.info, "Booking SMS skipped")).toHaveLength(0);
+  });
+
+  it("klient portalu bez telefonu → info „skipped” z powodem no_phone", async () => {
+    h.session.mockResolvedValue({ user: { id: "user-1" } });
+    primeHappyPath();
+    expect((await post({ ...validBody, guestName: undefined, guestPhone: undefined })).status).toBe(201);
+    const calls = logCallsMatching(h.logger.info, "Booking SMS skipped");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![1]).toEqual({ appointmentId: APPOINTMENT, reason: "no_phone" });
+  });
+
+  it("szczegóły wizyty niewidoczne (inny salon) → info „skipped” z powodem no_details", async () => {
+    primeHappyPath([detailsRow({ salon_id: OTHER_SALON })]);
+    expect((await post()).status).toBe(201);
+    const calls = logCallsMatching(h.logger.info, "Booking SMS skipped");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]![1]).toEqual({ appointmentId: APPOINTMENT, reason: "no_details" });
   });
 });
 
