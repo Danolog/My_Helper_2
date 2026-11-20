@@ -6,7 +6,7 @@
  * - CHECK-i (23514) i złożony FK (23503) także dla roli migracji (pula systemowa omija RLS, FK nie);
  * - RLS po `salon_id`;
  * - atomowość z UPDATE flagi przez `forSalon(A).raw` + `recordDepositStatusEvent`;
- * - kaskada: usunięcie wizyty usuwa jej wpisy.
+ * - kaskada: usunięcie wizyty (rolą migracji i pod rolą aplikacji przez `forSalon`) usuwa jej wpisy.
  *
  * Dane: konta `it-t3-dse-…-a` i `-b` (właściciele), salony A i B, pracownicy i wizyty zatwierdzone rolą migracji;
  * wpisy z prób uprawnień, CHECK, FK i RLS w transakcji wycofywanej. Salony usuwane w
@@ -15,7 +15,7 @@
  *   INTEGRATION_POSTGRES_URL=postgresql://…@localhost:5432/pos_dev pnpm test:pg
  */
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { recordDepositStatusEvent } from "@/lib/deposit-status-events";
 import { appointments, depositStatusEvents, employees, salons, user } from "@/lib/schema";
@@ -342,5 +342,31 @@ suite("deposit_status_events — prawdziwy Postgres (migracja 0014)", () => {
     expect(await eventsOf(appt)).toHaveLength(1);
     await h!.db.delete(appointments).where(eq(appointments.id, appt));
     expect(await eventsOf(appt)).toHaveLength(0);
+  });
+
+  it("kaskada pod rolą aplikacji: DELETE wizyty przez forSalon(A).raw usuwa jej wpisy, wpis salonu B zostaje", async () => {
+    const apptA = await appointment(salonA);
+    const apptB = await appointment(salonB);
+    await h!.observer.unsafe(INSERT_EVENT, params(markBy(salonA, apptA)) as never[]);
+    await h!.observer.unsafe(INSERT_EVENT, params(markBy(salonB, apptB)) as never[]);
+    expect(await eventsOf(apptA)).toHaveLength(1);
+    expect(await eventsOf(apptB)).toHaveLength(1);
+
+    const role = await forSalon(salonA).raw(async (tx) => {
+      // Kontrola fałszywej zieleni: DELETE musi iść pod rolą aplikacji, nie rolą migracji.
+      const rows = (await tx.execute(sql`select current_user as u`)) as unknown as Array<{ u: string }>;
+      const current = rows[0]!.u;
+      if (current !== APP_ROLE) return current;
+      await tx.delete(appointments).where(and(eq(appointments.id, apptA), eq(appointments.salonId, salonA)));
+      return current;
+    });
+
+    expect(role).toBe(APP_ROLE);
+    expect(await eventsOf(apptA)).toHaveLength(0);
+    expect(await eventsOf(apptB)).toHaveLength(1);
+    const [priv] = (await h!.observer.unsafe(
+      `SELECT has_table_privilege('${APP_ROLE}', 'public.${TABLE}', 'DELETE') AS v`,
+    )) as Array<{ v: boolean }>;
+    expect(priv!.v).toBe(false);
   });
 });

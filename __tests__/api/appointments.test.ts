@@ -239,6 +239,13 @@ vi.mock("@/lib/deposit-guard", () => ({
   depositGuardResponse: (...args: unknown[]) => mockDepositGuard(...args),
 }));
 
+// Dziennik zmian zadatku (PUT owner_edit) — pomocnik ma własne testy
+// (__tests__/lib/deposit-status-events.test.ts); tu: czy i z czym trasa go woła.
+const mockRecordDepositStatusEvent = vi.fn(async (..._args: unknown[]): Promise<void> => undefined);
+vi.mock("@/lib/deposit-status-events", () => ({
+  recordDepositStatusEvent: (...args: unknown[]) => mockRecordDepositStatusEvent(...args),
+}));
+
 function salonRefRejection() {
   return new Response(
     JSON.stringify({ success: false, error: "Nieprawidlowe dane dla tego salonu" }),
@@ -2054,11 +2061,29 @@ describe("PUT /api/appointments/[id] — referencje i zadatek (P1)", () => {
     return updateChain.set!.mock.calls[0]![0] as Record<string, unknown>;
   }
 
+  /**
+   * PUT z `depositPaid` (termin bez zmian, więc bez blokad czasu):
+   * findOne → kolizja → odczyt `depositPaid` z blokadą wiersza → update.
+   * `locked`: wartość w zablokowanym wierszu albo "missing" (brak wiersza).
+   */
+  function arrangeDeposit(locked: boolean | null | "missing", existingPaid: boolean | null = false) {
+    const lockedChain = chainMock(locked === "missing" ? [] : [{ depositPaid: locked }]);
+    const updateChain = chainMock([makeAppointment()]);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([makeAppointment({ depositPaid: existingPaid })])) // findOne
+      .mockReturnValueOnce(chainMock([])) // overlap
+      .mockReturnValueOnce(lockedChain); // odczyt z blokadą
+    mockDbUpdate.mockReturnValue(updateChain);
+    return { lockedChain, updateChain };
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbSelect.mockReset();
     mockDbUpdate.mockReset();
     mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+    mockRecordDepositStatusEvent.mockReset();
+    mockRecordDepositStatusEvent.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -2113,13 +2138,134 @@ describe("PUT /api/appointments/[id] — referencje i zadatek (P1)", () => {
     const res = await put({ [field]: value });
     expect(res.status).toBe(403);
     expect(mockDbUpdate).not.toHaveBeenCalled();
+    expect(mockRecordDepositStatusEvent).not.toHaveBeenCalled();
   });
 
   it("wlasciciel moze ustawic depositPaid (reczne rozliczenie)", async () => {
-    const updateChain = arrange();
+    const { updateChain } = arrangeDeposit(false);
     const res = await put({ depositPaid: true });
     expect(res.status).toBe(200);
     expect(updated(updateChain).depositPaid).toBe(true);
+  });
+
+  it("owner depositPaid false→true: wpis owner_edit w tym samym tx, z odczytu z blokadą wiersza", async () => {
+    const { lockedChain } = arrangeDeposit(false);
+    const res = await put({ depositPaid: true });
+
+    expect(res.status).toBe(200);
+    expect(lockedChain.for).toHaveBeenCalledWith("update");
+    expect(lockedChain.where).toHaveBeenCalledWith({
+      type: "and",
+      args: [
+        { type: "eq", args: ["appointments.id", TEST_IDS.APPOINTMENT_UUID] },
+        { type: "eq", args: ["appointments.salonId", TEST_IDS.SALON_UUID] },
+      ],
+    });
+    expect(mockRecordDepositStatusEvent).toHaveBeenCalledTimes(1);
+    const [tx, input] = mockRecordDepositStatusEvent.mock.calls[0]!;
+    expect(tx).toBe(mockTx);
+    expect(input).toEqual({
+      salonId: TEST_IDS.SALON_UUID,
+      appointmentId: TEST_IDS.APPOINTMENT_UUID,
+      previousDepositPaid: false,
+      depositPaid: true,
+      source: "owner_edit",
+      actor: { userId: OWNER_CTX.userId, role: "owner" },
+    });
+  });
+
+  it("owner depositPaid true→false: wpis owner_edit", async () => {
+    arrangeDeposit(true, true);
+    const res = await put({ depositPaid: false });
+
+    expect(res.status).toBe(200);
+    expect(mockRecordDepositStatusEvent).toHaveBeenCalledTimes(1);
+    expect(mockRecordDepositStatusEvent.mock.calls[0]![1]).toMatchObject({
+      previousDepositPaid: true,
+      depositPaid: false,
+      source: "owner_edit",
+    });
+  });
+
+  it("decyduje odczyt z blokadą: existing=false, zablokowany=true, body true → bez wpisu", async () => {
+    const { updateChain } = arrangeDeposit(true, false);
+    const res = await put({ depositPaid: true });
+
+    expect(res.status).toBe(200);
+    expect(updated(updateChain).depositPaid).toBe(true);
+    expect(mockRecordDepositStatusEvent).not.toHaveBeenCalled();
+  });
+
+  it("zablokowany null + body false → bez wpisu (null liczy się jak false)", async () => {
+    arrangeDeposit(null, null);
+    const res = await put({ depositPaid: false });
+
+    expect(res.status).toBe(200);
+    expect(mockRecordDepositStatusEvent).not.toHaveBeenCalled();
+  });
+
+  it("zablokowany null + body true → wpis z previousDepositPaid=null (normalizuje pomocnik)", async () => {
+    arrangeDeposit(null, null);
+    const res = await put({ depositPaid: true });
+
+    expect(res.status).toBe(200);
+    expect(mockRecordDepositStatusEvent).toHaveBeenCalledTimes(1);
+    expect(mockRecordDepositStatusEvent.mock.calls[0]![1]).toMatchObject({
+      previousDepositPaid: null,
+      depositPaid: true,
+    });
+  });
+
+  it("brak wiersza w odczycie z blokadą → bez wpisu, odpowiedź bez zmian", async () => {
+    arrangeDeposit("missing");
+    const res = await put({ depositPaid: true });
+
+    expect(res.status).toBe(200);
+    expect(mockRecordDepositStatusEvent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["notes", { notes: "Nowa notatka" }],
+    ["depositAmount", { depositAmount: "20.00" }],
+  ])("PUT bez depositPaid (%s) → bez odczytu z blokadą i bez wpisu", async (_label, body) => {
+    const updateChain = chainMock([makeAppointment()]);
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([makeAppointment()])) // findOne
+      .mockReturnValueOnce(chainMock([])); // overlap
+    mockDbUpdate.mockReturnValue(updateChain);
+
+    const res = await put(body);
+
+    expect(res.status).toBe(200);
+    expect(mockDbSelect).toHaveBeenCalledTimes(2);
+    expect(mockRecordDepositStatusEvent).not.toHaveBeenCalled();
+  });
+
+  it("kolizja 409 z depositPaid → bez odczytu z blokadą, bez update, bez wpisu", async () => {
+    mockDbSelect
+      .mockReturnValueOnce(chainMock([makeAppointment()])) // findOne
+      .mockReturnValueOnce(chainMock([{ id: TEST_IDS.VALID_UUID }])); // overlap
+    const res = await put({ depositPaid: true });
+
+    expect(res.status).toBe(409);
+    expect(mockDbSelect).toHaveBeenCalledTimes(2);
+    expect(mockDbUpdate).not.toHaveBeenCalled();
+    expect(mockRecordDepositStatusEvent).not.toHaveBeenCalled();
+  });
+
+  it("pomocnik odrzuca → 500, wołany po update", async () => {
+    const { updateChain } = arrangeDeposit(false);
+    mockRecordDepositStatusEvent.mockRejectedValueOnce(new Error("insert failed"));
+
+    const res = await put({ depositPaid: true });
+    const { status, body } = await parseResponse(res);
+
+    expect(status).toBe(500);
+    expect(body.error).toContain("Failed to update appointment");
+    expect(mockRecordDepositStatusEvent).toHaveBeenCalledTimes(1);
+    expect(updateChain.returning!.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockRecordDepositStatusEvent.mock.invocationCallOrder[0]!
+    );
   });
 
   it("pracownik przenosi wlasna wizyte bez pol zadatku -> 200", async () => {
