@@ -16,7 +16,8 @@ import { forSalon } from "@/lib/server/repository";
  *
  * Prywatność (RODO): numer to dane osobowe właściciela. Nie trafia do logów
  * (logujemy tylko salonId i to, czy numer jest ustawiony), a komunikaty
- * walidacji są stałe. Numer zwraca tylko ta trasa i tylko właścicielowi.
+ * walidacji są stałe. Pełne ustawienia zwraca ta trasa tylko właścicielowi;
+ * sam numer dostaje też klient w odpowiedzi 201 rezerwacji z zadatkiem BLIK.
  */
 
 interface BlikDepositSettings {
