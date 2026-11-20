@@ -33,6 +33,7 @@ import { PUT as updateAppointment } from "@/app/api/appointments/[id]/route";
 import { POST as bookPackage } from "@/app/api/appointments/book-package/route";
 import { POST as createAppointment } from "@/app/api/appointments/route";
 import { GET as getAvailableSlots } from "@/app/api/available-slots/route";
+import { POST as createBlikBooking } from "@/app/api/deposits/blik-booking/route";
 import { POST as createDepositSession } from "@/app/api/deposits/create-session/route";
 import { GET as getSalonEmployee } from "@/app/api/salons/[id]/employees/[employeeId]/route";
 import { GET as getSalon } from "@/app/api/salons/[id]/route";
@@ -41,6 +42,7 @@ import { APPOINTMENT_NO_OVERLAP_CONSTRAINT, dbErrorCode, isAppointmentSlotTaken 
 import {
   appointments,
   clients,
+  depositPayments,
   employees,
   promoCodes,
   promotions,
@@ -123,6 +125,7 @@ vi.mock("@/lib/stripe", async (orig) => ({
 const RUN = randomUUID().slice(0, 8);
 const USER_ID = `it-t3-ovl-${RUN}`;
 const OWNER_B_ID = `it-t3-ovl-b-${RUN}`;
+const OWNER_C_ID = `it-t3-ovl-c-${RUN}`;
 const MSG = "Termin koliduje z istniejaca wizyta. Wybierz inna godzine";
 let salonId = "";
 let employeeId = "";
@@ -737,6 +740,144 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       expect(day).toHaveLength(20); // 10 pakietów × 2 wizyty, bez połowicznych
       expect(noOverlaps(day)).toBe(true);
     }, 120_000);
+  });
+
+  // Rezerwacja z zadatkiem BLIK na telefon salonu: forSalon(salonId z body)
+  // pod rolą aplikacji, prawdziwe wyliczenie kwoty. Salon C ma numer BLIK
+  // (testowy) i własnego właściciela (`salons_owner_id_uq`); salon A nie ma
+  // numeru, dostaje tu usługę z zadatkiem. Terminy: dni 7–9 marca 2099.
+  describe("POST /api/deposits/blik-booking (gość, forSalon)", () => {
+    const BLIK_PHONE = "+48000600703";
+    const SALON_C_PHONE = "+48000600704";
+    const BLIK_MSG = "Wybrany termin jest juz zajety. Wybierz inny termin.";
+    let salonCId = "";
+    let employeeCId = "";
+    let serviceCId = "";
+    let depositServiceAId = "";
+
+    async function blikBooking(target: { salonId: string; employeeId: string; serviceId: string }, start: string, end: string) {
+      const res = await createBlikBooking(
+        new Request("http://localhost/api/deposits/blik-booking", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ...target,
+            startTime: start,
+            endTime: end,
+            depositAmount: 50,
+            guestName: "IT Gość",
+            guestPhone: "+48 000 600 700",
+          }),
+        })
+      );
+      return {
+        status: res.status,
+        body: (await res.json()) as {
+          success: boolean;
+          error?: string;
+          code?: string;
+          data?: { appointmentId: string; depositAmount: number; blik: { phone: string; recipient: string; title: string } };
+        },
+      };
+    }
+
+    const salonC = () => ({ salonId: salonCId, employeeId: employeeCId, serviceId: serviceCId });
+
+    /** Wszystkie wizyty salonu w dniu (także anulowane). */
+    async function salonDay(sid: string, day: number) {
+      const { from, to } = dayRange(day);
+      return h!.db
+        .select({ id: appointments.id, status: appointments.status, depositPaid: appointments.depositPaid, depositAmount: appointments.depositAmount })
+        .from(appointments)
+        .where(and(eq(appointments.salonId, sid), gte(appointments.startTime, from), lt(appointments.startTime, to)));
+    }
+
+    beforeAll(async () => {
+      const db = h!.db;
+      await db.insert(user).values({ id: OWNER_C_ID, name: "IT T3 ovl C", email: `${OWNER_C_ID}@example.invalid` });
+      const [salon] = await db
+        .insert(salons)
+        .values({
+          name: `IT T3 ovl C ${RUN}`,
+          ownerId: OWNER_C_ID,
+          phone: SALON_C_PHONE,
+          settingsJson: { deposits: { blikPhone: BLIK_PHONE, blikConsentAt: "2099-01-01T00:00:00.000Z" } },
+        })
+        .returning();
+      salonCId = salon!.id;
+      const [emp] = await db.insert(employees).values({ salonId: salonCId, firstName: "IT", lastName: "Pracownik C" }).returning();
+      employeeCId = emp!.id;
+      // Zadatek 50% z 100 zł = 50 zł (bez promocji w salonie).
+      const [svc] = await db
+        .insert(services)
+        .values({ salonId: salonCId, name: "IT Usługa zadatek", basePrice: "100.00", baseDuration: 60, depositRequired: true, depositPercentage: 50 })
+        .returning();
+      serviceCId = svc!.id;
+      const [svcA] = await db
+        .insert(services)
+        .values({ salonId, name: "IT Usługa zadatek A", basePrice: "100.00", baseDuration: 60, depositRequired: true, depositPercentage: 50 })
+        .returning();
+      depositServiceAId = svcA!.id;
+    });
+
+    afterAll(async () => {
+      // Usługa z zadatkiem salonu A znika kaskadą z salonu A w afterAll całego opisu.
+      if (salonCId) await h!.db.delete(salons).where(eq(salons.id, salonCId));
+      await h!.db.delete(user).where(eq(user.id, OWNER_C_ID));
+    });
+
+    beforeEach(() => {
+      session.ctx = null;
+    });
+
+    it("salon z numerem i usługą z zadatkiem → 201, wizyta scheduled/false, 0 wierszy deposit_payments", async () => {
+      const res = await blikBooking(salonC(), at(7, "10:00"), at(7, "11:00"));
+      expect(res.status, res.body.error).toBe(201);
+      const data = res.body.data!;
+      expect(data.depositAmount).toBe(50);
+      expect(data.blik).toEqual({
+        phone: BLIK_PHONE,
+        recipient: `IT T3 ovl C ${RUN}`,
+        title: `Zadatek MH-${data.appointmentId.slice(0, 6).toUpperCase()}`,
+      });
+
+      const rows = await salonDay(salonCId, 7);
+      expect(rows).toEqual([{ id: data.appointmentId, status: "scheduled", depositPaid: false, depositAmount: "50.00" }]);
+      const payments = await h!.db
+        .select({ id: depositPayments.id })
+        .from(depositPayments)
+        .where(eq(depositPayments.appointmentId, data.appointmentId));
+      expect(payments).toEqual([]);
+    });
+
+    it("druga rezerwacja tego samego terminu → 409, w bazie jedna wizyta", async () => {
+      expect((await blikBooking(salonC(), at(8, "10:00"), at(8, "11:00"))).status).toBe(201);
+      const second = await blikBooking(salonC(), at(8, "10:30"), at(8, "11:30"));
+      expect(second.status).toBe(409);
+      expect(second.body.error).toBe(BLIK_MSG);
+      expect(JSON.stringify(second.body)).not.toContain(BLIK_PHONE);
+      expect(await salonDay(salonCId, 8)).toHaveLength(1);
+    });
+
+    it("wyścig: dwie równoległe rezerwacje tego samego terminu → jedna 201, druga 409", async () => {
+      const results = await Promise.all([
+        blikBooking(salonC(), at(17, "10:00"), at(17, "11:00")),
+        blikBooking(salonC(), at(17, "10:00"), at(17, "11:00")),
+      ]);
+      expect(statuses(results)).toEqual([201, 409]);
+      expect(await salonDay(salonCId, 17)).toHaveLength(1);
+    });
+
+    it("salon bez numeru BLIK → 409 DEPOSIT_BLIK_NOT_CONFIGURED, 0 nowych wizyt", async () => {
+      const res = await blikBooking({ salonId, employeeId, serviceId: depositServiceAId }, at(9, "10:00"), at(9, "11:00"));
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({
+        success: false,
+        code: "DEPOSIT_BLIK_NOT_CONFIGURED",
+        error: "Ten salon nie przyjmuje teraz rezerwacji online z zadatkiem.",
+      });
+      expect(await salonDay(salonId, 9)).toEqual([]);
+    });
   });
 
   // Publiczne wolne terminy przez forSalon(salonId z zapytania), pod rolą
