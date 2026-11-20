@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import AppointmentDetailPage from "@/app/dashboard/appointments/[id]/page";
 import { ModulesProvider } from "@/components/dashboard/modules-provider";
@@ -29,15 +30,36 @@ vi.mock("@/hooks/use-salon-id", () => ({
   useSalonId: () => ({ salonId: "salon-1", loading: false }),
 }));
 
+const tabSync = vi.hoisted(() => ({
+  notifyChange: vi.fn(),
+  onRefetch: null as null | (() => void | Promise<void>),
+}));
+
 vi.mock("@/hooks/use-tab-sync", () => ({
-  useTabSync: vi.fn(),
+  useTabSync: vi.fn((_resource: string, onRefetch: () => void | Promise<void>) => {
+    tabSync.onRefetch = onRefetch;
+    return { notifyChange: tabSync.notifyChange };
+  }),
+}));
+
+interface DepositMarkButtonStubProps {
+  onChanged: () => void | Promise<void>;
+  notifyChange: () => void;
+}
+
+const depositButton = vi.hoisted(() => ({
+  props: null as null | DepositMarkButtonStubProps,
 }));
 
 // Karty szczegółów wizyty mają własne testy; tu liczy się, o co strona pyta API.
 vi.mock("@/components/appointments/detail", () => ({
   AppointmentHeader: () => <div data-testid="stub-header" />,
   AppointmentInfoCard: () => null,
-  AppointmentRefundStatus: () => null,
+  AppointmentRefundStatus: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  DepositMarkButton: (props: DepositMarkButtonStubProps) => {
+    depositButton.props = props;
+    return <div data-testid="stub-deposit-mark-btn" />;
+  },
   AppointmentNotes: () => null,
   AppointmentTreatment: () => null,
   AppointmentCommission: () => null,
@@ -134,5 +156,64 @@ describe("AppointmentDetailPage — faktury zamrożone", () => {
       expect(screen.getByTestId("stub-invoice-card")).toBeInTheDocument();
     });
     expect(fetchedUrls()).toContain("/api/appointments/appt-1/invoice");
+  });
+});
+
+describe("AppointmentDetailPage — odświeżenie stanu zadatku", () => {
+  const REFUND_STATUS_URL = "/api/appointments/appt-1/refund-status";
+  const APPOINTMENT_URL = "/api/appointments/appt-1";
+
+  function countFetches(url: string): number {
+    return fetchedUrls().filter((u) => u === url).length;
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", mockFetch());
+    tabSync.onRefetch = null;
+    depositButton.props = null;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("zdarzenie synchronizacji kart pobiera ponownie wizytę i refund-status", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("stub-header")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(countFetches(REFUND_STATUS_URL)).toBe(1);
+    });
+    expect(tabSync.onRefetch).not.toBeNull();
+
+    await act(async () => {
+      await tabSync.onRefetch?.();
+    });
+
+    expect(countFetches(REFUND_STATUS_URL)).toBe(2);
+    expect(countFetches(APPOINTMENT_URL)).toBe(2);
+  });
+
+  it("przycisk zadatku dostaje odświeżenie wizyty i refund-status oraz notifyChange kart", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("stub-deposit-mark-btn")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(countFetches(REFUND_STATUS_URL)).toBe(1);
+    });
+
+    const props = depositButton.props;
+    expect(props).not.toBeNull();
+    expect(props?.notifyChange).toBe(tabSync.notifyChange);
+
+    await act(async () => {
+      await props?.onChanged();
+    });
+
+    expect(countFetches(REFUND_STATUS_URL)).toBe(2);
+    expect(countFetches(APPOINTMENT_URL)).toBe(2);
   });
 });

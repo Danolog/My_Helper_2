@@ -1,6 +1,7 @@
 export { AppointmentHeader } from "./appointment-header";
 export { AppointmentInfoCard } from "./appointment-info-card";
 export { AppointmentRefundStatus } from "./appointment-refund-status";
+export { DepositMarkButton } from "./deposit-mark-button";
 export { AppointmentNotes } from "./appointment-notes";
 export { AppointmentTreatment } from "./appointment-treatment";
 export { AppointmentCommission } from "./appointment-commission";

@@ -9,6 +9,7 @@ import {
   AppointmentHeader,
   AppointmentInfoCard,
   AppointmentRefundStatus,
+  DepositMarkButton,
   AppointmentNotes,
   AppointmentTreatment,
   AppointmentCommission,
@@ -188,8 +189,18 @@ export default function AppointmentDetailPage() {
     return () => controller.abort();
   }, [fetchAppointment, fetchMaterials, fetchProducts, fetchTreatment, fetchCommission, fetchRefundStatus, fetchInvoice]);
 
+  // Stan zadatku pochodzi z dwoch zrodel: wizyty (badge w karcie) i
+  // refund-status (settledOutsideApp, depositPaid dla przycisku oznaczenia).
+  // Przycisk zadatku i synchronizacja kart odswiezaja oba naraz.
+  const refreshAppointmentAndDeposit = useCallback(async () => {
+    await Promise.all([fetchAppointment(), fetchRefundStatus()]);
+  }, [fetchAppointment, fetchRefundStatus]);
+
   // Cross-tab sync: refetch when another tab modifies appointments
-  useTabSync("appointments", fetchAppointment);
+  const { notifyChange: notifyAppointmentsChanged } = useTabSync(
+    "appointments",
+    refreshAppointmentAndDeposit
+  );
 
   // --- Event handlers ---
 
@@ -261,7 +272,14 @@ export default function AppointmentDetailPage() {
       <AppointmentRefundStatus
         appointment={appointment}
         refundStatus={refundStatus}
-      />
+      >
+        <DepositMarkButton
+          appointment={appointment}
+          refundStatus={refundStatus}
+          onChanged={refreshAppointmentAndDeposit}
+          notifyChange={notifyAppointmentsChanged}
+        />
+      </AppointmentRefundStatus>
 
       <AppointmentNotes
         appointment={appointment}
