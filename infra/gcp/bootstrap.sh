@@ -381,6 +381,9 @@ stage_sql() {
     local state
     state="$("${GC[@]}" sql instances describe "$SQL_INSTANCE" "--format=value(state)" 2>/dev/null)" ||
       die "cannot read state of instance $SQL_INSTANCE"
+    # Wielkie litery: `value(state)` w gcloud potrafi wypisać enum małymi
+    # literami (tak robi `secrets versions list`, przebieg 44817913061).
+    state="$(printf '%s' "$state" | tr '[:lower:]' '[:upper:]')"
     [[ "$state" == "RUNNABLE" ]] || die "instance $SQL_INSTANCE is $state, not RUNNABLE — repeat stage sql later"
     echo "  state: RUNNABLE"
   else

@@ -549,6 +549,26 @@ exit 0
     expect(r.calls.some((c) => c.includes("versions describe"))).toBe(false);
   });
 
+  // Prawdziwy gcloud (577.0.0) wypisuje w `value(state)` stan małymi literami
+  // (`enabled`), JSON — `ENABLED`. Przebieg 44817913061 odrzucił przez to
+  // wymagane sekrety z włączoną wersją.
+  it("stan małymi literami z gcloud (`enabled`) → sekret mapowany; `disabled` nie", () => {
+    const r = deploy("postgres-url=enabled,better-auth-secret=Enabled,cron-secret=enabled,resend-api-key=disabled");
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).not.toContain("required secrets without an enabled version");
+    expect(secretsArg(r.run!).sort()).toEqual(
+      [mapping("BETTER_AUTH_SECRET", "better-auth-secret"), mapping("CRON_SECRET", "cron-secret"), mapping("POSTGRES_URL", "postgres-url")].sort(),
+    );
+    expect(r.stdout).toMatch(/skip: optional secret resend-api-key has no enabled version \(DISABLED\)/);
+  });
+
+  it("stan małymi literami: najnowsza wersja `disabled` wymaganego sekretu → kod 2, przed deployem", () => {
+    const r = deploy("postgres-url=enabled>disabled,better-auth-secret=enabled");
+    expect(r.status).toBe(2);
+    expect(r.stderr).toMatch(/required secrets without an enabled version: postgres-url$/m);
+    expect(r.run).toBeUndefined();
+  });
+
   it("pusty kontener (sekret bez wersji, kod 0) wymaganego sekretu → kod 2 z nazwą sekretu, przed deployem", () => {
     const r = deploy("postgres-url=EMPTY,better-auth-secret=ENABLED");
     expect(r.status).toBe(2);

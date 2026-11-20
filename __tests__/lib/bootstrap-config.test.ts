@@ -462,6 +462,16 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
     ]);
   });
 
+  // `value(state)` w gcloud potrafi wypisać enum małymi literami (secrets: `enabled`).
+  it("stan instancji małymi literami (`runnable`) → etap idzie dalej; `pending_create` przerywa", () => {
+    const low = bootstrap([...base("sql"), "--apply"], { sqlState: "runnable" });
+    expect(low.status, low.stderr).toBe(0);
+    expect(low.calls.some((c) => c.includes("sql databases create"))).toBe(true);
+    const pending = bootstrap([...base("sql"), "--apply"], { sqlState: "pending_create" });
+    expect(pending.status).toBe(2);
+    expect(pending.stderr).toMatch(/PENDING_CREATE, not RUNNABLE/);
+  });
+
   it("baza i loginy dopiero na instancji RUNNABLE; inny stan przerywa etap", () => {
     const p = bootstrap([...base("sql"), "--apply"], { sqlState: "PENDING_CREATE" });
     expect(p.status).toBe(2);

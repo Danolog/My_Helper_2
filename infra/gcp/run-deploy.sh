@@ -123,6 +123,12 @@ while read -r env_name secret_name is_required; do
     sed -n '1,3s/^/  cause: /p' "$workdir/list.err" >&2
     exit 2
   fi
+  # gcloud `secrets versions list --format=value(state)` wypisuje stan małymi
+  # literami (`enabled`), a `--format=json` — surowy enum (`ENABLED`); przebieg
+  # 44817913061 odrzucił przez to sekrety z wersją włączoną. Porównanie po
+  # sprowadzeniu do wielkich liter działa w obu wariantach. `tr`, nie `${state^^}`:
+  # bash 3.2 (macOS, testy lokalne) nie zna tej składni.
+  state="$(printf '%s' "$state" | tr '[:lower:]' '[:upper:]')"
   if [[ -z "$state" ]]; then
     state="MISSING"
     if [[ "$is_required" == 1 ]]; then
