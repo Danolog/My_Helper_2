@@ -18,7 +18,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST as stripeWebhook } from "@/app/api/stripe/webhook/route";
 import { POST as confirmRoute } from "@/app/api/subscriptions/confirm/route";
 import { salonSubscriptions } from "@/lib/schema";
-import { lockSalonSubscriptions, lockStripeSubscription } from "@/lib/subscription-locks";
+import {
+  lockSalonSubscriptions,
+  lockStripeSubscription,
+  withSalonSubscriptionLock,
+  withStripeSubscriptionLock,
+} from "@/lib/subscription-locks";
 
 const f = await vi.hoisted(async () =>
   (await import("./subscription-db-fake")).createSubscriptionDbFake()
@@ -41,6 +46,25 @@ vi.mock("drizzle-orm", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/db", () => ({ db: f.db }));
+// Prawdziwe `forSalon` (transakcja na atrapie `db`), opakowane szpiegami: widać salonId i użycie `raw`.
+const { forSalonSpy, rawSpy } = vi.hoisted(() => ({ forSalonSpy: vi.fn(), rawSpy: vi.fn() }));
+vi.mock("@/lib/server/repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server/repository")>();
+  return {
+    ...actual,
+    forSalon: (salonId: string) => {
+      forSalonSpy(salonId);
+      const gate = actual.forSalon(salonId);
+      return {
+        ...gate,
+        raw: ((fn) => {
+          rawSpy(salonId);
+          return gate.raw(fn);
+        }) as typeof gate.raw,
+      };
+    },
+  };
+});
 vi.mock("@/lib/stripe", () => ({
   getStripe: (...a: unknown[]) => mockGetStripe(...a),
   isStripeWebhookConfigured: () => true,
@@ -259,6 +283,48 @@ describe("reguły blokad pilnowane w kodzie", () => {
         await lockSalonSubscriptions(tx as LockTx, "salon-2");
       })
     ).rejects.toThrow(/second salon lock/);
+  });
+});
+
+describe("withSalonSubscriptionLock — transakcja forSalon (rola aplikacji, RLS salonu)", () => {
+  // Dwa `execute` na początku = `set local role` i `set_config(app.current_salon_id)` z `forSalon`.
+  const SALON_CONTEXT = ["execute", "execute"];
+
+  it("forSalon(salonId).raw z tym salonId; w nim lock_timeout → blokada salonu → fn → commit", async () => {
+    const result = await withSalonSubscriptionLock("salon-1", async () => {
+      f.log.push("fn");
+      return "ok";
+    });
+
+    expect(result).toBe("ok");
+    expect(forSalonSpy.mock.calls).toEqual([["salon-1"]]);
+    expect(rawSpy.mock.calls).toEqual([["salon-1"]]);
+    expect(f.state.transactions).toBe(1);
+    expect(f.log).toEqual([...SALON_CONTEXT, "lock_timeout", "lock:salon:salon-1", "fn", "commit"]);
+  });
+
+  it("55P03 przy blokadzie salonu → wyjątek z kodem, fn nie rusza, rollback", async () => {
+    f.state.failNextLock = { code: "55P03" };
+    const fn = vi.fn();
+
+    await expect(withSalonSubscriptionLock("salon-1", fn)).rejects.toMatchObject({ code: "55P03" });
+
+    expect(fn).not.toHaveBeenCalled();
+    expect(f.log).toEqual([...SALON_CONTEXT, "lock_timeout", "lock:salon:salon-1", "rollback"]);
+  });
+
+  it("pusty salonId → błąd forSalon, bez transakcji", async () => {
+    expect(() => withSalonSubscriptionLock("", vi.fn())).toThrow(/salonId wymagany/);
+    expect(f.state.transactions).toBe(0);
+  });
+
+  it("withStripeSubscriptionLock dalej przez db.transaction: bez forSalon, lock_timeout → stripe_sub", async () => {
+    await withStripeSubscriptionLock("sub_1", async () => {
+      f.log.push("fn");
+    });
+
+    expect(forSalonSpy).not.toHaveBeenCalled();
+    expect(f.log).toEqual(["lock_timeout", "lock:stripe_sub:sub_1", "fn", "commit"]);
   });
 });
 

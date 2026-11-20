@@ -47,7 +47,8 @@ const ACTIVE = {
   scheduledPlanId: null,
   scheduledChangeAt: null,
 };
-const LOCKED_PREFIX = ["lock_timeout", "lock:salon:salon-1"];
+// Transakcja `forSalon`: najpierw `set local role` i kontekst salonu (dwa `execute`), potem blokada.
+const LOCKED_PREFIX = ["execute", "execute", "lock_timeout", "lock:salon:salon-1"];
 const subWrites = () => f.committed.filter((w) => w.table === "salon_subscriptions");
 
 async function call(handler: (r: Request) => Promise<Response>, method: string, body?: unknown) {
@@ -88,7 +89,7 @@ describe("POST /api/subscriptions/downgrade — pod blokadą salonu", () => {
 
     expect(status).toBe(expected);
     expect(f.committed).toEqual([]);
-    expect(f.log.slice(0, 2)).toEqual(LOCKED_PREFIX);
+    expect(f.log.slice(0, LOCKED_PREFIX.length)).toEqual(LOCKED_PREFIX);
   });
 
   it.each(["40P01", "55P03"])("503: %s przy blokadzie → LOCK_BUSY, bez odczytu i zapisu", async (code) => {
