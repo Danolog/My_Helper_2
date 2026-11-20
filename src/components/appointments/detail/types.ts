@@ -90,14 +90,20 @@ export interface RefundStatus {
   hasDeposit: boolean;
   depositAmount?: number;
   depositPaid?: boolean;
-  paymentMethod?: string;
-  paymentStatus?: string;
+  /** null, gdy zadatek nie ma platnosci online (rozliczany poza MyHelper). */
+  paymentMethod?: string | null;
+  paymentStatus?: string | null;
   refundStatus: string;
   refundAmount: number;
   forfeitedAmount?: number;
   refundedAt?: string;
   stripeRefundId?: string;
   refundReason?: string;
+  /**
+   * true: brak platnosci online — zadatek salon rozlicza poza MyHelper,
+   * a zwrot ustala salon. Brak pola (starsza odpowiedz) traktujemy jak false.
+   */
+  settledOutsideApp?: boolean;
 }
 
 export interface InvoiceData {

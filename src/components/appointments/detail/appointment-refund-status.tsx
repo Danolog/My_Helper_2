@@ -11,17 +11,51 @@ interface AppointmentRefundStatusProps {
 }
 
 /**
- * Renders the refund status card for cancelled appointments with deposits,
+ * Renders, for cancelled appointments with deposits, the refund status card
+ * (online deposit payment) or the deposit card settled outside the app,
  * and the deposit info card for non-cancelled appointments with deposits.
  */
 export function AppointmentRefundStatus({
   appointment,
   refundStatus,
 }: AppointmentRefundStatusProps) {
+  const isCancelled = appointment.status === "cancelled";
+  // Zadatek bez platnosci online (np. BLIK na telefon salonu): aplikacja nie
+  // przeprowadza ani nie rozstrzyga zwrotu, wiec nie pokazujemy statusow
+  // zwrotu/przepadku ani metody platnosci.
+  const settledOutsideApp = refundStatus?.settledOutsideApp === true;
+
   return (
     <>
-      {/* Refund Status Section (shown for cancelled appointments with deposits) */}
-      {appointment.status === "cancelled" && refundStatus && refundStatus.hasDeposit && (
+      {/* Cancelled appointment, deposit settled outside the app */}
+      {isCancelled && refundStatus && refundStatus.hasDeposit && settledOutsideApp && (
+        <Card className="mb-6" data-testid="deposit-outside-app-card">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-primary" />
+              <CardTitle className="text-lg">Zadatek</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              <p className="font-semibold" data-testid="deposit-outside-app-label">
+                {refundStatus.depositPaid
+                  ? "Zadatek rozliczany poza MyHelper — zwrot ustala salon"
+                  : "Zadatek nie zostal oznaczony jako wplacony"}
+              </p>
+              <div className="text-sm">
+                <span className="text-muted-foreground">Kwota zadatku: </span>
+                <span className="font-medium" data-testid="deposit-outside-app-amount">
+                  {refundStatus.depositAmount?.toFixed(2)} PLN
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Refund Status Section (cancelled appointments with an online deposit payment) */}
+      {isCancelled && refundStatus && refundStatus.hasDeposit && !settledOutsideApp && (
         <Card className="mb-6" data-testid="refund-status-card">
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -120,7 +154,7 @@ export function AppointmentRefundStatus({
       )}
 
       {/* Deposit Info for non-cancelled appointments */}
-      {appointment.status !== "cancelled" && appointment.depositAmount && parseFloat(appointment.depositAmount) > 0 && (
+      {!isCancelled && appointment.depositAmount && parseFloat(appointment.depositAmount) > 0 && (
         <Card className="mb-6" data-testid="deposit-info-card">
           <CardHeader>
             <div className="flex items-center gap-2">

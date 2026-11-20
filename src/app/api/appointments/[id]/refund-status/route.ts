@@ -48,14 +48,26 @@ export async function GET(
     );
 
     if (!payment) {
+      // Brak wiersza platnosci online: zadatek (jesli jest w wizycie) salon
+      // rozlicza poza MyHelper (np. BLIK na telefon salonu, reczne oznaczenie
+      // wplaty). Aplikacja nie zna ani nie decyduje o zwrocie — stad
+      // refundStatus "none" i zerowe kwoty zwrotu/przepadku.
+      // Number(null|""|"abc") daje 0 albo NaN, a oba nie przechodza "> 0".
+      const depositAmount = Number(appointment.depositAmount);
+      const hasDeposit = depositAmount > 0;
       return NextResponse.json({
         success: true,
         data: {
           appointmentId: id,
-          hasDeposit: false,
-          depositPaid: false,
+          hasDeposit,
+          ...(hasDeposit ? { depositAmount } : {}),
+          depositPaid: appointment.depositPaid,
+          paymentMethod: null,
+          paymentStatus: null,
           refundStatus: "none",
           refundAmount: 0,
+          forfeitedAmount: 0,
+          settledOutsideApp: true,
         },
       });
     }
@@ -83,6 +95,7 @@ export async function GET(
         refundedAt: payment.refundedAt,
         stripeRefundId: payment.stripeRefundId,
         refundReason: payment.refundReason,
+        settledOutsideApp: false,
       },
     });
   } catch (error) {
