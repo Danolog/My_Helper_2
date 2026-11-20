@@ -57,6 +57,7 @@ const h = vi.hoisted(() => ({
   refs: vi.fn(),
   calc: vi.fn(),
   rate: vi.fn(),
+  sms: vi.fn(),
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
@@ -130,6 +131,8 @@ vi.mock("@/lib/rate-limit", () => ({
   getClientIp: () => "127.0.0.1",
 }));
 vi.mock("@/lib/logger", () => ({ logger: h.logger }));
+// Argumenty atrapy SMS nie są logami — strażnik prywatności ich nie sprawdza.
+vi.mock("@/lib/sms", () => ({ sendBlikDepositBookingSms: (...a: unknown[]) => h.sms(...a) }));
 
 const at = (hm: string) => new Date(`2026-12-01T${hm}:00.000Z`);
 const iso = (hm: string) => at(hm).toISOString();
@@ -190,9 +193,24 @@ type Ok = {
 };
 type Err = { success: false; error: string; code?: string; details?: Record<string, string> };
 
-/** Kolejka zapytań ścieżki szczęśliwej: salon, kolizje, blokady. */
-function primeHappyPath() {
-  h.queue.push([salonRow()], [], []);
+/**
+ * Szczegóły do SMS (WHERE po `appointments.id` i `appointments.salon_id`):
+ * wiersz wizyty z kolumnami z joinów klienta, usługi i pracownika.
+ */
+const detailsRow = (extra: Record<string, unknown> = {}) => ({
+  id: APPOINTMENT,
+  salon_id: SALON,
+  clientFirstName: null,
+  clientPhone: null,
+  serviceName: "Strzyzenie",
+  employeeFirstName: "Anna",
+  employeeLastName: "Testowa",
+  ...extra,
+});
+
+/** Kolejka zapytań ścieżki szczęśliwej: salon, kolizje, blokady, szczegóły do SMS. */
+function primeHappyPath(details: Record<string, unknown>[] = [detailsRow()]) {
+  h.queue.push([salonRow()], [], [], details);
 }
 
 const insertedTables = () => h.insert.mock.calls.map((c) => c[0]);
@@ -218,6 +236,7 @@ beforeEach(() => {
   h.refs.mockResolvedValue(null);
   h.calc.mockResolvedValue({ ok: true, required: true, amount: 50, serviceName: "Strzyzenie" });
   h.rate.mockReturnValue({ success: true, remaining: 4, reset: 60_000 });
+  h.sms.mockResolvedValue({ success: true, notificationId: "notif-1" });
 });
 
 const PRIVATE_DIGITS = ["000600703", "000600700", "000 600 700"];
@@ -329,10 +348,11 @@ describe("201 — wizyta scheduled/false z danymi BLIK", () => {
   it("forSalon wyłącznie z salonId z body; każde zapytanie z jawną listą kolumn", async () => {
     primeHappyPath();
     await post();
-    expect(h.forSalon.mock.calls.map((c) => c[0])).toEqual([SALON]);
-    // Dwie transakcje: odczyt salonu, potem kolizja + blokady + zapis razem.
-    expect(h.raw.mock.calls.map((c) => c[0])).toEqual([SALON, SALON]);
-    expect(h.selectArgs).toHaveLength(3);
+    expect(h.forSalon.mock.calls.map((c) => c[0])).toEqual([SALON, SALON]);
+    // Trzy transakcje: odczyt salonu, potem kolizja + blokady + zapis razem,
+    // potem szczegóły do SMS.
+    expect(h.raw.mock.calls.map((c) => c[0])).toEqual([SALON, SALON, SALON]);
+    expect(h.selectArgs).toHaveLength(4);
     for (const cols of h.selectArgs) {
       expect(cols).toBeTypeOf("object");
       expect(Object.keys(cols as object).length).toBeGreaterThan(0);
@@ -386,6 +406,160 @@ describe("201 — wizyta scheduled/false z danymi BLIK", () => {
       [block("10:00", "11:00", { employee_id: OTHER_EMPLOYEE }), block("10:00", "11:00", { salon_id: OTHER_SALON })]
     );
     expect((await post()).status).toBe(201);
+  });
+});
+
+// ─── SMS do klienta ─────────────────────────────────────────────────────────
+
+/** Inny numer testowy: gdyby SMS czytał numer drugi raz, dostałby właśnie ten. */
+const OTHER_BLIK_PHONE = "+48000600705";
+const STAFF_CLIENT_PHONE = "+48000600701";
+
+const smsArgs = () => h.sms.mock.calls[0]![0] as Record<string, unknown>;
+
+describe("SMS z numerem BLIK, kwotą i tytułem — tylko po 201", () => {
+  it("gość: dokładnie jeden SMS na telefon gościa; numer i tytuł identyczne z data.blik", async () => {
+    primeHappyPath();
+    const { status, body } = await parseResponse<Ok>(await post());
+
+    expect(status).toBe(201);
+    expect(h.sms).toHaveBeenCalledTimes(1);
+    expect(smsArgs().blikPhone).toBe(body.data.blik.phone);
+    expect(smsArgs().title).toBe(body.data.blik.title);
+    expect(smsArgs()).toEqual({
+      clientPhone: GUEST_PHONE_E164,
+      clientName: "Jan Testowy",
+      serviceName: "Strzyzenie",
+      employeeName: "Anna Testowa",
+      appointmentDate: at("10:00"),
+      salonName: SALON_NAME,
+      salonId: SALON,
+      blikPhone: BLIK_PHONE,
+      amount: 50,
+      title: "Zadatek MH-A1B2C3",
+    });
+  });
+
+  it("numer do SMS to zmienna z odczytu trasy — inny numer w bazie przy drugim odczycie nie trafia do SMS", async () => {
+    // Szczegóły niosą inny numer, a kolejne zapytanie zwróciłoby salon z innym
+    // numerem: trasa, która czyta numer drugi raz, wysłałaby OTHER_BLIK_PHONE.
+    primeHappyPath([detailsRow({ blikPhone: OTHER_BLIK_PHONE })]);
+    h.queue.push([salonRow(OTHER_BLIK_PHONE)]);
+    const { status, body } = await parseResponse<Ok>(await post());
+
+    expect(status).toBe(201);
+    expect(body.data.blik.phone).toBe(BLIK_PHONE);
+    expect(smsArgs().blikPhone).toBe(BLIK_PHONE);
+    expect(JSON.stringify(h.sms.mock.calls)).not.toContain(OTHER_BLIK_PHONE);
+  });
+
+  it("SMS dopiero po zapisie wizyty", async () => {
+    primeHappyPath();
+    await post();
+    expect(h.sms.mock.invocationCallOrder[0]!).toBeGreaterThan(h.insertValues.mock.invocationCallOrder[0]!);
+  });
+
+  it("personel z klientem z kartoteki: SMS na telefon z kartoteki, z clientId i imieniem klienta", async () => {
+    h.session.mockResolvedValue({ user: { id: "owner-1" } });
+    h.salonCtx.mockResolvedValue({ salonId: SALON, role: "owner" });
+    primeHappyPath([detailsRow({ clientFirstName: "Maria", clientPhone: STAFF_CLIENT_PHONE })]);
+    const { status, body } = await parseResponse<Ok>(
+      await post({ ...validBody, clientId: CLIENT, guestName: undefined, guestPhone: undefined })
+    );
+
+    expect(status).toBe(201);
+    expect(h.sms).toHaveBeenCalledTimes(1);
+    expect(smsArgs()).toMatchObject({
+      clientPhone: STAFF_CLIENT_PHONE,
+      clientName: "Maria",
+      clientId: CLIENT,
+      blikPhone: body.data.blik.phone,
+      title: body.data.blik.title,
+    });
+  });
+
+  it("brak telefonu (klient portalu bez pól gościa, bez kartoteki) → 201 bez SMS", async () => {
+    h.session.mockResolvedValue({ user: { id: "user-1" } });
+    primeHappyPath();
+    const res = await post({ ...validBody, guestName: undefined, guestPhone: undefined });
+    expect(res.status).toBe(201);
+    expect(h.sms).not.toHaveBeenCalled();
+  });
+
+  it("odczyt szczegółów przez forSalon(salonId) z jawną listą kolumn i warunkiem na id wizyty i salon", async () => {
+    primeHappyPath();
+    await post();
+    expect(h.forSalon.mock.calls.at(-1)![0]).toBe(SALON);
+    expect(Object.keys(h.selectArgs[3] as object).sort()).toEqual(
+      ["clientFirstName", "clientPhone", "employeeFirstName", "employeeLastName", "serviceName"]
+    );
+  });
+
+  it("szczegóły dla wizyty innego salonu nie przechodzą WHERE → 201 bez SMS", async () => {
+    primeHappyPath([detailsRow({ salon_id: OTHER_SALON })]);
+    expect((await post()).status).toBe(201);
+    expect(h.sms).not.toHaveBeenCalled();
+  });
+
+  it("SMS rzuca błąd z numerami → ta sama odpowiedź 201; log: id wizyty i tożsamość błędu", async () => {
+    primeHappyPath();
+    const ok = await parseResponse<Ok>(await post());
+
+    vi.clearAllMocks();
+    h.queue.length = 0;
+    h.session.mockResolvedValue(null);
+    h.refs.mockResolvedValue(null);
+    h.calc.mockResolvedValue({ ok: true, required: true, amount: 50, serviceName: "Strzyzenie" });
+    h.rate.mockReturnValue({ success: true, remaining: 4, reset: 60_000 });
+    h.sms.mockRejectedValue(new Error(`SMSAPI: ${GUEST_PHONE_E164} ${BLIK_PHONE}`));
+    primeHappyPath();
+    const failed = await parseResponse<Ok>(await post());
+
+    expect(failed).toEqual(ok);
+    const call = h.logger.warn.mock.calls.find((c) => String(c[0]).includes("SMS failed"));
+    expect(call?.[1]).toEqual({ appointmentId: APPOINTMENT, errorName: "Error" });
+  });
+
+  it("błąd odczytu szczegółów → 201 bez SMS, log bez treści błędu", async () => {
+    primeHappyPath();
+    h.failAt = 4;
+    const { status, body } = await parseResponse<Ok>(await post());
+    expect(status).toBe(201);
+    expect(body.data.blik.phone).toBe(BLIK_PHONE);
+    expect(h.sms).not.toHaveBeenCalled();
+    const call = h.logger.warn.mock.calls.find((c) => String(c[0]).includes("SMS failed"));
+    expect(call?.[1]).toEqual({ appointmentId: APPOINTMENT, errorName: "Error" });
+  });
+
+  it.each<[string, () => void, Record<string, unknown>?]>([
+    ["409 brak numeru BLIK", () => h.queue.push([salonRow(null)])],
+    ["409 termin zajęty", () => h.queue.push([salonRow()], [appt("10:30", "11:30")], [], [detailsRow()])],
+    ["409 wyścig EXCLUDE", () => {
+      primeHappyPath();
+      h.insertError = wrapped({ code: "23P01", constraint_name: "appointments_no_overlap" });
+    }],
+    ["400 zła kwota", () => {
+      h.calc.mockResolvedValue({ ok: true, required: true, amount: 60, serviceName: "S" });
+      primeHappyPath();
+    }],
+    ["400 walidacja", () => primeHappyPath(), { employeeId: undefined }],
+    ["429 limit", () => {
+      h.rate.mockReturnValue({ success: false, remaining: 0, reset: 30_000 });
+      primeHappyPath();
+    }],
+    ["503 wyliczenie kwoty", () => {
+      h.calc.mockRejectedValue(new Error("db down"));
+      primeHappyPath();
+    }],
+    ["500 insert bez wiersza", () => {
+      primeHappyPath();
+      h.insertResult = [];
+    }],
+  ])("%s → bez SMS", async (_n, arrange, patch = {}) => {
+    arrange();
+    const res = await post({ ...validBody, ...patch });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(h.sms).not.toHaveBeenCalled();
   });
 });
 

@@ -35,6 +35,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import * as sms from "@/lib/sms";
+import { TEST_PHONE_NUMBERS } from "@/lib/test-phone";
 
 const APP_URL = "https://aplikacja-salonu.example";
 const SALON_ID = "11111111-2222-4333-8444-555555555555";
@@ -89,6 +90,20 @@ const TEMPLATES: Record<string, (mod: typeof sms, salonName: string) => Promise<
       salonName,
       salonId: SALON_ID,
       clientId: "client-1",
+    }),
+  sendBlikDepositBookingSms: (mod, salonName) =>
+    mod.sendBlikDepositBookingSms({
+      clientPhone: PHONE,
+      clientName: "Jan Kowalski",
+      serviceName: "Strzyzenie",
+      employeeName: "Anna Nowak",
+      appointmentDate: DATE,
+      salonName,
+      salonId: SALON_ID,
+      clientId: "client-1",
+      blikPhone: TEST_PHONE_NUMBERS[3]!,
+      amount: 50,
+      title: "Zadatek MH-A1B2C3",
     }),
 };
 
@@ -152,4 +167,111 @@ describe("szablony SMS transakcyjnych: bez linku i bez wezwania do rezerwacji", 
       expect(message).not.toMatch(/zarezerwuj/i);
     }
   );
+});
+
+describe("SMS rezerwacji z zadatkiem BLIK (buildBlikDepositBookingSms)", () => {
+  /** Niezależna kopia podstawowej tabeli GSM 03.38 (bez LF, CR, ESC). */
+  const GSM7 = new Set(
+    "@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?" +
+      "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà"
+  );
+  const BLIK_PHONE = TEST_PHONE_NUMBERS[3]!;
+  const TITLE = "Zadatek MH-A1B2C3";
+
+  const params = (patch: Partial<sms.BlikDepositBookingSmsParams> = {}): sms.BlikDepositBookingSmsParams => ({
+    clientPhone: TEST_PHONE_NUMBERS[0]!,
+    clientName: "Jan Testowy",
+    serviceName: "Strzyżenie",
+    employeeName: "Łucja Nowak",
+    // 13:00 UTC = 14:00 w Warszawie (zima, UTC+1).
+    appointmentDate: new Date("2030-01-15T13:00:00.000Z"),
+    salonName: "Salon Uroda",
+    salonId: SALON_ID,
+    blikPhone: BLIK_PHONE,
+    amount: 50,
+    title: TITLE,
+    ...patch,
+  });
+
+  /** Liczba części SMS GSM-7: do 160 znaków jedna, dłuższa po 153 na część. */
+  const gsm7Parts = (text: string) => (text.length <= 160 ? 1 : Math.ceil(text.length / 153));
+
+  it("pełna treść: numer, kwota z dwoma miejscami, tytuł, data w strefie Warszawy, salon", () => {
+    const message = sms.buildBlikDepositBookingSms(params());
+    expect(message).toBe(
+      'Rezerwacja przyjeta: Jan Testowy, "Strzyzenie" u Lucja Nowak w Salon Uroda 15 stycznia o 14:00. ' +
+        `Wplac zadatek 50.00 PLN BLIK-iem na telefon ${BLIK_PHONE}, tytul: ${TITLE}. Salon potwierdzi wplate.`
+    );
+    expect(gsm7Parts(message)).toBe(2);
+  });
+
+  it("godzina w strefie Warszawy także latem (UTC+2)", () => {
+    const message = sms.buildBlikDepositBookingSms(params({ appointmentDate: new Date("2030-07-15T12:00:00.000Z") }));
+    expect(message).toContain("15 lipca o 14:00.");
+  });
+
+  it.each([
+    [49.5, "49.50 PLN"],
+    [120, "120.00 PLN"],
+    [33.333, "33.33 PLN"],
+  ])("kwota %s → %s", (amount, text) => {
+    expect(sms.buildBlikDepositBookingSms(params({ amount }))).toContain(`zadatek ${text} BLIK-iem`);
+  });
+
+  it.each([
+    ["polskie znaki", params()],
+    ["miesiąc z polskim znakiem (październik)", params({ appointmentDate: new Date("2030-10-15T12:00:00.000Z") })],
+    ["teksty z nową linią i emoji", params({ clientName: "Zoś\nka 💅", serviceName: "Manicure ✨", employeeName: "Ćma\tŻak" })],
+    ["wroga nazwa salonu", params({ salonName: "Salon 💇‍♀️ Uroda " + "x".repeat(60) })],
+  ])("wyłącznie znaki GSM-7: %s", (_n, p) => {
+    const message = sms.buildBlikDepositBookingSms(p);
+    expect([...message].filter((c) => !GSM7.has(c))).toEqual([]);
+    expect(message).toContain(BLIK_PHONE);
+    expect(message).toContain(TITLE);
+  });
+
+  it.each([
+    ["null", null],
+    ["pusty napis", ""],
+    ["adres", "Uroda.com"],
+    ["adres w nazwie", "Salon www.uroda-ania.pl"],
+  ])("nazwa salonu: %s → treść bez fragmentu salonu", (_n, salonName) => {
+    const message = sms.buildBlikDepositBookingSms(params({ salonName }));
+    expect(message).toContain('"Strzyzenie" u Lucja Nowak 15 stycznia o 14:00.');
+    expect(message).not.toMatch(/ w /);
+    expect(message).not.toMatch(/uroda/i);
+  });
+
+  it("nazwa usługi wyglądająca na adres → „wizyta”; numer, kwota i tytuł zostają", () => {
+    const message = sms.buildBlikDepositBookingSms(params({ serviceName: "www.promo.pl" }));
+    expect(message).toContain('"wizyta"');
+    expect(message).toContain(`50.00 PLN BLIK-iem na telefon ${BLIK_PHONE}, tytul: ${TITLE}.`);
+  });
+
+  it("puste imię klienta → bez powitania", () => {
+    expect(sms.buildBlikDepositBookingSms(params({ clientName: "" }))).toMatch(/^Rezerwacja przyjeta: "Strzyzenie"/);
+  });
+
+  it("sendBlikDepositBookingSms wysyła treść z buildera przez sendSms (zapis w notifications, z clientId)", async () => {
+    const p = params({ clientPhone: PHONE, clientId: "client-1" });
+    const result = await sms.sendBlikDepositBookingSms(p);
+    expect(result.success).toBe(true);
+    expect(sentMessage()).toBe(sms.buildBlikDepositBookingSms(p));
+    expect(mockDbValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        salonId: SALON_ID,
+        clientId: "client-1",
+        type: "sms",
+        message: sms.buildBlikDepositBookingSms(p),
+        status: "sent",
+      })
+    );
+  });
+
+  it("numer testowy klienta → bez wysyłki i bez zapisu", async () => {
+    const result = await sms.sendBlikDepositBookingSms(params());
+    expect(result).toMatchObject({ success: false, skipped: "test_phone" });
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockDbValues).not.toHaveBeenCalled();
+  });
 });

@@ -93,7 +93,10 @@ vi.mock("@/lib/rate-limit", () => {
   const limiter = { check: () => ok, checkAsync: async () => ok };
   return { strictRateLimit: limiter, apiRateLimit: limiter, getClientIp: () => "127.0.0.1" };
 });
-vi.mock("@/lib/sms", () => ({ sendBookingConfirmationSms: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@/lib/sms", () => ({
+  sendBookingConfirmationSms: vi.fn().mockResolvedValue(undefined),
+  sendBlikDepositBookingSms: vi.fn().mockResolvedValue(undefined),
+}));
 // Katalog salonu (GET /api/salons/[id]) używa unstable_cache, który poza
 // serwerem Next rzuca „incrementalCache missing”. Tu bez cache: każde wywołanie
 // czyta prawdziwą bazę (cache ma osobny test jednostkowy).

@@ -510,3 +510,73 @@ export async function sendPaymentConfirmationSms(params: {
     clientId: params.clientId,
   });
 }
+
+/**
+ * Parametry SMS o rezerwacji z zadatkiem płatnym BLIK-iem na telefon salonu.
+ * `blikPhone` i `title` to dokładnie te wartości, które klient dostał
+ * w odpowiedzi rezerwacji — wołający nie czyta ich ponownie z bazy, żeby SMS
+ * i ekran nie mogły się rozjechać (np. gdy właściciel zmieni numer w trakcie).
+ */
+export interface BlikDepositBookingSmsParams {
+  clientPhone: string;
+  clientName: string;
+  serviceName: string;
+  employeeName: string;
+  appointmentDate: Date;
+  salonName: string | null;
+  salonId: string;
+  clientId?: string | undefined;
+  blikPhone: string;
+  amount: number;
+  title: string;
+}
+
+/**
+ * Treść SMS o rezerwacji z zadatkiem BLIK (czysta funkcja, bez wysyłki).
+ * Teksty z bazy (imię, usługa, pracownik, data) przechodzą przez `toGsm7Basic`,
+ * nazwa salonu przez `salonNameForSms`, usługa przez regułę tekstu właściciela
+ * (adres pomijany). Numer BLIK, kwota i tytuł nie są skracane — bez nich
+ * klient nie zapłaci; numer i tytuł idą bez zmian, bo muszą być identyczne
+ * z tym, co pokazał ekran rezerwacji. Data i godzina w strefie SMS_TIME_ZONE.
+ */
+export function buildBlikDepositBookingSms(params: BlikDepositBookingSmsParams): string {
+  const formattedDate = toGsm7Basic(
+    params.appointmentDate.toLocaleDateString("pl-PL", {
+      timeZone: SMS_TIME_ZONE,
+      day: "numeric",
+      month: "long",
+    })
+  );
+  const formattedTime = params.appointmentDate.toLocaleTimeString("pl-PL", {
+    timeZone: SMS_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const salon = salonPart(salonNameForSms(params.salonName));
+  const clientName = toGsm7Basic(params.clientName);
+  const greeting = clientName ? `${clientName}, ` : "";
+  const service = ownerTextForSms(params.serviceName, SMS_SERVICE_NAME_MAX) || "wizyta";
+  const employee = toGsm7Basic(params.employeeName);
+  const employeePart = employee ? ` u ${employee}` : "";
+
+  return (
+    `Rezerwacja przyjeta: ${greeting}"${service}"${employeePart}${salon} ${formattedDate} o ${formattedTime}. ` +
+    `Wplac zadatek ${params.amount.toFixed(2)} PLN BLIK-iem na telefon ${params.blikPhone}, ` +
+    `tytul: ${params.title}. Salon potwierdzi wplate.`
+  );
+}
+
+/**
+ * Send the BLIK deposit booking SMS right after the booking is created:
+ * the appointment is reserved, the deposit is paid by BLIK to the salon's
+ * phone and confirmed manually by the salon.
+ */
+export async function sendBlikDepositBookingSms(params: BlikDepositBookingSmsParams): Promise<SmsResult> {
+  return sendSms({
+    to: params.clientPhone,
+    message: buildBlikDepositBookingSms(params),
+    salonId: params.salonId,
+    clientId: params.clientId,
+  });
+}
