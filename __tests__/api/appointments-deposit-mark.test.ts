@@ -319,10 +319,10 @@ describe("401 / 403 / 404", () => {
 describe("409 DEPOSIT_ONLINE_PAYMENT", () => {
   it.each(["pending", "succeeded", "failed", "expired", "refunded"])(
     "wizyta z wierszem deposit_payments (%s) → 409, bez UPDATE",
-    async () => {
+    async (status) => {
       m.asOwnerOf(SALON_A);
       // Status płatności nie ma znaczenia — trasa pyta o istnienie wiersza.
-      m.txRows.push([appt()], [{ id: "pay-1" }]);
+      m.txRows.push([appt()], [{ id: "pay-1", status }]);
 
       const res = await call(POST);
 
