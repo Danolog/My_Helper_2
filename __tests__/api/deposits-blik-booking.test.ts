@@ -239,7 +239,7 @@ beforeEach(() => {
   h.sms.mockResolvedValue({ success: true, notificationId: "notif-1" });
 });
 
-const PRIVATE_DIGITS = ["000600703", "000600700", "000 600 700"];
+const PRIVATE_DIGITS = ["000600703", "000600700", "000 600 700", "000600701", "000600705"];
 
 /**
  * Argumenty logów jako tekst. Sam `JSON.stringify(new Error(...))` daje `{}`,
