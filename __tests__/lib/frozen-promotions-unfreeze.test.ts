@@ -1,5 +1,5 @@
 /**
- * Jeden nośnik reguły promocji złożonych (przegląd B2, B2.1).
+ * Jeden nośnik reguły promocji złożonych.
  *
  * Zamrożenie typów promocji (`isPromotionTypeFrozen`) wynika z flagi
  * `hardOff` modułu `complexPromotions` w `src/lib/features.ts`. Test
