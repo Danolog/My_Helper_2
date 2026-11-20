@@ -40,6 +40,7 @@ const {
   accessQueue,
   accessWheres,
   mockForSalon,
+  mockRaw,
   mockUpdate,
   mockInsert,
   mockTransaction,
@@ -51,7 +52,8 @@ const {
   mockSubscriptionsRetrieve,
   mockRateLimitCheck,
 } = vi.hoisted(() => ({
-  // Kolejne `db.select()` / `tx.select()` zdejmują wyniki z kolejki (FIFO).
+  // Kolejne odczyty planu i wierszy bieżących (`tx.select()` w `forSalon(...).raw`)
+  // zdejmują wyniki z kolejki (FIFO).
   selectQueue: [] as unknown[][],
   // Argumenty `.where(...)` kolejnych SELECT-ów (filtr renderowany przez PgDialect).
   selectWheres: [] as unknown[],
@@ -60,6 +62,7 @@ const {
   accessQueue: [] as (unknown[] | Error)[],
   accessWheres: [] as unknown[],
   mockForSalon: vi.fn(),
+  mockRaw: vi.fn(),
   mockUpdate: vi.fn(),
   mockInsert: vi.fn(),
   mockTransaction: vi.fn(),
@@ -111,7 +114,10 @@ vi.mock("@/lib/db", () => {
   };
   return {
     db: {
-      select: () => selectChain(),
+      // Trasa czyta wyłącznie przez `forSalon(...).raw`; surowy odczyt = błąd (→ 500 i czerwony test).
+      select: () => {
+        throw new Error("unexpected raw db.select in checkout");
+      },
       update: writeChain(mockUpdate),
       insert: writeChain(mockInsert),
       transaction: (fn: (t: typeof tx) => unknown) => {
@@ -122,31 +128,45 @@ vi.mock("@/lib/db", () => {
   };
 });
 
+// Wszystkie odczyty trasy idą przez `forSalon(salonId).raw`. Zapytanie z
+// `innerJoin` (wszystkie wiersze salonu z planem) bierze wynik z `accessQueue`,
+// pozostałe (plan, wiersze bieżące) z `selectQueue` — w kolejności wywołań.
 vi.mock("@/lib/server/repository", () => {
-  const accessChain = () => {
+  const txChain = () => {
     const builder: Record<string, unknown> = {};
-    for (const method of ["from", "innerJoin", "orderBy", "limit"]) {
+    let joined = false;
+    for (const method of ["from", "orderBy", "limit"]) {
       builder[method] = () => builder;
     }
+    builder.innerJoin = () => {
+      joined = true;
+      return builder;
+    };
     builder.where = (cond: unknown) => {
-      accessWheres.push(cond);
+      (joined ? accessWheres : selectWheres).push(cond);
       return builder;
     };
     builder.then = (
       resolve: (value: unknown[]) => unknown,
       reject: (reason: unknown) => unknown,
     ) => {
-      const next = accessQueue.shift() ?? [];
+      const next = (joined ? accessQueue.shift() : selectQueue.shift()) ?? [];
       if (next instanceof Error) return Promise.reject(next).then(resolve, reject);
       return Promise.resolve(next).then(resolve, reject);
     };
     return builder;
   };
-  const tx = { select: () => accessChain() };
+  const tx = { select: () => txChain() };
   return {
     forSalon: (salonId: string) => {
       mockForSalon(salonId);
-      return { raw: (fn: (t: typeof tx) => unknown) => fn(tx), salonId };
+      return {
+        raw: (fn: (t: typeof tx) => unknown) => {
+          mockRaw(salonId);
+          return fn(tx);
+        },
+        salonId,
+      };
     },
   };
 });
@@ -251,6 +271,7 @@ describe("POST /api/subscriptions/checkout", () => {
     accessQueue.length = 0;
     accessWheres.length = 0;
     mockForSalon.mockReset();
+    mockRaw.mockReset();
     mockUpdate.mockReset();
     mockInsert.mockReset();
     mockTransaction.mockReset();
@@ -316,6 +337,8 @@ describe("POST /api/subscriptions/checkout", () => {
       expect(body.code).toBe("PLAN_CHANGE_UNSUPPORTED");
       expect(mockSessionsCreate).not.toHaveBeenCalled();
       expectNoWrites();
+      expect(selectQueue).toHaveLength(0);
+      expect(mockRaw.mock.calls).toEqual([["salon-1"], ["salon-1"]]);
     });
 
     it("ten sam plan: 409, zero zapisów", async () => {
@@ -325,6 +348,9 @@ describe("POST /api/subscriptions/checkout", () => {
 
       expect(res.status).toBe(409);
       expectNoWrites();
+      // Odmowa po faktycznych odczytach planu i wierszy bieżących przez forSalon salonu z sesji.
+      expect(selectQueue).toHaveLength(0);
+      expect(mockRaw.mock.calls).toEqual([["salon-1"], ["salon-1"]]);
     });
   });
 
@@ -686,6 +712,10 @@ describe("POST /api/subscriptions/checkout", () => {
 
       expect(res.status).toBe(404);
       expectNoWrites();
+      // Odmowa po faktycznym odczycie planu (aktywny, slug z body) przez forSalon salonu z sesji.
+      expect(mockRaw.mock.calls).toEqual([["salon-1"]]);
+      const { params } = new PgDialect().sqlToQuery(selectWheres[0] as SQL);
+      expect(params).toEqual(["pro", true]);
     });
 
     it("429 z Retry-After przy przekroczonym limicie", async () => {
@@ -732,6 +762,38 @@ describe("POST /api/subscriptions/checkout", () => {
       expect(res.status).toBe(200);
       const params = mockSessionsCreate.mock.calls[0]![0];
       expect(params.metadata.salonId).toBe("salon-1");
+      expectNoWrites();
+      // Każdy odczyt przez forSalon salonu z sesji, nigdy z body.
+      expect(mockForSalon.mock.calls).toEqual([["salon-1"]]);
+      expect(mockRaw.mock.calls).toEqual([["salon-1"], ["salon-1"], ["salon-1"]]);
+    });
+
+    it("salon z sesji inny niż w body: forSalon, filtry wierszy i metadata z salonu z sesji", async () => {
+      mockGetUserSalonId.mockResolvedValue("salon-session");
+      mockGetStripe.mockReturnValue(stripeClient());
+      selectQueue.push([PLAN_PRO], []);
+
+      const res = await POST(rawCheckoutRequest({ planSlug: "pro", salonId: "salon-body" }));
+
+      expect(res.status).toBe(200);
+      expect(mockForSalon.mock.calls).toEqual([["salon-session"]]);
+      expect(mockRaw.mock.calls).toEqual([["salon-session"], ["salon-session"], ["salon-session"]]);
+      expect(new PgDialect().sqlToQuery(selectWheres[1] as SQL).params).toEqual(
+        expect.arrayContaining(["salon-session"]),
+      );
+      expect(new PgDialect().sqlToQuery(accessWheres[0] as SQL).params).toEqual(["salon-session"]);
+      expect(JSON.stringify([selectWheres, accessWheres].map((w) => w.map((c) => new PgDialect().sqlToQuery(c as SQL).params)))).not.toContain("salon-body");
+      expect(mockSessionsCreate.mock.calls[0]![0].metadata.salonId).toBe("salon-session");
+    });
+
+    it("błąd odczytu planu (forSalon raw odrzuca): 500, bez Stripe i zapisów", async () => {
+      mockGetStripe.mockReturnValue(stripeClient());
+      selectQueue.push(new Error("permission denied for table subscription_plans") as unknown as unknown[]);
+
+      const res = await POST(checkoutRequest("pro"));
+
+      expect(res.status).toBe(500);
+      expect(mockSessionsCreate).not.toHaveBeenCalled();
       expectNoWrites();
     });
 

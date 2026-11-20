@@ -74,8 +74,6 @@ const BASELINE: Record<string, readonly string[]> = {
   P1_FILES: [
     "src/app/api/deposits/create-session/route.ts",
     "src/app/api/stripe/webhook/route.ts",
-    "src/app/api/subscriptions/cancel/route.ts",
-    "src/app/api/subscriptions/checkout/route.ts",
     "src/lib/deposit-calculation.ts",
     "src/lib/deposit-confirmation.ts",
     "src/lib/refund.ts",

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions } from "@/lib/schema";
+// Salon wyłącznie z sesji: odczyty i transakcja blokad przez forSalon (rola aplikacji, RLS salonu) z jawnym eq(salonId)
+import { forSalon } from "@/lib/server/repository";
 import { getStripe } from "@/lib/stripe";
 import { paidInvoicePeriod, stripeSubscriptionPeriod, type BillingPeriod } from "@/lib/stripe-period";
 import {
@@ -17,6 +17,7 @@ import {
 } from "@/lib/subscription-locks";
 import { paidPeriodEndSql, paidPeriodStartSql } from "@/lib/subscription-paid-period";
 import { hasRealStripeSubscription } from "@/lib/subscription-predicates";
+import { isStripeSubscriptionEnded } from "@/lib/subscription-sync";
 
 type SubscriptionRow = typeof salonSubscriptions.$inferSelect;
 
@@ -25,9 +26,6 @@ type CancelOutcome =
   | { changed: true }
   | { stripeFailed: true }
   | { stripeNotConfirmed: string };
-
-/** Stany Stripe, które same w sobie potwierdzają koniec subskrypcji. */
-const STRIPE_ENDED_STATUSES = new Set(["canceled", "incomplete_expired"]);
 
 function json(status: number, code: string, error: string) {
   return NextResponse.json({ success: false, code, error }, { status });
@@ -56,7 +54,9 @@ function json(status: number, code: string, error: string) {
  * Anulowanie nie zapisuje płatności.
  *
  * Blokady jak w webhooku (`subscription-locks.ts`): lock_timeout →
- * stripe_sub → (wywołanie Stripe) → salon. Webhook tej subskrypcji czeka
+ * stripe_sub → (wywołanie Stripe) → salon. Transakcja to
+ * `forSalon(salonId).raw`: kontekst salonu (`SET LOCAL ROLE`, `set_config`)
+ * jest ustawiony przed `lock_timeout`. Webhook tej subskrypcji czeka
  * na nas i czyta ze Stripe stan PO anulowaniu. Bez prawdziwej subskrypcji
  * Stripe (null, dawne `sim_*`) — tylko blokada salonu i zapis lokalny.
  *
@@ -78,15 +78,18 @@ export async function POST() {
 
     // Odczyt poza blokadą tylko po to, żeby znać klucz blokady stripe_sub;
     // stan jest sprawdzany ponownie pod blokadą.
-    const [activeSub] = await db
-      .select()
-      .from(salonSubscriptions)
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          eq(salonSubscriptions.status, "active"),
+    const salon = forSalon(salonId);
+    const [activeSub] = await salon.raw((tx) =>
+      tx
+        .select()
+        .from(salonSubscriptions)
+        .where(
+          and(
+            eq(salonSubscriptions.salonId, salonId),
+            eq(salonSubscriptions.status, "active"),
+          ),
         ),
-      );
+    );
 
     if (!activeSub) {
       return NextResponse.json(
@@ -114,7 +117,7 @@ export async function POST() {
     const now = new Date();
     let outcome: CancelOutcome;
     try {
-      outcome = await db.transaction(async (tx): Promise<CancelOutcome> => {
+      outcome = await salon.raw(async (tx): Promise<CancelOutcome> => {
         await setSubscriptionLockTimeout(tx);
 
         let paid: BillingPeriod | null = null;
@@ -123,7 +126,7 @@ export async function POST() {
           const [row] = await tx
             .select()
             .from(salonSubscriptions)
-            .where(eq(salonSubscriptions.id, activeSub.id));
+            .where(and(eq(salonSubscriptions.id, activeSub.id), eq(salonSubscriptions.salonId, salonId)));
           if (row?.status !== "active" || row.stripeSubscriptionId !== stripeSubscriptionId) {
             return { changed: true };
           }
@@ -146,7 +149,7 @@ export async function POST() {
             return { stripeFailed: true };
           }
 
-          if (stripeSub.cancel_at_period_end !== true && !STRIPE_ENDED_STATUSES.has(stripeSub.status)) {
+          if (stripeSub.cancel_at_period_end !== true && !isStripeSubscriptionEnded(stripeSub.status)) {
             logger.error("Stripe did not confirm cancellation — local subscription unchanged, manual handling", {
               subscriptionId: activeSub.id,
               stripeSubscriptionId,
@@ -195,7 +198,7 @@ export async function POST() {
           const [row] = await tx
             .select()
             .from(salonSubscriptions)
-            .where(eq(salonSubscriptions.id, activeSub.id));
+            .where(and(eq(salonSubscriptions.id, activeSub.id), eq(salonSubscriptions.salonId, salonId)));
           if (row?.status !== "active") return { changed: true };
         }
 
@@ -206,7 +209,7 @@ export async function POST() {
             canceledAt: now,
             ...(paid ? { currentPeriodStart: paidPeriodStartSql(paid), currentPeriodEnd: paidPeriodEndSql(paid) } : {}),
           })
-          .where(eq(salonSubscriptions.id, activeSub.id))
+          .where(and(eq(salonSubscriptions.id, activeSub.id), eq(salonSubscriptions.salonId, salonId)))
           .returning();
         if (!updated) throw new Error("Subscription cancel: update returned no row");
         return { updated };

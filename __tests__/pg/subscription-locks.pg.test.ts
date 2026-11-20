@@ -20,6 +20,8 @@
  * (T3b) Prawdziwa trasa `subscriptions/cancel` (502 przy błędzie Stripe,
  *     `canceled` tylko po potwierdzeniu, cancel ‖ updated), bliźniak (c3'')
  *     bez potwierdzenia, indeksy unikalne 0008 i równoległa rejestracja.
+ *     Trasy cancel i checkout pod rolą aplikacji (forSalon): cancel salonu A
+ *     zmienia tylko wiersz A; checkout czyta plan pod rolą aplikacji.
  * (d) Baza z `INTEGRATION_POSTGRES_URL` + ochrona hosta z seeda (#56)
  *     (`pg-harness.ts`); przy `CI=true` bez adresu — błąd, nie skip. Własne
  *     wiersze (user, salon, plan) z unikalnymi id, sprzątane w `afterAll` albo w `finally` przypadku, który je wstawia.
@@ -29,12 +31,14 @@
  */
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { POST as registerSubscription } from "@/app/api/register-subscription/route";
 import { POST as stripeWebhook } from "@/app/api/stripe/webhook/route";
 import { POST as cancelSubscription } from "@/app/api/subscriptions/cancel/route";
+import { POST as checkoutSubscription } from "@/app/api/subscriptions/checkout/route";
 import { DELETE as cancelDowngrade, POST as downgrade } from "@/app/api/subscriptions/downgrade/route";
 import { logger } from "@/lib/logger";
+import { strictRateLimit } from "@/lib/rate-limit";
 import { salonSubscriptions, salons, subscriptionPayments, subscriptionPlans, user } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { getCurrentPlan, getSalonAccess } from "@/lib/subscription";
@@ -159,6 +163,11 @@ const fakeStripe = {
     }),
   },
   webhooks: { constructEvent: vi.fn() },
+  checkout: {
+    sessions: {
+      create: vi.fn(async () => ({ id: "cs_it_checkout", url: "https://checkout.example.invalid/cs_it_checkout" })),
+    },
+  },
 };
 
 // ---------------------------------------------------------------- dane testu
@@ -944,6 +953,139 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
       },
       15_000
     );
+  });
+
+  describe("cancel i checkout salonu z sesji w transakcjach forSalon (rola aplikacji)", () => {
+    const otherUserId = `it-t3-cc-${RUN}`; // prefiks it-t3- = sprzątanie z pg-harness.ts
+    let otherSalonId = "";
+
+    const cancel = async () => {
+      const res = await cancelSubscription();
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+    const checkout = async () => {
+      const res = await checkoutSubscription(
+        new Request("http://localhost/api/subscriptions/checkout", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ planSlug: testPlanSlug }),
+        })
+      );
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+    const otherRows = () =>
+      h!.db.select().from(salonSubscriptions).where(eq(salonSubscriptions.salonId, otherSalonId));
+
+    beforeAll(async () => {
+      await h!.db.insert(user).values({ id: otherUserId, name: "IT CC", email: `${otherUserId}@example.invalid` });
+      const [other] = await h!.db.insert(salons).values({ name: `IT CC ${RUN}`, ownerId: otherUserId }).returning();
+      otherSalonId = other!.id;
+    });
+
+    afterAll(async () => {
+      // Kaskada z salonu usuwa jego subskrypcje.
+      if (otherSalonId) await h!.db.delete(salons).where(eq(salons.id, otherSalonId));
+      await h!.db.delete(user).where(eq(user.id, otherUserId));
+    });
+
+    beforeEach(async () => {
+      await h!.db.delete(salonSubscriptions).where(eq(salonSubscriptions.salonId, otherSalonId));
+      strictRateLimit.reset();
+      fakeStripe.checkout.sessions.create.mockClear();
+      // Bez hostingu: cena tworzona w żądaniu z planu testu (slug spoza basic/pro).
+      vi.stubEnv("VERCEL", "");
+      vi.stubEnv("K_SERVICE", "");
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("cancel salonu A (prawdziwa subskrypcja Stripe) → 200, canceled tylko wiersz A; wiersz salonu B bez zmian", async () => {
+      const subA = `sub_it_${randomUUID().slice(0, 8)}`;
+      const subB = `sub_it_${randomUUID().slice(0, 8)}`;
+      setStripe(subA, "active");
+      setStripe(subB, "active");
+      await h!.db.insert(salonSubscriptions).values({ salonId, planId, status: "active", stripeSubscriptionId: subA });
+      await h!.db
+        .insert(salonSubscriptions)
+        .values({ salonId: otherSalonId, planId, status: "active", stripeSubscriptionId: subB });
+      const beforeB = await otherRows();
+
+      const { status, body } = await cancel();
+
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      expect((await rows()).map((r) => [r.stripeSubscriptionId, r.status])).toEqual([[subA, "canceled"]]);
+      expect(await otherRows()).toEqual(beforeB);
+      expect(stripeState.get(subA)?.cancel_at_period_end).toBe(true);
+      expect(stripeState.get(subB)?.cancel_at_period_end).toBeUndefined();
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it("cancel salonu A bez prawdziwej subskrypcji Stripe → 200, tylko wiersz A; B bez zmian", async () => {
+      await h!.db.insert(salonSubscriptions).values({ salonId, planId, status: "active" });
+      await h!.db.insert(salonSubscriptions).values({ salonId: otherSalonId, planId, status: "active" });
+      const beforeB = await otherRows();
+
+      const { status } = await cancel();
+
+      expect(status).toBe(200);
+      expect((await rows()).map((r) => r.status)).toEqual(["canceled"]);
+      expect(await otherRows()).toEqual(beforeB);
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it("cancel ‖ blokada salonu trzymana dłużej niż lock_timeout → 503 LOCK_BUSY, zero zapisów", async () => {
+      await h!.db.insert(salonSubscriptions).values({ salonId, planId, status: "active" });
+      const before = await rows();
+      let release!: () => void;
+      let held!: () => void;
+      const releaseP = new Promise<void>((r) => (release = r));
+      const heldP = new Promise<void>((r) => (held = r));
+      const barrier = withSalonSubscriptionLock(salonId, async () => {
+        held();
+        await releaseP;
+      });
+      await heldP;
+
+      try {
+        const { status, body } = await cancel();
+        expect(status).toBe(503);
+        expect(body.code).toBe("LOCK_BUSY");
+      } finally {
+        release();
+        await barrier;
+      }
+      expect(await rows()).toEqual(before);
+    }, 15_000);
+
+    it("checkout salonu A: plan czytany pod rolą aplikacji → 200 z sesją Checkout; aktywny wiersz tego planu w salonie B nie blokuje A", async () => {
+      await h!.db.insert(salonSubscriptions).values({ salonId: otherSalonId, planId, status: "active" });
+
+      const { status, body } = await checkout();
+
+      expect(status).toBe(200);
+      expect(body.url).toBe("https://checkout.example.invalid/cs_it_checkout");
+      expect(fakeStripe.checkout.sessions.create).toHaveBeenCalledTimes(1);
+      const [params] = fakeStripe.checkout.sessions.create.mock.calls[0] as unknown as [
+        { metadata: Record<string, string>; line_items: Array<{ price_data?: { unit_amount: number } }> },
+      ];
+      expect(params.metadata).toEqual(expect.objectContaining({ salonId, planId, planSlug: testPlanSlug }));
+      expect(params.line_items[0]?.price_data?.unit_amount).toBeGreaterThan(0);
+      expect(await rows()).toEqual([]);
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it("checkout salonu A z aktywnym wierszem tego planu → 409, bez sesji Checkout (wiersze A widoczne pod RLS)", async () => {
+      await h!.db.insert(salonSubscriptions).values({ salonId, planId, status: "active" });
+
+      const { status } = await checkout();
+
+      expect(status).toBe(409);
+      expect(fakeStripe.checkout.sessions.create).not.toHaveBeenCalled();
+      expect(logger.error).not.toHaveBeenCalled();
+    });
   });
 
   it("sprzątanie: test nie zostawia blokad (żadnej czekającej ani trzymanej w przestrzeniach subskrypcji)", async () => {
