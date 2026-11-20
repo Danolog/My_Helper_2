@@ -19,7 +19,7 @@ const EMPLOYEE_NOT_FOUND_BODY = { success: false, error: "Employee not found" } 
 // Returns available time slots for booking
 export async function GET(request: Request) {
   try {
-    // Publiczny endpoint (3 zapytania DB/wywolanie, enumerowalne employeeId)
+    // Publiczny endpoint (do 4 zapytań DB w jednej transakcji na wywołanie, employeeId z query)
     // — limit per IP; checkAsync uzywa Upstash gdy skonfigurowany, inaczej in-memory
     const ip = getClientIp(request);
     const rateLimitResult = await apiRateLimit.checkAsync(ip);
