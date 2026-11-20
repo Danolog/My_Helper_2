@@ -33,11 +33,16 @@ import { forSalon, type DbTx } from "@/lib/server/repository";
  * Promo eligibility mirrors /api/promotions/check-happy-hours.
  *
  * Data access: every read runs in ONE forSalon(salonId) transaction per call
- * (application role, RLS salon context). Callers validate salonId as a UUID
- * first — the RLS policy casts the context to ::uuid. Each read keeps an
- * explicit column list and an explicit eq(salonId) where the table has one;
- * service_variants has no salon_id, so RLS checks it through its parent
- * service. Database errors propagate (no silent 0) — callers answer 503.
+ * (application role, RLS salon context). salonId must be a UUID — the RLS
+ * policy casts the context to ::uuid. Callers pass a schema-validated UUID
+ * (create-session), a value read from the database (session salon,
+ * waiting-list token) or, in /api/appointments POST, a value assertSalonRefs
+ * has already sent through forSalon (a malformed one fails there first).
+ * Each read keeps an explicit column list and an explicit eq(salonId) where
+ * the table has one; service_variants has no salon_id, so RLS checks it
+ * through its parent service. Database errors propagate (no silent 0) —
+ * callers refuse the booking (503 on the booking routes; a refusal message
+ * when accepting a waiting-list offer).
  */
 
 export type ExpectedDeposit =

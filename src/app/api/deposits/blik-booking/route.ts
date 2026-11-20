@@ -39,8 +39,8 @@ import { getOptionalSession } from "@/lib/session";
  *
  * Izolacja salonów: `salonId` z body to cel rezerwacji. Przynależność
  * pracownika, usługi, wariantu i klienta do tego salonu sprawdza
- * `assertSalonRefs` (przez `forSalon`). Wyliczenie kwoty (`calculateExpectedDeposit`) czyta
- * surową pulą; zapytania samej trasy idą przez `forSalon(salonId)` (kontekst RLS)
+ * `assertSalonRefs` (przez `forSalon`). Wyliczenie kwoty (`calculateExpectedDeposit`)
+ * i zapytania samej trasy idą przez `forSalon(salonId)` (kontekst RLS)
  * z jawnym `eq(salonId)` i jawną listą kolumn.
  */
 
