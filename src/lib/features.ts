@@ -208,9 +208,9 @@ export function isModuleFrozen(key: ModuleKey): boolean {
 
 /**
  * Czy zadatek w portalu rezerwacji jest płatny BLIK-iem na telefon salonu
- * zamiast płatności online. Jedyne miejsce przełączenia: po zamrożeniu
- * płatności online ciało zwraca stan zamrożenia tego modułu. Hook rezerwacji
- * i podsumowanie rezerwacji czytają wyłącznie tę funkcję.
+ * zamiast płatności online. Jedyne miejsce przełączenia ścieżki zadatku;
+ * na razie zwraca false (płatność online). Hook rezerwacji portalu czyta
+ * wyłącznie tę funkcję.
  */
 export function isBlikDepositFlow(): boolean {
   return false;
