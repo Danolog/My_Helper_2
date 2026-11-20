@@ -153,7 +153,7 @@ describe("GET /api/salons/[id]/gallery — publiczna galeria", () => {
     expect(state.transactions).toBe(1);
   });
 
-  it("jawne listy kolumn i eq(salonId) w każdym zapytaniu, także po stronie złączeń", async () => {
+  it("jawne listy kolumn i eq(salonId) w każdym zapytaniu; w listach filtrów także po stronie pracowników i usług", async () => {
     await get(SALON_A);
     expect(selectCalls).toHaveLength(3);
     expect(selectCalls.filter((c) => c.cols === null)).toEqual([]);

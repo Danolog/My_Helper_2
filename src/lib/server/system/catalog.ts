@@ -39,7 +39,7 @@ export interface PublicSalonCatalogEntry {
 
 /**
  * Zwraca publiczną listę salonów z liczbą aktywnych usług i statystyką
- * zatwierdzonych opinii. Salony z co najmniej jedną usługą są na początku
+ * zatwierdzonych opinii. Salony z co najmniej jedną aktywną usługą są na początku
  * (sortowanie stabilne, w obrębie grupy kolejność z bazy).
  */
 export async function listPublicSalonCatalog(): Promise<PublicSalonCatalogEntry[]> {

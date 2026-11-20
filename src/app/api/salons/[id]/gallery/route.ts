@@ -4,9 +4,10 @@ import { isValidUuid } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import { galleryPhotos, employees, services } from "@/lib/schema";
 // Publiczna galeria salonu (bez sesji): wszystkie odczyty w jednej transakcji
-// forSalon(id z URL). RLS przy salonId z URL niczego nie chroni (kontekst
-// ustawia wołający) — ochroną są jawne listy kolumn i jawne eq(salonId), także
-// po stronie złączeń z pracownikami i usługami.
+// forSalon(id z URL). Kontekst RLS ustawia wołający, więc RLS nie ogranicza,
+// który salon da się odczytać — zawęża tylko wiersze do salonu z URL. Zakres
+// trzymają jawne listy kolumn i jawne eq(salonId), także po stronie złączeń
+// z pracownikami i usługami.
 import { forSalon } from "@/lib/server/repository";
 
 /** Treść 400 dla parametru o złym formacie (nazwa parametru w komunikacie). */
