@@ -1,5 +1,6 @@
 /**
- * Atomowy zapis ustawień salonu: PUT /api/salons/[id]/{modules,loyalty-settings,birthday-settings}.
+ * Atomowy zapis ustawień salonu: PUT /api/salons/[id]/{modules,loyalty-settings,
+ * birthday-settings,notification-type-settings,we-miss-you-settings}.
  *
  * Każda z tras zapisuje TYLKO swój klucz `salons.settingsJson` jednym
  * `UPDATE ... SET settings_json = jsonb_set(...)`. Zapis całego obiektu
@@ -12,13 +13,15 @@
  *
  * Numer telefonu: fikcyjny, nie wychodzi do sieci.
  */
+import { is, SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PUT as putBirthday } from "@/app/api/salons/[id]/birthday-settings/route";
 import { PUT as putLoyalty } from "@/app/api/salons/[id]/loyalty-settings/route";
 import { PUT as putModules } from "@/app/api/salons/[id]/modules/route";
+import { PUT as putNotificationTypes } from "@/app/api/salons/[id]/notification-type-settings/route";
+import { PUT as putWeMissYou } from "@/app/api/salons/[id]/we-miss-you-settings/route";
 import { SALON_A } from "./salon-staff-harness";
-import type { SQL } from "drizzle-orm";
 
 const h = await vi.hoisted(async () => {
   const m = (await import("./salon-staff-harness")).createSalonStaffMocks();
@@ -61,12 +64,14 @@ const dialect = new PgDialect();
 const OWNER_ID = "owner-a";
 const BLIK_PHONE = "+48600100200";
 
-/** settingsJson w bazie: numer BLIK i ustawienia wszystkich trzech tras. */
+/** settingsJson w bazie: numer BLIK i ustawienia wszystkich tras. */
 const STORED_SETTINGS = {
   deposits: { blikPhone: BLIK_PHONE, blikConsentAt: "2026-11-19T08:00:00.000Z" },
   modules: { products: true },
   loyalty: { enabled: true, pointsPerCurrencyUnit: 5 },
   birthdayGift: { enabled: true, discountPercentage: 20 },
+  notificationTypes: { smsReminders: false, pushReminders: false },
+  weMissYou: { enabled: true, inactiveDays: 90 },
 };
 
 type Put = (req: Request, ctx: { params: Promise<{ id: string }> }) => Promise<Response>;
@@ -92,9 +97,35 @@ const BIRTHDAY_ROUTE: Route = {
   body: { enabled: true, discountPercentage: 15 },
 };
 
-const ROUTES: Route[] = [MODULES_ROUTE, LOYALTY_ROUTE, BIRTHDAY_ROUTE];
+const NOTIFICATION_TYPES_ROUTE: Route = {
+  name: "notification-type-settings",
+  key: "notificationTypes",
+  put: putNotificationTypes,
+  body: { smsReminders: false, birthdayNotifications: false },
+};
+const WE_MISS_YOU_ROUTE: Route = {
+  name: "we-miss-you-settings",
+  key: "weMissYou",
+  put: putWeMissYou,
+  body: { enabled: true, inactiveDays: 45, customMessage: "  Wróć do nas, {imie}!  " },
+};
 
-const OTHER_KEYS = ["deposits", "modules", "loyalty", "birthdayGift"];
+const ROUTES: Route[] = [
+  MODULES_ROUTE,
+  LOYALTY_ROUTE,
+  BIRTHDAY_ROUTE,
+  NOTIFICATION_TYPES_ROUTE,
+  WE_MISS_YOU_ROUTE,
+];
+
+const OTHER_KEYS = [
+  "deposits",
+  "modules",
+  "loyalty",
+  "birthdayGift",
+  "notificationTypes",
+  "weMissYou",
+];
 
 function callPut(route: Route) {
   return route.put(
@@ -117,6 +148,9 @@ function onlySettingsWrite() {
   expect(h.setArgs).toHaveLength(1);
   const arg = h.setArgs[0]!;
   expect(Object.keys(arg)).toEqual(["settingsJson"]);
+  // Zapis całego obiektu ustawień daje tu zwykły obiekt zamiast wyrażenia SQL —
+  // asercja łapie to, zanim dialekt wywróci się na renderowaniu.
+  expect(is(arg.settingsJson, SQL), "settingsJson ma być wyrażeniem SQL (jsonb_set)").toBe(true);
   return dialect.sqlToQuery(arg.settingsJson as SQL);
 }
 
@@ -223,5 +257,39 @@ describe("wartość klucza liczona jak przed zmianą", () => {
     expect(Object.keys(value).sort()).toEqual(
       ["autoSend", "customMessage", "discountPercentage", "enabled", "giftType", "productName"]
     );
+  });
+
+  it("notificationTypes: zapis = wartości z body uzupełnione domyślnymi (nie z bazy)", async () => {
+    storedSalonRow();
+
+    const res = await callPut(NOTIFICATION_TYPES_ROUTE);
+    expect(res.status).toBe(200);
+
+    const expected = {
+      smsReminders: false,
+      pushReminders: true,
+      birthdayNotifications: false,
+      weMissYouNotifications: true,
+      paymentConfirmations: true,
+    };
+    expect(JSON.parse(onlySettingsWrite().params[0] as string)).toEqual(expected);
+    expect((await res.json()).data).toEqual(expected);
+  });
+
+  it("weMissYou: zapis = wartości z body (wiadomość przycięta) uzupełnione domyślnymi", async () => {
+    storedSalonRow();
+
+    const res = await callPut(WE_MISS_YOU_ROUTE);
+    expect(res.status).toBe(200);
+
+    const value = JSON.parse(onlySettingsWrite().params[0] as string);
+    expect(value).toEqual({
+      enabled: true,
+      inactiveDays: 45,
+      customMessage: "Wróć do nas, {imie}!",
+      includeBookingLink: true,
+      autoSend: false,
+    });
+    expect((await res.json()).data).toEqual(value);
   });
 });
