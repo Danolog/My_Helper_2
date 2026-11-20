@@ -16,8 +16,8 @@ import { forSalon } from "@/lib/server/repository";
  * Returns subscription payment history for the salon.
  *
  * Query params:
- *  - dateFrom: ISO date string (filter paidAt >= dateFrom)
- *  - dateTo: ISO date string (filter paidAt <= dateTo)
+ *  - dateFrom: ISO date string (filter createdAt >= dateFrom)
+ *  - dateTo: ISO date string (filter createdAt <= dateTo + 1 day)
  *  - status: payment status filter ('succeeded' | 'pending' | 'failed')
  *  - page: pagination page number (default: 1)
  *  - limit: items per page (default: 20)
