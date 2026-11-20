@@ -18,7 +18,7 @@ const MARKABLE_STATUSES: readonly string[] = ["scheduled", "confirmed"];
 const DEPOSIT_ONLINE_PAYMENT_CODE = "DEPOSIT_ONLINE_PAYMENT";
 
 const DEPOSIT_ONLINE_PAYMENT_MESSAGE =
-  "Zadatek oplacony online — oznaczenie reczne niedostepne";
+  "Zadatek ma platnosc online — oznaczenie reczne niedostepne";
 const DEPOSIT_MARK_GENERIC_ERROR = "Nie udalo sie zmienic oznaczenia zadatku";
 
 interface DepositMarkButtonProps {

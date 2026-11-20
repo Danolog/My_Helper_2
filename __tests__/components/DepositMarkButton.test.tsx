@@ -12,7 +12,7 @@ vi.mock("sonner", () => ({
 
 const APPOINTMENT_ID = "11111111-1111-4111-8111-111111111111";
 const DEPOSIT_URL = `/api/appointments/${APPOINTMENT_ID}/deposit`;
-const ONLINE_PAYMENT_MESSAGE = "Zadatek oplacony online — oznaczenie reczne niedostepne";
+const ONLINE_PAYMENT_MESSAGE = "Zadatek ma platnosc online — oznaczenie reczne niedostepne";
 const GENERIC_ERROR = "Nie udalo sie zmienic oznaczenia zadatku";
 
 function makeAppointment(overrides: Partial<AppointmentDetail> = {}): AppointmentDetail {

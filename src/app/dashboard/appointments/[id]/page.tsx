@@ -191,7 +191,7 @@ export default function AppointmentDetailPage() {
 
   // Stan zadatku pochodzi z dwoch zrodel: wizyty (badge w karcie) i
   // refund-status (settledOutsideApp, depositPaid dla przycisku oznaczenia).
-  // Kazda zmiana wizyty musi odswiezyc oba, inaczej karta pokazuje stary stan.
+  // Przycisk zadatku i synchronizacja kart odswiezaja oba naraz.
   const refreshAppointmentAndDeposit = useCallback(async () => {
     await Promise.all([fetchAppointment(), fetchRefundStatus()]);
   }, [fetchAppointment, fetchRefundStatus]);
