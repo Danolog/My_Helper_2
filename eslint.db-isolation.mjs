@@ -103,11 +103,7 @@ export const P2_FILES = [
 ];
 
 /** P3: publiczna rezerwacja i katalog. */
-export const P3_FILES = [
-  "src/app/api/promotions/check-happy-hours/route.ts",
-  "src/app/api/promotions/check-package/route.ts",
-  "src/app/api/promotions/check/route.ts",
-];
+export const P3_FILES = [];
 
 /** P4: portal klienta (forUser). */
 export const P4_FILES = [

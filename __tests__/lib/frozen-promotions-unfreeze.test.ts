@@ -1,5 +1,5 @@
 /**
- * Jeden nośnik reguły promocji złożonych (przegląd Ethana B2, B2.1).
+ * Jeden nośnik reguły promocji złożonych.
  *
  * Zamrożenie typów promocji (`isPromotionTypeFrozen`) wynika z flagi
  * `hardOff` modułu `complexPromotions` w `src/lib/features.ts`. Test
@@ -28,8 +28,8 @@ import { frozenModuleResponse, frozenPromotionTypeResponse } from "@/lib/server/
 
 const { selectQueue } = vi.hoisted(() => ({ selectQueue: [] as unknown[][] }));
 
-// Jedna kolejka wyników dla db.select (trasa check-happy-hours) i tx.select
-// (deposit-calculation czyta przez forSalon, czyli w db.transaction).
+// Jedna kolejka wyników dla tx.select: trasa check-happy-hours i
+// deposit-calculation czytają przez forSalon, czyli w db.transaction.
 vi.mock("@/lib/db", () => {
   const select = () => {
     const rows = selectQueue.shift() ?? [];
@@ -54,7 +54,8 @@ vi.mock("@/lib/logger", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-const SALON = "salon-1";
+// UUID: trasa check-happy-hours odrzuca zły format salonId przed forSalon.
+const SALON = "11111111-1111-4111-8111-111111111111";
 // Poniedziałek 2026-07-06 14:00 w Warszawie (CEST) = 12:00Z.
 const DATE = "2026-07-06";
 const TIME_IN_WINDOW = "14:00";
