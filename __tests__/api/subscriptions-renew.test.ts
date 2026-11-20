@@ -12,8 +12,12 @@
  * Stripe skonfigurowany → 409 RENEWAL_MANAGED_BY_STRIPE. GET (informacja
  * o najbliższym odnowieniu) bez zmian.
  */
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GET, POST } from "@/app/api/subscriptions/renew/route";
+import type { SQL } from "drizzle-orm";
+
+const dialect = new PgDialect();
 
 const {
   selectQueue,
@@ -24,7 +28,15 @@ const {
   mockIsAuthError,
   mockGetUserSalonId,
   mockGetStripe,
+  mockForSalon,
+  rawFailure,
+  whereLog,
 } = vi.hoisted(() => ({
+  mockForSalon: vi.fn(),
+  // Warunki `where` kolejnych zapytań `tx.select()` (SQL drizzle).
+  whereLog: [] as unknown[],
+  // Ustawiony błąd = `raw` odrzucone (błąd bazy).
+  rawFailure: { error: null as Error | null },
   selectQueue: [] as unknown[][],
   mockUpdate: vi.fn(),
   mockInsert: vi.fn(),
@@ -35,12 +47,17 @@ const {
   mockGetStripe: vi.fn(),
 }));
 
-vi.mock("@/lib/db", () => {
+// Trasa czyta przez repozytorium salonu; `raw` podaje `tx` atrapy.
+vi.mock("@/lib/server/repository", () => {
   const selectChain = () => {
     const builder: Record<string, unknown> = {};
-    for (const method of ["from", "innerJoin", "where", "orderBy", "limit"]) {
+    for (const method of ["from", "innerJoin", "orderBy", "limit"]) {
       builder[method] = () => builder;
     }
+    builder.where = (cond: unknown) => {
+      whereLog.push(cond);
+      return builder;
+    };
     builder.then = (
       resolve: (value: unknown[]) => unknown,
       reject: (reason: unknown) => unknown,
@@ -67,19 +84,39 @@ vi.mock("@/lib/db", () => {
     select: () => selectChain(),
     update: writeChain(mockUpdate),
     insert: writeChain(mockInsert),
+    transaction: (fn: (t: unknown) => unknown) => {
+      mockTransaction();
+      return fn(tx);
+    },
   };
   return {
-    db: {
-      select: () => selectChain(),
-      update: writeChain(mockUpdate),
-      insert: writeChain(mockInsert),
-      transaction: (fn: (t: typeof tx) => unknown) => {
-        mockTransaction();
-        return fn(tx);
-      },
+    forSalon: (salonId: string) => {
+      mockForSalon(salonId);
+      return {
+        salonId,
+        raw: (fn: (t: typeof tx) => unknown) => (rawFailure.error ? Promise.reject(rawFailure.error) : fn(tx)),
+      };
     },
   };
 });
+
+// Trasa nie sięga po surowe `db`; wywołanie = błąd testu.
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: () => {
+      throw new Error("surowe db w trasie");
+    },
+    update: () => {
+      throw new Error("surowe db w trasie");
+    },
+    insert: () => {
+      throw new Error("surowe db w trasie");
+    },
+    transaction: () => {
+      throw new Error("surowe db w trasie");
+    },
+  },
+}));
 
 vi.mock("@/lib/auth-middleware", () => ({
   requireAuth: (...args: unknown[]) => mockRequireAuth(...args),
@@ -129,6 +166,8 @@ function expectNoWrites() {
 beforeEach(() => {
   vi.clearAllMocks();
   selectQueue.length = 0;
+  rawFailure.error = null;
+  whereLog.length = 0;
   mockRequireAuth.mockResolvedValue({ user: { id: "owner-1" } });
   mockIsAuthError.mockReturnValue(false);
   mockGetUserSalonId.mockResolvedValue("salon-1");
@@ -219,5 +258,67 @@ describe("GET /api/subscriptions/renew (bez zmian)", () => {
     const res = await GET();
 
     expect(res.status).toBe(404);
+    expect(mockForSalon).not.toHaveBeenCalled();
+  });
+
+  it("izolacja: odczyt przez forSalon z salonId z sesji", async () => {
+    mockGetUserSalonId.mockResolvedValue("salon-z-sesji");
+    selectQueue.push([{ subscription: { ...ACTIVE_SUB, salonId: "salon-z-sesji" }, plan: PLAN_PRO }]);
+
+    const res = await GET();
+
+    expect(res.status).toBe(200);
+    expect(mockForSalon).toHaveBeenCalledTimes(1);
+    expect(mockForSalon).toHaveBeenCalledWith("salon-z-sesji");
+    // `raw` nie domyka filtra sam — warunek salonu jawnie w zapytaniu.
+    const q = dialect.sqlToQuery(whereLog[0] as SQL);
+    expect(q.sql).toContain('"salon_subscriptions"."salon_id" = $');
+    expect(q.params).toContain("salon-z-sesji");
+  });
+
+  it("zaplanowana zmiana planu: kwota odnowienia z planu docelowego", async () => {
+    selectQueue.push([
+      { subscription: { ...ACTIVE_SUB, scheduledPlanId: "plan-basic" }, plan: PLAN_PRO },
+    ]);
+    selectQueue.push([{ id: "plan-basic", name: "Basic", slug: "basic", priceMonthly: "49.00" }]);
+
+    const body = await (await GET()).json();
+
+    expect(body.renewal.renewalAmount).toBe("49.00");
+    expect(body.renewal.scheduledPlanChange).toEqual({
+      id: "plan-basic",
+      name: "Basic",
+      slug: "basic",
+      priceMonthly: "49.00",
+    });
+    expect(body.renewal.currentPlan.slug).toBe("pro");
+  });
+
+  it("brak aktywnej subskrypcji: 200 z renewal null", async () => {
+    selectQueue.push([]);
+
+    const body = await (await GET()).json();
+
+    expect(body).toEqual({ success: true, renewal: null, message: "Brak aktywnej subskrypcji" });
+  });
+
+  it("niezalogowany: 401 bez odczytu", async () => {
+    mockRequireAuth.mockResolvedValue(new Response(null, { status: 401 }));
+    mockIsAuthError.mockReturnValue(true);
+
+    expect((await GET()).status).toBe(401);
+    expect(mockForSalon).not.toHaveBeenCalled();
+  });
+
+  it("błąd bazy: 500 ze stałą treścią", async () => {
+    rawFailure.error = new Error("db down");
+
+    const res = await GET();
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      success: false,
+      error: "Nie udalo sie pobrac informacji o odnowieniu",
+    });
   });
 });
