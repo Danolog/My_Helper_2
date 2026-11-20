@@ -16,7 +16,9 @@
  * - galeria salonu (GET salons/[id]/gallery, forSalon): zdjęcia A, nie D; filtr
  *   pracownikiem A pod salonem D → pusta lista; zły format id → 400; lista salonów
  *   (GET /api/salons, pula systemowa): salon D bez settingsJson/ownerId i numeru BLIK;
- * - POST /api/deposits/blik-booking (gość): salon C z numerem BLIK → 201 bez wiersza deposit_payments, zajęty termin i wyścig → 409, salon A bez numeru → 409 bez nowej wizyty.
+ * - POST /api/deposits/blik-booking (gość): salon C z numerem BLIK → 201 bez wiersza deposit_payments, zajęty termin i wyścig → 409, salon A bez numeru → 409 bez nowej wizyty;
+ * - POST /api/appointments/[id]/deposit (właściciel, forSalon): wizyta BLIK bez płatności → depositPaid=true
+ *   w bazie; wizyta z wierszem deposit_payments → 409 bez zmiany stanu; wizyta salonu E przez kontekst A → 404.
  *
  * Mocki: sesja i kontekst salonu (atrapy, sterowane per opis), limiter, SMS,
  * logger, bramka zamrożenia modułu pakietów i unstable_cache (przejście bez cache).
@@ -26,13 +28,15 @@
  * Dane: użytkownik `it-t3-ovl-…` (prefiks z notatki sprzątania w pg-harness.ts),
  * salon, dwóch pracowników, klient, dwie usługi bez zadatku, promocja-pakiet;
  * wizyty kaskadą z salonu w `afterAll`. Terminy w 2099 r., KAŻDY test zapisu na
- * własnym dniu i z własnymi danymi — kolejność testów bez znaczenia.
+ * własnym dniu (ręczne oznaczenie zadatku: wspólny dzień 31, rozłączne godziny)
+ * i z własnymi danymi — kolejność testów bez znaczenia.
  * Wymaga bazy z migracją 0009.
  * Uruchomienie: `INTEGRATION_POSTGRES_URL=postgresql://…@localhost:5432/pos_dev pnpm test:pg`.
  */
 import { randomUUID } from "node:crypto";
 import { and, eq, gte, lt } from "drizzle-orm";
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { POST as markDepositPaid } from "@/app/api/appointments/[id]/deposit/route";
 import { PUT as updateAppointment } from "@/app/api/appointments/[id]/route";
 import { POST as bookPackage } from "@/app/api/appointments/book-package/route";
 import { POST as createAppointment } from "@/app/api/appointments/route";
@@ -887,6 +891,100 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
         error: "Ten salon nie przyjmuje teraz rezerwacji online z zadatkiem.",
       });
       expect(await salonDay(salonId, 9)).toEqual([]);
+    });
+  });
+
+  // Ręczne oznaczenie zadatku BLIK pod rolą aplikacji (forSalon salonu z sesji).
+  // Wizyty salonu A na dniu 31 (różne godziny) i ich płatność usuwane w afterAll
+  // bloku. Salon E ma własnego właściciela; jego wizyta znika kaskadą z salonem.
+  describe("POST /api/appointments/[id]/deposit (właściciel, forSalon)", () => {
+    const OWNER_E_ID = `it-t3-ovl-dep-${RUN}`;
+    const D = 31;
+    let salonEId = "";
+    let employeeEId = "";
+    const addedAppointmentIds: string[] = [];
+
+    async function mark(id: string) {
+      const res = await markDepositPaid(
+        new Request(`http://localhost/api/appointments/${id}/deposit`, { method: "POST" }),
+        { params: Promise.resolve({ id }) }
+      );
+      return { status: res.status, body: (await res.json()) as { success: boolean; code?: string; error?: string } };
+    }
+
+    async function depositPaidOf(id: string) {
+      const [row] = await h!.db
+        .select({ depositPaid: appointments.depositPaid })
+        .from(appointments)
+        .where(eq(appointments.id, id));
+      return row?.depositPaid;
+    }
+
+    /** Wizyta BLIK salonu A: scheduled, zadatek 50 zł, nieopłacony. */
+    async function blikAppointment(start: string, end: string) {
+      const row = await insertAppt(start, end, { depositAmount: "50.00", depositPaid: false });
+      addedAppointmentIds.push(row.id);
+      return row;
+    }
+
+    beforeAll(async () => {
+      const db = h!.db;
+      await db.insert(user).values({ id: OWNER_E_ID, name: "IT T3 ovl dep", email: `${OWNER_E_ID}@example.invalid` });
+      const [salonE] = await db.insert(salons).values({ name: `IT T3 ovl E ${RUN}`, ownerId: OWNER_E_ID }).returning();
+      salonEId = salonE!.id;
+      const [empE] = await db.insert(employees).values({ salonId: salonEId, firstName: "IT", lastName: "Pracownik E" }).returning();
+      employeeEId = empE!.id;
+    });
+
+    afterAll(async () => {
+      if (!h) return;
+      // Płatność znika kaskadą z wizytą; wizyty salonu A usuwamy jawnie.
+      for (const id of addedAppointmentIds) {
+        await h.db.delete(depositPayments).where(eq(depositPayments.appointmentId, id));
+        await h.db.delete(appointments).where(eq(appointments.id, id));
+      }
+      if (salonEId) await h.db.delete(salons).where(eq(salons.id, salonEId));
+      await h.db.delete(user).where(eq(user.id, OWNER_E_ID));
+    });
+
+    beforeEach(() => {
+      session.ctx = owner();
+    });
+
+    it("wizyta BLIK bez płatności → 200, depositPaid=true w bazie", async () => {
+      const appt = await blikAppointment(at(D, "08:00"), at(D, "09:00"));
+      const res = await mark(appt.id);
+      expect(res.status, res.body.error).toBe(200);
+      expect(await depositPaidOf(appt.id)).toBe(true);
+    });
+
+    it("wizyta z wierszem deposit_payments (failed) → 409 DEPOSIT_ONLINE_PAYMENT, stan bez zmian", async () => {
+      const appt = await blikAppointment(at(D, "10:00"), at(D, "11:00"));
+      await h!.db
+        .insert(depositPayments)
+        .values({ appointmentId: appt.id, salonId, amount: "50.00", paymentMethod: "stripe", status: "failed" });
+      const res = await mark(appt.id);
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe("DEPOSIT_ONLINE_PAYMENT");
+      expect(await depositPaidOf(appt.id)).toBe(false);
+    });
+
+    it("wizyta salonu E przez kontekst salonu A → 404, stan bez zmian", async () => {
+      const [foreign] = await h!.db
+        .insert(appointments)
+        .values({
+          salonId: salonEId,
+          employeeId: employeeEId,
+          startTime: new Date(at(D, "12:00")),
+          endTime: new Date(at(D, "13:00")),
+          status: "scheduled",
+          depositAmount: "50.00",
+          depositPaid: false,
+        })
+        .returning();
+      const res = await mark(foreign!.id);
+      expect(res.status).toBe(404);
+      expect(await depositPaidOf(foreign!.id)).toBe(false);
     });
   });
 
