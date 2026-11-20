@@ -8,7 +8,7 @@
  * - atomowość z UPDATE flagi przez `forSalon(A).raw` + `recordDepositStatusEvent`;
  * - kaskada: usunięcie wizyty usuwa jej wpisy.
  *
- * Dane: konto `it-t3-dse-…`, salony A i B, pracownicy i wizyty zatwierdzone rolą migracji;
+ * Dane: konta `it-t3-dse-…-a` i `-b` (właściciele), salony A i B, pracownicy i wizyty zatwierdzone rolą migracji;
  * wpisy z prób uprawnień, CHECK, FK i RLS w transakcji wycofywanej. Salony usuwane w
  * `afterAll` (kaskada: wizyty i ich wpisy). Bez danych klientów (wizyty bez gościa i klienta).
  *
@@ -138,9 +138,11 @@ async function eventsOf(appt: string) {
 suite("deposit_status_events — prawdziwy Postgres (migracja 0014)", () => {
   beforeAll(async () => {
     const db = h!.db;
-    await db.insert(user).values({ id: USER_ID, name: "IT T3 dse", email: `${USER_ID}@example.invalid` });
     for (const label of ["A", "B"]) {
-      const [s] = await db.insert(salons).values({ name: `IT T3 dse ${label} ${RUN}`, ownerId: USER_ID }).returning({ id: salons.id });
+      // Jedno konto = jeden salon (salons_owner_id_uq) — osobny właściciel dla A i B.
+      const ownerId = `${USER_ID}-${label.toLowerCase()}`;
+      await db.insert(user).values({ id: ownerId, name: "IT T3 dse", email: `${ownerId}@example.invalid` });
+      const [s] = await db.insert(salons).values({ name: `IT T3 dse ${label} ${RUN}`, ownerId }).returning({ id: salons.id });
       const [e] = await db.insert(employees).values({ salonId: s!.id, firstName: "IT", lastName: "Pracownik" }).returning({ id: employees.id });
       employeeOf[s!.id] = e!.id;
       if (label === "A") salonA = s!.id;
@@ -153,7 +155,7 @@ suite("deposit_status_events — prawdziwy Postgres (migracja 0014)", () => {
     try {
       // Kaskada z salonów: pracownicy, wizyty i ich wpisy w dzienniku.
       for (const s of [salonA, salonB]) if (s) await h.db.delete(salons).where(eq(salons.id, s));
-      await h.db.delete(user).where(eq(user.id, USER_ID));
+      for (const label of ["a", "b"]) await h.db.delete(user).where(eq(user.id, `${USER_ID}-${label}`));
     } finally {
       await h.end();
     }
