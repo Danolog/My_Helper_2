@@ -2,7 +2,7 @@
 /**
  * #193 L7: migawka importerów wyjść rejestru systemowego `src/lib/server/system/**`.
  *
- * Wyjścia przyjmują `userId`/`salonId`. Każdy nowy importer wyjścia ma być widoczny
+ * Część wyjść przyjmuje `userId`/`salonId`. Każdy nowy importer wyjścia ma być widoczny
  * w diffie jako zmiana tej migawki, żeby recenzja sprawdziła pochodzenie argumentu.
  *
  * Mechanizm: program TS na `src/` i checker. Każdy importowany (lub re-eksportowany)
