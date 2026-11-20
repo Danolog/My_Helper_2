@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, index, uniqueIndex, uuid, jsonb, integer, numeric, check, customType } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, index, uniqueIndex, uuid, jsonb, integer, numeric, check, customType, foreignKey } from "drizzle-orm/pg-core";
 
 // IMPORTANT! ID fields should ALWAYS use UUID types, EXCEPT the BetterAuth tables.
 
@@ -301,6 +301,47 @@ export const appointments = pgTable(
     // Obok niego w bazie EXCLUDE "appointments_no_overlap" (gist, tsrange '[)',
     // bez cancelled) — Drizzle nie wyraża EXCLUDE, jest tylko w drizzle/0009.
     check("appointments_end_after_start", sql`${table.endTime} > ${table.startTime}`),
+    // Cel złożonego FK z deposit_status_events: zdarzenie nie wskaże salonu innego
+    // niż salon wizyty (id jest już unikalne, para jest potrzebna jako cel FK).
+    uniqueIndex("appointments_id_salon_id_uidx").on(table.id, table.salonId),
+  ]
+);
+
+/**
+ * Dziennik zmian `appointments.deposit_paid` — kto (konto + rola w salonie;
+ * NULL = ścieżka systemowa) i kiedy. Dla roli aplikacji tylko do dopisywania
+ * (migracja odbiera UPDATE/DELETE). Bez danych klienta, kwoty i numeru.
+ * Wpis dodaje tylko `recordDepositStatusEvent`; wizyta bez wpisów może mieć
+ * dowolną wartość flagi. `actor_user_id` bez FK,
+ * żeby historia przetrwała usunięcie konta. RLS i uprawnienia są w migracji
+ * 0014 (Drizzle ich nie wyraża).
+ */
+export const DEPOSIT_STATUS_EVENT_SOURCES = ["manual_mark", "manual_unmark", "owner_edit", "stripe_confirmation", "refund"] as const;
+export const depositStatusEvents = pgTable(
+  "deposit_status_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    salonId: uuid("salon_id").notNull(),
+    appointmentId: uuid("appointment_id").notNull(),
+    depositPaid: boolean("deposit_paid").notNull(),
+    previousDepositPaid: boolean("previous_deposit_paid").notNull(),
+    source: text("source").notNull(),
+    actorUserId: text("actor_user_id"),
+    actorRole: text("actor_role"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.appointmentId, table.salonId],
+      foreignColumns: [appointments.id, appointments.salonId],
+      name: "deposit_status_events_appointment_salon_fk",
+    }).onDelete("cascade"),
+    index("deposit_status_events_appointment_created_idx").on(table.appointmentId, table.createdAt),
+    index("deposit_status_events_salon_created_idx").on(table.salonId, table.createdAt),
+    check("deposit_status_events_source_valid", sql`${table.source} IN ('manual_mark', 'manual_unmark', 'owner_edit', 'stripe_confirmation', 'refund')`),
+    check("deposit_status_events_value_changed", sql`${table.depositPaid} <> ${table.previousDepositPaid}`),
+    check("deposit_status_events_direction", sql`(${table.source} IN ('manual_mark', 'stripe_confirmation') AND ${table.depositPaid}) OR (${table.source} IN ('manual_unmark', 'refund') AND NOT ${table.depositPaid}) OR ${table.source} = 'owner_edit'`),
+    check("deposit_status_events_actor", sql`(${table.source} IN ('stripe_confirmation', 'refund') AND ${table.actorUserId} IS NULL AND ${table.actorRole} IS NULL) OR (${table.source} IN ('manual_mark', 'manual_unmark') AND ${table.actorUserId} IS NOT NULL AND ${table.actorRole} IN ('owner', 'receptionist')) OR (${table.source} = 'owner_edit' AND ${table.actorUserId} IS NOT NULL AND ${table.actorRole} = 'owner')`),
   ]
 );
 

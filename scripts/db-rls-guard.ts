@@ -15,6 +15,7 @@
  * - liczba tabel z `relrowsecurity` w bazie nie mniejsza niż liczba tabel z pliku;
  * - jawne `CREATE POLICY` musi mieć w pliku `ALTER TABLE … ENABLE ROW LEVEL SECURITY`.
  * Zmiana formatu pliku albo pusta lista = głośny błąd, nie „OK”.
+ * Lista tabel = lista z 0005 + jawne polityki z migracji w `RLS_EXTRA_MIGRATION_FILES`.
  *
  * Gdzie działa: krok „RLS guard” po `pnpm db:migrate` w obu jobach z Postgresem
  * w `.github/workflows/quality-gate.yml`; test `__tests__/pg/rls-guard.pg.test.ts`.
@@ -117,9 +118,70 @@ export function parseRlsRequirements(sql: string): RlsRequirement[] {
   return out;
 }
 
-/** Wymagania RLS z pliku migracji w repozytorium. */
+/**
+ * Migracje po 0005, które zakładają RLS nowej tabeli jawnym `CREATE POLICY`.
+ * Plik dopisuje się tu w tym samym PR co migrację.
+ */
+export const RLS_EXTRA_MIGRATION_FILES: readonly string[] = ["drizzle/0014_deposit_status_events.sql"];
+
+const failIn = (file: string, what: string): never => {
+  throw new Error(`${file}: ${what} — zmieniony format migracji, popraw parser strażnika`);
+};
+
+/**
+ * Wymagania RLS z migracji po 0005: jawne `CREATE POLICY <nazwa> ON <tabela>` od
+ * początku linii (nazwy bez cudzysłowów — ten sam wzorzec co dla 0005), każda tabela
+ * z `ALTER TABLE <tabela> ENABLE ROW LEVEL SECURITY`, nazwa polityki `tenant_*`
+ * (inaczej semantyka polityk w `checkPolicySemantics` by jej nie objęła).
+ * Pada głośno, gdy w pliku nie ma żadnej polityki — plik z listy bez polityki to błąd listy.
+ */
+export function parseExplicitRlsRequirements(sql: string, file: string): RlsRequirement[] {
+  const explicit = [...sql.matchAll(/^CREATE POLICY\s+([a-z_][a-z0-9_]*)\s+ON\s+([a-z_][a-z0-9_]*)/gim)].map(
+    (m) => ({ table: m[2]!, policy: m[1]! }),
+  );
+  if (explicit.length === 0) failIn(file, "brak jawnego CREATE POLICY");
+  const seen = new Set<string>();
+  for (const { table, policy } of explicit) {
+    if (!IDENT.test(table) || !IDENT.test(policy) || seen.has(table)) {
+      failIn(file, `nieoczekiwana albo zdublowana tabela ${table}`);
+    }
+    seen.add(table);
+    if (!policy.startsWith("tenant_")) failIn(file, `polityka ${policy} na ${table} bez przedrostka tenant_`);
+    if (!new RegExp(`^ALTER TABLE\\s+${table}\\s+ENABLE ROW LEVEL SECURITY`, "m").test(sql)) {
+      failIn(file, `CREATE POLICY na ${table} bez ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+    }
+  }
+  return explicit;
+}
+
+/**
+ * Wymagania z 0005 + z kolejnych migracji. Tabela powtórzona (względem 0005 albo
+ * między plikami) = błąd z nazwą pliku i tabeli: druga polityka na tej samej tabeli
+ * oznacza zmianę istniejącej izolacji, nie nową tabelę.
+ */
+export function mergeRlsRequirements(
+  base: RlsRequirement[],
+  extra: Array<{ file: string; requirements: RlsRequirement[] }>,
+): RlsRequirement[] {
+  const seen = new Set(base.map((r) => r.table));
+  const out = [...base];
+  for (const { file, requirements } of extra) {
+    for (const r of requirements) {
+      if (seen.has(r.table)) failIn(file, `tabela ${r.table} ma już wymaganie RLS`);
+      seen.add(r.table);
+      out.push(r);
+    }
+  }
+  return out;
+}
+
+/** Wymagania RLS z plików migracji w repozytorium (0005 + `RLS_EXTRA_MIGRATION_FILES`). */
 export function loadRlsRequirements(root = process.cwd()): RlsRequirement[] {
-  return parseRlsRequirements(readFileSync(join(root, RLS_MIGRATION_FILE), "utf8"));
+  const read = (f: string) => readFileSync(join(root, f), "utf8");
+  return mergeRlsRequirements(
+    parseRlsRequirements(read(RLS_MIGRATION_FILE)),
+    RLS_EXTRA_MIGRATION_FILES.map((f) => ({ file: f, requirements: parseExplicitRlsRequirements(read(f), f) })),
+  );
 }
 
 /** RLS i polityki w schemacie public (tylko odczyt katalogu). */
