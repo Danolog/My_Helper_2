@@ -14,6 +14,8 @@
 #   RUNTIME_SA (konto serwisowe usługi), REVISION_TAG (np. sha-<7 znaków>),
 #   SQL_INSTANCE (nazwa instancji Cloud SQL — połączenie przez wbudowany
 #   konektor: --set-cloudsql-instances=PROJECT_ID:REGION:SQL_INSTANCE, K-1)
+#   oraz (tryb deploy) numer projektu: PROJECT_NUMBER albo GCP_WIF_PROVIDER,
+#   z którego numer jest wyciągany (oba podane → muszą się zgadzać)
 # Opcjonalne: VPC_NETWORK + VPC_SUBNET (bezpośrednie wyjście do VPC — Cloud SQL
 #   po prywatnym IP, decyzja kroku D), MANIFEST (domyślnie infra/gcp/env-manifest.json).
 #
@@ -62,6 +64,33 @@ fi
 if [[ ! "$REVISION_TAG" =~ ^[a-z][a-z0-9-]{0,45}$ ]]; then
   echo "error: REVISION_TAG must match ^[a-z][a-z0-9-]{0,45}$" >&2
   exit 2
+fi
+
+# Numer projektu do deterministycznego URL taga (tag_url). Źródło: PROJECT_NUMBER
+# albo — w workflow — vars.GCP_WIF_PROVIDER (projects/<numer>/locations/global/
+# workloadIdentityPools/<pula>/providers/<dostawca>, wypisuje go bootstrap.sh).
+# Bez `gcloud projects describe`: konto deploy nie ma roli na odczyt projektu
+# (bootstrap.sh), a GCP_WIF_PROVIDER workflow już wymaga (krok „Check required
+# repository variables”); postać sprawdza ten skrypt.
+if [[ "$MODE" == "deploy" ]]; then
+  WIF_PROVIDER_RE='^projects/([0-9]+)/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$'
+  wif_number=""
+  if [[ -n "${GCP_WIF_PROVIDER:-}" ]]; then
+    if [[ ! "$GCP_WIF_PROVIDER" =~ $WIF_PROVIDER_RE ]]; then
+      echo "error: GCP_WIF_PROVIDER must match projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>" >&2
+      exit 2
+    fi
+    wif_number="${BASH_REMATCH[1]}"
+  fi
+  if [[ -n "${PROJECT_NUMBER:-}" && -n "$wif_number" && "$PROJECT_NUMBER" != "$wif_number" ]]; then
+    echo "error: PROJECT_NUMBER ($PROJECT_NUMBER) differs from GCP_WIF_PROVIDER project ($wif_number)" >&2
+    exit 2
+  fi
+  PROJECT_NUMBER="${PROJECT_NUMBER:-$wif_number}"
+  if [[ ! "$PROJECT_NUMBER" =~ ^[0-9]+$ ]]; then
+    echo "error: missing or invalid PROJECT_NUMBER (set it or GCP_WIF_PROVIDER)" >&2
+    exit 2
+  fi
 fi
 
 GC=(gcloud --project="$PROJECT_ID" --quiet)
@@ -196,10 +225,15 @@ fi
   --env-vars-file="$workdir/env.yaml" \
   ${network[@]+"${network[@]}"}
 
-url="$("${GC[@]}" run services describe "$SERVICE" --region="$REGION" \
+# Sprawdzenie istnienia taga w ruchu usługi. gcloud zwraca w status.traffic[].url
+# adres w starej, haszowanej postaci (https://<tag>---<usługa>-<hasz>-<kod regionu>.a.run.app),
+# a allowlista e2e (e2e-production.yml) przyjmuje tylko postać deterministyczną —
+# przebieg 44821507855 padł na tej różnicy. Obie postacie wskazują tę samą rewizję,
+# więc adres z gcloud służy wyłącznie jako dowód, że tag istnieje.
+legacy_url="$("${GC[@]}" run services describe "$SERVICE" --region="$REGION" \
   --format="value(status.traffic[].url)" | tr ';' '\n' | grep -E "^https://${REVISION_TAG}---" | head -n1 || true)"
-if [[ -z "$url" ]]; then
+if [[ -z "$legacy_url" ]]; then
   echo "error: tagged revision URL not found for $REVISION_TAG" >&2
   exit 1
 fi
-echo "tag_url=$url"
+echo "tag_url=https://${REVISION_TAG}---${SERVICE}-${PROJECT_NUMBER}.${REGION}.run.app"
