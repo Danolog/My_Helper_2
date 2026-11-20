@@ -70,7 +70,8 @@ fi
 # albo — w workflow — vars.GCP_WIF_PROVIDER (projects/<numer>/locations/global/
 # workloadIdentityPools/<pula>/providers/<dostawca>, wypisuje go bootstrap.sh).
 # Bez `gcloud projects describe`: konto deploy nie ma roli na odczyt projektu
-# (bootstrap.sh), a wejście z WIF jest już wymagane i sprawdzane przez workflow.
+# (bootstrap.sh), a GCP_WIF_PROVIDER workflow już wymaga (krok „Check required
+# repository variables”); postać sprawdza ten skrypt.
 if [[ "$MODE" == "deploy" ]]; then
   WIF_PROVIDER_RE='^projects/([0-9]+)/locations/global/workloadIdentityPools/[a-z0-9-]+/providers/[a-z0-9-]+$'
   wif_number=""
@@ -225,7 +226,7 @@ fi
   ${network[@]+"${network[@]}"}
 
 # Sprawdzenie istnienia taga w ruchu usługi. gcloud zwraca w status.traffic[].url
-# adres w starej, haszowanej postaci (https://<tag>---<usługa>-<hasz>-lm.a.run.app),
+# adres w starej, haszowanej postaci (https://<tag>---<usługa>-<hasz>-<kod regionu>.a.run.app),
 # a allowlista e2e (e2e-production.yml) przyjmuje tylko postać deterministyczną —
 # przebieg 44821507855 padł na tej różnicy. Obie postacie wskazują tę samą rewizję,
 # więc adres z gcloud służy wyłącznie jako dowód, że tag istnieje.
