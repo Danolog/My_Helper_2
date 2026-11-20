@@ -108,6 +108,7 @@ vi.mock("@/lib/stripe", async (orig) => ({
 
 const RUN = randomUUID().slice(0, 8);
 const USER_ID = `it-t3-ovl-${RUN}`;
+const OWNER_B_ID = `it-t3-ovl-b-${RUN}`;
 const MSG = "Termin koliduje z istniejaca wizyta. Wybierz inna godzine";
 let salonId = "";
 let employeeId = "";
@@ -750,7 +751,9 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
 
     beforeAll(async () => {
       const db = h!.db;
-      const [salonB] = await db.insert(salons).values({ name: `IT T3 ovl B ${RUN}`, ownerId: USER_ID }).returning();
+      // Jeden salon na właściciela (`salons_owner_id_uq`): salon B ma własnego właściciela.
+      await db.insert(user).values({ id: OWNER_B_ID, name: "IT T3 ovl B", email: `${OWNER_B_ID}@example.invalid` });
+      const [salonB] = await db.insert(salons).values({ name: `IT T3 ovl B ${RUN}`, ownerId: OWNER_B_ID }).returning();
       salonBId = salonB!.id;
       await db.insert(workSchedules).values({
         employeeId,
@@ -764,6 +767,7 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
     afterAll(async () => {
       // Grafik i wizyta znikają kaskadą z salonu A w afterAll całego opisu.
       if (salonBId) await h!.db.delete(salons).where(eq(salons.id, salonBId));
+      await h!.db.delete(user).where(eq(user.id, OWNER_B_ID));
     });
 
     it("pracownik salonu A zapytany z salonId = B → 404", async () => {
