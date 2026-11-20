@@ -17,7 +17,7 @@
  *
  * Dane: użytkownik `it-t3-ovl-…` (prefiks z notatki sprzątania w pg-harness.ts),
  * salon, dwóch pracowników, klient, dwie usługi bez zadatku, promocja-pakiet;
- * wizyty kaskadą z salonu w `afterAll`. Terminy w 2099 r., KAŻDY test na
+ * wizyty kaskadą z salonu w `afterAll`. Terminy w 2099 r., KAŻDY test zapisu na
  * własnym dniu i z własnymi danymi — kolejność testów bez znaczenia.
  * Wymaga bazy z migracją 0009.
  * Uruchomienie: `INTEGRATION_POSTGRES_URL=postgresql://…@localhost:5432/pos_dev pnpm test:pg`.

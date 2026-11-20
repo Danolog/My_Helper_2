@@ -166,7 +166,7 @@ describe("niezmiennik: salonId z query przechodzi przez strażnika salonu z sesj
     expect(Object.values(EXCEPTIONS).every((e) => e.reason.length > 20)).toBe(true);
   });
 
-  it("wyjątek trasy bez sesji obowiązuje tylko póki complexPromotions jest zamrożony", () => {
+  it("wyjątek tras promocji bez sesji obowiązuje tylko póki complexPromotions jest zamrożony", () => {
     expect(isModuleFrozen("complexPromotions")).toBe(true);
   });
 
