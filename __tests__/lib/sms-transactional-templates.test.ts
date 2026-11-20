@@ -1,5 +1,5 @@
 /**
- * Szablony SMS transakcyjnych z src/lib/sms.ts: przy zwykłym imieniu klienta
+ * Szablony SMS transakcyjnych z src/lib/sms.ts: przy zwykłym imieniu klienta, nazwie usługi i pracownika
  * treść przekazana dostawcy zawiera wyłącznie informację o wizycie / płatności —
  * bez adresu URL i bez wezwania do rezerwacji, także przy wrogiej nazwie salonu.
  *
