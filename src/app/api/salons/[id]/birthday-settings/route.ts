@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { validateBody, birthdaySettingsSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
@@ -107,10 +107,10 @@ export async function PUT(
       return NextResponse.json(validationError, { status: 400 });
     }
 
-    // Fetch current salon
+    // Fetch current salon (tylko do sprawdzenia właściciela — zapis nie scala ustawień)
     const [salon] = await forSalon(id).raw((tx) =>
       tx
-        .select({ id: salons.id, ownerId: salons.ownerId, settingsJson: salons.settingsJson })
+        .select({ id: salons.id, ownerId: salons.ownerId })
         .from(salons)
         .where(eq(salons.id, id))
         .limit(1)
@@ -167,20 +167,17 @@ export async function PUT(
           : DEFAULT_BIRTHDAY_SETTINGS.autoSend,
     };
 
-    // Merge into existing settingsJson
-    const existingSettings = (salon.settingsJson as Record<string, unknown>) || {};
-    const updatedSettings = {
-      ...existingSettings,
-      birthdayGift: newBirthdaySettings,
-    };
-
-    // Save to database (salons: tabela nadrzędna — filtr jawny po id = salonId)
-    const [_updated] = await forSalon(id).raw((tx) =>
+    // Zapis atomowy jednym UPDATE (jsonb_set): podmienia tylko klucz `birthdayGift`.
+    // Zapis całego settingsJson ze starej kopii mógłby przywrócić inne klucze
+    // (np. numer BLIK w `deposits`) usunięte równolegle przez właściciela.
+    // salons: tabela nadrzędna — filtr jawny po id = salonId.
+    await forSalon(id).raw((tx) =>
       tx
         .update(salons)
-        .set({ settingsJson: updatedSettings })
+        .set({
+          settingsJson: sql`jsonb_set(coalesce(${salons.settingsJson}, '{}'::jsonb), '{birthdayGift}', ${JSON.stringify(newBirthdaySettings)}::jsonb)`,
+        })
         .where(eq(salons.id, id))
-        .returning()
     );
 
     logger.info(`[Birthday Settings API] Updated birthday settings for salon ${id}`,

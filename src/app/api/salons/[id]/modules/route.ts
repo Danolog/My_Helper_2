@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { validateBody, salonModulesSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { resolveModules, TOGGLEABLE_MODULES, type ModuleKey } from "@/lib/features";
@@ -117,18 +117,20 @@ export async function PUT(
       }
     }
 
-    const updatedSettings = { ...existingSettings, modules: nextModules };
-
+    // Zapis atomowy jednym UPDATE (jsonb_set): podmienia tylko klucz `modules`.
+    // Zapis całego settingsJson ze starej kopii mógłby przywrócić inne klucze
+    // (np. numer BLIK w `deposits`) usunięte równolegle przez właściciela.
     // salons: tabela nadrzędna — filtr jawny po id = salonId.
     await forSalon(id).raw((tx) =>
       tx
         .update(salons)
-        .set({ settingsJson: updatedSettings })
+        .set({
+          settingsJson: sql`jsonb_set(coalesce(${salons.settingsJson}, '{}'::jsonb), '{modules}', ${JSON.stringify(nextModules)}::jsonb)`,
+        })
         .where(eq(salons.id, id))
-        .returning()
     );
 
-    const resolved = resolveModules(updatedSettings);
+    const resolved = resolveModules({ modules: nextModules });
     logger.info(`[Modules API] Updated modules for salon ${id}`, {
       modules: nextModules as Record<string, unknown>,
     });
