@@ -104,7 +104,7 @@ export const CalendarEventComponent = memo(function CalendarEventComponent({
   const hasDeposit = Boolean(
     event.appointment.depositAmount && parseFloat(event.appointment.depositAmount) > 0
   );
-  // Only upcoming visits wait for a deposit; finished or cancelled ones are settled elsewhere.
+  // Only scheduled or confirmed visits get the marker; completed, cancelled and no-show visits never show it.
   const isDepositPending =
     hasDeposit &&
     event.appointment.depositPaid === false &&
