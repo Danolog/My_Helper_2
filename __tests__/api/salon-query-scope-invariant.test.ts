@@ -102,6 +102,14 @@ const EXCEPTIONS: Record<string, Exception> = {
     guard: /getSalonContext\(\)/,
     proof: /const salonId = ctx\.salonId;/,
   },
+  "src/app/api/available-slots/route.ts#GET": {
+    reason:
+      "publiczne wolne terminy bez sesji: salonId z query to cel rezerwacji, walidowany jako UUID przed forSalon; " +
+      "pracownik musi należeć do tego salonu (obcy i nieistniejący → ta sama 404), odczyty z jawnymi listami kolumn",
+    guard: /if \(!salonId \|\| !isValidUuid\(salonId\)\)/,
+    proof:
+      /eq\(employees\.id, employeeId\), eq\(employees\.salonId, salonId\)[\s\S]*?if \(!result\.employeeFound\)[\s\S]*?EMPLOYEE_NOT_FOUND_BODY, \{ status: 404 \}/,
+  },
   "src/app/api/dashboard/stats/route.ts#GET": {
     reason: "własna weryfikacja własności (ADR-001 R2b): salon z query tylko gdy ownerId = użytkownik sesji, inaczej 403",
     guard: /auth: "user"/,

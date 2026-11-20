@@ -28,9 +28,21 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { PUT as updateAppointment } from "@/app/api/appointments/[id]/route";
 import { POST as bookPackage } from "@/app/api/appointments/book-package/route";
 import { POST as createAppointment } from "@/app/api/appointments/route";
+import { GET as getAvailableSlots } from "@/app/api/available-slots/route";
 import { POST as createDepositSession } from "@/app/api/deposits/create-session/route";
 import { APPOINTMENT_NO_OVERLAP_CONSTRAINT, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
-import { appointments, clients, employees, promoCodes, promotions, salons, services, timeBlocks, user } from "@/lib/schema";
+import {
+  appointments,
+  clients,
+  employees,
+  promoCodes,
+  promotions,
+  salons,
+  services,
+  timeBlocks,
+  user,
+  workSchedules,
+} from "@/lib/schema";
 import { sendBookingConfirmationSms } from "@/lib/sms";
 // Godzina `hh:mm` w dniu `day` (UTC) marca 2099 r.; dzień spoza 1–31 = wyjątek (CI @ cf2ee2e: 2099-03-32).
 import { at, dayRange } from "./pg-dates";
@@ -710,5 +722,65 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       expect(day).toHaveLength(20); // 10 pakietów × 2 wizyty, bez połowicznych
       expect(noOverlaps(day)).toBe(true);
     }, 120_000);
+  });
+
+  // Publiczne wolne terminy przez forSalon(salonId z zapytania), pod rolą
+  // aplikacji. Salon B istnieje tylko po to, żeby zapytać o pracownika salonu A
+  // w kontekście cudzego salonu. Daty w kwietniu 2099 (testy wyżej: marzec);
+  // trasa liczy dzień w czasie lokalnym, więc terminy wizyt też lokalnie (bez Z).
+  describe("GET /api/available-slots (publiczne, forSalon)", () => {
+    const DATE = "2099-04-15";
+    let salonBId = "";
+
+    async function slots(querySalonId: string) {
+      const res = await getAvailableSlots(
+        new Request(
+          `http://localhost/api/available-slots?salonId=${querySalonId}&employeeId=${employeeId}&date=${DATE}&duration=60`
+        )
+      );
+      return {
+        status: res.status,
+        body: (await res.json()) as {
+          success: boolean;
+          error?: string;
+          data?: { dayOff: boolean; slots: { time: string }[] };
+        },
+      };
+    }
+
+    beforeAll(async () => {
+      const db = h!.db;
+      const [salonB] = await db.insert(salons).values({ name: `IT T3 ovl B ${RUN}`, ownerId: USER_ID }).returning();
+      salonBId = salonB!.id;
+      await db.insert(workSchedules).values({
+        employeeId,
+        dayOfWeek: new Date(`${DATE}T00:00:00`).getDay(),
+        startTime: "09:00",
+        endTime: "17:00",
+      });
+      await insertAppt(`${DATE}T10:00:00`, `${DATE}T11:00:00`);
+    });
+
+    afterAll(async () => {
+      // Grafik i wizyta znikają kaskadą z salonu A w afterAll całego opisu.
+      if (salonBId) await h!.db.delete(salons).where(eq(salons.id, salonBId));
+    });
+
+    it("pracownik salonu A zapytany z salonId = B → 404", async () => {
+      const res = await slots(salonBId);
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ success: false, error: "Employee not found" });
+    });
+
+    it("salonId = A → 200 ze slotami pod rolą aplikacji (grafik, wizyta)", async () => {
+      const res = await slots(salonId);
+      expect(res.status, res.body.error).toBe(200);
+      expect(res.body.data?.dayOff).toBe(false);
+      const times = res.body.data!.slots.map((s) => s.time);
+      expect(times).toContain("09:00");
+      expect(times).toContain("11:00");
+      expect(times).not.toContain("10:00"); // wizyta 10–11 widoczna w kontekście salonu A
+      expect(times).not.toContain("10:30");
+    });
   });
 });
