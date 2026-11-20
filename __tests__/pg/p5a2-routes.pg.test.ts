@@ -55,6 +55,17 @@ vi.mock("@/lib/sms", async (orig) => ({
   smsProviderUnavailablePlatform: () => null,
   sendSms: (...a: unknown[]) => ctl.sendSms(...a),
   sendAppointmentReminderSms: (...a: unknown[]) => ctl.sendReminderSms(...a),
+  // Przypomnienie 24 h (reminders/appointment): treść z prawdziwego szablonu,
+  // wysyłka przez zmockowany sendSms — asercje liczą wywołania ctl.sendSms.
+  sendAppointmentReminder24hSms: async (p: import("@/lib/sms").AppointmentReminder24hSmsParams) => {
+    const real = await orig<typeof import("@/lib/sms")>();
+    return ctl.sendSms({
+      to: p.clientPhone,
+      message: real.buildAppointmentReminder24hSms(p),
+      salonId: p.salonId,
+      clientId: p.clientId,
+    });
+  },
 }));
 vi.mock("@/lib/subscription", async (orig) => ({
   ...(await orig<typeof import("@/lib/subscription")>()),
