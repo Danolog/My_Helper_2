@@ -787,7 +787,7 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
     });
   });
 
-  describe("#193 S1b — downgrade pod blokadą salonu w transakcji forSalon (rola aplikacji)", () => {
+  describe("#193 — downgrade pod blokadą salonu w transakcji forSalon (rola aplikacji)", () => {
     const appRole = process.env.MYHELPER_APP_DB_ROLE ?? "myhelper_app";
     let higherPlanId = "";
     const periodEnd = new Date(Date.now() + 20 * DAY * 1000);
@@ -838,7 +838,7 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
     beforeAll(async () => {
       const [higher] = await h!.db
         .insert(subscriptionPlans)
-        .values({ name: "IT S1b wyższy", slug: `${testPlanSlug}-hi`, priceMonthly: "299.00" })
+        .values({ name: "IT wyższy", slug: `${testPlanSlug}-hi`, priceMonthly: "299.00" })
         .returning();
       higherPlanId = higher!.id;
     });
