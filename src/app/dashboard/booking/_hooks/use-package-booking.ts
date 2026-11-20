@@ -61,7 +61,8 @@ export function usePackageBooking({ salonId, selectedClientId }: UsePackageBooki
   }, [salonId]);
 
   const fetchPackageSlots = useCallback(async (empId: string, date: string, duration: number, signal: AbortSignal | null = null) => {
-    if (!empId || !date || !duration) {
+    // Bez salonu z sesji nie pytamy o terminy — trasa bedzie je liczyc w obrebie salonu.
+    if (!salonId || !empId || !date || !duration) {
       setPackageSlotsData(null);
       return;
     }
@@ -69,7 +70,7 @@ export function usePackageBooking({ salonId, selectedClientId }: UsePackageBooki
     setPackageTimeSlot("");
     try {
       const res = await fetch(
-        `/api/available-slots?employeeId=${empId}&date=${date}&duration=${duration}`,
+        `/api/available-slots?salonId=${encodeURIComponent(salonId)}&employeeId=${empId}&date=${date}&duration=${duration}`,
         { signal }
       );
       if (!res.ok) { setPackageSlotsData(null); return; }
@@ -85,7 +86,7 @@ export function usePackageBooking({ salonId, selectedClientId }: UsePackageBooki
     } finally {
       setLoadingPackageSlots(false);
     }
-  }, []);
+  }, [salonId]);
 
   // --- Effects ---
 
