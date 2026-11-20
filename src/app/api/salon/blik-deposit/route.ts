@@ -100,8 +100,8 @@ export async function PUT(request: Request) {
         : { blikPhone: parsed.data.blikPhone, blikConsentAt: new Date().toISOString() };
 
     // Zapis atomowy jednym UPDATE (jsonb_set): podmienia tylko klucz `deposits`,
-    // więc równoległy zapis `modules`/`loyalty` nie zostanie nadpisany starą
-    // kopią ustawień (inaczej niż odczyt-scalenie-zapis w salons/[id]/modules).
+    // tak jak trasy pozostałych ustawień salonu, więc żaden równoległy zapis
+    // innego klucza nie nadpisze go starą kopią ustawień.
     const updated = await forSalon(salonId).raw((tx) =>
       tx
         .update(salons)
