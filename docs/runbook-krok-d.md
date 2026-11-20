@@ -178,7 +178,10 @@ Tworzy:
   `cloudsql.backupRuns.get`, `cloudsql.instances.get` (śledzenie operacji; bez
   `list` — W-1, Ryan). Istniejąca rola dostaje tę samą listę (`iam roles update`).
   Warunek obejmuje oba typy zasobu, bo operacje na kopiach mają typ `BackupRun`:
-  `(resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/P/instances/myhelper-pg") || (resource.type == "sqladmin.googleapis.com/BackupRun" && resource.name.startsWith("projects/P/instances/myhelper-pg/"))`.
+  `(resource.type == "sqladmin.googleapis.com/Instance" || resource.type == "sqladmin.googleapis.com/BackupRun") && (resource.name == "projects/P/instances/myhelper-pg" || resource.name.startsWith("projects/P/instances/myhelper-pg/"))`.
+  `cloudsql.backupRuns.create` jest oceniane z nazwą samej instancji (bez ukośnika
+  na końcu — log audytu), więc BackupRun musi przechodzić także przy równości
+  nazwy; prefiks z ukośnikiem nie wpuszcza `myhelper-pg2`.
   Cloud SQL nie ma polityk IAM na instancji, więc wiązanie projektowe z warunkiem
   (Oliver). Z bazą łączy się
   tylko konto runtime: usługa i job migracji `myhelper-migrate` działają jako

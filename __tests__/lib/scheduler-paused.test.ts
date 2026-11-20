@@ -86,13 +86,15 @@ const printResource = (j) => { if (flag("format") !== "none") console.log(JSON.s
 if (verb === "describe") {
   if (!job) process.exit(1);
   const fmt = flag("format");
+  // FAKE_ENUM_LOWER: enumy w value() małymi literami (tak gcloud wypisuje stan wersji sekretu).
+  const en = (v) => (process.env.FAKE_ENUM_LOWER ? String(v).toLowerCase() : v);
   if (fmt === "value(name)") console.log(name);
-  else if (fmt === "value(state)") console.log(job.state);
+  else if (fmt === "value(state)") console.log(en(job.state));
   else if (fmt === "value(schedule)") {
     if (process.env.FAKE_SCHEDULE_READ === "fail") { process.stderr.write("ERROR: UNAVAILABLE\\n"); process.exit(1); }
     console.log(process.env.FAKE_SCHEDULE_READ === "empty" ? "" : job.schedule);
   }
-  else console.log([job.schedule, job.timeZone, job.uri, job.method, job.state].join("\\t"));
+  else console.log([job.schedule, job.timeZone, job.uri, en(job.method), en(job.state)].join("\\t"));
 } else if (verb === "create") {
   if (job) process.exit(1);
   if (!ffText || !ffText.includes("Authorization")) process.exit(3);
@@ -192,6 +194,24 @@ describe("G-C5b: tworzenie wstrzymane (#121 j)", () => {
       expect(mine[4]).toContain(`--schedule=${job.schedule}`);
       expect(w.state(job.name)).toMatchObject({ state: "PAUSED", schedule: job.schedule, timeZone: "Europe/Warsaw", method: "GET" });
     }
+  });
+
+  it("enumy z gcloud małymi literami (`enabled`/`paused`/`get`): pełny cykl jak przy wielkich", () => {
+    const w = world();
+    const lower = { FAKE_ENUM_LOWER: "1" };
+    const r = w.run([], lower);
+    expect(r.status, r.stderr).toBe(0);
+    for (const job of TABLE) expect(w.state(job.name).state, job.name).toBe("PAUSED");
+    expect(w.run(["--check"], lower).status).toBe(1);
+    const res = w.run(["--resume", ...NAMES], lower);
+    expect(res.status, res.stderr).toBe(0);
+    for (const job of TABLE) expect(w.state(job.name).state, job.name).toBe(job.state);
+    const post = w.run(["--check"], lower);
+    expect(post.status, post.stdout).toBe(0);
+    // Ponowne --resume: stan `enabled` rozpoznany, bez resume na ENABLED.
+    const before = w.calls().length;
+    expect(w.run(["--resume", ...NAMES], lower).status).toBe(0);
+    expect(w.calls().slice(before).some((c) => verbOf(c).startsWith("resume"))).toBe(false);
   });
 
   it("pauza bez skutku → stop z kodem 1 po pierwszym zadaniu, następne nie powstają", () => {
