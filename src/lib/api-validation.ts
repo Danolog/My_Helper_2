@@ -724,7 +724,7 @@ const blikPhoneField = z.preprocess(
  * brak klucza nie może przypadkiem skasować ustawienia). Numer wymaga
  * `consent: true` (RODO: zgoda właściciela na pokazanie numeru klientom).
  * Data zgody NIE pochodzi z body — nadaje ją serwer; nieznane klucze
- * (np. `blikConsentAt`) schemat odrzuca przez strip.
+ * (np. `blikConsentAt`) schemat pomija (strip), żądanie przechodzi.
  */
 export const blikDepositSettingsSchema = z
   .object({
