@@ -11,7 +11,7 @@ import { useTabSync } from "@/hooks/use-tab-sync";
 import type { SalonRole } from "@/lib/salon-context";
 import { formatTime } from "./dashboard-types";
 
-/** Role, ktore moga oznaczyc zadatek albo anulowac wizyte — tylko one widza liste. */
+/** Role, ktore moga recznie oznaczyc zadatek (jak przycisk oznaczenia) — tylko one widza liste. */
 const DEPOSITS_PENDING_ROLES: readonly SalonRole[] = ["owner", "receptionist"];
 
 const DEPOSITS_PENDING_ERROR = "Nie udalo sie pobrac wizyt czekajacych na zadatek";
@@ -35,10 +35,10 @@ interface AppointmentsResponse {
 }
 
 /**
- * Karta pulpitu z nadchodzacymi wizytami, ktore czekaja na wplate zadatku.
- * Rezerwacja z zadatkiem bez wplaty trzyma termin bez konca, wiec wlasciciel
- * i recepcja musza widziec takie wizyty w jednym miejscu. Bez takich wizyt
- * karta nie renderuje sie wcale.
+ * Karta pulpitu z wizytami od poczatku dzisiejszego dnia, ktore czekaja na
+ * wplate zadatku. Rezerwacja z zadatkiem rozliczanym poza MyHelper nie jest
+ * anulowana automatycznie, wiec wlasciciel i recepcja musza widziec takie
+ * wizyty w jednym miejscu. Pusta lista = brak karty; blad pobrania = karta z tekstem bledu.
  */
 export function DashboardDepositsPending() {
   const role = useSalonRole();
