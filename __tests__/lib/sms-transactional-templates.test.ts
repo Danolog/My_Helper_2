@@ -1,7 +1,10 @@
 /**
- * Szablony SMS transakcyjnych z src/lib/sms.ts: przy zwykłym imieniu klienta, nazwie usługi i pracownika
- * treść przekazana dostawcy zawiera wyłącznie informację o wizycie / płatności —
- * bez adresu URL i bez wezwania do rezerwacji, także przy wrogiej nazwie salonu.
+ * Szablony SMS transakcyjnych z src/lib/sms.ts: treść przekazana dostawcy
+ * zawiera wyłącznie informację o wizycie / płatności — bez adresu URL i bez
+ * wezwania do rezerwacji, także przy wrogiej nazwie salonu. Imię klienta
+ * z adresem, cyfrą albo ponad limit jest pomijane (treść bez powitania), a nazwa
+ * usługi i pracownika wyglądająca na adres — opuszczana; treść zostaje
+ * gramatyczna przy pustych polach.
  *
  * Lista szablonów jest zamknięta względem eksportów sms.ts: każdy eksport
  * `send…Sms` (poza ogólnym `sendSms`) musi mieć wpis w TEMPLATES, inaczej
@@ -336,4 +339,209 @@ describe("SMS rezerwacji z zadatkiem BLIK (buildBlikDepositBookingSms)", () => {
     expect(mockFetch).not.toHaveBeenCalled();
     expect(mockDbValues).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["www.", "Anna www.oplaty-salon.pl"],
+    ["domena", "Anna.com"],
+    ["https://", "https://oplata.example/zadatek"],
+  ])("nazwa pracownika wyglądająca na adres (%s) → bez fragmentu „u …”", (_n, employeeName) => {
+    const message = sms.buildBlikDepositBookingSms(params({ employeeName }));
+    expect(message).toContain('Rezerwacja przyjeta: Jan Testowy, "Strzyzenie" w Salon Uroda 15 stycznia o 14:00.');
+    expect(message).not.toMatch(/ u /);
+    expect(message).toContain(`na telefon ${BLIK_PHONE}, tytul: ${TITLE}.`);
+  });
+
+  it("nazwa pracownika ponad limit → skrócona do 40 znaków z „...”", () => {
+    const message = sms.buildBlikDepositBookingSms(params({ employeeName: "Anna " + "x".repeat(60) }));
+    expect(message).toContain(` u Anna ${"x".repeat(32)}... w Salon Uroda`);
+  });
 });
+
+/**
+ * Trzy szablony z imieniem klienta, usługą i pracownikiem wysyłane przez
+ * sendSms (przypomnienie, potwierdzenie rezerwacji, potwierdzenie płatności).
+ */
+describe("SMS przypomnienia i potwierdzeń: imię, usługa i pracownik przez filtry", () => {
+  interface TemplateFields {
+    clientName: string;
+    serviceName: string;
+    employeeName: string;
+  }
+
+  const BASE: TemplateFields = { clientName: "Jan Kowalski", serviceName: "Strzyzenie", employeeName: "Anna Nowak" };
+  // 13:00 UTC = 14:00 w Warszawie (zima, UTC+1).
+  const WARSAW_DATE = new Date("2030-01-15T13:00:00.000Z");
+
+  /** Każdy szablon: wysyłka z podmienionymi polami oraz oczekiwany początek treści. */
+  const SENDERS: Record<
+    string,
+    { send: (f: TemplateFields) => Promise<sms.SmsResult>; prefix: (greeting: string) => string; noName: string }
+  > = {
+    sendAppointmentReminderSms: {
+      send: (f) =>
+        sms.sendAppointmentReminderSms({
+          clientPhone: PHONE,
+          ...f,
+          appointmentDate: WARSAW_DATE,
+          salonName: "Salon Uroda",
+          salonId: SALON_ID,
+        }),
+      prefix: (g) => `Przypomnienie: ${g}Twoja wizyta "Strzyzenie" u Anna Nowak w Salon Uroda juz dzisiaj o 14:00`,
+      noName: "Przypomnienie: Twoja wizyta",
+    },
+    sendBookingConfirmationSms: {
+      send: (f) =>
+        sms.sendBookingConfirmationSms({
+          clientPhone: PHONE,
+          ...f,
+          appointmentDate: WARSAW_DATE,
+          salonName: "Salon Uroda",
+          salonId: SALON_ID,
+        }),
+      prefix: (g) => `Potwierdzenie rezerwacji: ${g}Twoja wizyta "Strzyzenie" u Anna Nowak w Salon Uroda zostala umowiona na `,
+      noName: "Potwierdzenie rezerwacji: Twoja wizyta",
+    },
+    sendPaymentConfirmationSms: {
+      send: (f) =>
+        sms.sendPaymentConfirmationSms({
+          clientPhone: PHONE,
+          ...f,
+          amount: 50,
+          currency: "PLN",
+          appointmentDate: WARSAW_DATE,
+          salonName: "Salon Uroda",
+          salonId: SALON_ID,
+        }),
+      prefix: (g) => `Potwierdzenie platnosci: ${g}zadatek 50.00 PLN za usluge "Strzyzenie" u Anna Nowak w Salon Uroda dnia `,
+      noName: "Potwierdzenie platnosci: zadatek 50.00 PLN",
+    },
+  };
+
+  const NAMES = Object.keys(SENDERS);
+
+  /** Treść wysłana przez dany szablon przy polach BASE z podmianą. */
+  async function messageOf(name: string, patch: Partial<TemplateFields> = {}): Promise<string> {
+    mockFetch.mockClear();
+    const result = await SENDERS[name]!.send({ ...BASE, ...patch });
+    expect(result.success).toBe(true);
+    return sentMessage();
+  }
+
+  /** Niezależna kopia podstawowej tabeli GSM 03.38 (bez LF, CR, ESC). */
+  const GSM7 = new Set(
+    "@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?" +
+      "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà"
+  );
+
+  it.each(NAMES)("%s: zwykłe imię, usługa i pracownik → pełna treść jak dotąd", async (name) => {
+    expect(await messageOf(name)).toMatch(new RegExp(`^${escapeRegExp(SENDERS[name]!.prefix("Jan Kowalski, "))}`));
+  });
+
+  it.each(NAMES)("%s: imię z polskimi znakami → po oczyszczeniu w powitaniu", async (name) => {
+    expect(await messageOf(name, { clientName: "Józef Żółć" })).toMatch(
+      new RegExp(`^${escapeRegExp(SENDERS[name]!.prefix("Jozef Zolc, "))}`)
+    );
+  });
+
+  const HOSTILE_CLIENT_NAMES: ReadonlyArray<[string, string]> = [
+    ["adres www.", "Jan www.oplaty-salon.pl"],
+    ["adres https://", "https://oplata.example/zadatek"],
+    ["domena dopiero po oczyszczeniu", "Jan oplata.​com"],
+    ["cyfra (telefon)", "Jan 600123456"],
+    ["jedna cyfra", "Jan2"],
+    ["cyfry pełnoszerokie", "Jan ６００１２３"],
+    ["cyfra widoczna dopiero po oczyszczeniu", "Jan ㏠"],
+    ["ponad 30 znaków", "Aleksandra Wisniewska-Kowalskaa"],
+  ];
+
+  it.each(
+    NAMES.flatMap((name) =>
+      HOSTILE_CLIENT_NAMES.map(([label, value]): [string, string, string] => [name, label, value])
+    )
+  )("%s: imię (%s) → bez powitania, reszta treści bez zmian", async (name, _label, clientName) => {
+    const message = await messageOf(name, { clientName });
+    expect(message).toBe(await messageOf(name, { clientName: "" }));
+    expect(message).toMatch(new RegExp(`^${escapeRegExp(SENDERS[name]!.prefix(""))}`));
+  });
+
+  it.each(NAMES)("%s: imię dokładnie w limicie 30 znaków → zostaje", async (name) => {
+    const atLimit = "Aleksandra Wisniewska-Kowalska";
+    expect(atLimit).toHaveLength(30);
+    expect(await messageOf(name, { clientName: atLimit })).toContain(`: ${atLimit}, `);
+  });
+
+  it.each(NAMES)("%s: imię z wstrzykniętym numerem → numer nie trafia do treści", async (name) => {
+    const PRIVATE_DIGITS = "799888777";
+    for (const clientName of [
+      `Wplac na ${PRIVATE_DIGITS.replace(/(\d{3})(?=\d)/g, "$1 ")}`,
+      `Wplac na ${PRIVATE_DIGITS}`,
+      "Wplac na ７９９８８８７７７",
+    ]) {
+      const message = await messageOf(name, { clientName });
+      expect(message.replace(/\D/g, "")).not.toContain(PRIVATE_DIGITS);
+      expect(message).not.toMatch(/Wplac na/);
+    }
+  });
+
+  const HOSTILE_OWNER_TEXTS: ReadonlyArray<[string, Partial<TemplateFields>]> = [
+    ["usługa", { serviceName: "www.promo.pl" }],
+    ["usługa", { serviceName: "Promocja https://oplata.example" }],
+    ["pracownik", { employeeName: "Anna www.oplaty-salon.pl" }],
+    ["pracownik", { employeeName: "Oplata.com" }],
+  ];
+
+  it.each(
+    NAMES.flatMap((name) =>
+      HOSTILE_OWNER_TEXTS.map(([label, patch]): [string, string, Partial<TemplateFields>] => [name, label, patch])
+    )
+  )("%s: %s wyglądająca na adres → pominięta", async (name, _label, patch) => {
+    const message = await messageOf(name, patch);
+    expect(message).not.toMatch(/\.pl\b|\.com\b|https?:\/\/|www\.|oplat/i);
+    expect(message).toContain("Jan Kowalski, ");
+  });
+
+  it("puste pola: treść gramatyczna bez powitania, usługi i pracownika", async () => {
+    const empty = { clientName: "", serviceName: "", employeeName: "" };
+    expect(await messageOf("sendAppointmentReminderSms", empty)).toMatch(
+      /^Przypomnienie: Twoja wizyta w Salon Uroda juz dzisiaj o 14:00 \(15 stycznia\)\. Do zobaczenia!$/
+    );
+    expect(await messageOf("sendBookingConfirmationSms", empty)).toMatch(
+      /^Potwierdzenie rezerwacji: Twoja wizyta w Salon Uroda zostala umowiona na .+ o 14:00\. Do zobaczenia!$/
+    );
+    expect(await messageOf("sendPaymentConfirmationSms", empty)).toMatch(
+      /^Potwierdzenie platnosci: zadatek 50\.00 PLN za wizyte w Salon Uroda dnia .+ zostal przyjety\. Dziekujemy!$/
+    );
+  });
+
+  it.each(NAMES)("%s: wrogie wszystkie pola → treść gramatyczna, jak przy pustych", async (name) => {
+    const hostile = await messageOf(name, {
+      clientName: "Jan 600123456",
+      serviceName: "www.promo.pl",
+      employeeName: "Oplata.com",
+    });
+    expect(hostile).toBe(await messageOf(name, { clientName: "", serviceName: "", employeeName: "" }));
+    expect(hostile.startsWith(SENDERS[name]!.noName)).toBe(true);
+    expect(hostile).not.toMatch(/ {2}|""|: ,| u w | u (juz|zostala|dnia)\b/);
+  });
+
+  it.each(NAMES)("%s: wyłącznie znaki GSM-7 (polskie znaki, nowe linie, emoji)", async (name) => {
+    const message = await messageOf(name, {
+      clientName: "Zoś\nka 💅",
+      serviceName: "Manicure ✨ ąę",
+      employeeName: "Ćma\tŻak",
+    });
+    expect([...message].filter((c) => !GSM7.has(c))).toEqual([]);
+    expect(message).toContain('"Manicure ae"');
+    expect(message).toContain(" u Cma Zak ");
+  });
+
+  it.each(NAMES)("%s: nazwa pracownika ponad limit → skrócona z „...”", async (name) => {
+    const message = await messageOf(name, { employeeName: "Anna " + "x".repeat(60) });
+    expect(message).toContain(` u Anna ${"x".repeat(32)}... w Salon Uroda`);
+  });
+});
+
+/** Ucieczka znaków specjalnych do dosłownego dopasowania w RegExp. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
