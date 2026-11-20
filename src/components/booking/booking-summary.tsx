@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { isBlikDepositFlow } from "@/lib/features";
 import { formatDuration, formatDateDisplay, calcEndTime } from "./types";
 import type { AssignedEmployee, ServiceItem, ServiceVariant } from "./types";
 
@@ -131,6 +132,9 @@ export const BookingSummary = forwardRef<HTMLDivElement, BookingSummaryProps>(
     } = promotion;
 
     const { depositRequired, depositAmount, depositPercentage } = deposit;
+    // BLIK deposit is paid by the client to the salon's phone after booking,
+    // so the summary must not offer or promise any online payment.
+    const blikFlow = isBlikDepositFlow();
 
     return (
       <Card
@@ -295,11 +299,17 @@ export const BookingSummary = forwardRef<HTMLDivElement, BookingSummaryProps>(
                       Zadatek jest wymagany do potwierdzenia rezerwacji. Pozostala kwota platna w salonie.
                     </p>
 
-                    {/* Payment method info.
+                    {blikFlow ? (
+                      <div className="space-y-1 text-sm text-amber-800 dark:text-amber-300" data-testid="blik-deposit-notice">
+                        <p>Zadatek wplacisz BLIK-iem na telefon salonu. Numer, odbiorce i tytul przelewu pokazemy po rezerwacji.</p>
+                        <p>Zadatek rozliczany poza MyHelper — zwrot ustala salon.</p>
+                      </div>
+                    ) : (
+                    /* Payment method info.
                         The mock "BLIK P2P" option (payment request to a phone
                         number) was removed — BLIK and Przelewy24 are available
                         as payment methods inside Stripe Checkout, so a single
-                        online payment entry is enough. */}
+                        online payment entry is enough. */
                     <div className="space-y-2">
                       <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Metoda platnosci:</p>
                       <div className="grid grid-cols-1 gap-2">
@@ -326,6 +336,7 @@ export const BookingSummary = forwardRef<HTMLDivElement, BookingSummaryProps>(
                         </div>
                       </div>
                     </div>
+                    )}
                   </div>
                 </>
               )}
@@ -395,7 +406,13 @@ export const BookingSummary = forwardRef<HTMLDivElement, BookingSummaryProps>(
                 {isBooking || isProcessingPayment ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    {isProcessingPayment ? "Przetwarzanie platnosci..." : "Rezerwowanie..."}
+                    {/* Nothing is paid online in the BLIK flow. */}
+                    {isProcessingPayment && !blikFlow ? "Przetwarzanie platnosci..." : "Rezerwowanie..."}
+                  </div>
+                ) : blikFlow && depositRequired && depositAmount > 0 ? (
+                  <div className="flex items-center gap-2">
+                    <CalendarPlus className="h-5 w-5" />
+                    Zarezerwuj — zadatek {depositAmount} PLN BLIK-iem
                   </div>
                 ) : depositRequired && depositAmount > 0 ? (
                   <div className="flex items-center gap-2">
