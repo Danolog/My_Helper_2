@@ -433,7 +433,8 @@ export async function sendAppointmentReminderSms(params: {
 
 /**
  * Send a booking confirmation SMS right after an appointment is created
- * without a deposit (deposit bookings get their confirmation after payment).
+ * without a deposit (Stripe deposit bookings get their confirmation after
+ * payment; BLIK deposit bookings get sendBlikDepositBookingSms instead).
  */
 export async function sendBookingConfirmationSms(params: {
   clientPhone: string;
