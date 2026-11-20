@@ -38,7 +38,7 @@ import postgres from "postgres";
 /** Plik migracji, z którego wyprowadzana jest lista tabel z RLS. */
 export const RLS_MIGRATION_FILE = "drizzle/0005_rls_tenant_isolation.sql";
 
-/** Tabela z RLS i nazwa polityki, której wymaga migracja 0005. */
+/** Tabela z RLS i nazwa polityki, której wymaga migracja 0005 albo plik z RLS_EXTRA_MIGRATION_FILES. */
 export interface RlsRequirement {
   table: string;
   policy: string;
@@ -197,8 +197,8 @@ export type RlsGuardResult =
   | { ok: false; missing: string[]; message: string };
 
 /**
- * Czysta decyzja: każda tabela z 0005 istnieje, ma RLS i politykę o nazwie z pliku;
- * tabel z RLS w bazie co najmniej tyle, ile tabel w pliku. Pusta lista wymagań = odmowa.
+ * Czysta decyzja: każda tabela z listy (0005 + RLS_EXTRA_MIGRATION_FILES) istnieje, ma RLS i politykę o nazwie z pliku;
+ * tabel z RLS w bazie co najmniej tyle, ile tabel na liście. Pusta lista wymagań = odmowa.
  */
 export function checkRls(rows: readonly RlsRow[], required: readonly RlsRequirement[]): RlsGuardResult {
   if (required.length === 0) {
@@ -213,7 +213,7 @@ export function checkRls(rows: readonly RlsRow[], required: readonly RlsRequirem
     else if (!row.policies.includes(req.policy)) missing.push(`${req.table} (brak polityki ${req.policy})`);
   }
   const rlsTables = rows.filter((r) => r.rls === true).length;
-  if (rlsTables < required.length) missing.push(`tabel z RLS w bazie ${rlsTables} < ${required.length} z 0005`);
+  if (rlsTables < required.length) missing.push(`tabel z RLS w bazie ${rlsTables} < ${required.length} z migracji`);
   if (missing.length === 0) return { ok: true, checked: required.length, rlsTables };
   const shown = missing.slice(0, 5).join(", ");
   const more = missing.length > 5 ? ` i ${missing.length - 5} więcej` : "";
@@ -221,7 +221,7 @@ export function checkRls(rows: readonly RlsRow[], required: readonly RlsRequirem
     ok: false,
     missing,
     message:
-      `RLS z 0005 niekompletne (${missing.length}): ${shown}${more} — baza zbudowana bez db:migrate ` +
+      `RLS z migracji niekompletne (${missing.length}): ${shown}${more} — baza zbudowana bez db:migrate ` +
       "albo po nim nadpisana przez db:push. Schemat tylko przez pnpm db:migrate.",
   };
 }
@@ -462,7 +462,7 @@ async function main(): Promise<number> {
       return 1;
     }
     console.log(
-      `[db-rls-guard] OK: RLS i polityki z 0005 na ${result.checked} tabelach; tabel z RLS w bazie: ${result.rlsTables}; ` +
+      `[db-rls-guard] OK: RLS i polityki z migracji na ${result.checked} tabelach; tabel z RLS w bazie: ${result.rlsTables}; ` +
         `polityk zgodnych z migawką: ${policies.policies}; role aplikacji bez SUPERUSER/BYPASSRLS`,
     );
     return 0;

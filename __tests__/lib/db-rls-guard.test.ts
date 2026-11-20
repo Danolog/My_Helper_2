@@ -43,7 +43,7 @@ const SQL = readFileSync(join(ROOT, "drizzle/0005_rls_tenant_isolation.sql"), "u
 const RLS = loadRlsRequirements();
 const fullRls = (): RlsRow[] => RLS.map((r) => ({ table: r.table, rls: true, policies: [r.policy] }));
 
-describe("strażnik — lista RLS z migracji 0005", () => {
+describe("strażnik — lista RLS z migracji (0005 + RLS_EXTRA_MIGRATION_FILES)", () => {
   it("pliki migracji: 0005 + jawne polityki z RLS_EXTRA_MIGRATION_FILES", () => {
     expect(RLS_MIGRATION_FILE).toBe("drizzle/0005_rls_tenant_isolation.sql");
     expect(RLS_EXTRA_MIGRATION_FILES).toEqual(["drizzle/0014_deposit_status_events.sql"]);
@@ -151,21 +151,21 @@ describe("strażnik — decyzja", () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.missing).toHaveLength(41);
-    expect(r.missing).toContain("tabel z RLS w bazie 0 < 40 z 0005");
-    expect(r.message).toMatch(/^RLS z 0005 niekompletne \(41\): .* i 36 więcej — .*pnpm db:migrate\.$/);
+    expect(r.missing).toContain("tabel z RLS w bazie 0 < 40 z migracji");
+    expect(r.message).toMatch(/^RLS z migracji niekompletne \(41\): .* i 36 więcej — .*pnpm db:migrate\.$/);
   });
 
   it("RLS wyłączone na deposit_status_events (0014) → odmowa wskazująca tabelę", () => {
     const r = checkRls(fullRls().map((x) => (x.table === "deposit_status_events" ? { ...x, rls: false } : x)), RLS);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.missing).toEqual(["deposit_status_events (RLS wyłączone)", "tabel z RLS w bazie 39 < 40 z 0005"]);
+    if (!r.ok) expect(r.missing).toEqual(["deposit_status_events (RLS wyłączone)", "tabel z RLS w bazie 39 < 40 z migracji"]);
   });
 
   it.each([
-    ["RLS wyłączone na appointments", (rows: RlsRow[]) => rows.map((x) => (x.table === "appointments" ? { ...x, rls: false } : x)), ["appointments (RLS wyłączone)", "tabel z RLS w bazie 39 < 40 z 0005"]],
+    ["RLS wyłączone na appointments", (rows: RlsRow[]) => rows.map((x) => (x.table === "appointments" ? { ...x, rls: false } : x)), ["appointments (RLS wyłączone)", "tabel z RLS w bazie 39 < 40 z migracji"]],
     ["brak polityki na deposit_payments", (rows: RlsRow[]) => rows.map((x) => (x.table === "deposit_payments" ? { ...x, policies: [] } : x)), ["deposit_payments (brak polityki tenant_isolation)"]],
     ["salons z tenant_isolation zamiast tenant_self", (rows: RlsRow[]) => rows.map((x) => (x.table === "salons" ? { ...x, policies: ["tenant_isolation"] } : x)), ["salons (brak polityki tenant_self)"]],
-    ["brak tabeli clients", (rows: RlsRow[]) => rows.filter((x) => x.table !== "clients"), ["clients (brak tabeli)", "tabel z RLS w bazie 39 < 40 z 0005"]],
+    ["brak tabeli clients", (rows: RlsRow[]) => rows.filter((x) => x.table !== "clients"), ["clients (brak tabeli)", "tabel z RLS w bazie 39 < 40 z migracji"]],
   ])("%s → odmowa wskazująca tabelę", (_n, mutate, expected) => {
     const r = checkRls(mutate(fullRls()), RLS);
     expect(r.ok).toBe(false);
@@ -178,7 +178,7 @@ describe("strażnik — decyzja", () => {
     expect(checkRls(rows, req)).toEqual({ ok: true, checked: 2, rlsTables: 2 });
     const r = checkRls([{ table: "b", rls: true, policies: ["p"] }, { table: "a", rls: false, policies: ["p"] }], req);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.missing).toContain("tabel z RLS w bazie 1 < 2 z 0005");
+    if (!r.ok) expect(r.missing).toContain("tabel z RLS w bazie 1 < 2 z migracji");
   });
 
   it("pusta lista wymagań → odmowa (nic nie sprawdzono to nie sukces)", () => {

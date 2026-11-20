@@ -65,7 +65,7 @@ const LOCAL = "postgresql://dev_user:pw-x9@localhost:5432/pos_dev";
 const RLS = loadRlsRequirements();
 const fullRls = (): RlsRow[] => RLS.map((r) => ({ table: r.table, rls: true, policies: [r.policy] }));
 
-describe("strażnik — lista RLS z migracji 0005", () => {
+describe("strażnik — lista RLS z migracji (0005 + RLS_EXTRA_MIGRATION_FILES)", () => {
   it("40 tabel: 38 z 0005 i deposit_status_events z 0014 z tenant_isolation, salons z tenant_self", () => {
     expect(RLS).toHaveLength(40);
     expect(RLS.filter((r) => r.policy === "tenant_isolation")).toHaveLength(39);
@@ -131,9 +131,9 @@ describe("strażnik — decyzja", () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.missing).toHaveLength(41);
-    expect(r.missing).toContain("tabel z RLS w bazie 0 < 40 z 0005");
+    expect(r.missing).toContain("tabel z RLS w bazie 0 < 40 z migracji");
     expect(r.message).toMatch(
-      /^RLS z 0005 niekompletne \(41\): .* i 36 więcej — baza zbudowana bez db:migrate albo po nim nadpisana przez db:push\. .* Odbuduj: pnpm db:reset \(lokalnie\) albo pnpm db:migrate na pustej bazie\.$/
+      /^RLS z migracji niekompletne \(41\): .* i 36 więcej — baza zbudowana bez db:migrate albo po nim nadpisana przez db:push\. .* Odbuduj: pnpm db:reset \(lokalnie\) albo pnpm db:migrate na pustej bazie\.$/
     );
   });
 
@@ -143,7 +143,7 @@ describe("strażnik — decyzja", () => {
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.missing.slice(0, 2)).toEqual(["appointments_no_overlap", "appointments (RLS wyłączone)"]);
-    expect(r.message).toMatch(/^Brak appointments_no_overlap; RLS z 0005 niekompletne \(2\): /);
+    expect(r.message).toMatch(/^Brak appointments_no_overlap; RLS z migracji niekompletne \(2\): /);
     expect(r.message).toMatch(/ Odbuduj: pnpm db:reset/);
   });
 
@@ -151,7 +151,7 @@ describe("strażnik — decyzja", () => {
     const rows = fullRls().map((x) => (x.table === "appointments" ? { ...x, rls: false } : x));
     const r = checkSchema([...REQUIRED_CONSTRAINTS], rows, RLS);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.missing).toContain("tabel z RLS w bazie 39 < 40 z 0005");
+    if (!r.ok) expect(r.missing).toContain("tabel z RLS w bazie 39 < 40 z migracji");
   });
 
   it("D3: liczba tabel z RLS w bazie mniejsza mimo kompletu wymagań → odmowa (osobna gałąź)", () => {
@@ -160,7 +160,7 @@ describe("strażnik — decyzja", () => {
     expect(checkSchema([...REQUIRED_CONSTRAINTS], rows, req)).toEqual({ ok: true });
     const r = checkSchema([...REQUIRED_CONSTRAINTS], rows, [...req, req[0]!]);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.missing).toEqual(["tabel z RLS w bazie 2 < 3 z 0005"]);
+    if (!r.ok) expect(r.missing).toEqual(["tabel z RLS w bazie 2 < 3 z migracji"]);
   });
 
   it("schemat korzysta ze wspólnego strażnika RLS (#194), bez własnego parsera", () => {
