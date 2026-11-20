@@ -11,7 +11,8 @@ interface AppointmentRefundStatusProps {
 }
 
 /**
- * Renders the refund status card for cancelled appointments with deposits,
+ * Renders, for cancelled appointments with deposits, the refund status card
+ * (online deposit payment) or the deposit card settled outside the app,
  * and the deposit info card for non-cancelled appointments with deposits.
  */
 export function AppointmentRefundStatus({
@@ -40,7 +41,7 @@ export function AppointmentRefundStatus({
               <p className="font-semibold" data-testid="deposit-outside-app-label">
                 {refundStatus.depositPaid
                   ? "Zadatek rozliczany poza MyHelper — zwrot ustala salon"
-                  : "Zadatek nie zostal wplacony"}
+                  : "Zadatek nie zostal oznaczony jako wplacony"}
               </p>
               <div className="text-sm">
                 <span className="text-muted-foreground">Kwota zadatku: </span>

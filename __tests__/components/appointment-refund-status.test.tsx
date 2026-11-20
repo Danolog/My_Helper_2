@@ -70,12 +70,12 @@ describe("wizyta anulowana, zadatek poza MyHelper", () => {
     expectNoRefundWording(container);
   });
 
-  it("niewpłacony → „Zadatek nie zostal wplacony”, bez słownictwa zwrotu", () => {
+  it("nieoznaczony → „Zadatek nie zostal oznaczony jako wplacony”, bez słownictwa zwrotu", () => {
     const { container } = render(
       <AppointmentRefundStatus appointment={appointment()} refundStatus={outsideApp(false)} />
     );
 
-    expect(screen.getByTestId("deposit-outside-app-label").textContent).toBe("Zadatek nie zostal wplacony");
+    expect(screen.getByTestId("deposit-outside-app-label").textContent).toBe("Zadatek nie zostal oznaczony jako wplacony");
     expect(screen.queryByTestId("refund-status-card")).toBeNull();
     expect(container.textContent).not.toContain("poza MyHelper");
     expectNoRefundWording(container);
