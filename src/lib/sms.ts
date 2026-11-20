@@ -276,6 +276,16 @@ const SMS_SALON_NAME_MAX = 40;
 const SMS_SERVICE_NAME_MAX = 40;
 
 /**
+ * Maksymalna długość imienia klienta w SMS z instrukcją płatności. Imię
+ * i nazwisko zwykle mieszczą się w tym limicie; dłuższy tekst nie jest skracany,
+ * tylko pomijany (patrz `clientNameForPaymentSms`).
+ */
+const SMS_CLIENT_NAME_MAX = 30;
+
+/** Dowolny znak liczbowy Unicode (cyfry ASCII, pełnoszerokie, indeksy itd.). */
+const ANY_NUMBER_CHAR = /\p{N}/u;
+
+/**
  * Telefon salonu w treści SMS: po obcięciu spacji w całości cyfry, spacje,
  * nawiasy i myślniki (opcjonalny „+” na początku), 6–20 znaków, w tym co
  * najmniej 6 cyfr. Wartość niepasująca nie jest poprawiana — fragment
@@ -328,6 +338,25 @@ function ownerTextForSms(text: string, max: number): string {
   if (looksLikeAddress(text) || looksLikeAddress(cleaned)) return "";
   if (cleaned.length <= max) return cleaned;
   return `${cleaned.slice(0, max - 3).trimEnd()}...`;
+}
+
+/**
+ * Imię klienta przygotowane do SMS z instrukcją płatności. Imię może pochodzić
+ * z publicznego formularza (także bez sesji), a SMS może wtedy trafić na dowolny numer —
+ * nie może więc przemycić adresu strony ani numeru (telefonu, konta, kodu),
+ * który odbiorca wziąłby za część instrukcji płatności od salonu.
+ * `toGsm7Basic`; pomijane w całości (pusty wynik), gdy przed albo po
+ * oczyszczeniu wygląda na adres albo zawiera jakikolwiek znak liczbowy, oraz
+ * gdy po oczyszczeniu ma ponad SMS_CLIENT_NAME_MAX znaków — obcięcie mogłoby
+ * zostawić czytelny fragment wstrzykniętej instrukcji.
+ */
+function clientNameForPaymentSms(name: string): string {
+  const cleaned = toGsm7Basic(name);
+
+  if (looksLikeAddress(name) || looksLikeAddress(cleaned)) return "";
+  if (ANY_NUMBER_CHAR.test(name) || ANY_NUMBER_CHAR.test(cleaned)) return "";
+  if (cleaned.length > SMS_CLIENT_NAME_MAX) return "";
+  return cleaned;
 }
 
 /**
@@ -534,9 +563,11 @@ export interface BlikDepositBookingSmsParams {
 
 /**
  * Treść SMS o rezerwacji z zadatkiem BLIK (czysta funkcja, bez wysyłki).
- * Teksty z bazy (imię, usługa, pracownik, data) przechodzą przez `toGsm7Basic`,
- * nazwa salonu przez `salonNameForSms`, usługa przez regułę tekstu właściciela
- * (adres pomijany). Numer BLIK, kwota i tytuł nie są skracane — bez nich
+ * Pracownik i data przechodzą przez `toGsm7Basic`, nazwa salonu przez
+ * `salonNameForSms`, usługa przez regułę tekstu właściciela (adres pomijany).
+ * Imię klienta (z kartoteki albo z publicznego formularza) przez `clientNameForPaymentSms`:
+ * imię z adresem, cyfrą albo ponad limit jest pomijane i treść idzie bez
+ * powitania. Numer BLIK, kwota i tytuł nie są skracane — bez nich
  * klient nie zapłaci; numer i tytuł idą bez zmian, bo muszą być identyczne
  * z tym, co pokazał ekran rezerwacji. Data i godzina w strefie SMS_TIME_ZONE.
  */
@@ -555,7 +586,7 @@ export function buildBlikDepositBookingSms(params: BlikDepositBookingSmsParams):
   });
 
   const salon = salonPart(salonNameForSms(params.salonName));
-  const clientName = toGsm7Basic(params.clientName);
+  const clientName = clientNameForPaymentSms(params.clientName);
   const greeting = clientName ? `${clientName}, ` : "";
   const service = ownerTextForSms(params.serviceName, SMS_SERVICE_NAME_MAX) || "wizyta";
   const employee = toGsm7Basic(params.employeeName);

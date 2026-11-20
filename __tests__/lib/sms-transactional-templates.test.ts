@@ -1,7 +1,7 @@
 /**
- * Szablony SMS transakcyjnych z src/lib/sms.ts: treść przekazana dostawcy
- * zawiera wyłącznie informację o wizycie / płatności — bez adresu URL
- * i bez wezwania do rezerwacji.
+ * Szablony SMS transakcyjnych z src/lib/sms.ts: przy zwykłym imieniu klienta, nazwie usługi i pracownika
+ * treść przekazana dostawcy zawiera wyłącznie informację o wizycie / płatności —
+ * bez adresu URL i bez wezwania do rezerwacji, także przy wrogiej nazwie salonu.
  *
  * Lista szablonów jest zamknięta względem eksportów sms.ts: każdy eksport
  * `send…Sms` (poza ogólnym `sendSms`) musi mieć wpis w TEMPLATES, inaczej
@@ -250,6 +250,68 @@ describe("SMS rezerwacji z zadatkiem BLIK (buildBlikDepositBookingSms)", () => {
 
   it("puste imię klienta → bez powitania", () => {
     expect(sms.buildBlikDepositBookingSms(params({ clientName: "" }))).toMatch(/^Rezerwacja przyjeta: "Strzyzenie"/);
+  });
+
+  /** Pełna treść bez powitania — imię pominięte, reszta bez zmian. */
+  const WITHOUT_GREETING =
+    'Rezerwacja przyjeta: "Strzyzenie" u Lucja Nowak w Salon Uroda 15 stycznia o 14:00. ' +
+    `Wplac zadatek 50.00 PLN BLIK-iem na telefon ${BLIK_PHONE}, tytul: ${TITLE}. Salon potwierdzi wplate.`;
+
+  it.each([
+    ["www.", "Jan www.oplaty-salon.pl"],
+    ["domena ze ścieżką", "x.pl/oplata"],
+    ["https://", "https://oplata.example/zadatek"],
+    ["domena dopiero po oczyszczeniu (znak zerowej szerokości)", "Jan oplata.​com"],
+    ["adres numeryczny", "192.168.10.20"],
+  ])("imię wyglądające na adres (%s) → bez powitania, reszta treści bez zmian", (_n, clientName) => {
+    expect(sms.buildBlikDepositBookingSms(params({ clientName }))).toBe(WITHOUT_GREETING);
+  });
+
+  it.each([
+    ["numer telefonu", "Jan 600123456"],
+    ["numer konta", "Konto 12 3456"],
+    ["jedna cyfra", "Jan2"],
+    ["kod BLIK", "Kod BLIK 123 456"],
+    ["cyfry pełnoszerokie (NFKD → ASCII)", "Jan ６００１２３４５６"],
+    ["cyfry arabsko-indyjskie (usuwane przez GSM-7)", "Jan ٦٠٠١٢٣"],
+    ["indeks górny (NFKD → cyfra)", "Jan²"],
+  ])("imię z cyfrą (%s) → bez powitania, reszta treści bez zmian", (_n, clientName) => {
+    expect(sms.buildBlikDepositBookingSms(params({ clientName }))).toBe(WITHOUT_GREETING);
+  });
+
+  it("imię z wstrzykniętym numerem → numer nie trafia do treści", () => {
+    const PRIVATE_DIGITS = "799888777";
+    const message = sms.buildBlikDepositBookingSms(
+      params({ clientName: `Wplac na ${PRIVATE_DIGITS.replace(/(\d{3})(?=\d)/g, "$1 ")}` })
+    );
+    expect(message.replace(/\D/g, "")).not.toContain(PRIVATE_DIGITS);
+    expect(message).not.toMatch(/Wplac na/);
+  });
+
+  it("imię dokładnie w limicie 30 znaków → zostaje; 31 znaków → pominięte w całości", () => {
+    const atLimit = "Aleksandra Wisniewska-Kowalska";
+    expect(atLimit).toHaveLength(30);
+    expect(sms.buildBlikDepositBookingSms(params({ clientName: atLimit }))).toContain(
+      `Rezerwacja przyjeta: ${atLimit}, "Strzyzenie"`
+    );
+
+    const overLimit = `${atLimit}a`;
+    expect(sms.buildBlikDepositBookingSms(params({ clientName: overLimit }))).toBe(WITHOUT_GREETING);
+  });
+
+  it("limit liczony po oczyszczeniu: emoji i znaki sterujące nie wliczają się", () => {
+    const message = sms.buildBlikDepositBookingSms(params({ clientName: `💅💅💅 Aleksandra Wisniewska-Kowalska\n` }));
+    expect(message).toContain('Rezerwacja przyjeta: Aleksandra Wisniewska-Kowalska, "Strzyzenie"');
+  });
+
+  it.each([
+    ["Zofia Wójcik-Łęcka", "Zofia Wojcik-Lecka"],
+    ["Józef Żółć", "Jozef Zolc"],
+    ["  Anna  ", "Anna"],
+  ])("zwykłe imię %j → %j w powitaniu", (clientName, expected) => {
+    expect(sms.buildBlikDepositBookingSms(params({ clientName }))).toContain(
+      `Rezerwacja przyjeta: ${expected}, "Strzyzenie"`
+    );
   });
 
   it("sendBlikDepositBookingSms wysyła treść z buildera przez sendSms (zapis w notifications, z clientId)", async () => {
