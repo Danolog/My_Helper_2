@@ -2,14 +2,13 @@ import { NextResponse } from "next/server";
 import { eq, and, inArray, desc } from "drizzle-orm";
 import { validateBody, subscriptionCheckoutSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// Surowe db: odczyt planu (tabela bez salonu) i bieżących wierszy subskrypcji salonu z sesji (plik na przejściowej liście izolacji danych salonu); odczyt wszystkich wierszy salonu idzie przez forSalon
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { hostingPlatform } from "@/lib/hosting";
 import { logger } from "@/lib/logger";
 import { grossGrosze } from "@/lib/plan-price";
 import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { subscriptionPlans, salonSubscriptions } from "@/lib/schema";
+// Salon wyłącznie z sesji: wszystkie odczyty przez forSalon (rola aplikacji, RLS salonu), wiersze salonu z jawnym eq(salonId); plan z tabeli bez salonu (rola aplikacji ma na niej SELECT)
 import { forSalon } from "@/lib/server/repository";
 import { getStripe } from "@/lib/stripe";
 import { retrieveStripeSubscriptionLocked } from "@/lib/subscription-locks";
@@ -130,16 +129,21 @@ export async function POST(request: Request) {
     // znikaja z wyniku parse) — salon wylacznie z sesji (wyzej).
     const { planSlug } = subscriptionCheckoutSchema.parse(body);
 
-    // Look up the plan in the database
-    const [plan] = await db
-      .select()
-      .from(subscriptionPlans)
-      .where(
-        and(
-          eq(subscriptionPlans.slug, planSlug),
-          eq(subscriptionPlans.isActive, true),
+    const salon = forSalon(salonId);
+
+    // Plan z bazy. `subscription_plans` nie ma kolumny salonu ani RLS, więc
+    // bez filtra salonu; transakcja salonu daje tylko rolę aplikacji.
+    const [plan] = await salon.raw((tx) =>
+      tx
+        .select()
+        .from(subscriptionPlans)
+        .where(
+          and(
+            eq(subscriptionPlans.slug, planSlug),
+            eq(subscriptionPlans.isActive, true),
+          ),
         ),
-      );
+    );
 
     if (!plan) {
       return NextResponse.json(
@@ -153,15 +157,17 @@ export async function POST(request: Request) {
     // Stripe — także trial prowadzony przez Stripe — blokuje nowy Checkout
     // TUTAJ, przed pobraniem pieniędzy, a nie dopiero 409 w confirm.
     const currentRows = (
-      await db
-        .select()
-        .from(salonSubscriptions)
-        .where(
-          and(
-            eq(salonSubscriptions.salonId, salonId),
-            inArray(salonSubscriptions.status, [...CURRENT_LOCAL_STATUSES]),
+      await salon.raw((tx) =>
+        tx
+          .select()
+          .from(salonSubscriptions)
+          .where(
+            and(
+              eq(salonSubscriptions.salonId, salonId),
+              inArray(salonSubscriptions.status, [...CURRENT_LOCAL_STATUSES]),
+            ),
           ),
-        )
+      )
     ).filter((s) => isCurrentLocalStatus(s.status));
 
     const paidStripeRow = currentRows.find(isCurrentPaidStripeRow);
@@ -201,7 +207,7 @@ export async function POST(request: Request) {
     // dni; past_due — stara subskrypcja w Stripe nie jest zakończona). Warunek
     // i termin liczy `purchaseBlock`; odmawiamy do `block.until` (termin
     // pełnego dostępu), bez wywołania Stripe i bez zapisu.
-    const accessRows = await forSalon(salonId).raw(async (tx) => {
+    const accessRows = await salon.raw(async (tx) => {
       const all = await tx
         .select({
           subscription: salonSubscriptions,

@@ -17,6 +17,8 @@
  *   z T3(b) (`salon_id` WHERE status IN ('trialing','active')) — wiersze
  *   „zatwierdzone przez inną transakcję”, niewidoczne dla SELECT-a; INSERT
  *   active/trialing przy istniejącym active/trialing tego salonu → 23505.
+ * - `wheres`: warunki `.where(...)` kolejnych SELECT-ów i zapisów (`op`:
+ *   `select` / `insert` / `update`), do sprawdzenia filtrów przez `PgDialect`.
  *
  * Użycie (fabryki vi.mock nie widzą zwykłych importów):
  *   const f = await vi.hoisted(async () =>
@@ -37,6 +39,7 @@ export function createSubscriptionDbFake() {
   const committed: FakeWrite[] = [];
   const log: string[] = [];
   const partialUniqueActiveTrialing: Array<{ salonId: string; status: string }> = [];
+  const wheres: Array<{ op: "select" | FakeWrite["op"]; table: FakeWrite["table"] | null; cond: unknown }> = [];
   const state = {
     transactions: 0,
     rolledBack: 0,
@@ -54,9 +57,18 @@ export function createSubscriptionDbFake() {
 
   function selectChain() {
     const chain: Record<string, unknown> = {};
-    for (const m of ["from", "where", "innerJoin", "leftJoin", "orderBy", "limit"]) {
+    let table: FakeWrite["table"] | null = null;
+    for (const m of ["innerJoin", "leftJoin", "orderBy", "limit"]) {
       chain[m] = () => chain;
     }
+    chain.from = (t: unknown) => {
+      table = tableName(t);
+      return chain;
+    };
+    chain.where = (cond: unknown) => {
+      wheres.push({ op: "select", table, cond });
+      return chain;
+    };
     chain.then = (resolve: (r: unknown[]) => unknown, reject?: (e: unknown) => unknown) => {
       log.push("select");
       return Promise.resolve(selects.shift() ?? []).then(resolve, reject);
@@ -98,7 +110,10 @@ export function createSubscriptionDbFake() {
       write.values = v;
       return chain;
     };
-    chain.where = () => chain;
+    chain.where = (cond: unknown) => {
+      wheres.push({ op, table: write.table, cond });
+      return chain;
+    };
     chain.onConflictDoNothing = () => chain;
     chain.returning = async () => {
       record();
@@ -173,6 +188,7 @@ export function createSubscriptionDbFake() {
     committed.length = 0;
     log.length = 0;
     partialUniqueActiveTrialing.length = 0;
+    wheres.length = 0;
     state.transactions = 0;
     state.rolledBack = 0;
     state.paymentInsertResult = null;
@@ -180,5 +196,5 @@ export function createSubscriptionDbFake() {
     state.failNextLock = null;
   }
 
-  return { db, selects, committed, log, partialUniqueActiveTrialing, state, reset };
+  return { db, selects, committed, log, partialUniqueActiveTrialing, wheres, state, reset };
 }

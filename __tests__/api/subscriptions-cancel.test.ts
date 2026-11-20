@@ -20,13 +20,19 @@
  * - błąd Stripe albo brak potwierdzenia → 502, zero zapisów,
  * - Stripe nieskonfigurowany przy prawdziwej subskrypcji → 503, zero zapisów,
  * - bez prawdziwej subskrypcji (null, `sim_*`) → tylko blokada salonu, zapis lokalny,
- * - wiersz zmieniony pod blokadą → 409, zakleszczenie / lock_timeout → 503.
+ * - wiersz zmieniony pod blokadą → 409, zakleszczenie / lock_timeout → 503,
+ * - odczyt przed blokadą i transakcja blokad przez `forSalon(salonId z sesji).raw`
+ *   (prawdziwe repozytorium na atrapie `db`): każda transakcja zaczyna się od
+ *   kontekstu salonu (`set local role`, `set_config` = dwa `execute`), każde
+ *   zapytanie ma jawne `eq(salonId)`.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "@/app/api/subscriptions/cancel/route";
 import { logger } from "@/lib/logger";
 import { STRIPE_LOCKED_READ_OPTIONS } from "@/lib/subscription-locks";
+import type { SQL } from "drizzle-orm";
 
 const f = await vi.hoisted(async () =>
   (await import("./subscription-db-fake")).createSubscriptionDbFake()
@@ -40,6 +46,25 @@ const { mockRequireAuth, mockGetUserSalonId, mockGetStripe, mockUpdate } = vi.ho
 }));
 
 vi.mock("@/lib/db", () => ({ db: f.db }));
+// Prawdziwe `forSalon` (transakcja na atrapie `db`), opakowane szpiegami: widać salonId i użycie `raw`.
+const { forSalonSpy, rawSpy } = vi.hoisted(() => ({ forSalonSpy: vi.fn(), rawSpy: vi.fn() }));
+vi.mock("@/lib/server/repository", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server/repository")>();
+  return {
+    ...actual,
+    forSalon: (salonId: string) => {
+      forSalonSpy(salonId);
+      const gate = actual.forSalon(salonId);
+      return {
+        ...gate,
+        raw: ((fn) => {
+          rawSpy(salonId);
+          return gate.raw(fn);
+        }) as typeof gate.raw,
+      };
+    },
+  };
+});
 vi.mock("@/lib/auth-middleware", () => ({
   requireAuth: (...args: unknown[]) => mockRequireAuth(...args),
   isAuthError: (r: unknown) => r instanceof NextResponse,
@@ -104,6 +129,15 @@ const STRIPE_CANCELED_AT_PERIOD_END = {
 
 const subWrites = () => f.committed.filter((w) => w.table === "salon_subscriptions");
 
+/** Kontekst salonu z `forSalon`: `set local role` i `set_config(app.current_salon_id)`. */
+const SALON_CONTEXT = ["execute", "execute"];
+/** Odczyt aktywnej subskrypcji przed blokadą: własna transakcja `forSalon`. */
+const PRE_READ = [...SALON_CONTEXT, "select", "commit"];
+
+/** Parametry filtra `.where(...)` (renderowanego przez PgDialect) kolejnych zapytań. */
+const whereParams = () =>
+  f.wheres.map((w) => ({ op: w.op, params: new PgDialect().sqlToQuery(w.cond as SQL).params }));
+
 async function cancel() {
   const res = await POST();
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
@@ -150,7 +184,8 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
       new Date(PERIOD_END * 1000).toISOString(),
     );
     expect(f.log).toEqual([
-      "select",
+      ...PRE_READ,
+      ...SALON_CONTEXT,
       "lock_timeout",
       "lock:stripe_sub:sub_1",
       "select",
@@ -234,7 +269,7 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("manual handling"), expect.anything());
   });
 
-  it("503: Stripe nieskonfigurowany przy prawdziwej subskrypcji → bez transakcji i bez zapisu", async () => {
+  it("503: Stripe nieskonfigurowany przy prawdziwej subskrypcji → bez transakcji blokad i bez zapisu", async () => {
     mockGetStripe.mockReturnValue(null);
     f.selects.push([ACTIVE]);
 
@@ -242,7 +277,10 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
 
     expect(status).toBe(503);
     expect(body.code).toBe("STRIPE_UNAVAILABLE");
-    expect(f.state.transactions).toBe(0);
+    // Jedyna transakcja to odczyt przed blokadą (wykonany): bez lock_timeout i blokad.
+    expect(f.state.transactions).toBe(1);
+    expect(f.log).toEqual(PRE_READ);
+    expect(f.selects).toHaveLength(0);
     expect(f.committed).toEqual([]);
   });
 
@@ -255,6 +293,9 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
     expect(body.code).toBe("SUBSCRIPTION_CHANGED");
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(f.committed).toEqual([]);
+    // Odmowa po faktycznym odczycie wiersza pod blokadą stripe_sub.
+    expect(f.selects).toHaveLength(0);
+    expect(f.log).toEqual([...PRE_READ, ...SALON_CONTEXT, "lock_timeout", "lock:stripe_sub:sub_1", "select", "commit"]);
   });
 
   it.each(["40P01", "55P03"])("503: %s przy blokadzie → LOCK_BUSY, bez wywołania Stripe i zapisu", async (code) => {
@@ -267,6 +308,7 @@ describe("POST /api/subscriptions/cancel — prawdziwa subskrypcja Stripe", () =
     expect(body.code).toBe("LOCK_BUSY");
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(f.committed).toEqual([]);
+    expect(f.log).toEqual([...PRE_READ, ...SALON_CONTEXT, "lock_timeout", "lock:stripe_sub:sub_1", "rollback"]);
   });
 
   it("500: błąd bazy przy zapisie → transakcja wycofana", async () => {
@@ -431,7 +473,8 @@ describe("POST /api/subscriptions/cancel — okres z latest_invoice", () => {
     await cancel();
 
     expect(f.log).toEqual([
-      "select",
+      ...PRE_READ,
+      ...SALON_CONTEXT,
       "lock_timeout",
       "lock:stripe_sub:sub_1",
       "select",
@@ -512,7 +555,15 @@ describe("POST /api/subscriptions/cancel — bez prawdziwej subskrypcji Stripe",
     expect(status).toBe(200);
     expect(body.stripeCanceled).toBe(false);
     expect(mockUpdate).not.toHaveBeenCalled();
-    expect(f.log).toEqual(["select", "lock_timeout", "lock:salon:salon-1", "select", "update:salon_subscriptions", "commit"]);
+    expect(f.log).toEqual([
+      ...PRE_READ,
+      ...SALON_CONTEXT,
+      "lock_timeout",
+      "lock:salon:salon-1",
+      "select",
+      "update:salon_subscriptions",
+      "commit",
+    ]);
     expect(subWrites()[0]?.values).toEqual(expect.objectContaining({ status: "canceled" }));
     // Zapis nie zawiera pól okresu — tak samo jak ze Stripe.
     expect(subWrites()[0]?.values).not.toHaveProperty("currentPeriodEnd");
@@ -526,6 +577,9 @@ describe("POST /api/subscriptions/cancel — bez prawdziwej subskrypcji Stripe",
 
     expect(status).toBe(409);
     expect(f.committed).toEqual([]);
+    // Odmowa po faktycznym odczycie wiersza pod blokadą salonu.
+    expect(f.selects).toHaveLength(0);
+    expect(f.log).toEqual([...PRE_READ, ...SALON_CONTEXT, "lock_timeout", "lock:salon:salon-1", "select", "commit"]);
   });
 });
 
@@ -544,6 +598,80 @@ describe("POST /api/subscriptions/cancel — wejście", () => {
   it("404 bez aktywnej subskrypcji", async () => {
     f.selects.push([]);
     expect((await cancel()).status).toBe(404);
-    expect(f.state.transactions).toBe(0);
+    // Odczyt wykonany (forSalon salonu z sesji), bez transakcji blokad.
+    expect(forSalonSpy.mock.calls).toEqual([["salon-1"]]);
+    expect(f.state.transactions).toBe(1);
+    expect(f.log).toEqual(PRE_READ);
+  });
+});
+
+describe("POST /api/subscriptions/cancel — forSalon salonu z sesji", () => {
+  it("forSalon i oba raw (odczyt i transakcja blokad) z salonId z sesji; blokada salonu na tym salonie", async () => {
+    mockGetUserSalonId.mockResolvedValue("salon-session");
+    f.selects.push([{ ...ACTIVE, salonId: "salon-session" }], [{ ...ACTIVE, salonId: "salon-session" }]);
+
+    const { status } = await cancel();
+
+    expect(status).toBe(200);
+    expect(forSalonSpy.mock.calls).toEqual([["salon-session"]]);
+    expect(rawSpy.mock.calls).toEqual([["salon-session"], ["salon-session"]]);
+    expect(f.log).toContain("lock:salon:salon-session");
+  });
+
+  it("kolejność: kontekst salonu → lock_timeout → stripe_sub → Stripe → salon → zapis", async () => {
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    await cancel();
+
+    const lockTx = f.log.slice(PRE_READ.length);
+    expect(lockTx).toEqual([
+      "execute",
+      "execute",
+      "lock_timeout",
+      "lock:stripe_sub:sub_1",
+      "select",
+      "stripe.update",
+      "lock:salon:salon-1",
+      "update:salon_subscriptions",
+      "commit",
+    ]);
+  });
+
+  it("każde zapytanie ma jawny filtr salonu; zapis po id ORAZ salonId", async () => {
+    f.selects.push([ACTIVE], [ACTIVE]);
+
+    await cancel();
+
+    expect(whereParams()).toEqual([
+      { op: "select", params: ["salon-1", "active"] },
+      { op: "select", params: ["sub-local", "salon-1"] },
+      { op: "update", params: ["sub-local", "salon-1"] },
+    ]);
+  });
+
+  it("bez prawdziwej subskrypcji Stripe: odczyt pod blokadą salonu i zapis też z filtrem salonu", async () => {
+    const row = { ...ACTIVE, stripeSubscriptionId: null };
+    f.selects.push([row], [row]);
+
+    await cancel();
+
+    expect(whereParams()).toEqual([
+      { op: "select", params: ["salon-1", "active"] },
+      { op: "select", params: ["sub-local", "salon-1"] },
+      { op: "update", params: ["sub-local", "salon-1"] },
+    ]);
+  });
+
+  it("55P03 przy blokadzie salonu (bez Stripe) → 503 LOCK_BUSY, bez zapisu, rollback", async () => {
+    const row = { ...ACTIVE, stripeSubscriptionId: null };
+    f.state.failNextLock = { code: "55P03" };
+    f.selects.push([row], [row]);
+
+    const { status, body } = await cancel();
+
+    expect(status).toBe(503);
+    expect(body.code).toBe("LOCK_BUSY");
+    expect(f.committed).toEqual([]);
+    expect(f.log).toEqual([...PRE_READ, ...SALON_CONTEXT, "lock_timeout", "lock:salon:salon-1", "rollback"]);
   });
 });
