@@ -59,7 +59,7 @@ interface BookingConfirmationProps {
 }
 
 // ---------------------------------------------------------------------------
-// Component — the success screen shown after a booking is confirmed
+// Component — the success screen shown after a booking is made
 // ---------------------------------------------------------------------------
 
 export function BookingConfirmation({

@@ -195,7 +195,7 @@ describe("flaga true — przypadki brzegowe", () => {
     expect(text.replace(/\D/g, "")).not.toContain(TEST_PHONE_DIGITS);
   });
 
-  it("dane przelewu nie trafiaja do konsoli", () => {
+  it("numer telefonu salonu nie trafia do konsoli", () => {
     flags.blik = true;
     const spies = (["log", "info", "warn", "error"] as const).map((method) =>
       vi.spyOn(console, method).mockImplementation(() => {})
