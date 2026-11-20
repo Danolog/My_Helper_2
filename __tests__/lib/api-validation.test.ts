@@ -12,6 +12,9 @@ import {
   updateAppointmentSchema,
   createWaitingListSchema,
   updateWaitingListSchema,
+  blikDepositSettingsSchema,
+  isPolishMobileNumber,
+  POLISH_MOBILE_PREFIXES,
 } from "@/lib/api-validation";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -882,5 +885,76 @@ describe("updateWaitingListSchema — bez pól źródła i potwierdzenia (#221)"
     });
     expect(result.success).toBe(true);
     expect(result.data).toEqual({ accepted: true });
+  });
+});
+
+describe("blikDepositSettingsSchema — numer BLIK salonu", () => {
+  // Numery fikcyjne; pozytywne muszą być w zakresie komórkowym.
+  it.each(POLISH_MOBILE_PREFIXES)("prefiks komórkowy %s przechodzi", (prefix) => {
+    const result = blikDepositSettingsSchema.safeParse({
+      blikPhone: `${prefix}0 000 000`,
+      consent: true,
+    });
+    expect(result.success).toBe(true);
+    expect(result.data?.blikPhone).toBe(`+48${prefix}0000000`);
+  });
+
+  it.each(["22", "58", "61", "71", "81", "70", "80", "00", "52"])(
+    "prefiks %s (stacjonarny/specjalny) jest odrzucany",
+    (prefix) => {
+      const result = blikDepositSettingsSchema.safeParse({
+        blikPhone: `+48 ${prefix}0 000 000`,
+        consent: true,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error?.issues[0]?.path).toEqual(["blikPhone"]);
+    }
+  );
+
+  it("normalizuje spacje, myślniki i nawiasy jak guestPhone", () => {
+    const result = blikDepositSettingsSchema.safeParse({
+      blikPhone: "(+48) 600-100-200",
+      consent: true,
+    });
+    expect(result.data?.blikPhone).toBe("+48600100200");
+  });
+
+  it("null i pusty napis = wyłączenie, bez wymogu zgody", () => {
+    expect(blikDepositSettingsSchema.safeParse({ blikPhone: null }).data).toEqual({
+      blikPhone: null,
+    });
+    expect(blikDepositSettingsSchema.safeParse({ blikPhone: "  " }).data).toEqual({
+      blikPhone: null,
+    });
+  });
+
+  it("numer bez consent: true jest odrzucany na polu consent", () => {
+    const result = blikDepositSettingsSchema.safeParse({ blikPhone: "600100200" });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.path)).toEqual([["consent"]]);
+  });
+
+  it("brak klucza blikPhone jest błędem (nie kasuje po cichu)", () => {
+    expect(blikDepositSettingsSchema.safeParse({ consent: true }).success).toBe(false);
+  });
+
+  it("blikConsentAt z body jest wycinany ze sparsowanych danych", () => {
+    const result = blikDepositSettingsSchema.safeParse({
+      blikPhone: "600100200",
+      consent: true,
+      blikConsentAt: "2020-01-01T00:00:00.000Z",
+    });
+    expect(result.data).not.toHaveProperty("blikConsentAt");
+  });
+
+  it("komunikaty błędów nie zawierają numeru", () => {
+    const result = blikDepositSettingsSchema.safeParse({ blikPhone: "+48 71 000 00 00" });
+    expect(JSON.stringify(result.error?.issues)).not.toMatch(/71\s?000/);
+  });
+
+  it("isPolishMobileNumber przyjmuje tylko E.164 +48", () => {
+    expect(isPolishMobileNumber("+48600100200")).toBe(true);
+    expect(isPolishMobileNumber("600100200")).toBe(false);
+    expect(isPolishMobileNumber("+4860010020")).toBe(false);
   });
 });

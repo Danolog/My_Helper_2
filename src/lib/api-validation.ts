@@ -667,6 +667,76 @@ export const salonModulesSchema = z.object({
   modules: z.record(z.string(), z.boolean()),
 });
 
+/**
+ * Prefiksy (dwie pierwsze cyfry numeru krajowego) zakresów sieci ruchomych
+ * w planie numeracji krajowej PL (rozporządzenie w sprawie planu numeracji
+ * krajowej; przydziały prowadzi UKE): 45, 50, 51, 53, 57, 60, 66, 69, 72, 73,
+ * 78, 79, 88. Źródło: wiedza o krajowym planie
+ * numeracji bez dostępu do rejestru UKE — przy zmianie przydziałów UKE lista
+ * do aktualizacji. Reguła „pierwsza cyfra 4–8” przepuszczała stacjonarne
+ * (58, 61, 71, 81), dlatego lista zamknięta.
+ */
+export const POLISH_MOBILE_PREFIXES: readonly string[] = Object.freeze([
+  "45", "50", "51", "53", "57", "60", "66", "69", "72", "73", "78", "79", "88",
+]);
+
+/** Czy numer w E.164 (+48 + 9 cyfr) należy do zakresu komórkowego. */
+export function isPolishMobileNumber(e164: string): boolean {
+  if (!/^\+48\d{9}$/.test(e164)) return false;
+  return POLISH_MOBILE_PREFIXES.includes(e164.slice(3, 5));
+}
+
+const BLIK_PHONE_FORMAT_MESSAGE = "Podaj prawidlowy numer telefonu (9 cyfr, opcjonalnie +48)";
+const BLIK_PHONE_MOBILE_MESSAGE = "Numer BLIK musi byc numerem komorkowym";
+const BLIK_CONSENT_MESSAGE = "Zaznacz zgode na pokazywanie numeru klientom";
+
+/**
+ * Numer BLIK salonu: ta sama normalizacja co `guestPhone` (spacje, myślniki,
+ * nawiasy zdejmowane, zapis E.164 przez normalizePolishPhoneNumber), potem
+ * zakres komórkowy. Pusty napis = null (wyłączenie zadatków BLIK).
+ * Komunikaty błędów są stałe — numer nie trafia do odpowiedzi ani logów.
+ */
+const blikPhoneField = z.preprocess(
+  (v) => {
+    if (typeof v !== "string") return v;
+    const stripped = v.replace(/[\s\-()]/g, "");
+    return stripped === "" ? null : stripped;
+  },
+  z.union([
+    z.null(),
+    z.string().transform((v, ctx) => {
+      const e164 = normalizePolishPhoneNumber(v);
+      if (!e164) {
+        ctx.addIssue({ code: "custom", message: BLIK_PHONE_FORMAT_MESSAGE });
+        return z.NEVER;
+      }
+      if (!isPolishMobileNumber(e164)) {
+        ctx.addIssue({ code: "custom", message: BLIK_PHONE_MOBILE_MESSAGE });
+        return z.NEVER;
+      }
+      return e164;
+    }),
+  ])
+);
+
+/**
+ * PUT /api/salon/blik-deposit. `blikPhone` wymagany (null czyści numer —
+ * brak klucza nie może przypadkiem skasować ustawienia). Numer wymaga
+ * `consent: true` (RODO: zgoda właściciela na pokazanie numeru klientom).
+ * Data zgody NIE pochodzi z body — nadaje ją serwer; nieznane klucze
+ * (np. `blikConsentAt`) schemat pomija (strip), żądanie przechodzi.
+ */
+export const blikDepositSettingsSchema = z
+  .object({
+    blikPhone: blikPhoneField,
+    consent: z.boolean().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.blikPhone !== null && v.consent !== true) {
+      ctx.addIssue({ code: "custom", path: ["consent"], message: BLIK_CONSENT_MESSAGE });
+    }
+  });
+
 export const weMissYouSettingsSchema = z.object({
   enabled: z.boolean().optional(),
   inactiveDays: z.number().int().min(1).max(365).optional(),
