@@ -66,9 +66,9 @@ const RLS = loadRlsRequirements();
 const fullRls = (): RlsRow[] => RLS.map((r) => ({ table: r.table, rls: true, policies: [r.policy] }));
 
 describe("strażnik — lista RLS z migracji 0005", () => {
-  it("39 tabel: 26 bezpośrednich + 12 pośrednich z tenant_isolation, salons z tenant_self", () => {
-    expect(RLS).toHaveLength(39);
-    expect(RLS.filter((r) => r.policy === "tenant_isolation")).toHaveLength(38);
+  it("40 tabel: 38 z 0005 i deposit_status_events z 0014 z tenant_isolation, salons z tenant_self", () => {
+    expect(RLS).toHaveLength(40);
+    expect(RLS.filter((r) => r.policy === "tenant_isolation")).toHaveLength(39);
     expect(RLS).toContainEqual({ table: "salons", policy: "tenant_self" });
     for (const t of ["appointments", "deposit_payments", "clients", "ai_generated_media", "time_blocks", "loyalty_transactions"]) {
       expect(RLS).toContainEqual({ table: t, policy: "tenant_isolation" });
@@ -125,15 +125,15 @@ describe("strażnik — decyzja", () => {
     expect(r.ok).toBe(false);
   });
 
-  it("push po migracjach (RLS zdjęte na wszystkich 39) → odmowa z liczbą tabel", () => {
+  it("push po migracjach (RLS zdjęte na wszystkich 40) → odmowa z liczbą tabel", () => {
     const rows = RLS.map((r) => ({ table: r.table, rls: false, policies: [] }));
     const r = checkSchema([...REQUIRED_CONSTRAINTS], rows, RLS);
     expect(r.ok).toBe(false);
     if (r.ok) return;
-    expect(r.missing).toHaveLength(40);
-    expect(r.missing).toContain("tabel z RLS w bazie 0 < 39 z 0005");
+    expect(r.missing).toHaveLength(41);
+    expect(r.missing).toContain("tabel z RLS w bazie 0 < 40 z 0005");
     expect(r.message).toMatch(
-      /^RLS z 0005 niekompletne \(40\): .* i 35 więcej — baza zbudowana bez db:migrate albo po nim nadpisana przez db:push\. .* Odbuduj: pnpm db:reset \(lokalnie\) albo pnpm db:migrate na pustej bazie\.$/
+      /^RLS z 0005 niekompletne \(41\): .* i 36 więcej — baza zbudowana bez db:migrate albo po nim nadpisana przez db:push\. .* Odbuduj: pnpm db:reset \(lokalnie\) albo pnpm db:migrate na pustej bazie\.$/
     );
   });
 
@@ -151,7 +151,7 @@ describe("strażnik — decyzja", () => {
     const rows = fullRls().map((x) => (x.table === "appointments" ? { ...x, rls: false } : x));
     const r = checkSchema([...REQUIRED_CONSTRAINTS], rows, RLS);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.missing).toContain("tabel z RLS w bazie 38 < 39 z 0005");
+    if (!r.ok) expect(r.missing).toContain("tabel z RLS w bazie 39 < 40 z 0005");
   });
 
   it("D3: liczba tabel z RLS w bazie mniejsza mimo kompletu wymagań → odmowa (osobna gałąź)", () => {

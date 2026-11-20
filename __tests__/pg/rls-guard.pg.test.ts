@@ -49,12 +49,12 @@ afterAll(async () => {
 });
 
 suite("strażnik RLS na bazie po migracjach (#190)", () => {
-  it("baza po db:migrate: wszystkie tabele z 0005 z RLS i polityką → OK (D3: tabel z RLS ≥ 39)", async () => {
+  it("baza po db:migrate: wszystkie tabele z 0005 i 0014 z RLS i polityką → OK (D3: tabel z RLS ≥ 40)", async () => {
     const r = await runRlsGuard(h!.observer, REQUIRED);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.checked).toBe(39);
-    expect(r.rlsTables).toBeGreaterThanOrEqual(39);
+    expect(r.checked).toBe(40);
+    expect(r.rlsTables).toBeGreaterThanOrEqual(40);
   });
 
   it("RLS wyłączone na clients (w transakcji) → strażnik pada i nazywa tabelę", async () => {
