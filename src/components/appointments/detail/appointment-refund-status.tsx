@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { RefreshCw, CheckCircle, Ban, DollarSign } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +9,8 @@ import type { AppointmentDetail, RefundStatus } from "./types";
 interface AppointmentRefundStatusProps {
   appointment: AppointmentDetail;
   refundStatus: RefundStatus | null;
+  /** Akcje zadatku (np. reczne oznaczenie wplaty) w karcie wizyty nieanulowanej. */
+  children?: ReactNode;
 }
 
 /**
@@ -18,6 +21,7 @@ interface AppointmentRefundStatusProps {
 export function AppointmentRefundStatus({
   appointment,
   refundStatus,
+  children,
 }: AppointmentRefundStatusProps) {
   const isCancelled = appointment.status === "cancelled";
   // Zadatek bez platnosci online (np. BLIK na telefon salonu): aplikacja nie
@@ -163,7 +167,7 @@ export function AppointmentRefundStatus({
             </div>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <div>
                 <span className="text-muted-foreground text-sm">Kwota: </span>
                 <span className="font-semibold">{parseFloat(appointment.depositAmount).toFixed(2)} PLN</span>
@@ -171,6 +175,7 @@ export function AppointmentRefundStatus({
               <Badge variant={appointment.depositPaid ? "default" : "outline"} data-testid="deposit-paid-badge">
                 {appointment.depositPaid ? "Oplacony" : "Nieoplacony"}
               </Badge>
+              {children}
             </div>
           </CardContent>
         </Card>
