@@ -3,8 +3,6 @@ import { eq, and } from "drizzle-orm";
 import { isValidUuid } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
-// ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import {
@@ -13,6 +11,7 @@ import {
   subscriptionPlans,
   salons,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 /**
  * GET /api/subscriptions/payments/[id]/receipt
@@ -45,8 +44,8 @@ export async function GET(
       );
     }
 
-    // Fetch payment with plan and salon data
-    const rows = await db
+    // Fetch payment with plan and salon data (repozytorium salonu, jawny warunek salonId)
+    const rows = await forSalon(salonId).raw((tx) => tx
       .select({
         id: subscriptionPayments.id,
         amount: subscriptionPayments.amount,
@@ -85,7 +84,7 @@ export async function GET(
           eq(subscriptionPayments.salonId, salonId),
         ),
       )
-      .limit(1);
+      .limit(1));
 
     if (rows.length === 0 || !rows[0]) {
       return NextResponse.json(

@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions, subscriptionPlans } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { getStripe } from "@/lib/stripe";
 
 /**
@@ -69,23 +68,39 @@ export async function GET() {
       );
     }
 
-    // Find the current active subscription
-    const [activeSub] = await db
-      .select({
-        subscription: salonSubscriptions,
-        plan: subscriptionPlans,
-      })
-      .from(salonSubscriptions)
-      .innerJoin(
-        subscriptionPlans,
-        eq(salonSubscriptions.planId, subscriptionPlans.id)
-      )
-      .where(
-        and(
-          eq(salonSubscriptions.salonId, salonId),
-          eq(salonSubscriptions.status, "active")
+    // Oba odczyty przez repozytorium salonu, w jednej transakcji z kontekstem salonu.
+    const { activeSub, targetPlan } = await forSalon(salonId).raw(async (tx) => {
+      // Find the current active subscription
+      const [active] = await tx
+        .select({
+          subscription: salonSubscriptions,
+          plan: subscriptionPlans,
+        })
+        .from(salonSubscriptions)
+        .innerJoin(
+          subscriptionPlans,
+          eq(salonSubscriptions.planId, subscriptionPlans.id)
         )
-      );
+        .where(
+          and(
+            eq(salonSubscriptions.salonId, salonId),
+            eq(salonSubscriptions.status, "active")
+          )
+        );
+
+      // Check if there's a scheduled plan change.
+      // Katalog planów jest globalny (bez salon_id).
+      let target: typeof subscriptionPlans.$inferSelect | undefined;
+      const scheduledPlanId = active?.subscription.scheduledPlanId;
+      if (scheduledPlanId) {
+        [target] = await tx
+          .select()
+          .from(subscriptionPlans)
+          .where(eq(subscriptionPlans.id, scheduledPlanId));
+      }
+
+      return { activeSub: active, targetPlan: target };
+    });
 
     if (!activeSub) {
       return NextResponse.json({
@@ -97,23 +112,15 @@ export async function GET() {
 
     const { subscription: sub, plan } = activeSub;
 
-    // Check if there's a scheduled plan change
-    let scheduledPlanInfo = null;
-    if (sub.scheduledPlanId) {
-      const [targetPlan] = await db
-        .select()
-        .from(subscriptionPlans)
-        .where(eq(subscriptionPlans.id, sub.scheduledPlanId));
-
-      if (targetPlan) {
-        scheduledPlanInfo = {
+    // Plan docelowy odczytany wyżej tylko przy zaplanowanej zmianie.
+    const scheduledPlanInfo = targetPlan
+      ? {
           id: targetPlan.id,
           name: targetPlan.name,
           slug: targetPlan.slug,
           priceMonthly: targetPlan.priceMonthly,
-        };
-      }
-    }
+        }
+      : null;
 
     return NextResponse.json({
       success: true,

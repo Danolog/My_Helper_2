@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001: ścieżka systemowa (salonId z danych subskrypcji/Stripe, nie z sesji) — świadomie surowe db
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import {
@@ -10,6 +8,7 @@ import {
   salonSubscriptions,
   subscriptionPlans,
 } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 
 /**
  * GET /api/subscriptions/payments
@@ -61,7 +60,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Query subscription payments with plan info
-    const rows = await db
+    // (repozytorium salonu; warunek salonId jest pierwszym elementem `conditions`)
+    const rows = await forSalon(salonId).raw((tx) => tx
       .select({
         id: subscriptionPayments.id,
         subscriptionId: subscriptionPayments.subscriptionId,
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
         eq(salonSubscriptions.planId, subscriptionPlans.id),
       )
       .where(and(...conditions))
-      .orderBy(desc(subscriptionPayments.createdAt));
+      .orderBy(desc(subscriptionPayments.createdAt)));
 
     // Pagination
     const total = rows.length;
