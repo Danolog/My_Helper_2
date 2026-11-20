@@ -28,21 +28,28 @@ import { frozenModuleResponse, frozenPromotionTypeResponse } from "@/lib/server/
 
 const { selectQueue } = vi.hoisted(() => ({ selectQueue: [] as unknown[][] }));
 
-vi.mock("@/lib/db", () => ({
-  db: {
-    select: () => {
-      const rows = selectQueue.shift() ?? [];
-      const chain: Record<string, unknown> = {
-        from: () => chain,
-        where: () => chain,
-        limit: async () => rows,
-        then: (resolve: (r: unknown[]) => unknown, reject?: (e: unknown) => unknown) =>
-          Promise.resolve(rows).then(resolve, reject),
-      };
-      return chain;
+// Jedna kolejka wyników dla db.select (trasa check-happy-hours) i tx.select
+// (deposit-calculation czyta przez forSalon, czyli w db.transaction).
+vi.mock("@/lib/db", () => {
+  const select = () => {
+    const rows = selectQueue.shift() ?? [];
+    const chain: Record<string, unknown> = {
+      from: () => chain,
+      where: () => chain,
+      limit: async () => rows,
+      then: (resolve: (r: unknown[]) => unknown, reject?: (e: unknown) => unknown) =>
+        Promise.resolve(rows).then(resolve, reject),
+    };
+    return chain;
+  };
+  const tx = { select, execute: async () => undefined };
+  return {
+    db: {
+      select,
+      transaction: (fn: (t: typeof tx) => unknown) => fn(tx),
     },
-  },
-}));
+  };
+});
 vi.mock("@/lib/logger", () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));

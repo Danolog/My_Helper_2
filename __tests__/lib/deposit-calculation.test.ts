@@ -7,30 +7,52 @@
  *   - ustawienia zadatku klienta (fixed/percentage) nadpisuja ustawienia uslugi,
  *   - procent uslugi liczony z Math.ceil (zaokraglenie W GORE — na korzysc salonu).
  *
- * Mock db: kazde wywolanie db.select().from().where() zjada kolejny wynik
- * z kolejki (funkcje pomocnicze wolaja db wielokrotnie); `.limit(1)` na
- * wyniku where (lookup klienta) zwraca ten sam wynik.
+ * Odczyty ida przez forSalon(salonId).raw — prawdziwa warstwa repozytorium
+ * na atrapie db.transaction (jedna transakcja na wywolanie). Kazde wywolanie
+ * tx.select(cols).from(t).where() zjada kolejny wynik z kolejki; `.limit(1)`
+ * na wyniku where (lookup klienta) zwraca ten sam wynik. selectCalls zapisuje
+ * tabele i liste kolumn kazdego zapytania.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { selectQueue, mockDbSelect } = vi.hoisted(() => {
-  const selectQueue: unknown[][] = [];
-  const mockDbSelectWhere = vi.fn(() => {
-    const result = selectQueue.length > 0 ? selectQueue.shift()! : [];
-    const thenable = Promise.resolve(result) as Promise<unknown[]> & {
-      limit: (n: number) => Promise<unknown[]>;
-    };
-    thenable.limit = () => Promise.resolve(result);
-    return thenable;
+const { selectQueue, selectCalls, frozen, mockDbSelect, mockDbSelectWhere, mockTransaction, mockExecute } =
+  vi.hoisted(() => {
+    const selectQueue: unknown[][] = [];
+    const selectCalls: { table: string; cols: unknown }[] = [];
+    const frozen = { happyHours: false };
+    const mockDbSelectWhere = vi.fn((..._args: unknown[]) => {
+      const result = selectQueue.length > 0 ? selectQueue.shift()! : [];
+      const thenable = Promise.resolve(result) as Promise<unknown[]> & {
+        limit: (n: number) => Promise<unknown[]>;
+      };
+      thenable.limit = () => thenable;
+      return thenable;
+    });
+    const mockDbSelect = vi.fn((cols?: unknown) => {
+      const call = { table: "", cols };
+      selectCalls.push(call);
+      return {
+        from: (table: { _table: string }) => {
+          call.table = table._table;
+          return { where: mockDbSelectWhere };
+        },
+      };
+    });
+    const mockExecute = vi.fn().mockResolvedValue(undefined);
+    const tx = { select: mockDbSelect, execute: mockExecute };
+    const mockTransaction = vi.fn((fn: (t: typeof tx) => unknown) => fn(tx));
+    return { selectQueue, selectCalls, frozen, mockDbSelect, mockDbSelectWhere, mockTransaction, mockExecute };
   });
-  const mockDbSelectFrom = vi.fn(() => ({ where: mockDbSelectWhere }));
-  const mockDbSelect = vi.fn((..._args: unknown[]) => ({ from: mockDbSelectFrom }));
-  return { selectQueue, mockDbSelect, mockDbSelectFrom, mockDbSelectWhere };
-});
 
 vi.mock("@/lib/db", () => ({
-  db: { select: (...args: unknown[]) => mockDbSelect(...args) },
+  db: { transaction: (fn: (tx: unknown) => unknown) => mockTransaction(fn as never) },
 }));
+
+// Prawdziwa warstwa repo (na atrapie db wyzej) z podgladem wywolan forSalon.
+vi.mock("@/lib/server/repository", async (orig) => {
+  const actual = await orig<typeof import("@/lib/server/repository")>();
+  return { ...actual, forSalon: vi.fn(actual.forSalon) };
+});
 
 /**
  * Happy hours sa zamrozone (B2, FROZEN_PROMOTION_TYPES) — w produkcji rabat
@@ -40,7 +62,10 @@ vi.mock("@/lib/db", () => ({
  */
 vi.mock("@/lib/features", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/features")>();
-  return { ...real, isPromotionTypeFrozen: () => false };
+  return {
+    ...real,
+    isPromotionTypeFrozen: (type: string) => type === "happy_hours" && frozen.happyHours,
+  };
 });
 
 vi.mock("@/lib/logger", () => ({
@@ -51,29 +76,42 @@ vi.mock("drizzle-orm", () => ({
   eq: vi.fn((...args: unknown[]) => ({ type: "eq", args })),
   and: vi.fn((...args: unknown[]) => ({ type: "and", args })),
   inArray: vi.fn((...args: unknown[]) => ({ type: "inArray", args })),
-  sql: vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+  // sql`...` (set_config) + sql.raw (SET LOCAL ROLE) — oba uzywa forSalon.
+  sql: Object.assign(
+    vi.fn((...args: unknown[]) => ({ type: "sql", args })),
+    { raw: vi.fn((query: string) => ({ type: "sql.raw", query })) },
+  ),
 }));
 
 vi.mock("@/lib/schema", () => ({
   services: {
+    _table: "services",
     id: "services.id",
     name: "services.name",
     salonId: "services.salonId",
     basePrice: "services.basePrice",
     depositRequired: "services.depositRequired",
     depositPercentage: "services.depositPercentage",
+    isActive: "services.isActive",
   },
   serviceVariants: {
+    _table: "serviceVariants",
     id: "serviceVariants.id",
     serviceId: "serviceVariants.serviceId",
     priceModifier: "serviceVariants.priceModifier",
   },
   promotions: {
+    _table: "promotions",
     salonId: "promotions.salonId",
     type: "promotions.type",
     isActive: "promotions.isActive",
+    startDate: "promotions.startDate",
+    endDate: "promotions.endDate",
+    conditionsJson: "promotions.conditionsJson",
+    value: "promotions.value",
   },
   clients: {
+    _table: "clients",
     id: "clients.id",
     salonId: "clients.salonId",
     email: "clients.email",
@@ -90,8 +128,9 @@ vi.mock("@/lib/schema", () => ({
 }));
 
 import { calculateExpectedDeposit } from "@/lib/deposit-calculation";
+import { forSalon } from "@/lib/server/repository";
 
-/** Zaplanuj kolejne wyniki db.select().from().where() (FIFO). */
+/** Zaplanuj kolejne wyniki tx.select().from().where() (FIFO). */
 function queueSelect(...results: unknown[][]) {
   selectQueue.push(...results);
 }
@@ -132,6 +171,11 @@ const baseParams = {
   serviceId: "svc-1",
   startTime: MONDAY_1400_WARSAW,
 };
+
+beforeEach(() => {
+  selectCalls.length = 0;
+  frozen.happyHours = false;
+});
 
 describe("calculateExpectedDeposit — walidacja usluga/wariant", () => {
   beforeEach(() => {
@@ -512,5 +556,122 @@ describe("calculateExpectedDeposit — clientId (lista oczekujących, #63)", () 
 
     expect(eq).toHaveBeenCalledWith("clients.id", "client-1");
     expect(eq).not.toHaveBeenCalledWith("clients.email", "ktos@example.com");
+  });
+});
+
+describe("calculateExpectedDeposit — dostep do danych przez forSalon", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    selectQueue.length = 0;
+  });
+
+  /** Pelna sciezka: usluga, wariant, happy hours i klient. */
+  async function runFullPath() {
+    queueSelect(
+      [baseService],
+      [{ id: "var-1", priceModifier: "0" }],
+      /* happy hours */ [],
+      /* klient */ []
+    );
+    return calculateExpectedDeposit({
+      ...baseParams,
+      variantId: "var-1",
+      sessionUser: { email: "user@example.com", emailVerified: true },
+    });
+  }
+
+  it("forSalon wolany z salonId z parametrow", async () => {
+    await runFullPath();
+    expect(forSalon).toHaveBeenCalledTimes(1);
+    expect(forSalon).toHaveBeenCalledWith("salon-1");
+  });
+
+  it("jedna transakcja na wywolanie (wszystkie 4 odczyty w niej)", async () => {
+    await runFullPath();
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    // SET LOCAL ROLE + set_config kontekstu salonu — raz, na poczatku transakcji
+    expect(mockExecute).toHaveBeenCalledTimes(2);
+    expect(selectCalls.map((c) => c.table)).toEqual([
+      "services",
+      "serviceVariants",
+      "promotions",
+      "clients",
+    ]);
+  });
+
+  it("kazdy odczyt ma jawna liste kolumn (promotions bez select())", async () => {
+    await runFullPath();
+    const cols = Object.fromEntries(selectCalls.map((c) => [c.table, c.cols]));
+    expect(cols).toEqual({
+      services: {
+        id: "services.id",
+        name: "services.name",
+        basePrice: "services.basePrice",
+        depositRequired: "services.depositRequired",
+        depositPercentage: "services.depositPercentage",
+        isActive: "services.isActive",
+      },
+      serviceVariants: {
+        id: "serviceVariants.id",
+        priceModifier: "serviceVariants.priceModifier",
+      },
+      promotions: {
+        startDate: "promotions.startDate",
+        endDate: "promotions.endDate",
+        conditionsJson: "promotions.conditionsJson",
+        value: "promotions.value",
+      },
+      clients: {
+        requireDeposit: "clients.requireDeposit",
+        depositType: "clients.depositType",
+        depositValue: "clients.depositValue",
+      },
+    });
+  });
+
+  it("jawne eq(salonId) w odczytach services, promotions i clients", async () => {
+    const { eq } = await import("drizzle-orm");
+    await runFullPath();
+    expect(eq).toHaveBeenCalledWith("services.salonId", "salon-1");
+    expect(eq).toHaveBeenCalledWith("promotions.salonId", "salon-1");
+    expect(eq).toHaveBeenCalledWith("clients.salonId", "salon-1");
+    // service_variants nie ma salon_id: zawezenie do sprawdzonej uslugi
+    expect(eq).toHaveBeenCalledWith("serviceVariants.serviceId", "svc-1");
+  });
+
+  it("promocja zamrozona: bez zapytania o promotions, zadatek z pelnej ceny", async () => {
+    frozen.happyHours = true;
+    // gdyby kod pytal o promotions, ta pozycja dalaby rabat 50%
+    queueSelect([baseService], [happyHoursPromo("50")]);
+
+    const result = await calculateExpectedDeposit(baseParams);
+
+    expect(result).toMatchObject({ ok: true, required: true, amount: 30 });
+    expect(selectCalls.map((c) => c.table)).toEqual(["services"]);
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("blad bazy przy promotions przechodzi wyzej jako wyjatek (bez cichego zera)", async () => {
+    queueSelect([baseService]);
+    mockDbSelectWhere
+      .mockImplementationOnce(() => {
+        const result = selectQueue.shift() ?? [];
+        return Object.assign(Promise.resolve(result), { limit: () => Promise.resolve(result) });
+      })
+      .mockImplementationOnce(() => {
+        const failed = Promise.reject(new Error("connection terminated"));
+        return Object.assign(failed, { limit: () => failed });
+      });
+
+    await expect(calculateExpectedDeposit(baseParams)).rejects.toThrow("connection terminated");
+  });
+
+  it("blad bazy przy odczycie uslugi przechodzi wyzej jako wyjatek", async () => {
+    mockDbSelectWhere.mockImplementationOnce(() => {
+      const failed = Promise.reject(new Error("connection terminated"));
+      return Object.assign(failed, { limit: () => failed });
+    });
+
+    await expect(calculateExpectedDeposit(baseParams)).rejects.toThrow("connection terminated");
   });
 });

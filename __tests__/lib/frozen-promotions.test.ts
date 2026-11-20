@@ -30,14 +30,8 @@ const m = await vi.hoisted(async () =>
 
 vi.mock("next/headers", () => ({ headers: vi.fn().mockResolvedValue(new Headers()) }));
 vi.mock("@/lib/auth", () => ({ auth: { api: { getSession: m.getSession } } }));
-// Dług P1a: deposit-calculation czyta surowym db poza forSalon; lokalny select znika w P1a.
-// Własna kolejka wyników ustawiana w teście (nie ctxRows uprzęży); bez niej — głośny błąd.
-const local = vi.hoisted(() => ({
-  select: vi.fn((..._args: unknown[]): unknown => {
-    throw new Error("frozen-promotions: lokalny select bez kolejki wyników w teście");
-  }),
-}));
-vi.mock("@/lib/db", () => ({ db: { ...m.db, select: (...args: unknown[]) => local.select(...args) } }));
+// Pula tylko z transakcją: deposit-calculation czyta przez forSalon (kolejka txRows).
+vi.mock("@/lib/db", () => ({ db: m.db }));
 vi.mock("@/lib/server/system/db-system", () => ({ dbSystem: m.dbSystem }));
 vi.mock("@/lib/temporary-access", () => ({ hasTemporaryAccess: m.hasTemporaryAccess }));
 vi.mock("@/lib/auth-middleware", () => ({
@@ -221,34 +215,20 @@ describe("zadatek liczony przez serwer — bez rabatu happy hours", () => {
   };
 
   it("rezerwacja w oknie happy hours → zadatek od pełnej ceny, bez zapytania o promocje", async () => {
-    // Kolejka wyników db.select(): usługa, a gdyby trasa zapytała — promocja -50%.
-    const results: unknown[][] = [[service], [happyHours]];
-    const select = vi.spyOn(local, "select").mockImplementation((() => {
-      const rows = results.shift() ?? [];
-      const chain: Record<string, unknown> = {
-        from: () => chain,
-        where: () => chain,
-        limit: async () => rows,
-        then: (resolve: (r: unknown[]) => unknown) => Promise.resolve(rows).then(resolve),
-      };
-      return chain;
-    }) as unknown as typeof local.select);
+    // Kolejka wyników tx.select() w forSalon: usługa, a gdyby kod zapytał — promocja -50%.
+    m.txRows.push([service], [happyHours]);
 
-    try {
-      const result = await calculateExpectedDeposit({
-        salonId: SALON_A,
-        serviceId: "svc-1",
-        startTime: MONDAY_1400_WARSAW,
-      });
+    const result = await calculateExpectedDeposit({
+      salonId: SALON_A,
+      serviceId: "svc-1",
+      startTime: MONDAY_1400_WARSAW,
+    });
 
-      // 30% z pełnych 100 zł = 30 (z rabatem 50% byłoby 15).
-      expect(result).toEqual({ ok: true, required: true, amount: 30, serviceName: "Strzyżenie" });
-      // Tylko zapytanie o usługę — promocja happy hours została w kolejce.
-      expect(select).toHaveBeenCalledTimes(1);
-      expect(results).toEqual([[happyHours]]);
-    } finally {
-      select.mockRestore();
-    }
+    // 30% z pełnych 100 zł = 30 (z rabatem 50% byłoby 15).
+    expect(result).toEqual({ ok: true, required: true, amount: 30, serviceName: "Strzyżenie" });
+    // Tylko zapytanie o usługę — promocja happy hours została w kolejce.
+    expect(m.txRows).toEqual([[happyHours]]);
+    expect(m.rlsSalonIds()).toEqual([SALON_A]);
   });
 });
 
