@@ -227,7 +227,7 @@ async function loadSalonDetail(id: string) {
 /**
  * Cached salon detail query — avoids re-running 7+ DB queries on every request.
  * `id` jest ARGUMENTEM funkcji opakowanej, więc wchodzi do klucza cache — dwa
- * salony nigdy nie dzielą wpisu. Revalidated every 30s or on-demand via tag.
+ * salony nigdy nie dzielą wpisu. Odświeżany co 30 s; tag "salon-detail" jest ustawiony, ale dziś żaden zapis go nie unieważnia (PUT też nie).
  */
 const getCachedSalonDetail = unstable_cache(
   (id: string) => loadSalonDetail(id),

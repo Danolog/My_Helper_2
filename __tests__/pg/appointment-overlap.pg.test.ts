@@ -9,11 +9,15 @@
  *   reszta 409 (nie 500) — przez POST, PUT i pakiet;
  * - PUT /api/appointments/[id] i POST /api/appointments/book-package;
  * - zakleszczenie przy sprawdzaniu EXCLUDE (40P01, main `db71a43`): przepis na
- *   pewne 40P01 + wyścigi w pętli (PUT, POST, pakiet, zadatek) — zero 500.
+ *   pewne 40P01 + wyścigi w pętli (PUT, POST, pakiet, zadatek) — zero 500;
+ * - wolne terminy pod rolą aplikacji: pracownik salonu A zapytany z salonId = B → 404;
+ * - publiczny katalog (GET salons/[id], usługa, profil pracownika): dane salonu A
+ *   niewidoczne pod adresem salonu B, bez settingsJson/ownerId, zły format id → 400.
  *
  * Mocki: sesja i kontekst salonu (atrapy, sterowane per opis), limiter, SMS,
- * logger i bramka zamrożenia modułu pakietów. Baza, RLS (forSalon), walidacja,
- * przynależność referencji do salonu i strażnik zadatku — prawdziwe.
+ * logger, bramka zamrożenia modułu pakietów i unstable_cache (przejście bez cache).
+ * Baza, RLS (forSalon), walidacja, przynależność referencji do salonu i strażnik
+ * zadatku — prawdziwe. Salony B mają własnych właścicieli (jeden salon na użytkownika).
  *
  * Dane: użytkownik `it-t3-ovl-…` (prefiks z notatki sprzątania w pg-harness.ts),
  * salon, dwóch pracowników, klient, dwie usługi bez zadatku, promocja-pakiet;
