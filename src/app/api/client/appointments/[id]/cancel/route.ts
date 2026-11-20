@@ -261,7 +261,7 @@ export async function POST(
       depositSettledBySalon,
     });
 
-    // Process automatic refund if eligible (24h+ before appointment, deposit paid)
+    // Process automatic refund if eligible (24h+ before appointment, deposit paid online — a succeeded payment in MyHelper)
     let refundResult = null;
     if (depositRefunded) {
       refundResult = await refundAppointmentDeposits(
@@ -271,7 +271,7 @@ export async function POST(
       logger.info(`[Client Cancel API] Refund result for appointment ${id}`, { refundResult: refundResult as unknown as Record<string, unknown> });
     }
 
-    // Mark deposit as forfeited if late cancellation (<24h)
+    // Mark deposit as forfeited if late cancellation (<24h) of a deposit paid online (succeeded payment in MyHelper)
     if (depositForfeited) {
       // Zatrzymana tylko najstarsza płatność `succeeded`; kolejne (np. druga
       // sesja Checkout) wracają do klienta (Ethan, #98).
