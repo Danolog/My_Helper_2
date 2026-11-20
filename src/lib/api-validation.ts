@@ -987,6 +987,30 @@ export const depositCreateSessionSchema = z.object({
   path: ["endTime"],
 });
 
+// Rezerwacja z zadatkiem płatnym BLIK-iem na telefon salonu
+// (POST /api/deposits/blik-booking). Pola rezerwacji, kwoty i gościa jak w
+// depositCreateSessionSchema, bez metody płatności i numeru BLIK: numer
+// odbiorcy podaje serwer (ustawienia salonu), a klient płaci w swoim banku.
+// Usługa jest wymagana, bo kwota zadatku wynika z usługi.
+export const blikBookingSchema = z.object({
+  salonId: z.string().uuid("salonId musi byc poprawnym UUID"),
+  employeeId: z.string().uuid("employeeId musi byc poprawnym UUID"),
+  serviceId: z.string().uuid("serviceId musi byc poprawnym UUID"),
+  variantId: absentAsUndefined(z.string().uuid("variantId musi byc poprawnym UUID")),
+  clientId: absentAsUndefined(z.string().uuid("clientId musi byc poprawnym UUID")),
+  startTime: isoDateString("startTime"),
+  endTime: isoDateString("endTime"),
+  depositAmount: z.preprocess(
+    (v) => (typeof v === "string" ? parseFloat(v) : v),
+    z.number().positive("Kwota zadatku musi byc wieksza od 0")
+  ),
+  ...guestFields,
+  notes: absentAsUndefined(z.string().max(APPOINTMENT_NOTES_MAX_LENGTH, NOTES_TOO_LONG)),
+}).refine((d) => Date.parse(d.endTime) > Date.parse(d.startTime), {
+  message: "Czas zakończenia musi być późniejszy niż czas rozpoczęcia",
+  path: ["endTime"],
+});
+
 export const depositConfirmSchema = z.object({
   depositPaymentId: z.string().uuid("Nieprawidlowy identyfikator platnosci zadatku"),
   sessionId: requiredString("ID sesji"),

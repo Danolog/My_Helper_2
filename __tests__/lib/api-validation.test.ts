@@ -13,6 +13,7 @@ import {
   createWaitingListSchema,
   updateWaitingListSchema,
   blikDepositSettingsSchema,
+  blikBookingSchema,
   isPolishMobileNumber,
   POLISH_MOBILE_PREFIXES,
 } from "@/lib/api-validation";
@@ -956,5 +957,50 @@ describe("blikDepositSettingsSchema — numer BLIK salonu", () => {
     expect(isPolishMobileNumber("+48600100200")).toBe(true);
     expect(isPolishMobileNumber("600100200")).toBe(false);
     expect(isPolishMobileNumber("+4860010020")).toBe(false);
+  });
+});
+
+describe("blikBookingSchema — rezerwacja z zadatkiem BLIK", () => {
+  const valid = {
+    salonId: "11111111-1111-4111-8111-111111111111",
+    employeeId: "22222222-2222-4222-8222-222222222222",
+    serviceId: "44444444-4444-4444-8444-444444444444",
+    startTime: "2026-12-01T10:00:00.000Z",
+    endTime: "2026-12-01T11:00:00.000Z",
+    depositAmount: 50,
+    guestName: "Jan Testowy",
+    guestPhone: "+48 000 600 700",
+  };
+
+  it("poprawna rezerwacja: telefon gościa w E.164, null/\"\" → undefined", () => {
+    const result = blikBookingSchema.safeParse({ ...valid, variantId: null, clientId: "", guestEmail: null });
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({ guestPhone: "+48000600700", depositAmount: 50 });
+    expect(result.data?.variantId).toBeUndefined();
+    expect(result.data?.clientId).toBeUndefined();
+  });
+
+  it("kwota jako napis jest parsowana do liczby", () => {
+    expect(blikBookingSchema.safeParse({ ...valid, depositAmount: "50.00" }).data?.depositAmount).toBe(50);
+  });
+
+  it("paymentMethod i blikPhoneNumber nie należą do kontraktu (wycinane)", () => {
+    const result = blikBookingSchema.safeParse({ ...valid, paymentMethod: "blik", blikPhoneNumber: "000600701" });
+    expect(result.success).toBe(true);
+    expect(result.data).not.toHaveProperty("paymentMethod");
+    expect(result.data).not.toHaveProperty("blikPhoneNumber");
+  });
+
+  it.each([
+    ["brak serviceId", { serviceId: undefined }, "serviceId"],
+    ["zły employeeId", { employeeId: "abc" }, "employeeId"],
+    ["kwota ujemna", { depositAmount: -1 }, "depositAmount"],
+    ["data spoza ISO", { startTime: "jutro o 10" }, "startTime"],
+    ["koniec = początek", { endTime: "2026-12-01T10:00:00.000Z" }, "endTime"],
+    ["zły telefon gościa", { guestPhone: "12345" }, "guestPhone"],
+  ])("%s → błąd na polu %s", (_n, patch, field) => {
+    const result = blikBookingSchema.safeParse({ ...valid, ...patch });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.path[0])).toContain(field);
   });
 });

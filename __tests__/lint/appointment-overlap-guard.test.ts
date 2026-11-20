@@ -29,6 +29,7 @@ const CONFLICT_FILES = [
   "src/app/api/appointments/[id]/route.ts",
   "src/app/api/appointments/book-package/route.ts",
   "src/app/api/deposits/create-session/route.ts",
+  "src/app/api/deposits/blik-booking/route.ts",
   "src/lib/waiting-list.ts",
 ];
 const SLOTS_FILE = "src/app/api/available-slots/route.ts";
@@ -136,6 +137,11 @@ describe("#165 strażnik — test kontrolny (podrzucone naruszenia są łapane)"
     );
     expect(v.some((x) => x.includes("nie idzie przez appointmentConflictWhere"))).toBe(true);
     expect(v.some((x) => x.includes("własne porównanie czasu lt(appointments.startTime"))).toBe(true);
+  });
+
+  it("rezerwacja z zadatkiem BLIK bez appointmentConflictWhere", () => {
+    const v = plant("src/app/api/deposits/blik-booking/route.ts", "appointmentConflictWhere({", "({");
+    expect(v.some((x) => x.includes("blik-booking/route.ts: kolizja wizyt nie idzie"))).toBe(true);
   });
 
   it("dawny kształt „włącznie” w dowolnym pliku src/lib", () => {
