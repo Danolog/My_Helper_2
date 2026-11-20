@@ -1,5 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { forSalon } from "@/lib/server/repository";
+import type { DbTx } from "@/lib/server/repository";
 import { SUBSCRIPTION_LOCK_NAMESPACE } from "@/lib/subscription-lock-namespace";
 import type Stripe from "stripe";
 
@@ -41,8 +43,8 @@ export const SUBSCRIPTION_LOCK_TIMEOUT = "5s";
  */
 export const STRIPE_LOCKED_READ_OPTIONS = { timeout: 8_000 } as const;
 
-/** Transakcja Drizzle (typ z `db.transaction`). */
-export type SubscriptionTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+/** Transakcja Drizzle — typ z repozytorium (ten sam klient dla `db` i `forSalon`). */
+export type SubscriptionTx = DbTx;
 
 type Namespace = keyof typeof SUBSCRIPTION_LOCK_NAMESPACE;
 
@@ -98,12 +100,14 @@ export function withStripeSubscriptionLock<T>(
  * zmienia wiersz salonu bez wywołania Stripe (downgrade).
  * Webhook i confirm biorą tę samą blokadę salonu przed zapisem, więc odczyt
  * „active” i zapis nie przeplatają się z nimi. Reguła kolejności zachowana (brak stripe_sub).
+ * Transakcja `forSalon(salonId).raw`: rola aplikacji i RLS salonu (druga tama),
+ * `lock_timeout` i blokada salonu dopiero po ustawieniu kontekstu.
  */
 export function withSalonSubscriptionLock<T>(
   salonId: string,
   fn: (tx: SubscriptionTx) => Promise<T>
 ): Promise<T> {
-  return db.transaction(async (tx) => {
+  return forSalon(salonId).raw(async (tx) => {
     await setSubscriptionLockTimeout(tx);
     await lockSalonSubscriptions(tx, salonId);
     return fn(tx);

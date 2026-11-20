@@ -28,11 +28,12 @@
  * (baza z zastosowanymi migracjami; test nie uruchamia `db:*` ani seeda).
  */
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import { POST as registerSubscription } from "@/app/api/register-subscription/route";
 import { POST as stripeWebhook } from "@/app/api/stripe/webhook/route";
 import { POST as cancelSubscription } from "@/app/api/subscriptions/cancel/route";
+import { DELETE as cancelDowngrade, POST as downgrade } from "@/app/api/subscriptions/downgrade/route";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions, salons, subscriptionPayments, subscriptionPlans, user } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
@@ -42,7 +43,7 @@ import {
   type SubscriptionCheckoutSession,
 } from "@/lib/subscription-confirmation";
 import { SUBSCRIPTION_LOCK_NAMESPACE } from "@/lib/subscription-lock-namespace";
-import { withStripeSubscriptionLock } from "@/lib/subscription-locks";
+import { withSalonSubscriptionLock, withStripeSubscriptionLock } from "@/lib/subscription-locks";
 import { isUniqueViolation } from "@/lib/subscription-predicates";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
@@ -784,6 +785,165 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
       expect(await getSalonAccess(salonId)).toEqual({ state: "none", mode: "read_only", planSlug: null, until: null });
       expect(logger.error).not.toHaveBeenCalled();
     });
+  });
+
+  describe("#193 — downgrade pod blokadą salonu w transakcji forSalon (rola aplikacji)", () => {
+    const appRole = process.env.MYHELPER_APP_DB_ROLE ?? "myhelper_app";
+    let higherPlanId = "";
+    const periodEnd = new Date(Date.now() + 20 * DAY * 1000);
+
+    const post = async () => {
+      const res = await downgrade(
+        new Request("http://localhost/api/subscriptions/downgrade", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ targetPlanSlug: testPlanSlug }),
+        })
+      );
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+    const del = async () => {
+      const res = await cancelDowngrade();
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+    const routes = [
+      ["POST", post],
+      ["DELETE", del],
+    ] as const;
+
+    /** Wiersz active na droższym planie; dla DELETE z zaplanowanym obniżeniem do planu testu. */
+    async function activeOnHigherPlan(scheduled: boolean) {
+      await h!.db.insert(salonSubscriptions).values({
+        salonId,
+        planId: higherPlanId,
+        status: "active",
+        currentPeriodEnd: periodEnd,
+        ...(scheduled ? { scheduledPlanId: planId, scheduledChangeAt: periodEnd } : {}),
+      });
+    }
+
+    /** Jawna transakcja testu trzymająca blokadę salonu (też przez forSalon). */
+    function holdSalonLock() {
+      let release!: () => void;
+      let held!: () => void;
+      const releaseP = new Promise<void>((r) => (release = r));
+      const heldP = new Promise<void>((r) => (held = r));
+      const done = withSalonSubscriptionLock(salonId, async () => {
+        held();
+        await releaseP;
+      });
+      return { held: heldP, release, done };
+    }
+
+    beforeAll(async () => {
+      const [higher] = await h!.db
+        .insert(subscriptionPlans)
+        .values({ name: "IT wyższy", slug: `${testPlanSlug}-hi`, priceMonthly: "299.00" })
+        .returning();
+      higherPlanId = higher!.id;
+    });
+
+    afterAll(async () => {
+      // Wiersze salonu wskazują plan (restrict) — najpierw one, potem plan.
+      await h!.db.delete(salonSubscriptions).where(eq(salonSubscriptions.salonId, salonId));
+      if (higherPlanId) await h!.db.delete(subscriptionPlans).where(eq(subscriptionPlans.id, higherPlanId));
+    });
+
+    it("transakcja blokady jedzie rolą aplikacji z kontekstem salonu; lock_timeout i pg_advisory_xact_lock działają pod tą rolą", async () => {
+      const seen = await withSalonSubscriptionLock(salonId, async (tx) => {
+        const [r] = (await tx.execute(sql`
+          select current_user::text as role,
+                 current_setting('app.current_salon_id', true) as salon,
+                 current_setting('lock_timeout') as lock_timeout,
+                 (select count(*)::int from pg_locks
+                   where locktype = 'advisory' and granted and pid = pg_backend_pid()
+                     and classid = ${SUBSCRIPTION_LOCK_NAMESPACE.salon}::oid and objsubid = 2
+                     and objid = (hashtext(${salonId})::bigint & 4294967295)::oid) as held`)) as unknown as Array<{
+          role: string;
+          salon: string;
+          lock_timeout: string;
+          held: number;
+        }>;
+        return r;
+      });
+      expect(seen).toEqual({ role: appRole, salon: salonId, lock_timeout: "5s", held: 1 });
+    });
+
+    it("POST 200 przy active: obniżenie zaplanowane na koniec okresu (zapis pod RLS salonu)", async () => {
+      await activeOnHigherPlan(false);
+
+      const { status, body } = await post();
+
+      expect(status).toBe(200);
+      expect(body).toEqual(
+        expect.objectContaining({ success: true, currentPlan: `${testPlanSlug}-hi`, targetPlan: testPlanSlug })
+      );
+      expect((await rows()).map((r) => [r.status, r.scheduledPlanId, r.scheduledChangeAt])).toEqual([
+        ["active", planId, periodEnd],
+      ]);
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it("DELETE 200 przy active z zaplanowanym obniżeniem: plan i data wyczyszczone", async () => {
+      await activeOnHigherPlan(true);
+
+      const { status, body } = await del();
+
+      expect(status).toBe(200);
+      expect(body.success).toBe(true);
+      expect((await rows()).map((r) => [r.status, r.scheduledPlanId, r.scheduledChangeAt])).toEqual([
+        ["active", null, null],
+      ]);
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it.each(routes)("%s 404 bez aktywnej subskrypcji (tylko canceled) → zero zapisów", async (_m, call) => {
+      await h!.db.insert(salonSubscriptions).values({ salonId, planId: higherPlanId, status: "canceled" });
+      const before = await rows();
+
+      const { status } = await call();
+
+      expect(status).toBe(404);
+      expect(await rows()).toEqual(before);
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it.each(routes)("%s ‖ blokada salonu: trasa czeka w pg_locks (granted = false), po zwolnieniu 200", async (method, call) => {
+      await activeOnHigherPlan(method === "DELETE");
+      const barrier = holdSalonLock();
+      await barrier.held;
+
+      const pending = call();
+      expect(await waitForLockWaiters("salon", salonId)).toBe(true);
+      barrier.release();
+      await barrier.done;
+
+      expect((await pending).status).toBe(200);
+      const [row] = await rows();
+      expect(row?.scheduledPlanId).toBe(method === "POST" ? planId : null);
+    });
+
+    it.each(routes)(
+      "%s: blokada salonu trzymana dłużej niż lock_timeout → 503 LOCK_BUSY, zero zapisów",
+      async (method, call) => {
+        await activeOnHigherPlan(method === "DELETE");
+        const before = await rows();
+        const barrier = holdSalonLock();
+        await barrier.held;
+
+        try {
+          const { status, body } = await call();
+          expect(status).toBe(503);
+          expect(body.code).toBe("LOCK_BUSY");
+        } finally {
+          barrier.release();
+          await barrier.done;
+        }
+        expect(await rows()).toEqual(before);
+        expect(logger.error).not.toHaveBeenCalled();
+      },
+      15_000
+    );
   });
 
   it("sprzątanie: test nie zostawia blokad (żadnej czekającej ani trzymanej w przestrzeniach subskrypcji)", async () => {
