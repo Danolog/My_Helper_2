@@ -888,7 +888,7 @@ describe("updateWaitingListSchema — bez pól źródła i potwierdzenia (#221)"
   });
 });
 
-describe("blikDepositSettingsSchema — numer BLIK salonu (D1 K1)", () => {
+describe("blikDepositSettingsSchema — numer BLIK salonu", () => {
   // Numery fikcyjne; pozytywne muszą być w zakresie komórkowym.
   it.each(POLISH_MOBILE_PREFIXES)("prefiks komórkowy %s przechodzi", (prefix) => {
     const result = blikDepositSettingsSchema.safeParse({

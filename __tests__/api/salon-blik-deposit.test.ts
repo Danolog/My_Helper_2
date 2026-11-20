@@ -1,5 +1,5 @@
 /**
- * GET/PUT /api/salon/blik-deposit — numer BLIK salonu dla zadatków (D1 K1).
+ * GET/PUT /api/salon/blik-deposit — numer BLIK salonu dla zadatków.
  *
  * Przez prawdziwą bramkę (requireSalonStaff) i prawdziwe forSalon —
  * mockowane tylko krawędzie z salon-staff-harness (sesja, pule bazy).

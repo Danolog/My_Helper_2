@@ -671,7 +671,7 @@ export const salonModulesSchema = z.object({
  * Prefiksy (dwie pierwsze cyfry numeru krajowego) zakresów sieci ruchomych
  * w planie numeracji krajowej PL (rozporządzenie w sprawie planu numeracji
  * krajowej; przydziały prowadzi UKE): 45, 50, 51, 53, 57, 60, 66, 69, 72, 73,
- * 78, 79, 88. Źródło: plan D1 v2 §5 pkt 4, potwierdzone z wiedzą o planie
+ * 78, 79, 88. Źródło: wiedza o krajowym planie
  * numeracji bez dostępu do rejestru UKE — przy zmianie przydziałów UKE lista
  * do aktualizacji. Reguła „pierwsza cyfra 4–8” przepuszczała stacjonarne
  * (58, 61, 71, 81), dlatego lista zamknięta.

@@ -7,10 +7,10 @@ import { salons } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 
 /**
- * /api/salon/blik-deposit — numer BLIK salonu dla zadatków (D1 K1).
+ * /api/salon/blik-deposit — numer BLIK salonu dla zadatków.
  *
  * Zapis w `salons.settingsJson.deposits = { blikPhone, blikConsentAt }`
- * (decyzja Darka 20.11: bez migracji, jak `modules`). Dostęp wyłącznie
+ * (bez migracji, jak `modules`). Dostęp wyłącznie
  * właściciel salonu z sesji — recepcja i pracownik 403, salonu nie bierzemy
  * z żądania (requireSalonStaff: 401 bez sesji, 404 konto bez salonu).
  *
