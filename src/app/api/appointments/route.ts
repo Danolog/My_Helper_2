@@ -15,7 +15,7 @@ import { strictRateLimit, apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getSalonContext } from "@/lib/salon-context";
 import { assertSalonRefs } from "@/lib/salon-refs";
 import { appointments, clients, employees, salons, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
-// #193 R1: GET przez forSalon z salonu sesji; POST (publiczny booking, także
+// #193: GET przez forSalon z salonu sesji; POST (publiczny booking, także
 // gość bez sesji) przez forSalon(salonId z żądania) — kontekst RLS salonu,
 // jawne eq(salonId) w każdym warunku i jawne listy kolumn w raw().
 import { forSalon } from "@/lib/server/repository";
@@ -24,7 +24,7 @@ import { sendBookingConfirmationSms } from "@/lib/sms";
 import { timeBlockConflictMessage } from "@/lib/time-block-conflict";
 import { isValidUuid, isValidDateString } from "@/lib/validations";
 
-// #193 R1: kolumny wizyty w odpowiedzi 201 POST — dokładnie te, które trasa
+// #193: kolumny wizyty w odpowiedzi 201 POST — dokładnie te, które trasa
 // zwracała dotąd (cały wiersz appointments). Jawna lista: nowa kolumna w
 // schemacie nie trafi do publicznej odpowiedzi bez świadomej decyzji.
 const CREATED_APPOINTMENT_COLUMNS = {
@@ -335,7 +335,7 @@ export async function POST(request: Request) {
       if (depositError) return depositError;
     }
 
-    // #193 R1: od tego miejsca każde zapytanie biegnie w kontekście RLS salonu
+    // #193: od tego miejsca każde zapytanie biegnie w kontekście RLS salonu
     // wizyty (salonId z żądania — przynależność pracownika/usługi/klienta do
     // niego sprawdził wyżej assertSalonRefs) i ma jawne eq(salonId).
     const salonDb = forSalon(salonId);

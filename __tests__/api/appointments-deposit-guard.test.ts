@@ -28,7 +28,7 @@ const h = vi.hoisted(() => ({
   sms: vi.fn(),
 }));
 
-// #193 R1: POST czyta i zapisuje przez forSalon(salonId).raw(tx => …).
+// #193: POST czyta i zapisuje przez forSalon(salonId).raw(tx => …).
 vi.mock("@/lib/server/repository", () => {
   const tx = {
     select: (...a: unknown[]) => h.select(...a),

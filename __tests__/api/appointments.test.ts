@@ -53,7 +53,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-// #193 R1: prawdziwa warstwa repo (na atrapie db wyżej) z podglądem wywołań
+// #193: prawdziwa warstwa repo (na atrapie db wyżej) z podglądem wywołań
 // forSalon — test sprawdza, z jakim salonem POST otwiera kontekst RLS.
 vi.mock("@/lib/server/repository", async (orig) => {
   const actual = await orig<typeof import("@/lib/server/repository")>();
@@ -2656,7 +2656,7 @@ describe("POST /api/appointments — kolizja półotwarta (#165)", () => {
     expect(status).toBe(201);
   });
 
-  // salonId w blokadzie = salon pracownika z joinu employees (#193 R1).
+  // salonId w blokadzie = salon pracownika z joinu employees (#193).
   it("blokada czasu na styku (11–12 po wizycie 10–11) nie koliduje → 201", async () => {
     const block = {
       id: "block-165",
@@ -3016,12 +3016,12 @@ describe("PUT /api/appointments/[id] — wyścig odrzucony przez bazę (#171)", 
 });
 
 // -------------------------------------------------------
-// #193 R1: publiczny POST przez forSalon(salonId z żądania), jawne listy kolumn.
+// #193: publiczny POST przez forSalon(salonId z żądania), jawne listy kolumn.
 // -------------------------------------------------------
 
-describe("POST /api/appointments — forSalon i jawne listy kolumn (#193 R1)", () => {
+describe("POST /api/appointments — forSalon i jawne listy kolumn (#193)", () => {
   const PROMO_CODE_UUID = "77777777-7777-4777-8777-777777777777";
-  /** Kolumny wizyty, które odpowiedź 201 zwracała przed #193 R1 (cały wiersz appointments). */
+  /** Kolumny wizyty, które odpowiedź 201 zwracała przed #193 (cały wiersz appointments). */
   const RESPONSE_COLUMNS = [
     "id", "salonId", "clientId", "employeeId", "serviceId", "variantId", "bookedByUserId",
     "startTime", "endTime", "status", "notes", "depositAmount", "depositPaid",

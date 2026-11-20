@@ -109,7 +109,7 @@ const appt = (start: string, end: string, extra: Record<string, unknown> = {}) =
 });
 /**
  * Blokada: kolumny do WHERE + pola zwracane do komunikatu. `salon_id` to salon
- * pracownika z joinu employees (POST zawęża blokady do salonu, #193 R1).
+ * pracownika z joinu employees (POST zawęża blokady do salonu, #193).
  */
 const block = (start: string, end: string, extra: Record<string, unknown> = {}) => ({
   id: "bbbbbbbb-0000-4000-8000-000000000001",
@@ -314,9 +314,9 @@ describe("POST /api/appointments — filtr pracownika w blokadach (Q8, #168)", (
   });
 });
 
-// ─── POST: zawężenie do salonu z żądania (#193 R1) ─────────────────────────
+// ─── POST: zawężenie do salonu z żądania (#193) ─────────────────────────
 
-describe("POST /api/appointments — warunki kolizji i blokad z salonId z żądania (#193 R1)", () => {
+describe("POST /api/appointments — warunki kolizji i blokad z salonId z żądania (#193)", () => {
   const OTHER_SALON = "99999999-9999-4999-8999-999999999999";
   const GUEST = { guestName: "Jan Kowalski", guestPhone: "123 456 789" };
   function post() {

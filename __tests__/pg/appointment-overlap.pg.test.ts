@@ -368,11 +368,11 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       expect(await activeOnDay(5)).toEqual([`${at(5, "10:00")}–${at(5, "11:00")}`]);
     });
 
-    // #193 R1: POST gościa biegnie przez forSalon (SET LOCAL ROLE aplikacji +
+    // #193: POST gościa biegnie przez forSalon (SET LOCAL ROLE aplikacji +
     // kontekst salonu). Zapytanie do SMS łączy `salons` — gdyby polityka RLS
     // salons nie przepuszczała wiersza salonu z kontekstu, innerJoin dałby
     // zero wierszy i SMS zniknąłby po cichu (best-effort, bez błędu).
-    it("#193 R1: gość pod rolą aplikacji — wizyta zapisana, SMS dostaje nazwę salonu", async () => {
+    it("#193: gość pod rolą aplikacji — wizyta zapisana, SMS dostaje nazwę salonu", async () => {
       const sms = vi.mocked(sendBookingConfirmationSms);
       sms.mockClear();
       const res = await post(at(29, "10:00"), at(29, "11:00"));
@@ -388,7 +388,7 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       });
     });
 
-    it("#193 R1: gość z kodem promocyjnym pod rolą aplikacji — kod zapisany na wizycie i zużyty", async () => {
+    it("#193: gość z kodem promocyjnym pod rolą aplikacji — kod zapisany na wizycie i zużyty", async () => {
       const [code] = await h!.db
         .insert(promoCodes)
         .values({ salonId, code: `IT-R1-${RUN}`, usageLimit: 5, usedCount: 0 })
