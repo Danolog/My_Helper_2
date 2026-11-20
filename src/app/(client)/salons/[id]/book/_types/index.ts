@@ -60,6 +60,21 @@ export interface FirstVisitPromo {
 export type ActivePromoType = "happy_hours" | "first_visit" | "none";
 
 // ---------------------------------------------------------------------------
+// Dane przelewu zadatku BLIK na telefon salonu — wylacznie z odpowiedzi 201
+// POST /api/deposits/blik-booking (kwota liczona przez serwer)
+// ---------------------------------------------------------------------------
+
+export interface BlikInstructions {
+  appointmentId: string;
+  startTime: string;
+  endTime: string;
+  depositAmount: number;
+  phone: string;
+  recipient: string;
+  title: string;
+}
+
+// ---------------------------------------------------------------------------
 // Derived pricing/deposit values exposed by the hook
 // ---------------------------------------------------------------------------
 
@@ -114,6 +129,8 @@ export interface UseBookingDataReturn {
   isBooking: boolean;
   bookingSuccess: boolean;
   isProcessingPayment: boolean;
+  /** Dane przelewu po rezerwacji z zadatkiem BLIK; null poza ta sciezka. */
+  blikInstructions: BlikInstructions | null;
 
   // Payment
   selectedPaymentMethod: string;
