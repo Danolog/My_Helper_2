@@ -346,7 +346,7 @@ function ownerTextForSms(text: string, max: number): string {
 }
 
 /**
- * Imię klienta przygotowane do treści każdego SMS do klienta (przypomnienie,
+ * Imię klienta przygotowane do treści szablonów SMS z tego modułu (przypomnienie,
  * potwierdzenie rezerwacji, potwierdzenie płatności, rezerwacja z zadatkiem
  * BLIK). Imię może pochodzić z publicznego formularza (także bez sesji) albo
  * z kartoteki założonej z nazwy konta, a SMS może trafić na dowolny numer —
