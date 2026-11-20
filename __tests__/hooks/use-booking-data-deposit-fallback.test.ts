@@ -11,6 +11,13 @@ const SALON_ID = "salon-1";
 const SERVICE_ID = "service-1";
 const EMPLOYEE_ID = "employee-1";
 
+// Ten plik testuje ścieżkę płatności online (create-session) — przełącznik
+// zadatku BLIK przypięty na false, żeby zmiana jego ciała nie zmieniła testu.
+vi.mock("@/lib/features", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/features")>()),
+  isBlikDepositFlow: () => false,
+}));
+
 vi.mock("next/navigation", () => ({ useParams: () => ({ id: SALON_ID }) }));
 vi.mock("@/lib/auth-client", () => ({ useSession: () => ({ data: null }) }));
 
@@ -114,5 +121,22 @@ describe("useBookingData — zadatek niepobierany po stronie serwera (#67)", () 
 
     expect(calledUrls()).toEqual(["/api/deposits/create-session"]);
     expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/zajety/));
+  });
+
+  it("404 MODULE_DISABLED z create-session (stara karta po wyłączeniu płatności online) → komunikat, nie pusty ekran", async () => {
+    mutationFetch.mockResolvedValueOnce(
+      response(404, { success: false, code: "MODULE_DISABLED", error: "Ta funkcja jest obecnie niedostępna." }),
+    );
+    const { result } = await readyToBook();
+
+    await act(async () => {
+      await result.current.handleBookAppointment();
+    });
+
+    expect(calledUrls()).toEqual(["/api/deposits/create-session"]);
+    expect(toast.error).toHaveBeenCalledWith("Ta funkcja jest obecnie niedostępna.");
+    expect(result.current.isProcessingPayment).toBe(false);
+    expect(result.current.bookingSuccess).toBe(false);
+    expect(result.current.selectedServiceId).toBe(SERVICE_ID);
   });
 });

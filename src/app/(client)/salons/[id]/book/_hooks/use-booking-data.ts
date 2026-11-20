@@ -4,18 +4,58 @@ import { toast } from "sonner";
 import { mutationFetch } from "@/lib/api-client";
 import { useSession } from "@/lib/auth-client";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
-import { isPromotionTypeFrozen } from "@/lib/features";
+import { isBlikDepositFlow, isPromotionTypeFrozen } from "@/lib/features";
 import { buildDepositBody, isDepositNotApplicable } from "../_lib/deposit-body";
 import type {
   SalonDetail,
   AssignedEmployee,
   AvailableSlotsData,
+  BlikInstructions,
   ClientDepositSettings,
   HappyHoursPromo,
   FirstVisitPromo,
   ActivePromoType,
   UseBookingDataReturn,
 } from "../_types";
+
+// ---------------------------------------------------------------------------
+// Zadatek BLIK na telefon salonu
+// ---------------------------------------------------------------------------
+
+/** Kod 409 trasy blik-booking, gdy salon nie ma numeru BLIK. */
+const DEPOSIT_BLIK_NOT_CONFIGURED_CODE = "DEPOSIT_BLIK_NOT_CONFIGURED";
+const BLIK_BOOKING_FAILED_MESSAGE = "Nie udalo sie zarezerwowac wizyty z zadatkiem";
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+/**
+ * Dane przelewu z `data` odpowiedzi 201 albo null, gdy ksztalt sie nie zgadza.
+ * Kwota to liczba z serwera — nigdy kwota policzona w portalu.
+ */
+function toBlikInstructions(data: unknown): BlikInstructions | null {
+  if (typeof data !== "object" || data === null) return null;
+  const { appointmentId, startTime, endTime, depositAmount, blik } = data as Record<string, unknown>;
+  if (typeof blik !== "object" || blik === null) return null;
+  const { phone, recipient, title } = blik as Record<string, unknown>;
+
+  if (
+    !isNonEmptyString(appointmentId) ||
+    !isNonEmptyString(startTime) ||
+    !isNonEmptyString(endTime) ||
+    typeof depositAmount !== "number" ||
+    !Number.isFinite(depositAmount) ||
+    depositAmount <= 0 ||
+    !isNonEmptyString(phone) ||
+    !isNonEmptyString(recipient) ||
+    !isNonEmptyString(title)
+  ) {
+    return null;
+  }
+
+  return { appointmentId, startTime, endTime, depositAmount, phone, recipient, title };
+}
 
 // ---------------------------------------------------------------------------
 // Hook — useBookingData
@@ -63,6 +103,8 @@ export function useBookingData(): UseBookingDataReturn {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [_depositPaymentId, setDepositPaymentId] = useState<string>("");
   const [_depositSessionId, setDepositSessionId] = useState<string>("");
+  // Dane przelewu BLIK na telefon salonu — tylko z odpowiedzi 201 serwera
+  const [blikInstructions, setBlikInstructions] = useState<BlikInstructions | null>(null);
 
   // Guest booking info (when not logged in)
   const [guestName, setGuestName] = useState("");
@@ -498,6 +540,85 @@ export function useBookingData(): UseBookingDataReturn {
     });
   }
 
+  /**
+   * Rezerwacja z zadatkiem BLIK na telefon salonu (POST /api/deposits/blik-booking).
+   * Dane przelewu (numer, odbiorca, tytul, kwota) bierzemy WYLACZNIE z odpowiedzi
+   * 201 — kwote liczy serwer, kwota hooka sluzy mu tylko do porownania.
+   * Zwraca true, gdy serwer uznal, ze zadatku nie pobierze (zwykla rezerwacja).
+   * Przy bledzie formularz zostaje na miejscu z komunikatem.
+   */
+  async function bookWithBlikDeposit(
+    startTime: Date,
+    endTime: Date,
+    notesText: string,
+  ): Promise<boolean> {
+    setIsProcessingPayment(true);
+    setBlikInstructions(null);
+    try {
+      // Ten sam payload co create-session, bez metody platnosci — trasa BLIK
+      // jej nie przyjmuje.
+      const { paymentMethod, ...blikBody } = buildDepositBody({
+        salonId,
+        employeeId: selectedEmployeeId,
+        serviceId: selectedServiceId,
+        variantId: selectedVariantId,
+        startTime,
+        endTime,
+        notes: notesText,
+        depositAmount,
+        paymentMethod: selectedPaymentMethod,
+        isLoggedIn: !!session,
+        guestName,
+        guestPhone,
+        guestEmail,
+      });
+      void paymentMethod;
+
+      const res = await mutationFetch("/api/deposits/blik-booking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(blikBody),
+      });
+      const json = await res.json();
+
+      if (json.success) {
+        // Wizyta juz istnieje — sukces takze wtedy, gdy danych przelewu nie
+        // da sie odczytac; wtedy klient dostaje polecenie kontaktu z salonem.
+        const instructions = toBlikInstructions(json.data);
+        setBlikInstructions(instructions);
+        setBookingSuccess(true);
+        if (instructions) {
+          toast.success("Wizyta zarezerwowana. Oplac zadatek BLIK-iem wedlug instrukcji.");
+        } else {
+          toast.warning(
+            "Wizyta zarezerwowana, ale nie udalo sie wyswietlic danych przelewu zadatku. Skontaktuj sie z salonem.",
+          );
+        }
+        return false;
+      }
+
+      if (isDepositNotApplicable(res.status, json)) return true;
+
+      if (res.status === 409) {
+        // Brak numeru BLIK w salonie: serwer podaje w komunikacie telefon
+        // salonu. Inne 409 to zajety termin albo niedostepny pracownik.
+        toast.error(
+          json.code === DEPOSIT_BLIK_NOT_CONFIGURED_CODE
+            ? json.error || BLIK_BOOKING_FAILED_MESSAGE
+            : json.error || "Wybrany termin jest juz zajety. Wybierz inny termin.",
+        );
+      } else {
+        toast.error(json.error || BLIK_BOOKING_FAILED_MESSAGE);
+      }
+      return false;
+    } catch {
+      toast.error("Blad rezerwacji z zadatkiem");
+      return false;
+    } finally {
+      setIsProcessingPayment(false);
+    }
+  }
+
   async function handleBookAppointment() {
     if (
       !selectedService ||
@@ -525,8 +646,21 @@ export function useBookingData(): UseBookingDataReturn {
     // pobierze zadatku — wtedy zwykła rezerwacja poniżej, bez błędu.
     let fallBackToStandardBooking = false;
 
-    // If deposit is required, use the deposit flow
-    if (depositRequired && depositAmount > 0) {
+    // If deposit is required, use the deposit flow: BLIK to the salon's phone
+    // (no Stripe, no redirect) or online payment, chosen in one place.
+    const depositFlow =
+      depositRequired && depositAmount > 0
+        ? isBlikDepositFlow()
+          ? "blik"
+          : "online"
+        : "none";
+
+    if (depositFlow === "blik") {
+      fallBackToStandardBooking = await bookWithBlikDeposit(startTime, endTime, notesText);
+      if (!fallBackToStandardBooking) return;
+    }
+
+    if (depositFlow === "online") {
       // NOTE: the "Blik P2P" mock (payment request to a phone number) was
       // removed — BLIK is available as a payment method inside Stripe Checkout.
 
@@ -691,6 +825,7 @@ export function useBookingData(): UseBookingDataReturn {
     setIsProcessingPayment(false);
     setDepositPaymentId("");
     setDepositSessionId("");
+    setBlikInstructions(null);
     setHappyHoursPromo(null);
     setGuestName("");
     setGuestPhone("");
@@ -730,6 +865,7 @@ export function useBookingData(): UseBookingDataReturn {
     isBooking,
     bookingSuccess,
     isProcessingPayment,
+    blikInstructions,
 
     // Payment
     selectedPaymentMethod,
