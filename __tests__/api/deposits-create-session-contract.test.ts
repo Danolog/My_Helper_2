@@ -83,6 +83,11 @@ vi.mock("@/lib/stripe", () => ({
   isStripeConfigured: () => false,
 }));
 
+vi.mock("@/lib/server/frozen-guard", async (orig) => ({
+  ...(await orig<typeof import("@/lib/server/frozen-guard")>()),
+  frozenModuleResponse: () => null, // trasa testowana bez blokady modułu
+}));
+
 import { POST } from "@/app/api/deposits/create-session/route";
 
 // -------------------------------------------------------

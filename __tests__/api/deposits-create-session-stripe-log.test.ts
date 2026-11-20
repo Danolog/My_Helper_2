@@ -60,6 +60,11 @@ vi.mock("@/lib/stripe", () => ({
   isStripeConfigured: () => true,
   getStripe: () => ({ checkout: { sessions: { create: (...a: unknown[]) => mockSessionsCreate(...a) } } }),
 }));
+// Rejestr mocków przetrwa vi.resetModules() w runInMode — trasa importowana na nowo też dostaje ten mock.
+vi.mock("@/lib/server/frozen-guard", async (orig) => ({
+  ...(await orig<typeof import("@/lib/server/frozen-guard")>()),
+  frozenModuleResponse: () => null, // trasa testowana bez blokady modułu
+}));
 
 const guestBody = {
   salonId: SALON_UUID,
