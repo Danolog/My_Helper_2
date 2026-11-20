@@ -17,9 +17,10 @@ import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
 import { assertSalonRefs } from "@/lib/salon-refs";
-import { appointments, employees, salons, timeBlocks } from "@/lib/schema";
+import { appointments, clients, employees, salons, services, timeBlocks } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { getOptionalSession } from "@/lib/session";
+import { sendBlikDepositBookingSms } from "@/lib/sms";
 
 /**
  * POST /api/deposits/blik-booking — publiczna rezerwacja z zadatkiem płatnym
@@ -33,9 +34,16 @@ import { getOptionalSession } from "@/lib/session";
  * Stripe nie obejmują tej wizyty.
  *
  * Numer BLIK salonu (`settingsJson.deposits.blikPhone`) to dane osobowe
- * właściciela. Trafia wyłącznie do odpowiedzi 201, czyli po utworzeniu
- * wizyty — nigdy do błędów ani do logów. Format numeru sprawdza zapis
- * ustawień, tu liczy się tylko to, że jest niepustym napisem.
+ * właściciela. Trafia wyłącznie do odpowiedzi 201 i do SMS do klienta (wraz
+ * z treścią SMS do tabeli notifications salonu), czyli po utworzeniu wizyty —
+ * nigdy do błędów ani do logów. Format numeru sprawdza
+ * zapis ustawień, tu liczy się tylko to, że jest niepustym napisem.
+ *
+ * SMS: po zapisie, przed odpowiedzią 201, klient (telefon gościa albo telefon
+ * z kartoteki) dostaje SMS z numerem BLIK, kwotą i tytułem przelewu — tymi
+ * samymi wartościami co w odpowiedzi, bez drugiego odczytu numeru. Błąd SMS
+ * nie zmienia odpowiedzi. Przy 4xx/5xx SMS nie wychodzi. Treść SMS zapisuje
+ * `sendSms` w tabeli `notifications` salonu (jak każdy SMS transakcyjny).
  *
  * Izolacja salonów: `salonId` z body to cel rezerwacji. Przynależność
  * pracownika, usługi, wariantu i klienta do tego salonu sprawdza
@@ -78,6 +86,75 @@ function blikNotConfiguredResponse(salonPhone: string | null) {
 /** Niepusty napis albo null — `settingsJson` może mieć dowolny kształt. */
 function toBlikPhone(raw: unknown): string | null {
   return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+}
+
+interface BookingSmsInput {
+  salonId: string;
+  appointmentId: string;
+  clientId: string | null;
+  guestName: string | null;
+  guestPhone: string | null;
+  appointmentDate: Date;
+  salonName: string;
+  /** Ten sam numer, który trafia do odpowiedzi 201. */
+  blikPhone: string;
+  amount: number;
+  /** Ten sam tytuł, który trafia do odpowiedzi 201. */
+  title: string;
+}
+
+/**
+ * SMS do klienta z numerem BLIK, kwotą i tytułem przelewu. Best-effort: błąd
+ * odczytu szczegółów albo wysyłki nie zmienia odpowiedzi 201 — wizyta już
+ * istnieje, a dane przelewu klient ma na ekranie. Do logu tylko id wizyty
+ * i tożsamość błędu: treść błędu może nieść numer BLIK albo telefon klienta.
+ */
+async function sendBookingSms(input: BookingSmsInput): Promise<void> {
+  try {
+    // RLS: appointments, clients, services i employees mają politykę tenant_isolation
+    // po salon_id, więc pod forSalon widać tylko wiersze tego salonu; jawne
+    // eq(appointments.salonId) zawęża wizytę niezależnie od RLS.
+    const [details] = await forSalon(input.salonId).raw((tx) =>
+      tx
+        .select({
+          clientFirstName: clients.firstName,
+          clientPhone: clients.phone,
+          serviceName: services.name,
+          employeeFirstName: employees.firstName,
+          employeeLastName: employees.lastName,
+        })
+        .from(appointments)
+        .leftJoin(clients, eq(appointments.clientId, clients.id))
+        .leftJoin(services, eq(appointments.serviceId, services.id))
+        .innerJoin(employees, eq(appointments.employeeId, employees.id))
+        .where(and(eq(appointments.id, input.appointmentId), eq(appointments.salonId, input.salonId)))
+        .limit(1)
+    );
+
+    // Klient z kartoteki (wybrany przez personel) ma pierwszeństwo przed
+    // polami gościa. Bez telefonu nie ma SMS.
+    const phone = details?.clientPhone || input.guestPhone;
+    if (!details || !phone) return;
+
+    await sendBlikDepositBookingSms({
+      clientPhone: phone,
+      clientName: details.clientFirstName || input.guestName || "",
+      serviceName: details.serviceName || "",
+      employeeName: `${details.employeeFirstName} ${details.employeeLastName}`,
+      appointmentDate: input.appointmentDate,
+      salonName: input.salonName,
+      salonId: input.salonId,
+      ...(input.clientId ? { clientId: input.clientId } : {}),
+      blikPhone: input.blikPhone,
+      amount: input.amount,
+      title: input.title,
+    });
+  } catch (error) {
+    logger.warn("[BlikBooking API] Booking SMS failed", {
+      appointmentId: input.appointmentId,
+      ...toErrorIdentity(error),
+    });
+  }
 }
 
 export async function POST(request: Request) {
@@ -325,6 +402,24 @@ export async function POST(request: Request) {
       amount: depositAmount,
     });
 
+    const blikTitle = blikTransferTitle(appointment.id);
+
+    // SMS z danymi przelewu: te same `blikPhone` i `blikTitle`, które idą do
+    // odpowiedzi — bez drugiego odczytu numeru, więc zmiana numeru przez
+    // właściciela w trakcie żądania nie rozjedzie SMS i ekranu.
+    await sendBookingSms({
+      salonId,
+      appointmentId: appointment.id,
+      clientId,
+      guestName: guestName ?? null,
+      guestPhone: guestPhone ?? null,
+      appointmentDate: appointment.startTime,
+      salonName: salon.name,
+      blikPhone,
+      amount: depositAmount,
+      title: blikTitle,
+    });
+
     return NextResponse.json(
       {
         success: true,
@@ -336,7 +431,7 @@ export async function POST(request: Request) {
           blik: {
             phone: blikPhone,
             recipient: salon.name,
-            title: blikTransferTitle(appointment.id),
+            title: blikTitle,
           },
           status: appointment.status,
           depositPaid: appointment.depositPaid,
