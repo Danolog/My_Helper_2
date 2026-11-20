@@ -337,7 +337,8 @@ export async function POST(request: Request) {
 
     // #193: od tego miejsca każde zapytanie biegnie w kontekście RLS salonu
     // wizyty (salonId z żądania — przynależność pracownika/usługi/klienta do
-    // niego sprawdził wyżej assertSalonRefs) i ma jawne eq(salonId).
+    // niego sprawdził wyżej assertSalonRefs); odczyty i UPDATE mają jawne
+    // eq(salonId), INSERT ma salonId w wartościach, a sprawdza go WITH CHECK polityki.
     const salonDb = forSalon(salonId);
 
     // Kolizja: przedział półotwarty [start, end) — styk 10–11 / 11–12 nie koliduje (#165).

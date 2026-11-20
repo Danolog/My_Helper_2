@@ -391,7 +391,7 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
     it("#193: gość z kodem promocyjnym pod rolą aplikacji — kod zapisany na wizycie i zużyty", async () => {
       const [code] = await h!.db
         .insert(promoCodes)
-        .values({ salonId, code: `IT-R1-${RUN}`, usageLimit: 5, usedCount: 0 })
+        .values({ salonId, code: `IT-PROMO-${RUN}`, usageLimit: 5, usedCount: 0 })
         .returning();
       const res = await createAppointment(
         new Request("http://localhost/api/appointments", {
