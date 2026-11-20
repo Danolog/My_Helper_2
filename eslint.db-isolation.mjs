@@ -107,8 +107,6 @@ export const P3_FILES = [
   "src/app/api/promotions/check-happy-hours/route.ts",
   "src/app/api/promotions/check-package/route.ts",
   "src/app/api/promotions/check/route.ts",
-  "src/app/api/salons/[id]/gallery/route.ts",
-  "src/app/api/salons/route.ts",
 ];
 
 /** P4: portal klienta (forUser). */

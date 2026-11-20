@@ -70,6 +70,8 @@ const SNAPSHOT: Record<string, string[]> = {
   "auth-throttle.ts:clearSignInFailures": ["src/lib/auth-rate-limit-options.ts"],
   "auth-throttle.ts:consumeAuthRateLimit": ["src/lib/auth-rate-limit-options.ts"],
   "auth-throttle.ts:reserveAccountSignInAttempt": ["src/lib/auth-rate-limit-options.ts"],
+  // Publiczna lista salonów: bez argumentów (brak userId/salonId), tylko odczyt.
+  "catalog.ts:listPublicSalonCatalog": ["src/app/api/salons/route.ts"],
   "cron.ts:cleanupExpiredTemporaryAccess": [
     "src/app/api/cron/cleanup-temporary-access/route.ts",
     "src/lib/temporary-access.ts",

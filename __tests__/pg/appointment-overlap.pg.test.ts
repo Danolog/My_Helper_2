@@ -13,12 +13,15 @@
  * - wolne terminy pod rolą aplikacji: pracownik salonu A zapytany z salonId = B → 404;
  * - publiczny katalog (GET salons/[id], usługa, profil pracownika): dane salonu A
  *   niewidoczne pod adresem salonu B, bez settingsJson/ownerId, zły format id → 400;
+ * - galeria salonu (GET salons/[id]/gallery, forSalon): zdjęcia A, nie D; filtr
+ *   pracownikiem A pod salonem D → pusta lista; zły format id → 400; lista salonów
+ *   (GET /api/salons, pula systemowa): salon D bez settingsJson/ownerId i numeru BLIK;
  * - POST /api/deposits/blik-booking (gość): salon C z numerem BLIK → 201 bez wiersza deposit_payments, zajęty termin i wyścig → 409, salon A bez numeru → 409 bez nowej wizyty.
  *
  * Mocki: sesja i kontekst salonu (atrapy, sterowane per opis), limiter, SMS,
  * logger, bramka zamrożenia modułu pakietów i unstable_cache (przejście bez cache).
  * Baza, RLS (forSalon), walidacja, przynależność referencji do salonu i strażnik
- * zadatku — prawdziwe. Salony B i salon C mają własnych właścicieli (jeden salon na użytkownika).
+ * zadatku — prawdziwe. Salony B, C i D mają własnych właścicieli (jeden salon na użytkownika).
  *
  * Dane: użytkownik `it-t3-ovl-…` (prefiks z notatki sprzątania w pg-harness.ts),
  * salon, dwóch pracowników, klient, dwie usługi bez zadatku, promocja-pakiet;
@@ -37,14 +40,17 @@ import { GET as getAvailableSlots } from "@/app/api/available-slots/route";
 import { POST as createBlikBooking } from "@/app/api/deposits/blik-booking/route";
 import { POST as createDepositSession } from "@/app/api/deposits/create-session/route";
 import { GET as getSalonEmployee } from "@/app/api/salons/[id]/employees/[employeeId]/route";
+import { GET as getSalonGallery } from "@/app/api/salons/[id]/gallery/route";
 import { GET as getSalon } from "@/app/api/salons/[id]/route";
 import { GET as getSalonService } from "@/app/api/salons/[id]/services/[serviceId]/route";
+import { GET as listSalons } from "@/app/api/salons/route";
 import { APPOINTMENT_NO_OVERLAP_CONSTRAINT, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
 import {
   appointments,
   clients,
   depositPayments,
   employees,
+  galleryPhotos,
   promoCodes,
   promotions,
   salons,
@@ -1033,6 +1039,118 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       expect((await salon("not-a-uuid")).status).toBe(400);
       expect((await employee(salonId, "not-a-uuid")).status).toBe(400);
       expect((await service("not-a-uuid", serviceId)).status).toBe(400);
+    });
+  });
+
+  // Galeria salonu pod forSalon(id z URL) i lista salonów przez funkcję
+  // systemową. Salon D ma własnego właściciela, pełne dane katalogu (adres,
+  // telefon, branża) i numer BLIK w settingsJson — musi trafić na listę bez
+  // settingsJson i ownerId. Zdjęcie salonu A usuwane w afterAll bloku.
+  describe("galeria salonu i lista salonów (rola aplikacji / pula systemowa)", () => {
+    const OWNER_GALLERY_ID = `it-t3-ovl-gal-${RUN}`;
+    const BLIK_PHONE_D = "+48000600705";
+    let salonDId = "";
+    let photoAId = "";
+    let photoDId = "";
+
+    beforeAll(async () => {
+      const db = h!.db;
+      await db.insert(user).values({
+        id: OWNER_GALLERY_ID,
+        name: "IT T3 ovl gal",
+        email: `${OWNER_GALLERY_ID}@example.invalid`,
+      });
+      const [salonD] = await db
+        .insert(salons)
+        .values({
+          name: `IT T3 ovl D ${RUN}`,
+          ownerId: OWNER_GALLERY_ID,
+          phone: "+48000600706",
+          address: "Ul. Testowa 4",
+          industryType: "spa",
+          settingsJson: { deposits: { blikPhone: BLIK_PHONE_D, blikConsentAt: "2099-01-01T00:00:00.000Z" } },
+        })
+        .returning();
+      salonDId = salonD!.id;
+      const [photoA] = await db
+        .insert(galleryPhotos)
+        .values({ salonId, employeeId, description: `IT zdjęcie A ${RUN}` })
+        .returning();
+      photoAId = photoA!.id;
+      const [photoD] = await db
+        .insert(galleryPhotos)
+        .values({ salonId: salonDId, description: `IT zdjęcie D ${RUN}` })
+        .returning();
+      photoDId = photoD!.id;
+    });
+
+    afterAll(async () => {
+      if (!h) return;
+      if (photoAId) await h.db.delete(galleryPhotos).where(eq(galleryPhotos.id, photoAId));
+      // Salon D kaskadą zabiera swoje zdjęcie, potem jego właściciel.
+      if (salonDId) await h.db.delete(salons).where(eq(salons.id, salonDId));
+      await h.db.delete(user).where(eq(user.id, OWNER_GALLERY_ID));
+    });
+
+    const gallery = async (sid: string, query = "") => {
+      const res = await getSalonGallery(new Request(`http://localhost/api/salons/${sid}/gallery${query}`), {
+        params: Promise.resolve({ id: sid }),
+      });
+      return {
+        status: res.status,
+        body: (await res.json()) as {
+          success: boolean;
+          data?: { id: string; salonId: string; employeeFirstName: string | null }[];
+          filters?: { employees: { id: string }[] };
+        },
+      };
+    };
+
+    it("GET salons/{A}/gallery → zdjęcie A z imieniem pracownika, bez zdjęcia D", async () => {
+      const res = await gallery(salonId);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      const ids = res.body.data!.map((p) => p.id);
+      expect(ids).toContain(photoAId);
+      expect(ids).not.toContain(photoDId);
+      expect(res.body.data!.every((p) => p.salonId === salonId)).toBe(true);
+      expect(res.body.data!.find((p) => p.id === photoAId)!.employeeFirstName).toBe("IT");
+      expect(res.body.filters!.employees.map((e) => e.id)).toContain(employeeId);
+    });
+
+    it("GET salons/{D}/gallery z employeeId pracownika A → pusta lista", async () => {
+      const res = await gallery(salonDId, `?employeeId=${employeeId}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([]);
+    });
+
+    it("zły format id → 400 (nie 500 z rzutowania ::uuid)", async () => {
+      expect((await gallery("not-a-uuid")).status).toBe(400);
+      expect((await gallery(salonId, "?employeeId=not-a-uuid")).status).toBe(400);
+    });
+
+    it("GET /api/salons → 200; salon D na liście bez settingsJson i ownerId", async () => {
+      const res = await listSalons();
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { success: boolean; data: Record<string, unknown>[]; count: number };
+      expect(body.success).toBe(true);
+      expect(body.count).toBe(body.data.length);
+      const d = body.data.find((s) => s.id === salonDId);
+      expect(d).toEqual({
+        id: salonDId,
+        name: `IT T3 ovl D ${RUN}`,
+        phone: "+48000600706",
+        email: null,
+        address: "Ul. Testowa 4",
+        industryType: "spa",
+        serviceCount: 0,
+        averageRating: null,
+        reviewCount: 0,
+      });
+      for (const s of body.data) {
+        expect(s).not.toHaveProperty("settingsJson");
+        expect(s).not.toHaveProperty("ownerId");
+      }
+      expect(JSON.stringify(body)).not.toContain(BLIK_PHONE_D);
     });
   });
 });
