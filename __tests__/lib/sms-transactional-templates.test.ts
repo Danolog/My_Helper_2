@@ -524,7 +524,7 @@ describe("SMS przypomnienia i potwierdzeń: imię, usługa i pracownik przez fil
     expect(hostile).not.toMatch(/ {2}|""|: ,| u w | u (juz|zostala|dnia)\b/);
   });
 
-  it.each(NAMES)("%s: wyłącznie znaki GSM-7 (polskie znaki, nowe linie, emoji, data)", async (name) => {
+  it.each(NAMES)("%s: wyłącznie znaki GSM-7 (polskie znaki, nowe linie, emoji)", async (name) => {
     const message = await messageOf(name, {
       clientName: "Zoś\nka 💅",
       serviceName: "Manicure ✨ ąę",
