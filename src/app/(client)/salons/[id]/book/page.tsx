@@ -33,6 +33,8 @@ export default function ClientBookingPage() {
     firstVisitPromo,
     resetBooking,
     derived,
+    blikInstructions,
+    isLoggedIn,
   } = booking;
 
   // -------------------------------------------------------------------------
@@ -73,6 +75,8 @@ export default function ClientBookingPage() {
         depositAmount={derived.depositAmount}
         selectedPaymentMethod={selectedPaymentMethod}
         blikPhoneNumber={blikPhoneNumber}
+        blikInstructions={blikInstructions}
+        isLoggedIn={isLoggedIn}
         onReset={resetBooking}
       />
     );
