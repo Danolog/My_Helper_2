@@ -30,7 +30,8 @@ import { POST as bookPackage } from "@/app/api/appointments/book-package/route";
 import { POST as createAppointment } from "@/app/api/appointments/route";
 import { POST as createDepositSession } from "@/app/api/deposits/create-session/route";
 import { APPOINTMENT_NO_OVERLAP_CONSTRAINT, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
-import { appointments, clients, employees, promotions, salons, services, timeBlocks, user } from "@/lib/schema";
+import { appointments, clients, employees, promoCodes, promotions, salons, services, timeBlocks, user } from "@/lib/schema";
+import { sendBookingConfirmationSms } from "@/lib/sms";
 // Godzina `hh:mm` w dniu `day` (UTC) marca 2099 r.; dzień spoza 1–31 = wyjątek (CI @ cf2ee2e: 2099-03-32).
 import { at, dayRange } from "./pg-dates";
 
@@ -365,6 +366,57 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       expect(statuses(results)).toEqual([201, 409, 409, 409, 409, 409]);
       for (const r of results.filter((x) => x.status === 409)) expect(r.body.error).toBe(MSG);
       expect(await activeOnDay(5)).toEqual([`${at(5, "10:00")}–${at(5, "11:00")}`]);
+    });
+
+    // #193 R1: POST gościa biegnie przez forSalon (SET LOCAL ROLE aplikacji +
+    // kontekst salonu). Zapytanie do SMS łączy `salons` — gdyby polityka RLS
+    // salons nie przepuszczała wiersza salonu z kontekstu, innerJoin dałby
+    // zero wierszy i SMS zniknąłby po cichu (best-effort, bez błędu).
+    it("#193 R1: gość pod rolą aplikacji — wizyta zapisana, SMS dostaje nazwę salonu", async () => {
+      const sms = vi.mocked(sendBookingConfirmationSms);
+      sms.mockClear();
+      const res = await post(at(29, "10:00"), at(29, "11:00"));
+      expect(res.status, res.body.error).toBe(201);
+      expect(await activeOnDay(29)).toEqual([`${at(29, "10:00")}–${at(29, "11:00")}`]);
+      expect(sms).toHaveBeenCalledTimes(1);
+      expect(sms.mock.calls[0]![0]).toMatchObject({
+        salonName: `IT T3 ovl ${RUN}`,
+        salonId,
+        serviceName: "IT Usługa 30",
+        employeeName: "IT Pracownik",
+        clientPhone: "+48500600700",
+      });
+    });
+
+    it("#193 R1: gość z kodem promocyjnym pod rolą aplikacji — kod zapisany na wizycie i zużyty", async () => {
+      const [code] = await h!.db
+        .insert(promoCodes)
+        .values({ salonId, code: `IT-R1-${RUN}`, usageLimit: 5, usedCount: 0 })
+        .returning();
+      const res = await createAppointment(
+        new Request("http://localhost/api/appointments", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            salonId,
+            employeeId,
+            serviceId,
+            startTime: at(30, "10:00"),
+            endTime: at(30, "11:00"),
+            guestName: "IT Gość",
+            guestPhone: "500600700",
+            promoCodeId: code!.id,
+          }),
+        })
+      );
+      const body = (await res.json()) as { error?: string; data?: { id: string; promoCodeId: string | null } };
+      expect(res.status, body.error).toBe(201);
+      expect(body.data?.promoCodeId).toBe(code!.id);
+      const [after] = await h!.db
+        .select({ usedCount: promoCodes.usedCount })
+        .from(promoCodes)
+        .where(eq(promoCodes.id, code!.id));
+      expect(after!.usedCount).toBe(1);
     });
   });
 

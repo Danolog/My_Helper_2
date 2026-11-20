@@ -66,6 +66,7 @@ vi.mock("@/lib/db", () => {
 vi.mock("@/lib/server/repository", () => {
   const tx = {
     select: () => nextSelect(),
+    insert: (...a: unknown[]) => h.insert(...a),
     update: (...a: unknown[]) => h.update(...a),
   };
   return {
@@ -106,10 +107,14 @@ const appt = (start: string, end: string, extra: Record<string, unknown> = {}) =
   end_time: at(end),
   ...extra,
 });
-/** Blokada: kolumny do WHERE + pola zwracane do komunikatu. */
+/**
+ * Blokada: kolumny do WHERE + pola zwracane do komunikatu. `salon_id` to salon
+ * pracownika z joinu employees (POST zawęża blokady do salonu, #193 R1).
+ */
 const block = (start: string, end: string, extra: Record<string, unknown> = {}) => ({
   id: "bbbbbbbb-0000-4000-8000-000000000001",
   employee_id: EMPLOYEE,
+  salon_id: SALON,
   start_time: at(start),
   end_time: at(end),
   blockType: "vacation",
@@ -306,5 +311,36 @@ describe("POST /api/appointments — filtr pracownika w blokadach (Q8, #168)", (
     expect(status).toBe(409);
     expect(body.error).toBe("Pracownik ma dzien wolny w tym terminie");
     expect(h.insert).not.toHaveBeenCalled();
+  });
+});
+
+// ─── POST: zawężenie do salonu z żądania (#193 R1) ─────────────────────────
+
+describe("POST /api/appointments — warunki kolizji i blokad z salonId z żądania (#193 R1)", () => {
+  const OTHER_SALON = "99999999-9999-4999-8999-999999999999";
+  const GUEST = { guestName: "Jan Kowalski", guestPhone: "123 456 789" };
+  function post() {
+    return POST(
+      createMockRequest("http://localhost:3000/api/appointments", {
+        method: "POST",
+        body: { salonId: SALON, employeeId: EMPLOYEE, serviceId: SERVICE, startTime: iso("10:00"), endTime: iso("11:00"), ...GUEST },
+      })
+    );
+  }
+
+  it("kontrast: nakładająca się wizyta w salonie z żądania → 409", async () => {
+    h.queue.push([appt("10:30", "11:30")], []);
+    expect((await post()).status).toBe(409);
+    expect(h.insert).not.toHaveBeenCalled();
+  });
+
+  it("wizyta tego pracownika zapisana pod innym salonem nie trafia w warunek kolizji → 201", async () => {
+    h.queue.push([appt("10:30", "11:30", { salon_id: OTHER_SALON })], []);
+    expect((await post()).status).toBe(201);
+  });
+
+  it("blokada z joinu pracownika innego salonu nie trafia w warunek blokad → 201", async () => {
+    h.queue.push([], [block("10:00", "11:00", { salon_id: OTHER_SALON })]);
+    expect((await post()).status).toBe(201);
   });
 });

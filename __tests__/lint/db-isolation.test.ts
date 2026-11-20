@@ -72,7 +72,6 @@ const BASELINE: Record<string, readonly string[]> = {
   // P0b (#193): wszystkie 7 pozycji zdjęte — zapytania w src/lib/server/system/**.
   P0_FILES: [],
   P1_FILES: [
-    "src/app/api/appointments/route.ts",
     "src/app/api/deposits/create-session/route.ts",
     "src/app/api/stripe/webhook/route.ts",
     "src/app/api/subscriptions/cancel/route.ts",

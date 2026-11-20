@@ -8,8 +8,6 @@ import {
   overlapsRange,
 } from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001 R2b: POST to świadomie publiczny booking (gość bez sesji salonu) — świadomie surowe db; GET idzie przez forSalon
-import { db } from "@/lib/db";
 import { depositGuardResponse } from "@/lib/deposit-guard";
 import { logger } from "@/lib/logger";
 import { checkPromotionApplicable, computePromoDiscount, type PromotionRejection } from "@/lib/promo-discount";
@@ -17,11 +15,44 @@ import { strictRateLimit, apiRateLimit, getClientIp } from "@/lib/rate-limit";
 import { getSalonContext } from "@/lib/salon-context";
 import { assertSalonRefs } from "@/lib/salon-refs";
 import { appointments, clients, employees, salons, services, timeBlocks, promoCodes, promotions } from "@/lib/schema";
-import { sendBookingConfirmationSms } from "@/lib/sms";
+// #193 R1: GET przez forSalon z salonu sesji; POST (publiczny booking, także
+// gość bez sesji) przez forSalon(salonId z żądania) — kontekst RLS salonu,
+// jawne eq(salonId) w każdym warunku i jawne listy kolumn w raw().
 import { forSalon } from "@/lib/server/repository";
 import { getOptionalSession } from "@/lib/session";
+import { sendBookingConfirmationSms } from "@/lib/sms";
 import { timeBlockConflictMessage } from "@/lib/time-block-conflict";
 import { isValidUuid, isValidDateString } from "@/lib/validations";
+
+// #193 R1: kolumny wizyty w odpowiedzi 201 POST — dokładnie te, które trasa
+// zwracała dotąd (cały wiersz appointments). Jawna lista: nowa kolumna w
+// schemacie nie trafi do publicznej odpowiedzi bez świadomej decyzji.
+const CREATED_APPOINTMENT_COLUMNS = {
+  id: appointments.id,
+  salonId: appointments.salonId,
+  clientId: appointments.clientId,
+  employeeId: appointments.employeeId,
+  serviceId: appointments.serviceId,
+  variantId: appointments.variantId,
+  bookedByUserId: appointments.bookedByUserId,
+  startTime: appointments.startTime,
+  endTime: appointments.endTime,
+  status: appointments.status,
+  notes: appointments.notes,
+  depositAmount: appointments.depositAmount,
+  depositPaid: appointments.depositPaid,
+  reminderSentAt: appointments.reminderSentAt,
+  reminder1hSentAt: appointments.reminder1hSentAt,
+  reminderPushSentAt: appointments.reminderPushSentAt,
+  reminderPush1hSentAt: appointments.reminderPush1hSentAt,
+  promoCodeId: appointments.promoCodeId,
+  discountAmount: appointments.discountAmount,
+  guestName: appointments.guestName,
+  guestPhone: appointments.guestPhone,
+  guestEmail: appointments.guestEmail,
+  createdAt: appointments.createdAt,
+  updatedAt: appointments.updatedAt,
+};
 // GET /api/appointments - List appointments with optional date range filter
 export async function GET(request: Request) {
   try {
@@ -211,7 +242,7 @@ export async function POST(request: Request) {
       isStaff = staffCtx?.salonId === salonId;
     }
 
-    // P1 (Ryan): clientId wybiera WYLACZNIE personel salonu (panel). Gosc i
+    // P1: clientId wybiera WYLACZNIE personel salonu (panel). Gosc i
     // klient portalu nie podpinaja rekordu klienta — gosc jest opisany przez
     // guestName/guestPhone/guestEmail na wizycie (zaden front portalu nie
     // wysyla clientId). Wczesniej dowolny clientId z body: dane klienta w GET
@@ -223,7 +254,7 @@ export async function POST(request: Request) {
       logger.warn("[Appointments API] Ignored client-supplied clientId (non-staff booking)", { salonId });
     }
 
-    // P1 (Ryan): depositAmount z body jest ignorowany. Ta trasa nie tworzy
+    // P1: depositAmount z body jest ignorowany. Ta trasa nie tworzy
     // platnosci zadatku — wizyta z zadatkiem powstaje w
     // /api/deposits/create-session (kwota liczona serwerowo, deposit-calculation).
     // Kwota z body tylko wylaczala SMS potwierdzenia i udawala zadatek bez platnosci.
@@ -269,7 +300,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // P1 (Ryan): klient, pracownik i usluga musza nalezec do salonu wizyty —
+    // P1: klient, pracownik i usluga musza nalezec do salonu wizyty —
     // przed sprawdzeniem kolizji (obcy employeeId nie moze nawet sondowac
     // kalendarza innego salonu). Jeden, niezdradzajacy komunikat 400.
     // Wariant (#67): należy do tej usługi, a usługa do salonu — inaczej 400.
@@ -304,17 +335,25 @@ export async function POST(request: Request) {
       if (depositError) return depositError;
     }
 
+    // #193 R1: od tego miejsca każde zapytanie biegnie w kontekście RLS salonu
+    // wizyty (salonId z żądania — przynależność pracownika/usługi/klienta do
+    // niego sprawdził wyżej assertSalonRefs) i ma jawne eq(salonId).
+    const salonDb = forSalon(salonId);
+
     // Kolizja: przedział półotwarty [start, end) — styk 10–11 / 11–12 nie koliduje (#165).
     // Tylko id, bo liczy się samo istnienie kolizji.
-    const overlapping = await db.select({ id: appointments.id })
-      .from(appointments)
-      .where(
-        appointmentConflictWhere({
-          employeeId,
-          start: new Date(startTime),
-          end: new Date(endTime),
-        })
-      );
+    const overlapping = await salonDb.raw((tx) =>
+      tx.select({ id: appointments.id })
+        .from(appointments)
+        .where(
+          appointmentConflictWhere({
+            salonId,
+            employeeId,
+            start: new Date(startTime),
+            end: new Date(endTime),
+          })
+        )
+    );
 
     if (overlapping.length > 0) {
       return NextResponse.json(
@@ -324,19 +363,24 @@ export async function POST(request: Request) {
     }
 
     // Check for vacation/time blocks that overlap with the requested time
-    // Need blockType and reason for the user-facing error message
-    const conflictingBlocks = await db.select({
-      id: timeBlocks.id,
-      blockType: timeBlocks.blockType,
-      reason: timeBlocks.reason,
-    })
-      .from(timeBlocks)
-      .where(
-        and(
-          eq(timeBlocks.employeeId, employeeId),
-          overlapsRange(timeBlocks.startTime, timeBlocks.endTime, new Date(startTime), new Date(endTime))
+    // Need blockType and reason for the user-facing error message.
+    // time_blocks nie ma salon_id — zawężenie do salonu przez pracownika.
+    const conflictingBlocks = await salonDb.raw((tx) =>
+      tx.select({
+        id: timeBlocks.id,
+        blockType: timeBlocks.blockType,
+        reason: timeBlocks.reason,
+      })
+        .from(timeBlocks)
+        .innerJoin(employees, eq(timeBlocks.employeeId, employees.id))
+        .where(
+          and(
+            eq(timeBlocks.employeeId, employeeId),
+            eq(employees.salonId, salonId),
+            overlapsRange(timeBlocks.startTime, timeBlocks.endTime, new Date(startTime), new Date(endTime))
+          )
         )
-      );
+    );
 
     if (conflictingBlocks.length > 0) {
       return NextResponse.json(
@@ -354,15 +398,32 @@ export async function POST(request: Request) {
 
     if (promoCodeId) {
       // Verify the promo code exists, is valid and belongs to this salon
-      const [promoCode] = await db
-        .select({
-          promoCode: promoCodes,
-          promotion: promotions,
-        })
-        .from(promoCodes)
-        .leftJoin(promotions, eq(promoCodes.promotionId, promotions.id))
-        .where(and(eq(promoCodes.id, promoCodeId), eq(promoCodes.salonId, salonId)))
-        .limit(1);
+      // Tylko pola, których używa walidacja kodu i wyliczenie rabatu.
+      const [promoCode] = await salonDb.raw((tx) =>
+        tx
+          .select({
+            promoCode: {
+              id: promoCodes.id,
+              salonId: promoCodes.salonId,
+              expiresAt: promoCodes.expiresAt,
+              usageLimit: promoCodes.usageLimit,
+              usedCount: promoCodes.usedCount,
+            },
+            promotion: {
+              salonId: promotions.salonId,
+              type: promotions.type,
+              value: promotions.value,
+              isActive: promotions.isActive,
+              startDate: promotions.startDate,
+              endDate: promotions.endDate,
+              conditionsJson: promotions.conditionsJson,
+            },
+          })
+          .from(promoCodes)
+          .leftJoin(promotions, eq(promoCodes.promotionId, promotions.id))
+          .where(and(eq(promoCodes.id, promoCodeId), eq(promoCodes.salonId, salonId)))
+          .limit(1)
+      );
 
       // Kod (lub promocja) innego salonu traktujemy jak nieistniejacy —
       // nie zdradzamy, ze taki identyfikator istnieje gdzie indziej.
@@ -421,11 +482,13 @@ export async function POST(request: Request) {
           { status: 400 }
         );
       }
-      const [service] = await db
-        .select({ basePrice: services.basePrice })
-        .from(services)
-        .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
-        .limit(1);
+      const [service] = await salonDb.raw((tx) =>
+        tx
+          .select({ basePrice: services.basePrice })
+          .from(services)
+          .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)))
+          .limit(1)
+      );
       if (!service) {
         return NextResponse.json(
           { success: false, error: "Nieprawidlowa usluga dla tego salonu" },
@@ -442,34 +505,39 @@ export async function POST(request: Request) {
     }
 
     logger.info(`[Appointments API] Creating appointment for employee ${employeeId}, bookedBy: ${bookedByUserId}, promoCode: ${validatedPromoCodeId}`);
-    const [newAppointment] = await db
-      .insert(appointments)
-      .values({
-        salonId: booking.salonId,
-        clientId,
-        employeeId,
-        serviceId: booking.serviceId,
-        variantId: booking.variantId,
-        bookedByUserId,
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-        notes: notes || null,
-        depositAmount: null,
-        promoCodeId: validatedPromoCodeId,
-        discountAmount: validatedDiscountAmount,
-        guestName: guestName ?? null,
-        guestPhone: guestPhone ?? null,
-        guestEmail: guestEmail ?? null,
-        status: "scheduled",
-      })
-      .returning();
+    const [newAppointment] = await salonDb.raw((tx) =>
+      tx
+        .insert(appointments)
+        .values({
+          salonId: booking.salonId,
+          clientId,
+          employeeId,
+          serviceId: booking.serviceId,
+          variantId: booking.variantId,
+          bookedByUserId,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          notes: notes || null,
+          depositAmount: null,
+          promoCodeId: validatedPromoCodeId,
+          discountAmount: validatedDiscountAmount,
+          guestName: guestName ?? null,
+          guestPhone: guestPhone ?? null,
+          guestEmail: guestEmail ?? null,
+          status: "scheduled",
+        })
+        .returning(CREATED_APPOINTMENT_COLUMNS)
+    );
 
     // Increment promo code usage count
     if (validatedPromoCodeId) {
-      await db
-        .update(promoCodes)
-        .set({ usedCount: sql`COALESCE(${promoCodes.usedCount}, 0) + 1` })
-        .where(eq(promoCodes.id, validatedPromoCodeId));
+      const promoCodeToCount = validatedPromoCodeId;
+      await salonDb.raw((tx) =>
+        tx
+          .update(promoCodes)
+          .set({ usedCount: sql`COALESCE(${promoCodes.usedCount}, 0) + 1` })
+          .where(and(eq(promoCodes.id, promoCodeToCount), eq(promoCodes.salonId, salonId)))
+      );
       logger.info(`[Appointments API] Incremented usage count for promo code ${validatedPromoCodeId}`);
     }
 
@@ -480,22 +548,27 @@ export async function POST(request: Request) {
     // Best-effort: blad wysylki nie moze wywrocic utworzonej rezerwacji.
     if (newAppointment) {
       try {
-        const [details] = await db
-          .select({
-            clientFirstName: clients.firstName,
-            clientPhone: clients.phone,
-            serviceName: services.name,
-            employeeFirstName: employees.firstName,
-            employeeLastName: employees.lastName,
-            salonName: salons.name,
-          })
-          .from(appointments)
-          .leftJoin(clients, eq(appointments.clientId, clients.id))
-          .leftJoin(services, eq(appointments.serviceId, services.id))
-          .innerJoin(employees, eq(appointments.employeeId, employees.id))
-          .innerJoin(salons, eq(appointments.salonId, salons.id))
-          .where(eq(appointments.id, newAppointment.id))
-          .limit(1);
+        // RLS: salons ma politykę tenant_self (id = app.current_salon_id,
+        // drizzle/0010), więc wiersz salonu wizyty jest widoczny pod forSalon.
+        const createdId = newAppointment.id;
+        const [details] = await salonDb.raw((tx) =>
+          tx
+            .select({
+              clientFirstName: clients.firstName,
+              clientPhone: clients.phone,
+              serviceName: services.name,
+              employeeFirstName: employees.firstName,
+              employeeLastName: employees.lastName,
+              salonName: salons.name,
+            })
+            .from(appointments)
+            .leftJoin(clients, eq(appointments.clientId, clients.id))
+            .leftJoin(services, eq(appointments.serviceId, services.id))
+            .innerJoin(employees, eq(appointments.employeeId, employees.id))
+            .innerJoin(salons, eq(appointments.salonId, salons.id))
+            .where(and(eq(appointments.id, createdId), eq(appointments.salonId, salonId)))
+            .limit(1)
+        );
 
         const phone = details?.clientPhone || guestPhone || null;
         if (details && phone) {
