@@ -203,9 +203,9 @@ job_exists() {
 
 # Stan zawsze wielkimi literami. gcloud dla `secrets versions list` wypisuje w
 # `value(state)` stan małymi literami (`enabled`, przebieg 44817913061), mimo że
-# API zwraca enum `ENABLED`. Dla Scheduler `value()` daje zwykle surową nazwę
-# enuma, ale porównanie bez względu na wielkość liter jest bezpieczne w obu
-# wariantach. Kod wyjścia gcloud zostaje (pipefail), wywołujący go nie zmieniają.
+# API zwraca enum `ENABLED`. Czy Scheduler w value() też zmienia wielkość
+# liter — nie sprawdzone; porównanie bez względu na wielkość liter jest
+# bezpieczne w obu wariantach. Kod wyjścia gcloud zostaje (pipefail), wywołujący go nie zmieniają.
 job_state() {
   "${GC[@]}" scheduler jobs describe "$1" --location="$REGION" --format='value(state)' |
     tr '[:lower:]' '[:upper:]'
