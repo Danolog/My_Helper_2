@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { Lock } from "lucide-react";
 import { UserProfile } from "@/components/auth/user-profile";
+import { DashboardDepositsPending } from "@/components/dashboard/dashboard-deposits-pending";
 import { DashboardEmployeesToday } from "@/components/dashboard/dashboard-employees-today";
 import { DashboardQuickActions } from "@/components/dashboard/dashboard-quick-actions";
 import { DashboardStatsRow } from "@/components/dashboard/dashboard-stats-row";
@@ -163,6 +164,8 @@ export default function DashboardPage() {
       <DashboardQuickActions />
 
       <DashboardStatsRow stats={stats} statsLoading={statsLoading} statsError={statsError} />
+
+      <DashboardDepositsPending />
 
       <DashboardTodayAppointments stats={stats} statsLoading={statsLoading} statsError={statsError} />
 
