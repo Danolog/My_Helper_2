@@ -71,11 +71,13 @@ export type CancelInfo = {
   deposit: {
     amount: number;
     paid: boolean;
-    action: "refund" | "forfeit" | "none";
+    /** "salon": zadatek rozliczany poza MyHelper — zwrot ustala salon. */
+    action: "refund" | "forfeit" | "salon" | "none";
+    settledBySalon: boolean;
   };
   employee: { name: string } | null;
   service: { name: string; price: string } | null;
-  salon: { name: string } | null;
+  salon: { name: string; phone: string | null } | null;
 };
 
 // ---------------------------------------------------------------------------

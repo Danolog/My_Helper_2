@@ -5,9 +5,21 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { refundAppointmentDeposits } from "@/lib/refund";
+import { refundAppointmentDeposits, selectSucceededDeposits } from "@/lib/refund";
 import { appointments, employees, services, salons } from "@/lib/schema";
 import { notifyWaitingList } from "@/lib/waiting-list";
+
+/**
+ * Wpłacony zadatek bez płatności `succeeded` w MyHelper (np. BLIK na telefon
+ * salonu oznaczony ręcznie): aplikacja nie ma czego zwrócić ani zatrzymać,
+ * więc o zwrocie decyduje salon poza aplikacją. Klient nie może dostać
+ * obietnicy przelewu, którego nikt nie wykona.
+ */
+async function isDepositSettledBySalon(appointmentId: string): Promise<boolean> {
+  const payments = await selectSucceededDeposits(appointmentId);
+  return payments.length === 0;
+}
+
 // GET /api/client/appointments/[id]/cancel - Get cancellation policy info for client
 export async function GET(
   _request: Request,
@@ -84,9 +96,15 @@ export async function GET(
     const hasDeposit = appointment.depositAmount && parseFloat(appointment.depositAmount) > 0;
     const depositPaid = appointment.depositPaid;
 
-    let depositAction: "refund" | "forfeit" | "none" = "none";
+    let depositAction: "refund" | "forfeit" | "salon" | "none" = "none";
+    let settledBySalon = false;
     if (hasDeposit && depositPaid) {
-      depositAction = isMoreThan24h ? "refund" : "forfeit";
+      settledBySalon = await isDepositSettledBySalon(appointment.id);
+      if (settledBySalon) {
+        depositAction = "salon";
+      } else {
+        depositAction = isMoreThan24h ? "refund" : "forfeit";
+      }
     }
 
     return NextResponse.json({
@@ -104,6 +122,7 @@ export async function GET(
           amount: appointment.depositAmount ? parseFloat(appointment.depositAmount) : 0,
           paid: !!depositPaid,
           action: depositAction,
+          settledBySalon,
         },
         employee: row.employee
           ? { name: `${row.employee.firstName} ${row.employee.lastName}` }
@@ -112,7 +131,7 @@ export async function GET(
           ? { name: row.service.name, price: row.service.basePrice }
           : null,
         salon: row.salon
-          ? { name: row.salon.name }
+          ? { name: row.salon.name, phone: row.salon.phone ?? null }
           : null,
       },
     });
@@ -209,8 +228,15 @@ export async function POST(
     const depositPaid = appointment.depositPaid;
     let depositRefunded = false;
     let depositForfeited = false;
+    let depositSettledBySalon = false;
 
+    // Sprawdzane przed zmianą statusu: błąd odczytu płatności kończy się 500
+    // bez anulowania, a nie anulowaniem z błędną informacją o zadatku.
     if (hasDeposit && depositPaid) {
+      depositSettledBySalon = await isDepositSettledBySalon(id);
+    }
+
+    if (hasDeposit && depositPaid && !depositSettledBySalon) {
       if (isMoreThan24h) {
         depositRefunded = true;
       } else {
@@ -232,6 +258,7 @@ export async function POST(
       depositPaid,
       depositRefunded,
       depositForfeited,
+      depositSettledBySalon,
     });
 
     // Process automatic refund if eligible (24h+ before appointment, deposit paid)
@@ -305,6 +332,7 @@ export async function POST(
         depositAmount: appointment.depositAmount ? parseFloat(appointment.depositAmount) : 0,
         depositRefunded,
         depositForfeited,
+        depositSettledBySalon,
         refund: refundResult ? {
           processed: refundResult.refunded,
           refundId: refundResult.refundId,

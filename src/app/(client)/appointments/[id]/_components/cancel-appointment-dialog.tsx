@@ -127,6 +127,9 @@ function CancelInfoDetails({ cancelInfo }: { cancelInfo: CancelInfo }) {
       </div>
 
       {/* Cancellation policy */}
+      {cancelInfo.deposit.settledBySalon ? (
+        <SalonSettledPolicy cancelInfo={cancelInfo} />
+      ) : (
       <div
         className={`p-3 rounded-lg border ${
           cancelInfo.isMoreThan24h
@@ -159,50 +162,114 @@ function CancelInfoDetails({ cancelInfo }: { cancelInfo: CancelInfo }) {
           </div>
         </div>
       </div>
+      )}
 
       {/* Deposit info */}
       {cancelInfo.deposit.amount > 0 && cancelInfo.deposit.paid && (
-        <div
-          className={`p-3 rounded-lg border ${
-            cancelInfo.deposit.action === "refund"
-              ? "bg-blue-50 dark:bg-blue-950/30 border-blue-300 dark:border-blue-700"
-              : "bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-700"
-          }`}
-          data-testid="deposit-info"
-        >
-          <div className="flex items-start gap-2">
-            <DollarSign
-              className={`h-4 w-4 mt-0.5 shrink-0 ${
-                cancelInfo.deposit.action === "refund"
-                  ? "text-blue-600 dark:text-blue-400"
-                  : "text-red-600 dark:text-red-400"
-              }`}
-            />
-            <div className="text-sm">
-              <p className="font-medium">
-                Zadatek: {cancelInfo.deposit.amount.toFixed(2)} PLN
-              </p>
-              <p
-                className={
-                  cancelInfo.deposit.action === "refund"
-                    ? "text-blue-700 dark:text-blue-400"
-                    : "text-red-700 dark:text-red-400"
-                }
-                data-testid="deposit-action-message"
-              >
-                {cancelInfo.deposit.action === "refund"
-                  ? "Zadatek zostanie zwrocony na Twoje konto."
-                  : "Zadatek nie podlega zwrotowi (anulacja < 24h)."}
-              </p>
-            </div>
-          </div>
-        </div>
+        <DepositInfo cancelInfo={cancelInfo} />
       )}
 
       {/* Warning */}
       <p className="text-sm text-muted-foreground text-center">
         Czy na pewno chcesz anulowac te wizyte? Tej operacji nie mozna cofnac.
       </p>
+    </div>
+  );
+}
+
+// Polityka 24 h ("bez kosztow" / "utrata zadatku") nie obowiazuje zadatku
+// rozliczanego poza MyHelper — o zwrocie i zatrzymaniu decyduje salon.
+function SalonSettledPolicy({ cancelInfo }: { cancelInfo: CancelInfo }) {
+  return (
+    <div
+      className="p-3 rounded-lg border bg-muted/50"
+      data-testid="cancellation-policy"
+    >
+      <div className="flex items-start gap-2">
+        <DollarSign className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+        <div className="text-sm">
+          <p className="font-medium" data-testid="cancellation-policy-title">
+            Zadatek rozliczany przez salon
+          </p>
+          <p className="text-muted-foreground mt-1">
+            Do wizyty pozostalo:{" "}
+            {formatTimeRemaining(cancelInfo.hoursUntilAppointment)}
+          </p>
+          <p className="text-muted-foreground mt-1">
+            Wplacony zadatek salon rozlicza poza MyHelper — zasady zwrotu
+            ustala salon.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Zadatek rozliczany poza MyHelper: aplikacja nie zwraca ani nie zatrzymuje
+// pieniedzy, wiec okno nie moze sugerowac zwrotu (zielony/niebieski) ani
+// przepadku (czerwony) — tylko neutralna informacja i kontakt do salonu.
+function DepositInfo({ cancelInfo }: { cancelInfo: CancelInfo }) {
+  const { deposit, salon } = cancelInfo;
+  const amountLabel = `Zadatek: ${deposit.amount.toFixed(2)} PLN`;
+
+  if (deposit.settledBySalon) {
+    return (
+      <div
+        className="p-3 rounded-lg border bg-muted/50"
+        data-testid="deposit-info"
+      >
+        <div className="flex items-start gap-2">
+          <DollarSign className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+          <div className="text-sm">
+            <p className="font-medium">{amountLabel}</p>
+            <p
+              className="text-muted-foreground"
+              data-testid="deposit-action-message"
+            >
+              {salon?.phone
+                ? `Zwrot zadatku ustala salon, poza MyHelper. Skontaktuj sie z salonem: ${salon.phone}`
+                : "Zwrot zadatku ustala salon, poza MyHelper. Skontaktuj sie z salonem."}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const isRefund = deposit.action === "refund";
+  return (
+    <div
+      className={`p-3 rounded-lg border ${
+        isRefund
+          ? "bg-blue-50 dark:bg-blue-950/30 border-blue-300 dark:border-blue-700"
+          : "bg-red-50 dark:bg-red-950/30 border-red-300 dark:border-red-700"
+      }`}
+      data-testid="deposit-info"
+    >
+      <div className="flex items-start gap-2">
+        <DollarSign
+          className={`h-4 w-4 mt-0.5 shrink-0 ${
+            isRefund
+              ? "text-blue-600 dark:text-blue-400"
+              : "text-red-600 dark:text-red-400"
+          }`}
+        />
+        <div className="text-sm">
+          <p className="font-medium">{amountLabel}</p>
+          <p
+            className={
+              isRefund
+                ? "text-blue-700 dark:text-blue-400"
+                : "text-red-700 dark:text-red-400"
+            }
+            data-testid="deposit-action-message"
+          >
+            {isRefund
+              ? "Zadatek zostanie zwrocony na Twoje konto."
+              : "Zadatek nie podlega zwrotowi (anulacja < 24h)."}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

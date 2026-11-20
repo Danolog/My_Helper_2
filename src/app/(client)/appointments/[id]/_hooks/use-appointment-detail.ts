@@ -165,7 +165,9 @@ export function useAppointmentDetail() {
         const details = data.cancellationDetails;
         let description = "Twoja wizyta zostala pomyslnie anulowana.";
 
-        if (details?.depositRefunded) {
+        if (details?.depositSettledBySalon) {
+          description += " Zwrot zadatku ustala salon, poza MyHelper.";
+        } else if (details?.depositRefunded) {
           description += ` Zadatek ${details.depositAmount.toFixed(2)} PLN zostanie zwrocony.`;
         } else if (details?.depositForfeited) {
           description += ` Zadatek ${details.depositAmount.toFixed(2)} PLN nie podlega zwrotowi.`;
