@@ -95,7 +95,6 @@ const BASELINE: Record<string, readonly string[]> = {
     "src/lib/ai/usage-limits.ts",
   ],
   P3_FILES: [
-    "src/app/api/available-slots/route.ts",
     "src/app/api/promotions/check-happy-hours/route.ts",
     "src/app/api/promotions/check-package/route.ts",
     "src/app/api/promotions/check/route.ts",

@@ -1,17 +1,25 @@
 import { NextResponse } from "next/server";
 import { eq, and, gte, lt, not } from "drizzle-orm";
+import { isValidUuid } from "@/lib/api-validation";
 import { rangesOverlap } from "@/lib/appointment-overlap";
-// ADR-001 R2b: świadomie publiczny endpoint bookingu (bez auth, bez sesji salonu) — świadomie surowe db
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { apiRateLimit, getClientIp } from "@/lib/rate-limit";
-import { appointments, workSchedules, timeBlocks } from "@/lib/schema";
+import { appointments, employees, workSchedules, timeBlocks } from "@/lib/schema";
+// Publiczny endpoint bookingu (bez auth, bez sesji salonu): wszystkie odczyty
+// w jednej transakcji forSalon(salonId z zapytania). RLS przy salonId z URL
+// niczego nie chroni (kontekst ustawia wołający) — ochroną są jawne listy
+// kolumn, jawne eq(salonId) i sprawdzenie, że pracownik należy do salonu.
+import { forSalon } from "@/lib/server/repository";
 
-// GET /api/available-slots?employeeId=xxx&date=2026-02-10&duration=60
+// Ta sama odpowiedź dla pracownika nieistniejącego i pracownika z obcego
+// salonu — inaczej trasa byłaby wyrocznią do wyliczania pracowników.
+const EMPLOYEE_NOT_FOUND_BODY = { success: false, error: "Employee not found" } as const;
+
+// GET /api/available-slots?salonId=xxx&employeeId=xxx&date=2026-02-10&duration=60
 // Returns available time slots for booking
 export async function GET(request: Request) {
   try {
-    // Publiczny endpoint (3 zapytania DB/wywolanie, enumerowalne employeeId)
+    // Publiczny endpoint (do 4 zapytań DB w jednej transakcji na wywołanie, employeeId z query)
     // — limit per IP; checkAsync uzywa Upstash gdy skonfigurowany, inaczej in-memory
     const ip = getClientIp(request);
     const rateLimitResult = await apiRateLimit.checkAsync(ip);
@@ -51,20 +59,99 @@ export async function GET(request: Request) {
       );
     }
 
+    // salonId walidowany PRZED forSalon: polityka RLS rzutuje kontekst na
+    // ::uuid, więc zły format dałby 500 z bazy zamiast 400.
+    const salonId = searchParams.get("salonId");
+    if (!salonId || !isValidUuid(salonId)) {
+      return NextResponse.json(
+        { success: false, error: "salonId must be a valid UUID" },
+        { status: 400 }
+      );
+    }
+
+    // Zły format employeeId odrzucamy przed bazą (inaczej 500 z rzutowania
+    // ::uuid). Odpowiedź zależy tylko od formatu, nie od istnienia pracownika.
+    if (!isValidUuid(employeeId)) {
+      return NextResponse.json(
+        { success: false, error: "employeeId must be a valid UUID" },
+        { status: 400 }
+      );
+    }
+
     const dayOfWeek = requestedDate.getDay(); // 0=Sunday, 1=Monday, ...
 
-    logger.info(`[AvailableSlots API] Query for employee=${employeeId}, date=${date}, duration=${duration}min, dayOfWeek=${dayOfWeek}`);
+    logger.info(`[AvailableSlots API] Query for salon=${salonId}, employee=${employeeId}, date=${date}, duration=${duration}min, dayOfWeek=${dayOfWeek}`);
 
-    // 1. Get employee's work schedule for this day of week
-    const schedules = await db
-      .select()
-      .from(workSchedules)
-      .where(
-        and(
-          eq(workSchedules.employeeId, employeeId),
-          eq(workSchedules.dayOfWeek, dayOfWeek)
-        )
-      );
+    const dayStart = new Date(date + "T00:00:00");
+    const dayEnd = new Date(date + "T23:59:59");
+
+    // Jedna transakcja forSalon: najpierw przynależność pracownika do salonu,
+    // dopiero potem grafik, wizyty i blokady tego (sprawdzonego) pracownika.
+    // work_schedules i time_blocks nie mają salon_id — filtrujemy je po
+    // sprawdzonym employeeId, a RLS przez employees jest drugą tamą.
+    const result = await forSalon(salonId).raw(async (tx) => {
+      const employeeRows = await tx
+        .select({ id: employees.id })
+        .from(employees)
+        .where(and(eq(employees.id, employeeId), eq(employees.salonId, salonId)))
+        .limit(1);
+      if (employeeRows.length === 0) {
+        return { employeeFound: false as const };
+      }
+
+      // 1. Get employee's work schedule for this day of week
+      const schedules = await tx
+        .select({ startTime: workSchedules.startTime, endTime: workSchedules.endTime })
+        .from(workSchedules)
+        .where(
+          and(
+            eq(workSchedules.employeeId, employeeId),
+            eq(workSchedules.dayOfWeek, dayOfWeek)
+          )
+        );
+      if (schedules.length === 0) {
+        return { employeeFound: true as const, schedules, existingAppointments: [], existingBlocks: [] };
+      }
+
+      // 2. Get existing appointments for this employee on this date
+      const existingAppointments = await tx
+        .select({ startTime: appointments.startTime, endTime: appointments.endTime })
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.salonId, salonId),
+            eq(appointments.employeeId, employeeId),
+            not(eq(appointments.status, "cancelled")),
+            gte(appointments.startTime, dayStart),
+            lt(appointments.startTime, dayEnd)
+          )
+        );
+
+      // 3. Get time blocks (vacations, breaks) for this employee on this date
+      const existingBlocks = await tx
+        .select({
+          startTime: timeBlocks.startTime,
+          endTime: timeBlocks.endTime,
+          blockType: timeBlocks.blockType,
+        })
+        .from(timeBlocks)
+        .where(
+          and(
+            eq(timeBlocks.employeeId, employeeId),
+            // Time block overlaps with the day
+            lt(timeBlocks.startTime, dayEnd),
+            gte(timeBlocks.endTime, dayStart)
+          )
+        );
+
+      return { employeeFound: true as const, schedules, existingAppointments, existingBlocks };
+    });
+
+    if (!result.employeeFound) {
+      return NextResponse.json(EMPLOYEE_NOT_FOUND_BODY, { status: 404 });
+    }
+
+    const { schedules, existingAppointments, existingBlocks } = result;
 
     if (schedules.length === 0) {
       // Employee doesn't work on this day
@@ -87,37 +174,7 @@ export async function GET(request: Request) {
     const workStart = schedule.startTime; // e.g., "09:00"
     const workEnd = schedule.endTime; // e.g., "17:00"
 
-    // 2. Get existing appointments for this employee on this date
-    const dayStart = new Date(date + "T00:00:00");
-    const dayEnd = new Date(date + "T23:59:59");
-
-    const existingAppointments = await db
-      .select()
-      .from(appointments)
-      .where(
-        and(
-          eq(appointments.employeeId, employeeId),
-          not(eq(appointments.status, "cancelled")),
-          gte(appointments.startTime, dayStart),
-          lt(appointments.startTime, dayEnd)
-        )
-      );
-
     logger.info(`[AvailableSlots API] Found ${existingAppointments.length} existing appointments`);
-
-    // 3. Get time blocks (vacations, breaks) for this employee on this date
-    const existingBlocks = await db
-      .select()
-      .from(timeBlocks)
-      .where(
-        and(
-          eq(timeBlocks.employeeId, employeeId),
-          // Time block overlaps with the day
-          lt(timeBlocks.startTime, dayEnd),
-          gte(timeBlocks.endTime, dayStart)
-        )
-      );
-
     logger.info(`[AvailableSlots API] Found ${existingBlocks.length} time blocks`);
 
     // 4. Build list of blocked time ranges

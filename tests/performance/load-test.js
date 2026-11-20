@@ -39,6 +39,9 @@ const AUTH_COOKIE = __ENV.AUTH_COOKIE || "";
 // Salon ID used for scoped queries
 const SALON_ID = __ENV.SALON_ID || "test-salon-id";
 
+// Employee ID (of SALON_ID) used for available-slots
+const EMPLOYEE_ID = __ENV.EMPLOYEE_ID || "test-employee-id";
+
 // ─── K6 Options ──────────────────────────────────────────────────────────────
 export const options = {
   scenarios: {
@@ -147,7 +150,7 @@ export default function () {
   // ── GET /api/available-slots ─────────────────────────────────────────────
   group("GET /api/available-slots", () => {
     const res = http.get(
-      `${BASE_URL}/api/available-slots?salonId=${SALON_ID}&date=${today}&serviceId=test-service-id`,
+      `${BASE_URL}/api/available-slots?salonId=${SALON_ID}&employeeId=${EMPLOYEE_ID}&date=${today}&duration=60`,
       { headers, tags: { endpoint: "available-slots" } }
     );
     checkResponse(res, "available-slots", availableSlotsDuration);
