@@ -24,7 +24,8 @@ import { sendAppointmentReminder24hSms } from "@/lib/sms";
  * ?salonId=<uuid> zawęża do jednego salonu; podany, ale nie-UUID (także pusty)
  * → 400 przed jakimkolwiek zapytaniem.
  *
- * In development mode, SMS messages are logged to the console.
+ * Bez SMSAPI_TOKEN poza hostingiem (lokalnie, testy, CI) SMS jest tylko symulowany: log z zamaskowanym numerem i długością, bez treści.
+ * Z ustawionym SMSAPI_TOKEN SMS wychodzi naprawdę, także lokalnie.
  */
 export async function POST(request: Request) {
   try {
