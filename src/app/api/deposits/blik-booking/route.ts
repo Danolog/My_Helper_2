@@ -17,10 +17,15 @@ import { strictRateLimit, getClientIp } from "@/lib/rate-limit";
 import { toErrorIdentity } from "@/lib/safe-error";
 import { getSalonContext } from "@/lib/salon-context";
 import { assertSalonRefs } from "@/lib/salon-refs";
-import { appointments, clients, employees, salons, services, timeBlocks } from "@/lib/schema";
+import { appointments, clients, employees, salons, serviceVariants, services, timeBlocks } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { getOptionalSession } from "@/lib/session";
-import { sendBlikDepositBookingSms } from "@/lib/sms";
+import {
+  SMS_PROVIDER_UNAVAILABLE_ERROR,
+  SMS_SEND_FAILED_ERROR,
+  sendBlikDepositBookingSms,
+  type SmsResult,
+} from "@/lib/sms";
 
 /**
  * POST /api/deposits/blik-booking — publiczna rezerwacja z zadatkiem płatnym
@@ -39,11 +44,18 @@ import { sendBlikDepositBookingSms } from "@/lib/sms";
  * nigdy do błędów ani do logów. Format numeru sprawdza
  * zapis ustawień, tu liczy się tylko to, że jest niepustym napisem.
  *
+ * Termin: początek wcześniejszy niż 5 minut przed chwilą serwera → 400.
+ * Długość wizyty (koniec − początek) musi być równa długości usługi z wariantem
+ * zapisanej w bazie (`baseDuration` + `durationModifier`, odczyt razem z
+ * salonem); inna długość → 400, zanim trasa sprawdzi kalendarz.
+ *
  * SMS: po zapisie, przed odpowiedzią 201, klient (telefon gościa albo telefon
  * z kartoteki) dostaje SMS z numerem BLIK, kwotą i tytułem przelewu — tymi
- * samymi wartościami co w odpowiedzi, bez drugiego odczytu numeru. Błąd SMS
- * nie zmienia odpowiedzi. Przy 4xx/5xx SMS nie wychodzi. Treść SMS zapisuje
- * `sendSms` w tabeli `notifications` salonu (jak każdy SMS transakcyjny).
+ * samymi wartościami co w odpowiedzi, bez drugiego odczytu numeru. Wynik
+ * wysyłki nie zmienia odpowiedzi; nieudana wysyłka i pominięcie trafiają do
+ * logu z id wizyty i powodem z zamkniętej listy (bez numerów i treści). Przy
+ * 4xx/5xx SMS nie wychodzi. Treść SMS zapisuje `sendSms` w tabeli
+ * `notifications` salonu (jak każdy SMS transakcyjny).
  *
  * Izolacja salonów: `salonId` z body to cel rezerwacji. Przynależność
  * pracownika, usługi, wariantu i klienta do tego salonu sprawdza
@@ -58,6 +70,24 @@ const EMPLOYEE_UNAVAILABLE_MESSAGE = "Pracownik nie jest dostepny w wybranym ter
 
 const DEPOSIT_BLIK_NOT_CONFIGURED_CODE = "DEPOSIT_BLIK_NOT_CONFIGURED";
 const BLIK_NOT_CONFIGURED_MESSAGE = "Ten salon nie przyjmuje teraz rezerwacji online z zadatkiem.";
+
+const SERVICE_UNAVAILABLE_MESSAGE = "Wybrana usluga nie jest juz dostepna. Odswiez strone i wybierz ponownie.";
+const VARIANT_UNAVAILABLE_MESSAGE =
+  "Wybrany wariant uslugi nie jest juz dostepny. Odswiez strone i wybierz ponownie.";
+const SALON_UNAVAILABLE_MESSAGE = "Nie znaleziono salonu.";
+
+/**
+ * Tolerancja dla terminu tuż przed chwilą serwera: klient wybiera slot chwilę
+ * przed jego godziną, a wysłanie formularza może trwać.
+ */
+const PAST_START_TOLERANCE_MS = 5 * 60_000;
+const PAST_START_MESSAGE = "Wybrany termin juz minal. Wybierz inny termin.";
+
+const BOOKING_DURATION_MISMATCH_CODE = "BOOKING_DURATION_MISMATCH";
+const BOOKING_DURATION_MISMATCH_MESSAGE =
+  "Czas wizyty nie zgadza sie z wybrana usluga. Odswiez strone i sprobuj ponownie.";
+
+const MS_PER_MINUTE = 60_000;
 
 /** Tytuł przelewu, po którym salon rozpozna wpłatę: pierwsze 6 znaków id wizyty. */
 const BLIK_TITLE_ID_LENGTH = 6;
@@ -103,11 +133,25 @@ interface BookingSmsInput {
   title: string;
 }
 
+type BookingSmsFailureReason = "test_phone" | "provider_unavailable" | "send_failed" | "rejected";
+
+/**
+ * Powód nieudanej wysyłki z zamkniętej listy. `result.error` nie idzie do logu:
+ * błąd złego numeru niesie (zamaskowany) numer klienta.
+ */
+function bookingSmsFailureReason(result: SmsResult): BookingSmsFailureReason {
+  if (result.skipped === "test_phone") return "test_phone";
+  if (result.error === SMS_PROVIDER_UNAVAILABLE_ERROR) return "provider_unavailable";
+  if (result.error === SMS_SEND_FAILED_ERROR) return "send_failed";
+  return "rejected";
+}
+
 /**
  * SMS do klienta z numerem BLIK, kwotą i tytułem przelewu. Best-effort: błąd
  * odczytu szczegółów albo wysyłki nie zmienia odpowiedzi 201 — wizyta już
  * istnieje, a dane przelewu klient ma na ekranie. Do logu tylko id wizyty
- * i tożsamość błędu: treść błędu może nieść numer BLIK albo telefon klienta.
+ * oraz tożsamość błędu albo powód z zamkniętej listy: treść błędu może nieść
+ * numer BLIK albo telefon klienta.
  */
 async function sendBookingSms(input: BookingSmsInput): Promise<void> {
   try {
@@ -134,9 +178,15 @@ async function sendBookingSms(input: BookingSmsInput): Promise<void> {
     // Klient z kartoteki (wybrany przez personel) ma pierwszeństwo przed
     // polami gościa. Bez telefonu nie ma SMS.
     const phone = details?.clientPhone || input.guestPhone;
-    if (!details || !phone) return;
+    if (!details || !phone) {
+      logger.info("[BlikBooking API] Booking SMS skipped", {
+        appointmentId: input.appointmentId,
+        reason: details ? "no_phone" : "no_details",
+      });
+      return;
+    }
 
-    await sendBlikDepositBookingSms({
+    const result = await sendBlikDepositBookingSms({
       clientPhone: phone,
       clientName: details.clientFirstName || input.guestName || "",
       serviceName: details.serviceName || "",
@@ -149,6 +199,14 @@ async function sendBookingSms(input: BookingSmsInput): Promise<void> {
       amount: input.amount,
       title: input.title,
     });
+    // `?.` i ścisłe `=== false`: atrapa bez wyniku (`undefined`) nie jest
+    // nieudaną wysyłką i nie może sięgać po stałe błędów.
+    if (result?.success === false) {
+      logger.warn("[BlikBooking API] Booking SMS not sent", {
+        appointmentId: input.appointmentId,
+        reason: bookingSmsFailureReason(result),
+      });
+    }
   } catch (error) {
     logger.warn("[BlikBooking API] Booking SMS failed", {
       appointmentId: input.appointmentId,
@@ -206,6 +264,21 @@ export async function POST(request: Request) {
   } = parsed.data;
   const start = new Date(startTime);
   const end = new Date(endTime);
+
+  // Schemat wymaga ISO ze strefą, więc `start` to jednoznaczna chwila —
+  // porównanie z zegarem serwera w ms, bez przeliczania stref.
+  if (start.getTime() < Date.now() - PAST_START_TOLERANCE_MS) {
+    logger.warn("[BlikBooking API] Validation failed", { fields: ["startTime"] });
+    return NextResponse.json(
+      {
+        success: false,
+        error: PAST_START_MESSAGE,
+        code: "VALIDATION_FAILED",
+        details: { startTime: PAST_START_MESSAGE },
+      },
+      { status: 400 }
+    );
+  }
 
   try {
     const session = await getOptionalSession();
@@ -269,7 +342,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          error: expected.error === "service_not_found" ? "Service not found" : "Variant not found",
+          error: expected.error === "service_not_found" ? SERVICE_UNAVAILABLE_MESSAGE : VARIANT_UNAVAILABLE_MESSAGE,
         },
         { status: 404 }
       );
@@ -312,20 +385,58 @@ export async function POST(request: Request) {
     const salonDb = forSalon(salonId);
 
     // Numer BLIK i dane odbiorcy. Czytamy tylko poddrzewo ustawień zadatku.
+    // W tym samym odczycie długość usługi i modyfikator wariantu (bez nowej
+    // transakcji). RLS: services ma politykę po salon_id, a jawne
+    // eq(services.salonId) zawęża usługę do salonu; wariant zawęża usługa.
+    // Bez wariantu w body join wariantu jest pusty (`false`).
     const [salon] = await salonDb.raw((tx) =>
       tx
         .select({
           name: salons.name,
           phone: salons.phone,
           blikPhone: sql<unknown>`${salons.settingsJson} -> 'deposits' -> 'blikPhone'`,
+          serviceDuration: services.baseDuration,
+          variantRowId: serviceVariants.id,
+          variantDurationModifier: serviceVariants.durationModifier,
         })
         .from(salons)
+        .leftJoin(services, and(eq(services.id, serviceId), eq(services.salonId, salons.id)))
+        .leftJoin(
+          serviceVariants,
+          variantId
+            ? and(eq(serviceVariants.id, variantId), eq(serviceVariants.serviceId, services.id))
+            : sql`false`
+        )
         .where(eq(salons.id, salonId))
         .limit(1)
     );
     if (!salon) {
-      return NextResponse.json({ success: false, error: "Salon not found" }, { status: 404 });
+      return NextResponse.json({ success: false, error: SALON_UNAVAILABLE_MESSAGE }, { status: 404 });
     }
+    if (salon.serviceDuration == null) {
+      return NextResponse.json({ success: false, error: SERVICE_UNAVAILABLE_MESSAGE }, { status: 404 });
+    }
+    if (variantId && salon.variantRowId == null) {
+      return NextResponse.json({ success: false, error: VARIANT_UNAVAILABLE_MESSAGE }, { status: 404 });
+    }
+
+    // Równość, nie „≤”: krótsza wizyta też rozjeżdża kalendarz z usługą.
+    // Modyfikator liczy się tylko przy znalezionym wariancie (null = 0).
+    const expectedMinutes = salon.serviceDuration + (variantId ? (salon.variantDurationModifier ?? 0) : 0);
+    const requestedMs = end.getTime() - start.getTime();
+    if (requestedMs !== expectedMinutes * MS_PER_MINUTE) {
+      logger.warn("[BlikBooking API] Booking duration mismatch — request rejected", {
+        salonId,
+        serviceId,
+        requestedMinutes: requestedMs / MS_PER_MINUTE,
+        expectedMinutes,
+      });
+      return NextResponse.json(
+        { success: false, error: BOOKING_DURATION_MISMATCH_MESSAGE, code: BOOKING_DURATION_MISMATCH_CODE },
+        { status: 400 }
+      );
+    }
+
     const blikPhone = toBlikPhone(salon.blikPhone);
     if (!blikPhone) {
       logger.warn("[BlikBooking API] Deposit booking refused — salon has no BLIK number", { salonId, serviceId });
