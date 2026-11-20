@@ -92,6 +92,10 @@ vi.mock("@/lib/rate-limit", () => ({
   strictRateLimit: { check: () => ({ success: true, remaining: 4, reset: 60000 }) },
   getClientIp: () => "127.0.0.1",
 }));
+vi.mock("@/lib/server/frozen-guard", async (orig) => ({
+  ...(await orig<typeof import("@/lib/server/frozen-guard")>()),
+  frozenModuleResponse: () => null, // trasa testowana bez blokady modułu
+}));
 
 import { POST } from "@/app/api/deposits/create-session/route";
 
