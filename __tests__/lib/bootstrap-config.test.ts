@@ -509,16 +509,40 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
     }
   });
 
+  // Treść warunku = wiązanie już ustawione w GCP (inna treść → drugie wiązanie przy
+  // ponownym bootstrapie). BackupRun jest oceniany z resource.name samej instancji
+  // (bez ukośnika na końcu, log audytu) — stary warunek `startsWith(".../myhelper-pg/")`
+  // dawał 403 na `cloudsql.backupRuns.create`.
   it("W-1: wiązanie roli kopii dla deploy z warunkiem Instance + BackupRun tej instancji", () => {
     const b = r.calls.filter((c) => c.includes("roles/myhelperSqlBackup"));
     expect(b).toHaveLength(1);
     expect(b[0]).toContain("--member=serviceAccount:myhelper-deploy@");
     const condition = b[0]!.split(" --condition=")[1];
     expect(condition).toBe(
-      'expression=(resource.type == "sqladmin.googleapis.com/Instance" && resource.name == "projects/my-helper-2-488419/instances/myhelper-pg") || ' +
-        '(resource.type == "sqladmin.googleapis.com/BackupRun" && resource.name.startsWith("projects/my-helper-2-488419/instances/myhelper-pg/")),' +
+      'expression=(resource.type == "sqladmin.googleapis.com/Instance" || resource.type == "sqladmin.googleapis.com/BackupRun") && ' +
+        '(resource.name == "projects/my-helper-2-488419/instances/myhelper-pg" || ' +
+        'resource.name.startsWith("projects/my-helper-2-488419/instances/myhelper-pg/")),' +
         "title=only-myhelper-pg-backups",
     );
+  });
+
+  it("W-1: warunek kopii wpuszcza BackupRun o nazwie samej instancji, nie wpuszcza myhelper-pg2", () => {
+    const condition = r.calls.find((c) => c.includes("roles/myhelperSqlBackup"))!.split(" --condition=expression=")[1]!;
+    const expr = condition.slice(0, condition.lastIndexOf(",title="));
+    // Mały ewaluator CEL dla tej jednej postaci: (typ == A || typ == B) && (nazwa == N || nazwa.startsWith(P)).
+    const m = expr.match(
+      /^\(resource\.type == "([^"]+)" \|\| resource\.type == "([^"]+)"\) && \(resource\.name == "([^"]+)" \|\| resource\.name\.startsWith\("([^"]+)"\)\)$/,
+    );
+    expect(m, expr).not.toBeNull();
+    const [, typeA, typeB, exact, prefix] = m!;
+    const allows = (type: string, name: string) => (type === typeA || type === typeB) && (name === exact || name.startsWith(prefix!));
+    const inst = "projects/my-helper-2-488419/instances/myhelper-pg";
+    expect(allows("sqladmin.googleapis.com/BackupRun", inst)).toBe(true);
+    expect(allows("sqladmin.googleapis.com/BackupRun", `${inst}/backupRuns/123`)).toBe(true);
+    expect(allows("sqladmin.googleapis.com/Instance", inst)).toBe(true);
+    expect(allows("sqladmin.googleapis.com/BackupRun", `${inst}2`)).toBe(false);
+    expect(allows("sqladmin.googleapis.com/Instance", `${inst}2`)).toBe(false);
+    expect(allows("sqladmin.googleapis.com/Database", inst)).toBe(false);
   });
 
   it("idempotencja: istniejąca instancja, baza i wersje sekretów — nic nie jest tworzone ani zmieniane", () => {

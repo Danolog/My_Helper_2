@@ -400,7 +400,15 @@ stage_sql() {
   db_password postgres "$DB_ADMIN_SECRET" raw
   local cond="expression=resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"${SQL_RESOURCE}\",title=only-${SQL_INSTANCE}"
   # Kopia na żądanie: operacje na kopiach mają typ zasobu BackupRun (W-1).
-  local backup_cond="expression=(resource.type == \"sqladmin.googleapis.com/Instance\" && resource.name == \"${SQL_RESOURCE}\") || (resource.type == \"sqladmin.googleapis.com/BackupRun\" && resource.name.startsWith(\"${SQL_RESOURCE}/\")),title=only-${SQL_INSTANCE}-backups"
+  # Cloud SQL sprawdza `cloudsql.backupRuns.create` z resource.type BackupRun
+  # i resource.name = SAMA instancja (`projects/P/instances/myhelper-pg`, bez
+  # ukośnika na końcu — log audytu GCP), więc wymaganie prefiksu z ukośnikiem
+  # dla BackupRun dawało 403. Każdy z dwóch typów przechodzi przy nazwie równej
+  # instancji albo z prefiksem `instancja/`; prefiks Z ukośnikiem nadal nie
+  # wpuszcza `myhelper-pg2`. Treść identyczna z wiązaniem już ustawionym w GCP
+  # (add-iam-policy-binding z tym samym członkiem, rolą i warunkiem nie dodaje
+  # drugiego wiązania — inna treść by dodała).
+  local backup_cond="expression=(resource.type == \"sqladmin.googleapis.com/Instance\" || resource.type == \"sqladmin.googleapis.com/BackupRun\") && (resource.name == \"${SQL_RESOURCE}\" || resource.name.startsWith(\"${SQL_RESOURCE}/\")),title=only-${SQL_INSTANCE}-backups"
   # Usługa i job migracji działają jako konto runtime — tylko ono łączy się
   # z bazą: Cloud SQL Client wyłącznie na tej instancji. Konto deploy NIE
   # dostaje cloudsql.client (przegląd #134): po jego stronie nic nie
