@@ -2,7 +2,7 @@
  * Blokady subskrypcji (T3): ostrzeżenia [MEDIUM] #2 TOCTOU i #3 „zdarzenie
  * przed wierszem” — testy jednostkowe na atrapie `tx` z logiem kolejności
  * wywołań (`f.log`). Kolejność i czekanie na prawdziwym Postgresie dowodzi
- * test integracyjny `__tests__/integration/subscription-locks.pg.test.ts`.
+ * test integracyjny `__tests__/pg/subscription-locks.pg.test.ts`.
  *
  * Kształt:
  * - dwuargumentowe `pg_advisory_xact_lock(<przestrzeń>, hashtext(id))`,
