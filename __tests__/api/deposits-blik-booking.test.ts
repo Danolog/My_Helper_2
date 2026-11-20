@@ -8,8 +8,9 @@
  *
  * Wiersze-fikstury przechodzą przez WHERE trasy (prawdziwy drizzle,
  * `sqlMatches`), więc test pilnuje też znaczenia predykatów: salon, pracownik,
- * przedział półotwarty. Atrapa loggera pilnuje, że numer BLIK salonu i telefon
- * gościa nie trafiają do żadnego logu (sprawdzane po KAŻDYM teście).
+ * przedział półotwarty. Po KAŻDYM teście argumenty wywołań atrapy loggera
+ * (z treścią obiektów `Error`: message, stack, cause) nie zawierają cyfr
+ * testowego numeru BLIK salonu ani telefonu gościa w zapisach użytych w testach.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // vi.mock niżej jest wynoszony nad importy — trasa ładuje się już z atrapami.
@@ -219,17 +220,44 @@ beforeEach(() => {
   h.rate.mockReturnValue({ success: true, remaining: 4, reset: 60_000 });
 });
 
+const PRIVATE_DIGITS = ["000600703", "000600700", "000 600 700"];
+
+/**
+ * Argumenty logów jako tekst. Sam `JSON.stringify(new Error(...))` daje `{}`,
+ * a prawdziwy logger zachowuje treść błędu — replacer ją przenosi.
+ */
+function serializeLogCalls(calls: unknown[][]): string {
+  return JSON.stringify(calls, (_k, v: unknown) =>
+    v instanceof Error ? { name: v.name, message: v.message, stack: v.stack, cause: v.cause } : v
+  );
+}
+
 // Prywatność: po każdym teście żaden log nie zawiera numeru BLIK ani telefonu gościa.
 afterEach(() => {
-  const logged = JSON.stringify(
-    Object.values(h.logger).flatMap((fn) => fn.mock.calls)
-  );
-  for (const digits of ["000600703", "000600700", "000 600 700"]) {
+  const logged = serializeLogCalls(Object.values(h.logger).flatMap((fn) => fn.mock.calls));
+  for (const digits of PRIVATE_DIGITS) {
     expect(logged, `log zawiera ${digits}`).not.toContain(digits);
   }
   expect(h.dbTouched).not.toHaveBeenCalled();
   // Nigdy, w żadnej ścieżce, wiersz płatności zadatku.
   expect(insertedTables()).not.toContain(depositPayments);
+});
+
+// ─── Kontrola strażnika logów ───────────────────────────────────────────────
+
+describe("strażnik prywatności logów", () => {
+  it("log z obiektem Error, którego message zawiera numer, zostałby wykryty", () => {
+    const calls = [["[BlikBooking] failed", { error: new Error(`params: ${BLIK_PHONE}`) }]];
+    // Bez replacera treść błędu ginie — strażnik byłby ślepy.
+    expect(JSON.stringify(calls)).not.toContain("000600703");
+    const logged = serializeLogCalls(calls);
+    expect(PRIVATE_DIGITS.filter((d) => logged.includes(d))).toEqual(["000600703"]);
+  });
+
+  it("numer w cause błędu też zostałby wykryty", () => {
+    const calls = [["x", Object.assign(new Error("db"), { cause: new Error(`params: ${GUEST_PHONE_E164}`) })]];
+    expect(serializeLogCalls(calls)).toContain("000600700");
+  });
 });
 
 // ─── 201 ────────────────────────────────────────────────────────────────────

@@ -39,8 +39,9 @@ import { getOptionalSession } from "@/lib/session";
  *
  * Izolacja salonów: `salonId` z body to cel rezerwacji. Przynależność
  * pracownika, usługi, wariantu i klienta do tego salonu sprawdza
- * `assertSalonRefs`, potem każde zapytanie idzie przez `forSalon(salonId)`
- * (kontekst RLS) z jawnym `eq(salonId)` i jawną listą kolumn.
+ * `assertSalonRefs` (przez `forSalon`). Wyliczenie kwoty (`calculateExpectedDeposit`) czyta
+ * surową pulą; zapytania samej trasy idą przez `forSalon(salonId)` (kontekst RLS)
+ * z jawnym `eq(salonId)` i jawną listą kolumn.
  */
 
 const SLOT_TAKEN_MESSAGE = "Wybrany termin jest juz zajety. Wybierz inny termin.";

@@ -12,12 +12,13 @@
  *   pewne 40P01 + wyścigi w pętli (PUT, POST, pakiet, zadatek) — zero 500;
  * - wolne terminy pod rolą aplikacji: pracownik salonu A zapytany z salonId = B → 404;
  * - publiczny katalog (GET salons/[id], usługa, profil pracownika): dane salonu A
- *   niewidoczne pod adresem salonu B, bez settingsJson/ownerId, zły format id → 400.
+ *   niewidoczne pod adresem salonu B, bez settingsJson/ownerId, zły format id → 400;
+ * - POST /api/deposits/blik-booking (gość): salon C z numerem BLIK → 201 bez wiersza deposit_payments, zajęty termin i wyścig → 409, salon A bez numeru → 409 bez nowej wizyty.
  *
  * Mocki: sesja i kontekst salonu (atrapy, sterowane per opis), limiter, SMS,
  * logger, bramka zamrożenia modułu pakietów i unstable_cache (przejście bez cache).
  * Baza, RLS (forSalon), walidacja, przynależność referencji do salonu i strażnik
- * zadatku — prawdziwe. Salony B mają własnych właścicieli (jeden salon na użytkownika).
+ * zadatku — prawdziwe. Salony B i salon C mają własnych właścicieli (jeden salon na użytkownika).
  *
  * Dane: użytkownik `it-t3-ovl-…` (prefiks z notatki sprzątania w pg-harness.ts),
  * salon, dwóch pracowników, klient, dwie usługi bez zadatku, promocja-pakiet;
@@ -745,7 +746,7 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
   // Rezerwacja z zadatkiem BLIK na telefon salonu: forSalon(salonId z body)
   // pod rolą aplikacji, prawdziwe wyliczenie kwoty. Salon C ma numer BLIK
   // (testowy) i własnego właściciela (`salons_owner_id_uq`); salon A nie ma
-  // numeru, dostaje tu usługę z zadatkiem. Terminy: dni 7–9 marca 2099.
+  // numeru, dostaje tu usługę z zadatkiem (usuwaną w afterAll). Terminy: dni 7–9 i 17 marca 2099.
   describe("POST /api/deposits/blik-booking (gość, forSalon)", () => {
     const BLIK_PHONE = "+48000600703";
     const SALON_C_PHONE = "+48000600704";
@@ -821,7 +822,7 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
     });
 
     afterAll(async () => {
-      // Usługa z zadatkiem salonu A znika kaskadą z salonu A w afterAll całego opisu.
+      if (depositServiceAId) await h!.db.delete(services).where(eq(services.id, depositServiceAId));
       if (salonCId) await h!.db.delete(salons).where(eq(salons.id, salonCId));
       await h!.db.delete(user).where(eq(user.id, OWNER_C_ID));
     });
