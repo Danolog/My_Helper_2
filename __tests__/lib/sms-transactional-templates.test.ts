@@ -550,6 +550,20 @@ describe("SMS przypomnienia i potwierdzeń: imię, usługa i pracownik przez fil
     const message = await messageOf(name, { employeeName: "Anna " + "x".repeat(60) });
     expect(message).toContain(` u Anna ${"x".repeat(32)}... w Salon Uroda`);
   });
+  it("sendAppointmentReminderSms: data z polskim znakiem w miesiącu (październik) → pazdziernika, wyłącznie GSM-7", async () => {
+    const result = await sms.sendAppointmentReminderSms({
+      clientPhone: PHONE,
+      ...BASE,
+      // 10:00 UTC = 12:00 w Warszawie (lato, UTC+2), 16 października 2030.
+      appointmentDate: new Date("2030-10-16T10:00:00.000Z"),
+      salonName: "Salon Uroda",
+      salonId: SALON_ID,
+    });
+    expect(result.success).toBe(true);
+    const message = sentMessage();
+    expect(message).toContain("juz dzisiaj o 12:00 (16 pazdziernika). Do zobaczenia!");
+    expect([...message].filter((c) => !GSM7.has(c))).toEqual([]);
+  });
 });
 
 /**
