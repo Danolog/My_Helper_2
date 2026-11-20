@@ -218,6 +218,14 @@ async function seed() {
   // E2E testuje pelny produkt, wiec salon testowy ma WLACZONE wszystkie moduly
   // opcjonalne (Faza 2: domyslnie OFF — "chudy UI"); hardOff (voiceAi/videoGen/
   // fiscal/socialPosts) pozostaja wylaczone globalnie niezaleznie od zapisu.
+  //
+  // `deposits`: numer BLIK salonu w ksztalcie zapisu PUT /api/salon/blik-deposit
+  // ({ blikPhone w E.164, blikConsentAt ISO }); czyta go POST /api/deposits/blik-booking
+  // (`settingsJson -> 'deposits' -> 'blikPhone'`, wystarczy niepusty napis).
+  // Numer TESTOWY z src/lib/test-phone.ts (704 = telefon salonu), nigdy prawdziwy:
+  // sendSms go blokuje, a "+48 000" nie jest przydzielany abonentom. Nie jest
+  // komorkowy, wiec PUT by go odrzucil — w seedzie celowo, odczyt trasy go przyjmuje.
+  // Stala data zgody: seed deterministyczny.
   const seedModules = {
     modules: {
       products: true,
@@ -227,6 +235,10 @@ async function seed() {
       newsletters: true,
       invoices: true,
       reportsAdvanced: true,
+    },
+    deposits: {
+      blikPhone: "+48000600704",
+      blikConsentAt: "2026-01-01T00:00:00.000Z",
     },
   };
   await db
