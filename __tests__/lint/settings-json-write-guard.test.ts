@@ -9,15 +9,17 @@
 //
 // Skan tekstu wszystkich plików `.ts` i `.tsx` w `src` (z podkatalogami).
 // Za zapis kolumny uznawane są:
-//   1. klucz `settingsJson:` w obiekcie przekazanym do `.set({ ... })` (UPDATE drizzle),
+//   1. klucz `settingsJson:` albo skrót `{ settingsJson }` w obiekcie przekazanym do `.set({ ... })` (UPDATE drizzle),
 //   2. surowy SQL `settings_json = ...` (UPDATE ... SET),
-//   3. klucz `settingsJson:` w `.insert(salons).values({ ... })` (INSERT drizzle).
+//   3. klucz `settingsJson:` albo skrót w `.insert(salons).values({ ... })` (INSERT drizzle).
 // Wartość każdego zapisu musi zaczynać się od `sql\`jsonb_set(` (1, 3) albo
 // `jsonb_set(` (2). Dozwolone wyjątki: ALLOWED_EXCEPTIONS (dziś pusta).
 //
-// Ograniczenie skanu tekstowego: obiekt zbudowany wcześniej w zmiennej
-// i przekazany jako `.set(zmienna)` nie jest widoczny. Asercja dokładnej
-// listy zapisów (EXPECTED_WRITES) łapie zniknięcie zapisu z widoku skanu.
+// Ograniczenia skanu tekstowego (zapis niewidoczny): obiekt zbudowany wcześniej
+// i przekazany jako `.set(zmienna)`, kolumna wstawiona do szablonu `sql` jako
+// `${salons.settingsJson} = …`, insert tabeli pod inną nazwą niż `salons`. Asercja
+// dokładnej listy (EXPECTED_WRITES) łapie zniknięcie dzisiejszego zapisu z widoku
+// skanu, ale nie nowy zapis w niewidocznej formie.
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -36,8 +38,8 @@ const EXPECTED_WRITES: Record<string, number> = {
 
 /**
  * Zapisy poza jsonb_set dopuszczone świadomie: `plik:linia` → uzasadnienie.
- * Pusta: żaden insert salonu nie ustawia `settingsJson` (nowy salon ma NULL,
- * a trasy ustawień obsługują go przez `coalesce`).
+ * Pusta: żaden insert salonu nie ustawia `settingsJson` (nowy salon dostaje domyślne
+ * `'{}'::jsonb`, a SQL NULL trasy ustawień obsługują przez `coalesce`).
  */
 const ALLOWED_EXCEPTIONS: Record<string, string> = {};
 
@@ -82,10 +84,10 @@ function matchingClose(text: string, start: number, open: string, close: string)
   return -1;
 }
 
-/** Klucze `settingsJson:` w fragmencie `body` zaczynającym się na pozycji `offset` pliku. */
+/** Klucze `settingsJson` (z dwukropkiem albo skrótem) w fragmencie `body` zaczynającym się na pozycji `offset` pliku. */
 function settingsKeysIn(file: string, text: string, body: string, offset: number, kind: Write["kind"]): Write[] {
   const found: Write[] = [];
-  for (const m of body.matchAll(/\bsettingsJson\s*:\s*/g)) {
+  for (const m of body.matchAll(/(?<![.\w$])settingsJson(?:\s*:\s*|(?=\s*[,}]))/g)) {
     const valueStart = m.index! + m[0].length;
     const value = body.slice(valueStart, valueStart + 60);
     found.push({
@@ -166,6 +168,12 @@ describe("findSettingsWrites — rozpoznawanie wzorców", () => {
     const src = "await tx\n  .update(salons)\n  .set({ settingsJson: { ...old, loyalty } })\n";
     expect(findSettingsWrites("x.ts", src)).toEqual([
       expect.objectContaining({ file: "x.ts", line: 3, kind: "set", atomic: false }),
+    ]);
+  });
+
+  it("skrót { settingsJson } w .set() → nieatomowy", () => {
+    expect(findSettingsWrites("x.ts", "tx.update(salons).set({ name, settingsJson })")).toEqual([
+      expect.objectContaining({ line: 1, kind: "set", atomic: false }),
     ]);
   });
 
