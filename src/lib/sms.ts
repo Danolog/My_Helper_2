@@ -277,7 +277,7 @@ const SMS_SERVICE_NAME_MAX = 40;
 
 /**
  * Maksymalna długość imienia klienta w SMS z instrukcją płatności. Imię
- * i nazwisko mieszczą się w tym limicie; dłuższy tekst nie jest skracany,
+ * i nazwisko zwykle mieszczą się w tym limicie; dłuższy tekst nie jest skracany,
  * tylko pomijany (patrz `clientNameForPaymentSms`).
  */
 const SMS_CLIENT_NAME_MAX = 30;
@@ -341,8 +341,8 @@ function ownerTextForSms(text: string, max: number): string {
 }
 
 /**
- * Imię klienta przygotowane do SMS z instrukcją płatności. Imię pochodzi
- * z publicznego formularza (bez sesji), a SMS może trafić na dowolny numer —
+ * Imię klienta przygotowane do SMS z instrukcją płatności. Imię może pochodzić
+ * z publicznego formularza (także bez sesji), a SMS może wtedy trafić na dowolny numer —
  * nie może więc przemycić adresu strony ani numeru (telefonu, konta, kodu),
  * który odbiorca wziąłby za część instrukcji płatności od salonu.
  * `toGsm7Basic`; pomijane w całości (pusty wynik), gdy przed albo po
@@ -565,7 +565,7 @@ export interface BlikDepositBookingSmsParams {
  * Treść SMS o rezerwacji z zadatkiem BLIK (czysta funkcja, bez wysyłki).
  * Pracownik i data przechodzą przez `toGsm7Basic`, nazwa salonu przez
  * `salonNameForSms`, usługa przez regułę tekstu właściciela (adres pomijany).
- * Imię klienta (tekst z publicznego formularza) przez `clientNameForPaymentSms`:
+ * Imię klienta (z kartoteki albo z publicznego formularza) przez `clientNameForPaymentSms`:
  * imię z adresem, cyfrą albo ponad limit jest pomijane i treść idzie bez
  * powitania. Numer BLIK, kwota i tytuł nie są skracane — bez nich
  * klient nie zapłaci; numer i tytuł idą bez zmian, bo muszą być identyczne

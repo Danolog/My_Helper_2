@@ -1,7 +1,7 @@
 /**
- * Szablony SMS transakcyjnych z src/lib/sms.ts: treść przekazana dostawcy
- * zawiera wyłącznie informację o wizycie / płatności — bez adresu URL
- * i bez wezwania do rezerwacji.
+ * Szablony SMS transakcyjnych z src/lib/sms.ts: przy zwykłym imieniu klienta
+ * treść przekazana dostawcy zawiera wyłącznie informację o wizycie / płatności —
+ * bez adresu URL i bez wezwania do rezerwacji, także przy wrogiej nazwie salonu.
  *
  * Lista szablonów jest zamknięta względem eksportów sms.ts: każdy eksport
  * `send…Sms` (poza ogólnym `sendSms`) musi mieć wpis w TEMPLATES, inaczej
