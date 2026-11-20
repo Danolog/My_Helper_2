@@ -17,6 +17,7 @@ import {
 } from "@/lib/subscription-locks";
 import { paidPeriodEndSql, paidPeriodStartSql } from "@/lib/subscription-paid-period";
 import { hasRealStripeSubscription } from "@/lib/subscription-predicates";
+import { isStripeSubscriptionEnded } from "@/lib/subscription-sync";
 
 type SubscriptionRow = typeof salonSubscriptions.$inferSelect;
 
@@ -25,9 +26,6 @@ type CancelOutcome =
   | { changed: true }
   | { stripeFailed: true }
   | { stripeNotConfirmed: string };
-
-/** Stany Stripe, które same w sobie potwierdzają koniec subskrypcji. */
-const STRIPE_ENDED_STATUSES = new Set(["canceled", "incomplete_expired"]);
 
 function json(status: number, code: string, error: string) {
   return NextResponse.json({ success: false, code, error }, { status });
@@ -151,7 +149,7 @@ export async function POST() {
             return { stripeFailed: true };
           }
 
-          if (stripeSub.cancel_at_period_end !== true && !STRIPE_ENDED_STATUSES.has(stripeSub.status)) {
+          if (stripeSub.cancel_at_period_end !== true && !isStripeSubscriptionEnded(stripeSub.status)) {
             logger.error("Stripe did not confirm cancellation — local subscription unchanged, manual handling", {
               subscriptionId: activeSub.id,
               stripeSubscriptionId,
