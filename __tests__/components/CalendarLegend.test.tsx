@@ -52,6 +52,12 @@ describe("CalendarLegend", () => {
       );
       expect(colorIndicators).toHaveLength(5);
     });
+
+    it("explains the deposit pending marker", () => {
+      render(<CalendarLegend colorMode="status" />);
+
+      expect(screen.getByTestId("legend-deposit-pending")).toHaveTextContent("Czeka na zadatek");
+    });
   });
 
   describe("employee color mode", () => {
@@ -123,6 +129,12 @@ describe("CalendarLegend", () => {
       render(<CalendarLegend colorMode="employee" />);
 
       expect(screen.getByText("Pracownicy:")).toBeInTheDocument();
+    });
+
+    it("explains the deposit pending marker", () => {
+      render(<CalendarLegend colorMode="employee" employees={mockEmployees} />);
+
+      expect(screen.getByTestId("legend-deposit-pending")).toHaveTextContent("Czeka na zadatek");
     });
   });
 });
