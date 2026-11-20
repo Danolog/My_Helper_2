@@ -276,9 +276,14 @@ const SMS_SALON_NAME_MAX = 40;
 const SMS_SERVICE_NAME_MAX = 40;
 
 /**
- * Maksymalna długość imienia klienta w SMS z instrukcją płatności. Imię
- * i nazwisko zwykle mieszczą się w tym limicie; dłuższy tekst nie jest skracany,
- * tylko pomijany (patrz `clientNameForPaymentSms`).
+ * Maksymalna długość nazwy pracownika w treści SMS — jak nazwy salonu i usługi.
+ */
+const SMS_EMPLOYEE_NAME_MAX = 40;
+
+/**
+ * Maksymalna długość imienia klienta w treści SMS. Imię i nazwisko zwykle
+ * mieszczą się w tym limicie; dłuższy tekst nie jest skracany, tylko pomijany
+ * (patrz `clientNameForSms`).
  */
 const SMS_CLIENT_NAME_MAX = 30;
 
@@ -341,16 +346,19 @@ function ownerTextForSms(text: string, max: number): string {
 }
 
 /**
- * Imię klienta przygotowane do SMS z instrukcją płatności. Imię może pochodzić
- * z publicznego formularza (także bez sesji), a SMS może wtedy trafić na dowolny numer —
+ * Imię klienta przygotowane do treści każdego SMS do klienta (przypomnienie,
+ * potwierdzenie rezerwacji, potwierdzenie płatności, rezerwacja z zadatkiem
+ * BLIK). Imię może pochodzić z publicznego formularza (także bez sesji) albo
+ * z kartoteki założonej z nazwy konta, a SMS może trafić na dowolny numer —
  * nie może więc przemycić adresu strony ani numeru (telefonu, konta, kodu),
- * który odbiorca wziąłby za część instrukcji płatności od salonu.
+ * który odbiorca wziąłby za wiadomość albo instrukcję od salonu.
  * `toGsm7Basic`; pomijane w całości (pusty wynik), gdy przed albo po
  * oczyszczeniu wygląda na adres albo zawiera jakikolwiek znak liczbowy, oraz
  * gdy po oczyszczeniu ma ponad SMS_CLIENT_NAME_MAX znaków — obcięcie mogłoby
- * zostawić czytelny fragment wstrzykniętej instrukcji.
+ * zostawić czytelny fragment wstrzykniętej treści. Pusty wynik = szablon bez
+ * powitania.
  */
-function clientNameForPaymentSms(name: string): string {
+function clientNameForSms(name: string): string {
   const cleaned = toGsm7Basic(name);
 
   if (looksLikeAddress(name) || looksLikeAddress(cleaned)) return "";
@@ -373,6 +381,28 @@ export function salonNameForSms(name: string | null | undefined): string {
 /** Fragment „ w <salon>” albo pusty napis, gdy nazwy brak po przygotowaniu. */
 function salonPart(name: string): string {
   return name ? ` w ${name}` : "";
+}
+
+/** Powitanie „<imię>, ” przez `clientNameForSms` albo pusty napis. */
+function greetingPart(clientName: string): string {
+  const name = clientNameForSms(clientName);
+  return name ? `${name}, ` : "";
+}
+
+/** Nazwa usługi przez regułę tekstu właściciela (adres pomijany, limit). */
+function serviceNameForSms(serviceName: string): string {
+  return ownerTextForSms(serviceName, SMS_SERVICE_NAME_MAX);
+}
+
+/**
+ * Fragment „ u <pracownik>” albo pusty napis. Nazwę pracownika wpisuje
+ * właściciel salonu w panelu, więc idzie przez tę samą regułę co nazwa salonu
+ * i usługi (adres pomijany, długi tekst skracany), a nie przez regułę imienia
+ * klienta: tekst właściciela nie pochodzi z publicznego formularza.
+ */
+function employeePart(employeeName: string): string {
+  const employee = ownerTextForSms(employeeName, SMS_EMPLOYEE_NAME_MAX);
+  return employee ? ` u ${employee}` : "";
 }
 
 /**
@@ -425,6 +455,9 @@ export function buildWaitingListSms(params: WaitingListSmsParams): string {
 
 /**
  * Send an appointment reminder SMS to the client 1 hour before the appointment.
+ * Imię przez `clientNameForSms`, usługa i pracownik przez regułę tekstu
+ * właściciela, salon przez `salonNameForSms`, data przez `toGsm7Basic`; puste
+ * po przygotowaniu fragmenty są opuszczane („Przypomnienie: Twoja wizyta…”).
  */
 export async function sendAppointmentReminderSms(params: {
   clientPhone: string;
@@ -441,16 +474,22 @@ export async function sendAppointmentReminderSms(params: {
     hour: "2-digit",
     minute: "2-digit",
   });
-  const formattedDate = params.appointmentDate.toLocaleDateString("pl-PL", {
-    timeZone: SMS_TIME_ZONE,
-    day: "numeric",
-    month: "long",
-  });
+  const formattedDate = toGsm7Basic(
+    params.appointmentDate.toLocaleDateString("pl-PL", {
+      timeZone: SMS_TIME_ZONE,
+      day: "numeric",
+      month: "long",
+    })
+  );
 
   const salon = salonPart(salonNameForSms(params.salonName));
+  const greeting = greetingPart(params.clientName);
+  const service = serviceNameForSms(params.serviceName);
+  const servicePart = service ? ` "${service}"` : "";
+  const employee = employeePart(params.employeeName);
 
   const message =
-    `Przypomnienie: ${params.clientName}, Twoja wizyta "${params.serviceName}" u ${params.employeeName}${salon} juz dzisiaj o ${formattedTime} (${formattedDate}). Do zobaczenia!`;
+    `Przypomnienie: ${greeting}Twoja wizyta${servicePart}${employee}${salon} juz dzisiaj o ${formattedTime} (${formattedDate}). Do zobaczenia!`;
 
   return sendSms({
     to: params.clientPhone,
@@ -464,6 +503,10 @@ export async function sendAppointmentReminderSms(params: {
  * Send a booking confirmation SMS right after an appointment is created
  * without a deposit (Stripe deposit bookings get their confirmation after
  * payment; BLIK deposit bookings get sendBlikDepositBookingSms instead).
+ * Imię przez `clientNameForSms`, usługa i pracownik przez regułę tekstu
+ * właściciela, salon przez `salonNameForSms`, data przez `toGsm7Basic`; puste
+ * po przygotowaniu fragmenty są opuszczane („Potwierdzenie rezerwacji: Twoja
+ * wizyta…”).
  */
 export async function sendBookingConfirmationSms(params: {
   clientPhone: string;
@@ -475,13 +518,15 @@ export async function sendBookingConfirmationSms(params: {
   salonId: string;
   clientId?: string;
 }): Promise<SmsResult> {
-  const formattedDate = params.appointmentDate.toLocaleDateString("pl-PL", {
-    timeZone: SMS_TIME_ZONE,
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  const formattedDate = toGsm7Basic(
+    params.appointmentDate.toLocaleDateString("pl-PL", {
+      timeZone: SMS_TIME_ZONE,
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    })
+  );
   const formattedTime = params.appointmentDate.toLocaleTimeString("pl-PL", {
     timeZone: SMS_TIME_ZONE,
     hour: "2-digit",
@@ -489,9 +534,13 @@ export async function sendBookingConfirmationSms(params: {
   });
 
   const salon = salonPart(salonNameForSms(params.salonName));
+  const greeting = greetingPart(params.clientName);
+  const service = serviceNameForSms(params.serviceName);
+  const servicePart = service ? ` "${service}"` : "";
+  const employee = employeePart(params.employeeName);
 
   const message =
-    `Potwierdzenie rezerwacji: ${params.clientName}, Twoja wizyta "${params.serviceName}" u ${params.employeeName}${salon} zostala umowiona na ${formattedDate} o ${formattedTime}. Do zobaczenia!`;
+    `Potwierdzenie rezerwacji: ${greeting}Twoja wizyta${servicePart}${employee}${salon} zostala umowiona na ${formattedDate} o ${formattedTime}. Do zobaczenia!`;
 
   return sendSms({
     to: params.clientPhone,
@@ -505,6 +554,9 @@ export async function sendBookingConfirmationSms(params: {
  * Send a payment confirmation SMS to the client after a deposit payment.
  * `salonName` przechodzi przez `salonNameForSms`; pusty wynik (null, pusty
  * napis, nazwa jak adres albo spoza GSM-7) → treść bez fragmentu „w <salon>”.
+ * Imię przez `clientNameForSms` (pusty wynik → bez powitania), usługa
+ * i pracownik przez regułę tekstu właściciela (pusta usługa → „za wizyte”,
+ * pusty pracownik → bez fragmentu „u …”), data przez `toGsm7Basic`.
  */
 export async function sendPaymentConfirmationSms(params: {
   clientPhone: string;
@@ -518,20 +570,26 @@ export async function sendPaymentConfirmationSms(params: {
   salonId: string;
   clientId?: string;
 }): Promise<SmsResult> {
-  const formattedDate = params.appointmentDate.toLocaleDateString("pl-PL", {
-    timeZone: SMS_TIME_ZONE,
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const formattedDate = toGsm7Basic(
+    params.appointmentDate.toLocaleDateString("pl-PL", {
+      timeZone: SMS_TIME_ZONE,
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  );
 
   const salon = salonPart(salonNameForSms(params.salonName));
+  const greeting = greetingPart(params.clientName);
+  const service = serviceNameForSms(params.serviceName);
+  const servicePart = service ? ` za usluge "${service}"` : " za wizyte";
+  const employee = employeePart(params.employeeName);
 
   const message =
-    `Potwierdzenie platnosci: ${params.clientName}, zadatek ${params.amount.toFixed(2)} ${params.currency} za usluge "${params.serviceName}" u ${params.employeeName}${salon} dnia ${formattedDate} zostal przyjety. Dziekujemy!`;
+    `Potwierdzenie platnosci: ${greeting}zadatek ${params.amount.toFixed(2)} ${params.currency}${servicePart}${employee}${salon} dnia ${formattedDate} zostal przyjety. Dziekujemy!`;
 
   return sendSms({
     to: params.clientPhone,
@@ -563,9 +621,10 @@ export interface BlikDepositBookingSmsParams {
 
 /**
  * Treść SMS o rezerwacji z zadatkiem BLIK (czysta funkcja, bez wysyłki).
- * Pracownik i data przechodzą przez `toGsm7Basic`, nazwa salonu przez
- * `salonNameForSms`, usługa przez regułę tekstu właściciela (adres pomijany).
- * Imię klienta (z kartoteki albo z publicznego formularza) przez `clientNameForPaymentSms`:
+ * Data przechodzi przez `toGsm7Basic`, nazwa salonu przez `salonNameForSms`,
+ * usługa i pracownik przez regułę tekstu właściciela (adres pomijany, pusty
+ * pracownik → bez fragmentu „u …”).
+ * Imię klienta (z kartoteki albo z publicznego formularza) przez `clientNameForSms`:
  * imię z adresem, cyfrą albo ponad limit jest pomijane i treść idzie bez
  * powitania. Numer BLIK, kwota i tytuł nie są skracane — bez nich
  * klient nie zapłaci; numer i tytuł idą bez zmian, bo muszą być identyczne
@@ -586,14 +645,12 @@ export function buildBlikDepositBookingSms(params: BlikDepositBookingSmsParams):
   });
 
   const salon = salonPart(salonNameForSms(params.salonName));
-  const clientName = clientNameForPaymentSms(params.clientName);
-  const greeting = clientName ? `${clientName}, ` : "";
-  const service = ownerTextForSms(params.serviceName, SMS_SERVICE_NAME_MAX) || "wizyta";
-  const employee = toGsm7Basic(params.employeeName);
-  const employeePart = employee ? ` u ${employee}` : "";
+  const greeting = greetingPart(params.clientName);
+  const service = serviceNameForSms(params.serviceName) || "wizyta";
+  const employee = employeePart(params.employeeName);
 
   return (
-    `Rezerwacja przyjeta: ${greeting}"${service}"${employeePart}${salon} ${formattedDate} o ${formattedTime}. ` +
+    `Rezerwacja przyjeta: ${greeting}"${service}"${employee}${salon} ${formattedDate} o ${formattedTime}. ` +
     `Wplac zadatek ${params.amount.toFixed(2)} PLN BLIK-iem na telefon ${params.blikPhone}, ` +
     `tytul: ${params.title}. Salon potwierdzi wplate.`
   );

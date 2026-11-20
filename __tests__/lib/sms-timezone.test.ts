@@ -7,7 +7,8 @@
  * na pusto, dlatego każdy przypadek najpierw sprawdza, że proces naprawdę
  * liczy w UTC (`assertProcessInUtc`).
  *
- * Format treści (dzień tygodnia, nazwa miesiąca) bez zmian — to #231.
+ * Format treści: dzień tygodnia i nazwa miesiąca słownie, sprowadzone do
+ * podstawowej tabeli GSM-7 (bez polskich znaków, np. „sroda”).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -73,8 +74,9 @@ const CASES = [
     label: "po północy UTC następny dzień w Warszawie",
     at: "2030-01-15T23:30:00Z",
     reminder: "juz dzisiaj o 00:30 (16 stycznia). Do zobaczenia!",
-    booking: "zostala umowiona na środa, 16 stycznia 2030 o 00:30. Do zobaczenia!",
-    payment: "dnia środa, 16 stycznia 2030 00:30 zostal przyjety.",
+    // Data idzie przez sprowadzenie do GSM-7: „środa” → „sroda”.
+    booking: "zostala umowiona na sroda, 16 stycznia 2030 o 00:30. Do zobaczenia!",
+    payment: "dnia sroda, 16 stycznia 2030 00:30 zostal przyjety.",
   },
 ] as const;
 
