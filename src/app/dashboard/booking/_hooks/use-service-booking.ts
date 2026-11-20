@@ -116,7 +116,8 @@ export function useServiceBooking({ salonId }: UseServiceBookingParams) {
   }, []);
 
   const fetchAvailableSlots = useCallback(async (employeeId: string, date: string, duration: number, signal: AbortSignal | null = null) => {
-    if (!employeeId || !date || !duration) {
+    // Bez salonu z sesji nie pytamy o terminy — trasa liczy je w obrebie salonu.
+    if (!salonId || !employeeId || !date || !duration) {
       setSlotsData(null);
       return;
     }
@@ -125,7 +126,7 @@ export function useServiceBooking({ salonId }: UseServiceBookingParams) {
     setSelectedTimeSlot("");
     try {
       const res = await fetch(
-        `/api/available-slots?employeeId=${employeeId}&date=${date}&duration=${duration}`,
+        `/api/available-slots?salonId=${encodeURIComponent(salonId)}&employeeId=${employeeId}&date=${date}&duration=${duration}`,
         { signal }
       );
       if (!res.ok) { setSlotsData(null); return; }
@@ -143,7 +144,7 @@ export function useServiceBooking({ salonId }: UseServiceBookingParams) {
     } finally {
       setLoadingSlots(false);
     }
-  }, []);
+  }, [salonId]);
 
   const checkPromotions = useCallback(async (clientId: string, serviceId: string, signal: AbortSignal | null = null) => {
     // Promocja 2+1 jest zamrozona (FROZEN_PROMOTION_TYPES) — bez zapytania.

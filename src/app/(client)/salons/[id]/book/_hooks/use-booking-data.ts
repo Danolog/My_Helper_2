@@ -285,7 +285,9 @@ export function useBookingData(): UseBookingDataReturn {
 
   const fetchAvailableSlots = useCallback(
     async (employeeId: string, date: string, duration: number, signal?: AbortSignal) => {
-      if (!employeeId || !date || !duration) {
+      // Wolne terminy sa liczone w obrebie salonu z adresu, wiec bez niego
+      // nie ma czego pytac.
+      if (!salonId || !employeeId || !date || !duration) {
         setSlotsData(null);
         return;
       }
@@ -293,7 +295,7 @@ export function useBookingData(): UseBookingDataReturn {
       setSelectedTimeSlot("");
       try {
         const res = await fetch(
-          `/api/available-slots?employeeId=${employeeId}&date=${date}&duration=${duration}`,
+          `/api/available-slots?salonId=${encodeURIComponent(salonId)}&employeeId=${employeeId}&date=${date}&duration=${duration}`,
           signal ? { signal } : {},
         );
         const json = await res.json();
@@ -311,7 +313,7 @@ export function useBookingData(): UseBookingDataReturn {
         setLoadingSlots(false);
       }
     },
-    [],
+    [salonId],
   );
 
   // Auto-fetch slots when employee, date or effective duration changes
