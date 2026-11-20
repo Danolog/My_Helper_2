@@ -10,7 +10,7 @@ import { forSalon } from "@/lib/server/repository";
 // #193 P5a-2 (decyzja CTO): wysyłka (POST) z sekretem crona, salonId to opcjonalny
 // filtr (bez niego wszystkie salony) → wyjścia systemowe, nie pula żądań.
 import { findDueAppointmentReminders, markAppointmentRemindersSent } from "@/lib/server/system";
-import { SMS_TIME_ZONE, sendSms } from "@/lib/sms";
+import { sendAppointmentReminder24hSms } from "@/lib/sms";
 /**
  * POST /api/reminders/appointment
  *
@@ -24,7 +24,8 @@ import { SMS_TIME_ZONE, sendSms } from "@/lib/sms";
  * ?salonId=<uuid> zawęża do jednego salonu; podany, ale nie-UUID (także pusty)
  * → 400 przed jakimkolwiek zapytaniem.
  *
- * In development mode, SMS messages are logged to the console.
+ * Bez SMSAPI_TOKEN poza hostingiem (lokalnie, testy, CI) SMS jest tylko symulowany: log z zamaskowanym numerem i długością, bez treści.
+ * Z ustawionym SMSAPI_TOKEN SMS wychodzi naprawdę, także lokalnie.
  */
 export async function POST(request: Request) {
   try {
@@ -71,38 +72,20 @@ export async function POST(request: Request) {
         continue;
       }
 
-      // Format appointment date in Polish, always Warsaw time (#234)
-      const formattedDate = appt.startTime.toLocaleDateString("pl-PL", {
-        timeZone: SMS_TIME_ZONE,
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      });
-      const formattedTime = appt.startTime.toLocaleTimeString("pl-PL", {
-        timeZone: SMS_TIME_ZONE,
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-
       const clientName = `${appt.clientFirstName} ${appt.clientLastName}`;
-      const salonName = appt.salonName || "salon";
-      const serviceName = appt.serviceName || "wizyta";
       const employeeName = appt.employeeFirstName
         ? `${appt.employeeFirstName} ${appt.employeeLastName}`
         : "";
 
-      // Build SMS message
-      let message = `Przypomnienie: ${clientName}, Twoja wizyta "${serviceName}" w ${salonName}`;
-      if (employeeName) {
-        message += ` u ${employeeName}`;
-      }
-      message += ` odbedzie sie ${formattedDate} o godz. ${formattedTime}. Do zobaczenia!`;
-
-      // Send SMS
-      const smsResult = await sendSms({
-        to: appt.clientPhone,
-        message,
+      // Treść wyłącznie z szablonu modułu SMS: imię, usługa, pracownik i salon
+      // przez jego reguły, data i godzina w czasie warszawskim (#234).
+      const smsResult = await sendAppointmentReminder24hSms({
+        clientPhone: appt.clientPhone,
+        clientName,
+        serviceName: appt.serviceName,
+        employeeName,
+        appointmentDate: appt.startTime,
+        salonName: appt.salonName,
         salonId: appt.salonId,
         clientId: appt.clientId,
       });

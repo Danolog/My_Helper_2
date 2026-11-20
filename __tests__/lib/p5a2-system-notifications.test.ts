@@ -95,6 +95,18 @@ vi.mock("@/lib/sms", async (orig) => ({
     return h.sendSms(...a);
   },
   sendAppointmentReminderSms: (...a: unknown[]) => h.sendReminderSms(...a),
+  // Przypomnienie 24 h (reminders/appointment): treść z prawdziwego szablonu,
+  // wysyłka przez zmockowany sendSms — liczy się chwila wysyłki względem zapytań.
+  sendAppointmentReminder24hSms: async (p: import("@/lib/sms").AppointmentReminder24hSmsParams) => {
+    const real = await orig<typeof import("@/lib/sms")>();
+    h.queriesAtSend.push(h.captured.length);
+    return h.sendSms({
+      to: p.clientPhone,
+      message: real.buildAppointmentReminder24hSms(p),
+      salonId: p.salonId,
+      clientId: p.clientId,
+    });
+  },
 }));
 vi.mock("@/lib/push", () => ({
   sendAppointmentReminderPush: (...a: unknown[]) => h.push1h(...a),

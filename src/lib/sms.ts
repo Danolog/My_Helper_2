@@ -500,6 +500,69 @@ export async function sendAppointmentReminderSms(params: {
 }
 
 /**
+ * Parametry SMS przypomnienia na dobę przed wizytą (trasa
+ * /api/reminders/appointment). `clientName` to imię i nazwisko jako jedno pole
+ * — jak w pozostałych szablonach; reguła imienia (`clientNameForSms`, w tym
+ * limit SMS_CLIENT_NAME_MAX) działa na całym połączonym tekście, więc
+ * wstrzyknięta treść nie może się rozłożyć na dwa pola, z których każde
+ * osobno mieści się w limicie.
+ */
+export interface AppointmentReminder24hSmsParams {
+  clientPhone: string;
+  clientName: string;
+  serviceName: string | null | undefined;
+  employeeName: string;
+  appointmentDate: Date;
+  salonName: string | null | undefined;
+  salonId: string;
+  clientId?: string | undefined;
+}
+
+/**
+ * Treść SMS przypomnienia na dobę przed wizytą (czysta funkcja, bez wysyłki).
+ * Imię przez `clientNameForSms`, usługa i pracownik przez regułę tekstu
+ * właściciela, salon przez `salonNameForSms`, data (z dniem tygodnia i rokiem)
+ * przez `toGsm7Basic`; data i godzina w strefie SMS_TIME_ZONE. Puste po
+ * przygotowaniu fragmenty są opuszczane („Przypomnienie: Twoja wizyta
+ * odbedzie sie …”). Inne brzmienie niż `sendAppointmentReminderSms`, które
+ * mówi „juz dzisiaj”.
+ */
+export function buildAppointmentReminder24hSms(params: AppointmentReminder24hSmsParams): string {
+  const formattedDate = toGsm7Basic(
+    params.appointmentDate.toLocaleDateString("pl-PL", {
+      timeZone: SMS_TIME_ZONE,
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    })
+  );
+  const formattedTime = params.appointmentDate.toLocaleTimeString("pl-PL", {
+    timeZone: SMS_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const greeting = greetingPart(params.clientName);
+  const service = serviceNameForSms(params.serviceName ?? "");
+  const servicePart = service ? ` "${service}"` : "";
+  const salon = salonPart(salonNameForSms(params.salonName));
+  const employee = employeePart(params.employeeName);
+
+  return `Przypomnienie: ${greeting}Twoja wizyta${servicePart}${salon}${employee} odbedzie sie ${formattedDate} o godz. ${formattedTime}. Do zobaczenia!`;
+}
+
+/** Send the 24h appointment reminder SMS with the text from buildAppointmentReminder24hSms. */
+export async function sendAppointmentReminder24hSms(params: AppointmentReminder24hSmsParams): Promise<SmsResult> {
+  return sendSms({
+    to: params.clientPhone,
+    message: buildAppointmentReminder24hSms(params),
+    salonId: params.salonId,
+    clientId: params.clientId,
+  });
+}
+
+/**
  * Send a booking confirmation SMS right after an appointment is created
  * without a deposit (Stripe deposit bookings get their confirmation after
  * payment; BLIK deposit bookings get sendBlikDepositBookingSms instead).

@@ -9,8 +9,8 @@
  * liczy w UTC (`assertProcessInUtc`).
  *
  * `sendSms` jest prawdziwy; zmockowane są baza, logger i fetch dostawcy,
- * a asercja dotyczy treści przekazanej do wysyłki. Format treści bez zmian
- * (#231).
+ * a asercja dotyczy treści przekazanej do wysyłki. Treść składa szablon
+ * modułu SMS; data w niej tylko ze znakami GSM-7.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -98,7 +98,8 @@ const CASES = [
   {
     label: "po północy UTC następny dzień w Warszawie",
     at: "2030-01-15T23:30:00Z",
-    text: "odbedzie sie środa, 16 stycznia 2030 o godz. 00:30. Do zobaczenia!",
+    // Dzień tygodnia bez polskich znaków (data przez toGsm7Basic w szablonie).
+    text: "odbedzie sie sroda, 16 stycznia 2030 o godz. 00:30. Do zobaczenia!",
   },
 ] as const;
 
