@@ -35,6 +35,8 @@ import { POST as stripeWebhook } from "@/app/api/stripe/webhook/route";
 import { POST as cancelSubscription } from "@/app/api/subscriptions/cancel/route";
 import { logger } from "@/lib/logger";
 import { salonSubscriptions, salons, subscriptionPayments, subscriptionPlans, user } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { getCurrentPlan, getSalonAccess } from "@/lib/subscription";
 import {
   confirmSubscriptionCheckout,
   type SubscriptionCheckoutSession,
@@ -729,6 +731,58 @@ suite("blokady subskrypcji — prawdziwy Postgres", () => {
       const oneTime = { start: NEXT_PERIOD.start, end: NEXT_PERIOD.start };
       expect((await deliver("invoice.paid", invoicePaid(sub, [oneTime]))).status).toBe(200);
       expect(await period()).toEqual([[null, null]]);
+    });
+  });
+
+  describe("#193 S1a — bramki planu pod forSalon (rola aplikacji, RLS salonu)", () => {
+    const otherUserId = `it-t3-s1a-${RUN}`; // prefiks it-t3- = sprzątanie z pg-harness.ts
+    let otherSalonId = "";
+
+    beforeAll(async () => {
+      await h!.db.insert(user).values({ id: otherUserId, name: "IT S1a", email: `${otherUserId}@example.invalid` });
+      const [other] = await h!.db.insert(salons).values({ name: `IT S1a ${RUN}`, ownerId: otherUserId }).returning();
+      otherSalonId = other!.id;
+    });
+
+    afterAll(async () => {
+      // Kaskada z salonu usuwa jego subskrypcje.
+      if (otherSalonId) await h!.db.delete(salons).where(eq(salons.id, otherSalonId));
+      await h!.db.delete(user).where(eq(user.id, otherUserId));
+    });
+
+    it("salon A active, salon B trial wygasły: stan z wierszy (nie unavailable), A nie widzi wierszy B", async () => {
+      const periodEnd = new Date(Date.now() + 20 * DAY * 1000);
+      await h!.db.insert(salonSubscriptions).values({ salonId, planId, status: "active", currentPeriodEnd: periodEnd });
+      await h!.db.insert(salonSubscriptions).values({
+        salonId: otherSalonId,
+        planId,
+        status: "trialing",
+        trialEndsAt: new Date(Date.now() - DAY * 1000),
+      });
+
+      const accessA = await getSalonAccess(salonId);
+      expect(accessA.state, "unavailable = brak roli myhelper_app albo GRANT na bazie testowej").not.toBe("unavailable");
+      expect(accessA).toEqual({ state: "active", mode: "full", planSlug: testPlanSlug, until: periodEnd });
+      expect(await getCurrentPlan(salonId)).toEqual({ slug: testPlanSlug, name: "IT T3", status: "active" });
+      expect(await getCurrentPlan()).toEqual({ slug: testPlanSlug, name: "IT T3", status: "active" });
+
+      const accessB = await getSalonAccess(otherSalonId);
+      expect(accessB.state).not.toBe("unavailable");
+      expect(accessB).toEqual({ state: "expired", mode: "read_only", planSlug: null, until: null });
+      expect(await getCurrentPlan(otherSalonId)).toEqual({ slug: "basic", name: "Basic", status: "trial_expired" });
+      expect(logger.error).not.toHaveBeenCalled();
+
+      // Druga tama: pod kontekstem salonu A zapytanie BEZ filtra salonu widzi tylko wiersze A.
+      const visible = await forSalon(salonId).raw((tx) =>
+        tx.select({ salonId: salonSubscriptions.salonId }).from(salonSubscriptions)
+      );
+      expect(visible.length).toBeGreaterThan(0);
+      expect(new Set(visible.map((r) => r.salonId))).toEqual(new Set([salonId]));
+    });
+
+    it("salon bez wiersza subskrypcji → none (odczyt wykonany, nie unavailable)", async () => {
+      expect(await getSalonAccess(salonId)).toEqual({ state: "none", mode: "read_only", planSlug: null, until: null });
+      expect(logger.error).not.toHaveBeenCalled();
     });
   });
 

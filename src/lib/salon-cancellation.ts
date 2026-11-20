@@ -18,10 +18,10 @@
  * zdążył potwierdzić wpłatę, widzimy `depositPaid = true` i zwracamy.
  */
 import { and, eq } from "drizzle-orm";
-import type { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { toErrorIdentity } from "@/lib/safe-error";
 import { appointments, depositPayments } from "@/lib/schema";
+import type { DbTx } from "@/lib/server/repository";
 import { getStripe } from "@/lib/stripe";
 
 /** Wariant SMS i komunikatu (§6): zadatek online, wpłacony poza MyHelper, brak. */
@@ -30,7 +30,7 @@ export type CancellationDepositVariant = "online" | "manual" | "none";
 type AppointmentRow = typeof appointments.$inferSelect;
 
 /** Klient transakcyjny (`forSalon(salonId).raw`) — z kontekstem RLS salonu. */
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type Tx = DbTx;
 
 export type SalonCancelTxResult =
   | { alreadyCancelled: true }
@@ -153,7 +153,7 @@ export async function expireCheckoutSessions(
       logger.warn("[Salon cancel] Checkout session expire failed — webhook will refund a late payment", {
         appointmentId,
         depositPaymentId: payment.id,
-        // Tylko nazwa i kod — komunikat Stripe może nieść dane klienta (Ryan, P2 #98).
+        // Tylko nazwa i kod — komunikat Stripe może nieść dane klienta (P2 #98).
         ...toErrorIdentity(error),
       });
     }
