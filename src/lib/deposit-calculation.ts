@@ -1,7 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { verifiedClientMatchEmail, type SessionUserLike } from "@/lib/client-match";
 import { DEFAULT_DEPOSIT_PERCENTAGE } from "@/lib/constants";
-import { db } from "@/lib/db";
 import { isPromotionTypeFrozen } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import {
@@ -10,6 +9,7 @@ import {
   services,
   serviceVariants,
 } from "@/lib/schema";
+import { forSalon, type DbTx } from "@/lib/server/repository";
 
 /**
  * Server-side deposit amount calculation.
@@ -31,6 +31,18 @@ import {
  *     - else service.depositRequired -> Math.ceil(effectivePrice * pct / 100)
  *
  * Promo eligibility mirrors /api/promotions/check-happy-hours.
+ *
+ * Data access: every read runs in ONE forSalon(salonId) transaction per call
+ * (application role, RLS salon context). salonId must be a UUID — the RLS
+ * policy casts the context to ::uuid. Callers pass a schema-validated UUID
+ * (create-session), a value read from the database (session salon,
+ * waiting-list token) or, in /api/appointments POST, a value assertSalonRefs
+ * has already sent through forSalon (a malformed one fails there first).
+ * Each read keeps an explicit column list and an explicit eq(salonId) where
+ * the table has one; service_variants has no salon_id, so RLS checks it
+ * through its parent service. Database errors propagate (no silent 0) —
+ * callers refuse the booking (503 on the booking routes; a refusal message
+ * when accepting a waiting-list offer).
  */
 
 export type ExpectedDeposit =
@@ -82,15 +94,24 @@ function getWarsawWallClock(date: Date): { dayOfWeek: number; minutes: number } 
  * Happy hours are frozen (`FROZEN_PROMOTION_TYPES`, src/lib/features.ts): the
  * booking portal no longer asks for the discount, so the deposit must be
  * computed from the full price — no database lookup at all.
+ *
+ * Runs on the caller's transaction (`tx`), so the whole calculation stays a
+ * single forSalon transaction. Only the columns the loop reads are selected.
  */
 async function getHappyHoursDiscountPercent(
+  tx: DbTx,
   salonId: string,
   startTime: Date
 ): Promise<number> {
   if (isPromotionTypeFrozen("happy_hours")) return 0;
 
-  const activePromotions = await db
-    .select()
+  const activePromotions = await tx
+    .select({
+      startDate: promotions.startDate,
+      endDate: promotions.endDate,
+      conditionsJson: promotions.conditionsJson,
+      value: promotions.value,
+    })
     .from(promotions)
     .where(
       and(
@@ -155,11 +176,19 @@ export async function calculateExpectedDeposit(params: {
    */
   clientId?: string | null;
 }): Promise<ExpectedDeposit> {
+  return forSalon(params.salonId).raw((tx) => calculateInTransaction(tx, params));
+}
+
+/** The calculation itself; every read goes through the caller's forSalon `tx`. */
+async function calculateInTransaction(
+  tx: DbTx,
+  params: Parameters<typeof calculateExpectedDeposit>[0]
+): Promise<ExpectedDeposit> {
   const { salonId, serviceId, variantId, startTime, sessionUser, clientId } = params;
   const sessionEmail = verifiedClientMatchEmail(sessionUser);
 
   // 1. Service (price + deposit settings)
-  const [service] = await db
+  const [service] = await tx
     .select({
       id: services.id,
       name: services.name,
@@ -178,7 +207,7 @@ export async function calculateExpectedDeposit(params: {
   // 2. Variant price modifier
   let priceModifier = 0;
   if (variantId) {
-    const [variant] = await db
+    const [variant] = await tx
       .select({ id: serviceVariants.id, priceModifier: serviceVariants.priceModifier })
       .from(serviceVariants)
       .where(and(eq(serviceVariants.id, variantId), eq(serviceVariants.serviceId, serviceId)));
@@ -189,7 +218,7 @@ export async function calculateExpectedDeposit(params: {
   const baseEffectivePrice = parseFloat(service.basePrice) + priceModifier;
 
   // 3. Promotions (best single discount, no stacking — same as frontend)
-  const happyHoursPercent = await getHappyHoursDiscountPercent(salonId, startTime);
+  const happyHoursPercent = await getHappyHoursDiscountPercent(tx, salonId, startTime);
 
   // The first-visit promotion is frozen: /api/promotions/check-first-visit
   // answers "not eligible" for everyone, so the booking UI never shows that
@@ -209,7 +238,7 @@ export async function calculateExpectedDeposit(params: {
   let clientDepositValue = 0;
 
   if (clientId || sessionEmail) {
-    const [clientRecord] = await db
+    const [clientRecord] = await tx
       .select({
         requireDeposit: clients.requireDeposit,
         depositType: clients.depositType,

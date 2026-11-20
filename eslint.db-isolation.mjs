@@ -80,7 +80,6 @@ export const P0_FILES = [];
 export const P1_FILES = [
   "src/app/api/deposits/create-session/route.ts",
   "src/app/api/stripe/webhook/route.ts",
-  "src/lib/deposit-calculation.ts",
   "src/lib/deposit-confirmation.ts",
   "src/lib/refund.ts",
   "src/lib/subscription-confirmation.ts",
