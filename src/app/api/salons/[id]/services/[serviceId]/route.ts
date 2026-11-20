@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { eq, and } from "drizzle-orm";
-// ADR-001: ścieżka publiczna (bez sesji salonu) — świadomie surowe db
-import { db } from "@/lib/db";
+import { isValidUuid } from "@/lib/api-validation";
 import { logger } from "@/lib/logger";
 import {
   services,
@@ -11,6 +10,11 @@ import {
   employeeServicePrices,
   serviceCategories,
 } from "@/lib/schema";
+// Publiczny szczegół usługi (bez sesji): wszystkie odczyty w jednej
+// transakcji forSalon(salonId z URL). RLS przy salonId z URL niczego nie
+// chroni (kontekst ustawia wołający) — ochroną są jawne listy kolumn i jawne
+// eq(salonId); tabele bez salon_id filtrujemy po sprawdzonej usłudze.
+import { forSalon } from "@/lib/server/repository";
 
 // GET /api/salons/[id]/services/[serviceId] - Get service details with variants and assigned employees
 export async function GET(
@@ -20,67 +24,111 @@ export async function GET(
   try {
     const { id: salonId, serviceId } = await params;
 
-    // Fetch the service and verify it belongs to the salon
-    const [service] = await db
-      .select()
-      .from(services)
-      .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)));
+    // Format sprawdzany PRZED forSalon: polityka RLS rzutuje kontekst na
+    // ::uuid, a kolumny id są typu uuid — zły format dałby 500 z bazy.
+    if (!isValidUuid(salonId)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid salon id" },
+        { status: 400 }
+      );
+    }
+    if (!isValidUuid(serviceId)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid service id" },
+        { status: 400 }
+      );
+    }
 
-    if (!service) {
+    const result = await forSalon(salonId).raw(async (tx) => {
+      // Fetch the service and verify it belongs to the salon
+      const [service] = await tx
+        .select({
+          id: services.id,
+          name: services.name,
+          description: services.description,
+          basePrice: services.basePrice,
+          baseDuration: services.baseDuration,
+          isActive: services.isActive,
+          salonId: services.salonId,
+          categoryId: services.categoryId,
+        })
+        .from(services)
+        .where(and(eq(services.id, serviceId), eq(services.salonId, salonId)));
+      if (!service) return null;
+
+      // Fetch category info if available
+      let category: { id: string; name: string } | null = null;
+      if (service.categoryId) {
+        const [cat] = await tx
+          .select({ id: serviceCategories.id, name: serviceCategories.name })
+          .from(serviceCategories)
+          .where(
+            and(
+              eq(serviceCategories.id, service.categoryId),
+              eq(serviceCategories.salonId, salonId)
+            )
+          );
+        category = cat || null;
+      }
+
+      // Fetch all variants for this service (service_variants nie ma
+      // salon_id — usługa sprawdzona wyżej jako należąca do salonu)
+      const variants = await tx
+        .select({
+          id: serviceVariants.id,
+          name: serviceVariants.name,
+          priceModifier: serviceVariants.priceModifier,
+          durationModifier: serviceVariants.durationModifier,
+        })
+        .from(serviceVariants)
+        .where(eq(serviceVariants.serviceId, serviceId));
+
+      // Fetch assigned employees with their custom prices
+      const assignments = await tx
+        .select({
+          id: employees.id,
+          firstName: employees.firstName,
+          lastName: employees.lastName,
+          role: employees.role,
+          color: employees.color,
+          photoUrl: employees.photoUrl,
+        })
+        .from(employeeServices)
+        .innerJoin(employees, eq(employeeServices.employeeId, employees.id))
+        .where(
+          and(
+            eq(employeeServices.serviceId, serviceId),
+            eq(employees.salonId, salonId),
+            eq(employees.isActive, true)
+          )
+        );
+
+      // Fetch custom prices for assigned employees
+      let customPrices: { employeeId: string; customPrice: string }[] = [];
+      if (assignments.length > 0) {
+        customPrices = await tx
+          .select({
+            employeeId: employeeServicePrices.employeeId,
+            customPrice: employeeServicePrices.customPrice,
+          })
+          .from(employeeServicePrices)
+          .where(eq(employeeServicePrices.serviceId, serviceId));
+      }
+
+      return { service, category, variants, assignments, customPrices };
+    });
+
+    if (!result) {
       return NextResponse.json(
         { success: false, error: "Service not found" },
         { status: 404 }
       );
     }
 
-    // Fetch category info if available
-    let category = null;
-    if (service.categoryId) {
-      const [cat] = await db
-        .select()
-        .from(serviceCategories)
-        .where(eq(serviceCategories.id, service.categoryId));
-      category = cat || null;
-    }
-
-    // Fetch all variants for this service
-    const variants = await db
-      .select()
-      .from(serviceVariants)
-      .where(eq(serviceVariants.serviceId, serviceId));
-
-    // Fetch assigned employees with their custom prices
-    const assignments = await db
-      .select({
-        assignment: employeeServices,
-        employee: employees,
-      })
-      .from(employeeServices)
-      .innerJoin(employees, eq(employeeServices.employeeId, employees.id))
-      .where(
-        and(
-          eq(employeeServices.serviceId, serviceId),
-          eq(employees.isActive, true)
-        )
-      );
-
-    // Fetch custom prices for assigned employees
-    const assignedEmployeeIds = assignments.map((a) => a.employee.id);
-    let customPrices: { employeeId: string; customPrice: string }[] = [];
-    if (assignedEmployeeIds.length > 0) {
-      const priceRows = await db
-        .select()
-        .from(employeeServicePrices)
-        .where(eq(employeeServicePrices.serviceId, serviceId));
-      customPrices = priceRows.map((p) => ({
-        employeeId: p.employeeId,
-        customPrice: p.customPrice,
-      }));
-    }
+    const { service, category, variants, assignments, customPrices } = result;
 
     // Build employee list with optional custom prices
-    const employeeList = assignments.map((row) => {
-      const emp = row.employee;
+    const employeeList = assignments.map((emp) => {
       const priceEntry = customPrices.find((p) => p.employeeId === emp.id);
       return {
         id: emp.id,

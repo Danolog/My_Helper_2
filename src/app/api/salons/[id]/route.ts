@@ -1,26 +1,31 @@
 import { unstable_cache } from "next/cache";
 import { NextResponse } from "next/server";
 import { eq, and, avg, asc, inArray, count, sql } from "drizzle-orm";
-import { validateBody, updateSalonSchema } from "@/lib/api-validation";
+import { validateBody, updateSalonSchema, isValidUuid } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001: GET to ścieżka publiczna (katalog salonu przez unstable_cache, bez sesji
-// salonu — ryzyko 4.4 ADR), a lookup własności w PUT musi widzieć także cudzy salon
-// (404 vs 403) — te fragmenty świadomie na surowym db. UPDATE w PUT idzie przez forSalon.
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { salons, services, employees, reviews, serviceCategories, serviceVariants, employeeServices, galleryPhotos } from "@/lib/schema";
+// GET (katalog, bez sesji) i PUT czytają przez forSalon(id z URL). Polityka RLS
+// `salons` przepuszcza wiersz o id = kontekst, więc salon jest widoczny
+// niezależnie od właściciela: PUT nadal rozróżnia 404 i 403. W katalogu RLS przy
+// id z URL niczego nie chroni (kontekst ustawia wołający) — ochroną są jawne
+// listy kolumn i jawne eq(salonId).
 import { forSalon } from "@/lib/server/repository";
 
 
 // Revalidate salon detail every 30 seconds
 export const revalidate = 30;
 
+const INVALID_SALON_ID_BODY = { success: false, error: "Invalid salon id" } as const;
+
 /**
- * Cached salon detail query — avoids re-running 7+ DB queries on every request.
- * Cache is keyed by salonId and revalidated every 30s or on-demand via tag.
+ * Odczyt katalogu salonu wołany przy chybieniu cache. Wszystkie zapytania w
+ * jednej transakcji forSalon(id); transakcja zaczyna się i kończy tutaj, do
+ * cache trafia wyłącznie zwrócone DTO. Bez try/catch: błąd bazy przechodzi
+ * wyżej i nie jest zapisywany w cache.
  */
-const getCachedSalonDetail = unstable_cache(
-  async (id: string) => {
+async function loadSalonDetail(id: string) {
+  return forSalon(id).raw(async (tx) => {
     // Trasa PUBLICZNA (katalog) — WYŁĄCZNIE pola publiczne. Bez `settingsJson`
     // (konfig fiskalny/drukarka/loyalty) i `ownerId` — wyciek w nieautoryzowanej odpowiedzi.
     const salonColumns = {
@@ -34,7 +39,7 @@ const getCachedSalonDetail = unstable_cache(
       updatedAt: salons.updatedAt,
     };
 
-    const [salon] = await db.select(salonColumns).from(salons).where(eq(salons.id, id));
+    const [salon] = await tx.select(salonColumns).from(salons).where(eq(salons.id, id));
     if (!salon) return null;
 
     // Get active services
@@ -52,13 +57,13 @@ const getCachedSalonDetail = unstable_cache(
       isActive: services.isActive,
     };
 
-    const salonServices = await db
+    const salonServices = await tx
       .select(serviceColumns)
       .from(services)
       .where(and(eq(services.salonId, id), eq(services.isActive, true)));
 
     // Get service categories
-    const categories = await db
+    const categories = await tx
       .select({
         id: serviceCategories.id,
         salonId: serviceCategories.salonId,
@@ -69,11 +74,12 @@ const getCachedSalonDetail = unstable_cache(
       .where(eq(serviceCategories.salonId, id))
       .orderBy(asc(serviceCategories.sortOrder));
 
-    // Get variants for all active services
+    // Get variants for all active services (service_variants nie ma salon_id —
+    // filtr po usługach przeczytanych wyżej z eq(salonId))
     const serviceIds = salonServices.map((s) => s.id);
     let variants: { id: string; serviceId: string; name: string; priceModifier: string | null; durationModifier: number | null }[] = [];
     if (serviceIds.length > 0) {
-      variants = await db
+      variants = await tx
         .select({
           id: serviceVariants.id,
           serviceId: serviceVariants.serviceId,
@@ -93,7 +99,7 @@ const getCachedSalonDetail = unstable_cache(
     }));
 
     // Get active employees
-    const salonEmployees = await db
+    const salonEmployees = await tx
       .select({
         id: employees.id,
         firstName: employees.firstName,
@@ -110,14 +116,19 @@ const getCachedSalonDetail = unstable_cache(
     // Get specialties
     const employeeServiceMap: Record<string, string[]> = {};
     if (employeeIds.length > 0) {
-      const empServices = await db
+      const empServices = await tx
         .select({
           employeeId: employeeServices.employeeId,
           serviceName: services.name,
         })
         .from(employeeServices)
         .innerJoin(services, eq(employeeServices.serviceId, services.id))
-        .where(inArray(employeeServices.employeeId, employeeIds));
+        .where(
+          and(
+            inArray(employeeServices.employeeId, employeeIds),
+            eq(services.salonId, id)
+          )
+        );
 
       for (const es of empServices) {
         if (!employeeServiceMap[es.employeeId]) {
@@ -130,7 +141,7 @@ const getCachedSalonDetail = unstable_cache(
     // Get employee ratings
     const employeeRatingMap: Record<string, { avgRating: number; reviewCount: number }> = {};
     if (employeeIds.length > 0) {
-      const empRatings = await db
+      const empRatings = await tx
         .select({
           employeeId: reviews.employeeId,
           avgRating: avg(reviews.rating),
@@ -140,6 +151,7 @@ const getCachedSalonDetail = unstable_cache(
         .where(
           and(
             inArray(reviews.employeeId, employeeIds),
+            eq(reviews.salonId, id),
             eq(reviews.status, "approved")
           )
         )
@@ -158,7 +170,7 @@ const getCachedSalonDetail = unstable_cache(
     // Get gallery photo counts per employee
     const employeeGalleryCountMap: Record<string, number> = {};
     if (employeeIds.length > 0) {
-      const galleryCounts = await db
+      const galleryCounts = await tx
         .select({
           employeeId: galleryPhotos.employeeId,
           photoCount: count(galleryPhotos.id),
@@ -195,7 +207,7 @@ const getCachedSalonDetail = unstable_cache(
     }));
 
     // Get average rating
-    const [ratingResult] = await db
+    const [ratingResult] = await tx
       .select({ avgRating: avg(reviews.rating) })
       .from(reviews)
       .where(and(eq(reviews.salonId, id), eq(reviews.status, "approved")));
@@ -209,7 +221,16 @@ const getCachedSalonDetail = unstable_cache(
         ? parseFloat(String(ratingResult.avgRating))
         : null,
     };
-  },
+  });
+}
+
+/**
+ * Cached salon detail query — avoids re-running 7+ DB queries on every request.
+ * `id` jest ARGUMENTEM funkcji opakowanej, więc wchodzi do klucza cache — dwa
+ * salony nigdy nie dzielą wpisu. Odświeżany co 30 s; tag "salon-detail" jest ustawiony, ale dziś żaden zapis go nie unieważnia (PUT też nie).
+ */
+const getCachedSalonDetail = unstable_cache(
+  (id: string) => loadSalonDetail(id),
   ["salon-detail"],
   { revalidate: 30, tags: ["salon-detail"] }
 );
@@ -221,6 +242,11 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    // Format sprawdzany PRZED forSalon: polityka RLS rzutuje kontekst na
+    // ::uuid — zły format dałby 500 z bazy zamiast 400.
+    if (!isValidUuid(id)) {
+      return NextResponse.json(INVALID_SALON_ID_BODY, { status: 400 });
+    }
     const data = await getCachedSalonDetail(id);
 
     if (!data) {
@@ -259,12 +285,18 @@ export async function PUT(
 
   try {
     const { id } = await params;
+    if (!isValidUuid(id)) {
+      return NextResponse.json(INVALID_SALON_ID_BODY, { status: 400 });
+    }
 
-    // Verify ownership
-    const [salon] = await db
-      .select({ id: salons.id, ownerId: salons.ownerId })
-      .from(salons)
-      .where(eq(salons.id, id));
+    // Verify ownership. RLS `salons` po id = kontekst widzi salon niezależnie
+    // od właściciela, więc brak wiersza = 404, cudzy właściciel = 403.
+    const [salon] = await forSalon(id).raw((tx) =>
+      tx
+        .select({ id: salons.id, ownerId: salons.ownerId })
+        .from(salons)
+        .where(eq(salons.id, id))
+    );
 
     if (!salon) {
       return NextResponse.json(
