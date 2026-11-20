@@ -8,7 +8,13 @@
  * przechwytywane i renderowane dialektem Postgresa: tak sprawdzamy jawne
  * `eq(salonId)` salonu z sesji w każdym zapytaniu.
  *
- * Kolejność wyników txRows w jednej transakcji: [wizyta], [płatności], [update].
+ * Kolejność wyników txRows w jednej transakcji: [wizyta], [płatności], [update], [insert].
+ *
+ * Wpis dziennika zmian zadatku: prawdziwy `recordDepositStatusEvent` na atrapie
+ * `tx` (wartości INSERT w `m.insertedValues`), opakowany w `h.record`, żeby
+ * wstrzyknąć błąd wpisu. Kolejność „UPDATE przed wpisem” sprawdzamy przez
+ * `invocationCallOrder` szpiega `h.setSpy` (wołanego w `tx.update().set`)
+ * względem `h.record`.
  */
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -27,6 +33,16 @@ const h = await vi.hoisted(async () => {
   /** Czy odczyt wizyty blokował wiersz (`for update`). */
   const forUpdate: string[] = [];
   const state = { failDb: false, transactions: 0 };
+  /** Obiekt `tx`, który dostał callback każdej transakcji. */
+  const txObjects: unknown[] = [];
+  /** Szpieg `tx.update().set(...)` — do kolejności względem wpisu dziennika. */
+  const setSpy = vi.fn();
+  /** Wołany, gdy obietnica transakcji się rozstrzygnie — wpis musi paść przed nim. */
+  const txEnd = vi.fn();
+  const events = await vi.importActual<typeof import("@/lib/deposit-status-events")>(
+    "@/lib/deposit-status-events"
+  );
+  const record = vi.fn<typeof events.recordDepositStatusEvent>();
 
   type Tx = Parameters<Parameters<typeof m.db.transaction>[0]>[0];
   type Chain = Record<string, (...args: unknown[]) => unknown>;
@@ -34,8 +50,8 @@ const h = await vi.hoisted(async () => {
     transaction: (fn: (tx: Tx) => unknown) => {
       state.transactions += 1;
       if (state.failDb) return Promise.reject(new Error("connection refused params: Anna,+48500600700"));
-      return m.db.transaction((tx) =>
-        fn({
+      return Promise.resolve(m.db.transaction((tx) => {
+        const wrapped = {
           ...tx,
           select: (columns?: Record<string, unknown>) => {
             selectColumns.push(columns);
@@ -54,19 +70,31 @@ const h = await vi.hoisted(async () => {
             const chain = tx.update() as Chain;
             chain.set = (v: unknown) => {
               setArgs.push(v as Record<string, unknown>);
+              setSpy(v);
               return chain;
             };
             return chain;
           },
-        })
-      );
+        };
+        txObjects.push(wrapped);
+        return fn(wrapped);
+      })).finally(() => txEnd());
     },
   };
 
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-  return { m, selectWheres, selectColumns, setArgs, forUpdate, state, db, logger };
+  return {
+    m, selectWheres, selectColumns, setArgs, forUpdate, state, db, logger,
+    txObjects, setSpy, txEnd, record,
+    actualRecord: events.recordDepositStatusEvent,
+    DepositStatusEventError: events.DepositStatusEventError,
+  };
 });
 
+vi.mock("@/lib/deposit-status-events", async (orig) => {
+  const actual = await orig<typeof import("@/lib/deposit-status-events")>();
+  return { ...actual, recordDepositStatusEvent: h.record };
+});
 vi.mock("next/headers", () => ({ headers: vi.fn().mockResolvedValue(new Headers()) }));
 vi.mock("@/lib/auth", () => ({ auth: { api: { getSession: h.m.getSession } } }));
 vi.mock("@/lib/db", () => ({ db: h.db }));
@@ -121,9 +149,26 @@ beforeEach(() => {
   h.forUpdate.length = 0;
   h.state.failDb = false;
   h.state.transactions = 0;
+  h.txObjects.length = 0;
   vi.clearAllMocks();
   m.hasTemporaryAccess.mockResolvedValue(false);
+  h.record.mockReset();
+  h.record.mockImplementation(h.actualRecord);
 });
+
+/** Wpis dziennika, jaki prawdziwy pomocnik przekazuje do INSERT. */
+function event(over: Record<string, unknown> = {}) {
+  return {
+    salonId: SALON_A,
+    appointmentId: APPT_ID,
+    depositPaid: true,
+    previousDepositPaid: false,
+    source: "manual_mark",
+    actorUserId: "owner-a",
+    actorRole: "owner",
+    ...over,
+  };
+}
 
 describe("200: oznaczenie i cofnięcie", () => {
   it("POST owner → depositPaid=true, changed=true, jeden UPDATE w jednej transakcji salonu z sesji", async () => {
@@ -139,6 +184,7 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect(h.setArgs[0]!.depositPaid).toBe(true);
     expect(h.state.transactions).toBe(1);
     expect(new Set(m.rlsSalonIds())).toEqual(new Set([SALON_A]));
+    expect(m.insertedValues).toEqual([event()]);
   });
 
   it("POST receptionist → 200, changed=true", async () => {
@@ -150,6 +196,7 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect(res.status).toBe(200);
     expect((await res.json()).data).toEqual({ appointmentId: APPT_ID, depositPaid: true, changed: true });
     expect(h.setArgs[0]!.depositPaid).toBe(true);
+    expect(m.insertedValues).toEqual([event({ actorUserId: "staff-a", actorRole: "receptionist" })]);
   });
 
   it("DELETE owner → depositPaid=false, changed=true", async () => {
@@ -162,6 +209,38 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect((await res.json()).data).toEqual({ appointmentId: APPT_ID, depositPaid: false, changed: true });
     expect(h.setArgs).toHaveLength(1);
     expect(h.setArgs[0]!.depositPaid).toBe(false);
+    expect(m.insertedValues).toEqual([
+      event({ source: "manual_unmark", previousDepositPaid: true, depositPaid: false }),
+    ]);
+  });
+
+  it("DELETE receptionist → wpis manual_unmark z rolą recepcji", async () => {
+    m.asStaffOf(SALON_A, "receptionist");
+    givenAppointment(appt({ depositPaid: true }));
+
+    const res = await call(DELETE);
+
+    expect(res.status).toBe(200);
+    expect(m.insertedValues).toEqual([
+      event({
+        source: "manual_unmark",
+        previousDepositPaid: true,
+        depositPaid: false,
+        actorUserId: "staff-a",
+        actorRole: "receptionist",
+      }),
+    ]);
+  });
+
+  it("POST przy depositPaid=null (stary wiersz) → wpis z previousDepositPaid=false", async () => {
+    m.asOwnerOf(SALON_A);
+    givenAppointment(appt({ depositPaid: null }));
+
+    const res = await call(POST);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.changed).toBe(true);
+    expect(m.insertedValues).toEqual([event({ previousDepositPaid: false })]);
   });
 
   it("status confirmed też można oznaczyć", async () => {
@@ -181,6 +260,8 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect((await res.json()).data).toEqual({ appointmentId: APPT_ID, depositPaid: true, changed: false });
     expect(updates()).toEqual([]);
     expect(h.setArgs).toEqual([]);
+    expect(m.insertedValues).toEqual([]);
+    expect(h.record).not.toHaveBeenCalled();
   });
 
   it.each([false, null])("idempotencja: drugi DELETE (depositPaid=%s) → 200, changed=false, bez UPDATE", async (paid) => {
@@ -192,6 +273,8 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect(res.status).toBe(200);
     expect((await res.json()).data).toEqual({ appointmentId: APPT_ID, depositPaid: false, changed: false });
     expect(updates()).toEqual([]);
+    expect(m.insertedValues).toEqual([]);
+    expect(h.record).not.toHaveBeenCalled();
   });
 });
 
@@ -242,6 +325,7 @@ describe("400", () => {
     const res = await call(POST, id);
     expect(res.status).toBe(400);
     expect(h.state.transactions).toBe(0);
+    expect(m.insertedValues).toEqual([]);
   });
 
   it.each([null, "0", "0.00", "-10.00"])("wizyta bez zadatku (depositAmount=%j) → 400, bez UPDATE", async (amount) => {
@@ -253,6 +337,7 @@ describe("400", () => {
     expect(res.status).toBe(400);
     expect((await res.json()).success).toBe(false);
     expect(updates()).toEqual([]);
+    expect(m.insertedValues).toEqual([]);
   });
 
   it.each(["cancelled", "completed", "no_show"])("wizyta %s → 400, bez UPDATE (POST i DELETE)", async (status) => {
@@ -265,6 +350,7 @@ describe("400", () => {
     expect((await call(DELETE)).status).toBe(400);
 
     expect(updates()).toEqual([]);
+    expect(m.insertedValues).toEqual([]);
   });
 });
 
@@ -276,6 +362,7 @@ describe("401 / 403 / 404", () => {
     m.getSession.mockResolvedValue(null);
     expect((await call(handler)).status).toBe(401);
     expect(h.state.transactions).toBe(0);
+    expect(m.insertedValues).toEqual([]);
   });
 
   it.each([
@@ -287,6 +374,8 @@ describe("401 / 403 / 404", () => {
     expect((await call(handler)).status).toBe(403);
     expect(h.state.transactions).toBe(0);
     expect(updates()).toEqual([]);
+    expect(m.insertedValues).toEqual([]);
+    expect(h.record).not.toHaveBeenCalled();
   });
 
   it("403 employee także z grantem temporary_access", async () => {
@@ -313,6 +402,7 @@ describe("401 / 403 / 404", () => {
     expect(h.selectWheres).toHaveLength(1);
     expect(rendered(h.selectWheres[0]).params).toEqual([APPT_ID, SALON_A]);
     expect(updates()).toEqual([]);
+    expect(m.insertedValues).toEqual([]);
   });
 });
 
@@ -333,6 +423,7 @@ describe("409 DEPOSIT_ONLINE_PAYMENT", () => {
         error: "Zadatek tej wizyty obsługuje płatność online",
       });
       expect(updates()).toEqual([]);
+      expect(m.insertedValues).toEqual([]);
     }
   );
 
@@ -341,6 +432,7 @@ describe("409 DEPOSIT_ONLINE_PAYMENT", () => {
     m.txRows.push([appt({ depositPaid: true })], [{ id: "pay-1" }]);
     expect((await call(DELETE)).status).toBe(409);
     expect(updates()).toEqual([]);
+    expect(m.insertedValues).toEqual([]);
   });
 });
 
@@ -358,6 +450,50 @@ describe("500 i logi", () => {
     expect(meta).toEqual({ salonId: SALON_A, appointmentId: APPT_ID, errorName: "Error" });
     expect(loggedText()).not.toContain("connection refused");
     expect(loggedText()).not.toContain(GUEST_PHONE);
+  });
+
+  it("błąd wpisu dziennika → 500, wpis wołany raz po UPDATE w tym samym tx (rzut cofa transakcję)", async () => {
+    m.asOwnerOf(SALON_A);
+    givenAppointment();
+    h.record.mockRejectedValueOnce(new Error("insert failed params: +48500600700"));
+
+    const res = await call(POST);
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ success: false, error: "Nie udalo sie zmienic stanu zadatku" });
+    expect(h.state.transactions).toBe(1);
+    expect(h.record).toHaveBeenCalledTimes(1);
+    expect(h.record.mock.calls[0]![0]).toBe(h.txObjects[0]);
+    expect(h.setSpy).toHaveBeenCalledTimes(1);
+    expect(h.setSpy.mock.invocationCallOrder[0]!).toBeLessThan(h.record.mock.invocationCallOrder[0]!);
+    // Wpis wewnątrz callbacku transakcji, nie po jej zakończeniu.
+    expect(h.txEnd).toHaveBeenCalledTimes(1);
+    expect(h.record.mock.invocationCallOrder[0]!).toBeLessThan(h.txEnd.mock.invocationCallOrder[0]!);
+    expect(h.logger.info).not.toHaveBeenCalled();
+    expect(h.logger.error).toHaveBeenCalledTimes(1);
+    const [, meta] = h.logger.error.mock.calls[0]!;
+    expect(meta).toEqual({ salonId: SALON_A, appointmentId: APPT_ID, errorName: "Error" });
+    expect(loggedText()).not.toContain(GUEST_PHONE);
+  });
+
+  it("DepositStatusEventError z pomocnika → 500, errorName DepositStatusEventError", async () => {
+    m.asOwnerOf(SALON_A);
+    givenAppointment();
+    h.record.mockRejectedValueOnce(new h.DepositStatusEventError("actor"));
+
+    const res = await call(POST);
+
+    expect(res.status).toBe(500);
+    expect((await res.json()).success).toBe(false);
+    expect(h.logger.info).not.toHaveBeenCalled();
+    const [, meta] = h.logger.error.mock.calls[0]!;
+    // toErrorIdentity dokłada własny `code` błędu (stały kod reguły, bez wartości).
+    expect(meta).toEqual({
+      salonId: SALON_A,
+      appointmentId: APPT_ID,
+      errorName: "DepositStatusEventError",
+      errorCode: "actor",
+    });
   });
 
   it("log info: salonId, appointmentId, userId, rola, nowy stan i changed — nic więcej", async () => {

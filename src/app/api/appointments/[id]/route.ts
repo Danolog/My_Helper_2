@@ -14,6 +14,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // Pod RLS (rola myhelper_app) te zapytania wymagaja wlasnego kontekstu salonu;
 // sciezka pozytywna DELETE z zadatkiem nie jest pokryta testem R1 (zob. raport).
 import { db } from "@/lib/db";
+import { recordDepositStatusEvent, type DepositStatusEventActor } from "@/lib/deposit-status-events";
 import { logger } from "@/lib/logger";
 import { refundAppointmentDeposits, type AppointmentDepositsRefund } from "@/lib/refund";
 import {
@@ -159,12 +160,16 @@ export async function PUT(
     // Zaden ekran panelu nie wysyla tych pol w PUT. Pracownik/recepcja,
     // ktorzy "oplacali" zadatek recznie, wlaczali tez sciezke zwrotu przy
     // anulacji (DELETE) — dlatego 403, nie ciche pominiecie.
+    // Zmiana `depositPaid` zapisuje wpis dziennika `owner_edit` w transakcji zapisu.
     if ((depositAmount !== undefined || depositPaid !== undefined) && ctx.role !== "owner") {
       return NextResponse.json(
         { success: false, error: "Tylko wlasciciel salonu moze zmieniac zadatek" },
         { status: 403 }
       );
     }
+    // Zmiana `depositPaid` w PUT jest tylko wlasciciela (403 wyzej).
+    const ownerActor: DepositStatusEventActor | null =
+      ctx.role === "owner" ? { userId: ctx.userId, role: "owner" } : null;
 
     // Check if appointment exists in the caller's salon — cudza/nieistniejaca
     // wizyta = 404 (scoped findOne, kontekst RLS ustawiony).
@@ -267,11 +272,38 @@ export async function PUT(
       // trafiają do logów (hotfix P1, dane osobowe w logach).
       logger.info(`[Appointments API] Updating appointment ${id}`, { fields: Object.keys(updateData) });
 
+      // Odczyt `existing` sprzed transakcji nie decyduje o wpisie: wartość z blokadą wiersza.
+      const [locked] = depositPaid !== undefined
+        ? await tx
+            .select({ depositPaid: appointments.depositPaid })
+            .from(appointments)
+            .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
+            .limit(1)
+            .for("update")
+        : [];
+
       const [updatedAppointment] = await tx
         .update(appointments)
         .set(updateData)
         .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
         .returning();
+
+      if (
+        depositPaid !== undefined &&
+        ownerActor &&
+        locked &&
+        updatedAppointment &&
+        (locked.depositPaid === true) !== depositPaid
+      ) {
+        await recordDepositStatusEvent(tx, {
+          salonId,
+          appointmentId: id,
+          previousDepositPaid: locked.depositPaid,
+          depositPaid,
+          source: "owner_edit",
+          actor: ownerActor,
+        });
+      }
 
       return { conflicting: null, blocked: null, updated: updatedAppointment };
     });
