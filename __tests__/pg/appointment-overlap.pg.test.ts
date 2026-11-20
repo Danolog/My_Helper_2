@@ -30,6 +30,9 @@ import { POST as bookPackage } from "@/app/api/appointments/book-package/route";
 import { POST as createAppointment } from "@/app/api/appointments/route";
 import { GET as getAvailableSlots } from "@/app/api/available-slots/route";
 import { POST as createDepositSession } from "@/app/api/deposits/create-session/route";
+import { GET as getSalonEmployee } from "@/app/api/salons/[id]/employees/[employeeId]/route";
+import { GET as getSalon } from "@/app/api/salons/[id]/route";
+import { GET as getSalonService } from "@/app/api/salons/[id]/services/[serviceId]/route";
 import { APPOINTMENT_NO_OVERLAP_CONSTRAINT, dbErrorCode, isAppointmentSlotTaken } from "@/lib/appointment-overlap";
 import {
   appointments,
@@ -84,6 +87,13 @@ vi.mock("@/lib/rate-limit", () => {
   return { strictRateLimit: limiter, apiRateLimit: limiter, getClientIp: () => "127.0.0.1" };
 });
 vi.mock("@/lib/sms", () => ({ sendBookingConfirmationSms: vi.fn().mockResolvedValue(undefined) }));
+// Katalog salonu (GET /api/salons/[id]) używa unstable_cache, który poza
+// serwerem Next rzuca „incrementalCache missing”. Tu bez cache: każde wywołanie
+// czyta prawdziwą bazę (cache ma osobny test jednostkowy).
+vi.mock("next/cache", async (orig) => ({
+  ...(await orig<typeof import("next/cache")>()),
+  unstable_cache: <T extends (...args: never[]) => unknown>(fn: T) => fn,
+}));
 vi.mock("@/lib/logger", () => ({
   logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
@@ -785,6 +795,98 @@ suite("kolizja wizyt (#165, #171), prawdziwy Postgres", () => {
       expect(times).toContain("11:00");
       expect(times).not.toContain("10:00"); // wizyta 10–11 widoczna w kontekście salonu A
       expect(times).not.toContain("10:30");
+    });
+  });
+
+  // Publiczny katalog salonu pod forSalon(id z URL) (rola aplikacji, RLS
+  // salonu): pracownik i usługa salonu A nie są widoczne pod adresem salonu B.
+  describe("publiczny katalog salonu: GET salons/[id], usługa, pracownik (rola aplikacji)", () => {
+    // Własny właściciel salonu B: salons_owner_id_uq = jeden salon na użytkownika.
+    // Prefiks it-t3- zostaje (sprzątanie w pg-harness.ts).
+    const OWNER_CATALOG_ID = `it-t3-ovl-cat-${RUN}`;
+    let salonBId = "";
+    let serviceBId = "";
+
+    beforeAll(async () => {
+      const db = h!.db;
+      await db.insert(user).values({
+        id: OWNER_CATALOG_ID,
+        name: "IT T3 ovl cat",
+        email: `${OWNER_CATALOG_ID}@example.invalid`,
+      });
+      const [salonB] = await db
+        .insert(salons)
+        .values({ name: `IT T3 ovl B ${RUN}`, ownerId: OWNER_CATALOG_ID })
+        .returning();
+      salonBId = salonB!.id;
+      const [svcB] = await db
+        .insert(services)
+        .values({ salonId: salonBId, name: "IT Usługa B", basePrice: "10.00", baseDuration: 15 })
+        .returning();
+      serviceBId = svcB!.id;
+    });
+
+    afterAll(async () => {
+      if (!h) return;
+      // Najpierw salon (kaskada usług), potem jego właściciel.
+      if (salonBId) await h.db.delete(salons).where(eq(salons.id, salonBId));
+      await h.db.delete(user).where(eq(user.id, OWNER_CATALOG_ID));
+    });
+
+    const getJson = async (res: Response) => ({ status: res.status, body: (await res.json()) as Record<string, unknown> });
+    const employee = (sid: string, eid: string) =>
+      getSalonEmployee(new Request(`http://localhost/api/salons/${sid}/employees/${eid}`), {
+        params: Promise.resolve({ id: sid, employeeId: eid }),
+      }).then(getJson);
+    const service = (sid: string, svc: string) =>
+      getSalonService(new Request(`http://localhost/api/salons/${sid}/services/${svc}`), {
+        params: Promise.resolve({ id: sid, serviceId: svc }),
+      }).then(getJson);
+    const salon = (sid: string) =>
+      getSalon(new Request(`http://localhost/api/salons/${sid}`), { params: Promise.resolve({ id: sid }) }).then(getJson);
+
+    it("pracownik A pod salonem A → 200 (bez phone i email); pod salonem B → 404 jak nieistniejący", async () => {
+      const own = await employee(salonId, employeeId);
+      expect(own.status, JSON.stringify(own.body)).toBe(200);
+      const data = own.body.data as Record<string, unknown>;
+      expect(data.id).toBe(employeeId);
+      expect(data.salon).toEqual({ id: salonId, name: `IT T3 ovl ${RUN}` });
+      expect(data).not.toHaveProperty("phone");
+      expect(data).not.toHaveProperty("email");
+
+      const foreign = await employee(salonBId, employeeId);
+      const missing = await employee(salonBId, randomUUID());
+      expect(foreign.status).toBe(404);
+      expect(foreign.body).toEqual(missing.body);
+    });
+
+    it("usługa A pod salonem A → 200; pod salonem B → 404", async () => {
+      const own = await service(salonId, serviceId);
+      expect(own.status, JSON.stringify(own.body)).toBe(200);
+      expect((own.body.data as { id: string }).id).toBe(serviceId);
+      expect((await service(salonBId, serviceId)).status).toBe(404);
+    });
+
+    it("GET salons/{A} → 200 z usługami A, bez usługi B; bez settingsJson i ownerId", async () => {
+      const res = await salon(salonId);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      const data = res.body.data as { id: string; services: { id: string }[]; employees: { id: string }[] };
+      expect(data.id).toBe(salonId);
+      expect(data.services.map((s) => s.id).sort()).toEqual([serviceId, service2Id].sort());
+      expect(data.services.map((s) => s.id)).not.toContain(serviceBId);
+      expect(data.employees.map((e) => e.id).sort()).toEqual([employeeId, employee2Id].sort());
+      expect(data).not.toHaveProperty("settingsJson");
+      expect(data).not.toHaveProperty("ownerId");
+
+      const b = await salon(salonBId);
+      expect(b.status).toBe(200);
+      expect((b.body.data as { services: { id: string }[] }).services.map((s) => s.id)).toEqual([serviceBId]);
+    });
+
+    it("zły format id → 400 (nie 500 z rzutowania ::uuid)", async () => {
+      expect((await salon("not-a-uuid")).status).toBe(400);
+      expect((await employee(salonId, "not-a-uuid")).status).toBe(400);
+      expect((await service("not-a-uuid", serviceId)).status).toBe(400);
     });
   });
 });
