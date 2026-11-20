@@ -28,13 +28,17 @@ const h = vi.hoisted(() => ({
   sms: vi.fn(),
 }));
 
-vi.mock("@/lib/db", () => ({
-  db: {
+// #193: POST czyta i zapisuje przez forSalon(salonId).raw(tx => …).
+vi.mock("@/lib/server/repository", () => {
+  const tx = {
     select: (...a: unknown[]) => h.select(...a),
     insert: (...a: unknown[]) => h.insert(...a),
     update: (...a: unknown[]) => h.update(...a),
-  },
-}));
+  };
+  return {
+    forSalon: (salonId: string) => ({ salonId, raw: (fn: (t: typeof tx) => unknown) => fn(tx) }),
+  };
+});
 vi.mock("@/lib/session", () => ({ getOptionalSession: (...a: unknown[]) => h.session(...a) }));
 vi.mock("@/lib/rate-limit", () => {
   const ok = { check: () => ({ success: true, remaining: 10, reset: 60000 }) };

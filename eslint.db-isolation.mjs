@@ -78,7 +78,6 @@ export const P0_FILES = [];
 
 /** P1a/b/c: płatności (zadatki, subskrypcje, webhook Stripe). */
 export const P1_FILES = [
-  "src/app/api/appointments/route.ts",
   "src/app/api/deposits/create-session/route.ts",
   "src/app/api/stripe/webhook/route.ts",
   "src/app/api/subscriptions/cancel/route.ts",

@@ -53,6 +53,13 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+// #193: prawdziwa warstwa repo (na atrapie db wyżej) z podglądem wywołań
+// forSalon — test sprawdza, z jakim salonem POST otwiera kontekst RLS.
+vi.mock("@/lib/server/repository", async (orig) => {
+  const actual = await orig<typeof import("@/lib/server/repository")>();
+  return { ...actual, forSalon: vi.fn(actual.forSalon) };
+});
+
 // Mock the auth module (used via getOptionalSession in POST)
 vi.mock("@/lib/auth", () => ({
   auth: {
@@ -276,6 +283,7 @@ import { GET as listAppointments, POST as createAppointment } from "@/app/api/ap
 // flip the resolved salon (simulate "the caller has no salon" / wrong tenant).
 import { getSalonContext } from "@/lib/salon-context";
 import { salonCancelToast } from "@/components/appointments/cancel-appointment-texts";
+import { forSalon } from "@/lib/server/repository";
 const mockGetSalonContext = vi.mocked(getSalonContext);
 
 // Konteksty ról (Faza 3) — owner odtwarza dawne zachowanie getUserSalonId.
@@ -2648,10 +2656,12 @@ describe("POST /api/appointments — kolizja półotwarta (#165)", () => {
     expect(status).toBe(201);
   });
 
+  // salonId w blokadzie = salon pracownika z joinu employees (#193).
   it("blokada czasu na styku (11–12 po wizycie 10–11) nie koliduje → 201", async () => {
     const block = {
       id: "block-165",
       employeeId: TEST_IDS.EMPLOYEE_UUID,
+      salonId: TEST_IDS.SALON_UUID,
       blockType: "break",
       reason: null,
       startTime: new Date(at165("11:00")),
@@ -2665,6 +2675,7 @@ describe("POST /api/appointments — kolizja półotwarta (#165)", () => {
     const block = {
       id: "block-165",
       employeeId: TEST_IDS.EMPLOYEE_UUID,
+      salonId: TEST_IDS.SALON_UUID,
       blockType: "break",
       reason: null,
       startTime: new Date(at165("10:59")),
@@ -3001,5 +3012,187 @@ describe("PUT /api/appointments/[id] — wyścig odrzucony przez bazę (#171)", 
     expect(status).toBe(500);
     expect(spy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ code }));
     spy.mockRestore();
+  });
+});
+
+// -------------------------------------------------------
+// #193: publiczny POST przez forSalon(salonId z żądania), jawne listy kolumn.
+// -------------------------------------------------------
+
+describe("POST /api/appointments — forSalon i jawne listy kolumn (#193)", () => {
+  const PROMO_CODE_UUID = "77777777-7777-4777-8777-777777777777";
+  /** Kolumny wizyty, które odpowiedź 201 zwracała przed #193 (cały wiersz appointments). */
+  const RESPONSE_COLUMNS = [
+    "id", "salonId", "clientId", "employeeId", "serviceId", "variantId", "bookedByUserId",
+    "startTime", "endTime", "status", "notes", "depositAmount", "depositPaid",
+    "reminderSentAt", "reminder1hSentAt", "reminderPushSentAt", "reminderPush1hSentAt",
+    "promoCodeId", "discountAmount", "guestName", "guestPhone", "guestEmail",
+    "createdAt", "updatedAt",
+  ];
+  const mockForSalon = vi.mocked(forSalon);
+
+  async function asGuest() {
+    const { getOptionalSession } = await import("@/lib/session");
+    vi.mocked(getOptionalSession).mockResolvedValueOnce(null);
+    const { strictRateLimit } = await import("@/lib/rate-limit");
+    vi.mocked(strictRateLimit.check).mockReturnValue({ success: true, remaining: 4, reset: 60000 });
+  }
+
+  function guestRequest(extra: Record<string, unknown> = {}) {
+    return createMockRequest("http://localhost:3000/api/appointments", {
+      method: "POST",
+      body: {
+        salonId: TEST_IDS.SALON_UUID,
+        employeeId: TEST_IDS.EMPLOYEE_UUID,
+        serviceId: TEST_IDS.SERVICE_UUID,
+        startTime: "2026-04-01T10:00:00Z",
+        endTime: "2026-04-01T11:00:00Z",
+        guestName: "Jan Kowalski",
+        guestPhone: "123456789",
+        ...extra,
+      },
+    });
+  }
+
+  /** Pełna ścieżka z kodem promocyjnym: kolizja, blokady, kod, usługa, (insert), SMS. */
+  function arrangeFullPath() {
+    const chains = [
+      chainMock([]),
+      chainMock([]),
+      chainMock([{
+        promoCode: { id: PROMO_CODE_UUID, salonId: TEST_IDS.SALON_UUID, expiresAt: null, usageLimit: null, usedCount: 0 },
+        promotion: {
+          salonId: TEST_IDS.SALON_UUID, type: "percentage", value: "10.00", isActive: true,
+          startDate: null, endDate: null, conditionsJson: {},
+        },
+      }]),
+      chainMock([makeService()]),
+      chainMock([{
+        clientFirstName: null, clientPhone: null, serviceName: "Strzyzenie",
+        employeeFirstName: "Anna", employeeLastName: "Nowak", salonName: "Salon",
+      }]),
+    ];
+    for (const c of chains) mockDbSelect.mockReturnValueOnce(c);
+    const insertChain = chainMock([makeAppointment({ clientId: null })]);
+    const updateChain = chainMock([]);
+    mockDbInsert.mockReturnValue(insertChain);
+    mockDbUpdate.mockReturnValue(updateChain);
+    return { chains, insertChain, updateChain };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    mockDbUpdate.mockReset();
+    mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+  });
+
+  afterEach(() => {
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    mockDbUpdate.mockReset();
+    mockAssertSalonRefs.mockReset();
+    mockAssertSalonRefs.mockImplementation(async () => null);
+  });
+
+  it("gość: forSalon wołany wyłącznie z salonId z żądania, 201", async () => {
+    await asGuest();
+    const { insertChain } = arrangeFullPath();
+
+    const res = await createAppointment(guestRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    expect(res.status).toBe(201);
+    expect(mockForSalon).toHaveBeenCalled();
+    for (const call of mockForSalon.mock.calls) expect(call).toEqual([TEST_IDS.SALON_UUID]);
+    // Insert i zużycie kodu przeszły przez tx z kontekstem salonu.
+    expect(insertChain.values).toHaveBeenCalledTimes(1);
+    expect(mockDbUpdate).toHaveBeenCalledTimes(1);
+    expect(mockSendBookingSms).toHaveBeenCalledWith(expect.objectContaining({ salonName: "Salon", salonId: TEST_IDS.SALON_UUID }));
+  });
+
+  it("każde zapytanie POST ma jawną listę kolumn (select z argumentem, returning z listą)", async () => {
+    await asGuest();
+    const { insertChain } = arrangeFullPath();
+
+    const res = await createAppointment(guestRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    expect(res.status).toBe(201);
+    expect(mockDbSelect).toHaveBeenCalledTimes(5);
+    for (const call of mockDbSelect.mock.calls) {
+      expect(call[0], "select() bez listy kolumn").toEqual(expect.any(Object));
+    }
+    expect(insertChain.returning).toHaveBeenCalledTimes(1);
+    expect(insertChain.returning!.mock.calls[0]![0], "returning() bez listy kolumn").toEqual(expect.any(Object));
+  });
+
+  it("odpowiedź 201: lista kolumn returning = dokładnie kolumny dotychczasowej odpowiedzi", async () => {
+    await asGuest();
+    const { insertChain } = arrangeFullPath();
+
+    await createAppointment(guestRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    const columns = insertChain.returning!.mock.calls[0]![0] as Record<string, unknown>;
+    expect(Object.keys(columns).sort()).toEqual([...RESPONSE_COLUMNS].sort());
+  });
+
+  it("zużycie kodu promocyjnego zawężone do salonu wizyty", async () => {
+    await asGuest();
+    const { updateChain } = arrangeFullPath();
+
+    await createAppointment(guestRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    const where = updateChain.where!.mock.calls[0]![0];
+    expect(matchesPredicate(where, { id: PROMO_CODE_UUID, salonId: TEST_IDS.SALON_UUID })).toBe(true);
+    expect(matchesPredicate(where, { id: PROMO_CODE_UUID, salonId: "99999999-9999-4999-8999-999999999999" })).toBe(false);
+  });
+
+  it("zapytanie do SMS zawężone do salonu wizyty", async () => {
+    await asGuest();
+    const { chains } = arrangeFullPath();
+
+    await createAppointment(guestRequest({ promoCodeId: PROMO_CODE_UUID }));
+
+    const where = chains[4]!.where!.mock.calls[0]![0];
+    expect(matchesPredicate(where, { id: TEST_IDS.APPOINTMENT_UUID, salonId: TEST_IDS.SALON_UUID })).toBe(true);
+    expect(matchesPredicate(where, { id: TEST_IDS.APPOINTMENT_UUID, salonId: "99999999-9999-4999-8999-999999999999" })).toBe(false);
+  });
+
+  it("gość: obcy employeeId/serviceId (inny salon) → 400 jak dziś, bez żadnego zapytania przez forSalon", async () => {
+    await asGuest();
+    mockAssertSalonRefs.mockResolvedValueOnce(salonRefRejection());
+    arrangeFullPath();
+
+    const res = await createAppointment(guestRequest());
+    const { status, body } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(body).toEqual({ success: false, error: "Nieprawidlowe dane dla tego salonu" });
+    expect(mockForSalon).not.toHaveBeenCalled();
+    expect(mockDbSelect).not.toHaveBeenCalled();
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("gość: kolizja → 409 z dotychczasowym komunikatem, warunek kolizji z salonId z żądania", async () => {
+    await asGuest();
+    const overlapChain = chainMock([{ id: "inna" }]);
+    mockDbSelect.mockReturnValueOnce(overlapChain);
+
+    const res = await createAppointment(guestRequest());
+    const { status, body } = await parseResponse(res);
+
+    expect(status).toBe(409);
+    expect(body).toEqual({ success: false, error: "Termin koliduje z istniejaca wizyta. Wybierz inna godzine" });
+    expect(mockDbInsert).not.toHaveBeenCalled();
+    const where = overlapChain.where!.mock.calls[0]![0];
+    const row = {
+      id: "inna",
+      employeeId: TEST_IDS.EMPLOYEE_UUID,
+      status: "scheduled",
+      startTime: new Date("2026-04-01T10:30:00Z"),
+      endTime: new Date("2026-04-01T11:30:00Z"),
+    };
+    expect(matchesPredicate(where, { ...row, salonId: TEST_IDS.SALON_UUID })).toBe(true);
+    expect(matchesPredicate(where, { ...row, salonId: "99999999-9999-4999-8999-999999999999" })).toBe(false);
   });
 });
