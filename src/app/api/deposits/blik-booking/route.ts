@@ -34,8 +34,9 @@ import { sendBlikDepositBookingSms } from "@/lib/sms";
  * Stripe nie obejmują tej wizyty.
  *
  * Numer BLIK salonu (`settingsJson.deposits.blikPhone`) to dane osobowe
- * właściciela. Trafia wyłącznie do odpowiedzi 201 i do SMS do klienta, czyli
- * po utworzeniu wizyty — nigdy do błędów ani do logów. Format numeru sprawdza
+ * właściciela. Trafia wyłącznie do odpowiedzi 201 i do SMS do klienta (wraz
+ * z treścią SMS do tabeli notifications salonu), czyli po utworzeniu wizyty —
+ * nigdy do błędów ani do logów. Format numeru sprawdza
  * zapis ustawień, tu liczy się tylko to, że jest niepustym napisem.
  *
  * SMS: po zapisie, przed odpowiedzią 201, klient (telefon gościa albo telefon
@@ -110,8 +111,9 @@ interface BookingSmsInput {
  */
 async function sendBookingSms(input: BookingSmsInput): Promise<void> {
   try {
-    // RLS: salons ma politykę tenant_self, więc pod forSalon wiersze tego
-    // salonu są widoczne; jawne `eq(salonId)` zawęża niezależnie od RLS.
+    // RLS: appointments, clients, services i employees mają politykę tenant_isolation
+    // po salon_id, więc pod forSalon widać tylko wiersze tego salonu; jawne
+    // eq(appointments.salonId) zawęża wizytę niezależnie od RLS.
     const [details] = await forSalon(input.salonId).raw((tx) =>
       tx
         .select({
