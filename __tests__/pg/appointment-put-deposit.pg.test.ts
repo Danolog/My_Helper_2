@@ -6,6 +6,13 @@
  * - sesja salonu B na wizycie A → 404, wizyta A bez zmian, bez wpisu; wpis A ma `salon_id` A;
  * - recepcja: pola zadatku w PUT → 403 przed zapisem (wpis `owner_edit` tylko właściciela),
  *   PUT recepcji bez pól zadatku → zapis bez wpisu.
+ * - DELETE (#193 A1) pod rolą aplikacji: wizyta z opłaconym zadatkiem i klientem → 200,
+ *   nazwa salonu A odczytana w kontekście salonu (SMS, lista oczekujących), wpis
+ *   `notifications` z `salon_id` A widoczny w kontekście A, niewidoczny w kontekście B;
+ *   sesja salonu B na wizycie A → 404, wizyta bez zmian, zero wpisów i efektów ubocznych.
+ *
+ * Zwrot zadatku (`@/lib/refund`) i lista oczekujących (`@/lib/waiting-list`) to atrapy
+ * z podglądem wywołań: zwrot zmienia osobny krok, lista ma własne testy pg.
  *
  * Trasa wołana bezpośrednio; atrapa sesji (`auth.api.getSession`), nagłówków i loggera;
  * `@/lib/db` wskazuje bazę testową. Pomocnik dziennika prawdziwy, z przełącznikiem błędu
@@ -21,12 +28,25 @@ import { randomUUID } from "node:crypto";
 import { asc, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as appointmentRoute from "@/app/api/appointments/[id]/route";
-import { appointments, depositStatusEvents, employees, salons, user } from "@/lib/schema";
+import { appointments, clients, depositStatusEvents, employees, notifications, salons, user } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
 import { createMockRequest, createRouteParams, parseResponse } from "../api/helpers";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
 const ctl = vi.hoisted(() => ({ userId: "", failAfterInsert: false, recordCalls: 0 }));
-const mocks = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  error: vi.fn(),
+  warn: vi.fn(),
+  refund: vi.fn(),
+  notifyWaitingList: vi.fn(),
+}));
+
+vi.mock("@/lib/refund", () => ({
+  refundAppointmentDeposits: (...args: unknown[]) => mocks.refund(...args),
+}));
+vi.mock("@/lib/waiting-list", () => ({
+  notifyWaitingList: (...args: unknown[]) => mocks.notifyWaitingList(...args),
+}));
 
 vi.mock("@/lib/db", () => ({
   get db() {
@@ -65,17 +85,18 @@ const RUN = randomUUID().slice(0, 8);
 const OWNER_A = `it-t3-aput-a-${RUN}`;
 const OWNER_B = `it-t3-aput-b-${RUN}`;
 const RECEPTION_A = `it-t3-aput-r-${RUN}`;
-const ids = { salonA: "", salonB: "", empA: "" };
+const ids = { salonA: "", salonB: "", empA: "", clientA: "" };
 let slot = 0;
 
 /** Wizyta salonu A (rola migracji, zatwierdzona); każda w osobnym, dalekim terminie. */
-async function appointment(depositPaid = false): Promise<string> {
+async function appointment(depositPaid = false, clientId: string | null = null): Promise<string> {
   const start = new Date(Date.UTC(2095, 8, 1, 8) + slot++ * 3_600_000);
   const [a] = await h!.db
     .insert(appointments)
     .values({
       salonId: ids.salonA,
       employeeId: ids.empA,
+      clientId,
       startTime: start,
       endTime: new Date(start.getTime() + 1_800_000),
       status: "scheduled",
@@ -128,6 +149,11 @@ suite("PUT wizyty a dziennik zadatku — prawdziwy Postgres", () => {
     await db
       .insert(employees)
       .values({ salonId: ids.salonA, userId: RECEPTION_A, firstName: "IT", lastName: "Recepcja", role: "receptionist" });
+    const [c] = await db
+      .insert(clients)
+      .values({ salonId: ids.salonA, firstName: "IT", lastName: "Klient", phone: "+48000600799" })
+      .returning({ id: clients.id });
+    ids.clientA = c!.id;
   });
 
   afterAll(async () => {
@@ -147,6 +173,10 @@ suite("PUT wizyty a dziennik zadatku — prawdziwy Postgres", () => {
     ctl.recordCalls = 0;
     mocks.error.mockClear();
     mocks.warn.mockClear();
+    mocks.refund.mockReset();
+    mocks.refund.mockResolvedValue({ success: true, refunded: false, message: "it-aput zwrot poza MyHelper" });
+    mocks.notifyWaitingList.mockReset();
+    mocks.notifyWaitingList.mockResolvedValue({ notified: 0, smsCount: 0, pushCount: 0, errors: 0 });
   });
 
   describe("atomowość zapisu wizyty i wpisu dziennika", () => {
@@ -299,6 +329,79 @@ suite("PUT wizyty a dziennik zadatku — prawdziwy Postgres", () => {
       expect(ctl.recordCalls).toBe(0);
       expect(await eventsOf(appt)).toHaveLength(0);
       expect(mocks.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("DELETE: efekty uboczne anulacji w kontekście salonu (#193)", () => {
+    const del = (id: string, query = "") =>
+      appointmentRoute.DELETE(
+        createMockRequest(`http://localhost/api/appointments/${id}${query}`, { method: "DELETE" }),
+        createRouteParams(id)
+      );
+
+    async function statusOf(appt: string) {
+      const [a] = await h!.db
+        .select({ status: appointments.status, depositPaid: appointments.depositPaid })
+        .from(appointments)
+        .where(eq(appointments.id, appt));
+      return a!;
+    }
+
+    /** Wpisy powiadomień klienta A z treścią tej wizyty (rola migracji, bez RLS). */
+    async function smsOf(marker: string) {
+      const rows = await h!.db.select().from(notifications).where(eq(notifications.clientId, ids.clientA));
+      return rows.filter((r) => r.message.includes(marker));
+    }
+
+    it("właściciel A: wizyta z opłaconym zadatkiem i klientem → 200, SMS z nazwą salonu A, wpis widoczny tylko w kontekście A", async () => {
+      const appt = await appointment(true, ids.clientA);
+      ctl.userId = OWNER_A;
+      const salonAName = `IT T3 aput A ${RUN}`;
+
+      const res = await parseResponse<{
+        data: { status: string };
+        cancellationDetails: { depositVariant: string; clientNotified: boolean; depositPaid: boolean };
+      }>(await del(appt, "?notifyClient=true"));
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.data.status).toBe("cancelled");
+      expect(res.body.cancellationDetails).toMatchObject({ depositPaid: true, depositVariant: "manual", clientNotified: true });
+      expect(await statusOf(appt)).toMatchObject({ status: "cancelled" });
+      expect(mocks.refund).toHaveBeenCalledTimes(1);
+      expect(mocks.refund.mock.calls[0]![0]).toBe(appt);
+      // Nazwa salonu z odczytu pod rolą aplikacji (polityka tenant_self), nie zapas „Salon”.
+      expect(mocks.notifyWaitingList).toHaveBeenCalledTimes(1);
+      expect(mocks.notifyWaitingList.mock.calls[0]![0]).toMatchObject({ salonId: ids.salonA, salonName: salonAName });
+
+      const sms = await smsOf(salonAName);
+      expect(sms).toHaveLength(1);
+      expect(sms[0]).toMatchObject({ salonId: ids.salonA, clientId: ids.clientA, type: "sms", status: "pending" });
+
+      const inA = await forSalon(ids.salonA).listOwned(notifications, eq(notifications.id, sms[0]!.id));
+      // Celowo bez filtra salonu: niewidoczność w kontekście B daje sama polityka RLS.
+      const inB = await forSalon(ids.salonB).raw((tx) =>
+        tx.select({ id: notifications.id }).from(notifications).where(eq(notifications.id, sms[0]!.id))
+      );
+      expect(inA).toHaveLength(1);
+      expect(inB).toHaveLength(0);
+      expect(mocks.error).not.toHaveBeenCalled();
+    });
+
+    it("sesja salonu B: DELETE wizyty A z zadatkiem → 404, wizyta bez zmian, bez zwrotu, SMS i listy oczekujących", async () => {
+      const appt = await appointment(true, ids.clientA);
+      const before = (await h!.db.select({ id: notifications.id }).from(notifications).where(eq(notifications.clientId, ids.clientA))).length;
+      ctl.userId = OWNER_B;
+
+      const res = await parseResponse(await del(appt, "?notifyClient=true"));
+
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual({ success: false, error: "Appointment not found" });
+      expect(await statusOf(appt)).toMatchObject({ status: "scheduled", depositPaid: true });
+      expect(mocks.refund).not.toHaveBeenCalled();
+      expect(mocks.notifyWaitingList).not.toHaveBeenCalled();
+      const after = (await h!.db.select({ id: notifications.id }).from(notifications).where(eq(notifications.clientId, ids.clientA))).length;
+      expect(after).toBe(before);
+      expect(await eventsOf(appt)).toHaveLength(0);
     });
   });
 });
