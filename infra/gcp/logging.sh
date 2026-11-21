@@ -27,13 +27,13 @@
 #                                                przekierowaniu z linku resetu)
 #       Segment tokenu bez `.`, `%` i `/`: adresy z `..` albo `%2e%2e` po
 #       prefiksie resetu (inna ścieżka po normalizacji) zostają w logach.
-#       Tylko GET (linki z e-maili); inne metody zostają w logach.
+#       Tylko GET i HEAD (linki z e-maili); inne metody zostają w logach.
 #       Bez nagłówka Referer i bez dopasowania w parametrach zapytania: obie
 #       wartości ustala klient, więc pozwalałyby ukryć dowolne żądanie.
-#       Token w Referer usuwa aplikacja (Referrer-Policy: no-referrer na
-#       /reset-password i ścieżkach z tokenem) — osobna zmiana. Do tego czasu
-#       --apply odmawia (kod 2): skrypt sprawdza next.config.ts w repo
-#       (docs/runbook-krok-d.md, §10b). Dry-run wypisuje wynik sprawdzenia.
+#       Token w Referer usuwa aplikacja (next.config.ts, no-referrer na trzech
+#       adresach). --apply sprawdza te wpisy w next.config.ts i bez nich
+#       odmawia (kod 2) (docs/runbook-krok-d.md, §10b). Dry-run wypisuje
+#       wynik sprawdzenia.
 #       Wykluczenie zawsze z disabled=false: ponowne --apply przywraca
 #       wykluczenie wyłączone w konsoli.
 #   (2) retencja zasobnika `_Default` = 30 dni, jawnie (wpisy sprzed zmiany celu);
