@@ -108,7 +108,7 @@ odpowiedzi zapory (`403`) na domenie i na adresie wdrożenia; kod odpowiedzi
 ochrony wdrożeń (`401` albo `403`); czy wywołanie crona przechodzi przez
 zaporę (dlatego L2 jest osobnym krokiem); ponawianie zdarzeń Stripe na
 zmieniony adres (inny wynik = zdarzenia z okna ponawia się ręcznie z panelu
-Stripe); składnia `--format` w W0 i P3, P5 oraz W4 (rewizja Cloud Run; `traffic[0]` zakłada cały ruch na jednej rewizji — przy podziale ruchu odczytać całą listę); nagłówek `x-vercel-id` w T6.
+Stripe); składnia `--format` w W0 i P3, P5 oraz W4 (rewizja Cloud Run; `traffic[0]` zakłada cały ruch na jednej rewizji — przy podziale ruchu odczytać całą listę); nagłówek `x-vercel-id` w T6 (w próbie wariantem z `--resolve`, jak P6).
 
 ## 1. Warunki przed oknem
 
@@ -320,7 +320,7 @@ Vercel Production.
 | K1.1 | scalenie PR z P13 | PR dodaje do `vercel.json` jedno przekierowanie w `redirects`: `{"source": "/:path*", "destination": "https://app.nordsignal.cc/:path*", "permanent": false}` (tymczasowe, żeby powrót z sekcji 6 nie walczył z pamięcią przeglądarek) | wdrożenie Vercel Production `Ready` |
 | K1.2 | zawężenie reguły zapory | panel Vercela → Firewall: reguła z L1 zawężona do metod innych niż `GET`/`HEAD`, opublikowana (zapora działa przed przekierowaniem — `Deny` dla wszystkiego zablokowałby też przekierowanie) | reguła włączona, warunek metody |
 | K1.3 | przekierowanie działa | `curl -sI "https://<domena Vercel Production>/salon/x" \| grep -i '^location:'` | `location: https://app.nordsignal.cc/salon/x` |
-| K1.4 | zapisy na Vercelu nadal blokowane | `curl -s -o /dev/null -w '%{http_code}\n' -X POST "https://<domena Vercel Production>/api/health"` (do potwierdzenia przy K1) | `403` |
+| K1.4 | zapisy na Vercelu nadal blokowane | `curl -s -o /dev/null -w '%{http_code}\n' -X POST "https://<domena Vercel Production>/api/health"` (do potwierdzenia przy K1) | `403`; inny wynik = reguła z powrotem `Deny` dla wszystkiego (zgoda jak K1.2), decyzja właściciela |
 
 Każda inna domena z F1 — to samo przekierowanie (osobny wiersz w PR,
 rozstrzygnięty przed P13). Przy F8 = tak K1 jest obowiązkowy w tym samym oknie.
