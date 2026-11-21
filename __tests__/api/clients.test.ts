@@ -38,15 +38,32 @@ const mockTx = {
   execute: vi.fn().mockResolvedValue(undefined), // SET LOCAL app.current_salon_id
 };
 
+// #193: trasy /api/clients i /api/clients/[id] nie biorą surowego `db` —
+// dane salonu idą przez forSalon (db.transaction → tx), hash hasła przez
+// wyjście systemowe. Każde zapytanie na surowym `db` poza transakcją rzuca.
+// (vi.hoisted: fabryka niżej woła rawDbUsed w chwili wywołania.)
+const { rawDbUsed } = vi.hoisted(() => ({
+  rawDbUsed: (method: string) => () => {
+    throw new Error(`surowy db.${method} w teście clients — trasa ma iść przez forSalon albo @/lib/server/system`);
+  },
+}));
 vi.mock("@/lib/db", () => ({
   db: {
-    select: (...args: unknown[]) => mockDbSelect(...args),
-    insert: (...args: unknown[]) => mockDbInsert(...args),
-    update: (...args: unknown[]) => mockDbUpdate(...args),
-    delete: (...args: unknown[]) => mockDbDelete(...args),
+    select: rawDbUsed("select"),
+    insert: rawDbUsed("insert"),
+    update: rawDbUsed("update"),
+    delete: rawDbUsed("delete"),
+    execute: rawDbUsed("execute"),
     transaction: (fn: (tx: typeof mockTx) => unknown) => fn(mockTx),
   },
 }));
+
+// #193: hash hasła konta `credential` — wyjście systemowe (nie surowy db).
+const systemMocks = vi.hoisted(() => ({ findCredentialPasswordHash: vi.fn() }));
+vi.mock("@/lib/server/system", () => ({
+  findCredentialPasswordHash: (...args: unknown[]) => systemMocks.findCredentialPasswordHash(...args),
+}));
+const mockFindCredentialPasswordHash = systemMocks.findCredentialPasswordHash;
 
 // Mock session for DELETE endpoint
 const mockGetSession = vi.fn();
@@ -651,12 +668,9 @@ describe("DELETE /api/clients/[id]", () => {
       user: { id: "user-1", email: "owner@test.com" },
     });
 
-    // Account found with password hash
-    mockDbSelect.mockReturnValue(chainMock([{
-      userId: "user-1",
-      providerId: "credential",
-      password: "hashed-password",
-    }]));
+    // findOne (forSalon, tx): własny klient; hash z wyjścia systemowego.
+    mockDbSelect.mockReturnValue(chainMock([makeClient()]));
+    mockFindCredentialPasswordHash.mockResolvedValue("hashed-password");
 
     mockVerifyPassword.mockResolvedValue(false);
 
@@ -678,12 +692,8 @@ describe("DELETE /api/clients/[id]", () => {
       user: { id: "user-1", email: "owner@test.com" },
     });
 
-    // Account found with password hash
-    mockDbSelect.mockReturnValue(chainMock([{
-      userId: "user-1",
-      providerId: "credential",
-      password: "hashed-password",
-    }]));
+    mockDbSelect.mockReturnValue(chainMock([makeClient()]));
+    mockFindCredentialPasswordHash.mockResolvedValue("hashed-password");
 
     mockVerifyPassword.mockResolvedValue(true);
 
@@ -701,6 +711,11 @@ describe("DELETE /api/clients/[id]", () => {
     expect(status).toBe(200);
     expect(body.success).toBe(true);
     expect((body as any).data.id).toBe(TEST_IDS.CLIENT_UUID);
+    // Hash z wyjścia systemowego dla użytkownika z sesji, porównany z hasłem z body.
+    expect(mockFindCredentialPasswordHash).toHaveBeenCalledTimes(1);
+    expect(mockFindCredentialPasswordHash).toHaveBeenCalledWith("user-1");
+    expect(mockVerifyPassword).toHaveBeenCalledWith({ hash: "hashed-password", password: "correct-password" });
+    expect(mockDbDelete).toHaveBeenCalledTimes(1);
   });
 
   it("should return 404 when client not found after password verification", async () => {
@@ -708,11 +723,8 @@ describe("DELETE /api/clients/[id]", () => {
       user: { id: "user-1", email: "owner@test.com" },
     });
 
-    mockDbSelect.mockReturnValue(chainMock([{
-      userId: "user-1",
-      providerId: "credential",
-      password: "hashed-password",
-    }]));
+    mockDbSelect.mockReturnValue(chainMock([makeClient()]));
+    mockFindCredentialPasswordHash.mockResolvedValue("hashed-password");
 
     mockVerifyPassword.mockResolvedValue(true);
     mockDbDelete.mockReturnValue(chainMock([]));
@@ -760,12 +772,9 @@ describe("DELETE /api/clients/[id]", () => {
       user: { id: "user-1", email: "owner@test.com" },
     });
 
-    // Account found but password is null (OAuth-only account, no credential password)
-    mockDbSelect.mockReturnValue(chainMock([{
-      userId: "user-1",
-      providerId: "credential",
-      password: null,
-    }]));
+    // Brak konta `credential` albo konto bez hasła (tylko OAuth): wyjście systemowe zwraca null.
+    mockDbSelect.mockReturnValue(chainMock([makeClient()]));
+    mockFindCredentialPasswordHash.mockResolvedValue(null);
 
     const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`, {
       method: "DELETE",
@@ -777,7 +786,75 @@ describe("DELETE /api/clients/[id]", () => {
 
     expect(status).toBe(400);
     expect(body.success).toBe(false);
-    expect(body.error).toContain("Nie mozna zweryfikowac hasla");
+    expect(body.error).toBe("Nie mozna zweryfikowac hasla - brak konta z haslem");
+    expect(mockFindCredentialPasswordHash).toHaveBeenCalledWith("user-1");
+    expect(mockVerifyPassword).not.toHaveBeenCalled();
+    expect(mockDbDelete).not.toHaveBeenCalled();
+  });
+
+  it("#193: cudzy klient → 404 PRZED sprawdzeniem hasła (bez odczytu hasha i bez usunięcia)", async () => {
+    mockGetSession.mockResolvedValue({
+      user: { id: "user-1", email: "owner@test.com" },
+    });
+    // forSalon(salon z sesji).findOne: klient innego salonu niewidoczny.
+    mockDbSelect.mockReturnValue(chainMock([]));
+    mockFindCredentialPasswordHash.mockResolvedValue("hashed-password");
+    mockVerifyPassword.mockResolvedValue(true);
+
+    const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`, {
+      method: "DELETE",
+      body: { password: "correct-password" },
+    });
+    const response = await deleteClient(request, createRouteParams(TEST_IDS.CLIENT_UUID));
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(404);
+    expect(body.error).toBe("Client not found");
+    expect(mockFindCredentialPasswordHash).not.toHaveBeenCalled();
+    expect(mockVerifyPassword).not.toHaveBeenCalled();
+    expect(mockDbDelete).not.toHaveBeenCalled();
+  });
+
+  it("#193: błąd odczytu hasha → 500, bez usunięcia", async () => {
+    mockGetSession.mockResolvedValue({
+      user: { id: "user-1", email: "owner@test.com" },
+    });
+    mockDbSelect.mockReturnValue(chainMock([makeClient()]));
+    mockFindCredentialPasswordHash.mockRejectedValue(new Error("DB error"));
+
+    const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`, {
+      method: "DELETE",
+      body: { password: "correct-password" },
+    });
+    const response = await deleteClient(request, createRouteParams(TEST_IDS.CLIENT_UUID));
+    const { status, body } = await parseResponse(response);
+
+    expect(status).toBe(500);
+    expect(body.error).toBe("Failed to delete client");
+    expect(mockVerifyPassword).not.toHaveBeenCalled();
+    expect(mockDbDelete).not.toHaveBeenCalled();
+  });
+
+  it("#193: atrapa surowego db rzuca — DELETE idzie wyłącznie przez forSalon i wyjście systemowe", async () => {
+    const { db } = await import("@/lib/db");
+    expect(() => db.select()).toThrow(/surowy db\.select/);
+
+    mockGetSession.mockResolvedValue({
+      user: { id: "user-1", email: "owner@test.com" },
+    });
+    mockDbSelect.mockReturnValue(chainMock([makeClient()]));
+    mockFindCredentialPasswordHash.mockResolvedValue("hashed-password");
+    mockVerifyPassword.mockResolvedValue(true);
+    mockDbDelete.mockReturnValue(chainMock([makeClient()]));
+
+    const request = createMockRequest(`http://localhost:3000/api/clients/${TEST_IDS.CLIENT_UUID}`, {
+      method: "DELETE",
+      body: { password: "correct-password" },
+    });
+    const response = await deleteClient(request, createRouteParams(TEST_IDS.CLIENT_UUID));
+    expect((await parseResponse(response)).status).toBe(200);
+    // Jedno zapytanie select (findOne w transakcji) — hash nie idzie przez db.select.
+    expect(mockDbSelect).toHaveBeenCalledTimes(1);
   });
 });
 

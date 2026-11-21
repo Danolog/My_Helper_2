@@ -1,16 +1,14 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { verifyPassword } from "better-auth/crypto";
-import { eq, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { validateBody, updateClientSchema } from "@/lib/api-validation";
 import { auth } from "@/lib/auth";
-// `account` pozostaje surowym `db` (weryfikacja hasła nie jest salon-scoped):
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { getSalonContext, hasFeatureAccess } from "@/lib/salon-context";
-import { clients, account } from "@/lib/schema";
+import { clients } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+import { findCredentialPasswordHash } from "@/lib/server/system";
 import { isValidUuid } from "@/lib/validations";
 
 // GET /api/clients/[id] - Get a single client by ID
@@ -217,20 +215,11 @@ export async function DELETE(
       );
     }
 
-    // 3. Get the user's password hash from the account table
-    // (account nie jest salon-scoped — to dane uwierzytelniajace uzytkownika)
-    const [userAccount] = await db
-      .select()
-      .from(account)
-      .where(
-        and(
-          eq(account.userId, session.user.id),
-          eq(account.providerId, "credential")
-        )
-      )
-      .limit(1);
+    // 3. Get the user's password hash (konto `credential` uzytkownika z sesji;
+    // account nie jest salon-scoped — wyjscie systemowe, nie forSalon)
+    const passwordHash = await findCredentialPasswordHash(session.user.id);
 
-    if (!userAccount || !userAccount.password) {
+    if (!passwordHash) {
       return NextResponse.json(
         { success: false, error: "Nie mozna zweryfikowac hasla - brak konta z haslem" },
         { status: 400 }
@@ -239,7 +228,7 @@ export async function DELETE(
 
     // 4. Verify the password
     const isPasswordValid = await verifyPassword({
-      hash: userAccount.password,
+      hash: passwordHash,
       password,
     });
 
