@@ -56,7 +56,7 @@ const EMAIL = "wlasciciel-testowy@example.invalid";
 /** Wyrażenie RE2 adresu z tokenem (dosłownie jak w skrypcie). */
 const TOKEN_RE =
   "^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/[A-Za-z0-9]+([?]|$)|reset-password/?[?])";
-const EXCLUSION_FILTER = `httpRequest.requestMethod="GET" AND httpRequest.requestUrl=~"${TOKEN_RE}"`;
+const EXCLUSION_FILTER = `(httpRequest.requestMethod="GET" OR httpRequest.requestMethod="HEAD") AND httpRequest.requestUrl=~"${TOKEN_RE}"`;
 const LOGS_DEST = `logging.googleapis.com/projects/${PROJECT}/locations/${REGION}/buckets/myhelper-logs`;
 const AUDIT_DEST = `logging.googleapis.com/projects/${PROJECT}/locations/${REGION}/buckets/myhelper-audit`;
 const AUDIT_FILTER =
@@ -361,7 +361,7 @@ describe("P8 (1): ujście _Default — cel myhelper-logs i filtr wykluczający t
   it("dokładne wyrażenie filtru w kodzie: tylko adres żądania, bez Referer", () => {
     expect(SOURCE).toContain(`TOKEN_RE='${TOKEN_RE}'`);
     expect(SOURCE).toContain(
-      'EXCLUSION_FILTER="httpRequest.requestMethod=\\"GET\\" AND httpRequest.requestUrl=~\\"${TOKEN_RE}\\""\n',
+      'EXCLUSION_FILTER="(httpRequest.requestMethod=\\"GET\\" OR httpRequest.requestMethod=\\"HEAD\\") AND httpRequest.requestUrl=~\\"${TOKEN_RE}\\""\n',
     );
   });
 
@@ -451,15 +451,17 @@ describe("P8 (1): ujście _Default — cel myhelper-logs i filtr wykluczający t
   });
 
   // Ocena całego filtru (metoda AND adres) na wpisie żądania.
-  const parsed = /^httpRequest\.requestMethod="([A-Z]+)" AND httpRequest\.requestUrl=~"(.*)"$/.exec(EXCLUSION_FILTER);
+  const parsed = /^\(httpRequest\.requestMethod="([A-Z]+)" OR httpRequest\.requestMethod="([A-Z]+)"\) AND httpRequest\.requestUrl=~"(.*)"$/.exec(EXCLUSION_FILTER);
   const excluded = (method: string, url: string) =>
-    parsed !== null && method === parsed[1] && new RegExp(parsed[2]!).test(url);
+    parsed !== null && (method === parsed[1] || method === parsed[2]) && new RegExp(parsed[3]!).test(url);
 
-  it("filtr ma postać: metoda GET AND adres (jedna klauzula metody, bez OR)", () => {
+  it("filtr ma postać: (metoda GET OR HEAD) AND adres — jedyne OR to dwie metody", () => {
     expect(parsed).not.toBeNull();
     expect(parsed![1]).toBe("GET");
-    expect(parsed![2]).toBe(TOKEN_RE);
-    expect(EXCLUSION_FILTER).not.toMatch(/\bOR\b|\bNOT\b|-httpRequest/);
+    expect(parsed![2]).toBe("HEAD");
+    expect(parsed![3]).toBe(TOKEN_RE);
+    expect(EXCLUSION_FILTER.match(/\bOR\b/g)).toHaveLength(1);
+    expect(EXCLUSION_FILTER).not.toMatch(/\bNOT\b|-httpRequest/);
   });
 
   it.each([
@@ -471,7 +473,13 @@ describe("P8 (1): ujście _Default — cel myhelper-logs i filtr wykluczający t
     ["POST", "https://h/reset-password?token=AbCdEf123456", false],
     ["POST", "https://h/api/auth/reset-password", false],
     ["PUT", "https://h/api/auth/reset-password/AbCdEf123456", false],
-    ["HEAD", "https://h/api/auth/reset-password/AbCdEf123456", false],
+    ["HEAD", "https://h/api/auth/reset-password/AbCdEf123456", true],
+    ["HEAD", "https://h/api/auth/verify-email?token=eyJ.x.y", true],
+    ["HEAD", "https://h/reset-password?token=AbCdEf123456", true],
+    ["HEAD", "https://h/api/auth/reset-password/../sign-in/email", false],
+    ["OPTIONS", "https://h/api/auth/reset-password/AbCdEf123456", false],
+    ["OPTIONS", "https://h/api/auth/verify-email?token=1", false],
+    ["head", "https://h/api/auth/reset-password/AbCdEf123456", false],
     ["get", "https://h/api/auth/reset-password/AbCdEf123456", false],
     ["GET", "https://h/api/auth/reset-password/../sign-in/email", false],
     ["GET", "https://h/api/auth/reset-password/%2e%2e/sign-in/email", false],

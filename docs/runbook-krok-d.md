@@ -840,11 +840,11 @@ Najpierw odczyt ujścia `_Default` (błąd odczytu = stop przed jakąkolwiek zmi
    zasobnika `_Default` w lokalizacji `global`. Filtr `_Default` i wykluczenia są
    atrybutami ujścia, więc zostają. Wykluczenie ma zawsze `disabled=false`: ponowne
    `--apply` przywraca wykluczenie wyłączone w konsoli. Wpis nie trafia do logów
-   wyłącznie wtedy, gdy metoda to **GET** i **adres żądania** (od schematu
+   wyłącznie wtedy, gdy metoda to **GET** albo **HEAD** i **adres żądania** (od schematu
    i hosta, ścieżka zaraz po hoście) pasuje do wyrażenia RE2:
 
    ```
-   httpRequest.requestMethod="GET" AND httpRequest.requestUrl=~"^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/[A-Za-z0-9]+([?]|$)|reset-password/?[?])"
+   (httpRequest.requestMethod="GET" OR httpRequest.requestMethod="HEAD") AND httpRequest.requestUrl=~"^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/[A-Za-z0-9]+([?]|$)|reset-password/?[?])"
    ```
 
    Token resetu to **jeden segment** z alfabetu `generateId` biblioteki
@@ -853,7 +853,9 @@ Najpierw odczyt ujścia `_Default` (błąd odczytu = stop przed jakąkolwiek zmi
    adresu. Adresy z `..`, `%2e%2e`, `/` albo innym znakiem po prefiksie resetu
    (np. `/api/auth/reset-password/../sign-in/email` — po normalizacji inna
    ścieżka) **zostają w logach**; nie da się nimi ukryć żądania do innego
-   endpointu. Wykluczane jest wyłącznie GET (linki z e-maili); `POST`, `HEAD`
+   endpointu. Wykluczane są wyłącznie GET i HEAD (linki z e-maili; skanery linków w poczcie
+   wysyłają HEAD z prawdziwym tokenem, a HEAD obsługuje ten sam handler co GET);
+   `POST`, `OPTIONS`, `PUT`
    i inne metody na tych adresach zostają w logach. Strażnik ma te przypadki
    wprost i sprawdza alfabet w zainstalowanej bibliotece.
 

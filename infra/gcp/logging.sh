@@ -76,7 +76,7 @@ AUDIT_SERVICE="secretmanager.googleapis.com"
 # koniec adresu. `[?]` zamiast `\?` (bez ucieczek w języku zapytań Logging).
 # Bez przecinka (rozdziela pola --add-exclusion) i bez `\`.
 TOKEN_RE='^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/[A-Za-z0-9]+([?]|$)|reset-password/?[?])'
-EXCLUSION_FILTER="httpRequest.requestMethod=\"GET\" AND httpRequest.requestUrl=~\"${TOKEN_RE}\""
+EXCLUSION_FILTER="(httpRequest.requestMethod=\"GET\" OR httpRequest.requestMethod=\"HEAD\") AND httpRequest.requestUrl=~\"${TOKEN_RE}\""
 
 # Warunek --apply: next.config.ts w repo ustawia Referrer-Policy: no-referrer
 # dla każdej ścieżki niżej, we wpisie headers() PO wpisie "/(.*)" (przy tym
