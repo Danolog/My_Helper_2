@@ -6,7 +6,7 @@
  * - sesja salonu B na wizycie A → 404, wizyta A bez zmian, bez wpisu; wpis A ma `salon_id` A;
  * - recepcja: pola zadatku w PUT → 403 przed zapisem (wpis `owner_edit` tylko właściciela),
  *   PUT recepcji bez pól zadatku → zapis bez wpisu.
- * - DELETE (#193 A1) pod rolą aplikacji: wizyta z opłaconym zadatkiem i klientem → 200,
+ * - DELETE (#193) pod rolą aplikacji: wizyta z opłaconym zadatkiem i klientem → 200,
  *   nazwa salonu A odczytana w kontekście salonu (SMS, lista oczekujących), wpis
  *   `notifications` z `salon_id` A widoczny w kontekście A, niewidoczny w kontekście B;
  *   sesja salonu B na wizycie A → 404, wizyta bez zmian, zero wpisów i efektów ubocznych.
