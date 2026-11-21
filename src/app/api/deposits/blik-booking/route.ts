@@ -41,8 +41,12 @@ import {
  * Numer BLIK salonu (`settingsJson.deposits.blikPhone`) to dane osobowe
  * właściciela. Trafia wyłącznie do odpowiedzi 201 i do SMS do klienta (wraz
  * z treścią SMS do tabeli notifications salonu), czyli po utworzeniu wizyty —
- * nigdy do błędów ani do logów. Format numeru sprawdza
- * zapis ustawień, tu liczy się tylko to, że jest niepustym napisem.
+ * nigdy do błędów ani do logów. Numer wychodzi tylko wtedy, gdy obok niego jest
+ * zapisana data zgody właściciela (`settingsJson.deposits.blikConsentAt`,
+ * napis z poprawną datą); wersji zgody trasa nie wymaga. Brak numeru albo numer
+ * bez daty zgody → ta sama odpowiedź 409 `DEPOSIT_BLIK_NOT_CONFIGURED`, bez
+ * numeru i bez daty. Format numeru sprawdza zapis ustawień, tu liczy się tylko
+ * to, że jest niepustym napisem.
  *
  * Termin: początek wcześniejszy niż 5 minut przed chwilą serwera → 400.
  * Długość wizyty (koniec − początek) musi być równa długości usługi z wariantem
@@ -140,6 +144,11 @@ function blikNotConfiguredResponse(salonPhone: string | null) {
 /** Niepusty napis albo null — `settingsJson` może mieć dowolny kształt. */
 function toBlikPhone(raw: unknown): string | null {
   return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+}
+
+/** Zgoda właściciela na podawanie numeru: niepusty napis z datą, którą `Date.parse` odczytuje. */
+function hasBlikConsent(raw: unknown): boolean {
+  return typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Date.parse(raw));
 }
 
 type BookingLimitRefusal = { kind: "salon_daily_limit" } | { kind: "guest_daily_limit" };
@@ -509,6 +518,7 @@ export async function POST(request: Request) {
           name: salons.name,
           phone: salons.phone,
           blikPhone: sql<unknown>`${salons.settingsJson} -> 'deposits' -> 'blikPhone'`,
+          blikConsentAt: sql<unknown>`${salons.settingsJson} -> 'deposits' -> 'blikConsentAt'`,
           serviceDuration: services.baseDuration,
           variantRowId: serviceVariants.id,
           variantDurationModifier: serviceVariants.durationModifier,
@@ -554,6 +564,10 @@ export async function POST(request: Request) {
     const blikPhone = toBlikPhone(salon.blikPhone);
     if (!blikPhone) {
       logger.warn("[BlikBooking API] Deposit booking refused — salon has no BLIK number", { salonId, serviceId });
+      return blikNotConfiguredResponse(salon.phone);
+    }
+    if (!hasBlikConsent(salon.blikConsentAt)) {
+      logger.warn("[BlikBooking API] Deposit booking refused — salon has no BLIK consent", { salonId, serviceId });
       return blikNotConfiguredResponse(salon.phone);
     }
 

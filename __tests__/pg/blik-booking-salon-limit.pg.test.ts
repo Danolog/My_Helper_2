@@ -177,7 +177,7 @@ suite("blik-booking: limity salonu (20) i gościa (3) na 24 h — prawdziwy Post
       { id: OWNER_A, name: "IT T3 blim A", email: `${OWNER_A}@example.invalid` },
       { id: OWNER_B, name: "IT T3 blim B", email: `${OWNER_B}@example.invalid` },
     ]);
-    const settingsJson = { deposits: { blikPhone: BLIK_PHONE } };
+    const settingsJson = { deposits: { blikPhone: BLIK_PHONE, blikConsentAt: "2099-01-01T00:00:00.000Z" } };
     const [a] = await db
       .insert(salons)
       .values({ name: `IT T3 blim A ${RUN}`, ownerId: OWNER_A, settingsJson })

@@ -238,7 +238,8 @@ async function seed() {
     },
     deposits: {
       blikPhone: "+48000600704",
-      blikConsentAt: "2026-01-01T00:00:00.000Z",
+      blikConsentAt: "2026-11-21T00:00:00.000Z",
+      blikConsentVersion: "2026-11-21",
     },
   };
   await db
