@@ -112,6 +112,17 @@ describe("POST /api/promo-codes/validate — salon z sesji", () => {
     expect(m.rlsSalonIds()).toEqual([SALON_A]);
   });
 
+  it("403: pracownik bez dostępu do rezerwacji z panelu — forSalon niewołany", async () => {
+    m.asStaffOf(SALON_A, "employee");
+    m.txRows.push([{ promoCode, promotion }]);
+
+    const res = await validate({ code: "LATO", salonId: SALON_A });
+
+    expect(res.status).toBe(403);
+    expect(forSalonSpy).not.toHaveBeenCalled();
+    expect(m.txRows).toHaveLength(1);
+  });
+
   it("200 valid:false: kod nieistniejący w salonie sesji", async () => {
     m.asOwnerOf(SALON_A);
     m.txRows.push([]);

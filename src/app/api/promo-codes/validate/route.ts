@@ -22,9 +22,12 @@ export const POST = withApiHandler(
   async ({ body }) => {
     // Salon WYŁĄCZNIE z sesji. Wcześniej forSalon(body.salonId) pozwalał
     // każdemu zalogowanemu kontu sprawdzać (i zgadywać) kody dowolnego salonu.
-    // body.salonId tylko porównywany (inny => 403). Personel salonu (recepcja
-    // i pracownik) sprawdza kod przy rezerwacji z panelu, właściciel zawsze.
-    const guard = await requireSalonStaff({ requestedSalonId: body.salonId ?? null });
+    // body.salonId tylko porównywany (inny => 403). Kod sprawdza się przy
+    // rezerwacji z panelu, do której ma dostęp właściciel i recepcja.
+    const guard = await requireSalonStaff({
+      requestedSalonId: body.salonId ?? null,
+      roles: ["receptionist"],
+    });
     if (guard.error) return guard.error;
     const salonId = guard.ctx.salonId;
 
