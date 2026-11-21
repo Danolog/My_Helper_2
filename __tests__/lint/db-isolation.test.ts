@@ -81,8 +81,6 @@ const BASELINE: Record<string, readonly string[]> = {
   ],
   P2_FILES: [
     "src/app/api/ai/content/newsletter/route.ts",
-    "src/app/api/appointments/[id]/complete/route.ts",
-    "src/app/api/appointments/[id]/invoice/route.ts",
     "src/app/api/clients/[id]/route.ts",
     "src/app/api/dashboard/stats/route.ts",
     "src/app/api/employees/[id]/link-account/route.ts",

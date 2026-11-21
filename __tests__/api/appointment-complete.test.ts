@@ -1222,6 +1222,33 @@ describe("POST /api/appointments/[id]/complete", () => {
     });
   });
 
+  it("#193: transakcja domykająca biegnie w kontekście salonu z sesji (rola aplikacji + set_config)", async () => {
+    const { sql, eq } = await import("drizzle-orm");
+    const appointment = makeAppointment({ status: "scheduled", employeeId: null });
+    const service = makeService({ basePrice: "200.00" });
+
+    mockDbSelect.mockReturnValueOnce(chainMock([{ appointment, service }]));
+    mockDbSelect.mockReturnValueOnce(chainMock([]));
+    mockDbInsert.mockReturnValueOnce(chainMock([{ id: "treatment-1" }]));
+    mockDbUpdate.mockReturnValueOnce(chainMock([{ ...appointment, status: "completed" }]));
+    mockDbSelect.mockReturnValueOnce(chainMock([]));
+    mockDbSelect.mockReturnValueOnce(chainMock([{ id: TEST_IDS.SALON_UUID, settingsJson: null }]));
+
+    const request = createMockRequest(
+      `http://localhost:3000/api/appointments/${TEST_IDS.APPOINTMENT_UUID}/complete`,
+      { method: "POST", body: {} }
+    );
+    const response = await completeAppointment(request, createRouteParams(TEST_IDS.APPOINTMENT_UUID));
+    expect(response.status).toBe(200);
+
+    // Dwie transakcje forSalon: odczyt wizyty i transakcja zapisów.
+    const roleSwitches = vi.mocked(sql.raw).mock.calls.filter(([q]) => /^set local role /.test(String(q)));
+    expect(roleSwitches).toHaveLength(2);
+    // Aktualizacja statusu ma jawny filtr salonu z sesji.
+    expect(vi.mocked(eq).mock.calls).toContainEqual(["appointments.salonId", TEST_IDS.SALON_UUID]);
+    expect(vi.mocked(eq).mock.calls).toContainEqual(["salons.id", TEST_IDS.SALON_UUID]);
+  });
+
   it("should skip low stock check when product has no minQuantity", async () => {
     const appointment = makeAppointment({ status: "scheduled" });
     const service = makeService({ basePrice: "200.00" });
