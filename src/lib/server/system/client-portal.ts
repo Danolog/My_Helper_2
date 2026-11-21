@@ -77,7 +77,7 @@ export async function findClientAppointmentForUser(
     .leftJoin(employees, eq(appointments.employeeId, employees.id))
     .leftJoin(services, eq(appointments.serviceId, services.id))
     .leftJoin(salons, eq(appointments.salonId, salons.id))
-    .where(and(eq(appointments.id, appointmentId), eq(appointments.bookedByUserId, sessionUserId)))
+    .where(eq(appointments.id, appointmentId))
     .limit(1);
 
   if (!row) return null;
