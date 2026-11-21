@@ -45,7 +45,7 @@ export async function GET() {
       startTime: row.appointment.startTime,
       endTime: row.appointment.endTime,
       status: row.appointment.status,
-      notes: row.appointment.notes,
+      // appointments.notes to notatka personelu — poza portalem klienta (ADR-002 §2.5)
       depositAmount: row.appointment.depositAmount,
       depositPaid: row.appointment.depositPaid,
       createdAt: row.appointment.createdAt,
