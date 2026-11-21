@@ -2,14 +2,17 @@
 
 Osobna procedura, której wymaga `docs/runbook-przelaczenie-bazy.md` 1.0 pkt 1.
 Odwołują się do niej: 1.3 pkt 1, 2.1, 2.9, wycofanie (droga A pkt 3, droga B),
-3.3 krok 1, krok 2 („stop”), krok 10 i „Stop w kroku 7 albo 8”. **Bez
+3.3 krok 1 (do przepisania razem z sekcją 6), krok 2 („stop”), krok 10
+i „Stop w kroku 7 albo 8”. **Bez
 odpowiedzi na fakty F1–F8 z sekcji 0 i bez wyników kroków „do potwierdzenia
 w próbie” w `docs/drills/` nie startuje okno.**
 
 Zasady jak w `docs/runbook-przelaczenie-bazy.md` sekcja 0: uruchamia wyłącznie
 właściciel, we własnym terminalu; bloki bez linii komentarza, od `set +x`;
-w repo tylko symbole zastępcze w `<…>` (prawdziwe wartości tylko w notatce
-okna, nie w repo ani w zgłoszeniach); polecenie oznaczone „(do potwierdzenia
+w repo tylko symbole zastępcze w `<…>`; do notatki okna wolno zapisać tylko
+wartości z wyjątku w sekcji 0 runbooka przełączenia (host `<domena Vercel
+Production>`, adresy `*.vercel.app`, `<LB_IP>`), nigdy w repo ani
+w zgłoszeniach; polecenie oznaczone „(do potwierdzenia
 w próbie)” ma wynik zapisany w `docs/drills/` przed oknem, a polecenie z innym
 wynikiem w próbie poprawia się tu przed oknem. Kolumna „Zgoda” wskazuje wiersz
 tabeli 1.2 runbooka przełączenia; zgoda jest zapisana w notatce okna przed
@@ -52,13 +55,13 @@ Skutki:
 
 | | Decyzja | Kroki |
 |---|---|---|
-| L1 | Zatrzymanie zapisów Vercela = reguła zapory Vercela (Firewall → Custom Rules) na poziomie projektu: `Deny` dla wszystkich żądań (każda ścieżka, każda metoda), bez wyjątków. Tworzona przed oknem jako wyłączona; w oknie włączana i publikowana; cofnięcie = wyłączenie. Bez kodu i bez wdrożenia. Blokuje też `GET`, bo `GET` odświeża sesję. Zmienna środowiskowa odpada (wymaga wdrożenia w oknie). Jeśli plan Vercela nie daje reguł własnych z `Deny` (F2 = nie): stop, nowa decyzja przed próbą (wariant zapasowy: tryb utrzymania w aplikacji, osobny PR w pełnym procesie) | W1, R1, V1 |
-| L2 | Crony Vercela: Settings → Cron Jobs → „Disable Cron Jobs” (oba crony, `vercel.json:9-12`); cofnięcie = „Enable”. Okno poza 02:00–03:30 UTC. Po udanym oknie crony Vercela zostają wyłączone na stałe (pracę przejmuje Cloud Scheduler); usunięcie ich z `vercel.json` — osobny krok porządkowy po oknie | W3, R3, V2 |
+| L1 | Zatrzymanie zapisów Vercela = reguła zapory Vercela (Firewall → Custom Rules) na poziomie projektu: `Deny` dla wszystkich żądań (każda ścieżka, każda metoda), bez wyjątków. Tworzona przed oknem jako wyłączona; w oknie włączana i publikowana; cofnięcie = wyłączenie. Bez kodu i bez wdrożenia. Blokuje też `GET`, bo `GET` odświeża sesję. Zmienna środowiskowa odpada (wymaga wdrożenia w oknie). Jeśli plan Vercela nie daje reguł własnych z `Deny` (F2 = nie): stop, nowa decyzja przed próbą (wariant zapasowy: tryb utrzymania w aplikacji, osobny PR w pełnym procesie) | W1, R1, K1.2 |
+| L2 | Crony Vercela: Settings → Cron Jobs → „Disable Cron Jobs” (oba crony, `vercel.json:9-12`); cofnięcie = „Enable”. Okno poza 02:00–03:30 UTC. Po udanym oknie crony Vercela zostają wyłączone na stałe (pracę przejmuje Cloud Scheduler); usunięcie ich z `vercel.json` — osobny krok porządkowy po oknie | W3, R3 |
 | L3 | Przed oknem, na stałe: Deployment Protection = „Standard Protection” (Vercel Authentication — blokuje Preview i wygenerowane adresy starszych wdrożeń Production, domena produkcyjna działa dalej) oraz usunięcie `POSTGRES_URL` z zakresu Preview. Preview nie dostaje go z powrotem (nowe Preview nie powstają, `vercel.json:3-7`; gdy wrócą — osobna gałąź Neona). Istniejących wdrożeń Preview nie usuwa się. W oknie W2 = odczyt stanu | P11, W2, R2 |
-| L4 | Zmiana domeny (wyżej). Rekord `A app` → `<LB_IP>`, **DNS only** (bez proxy Cloudflare — `TRUSTED_PROXIES` ustawiony z pomiaru adresów LB, `env.example:70-81`), TTL 60 s. Droga B = usunięcie rekordu. Przekierowanie starej domeny = K1 po 2.10 | P7, T4–T6, B1–B3, K1 |
+| L4 | Zmiana domeny (wyżej). Rekord `A app` → `<LB_IP>`, **DNS only** (bez proxy Cloudflare — `TRUSTED_PROXIES` ustawiony z pomiaru adresów LB, `env.example:70-81`), TTL 60 s. Droga B = usunięcie rekordu. Przekierowanie starej domeny = K1 po 2.10 z kodem 0 albo po drodze C (sekcja 3, K1) | P7, T4–T6, B1–B3, K1 |
 | L5 | Google OAuth: według F5/F6. Jeśli logowanie Google działa na Vercelu — przed oknem **dopisać** (nie podmieniać) adres przekierowania i origin `app.nordsignal.cc` do tego samego klienta OAuth; wersja `google-client-secret` i `GOOGLE_CLIENT_ID` w `production-gcp` przed przebiegiem z P5. Jeśli nie działa — GCP startuje bez Google, P8 = „nie dotyczy”, a przed P10 osobne sprawdzenie w kodzie, że przycisk Google nie pokazuje się bez `GOOGLE_CLIENT_ID`. Logowania Google na GCP nie testuje się przed oknem (zapis do pustego Cloud SQL rozbiłby `--expect-empty`) — pierwsza próba po 2.10 | P8, P12 |
-| L6 | Stripe: jeden endpoint; w oknie zmiana jego adresu (T8), bez nowego endpointu i bez rotacji sekretu — **nie używać „Roll secret”**. Przed oknem sekret podpisu tego endpointu jako wersja `stripe-webhook-secret` (zgodność skrótem, P9). Cofnięcie (V8, droga B) przywraca stary adres. Jeśli F7 = brak endpointu live (zadatki Stripe wyłączone): L6, P9 i T8 = „nie dotyczy”, zapis w notatce | P9, T8, B6 |
-| L7 | Zakaz scaleń do `main` od W0 do 2.10 z kodem 0 albo do końca drogi A/B, ogłoszony w kanale zespołu przed W0 przez osoby scalające do `main`. Bez zmian w ustawieniach GitHuba. Wyjątek: K1, scalany po 2.10 z kodem 0, czyli po zakazie. Kontrola: W4 | W4, T3 |
+| L6 | Stripe: jeden endpoint; w oknie zmiana jego adresu (T8), bez nowego endpointu i bez rotacji sekretu — **nie używać „Roll secret”**. Przed oknem sekret podpisu tego endpointu jako wersja `stripe-webhook-secret` (zgodność skrótem, P9). Cofnięcie (B3, droga B) przywraca stary adres. Jeśli F7 = brak endpointu live (zadatki Stripe wyłączone): L6, P9 i T8 = „nie dotyczy”, zapis w notatce | P9, T8, B3 |
+| L7 | Zakaz scaleń do `main` trwa od W0 do jednego z czterech zdarzeń: 2.10 z kodem 0, potwierdzenie drogi C odczytem `off`, koniec drogi A albo koniec drogi B. Ogłaszają go w kanale zespołu przed W0 osoby scalające do `main`. Ustawienia GitHuba bez zmian. Wyjątek: K1, scalany po zakazie (po 2.10 z kodem 0 albo po drodze C według sekcji 3, K1). Kontrola: W4 | W4, T3 |
 | L8 | Zakres próby generalnej na produkcji — sekcja 0.3 | — |
 | L9 | Wiersze tabeli 1.2 runbooka przełączenia dla kroków tej procedury — dopisane | kolumny „Zgoda” |
 
@@ -118,20 +121,22 @@ P9, P11, P12) i „przed oknem: zmienne środowiska `production-gcp` …” (P4,
 | P1 | filtr logów i nagłówki `no-referrer` na rewizji GCP (`docs/runbook-krok-d.md` sekcja 10a „Logi LB”, 10b) | sprawdzenia z sekcji 10b („Sprawdzenie”, „Próba filtra”) | jak w 10b |
 | P2 | certyfikat LB aktywny | `gcloud --project='<projekt GCP>' certificate-manager certificates describe myhelper-lb-cert --location=europe-central2 --format='value(managed.state)'` | `ACTIVE` |
 | P3 | adres LB znany (do notatki, nie do repo) | `gcloud --project='<projekt GCP>' compute addresses describe myhelper-lb-ip --region=europe-central2 --format='value(address)'` (do potwierdzenia w próbie) | jeden adres IPv4 = `<LB_IP>` |
-| P4 | adresy domeny na GCP | `gh variable get BETTER_AUTH_URL --env production-gcp` i `gh variable get NEXT_PUBLIC_APP_URL --env production-gcp`; przy L5 „Google działa” także `gh variable get GOOGLE_CLIENT_ID --env production-gcp` | oba adresy `https://app.nordsignal.cc`; `GOOGLE_CLIENT_ID` niepusty (L5) |
-| P5 | rewizja zbudowana po ustawieniu P4 (i wersji `google-client-secret`, L5) | `gh variable list --env production-gcp --json name,updatedAt` oraz `gh run list --workflow=deploy-cloud-run.yml --limit=1 --json headSha,conclusion,createdAt` (do potwierdzenia w próbie) | ostatni przebieg `success`, `headSha` = `<sha okna>`, `createdAt` późniejsze niż `updatedAt` zmiennych z P4; ruch nadal na Vercelu |
+| P4 | adresy domeny na GCP | `gh variable get BETTER_AUTH_URL --env production-gcp` i `gh variable get NEXT_PUBLIC_APP_URL --env production-gcp`; przy L5 „Google działa” także `[[ -n "$(gh variable get GOOGLE_CLIENT_ID --env production-gcp)" ]] && echo google_client_id_set=yes \|\| echo google_client_id_set=no` (identyfikator nie trafia na ekran) | oba adresy `https://app.nordsignal.cc`; `google_client_id_set=yes` (L5) |
+| P5 | rewizja zbudowana po ustawieniu P4 (i wersji `google-client-secret`, L5) | `gh variable list --env production-gcp --json name,updatedAt` oraz `gh run list --workflow=deploy-cloud-run.yml --limit=1 --json headSha,conclusion,createdAt`; przy L5 „Google działa” także `gcloud --project='<projekt GCP>' secrets versions list google-client-secret --limit=1 --format='value(name,createTime)'` (wszystkie do potwierdzenia w próbie) | ostatni przebieg `success`, `headSha` = `<sha okna>`, `createdAt` późniejsze niż `updatedAt` zmiennych z P4 i niż `createTime` wersji `google-client-secret` (L5); ruch nadal na Vercelu |
 | P6 | LB odpowiada przed utworzeniem rekordu | `curl -s -o /dev/null -w '%{http_code}\n' --resolve "app.nordsignal.cc:443:<LB_IP>" "https://app.nordsignal.cc/api/health"` (przy ingress `all`, przed W5) | `200` |
-| P7 | brak rekordu `app` | panel Cloudflare: brak rekordu `app` (A/AAAA/CNAME) do notatki; `dig +short app.nordsignal.cc @1.1.1.1` | pusty wynik; TTL nie dotyczy |
+| P7 | brak rekordu `app` | panel Cloudflare: brak rekordu `app` (A/AAAA/CNAME) do notatki; `dig +short NS nordsignal.cc`, potem `dig +short app.nordsignal.cc @<serwer NS strefy>`; `dig +short SOA nordsignal.cc` — ostatnie pole (minimum SOA) do notatki. Do T4 bez pytań o `app` do resolverów publicznych ani lokalnego (zapamiętałyby brak rekordu na czas minimum SOA, nie 60 s TTL) | pusty wynik z serwera autorytatywnego; minimum SOA w notatce |
 | P8 | Google OAuth (L5) | konsola Google: klient OAuth z F6 | lista przekierowań zawiera `https://app.nordsignal.cc/api/auth/callback/google` obok dotychczasowego, originy zawierają `https://app.nordsignal.cc`; przy L5 „nie działa” — „nie dotyczy” |
-| P9 | Stripe (L6) | panel Stripe live: endpoint z F7 ma adres `https://<domena Vercel Production>/api/stripe/webhook`. Zgodność sekretu: właściciel kopiuje sekret podpisu z panelu, potem `pbpaste \| shasum -a 256` i `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions access latest --secret=stripe-webhook-secret \| shasum -a 256` | adres na `<domena Vercel Production>` (na `app.nordsignal.cc` dopiero po T8); skróty równe — do notatki „równe tak/nie”, bez skrótów; przy F7 = brak — „nie dotyczy” |
+| P9 | Stripe (L6) | panel Stripe live: endpoint z F7 ma adres `https://<domena Vercel Production>/api/stripe/webhook`. Zgodność sekretu: właściciel kopiuje sekret podpisu z panelu, potem `pbpaste \| shasum -a 256` i `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions access latest --secret=stripe-webhook-secret \| shasum -a 256`, na końcu `pbcopy </dev/null` (sekret nie zostaje w schowku) | adres na `<domena Vercel Production>` (na `app.nordsignal.cc` dopiero po T8); skróty równe — do notatki „równe tak/nie”, bez skrótów; przy F7 = brak — „nie dotyczy” |
 | P10 | F1–F8 odczytane, wyniki „do potwierdzenia w próbie” w `docs/drills/` | — | brak decyzji otwartej (F2, F3, F7) |
 | P11 | Preview i starsze wdrożenia zamknięte (L3) | panel Vercela: Deployment Protection = „Standard Protection”; Environment Variables: `POSTGRES_URL` bez zakresu Preview; `curl -s -o /dev/null -w '%{http_code}\n' "https://<adres wdrożenia Preview>/api/health"` | ustawienie i zakresy jak obok; `401` albo `403` (do potwierdzenia w próbie) |
 | P12 | reguła zapory gotowa (L1) | panel Vercela → Firewall: reguła `Deny`, cały projekt, każda ścieżka i metoda | reguła istnieje, **wyłączona** |
 | P13 | PR K1 gotowy | PR z przekierowaniem w `vercel.json` (sekcja 3, K1) zrecenzowany (1 recenzja — konfiguracja routingu), niescalony | recenzja zatwierdzona, PR otwarty |
+| P14 | scalenie K1 nie wdraża GCP | `deploy-cloud-run.yml` w dniu okna ma tylko wyzwalacz `workflow_dispatch` (odczyt `on:` w pliku na `<sha okna>`) | tylko `workflow_dispatch`; inny wyzwalacz = okno nie startuje (zmiana wyzwalacza przed oknem to osobny krok i nowa decyzja) |
 
 ## 2. Zatrzymanie zapisów
 
-Kiedy: 2.1 (okno w przód) i 3.3 krok 1 (okno powrotu — sekcja 6). Kolejność
+Kiedy: 2.1 (okno w przód). 3.3 krok 1 (okno powrotu) — do przepisania razem
+z sekcją 6. Kolejność
 W0 → W7; W7 jest kontrolą końcową przed 2.2.
 
 | Krok | Działanie | Zgoda (1.2) |
@@ -174,6 +179,9 @@ Oczekiwane: `403`; dla starszego wdrożenia `403` albo `401` (ochrona z L3).
 
 **W2 — Preview.** Odczyt, bez zmiany: `curl` z P11 → `401` albo `403`, a
 `POSTGRES_URL` w panelu bez zakresu Preview. Inny wynik = stop przed 2.2.
+W2 nie jest pełną kontrolą: „Standard Protection” przepuszcza zalogowanych
+członków zespołu Vercela, a istniejące Preview mają wbudowany stary
+`POSTGRES_URL` — w oknie chroni je zapora całego projektu (W1), kontrolą jest W7.
 
 **W3 — crony Vercela.** Panel Vercela → Settings → Cron Jobs → „Disable Cron
 Jobs”. Oczekiwane: oba crony w panelu wyłączone. Okno planowane poza
@@ -186,7 +194,8 @@ set +x
 git ls-remote origin refs/heads/main
 ```
 
-Oczekiwane: `<sha okna>`. To samo polecenie przed 2.9 i na końcu okna; inny
+Oczekiwane: `<sha okna>`. To samo polecenie przed 2.9 i na końcu okna przed
+K1.1 (po K1 oczekiwany sha = scalenie K1); inny
 sha = nowe wdrożenie Vercela w oknie (ruchu nie dostaje — zapora działa na
 cały projekt, ale rozjazd sha): stop, droga A, wyjaśnienie przed nowym oknem.
 
@@ -252,21 +261,29 @@ LB nie dostaje odpowiedzi usługi).
 | T2 | LB odpowiada | `curl` z P6 | `200` (Cloud SQL zamrożony — odczyt działa) |
 | T3 | sha `main` | blok W4 | `<sha okna>` |
 | T4 | rekord `app` utworzony | panel Cloudflare: **nowy** rekord `A`, nazwa `app`, wartość `<LB_IP>`, **DNS only** (bez proxy), TTL 60 s | zapis w panelu bez błędu |
-| T5 | DNS wskazuje LB | `dig +short app.nordsignal.cc @1.1.1.1` i `@8.8.8.8` | `<LB_IP>` w obu |
-| T6 | odpowiada GCP, nie Vercel | `curl -s -o /dev/null -w '%{http_code}\n' "https://app.nordsignal.cc/api/health"` i `curl -sI "https://app.nordsignal.cc/api/health" \| grep -ci '^x-vercel-id:'` (do potwierdzenia w próbie) | `200` i `0` |
-| T7 | alert uptime | konsola Cloud Monitoring: polityka `myhelper-app-health-alert` włączona (`docs/runbook-krok-d.md` sekcja 10a) | stan włączony |
+| T5 | DNS wskazuje LB | najpierw serwer autorytatywny: `dig +short app.nordsignal.cc @<serwer NS strefy>` (z P7); potem `dig +short app.nordsignal.cc @1.1.1.1` i `@8.8.8.8` | `<LB_IP>` z serwera autorytatywnego; z resolverów publicznych `<LB_IP>` najpóźniej po minimum SOA z P7 |
+| T6 | odpowiada GCP, nie Vercel | `curl -s -o /dev/null -w '%{http_code}\n' "https://app.nordsignal.cc/api/health"` i `curl -sI "https://app.nordsignal.cc/api/health" \| grep -ci '^x-vercel-id:'` (do potwierdzenia w próbie); gdy lokalny resolver nie zna jeszcze rekordu — te same dwa polecenia z `--resolve "app.nordsignal.cc:443:<LB_IP>"` jako kontrola zastępcza | `200` i `0` |
+| T7 | alert uptime | konsola Cloud Monitoring: włączyć politykę `myhelper-app-health-alert` (`docs/runbook-krok-d.md` sekcja 10a), potem odczyt stanu | włączona |
 | T8 | adres webhooka Stripe (L6) | panel Stripe live → endpoint z F7 → zmiana adresu z `https://<domena Vercel Production>/api/stripe/webhook` na `https://app.nordsignal.cc/api/stripe/webhook`; **bez „Roll secret”** | endpoint włączony, nowy adres, sekret bez zmian; przy F7 = brak — „nie dotyczy” |
 
-T5 albo T6 z wynikiem innym niż oczekiwany po dwóch minutach (dwa TTL) =
-stop: odczyt stanu (2.10, blok „Odczyt stanu”), dalej droga B albo C według
-runbooka przełączenia. Po T8 — 2.10. Od T1 do 2.10 zapisy na GCP kończą się
-błędem tylko do odczytu (2.9) — odcinek ma być krótki. Zdarzenia Stripe
+T5 z serwera autorytatywnego bez `<LB_IP>` po dwóch minutach (dwa TTL) albo
+T6 (także z `--resolve`) z wynikiem innym niż oczekiwany = stop: odczyt
+stanu (2.10, blok „Odczyt stanu”), dalej droga B albo C według runbooka
+przełączenia. Resolver publiczny bez `<LB_IP>` przy poprawnym wyniku
+z serwera autorytatywnego to buforowany brak rekordu, nie powód do stopu —
+ponowić po minimum SOA, wynik do notatki. Po T8 — 2.10. Od T1 do 2.10 zapisy
+na GCP kończą się błędem tylko do odczytu (2.9) — odcinek ma być krótki. Zdarzenia Stripe
 odrzucone przez zaporę w oknie Stripe ponawia na bieżący adres endpointu (do
 potwierdzenia w próbie, sekcja 0.3). OAuth bez zmian w oknie (P8).
 
 **K1 — przekierowanie `<domena Vercel Production>` → `app.nordsignal.cc`.**
-Dopiero po 2.10 z kodem 0 (po zakazie scaleń z L7). Zgoda: wiersz 1.2 „po 2.10
-z kodem 0: scalenie K1 …”. To wdrożenie Vercel Production.
+Wykonuje się po 2.10 z kodem 0 albo po drodze C, czyli zawsze po zakazie
+scaleń z L7. Po drodze C K1 wymaga, żeby T5 i T6 dały oczekiwany wynik. Jeśli
+nie dały: K1 się nie wykonuje, reguła zapory zostaje `Deny` dla wszystkiego
+(nie wyłączać, bo GCP mógł zapisać), do notatki okna idzie wpis „droga C bez
+K1: aplikacja wyłączona dla `<domena Vercel Production>`”, a dalej decyduje
+właściciel na miejscu. Zgoda: wiersz 1.2 „po 2.10 z kodem 0 albo po drodze C
+…”. To wdrożenie Vercel Production.
 
 | Krok | Działanie | Polecenie | Oczekiwane |
 |---|---|---|---|
@@ -289,33 +306,32 @@ przyjęte (odcinek krótki, zapisy na GCP i tak zablokowane).
 
 | Krok | Działanie | Polecenie | Oczekiwane |
 |---|---|---|---|
-| B1 | rekord `app` usunięty | panel Cloudflare: usunięcie rekordu `A app` z T4 | zapis bez błędu |
-| B2 | rekordu brak | `dig +short app.nordsignal.cc @1.1.1.1` i `@8.8.8.8` | pusty wynik (po co najmniej 60 s) |
-| B3 | adres webhooka Stripe przywrócony | panel Stripe live: adres endpointu z powrotem `https://<domena Vercel Production>/api/stripe/webhook`, bez „Roll secret” | adres jak w P9; przy F7 = brak — „nie dotyczy” |
+| B1 | rekord `app` usunięty (jeśli T4 wykonany) | panel Cloudflare: usunięcie rekordu `A app` z T4 | zapis bez błędu; T4 niewykonany — „nie dotyczy” |
+| B2 | rekordu brak | `dig +short app.nordsignal.cc @<serwer NS strefy>` (z P7) | pusty wynik; T4 niewykonany — „nie dotyczy” |
+| B3 | adres webhooka Stripe przywrócony (jeśli T8 wykonany) | panel Stripe live: adres endpointu z powrotem `https://<domena Vercel Production>/api/stripe/webhook`, bez „Roll secret” | adres jak w P9; przy F7 = brak — „nie dotyczy” |
 | B4 | ingress `internal` | blok W5 | odczyt `internal`, oba `curl` ≠ `200` |
 | B5 | alert uptime | konsola: polityka `myhelper-app-health-alert` z powrotem wyłączona, jeśli T7 ją włączył | stan wyłączony |
 
-Potem droga A od pkt 1 (odmrożenie Neona, Cloud SQL), a jej pkt 3 = sekcja 5
-(tam R1 wyłącza regułę zapory — część zgody drogi B).
+Potem droga A od pkt 1 (odmrożenie Neona, Cloud SQL). Jej pkt 3 to sekcja 5,
+a R1 wyłącza tam regułę zapory (zgoda: wiersz „start okna”).
 
 ## 5. Wznowienie stanu sprzed okna — droga A pkt 3
 
 Po drodze A pkt 1–2 (Neon odmrożony, Cloud SQL przywrócony albo bez zmian).
-Zgoda: wiersz 1.2 „start okna” obejmuje zatrzymanie; wznowienie stanu sprzed
-okna jest jego cofnięciem — zapis w notatce okna. Przy drodze B wyłączenie
-reguły zapory obejmuje wiersz „przełączenie ruchu …”.
+Zgoda: kolumna „Zgoda” niżej. Ta sama dotyczy drogi A, do której doszło się
+po drodze B.
 
-| Krok | Działanie | Polecenie | Oczekiwane |
-|---|---|---|---|
-| R1 | Vercel Production przyjmuje ruch | panel Vercela → Firewall: reguła z L1 **wyłączona** (nie usunięta — zostaje na następne okno) | reguła wyłączona |
-| R2 | Preview | bez zmian (L3 na stałe: ochrona zostaje, `POSTGRES_URL` bez zakresu Preview) | `curl` z P11 → `401` albo `403` |
-| R3 | crony Vercela | panel Vercela → Settings → Cron Jobs → „Enable” | oba crony włączone |
-| R4 | ingress `all` dopiero po kontrolach drogi A pkt 2 | blok T1 | odczyt `all` |
-| R5 | zadania Scheduler jak w W0 | niżej | lista = lista z W0 |
-| R6 | odpowiada Vercel | `curl -s -o /dev/null -w '%{http_code}\n' "https://<domena Vercel Production>/api/health"` i `curl -sI "https://<domena Vercel Production>/api/health" \| grep -ci '^x-vercel-id:'` | `200` i `1` |
+| Krok | Działanie | Polecenie | Oczekiwane | Zgoda (1.2) |
+|---|---|---|---|---|
+| R1 | Vercel Production przyjmuje ruch | panel Vercela → Firewall: reguła z L1 **wyłączona** (nie usunięta — zostaje na następne okno) | reguła wyłączona | „start okna” |
+| R2 | Preview | bez zmian (L3 na stałe: ochrona zostaje, `POSTGRES_URL` bez zakresu Preview) | `curl` z P11 → `401` albo `403` | — (odczyt) |
+| R3 | crony Vercela | panel Vercela → Settings → Cron Jobs → „Enable” | oba crony włączone | „start okna” |
+| R4 | ingress `all` dopiero po kontrolach drogi A pkt 2 | blok T1 | odczyt `all` | „start okna” |
+| R5 | zadania Scheduler jak w W0 | niżej | lista = lista z W0 | „po oknie albo przy wycofaniu (droga A pkt 3) …” |
+| R6 | odpowiada Vercel | `curl -s -o /dev/null -w '%{http_code}\n' "https://<domena Vercel Production>/api/health"` i `curl -sI "https://<domena Vercel Production>/api/health" \| grep -ci '^x-vercel-id:'` | `200` i `1` | — (odczyt) |
 
-R5 — tylko zadania, które w W0 miały `ENABLED` (wiersz 1.2 „po oknie:
-wznowienie zadań Scheduler …”):
+R5 — tylko zadania, które w W0 miały `ENABLED` (wiersz 1.2 „po oknie albo
+przy wycofaniu (droga A pkt 3) …”):
 
 ```bash
 set +x
@@ -328,10 +344,12 @@ Oczekiwane: `resumed <nazwa>` dla każdej nazwy, kod 0; lista = lista z W0.
 w tabeli (`scheduler.sh:112-129`). Zmienne w jednym wierszu z poleceniem
 (w zsh `env $S` nie dzieli zmiennej na słowa).
 
-**Okno w przód zakończone (2.10 z kodem 0, albo droga C).** Neon jest
-zamrożony. Vercel: K1 scalony, reguła zapory zawężona do metod innych niż
-`GET`/`HEAD` (K1.2), crony Vercela wyłączone na stałe (L2). Ingress zostaje
-`all`. Scheduler: tylko R5.
+**Okno w przód zakończone (2.10 z kodem 0 albo droga C).** Neon jest
+zamrożony. Vercel: K1 scalony i reguła zapory zawężona do metod innych niż
+`GET`/`HEAD` (K1.2). Wyjątek: droga C bez K1 (sekcja 3, K1), gdzie reguła
+zostaje `Deny` dla wszystkiego. Crony Vercela są wyłączone na stałe (L2).
+Ingress zostaje `all`. Scheduler: tylko R5, a po drodze C według decyzji
+właściciela (runbook przełączenia, droga C).
 
 **Stop w oknie powrotu** (3.3 krok 2 „stop” i „Stop w kroku 7 albo 8” — ruch
 zostaje na GCP): R4 i R5; Vercel bez zmian (przekierowanie i zawężona reguła).
