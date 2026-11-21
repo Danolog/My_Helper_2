@@ -220,8 +220,8 @@ async function seed() {
   // fiscal/socialPosts) pozostaja wylaczone globalnie niezaleznie od zapisu.
   //
   // `deposits`: numer BLIK salonu w ksztalcie zapisu PUT /api/salon/blik-deposit
-  // ({ blikPhone w E.164, blikConsentAt ISO }); czyta go POST /api/deposits/blik-booking
-  // (`settingsJson -> 'deposits' -> 'blikPhone'`, wystarczy niepusty napis).
+  // ({ blikPhone w E.164, blikConsentAt ISO, blikConsentVersion }); czyta go POST /api/deposits/blik-booking
+  // (`settingsJson -> 'deposits' -> 'blikPhone'`: niepusty napis, obok data zgody `blikConsentAt`).
   // Numer TESTOWY z src/lib/test-phone.ts (704 = telefon salonu), nigdy prawdziwy:
   // sendSms go blokuje, a "+48 000" nie jest przydzielany abonentom. Nie jest
   // komorkowy, wiec PUT by go odrzucil — w seedzie celowo, odczyt trasy go przyjmuje.
