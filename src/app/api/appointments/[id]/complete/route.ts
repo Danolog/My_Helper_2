@@ -4,9 +4,6 @@ import type { LoyaltySettings } from "@/app/api/salons/[id]/loyalty-settings/rou
 import { validateBody, completeAppointmentSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_COMMISSION_RATE } from "@/lib/constants";
-// ADR-001 R2b grupa B: transakcja domykająca wizytę czyta `salons` (polityka RLS po
-// owner_id) — czeka na akcesor forOwner; brama zasobu [id] idzie przez forSalon.
-import { db } from "@/lib/db";
 import { resolveModules } from "@/lib/features";
 import { logger } from "@/lib/logger";
 import { getSalonContext } from "@/lib/salon-context";
@@ -25,14 +22,7 @@ import {
   loyaltyTransactions,
   salons,
 } from "@/lib/schema";
-import { forSalon } from "@/lib/server/repository";
-
-/**
- * Database query executor — works for both the top-level `db` instance
- * and the `tx` parameter inside a `db.transaction()` callback.
- * Extracts the transaction type from drizzle's own `db.transaction` signature.
- */
-type DbExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
+import { forSalon, type DbTx } from "@/lib/server/repository";
 
 /**
  * Check if a product has low stock and create a notification if needed.
@@ -40,7 +30,7 @@ type DbExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * Accepts a `tx` executor so it can participate in a surrounding transaction.
  */
 async function checkAndNotifyLowStock(
-  tx: DbExecutor,
+  tx: DbTx,
   product: {
     id: string;
     salonId: string;
@@ -178,7 +168,10 @@ export async function POST(
     // All mutating operations are wrapped in a single transaction so that
     // a failure at any step (e.g. stock deduction, commission insert) rolls
     // back every preceding write, keeping the database consistent.
-    const txResult = await db.transaction(async (tx) => {
+    // Kontekst RLS salonu z sesji (#193): tabele pośrednie (treatment_history,
+    // appointment_materials, employee_commissions, loyalty_transactions) i
+    // `salons` (polityka `tenant_self`) widzą tylko ten salon; jawne filtry zostają.
+    const txResult = await forSalon(salonId).raw(async (tx) => {
       // 1. Save or update treatment record
       const [existingTreatment] = await tx
         .select()
@@ -220,7 +213,7 @@ export async function POST(
       const [updatedAppointment] = await tx
         .update(appointments)
         .set({ status: "completed" })
-        .where(eq(appointments.id, id))
+        .where(and(eq(appointments.id, id), eq(appointments.salonId, salonId)))
         .returning();
 
       logger.info("Appointment marked as completed", { appointmentId: id });
@@ -237,7 +230,7 @@ export async function POST(
         const [emp] = await tx
           .select({ commissionRate: employees.commissionRate })
           .from(employees)
-          .where(eq(employees.id, appointment.employeeId))
+          .where(and(eq(employees.id, appointment.employeeId), eq(employees.salonId, salonId)))
           .limit(1);
         if (emp?.commissionRate) {
           commPct = parseFloat(emp.commissionRate);
@@ -342,7 +335,7 @@ export async function POST(
           await tx
             .update(products)
             .set({ quantity: newQty.toString() })
-            .where(eq(products.id, linked.productId));
+            .where(and(eq(products.id, linked.productId), eq(products.salonId, salonId)));
 
           // Zapis zuzycia do appointmentMaterials — tabeli, ktora czytaja
           // raporty materialow/rentownosci (UAT S-2). Wczesniej pisalismy do
@@ -414,7 +407,7 @@ export async function POST(
           const [salon] = await tx
             .select({ id: salons.id, settingsJson: salons.settingsJson })
             .from(salons)
-            .where(eq(salons.id, appointment.salonId))
+            .where(eq(salons.id, salonId))
             .limit(1);
 
           if (salon) {

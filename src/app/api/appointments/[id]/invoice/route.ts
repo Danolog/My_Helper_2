@@ -3,10 +3,6 @@ import { eq, and, count } from "drizzle-orm";
 import { validateBody, invoiceSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { DEFAULT_VAT_RATE } from "@/lib/constants";
-// ADR-001 R2b grupa B: odczyt `salons` (dane sprzedawcy; polityka RLS po owner_id)
-// czeka na akcesor forOwner — odczyty poboczne świadomie surowe db;
-// brama zasobu [id] i zapisy faktur idą przez forSalon.
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import {
@@ -203,58 +199,82 @@ export async function POST(
       });
     }
 
-    // 3. Fetch related data
-    let clientFullName: string | null = null;
-    if (appointment.clientId) {
-      const [client] = await db
-        .select({ firstName: clients.firstName, lastName: clients.lastName })
-        .from(clients)
-        .where(eq(clients.id, appointment.clientId))
-        .limit(1);
-      if (client) {
-        clientFullName = `${client.firstName} ${client.lastName}`;
-      }
-    }
+    // 3–5. Odczyty poboczne (klient, pracownik, usługa, materiały, dane
+    // sprzedawcy) w kontekście RLS salonu z sesji (#193): `salons` ma politykę
+    // `tenant_self`, `appointment_materials` pośrednią przez wizytę. Jawne
+    // filtry salonu zostają tam, gdzie tabela ma `salon_id`.
+    const salonId = appointment.salonId || userSalonId;
+    const related = await forSalon(userSalonId).raw(async (tx) => {
+      const clientId = appointment.clientId;
+      const client = clientId
+        ? (
+            await tx
+              .select({ firstName: clients.firstName, lastName: clients.lastName })
+              .from(clients)
+              .where(and(eq(clients.id, clientId), eq(clients.salonId, userSalonId)))
+              .limit(1)
+          )[0]
+        : undefined;
 
-    let employeeName: string | null = null;
-    if (appointment.employeeId) {
-      const [employee] = await db
+      const employeeId = appointment.employeeId;
+      const employee = employeeId
+        ? (
+            await tx
+              .select({
+                firstName: employees.firstName,
+                lastName: employees.lastName,
+              })
+              .from(employees)
+              .where(and(eq(employees.id, employeeId), eq(employees.salonId, userSalonId)))
+              .limit(1)
+          )[0]
+        : undefined;
+
+      const serviceId = appointment.serviceId;
+      const service = serviceId
+        ? (
+            await tx
+              .select({ name: services.name, basePrice: services.basePrice })
+              .from(services)
+              .where(and(eq(services.id, serviceId), eq(services.salonId, userSalonId)))
+              .limit(1)
+          )[0]
+        : undefined;
+
+      // 4. Materials used during the appointment
+      const materialsRows = await tx
         .select({
-          firstName: employees.firstName,
-          lastName: employees.lastName,
+          quantityUsed: appointmentMaterials.quantityUsed,
+          pricePerUnit: products.pricePerUnit,
+          productName: products.name,
         })
-        .from(employees)
-        .where(eq(employees.id, appointment.employeeId))
-        .limit(1);
-      if (employee) {
-        employeeName = `${employee.firstName} ${employee.lastName}`;
-      }
-    }
+        .from(appointmentMaterials)
+        .leftJoin(products, eq(appointmentMaterials.productId, products.id))
+        .where(eq(appointmentMaterials.appointmentId, id));
 
-    let serviceName: string | null = null;
-    let servicePrice = "0";
-    if (appointment.serviceId) {
-      const [service] = await db
-        .select({ name: services.name, basePrice: services.basePrice })
-        .from(services)
-        .where(eq(services.id, appointment.serviceId))
+      // 5. Get salon info
+      const [salon] = await tx
+        .select({
+          name: salons.name,
+          address: salons.address,
+          settingsJson: salons.settingsJson,
+        })
+        .from(salons)
+        .where(eq(salons.id, salonId))
         .limit(1);
-      if (service) {
-        serviceName = service.name;
-        servicePrice = service.basePrice;
-      }
-    }
 
-    // 4. Calculate materials cost
-    const materialsRows = await db
-      .select({
-        quantityUsed: appointmentMaterials.quantityUsed,
-        pricePerUnit: products.pricePerUnit,
-        productName: products.name,
-      })
-      .from(appointmentMaterials)
-      .leftJoin(products, eq(appointmentMaterials.productId, products.id))
-      .where(eq(appointmentMaterials.appointmentId, id));
+      return { client, employee, service, materialsRows, salon };
+    });
+
+    const { client, employee, service, materialsRows, salon } = related;
+    const clientFullName: string | null = client
+      ? `${client.firstName} ${client.lastName}`
+      : null;
+    const employeeName: string | null = employee
+      ? `${employee.firstName} ${employee.lastName}`
+      : null;
+    const serviceName: string | null = service ? service.name : null;
+    const servicePrice = service ? service.basePrice : "0";
 
     const materialsCost = materialsRows.reduce((sum, m) => {
       if (m.pricePerUnit) {
@@ -262,18 +282,6 @@ export async function POST(
       }
       return sum;
     }, 0);
-
-    // 5. Get salon info
-    const salonId = appointment.salonId || userSalonId;
-    const [salon] = await db
-      .select({
-        name: salons.name,
-        address: salons.address,
-        settingsJson: salons.settingsJson,
-      })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
 
     const salonSettings = (salon?.settingsJson as Record<string, unknown>) || {};
     const fiscalSettings = (salonSettings.fiscal || {}) as Record<string, unknown>;
