@@ -56,8 +56,16 @@ export async function GET(
     // Fetch deposit payment info
     let depositPayment = null;
     if (row.appointment.depositAmount && parseFloat(row.appointment.depositAmount) > 0) {
+      // Jawne pola (ADR-002 §2.5): bez identyfikatorów Stripe i powodu zwrotu.
       const depositResult = await db
-        .select()
+        .select({
+          amount: depositPayments.amount,
+          currency: depositPayments.currency,
+          paymentMethod: depositPayments.paymentMethod,
+          blikPhoneNumber: depositPayments.blikPhoneNumber,
+          status: depositPayments.status,
+          paidAt: depositPayments.paidAt,
+        })
         .from(depositPayments)
         .where(eq(depositPayments.appointmentId, id))
         .limit(1);
@@ -68,7 +76,11 @@ export async function GET(
     let variant = null;
     if (row.appointment.variantId) {
       const variantResult = await db
-        .select()
+        .select({
+          name: serviceVariants.name,
+          priceModifier: serviceVariants.priceModifier,
+          durationModifier: serviceVariants.durationModifier,
+        })
         .from(serviceVariants)
         .where(eq(serviceVariants.id, row.appointment.variantId))
         .limit(1);
