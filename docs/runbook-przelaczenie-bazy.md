@@ -73,7 +73,8 @@ Przygotowanie terminala w dniu próby i w dniu okna, w tej kolejności: 1.7
    **cofnięcie** przełączenia ruchu (wycofanie, droga B w sekcji 2, i powrót,
    3.3 krok 10). Każdy krok z poleceniem i oczekiwanym wynikiem. **Bez tej
    procedury nie startuje ani próba generalna, ani okno.** Ten runbook (2.1,
-   2.9, wycofanie, 3.3) tylko się do niej odwołuje.
+   2.9, wycofanie, 3.3) tylko się do niej odwołuje. Procedura:
+   `docs/runbook-zatrzymanie-zapisow.md`.
 2. **Role Cloud SQL w stanie docelowym** — osobny krok wykonywany za zgodą
    właściciela, z recenzją bezpieczeństwa, **przed** próbą generalną (żeby próba
    sprawdziła stan docelowy; instancja próbna z 1.1 jest klonem z tym stanem):
@@ -379,10 +380,15 @@ Każda zgoda osobno, zapisana w notatce okna przed wykonaniem kroku:
 |---|---|
 | przed próbą generalną, na instancji produkcyjnej Cloud SQL: zmiana ról (`REVOKE`/`GRANT`), kopia na żądanie `pre-migrate`, przebieg workflow z migracjami (`run_migrations=true`, może wdrożyć rewizję usługi), czyszczenie `auth_rate_limit` przez `--expect-empty` (kroki 3 i 6, `compare.sh:40-44` — to też zapis). Jeśli właściciel daje zgodę na zmianę ról i na przebieg osobno — dwa wiersze; jedna zgoda nie obejmuje drugiej | 1.0 pkt 2 |
 | przywrócenie z kopii `pre-migrate` po czerwonym jobie | 1.0 pkt 2 |
-| start okna: zatrzymanie zapisów aplikacji i cronów, ingress Cloud Run `internal`, zamrożenie produkcyjnego Neona | 2.1–2.2 |
+| próba generalna na produkcji (procedura zatrzymania zapisów, L8): ingress Cloud Run `internal` i z powrotem `all`, pauza i wznowienie zadań Scheduler, przełącznik cronów Vercela wyłącz/włącz, reguła zapory Vercela na adresie jednego starszego wdrożenia (utworzenie, sprawdzenie, usunięcie) | 1.1; procedura zatrzymania zapisów L8 |
+| przed oknem, poza repo, bez wpływu na ruch: ochrona wdrożeń Vercela „Standard Protection”, usunięcie `POSTGRES_URL` z zakresu Preview, utworzenie **wyłączonej** reguły zapory Vercela (`Deny`, cały projekt), dopisanie adresu przekierowania i originu `app.nordsignal.cc` do klienta Google OAuth, wersja `stripe-webhook-secret` = sekret endpointu Stripe. Każda pozycja potwierdzana osobno | procedura zatrzymania zapisów L1, L3, L5, L6 |
+| przed oknem: zmienne środowiska `production-gcp` (`BETTER_AUTH_URL`, `NEXT_PUBLIC_APP_URL` = `https://app.nordsignal.cc`, `GOOGLE_CLIENT_ID` według L5), wersja `google-client-secret` według L5 i przebieg `deploy-cloud-run.yml` z `main` o `<sha okna>` (nowa rewizja usługi, ruch nadal na Vercelu) | procedura zatrzymania zapisów, sekcja 1 (P4, P5) |
+| start okna: zatrzymanie zapisów aplikacji i cronów, ingress Cloud Run `internal`, zamrożenie produkcyjnego Neona; włączenie reguły zapory Vercela (L1), wyłączenie cronów Vercela (L2) | 2.1–2.2 |
 | kopia na żądanie Cloud SQL „przed importem” i — w razie potrzeby — przywrócenie z niej | 2.4; wycofanie (sekcja 2) |
-| przełączenie ruchu aplikacji na GCP, ingress Cloud Run z powrotem `all`; przy wycofaniu (droga B) cofnięcie przełączenia | 2.9; wycofanie (sekcja 2) |
+| przełączenie ruchu aplikacji na GCP, ingress Cloud Run z powrotem `all`; przy wycofaniu (droga B) cofnięcie przełączenia; utworzenie rekordu `A app` → LB (DNS only), zmiana adresu endpointu webhooka Stripe; przy wycofaniu (droga B) usunięcie rekordu `app`, przywrócenie adresu endpointu i wyłączenie reguły zapory | 2.9; wycofanie (sekcja 2) |
 | odmrożenie Cloud SQL (początek zapisów na GCP) | 2.10 |
+| po 2.10 z kodem 0: scalenie K1 (przekierowanie `<domena Vercel Production>` → `app.nordsignal.cc`, wdrożenie Vercel Production) i zawężenie reguły zapory Vercela do metod innych niż `GET`/`HEAD` | procedura zatrzymania zapisów L4 (K1) |
+| po oknie: wznowienie zadań Scheduler — wyłącznie tych, które w W0 miały `ENABLED` (lista z notatki okna) | 2.10; procedura zatrzymania zapisów, sekcja 5 (R5) |
 | okno powrotu (osobne okno, osobna zgoda) z gałęzią Neona „przed powrotem” i kopią Cloud SQL | sekcja 3 |
 
 ### 1.3 Zatrzymanie zapisów PRZED zamrożeniem
