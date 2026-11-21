@@ -1086,9 +1086,11 @@ export const updatePromoCodeSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+// Salon trasa bierze z sesji (requireSalonStaff). salonId z body jest tylko
+// porównywany z salonem sesji (inny => 403); brak albo null = salon sesji.
 export const validatePromoCodeSchema = z.object({
   code: requiredString("Kod promocyjny"),
-  salonId: requiredString("Salon ID"),
+  salonId: z.string().nullable().optional(),
   serviceId: z.string().optional(),
 });
 

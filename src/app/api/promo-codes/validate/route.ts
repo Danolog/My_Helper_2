@@ -3,6 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { withApiHandler } from "@/lib/api-handler";
 import { validatePromoCodeSchema } from "@/lib/api-validation";
 import { isPromotionTypeFrozen } from "@/lib/features";
+import { requireSalonStaff } from "@/lib/salon-context";
 import { promoCodes, promotions } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import type { z } from "zod";
@@ -12,14 +13,25 @@ export const POST = withApiHandler(
     auth: "user",
     schema: validatePromoCodeSchema as z.ZodType<{
       code: string;
-      salonId: string;
+      salonId?: string | null;
       serviceId?: string;
     }>,
     logLabel: "[PromoCodes Validate API] POST",
     errorMessage: "Failed to validate promo code",
   },
   async ({ body }) => {
-    const { code, salonId } = body;
+    // Salon WYŁĄCZNIE z sesji. Wcześniej forSalon(body.salonId) pozwalał
+    // każdemu zalogowanemu kontu sprawdzać (i zgadywać) kody dowolnego salonu.
+    // body.salonId tylko porównywany (inny => 403). Kod sprawdza się przy
+    // rezerwacji z panelu, do której ma dostęp właściciel i recepcja.
+    const guard = await requireSalonStaff({
+      requestedSalonId: body.salonId ?? null,
+      roles: ["receptionist"],
+    });
+    if (guard.error) return guard.error;
+    const salonId = guard.ctx.salonId;
+
+    const { code } = body;
 
     const normalizedCode = code.toUpperCase().trim();
 

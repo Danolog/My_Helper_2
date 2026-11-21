@@ -244,6 +244,8 @@ describe("POST /api/promo-codes/validate — kod powiązany z promocją zamrożo
   };
 
   function validate() {
+    // Trasa bierze salon z sesji — właściciel salonu A.
+    m.asOwnerOf(SALON_A);
     return validateCode(
       new Request("http://localhost/api/promo-codes/validate", {
         method: "POST",
