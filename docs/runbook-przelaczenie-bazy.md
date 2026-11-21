@@ -46,8 +46,8 @@ Powiązane: `docs/runbook-krok-d.md` sekcja 9 (tunel do Cloud SQL), sekcja 3.6a
   W blokach są wyłącznie symbole zastępcze w `<…>`; prawdziwych nazw hostów,
   instancji, projektów i haseł nie zapisuje się w repo, w notatce okna ani w
   zgłoszeniach. Wyjątek — tylko w notatce okna (nigdy w repo ani
-  w zgłoszeniach): host `<domena Vercel Production>`, adresy `*.vercel.app`
-  wybrane według F1 i 0.3 procedury zatrzymania zapisów oraz `<LB_IP>`.
+  w zgłoszeniach): host `<domena Vercel Production>` i pozostałe domeny projektu z F1,
+  adresy `*.vercel.app` wybrane według F1 i 0.3 procedury zatrzymania zapisów oraz `<LB_IP>`.
   Identyfikator projektu GCP i nazwy instancji nie mają wyjątku.
 - **Strażnik zmiennej w tym samym wierszu.** Polecenia gcloud zaczynają się od
   `: "${CSQL_INSTANCE:?}" &&`: przy pustej zmiennej zsh przerywa cały wiersz,

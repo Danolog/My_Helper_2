@@ -126,7 +126,7 @@ P9, P11, P12) i „przed oknem: zmienne środowiska `production-gcp` …” (P4,
 | P6 | LB odpowiada przed utworzeniem rekordu | `curl -s -o /dev/null -w '%{http_code}\n' --resolve "app.nordsignal.cc:443:<LB_IP>" "https://app.nordsignal.cc/api/health"` (przy ingress `all`, przed W5) | `200` |
 | P7 | brak rekordu `app` | panel Cloudflare: brak rekordu `app` (A/AAAA/CNAME) do notatki; `dig +short NS nordsignal.cc`, potem `dig +short app.nordsignal.cc @<serwer NS strefy>`; `dig +short SOA nordsignal.cc` — ostatnie pole (minimum SOA) do notatki. Do T4 bez pytań o `app` do resolverów publicznych ani lokalnego (zapamiętałyby brak rekordu na czas minimum SOA, nie 60 s TTL) | pusty wynik z serwera autorytatywnego; minimum SOA w notatce |
 | P8 | Google OAuth (L5) | konsola Google: klient OAuth z F6 | lista przekierowań zawiera `https://app.nordsignal.cc/api/auth/callback/google` obok dotychczasowego, originy zawierają `https://app.nordsignal.cc`; przy L5 „nie działa” — „nie dotyczy” |
-| P9 | Stripe (L6) | panel Stripe live: endpoint z F7 ma adres `https://<domena Vercel Production>/api/stripe/webhook`. Zgodność sekretu: właściciel kopiuje sekret podpisu z panelu, potem `pbpaste \| shasum -a 256` i `CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions access latest --secret=stripe-webhook-secret \| shasum -a 256`, na końcu `pbcopy </dev/null` (sekret nie zostaje w schowku) | adres na `<domena Vercel Production>` (na `app.nordsignal.cc` dopiero po T8); skróty równe — do notatki „równe tak/nie”, bez skrótów; przy F7 = brak — „nie dotyczy” |
+| P9 | Stripe (L6) | panel Stripe live: endpoint z F7 ma adres `https://<domena Vercel Production>/api/stripe/webhook`. Zgodność sekretu: właściciel kopiuje sekret podpisu z panelu, potem jedno porównanie bez wypisywania skrótów: `[ "$(pbpaste \| shasum -a 256)" = "$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 gcloud --project='<projekt GCP>' secrets versions access latest --secret=stripe-webhook-secret \| shasum -a 256)" ] && echo stripe_secret_match=yes \|\| echo stripe_secret_match=no; pbcopy </dev/null` (na ekranie tylko `yes`/`no`; sekret nie zostaje w schowku) | adres na `<domena Vercel Production>` (na `app.nordsignal.cc` dopiero po T8); `stripe_secret_match=yes` — do notatki „równe tak/nie”; przy F7 = brak — „nie dotyczy” |
 | P10 | F1–F8 odczytane, wyniki „do potwierdzenia w próbie” w `docs/drills/` | — | brak decyzji otwartej (F2, F3, F7) |
 | P11 | Preview i starsze wdrożenia zamknięte (L3) | panel Vercela: Deployment Protection = „Standard Protection”; Environment Variables: `POSTGRES_URL` bez zakresu Preview; `curl -s -o /dev/null -w '%{http_code}\n' "https://<adres wdrożenia Preview>/api/health"` | ustawienie i zakresy jak obok; `401` albo `403` (do potwierdzenia w próbie) |
 | P12 | reguła zapory gotowa (L1) | panel Vercela → Firewall: reguła `Deny`, cały projekt, każda ścieżka i metoda | reguła istnieje, **wyłączona** |
@@ -322,8 +322,10 @@ Vercel Production.
 | K1.3 | przekierowanie działa | `curl -sI "https://<domena Vercel Production>/salon/x" \| grep -i '^location:'` | `location: https://app.nordsignal.cc/salon/x` |
 | K1.4 | zapisy na Vercelu nadal blokowane | `curl -s -o /dev/null -w '%{http_code}\n' -X POST "https://<domena Vercel Production>/api/health"` (do potwierdzenia przy K1) | `403`; inny wynik = reguła z powrotem `Deny` dla wszystkiego (zgoda jak K1.2), decyzja właściciela |
 
-Każda inna domena z F1 — to samo przekierowanie (osobny wiersz w PR,
-rozstrzygnięty przed P13). Przy F8 = tak K1 jest obowiązkowy w tym samym oknie.
+Każda inna domena z F1 jest objęta tym samym przekierowaniem: reguła
+`/:path*` bez warunku `host` działa na wszystkich domenach projektu Vercela.
+Nazw domen nie wpisuje się do `vercel.json` ani do PR (repo publiczne);
+lista domen z F1 tylko w notatce okna, sprawdzenie K1.3 dla każdej z nich. Przy F8 = tak K1 jest obowiązkowy w tym samym oknie.
 
 ## 4. Cofnięcie przełączenia ruchu — droga B
 
