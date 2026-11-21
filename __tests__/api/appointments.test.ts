@@ -2148,7 +2148,7 @@ describe("PUT /api/appointments/[id] — referencje i zadatek (P1)", () => {
     expect(updated(updateChain).depositPaid).toBe(true);
   });
 
-  it("owner depositPaid false→true: wpis owner_edit w tym samym tx, z odczytu z blokadą wiersza", async () => {
+  it("owner depositPaid false→true: wpis owner_edit z odczytu z blokadą wiersza", async () => {
     const { lockedChain } = arrangeDeposit(false);
     const res = await put({ depositPaid: true });
 
