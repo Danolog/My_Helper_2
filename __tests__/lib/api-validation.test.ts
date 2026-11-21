@@ -891,10 +891,13 @@ describe("updateWaitingListSchema — bez pól źródła i potwierdzenia (#221)"
 
 describe("blikDepositSettingsSchema — numer BLIK salonu", () => {
   // Numery fikcyjne; pozytywne muszą być w zakresie komórkowym.
+  const consentVersion = "2026-11-21";
+
   it.each(POLISH_MOBILE_PREFIXES)("prefiks komórkowy %s przechodzi", (prefix) => {
     const result = blikDepositSettingsSchema.safeParse({
       blikPhone: `${prefix}0 000 000`,
       consent: true,
+      consentVersion,
     });
     expect(result.success).toBe(true);
     expect(result.data?.blikPhone).toBe(`+48${prefix}0000000`);
@@ -906,6 +909,7 @@ describe("blikDepositSettingsSchema — numer BLIK salonu", () => {
       const result = blikDepositSettingsSchema.safeParse({
         blikPhone: `+48 ${prefix}0 000 000`,
         consent: true,
+        consentVersion,
       });
       expect(result.success).toBe(false);
       expect(result.error?.issues[0]?.path).toEqual(["blikPhone"]);
@@ -916,11 +920,12 @@ describe("blikDepositSettingsSchema — numer BLIK salonu", () => {
     const result = blikDepositSettingsSchema.safeParse({
       blikPhone: "(+48) 600-100-200",
       consent: true,
+      consentVersion,
     });
     expect(result.data?.blikPhone).toBe("+48600100200");
   });
 
-  it("null i pusty napis = wyłączenie, bez wymogu zgody", () => {
+  it("null i pusty napis = wyłączenie, bez wymogu zgody i wersji", () => {
     expect(blikDepositSettingsSchema.safeParse({ blikPhone: null }).data).toEqual({
       blikPhone: null,
     });
@@ -930,22 +935,34 @@ describe("blikDepositSettingsSchema — numer BLIK salonu", () => {
   });
 
   it("numer bez consent: true jest odrzucany na polu consent", () => {
-    const result = blikDepositSettingsSchema.safeParse({ blikPhone: "600100200" });
+    const result = blikDepositSettingsSchema.safeParse({ blikPhone: "600100200", consentVersion });
     expect(result.success).toBe(false);
     expect(result.error?.issues.map((i) => i.path)).toEqual([["consent"]]);
   });
 
-  it("brak klucza blikPhone jest błędem (nie kasuje po cichu)", () => {
-    expect(blikDepositSettingsSchema.safeParse({ consent: true }).success).toBe(false);
+  it("numer bez consentVersion jest odrzucany na polu consentVersion", () => {
+    const result = blikDepositSettingsSchema.safeParse({ blikPhone: "600100200", consent: true });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.path)).toEqual([["consentVersion"]]);
   });
 
-  it("blikConsentAt z body jest wycinany ze sparsowanych danych", () => {
+  it("brak klucza blikPhone jest błędem (nie kasuje po cichu)", () => {
+    expect(
+      blikDepositSettingsSchema.safeParse({ consent: true, consentVersion }).success
+    ).toBe(false);
+  });
+
+  it("blikConsentAt i blikConsentVersion z body są wycinane ze sparsowanych danych", () => {
     const result = blikDepositSettingsSchema.safeParse({
       blikPhone: "600100200",
       consent: true,
+      consentVersion,
       blikConsentAt: "2020-01-01T00:00:00.000Z",
+      blikConsentVersion: "2020-01-01",
     });
+    expect(result.success).toBe(true);
     expect(result.data).not.toHaveProperty("blikConsentAt");
+    expect(result.data).not.toHaveProperty("blikConsentVersion");
   });
 
   it("komunikaty błędów nie zawierają numeru", () => {
