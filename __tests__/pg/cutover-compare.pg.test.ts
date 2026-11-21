@@ -15,6 +15,12 @@
  *      (tabela wyczyszczona); jeden wiersz w `user` → `expect_empty=no`, kod ≠ 0.
  *      Świeża baza po migracjach nie ma niepustych tabel (lista słownikowa pusta).
  * (f4) błędne hasło → na fd 3 tylko `error_class=connection` i `exit=`.
+ * (e1) rola logowania testu (nie-właściciel, bez BYPASSRLS, GRANT SELECT na
+ *      tabele) → compare.sh i --expect-empty dają `error_class=other`, kod 1
+ *      (42501 przy `row_security = off`), a nie przefiltrowane „0 = 0”; ta sama
+ *      rola z `row_security = on` widzi mniej wierszy bez błędu (zagrożenie
+ *      istnieje), a pg_sequence_last_value bez uprawnienia rzuca 42501.
+ *      Rolę tworzy i usuwa sam test; GRANT-y tylko w bazie testu.
  *
  * Bazy testu (`it_cutover_<los>_*`) tworzy i usuwa sam test przez pulę
  * zweryfikowaną w `pg-harness.ts` (pos_dev, ten sam serwer). pos_dev jest tylko
@@ -49,6 +55,9 @@ const DB_C = `${TAG}_c`; // świeża baza po migracjach (--expect-empty, strefa)
 const DB_D = `${TAG}_d`; // świeża baza po migracjach, strefa Europe/Warsaw
 const OWN_DBS = [DB_B, DB_C, DB_D];
 const SEED_OWNER_ID = "test-owner-user-id-00001";
+/** Rola logowania testu (e1): nie-właściciel, bez SUPERUSER i BYPASSRLS, z GRANT SELECT. */
+const RO_ROLE = `${TAG}_ro`;
+const RO_PASS = randomBytes(16).toString("hex");
 
 /**
  * Gałąź --expect-empty liczy wszystkie tabele public (lista słownikowa pusta,
@@ -127,7 +136,7 @@ async function ownClient(db: string): Promise<Sql> {
 }
 
 /** Zmienne libpq dla narzędzi (hasło tylko w środowisku procesu). */
-function pgEnv(db: string, password?: string): NodeJS.ProcessEnv {
+function pgEnv(db: string, password?: string, user?: string): NodeJS.ProcessEnv {
   return {
     NODE_ENV: "test",
     PATH: toolPath,
@@ -135,7 +144,7 @@ function pgEnv(db: string, password?: string): NodeJS.ProcessEnv {
     HOME: process.env.HOME ?? "",
     PGHOST: base!.hostname === "localhost" ? "127.0.0.1" : base!.hostname,
     PGPORT: base!.port || "5432",
-    PGUSER: decodeURIComponent(base!.username),
+    PGUSER: user ?? decodeURIComponent(base!.username),
     PGPASSWORD: password ?? decodeURIComponent(base!.password),
     PGDATABASE: db,
   };
@@ -150,12 +159,12 @@ interface Compare {
 }
 
 const homes: string[] = [];
-function compare(db: string, args: string[] = [], password?: string): Compare {
+function compare(db: string, args: string[] = [], password?: string, user?: string): Compare {
   const home = mkdtempSync(join(tmpdir(), "it-cutover-home-"));
   homes.push(home);
   const r = spawnSync("bash", [SCRIPT, ...args], {
     encoding: "utf8",
-    env: { ...pgEnv(db, password), HOME: home },
+    env: { ...pgEnv(db, password, user), HOME: home },
     timeout: 120_000,
   });
   const lines = r.stdout.split("\n").filter(Boolean);
@@ -260,6 +269,8 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("compare.sh na prawdziwym Postgres
       for (const db of OWN_DBS) {
         if (db.startsWith("it_cutover_")) await h.observer.unsafe(`DROP DATABASE IF EXISTS ${db} WITH (FORCE)`);
       }
+      // GRANT-y roli testu żyją tylko w DB_B (usuniętej wyżej), więc rola nie ma zależności.
+      if (RO_ROLE.startsWith("it_cutover_")) await h.observer.unsafe(`DROP ROLE IF EXISTS ${RO_ROLE}`);
       await h.end();
     }
     for (const home of homes) rmSync(home, { recursive: true, force: true });
@@ -376,5 +387,81 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("compare.sh na prawdziwym Postgres
     expect(r.stderr).toBe("");
     expect(logOf(r)).toMatch(/password authentication failed/);
     expect(logOf(r)).not.toContain(wrong);
+  });
+
+  it("(e1) rola nie-właściciel bez BYPASSRLS z GRANT SELECT → error_class=other, exit=1 (42501), nie ciche 0 = 0", async () => {
+    await h.observer.unsafe(
+      `CREATE ROLE ${RO_ROLE} LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD '${RO_PASS}'`,
+    );
+    await b.unsafe(`GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${RO_ROLE}`);
+    await b.unsafe(`GRANT USAGE ON SCHEMA drizzle TO ${RO_ROLE}`);
+    await b.unsafe(`GRANT SELECT ON ALL TABLES IN SCHEMA drizzle TO ${RO_ROLE}`);
+    // Jedyny zapis --expect-empty; bez tego rola padłaby na TRUNCATE, a nie na bloku odczytu.
+    await b.unsafe(`GRANT TRUNCATE ON public.auth_rate_limit TO ${RO_ROLE}`);
+    const [attrs] = await b.unsafe(`select rolsuper, rolbypassrls from pg_roles where rolname = '${RO_ROLE}'`);
+    expect(attrs).toMatchObject({ rolsuper: false, rolbypassrls: false });
+
+    // Tabela z RLS i wierszami w B (po zrzucie seeda).
+    const rlsTables = await b.unsafe(
+      "select c.relname as t from pg_class c join pg_namespace n on n.oid = c.relnamespace " +
+        "where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity order by c.relname collate \"C\"",
+    );
+    let table = "";
+    let total = 0;
+    for (const r of rlsTables) {
+      const q = `"${String(r.t).replace(/"/g, '""')}"`;
+      const [x] = await b.unsafe(`select count(*)::int as n from public.${q}`);
+      if (x!.n > 0) {
+        table = q;
+        total = x!.n;
+        break;
+      }
+    }
+    expect(table, "tabela z RLS i wierszami w bazie po zrzucie seeda").not.toBe("");
+
+    // Zagrożenie, które zamyka poprawka: z row_security = on ta rola widzi mniej
+    // wierszy niż właściciel, bez błędu (po obu stronach porównania byłoby „0 = 0”).
+    const filtered = await b.begin(async (tx) => {
+      await tx.unsafe(`SET LOCAL ROLE ${RO_ROLE}`);
+      await tx.unsafe("SET LOCAL row_security = on");
+      const [x] = await tx.unsafe(`select count(*)::int as n from public.${table}`);
+      return x!.n as number;
+    });
+    expect(filtered).toBeLessThan(total);
+    // Z row_security = off ta sama rola dostaje 42501.
+    await expect(
+      b.begin(async (tx) => {
+        await tx.unsafe(`SET LOCAL ROLE ${RO_ROLE}`);
+        await tx.unsafe("SET LOCAL row_security = off");
+        await tx.unsafe(`select count(*) from public.${table}`);
+      }),
+    ).rejects.toMatchObject({ code: "42501" });
+
+    // Sekwencja bez uprawnienia: pg_sequence_last_value rzuca 42501 (nie NULL → 0).
+    const [seq] = await b.unsafe(
+      "select sequencename as s from pg_sequences where schemaname = 'public' order by sequencename collate \"C\" limit 1",
+    );
+    expect(seq, "sekwencja w schemacie public").toBeDefined();
+    const seqName = `"${String(seq!.s).replace(/"/g, '""')}"`;
+    await expect(
+      b.begin(async (tx) => {
+        await tx.unsafe(`SET LOCAL ROLE ${RO_ROLE}`);
+        await tx.unsafe(`select pg_sequence_last_value('public.${seqName.replace(/'/g, "''")}'::regclass)`);
+      }),
+    ).rejects.toMatchObject({ code: "42501" });
+
+    // compare.sh jako ta rola: błąd, nie liczby.
+    const cmp = compare(DB_B, [], RO_PASS, RO_ROLE);
+    expect(cmp.lines).toEqual(["error_class=other", "exit=1"]);
+    expect(cmp.status).toBe(1);
+    expect(cmp.stderr).toBe("");
+    expect(logOf(cmp)).toMatch(/ERROR: +42501/);
+    expect(logOf(cmp)).not.toContain(RO_PASS);
+
+    // --expect-empty jako ta rola na niepustej bazie: błąd, nie expect_empty=yes.
+    const ee = compare(DB_B, ["--expect-empty"], RO_PASS, RO_ROLE);
+    expect(ee.lines).toEqual(["error_class=other", "exit=1"]);
+    expect(ee.status).toBe(1);
+    expect(logOf(ee)).toMatch(/ERROR: +42501/);
   });
 });

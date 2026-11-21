@@ -133,6 +133,12 @@ jobs:
           CUTOVER_COMPARE_PG: "1"
           CUTOVER_PG_CONTAINER: ${{ job.services.postgres.id }}
 
+      # Seed drugi raz po test:pg, przed Playwrightem: test działający globalnie
+      # (cleanup, cron, agregaty) nie może po cichu zmienić wierszy seeda, na
+      # których stoi @smoke — wtedy czerwony ten krok, nie flakujący E2E.
+      - name: Seed check (after test:pg)
+        run: pnpm exec tsx scripts/verify-seed.ts
+
       # Bez --with-deps: pobieranie pakietów systemowych (apt) potrafi trwać
       # minuty i zjadało limit joba. Obraz runnera ma biblioteki Chromium;
       # brak dodatkowych czcionek nie wpływa na testy (nie porównują zrzutów).

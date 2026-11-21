@@ -19,11 +19,17 @@
 #   rows_hash_<tabela>   md5 treści wierszy (posortowane po tekście wiersza,
 #                        COLLATE "C"); bez session, verification, auth_rate_limit,
 #                        chyba że --all-tables
-#   last_value_<sekw.>   last_value sekwencji public (0 = nieużyta)
+#   last_value_<sekw.>   pg_sequence_last_value sekwencji public (0 = nieużyta;
+#                        brak uprawnienia = błąd, nie 0)
 #   writes_<tabela>      n_tup_ins + n_tup_upd + n_tup_del (pomocnicze)
 #   rls_<t>, force_rls_<t>, policies_<t>
 #   grants_count, grants_sha256       role_table_grants dla myhelper_app
-#   extensions_count, extensions_sha256, locale_sha256
+#   extensions_count, extensions_sha256
+#   locale_sha256        datcollate, datctype i kodowanie bazy
+# Oba bloki READ ONLY mają SET LOCAL row_security = off: rola, której dotyczą
+# polityki RLS (nie-właściciel bez BYPASSRLS albo FORCE ROW LEVEL SECURITY),
+# dostaje błąd 42501 (error_class=other, kod 1) zamiast przefiltrowanych,
+# po obu stronach równych liczb i hashy.
 #   migrations_count, migrations_sha256   drizzle.__drizzle_migrations
 # Potem schemat: pg_dump --schema-only --schema=public --no-owner --no-privileges,
 # normalizacja (bez komentarzy, SET, \restrict) do pliku .schema.sql obok logu:
@@ -180,6 +186,7 @@ SET LOCAL DateStyle = 'ISO, YMD';
 SET LOCAL IntervalStyle = 'postgres';
 SET LOCAL extra_float_digits = 1;
 SET LOCAL bytea_output = 'hex';
+SET LOCAL row_security = off;
 SELECT format('SELECT %L || count(*) FROM public.%I', 'count_' || c.relname || '=', c.relname)
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
@@ -189,7 +196,7 @@ SELECT format('SELECT %L || md5(coalesce(string_agg(t::text, E''\n'' ORDER BY (t
   WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
     AND (:'all_tables' = 'yes' OR c.relname NOT IN ('auth_rate_limit', 'session', 'verification'))
   ORDER BY c.relname COLLATE "C" \gexec
-SELECT 'last_value_' || sequencename || '=' || coalesce(last_value, 0)
+SELECT 'last_value_' || sequencename || '=' || coalesce(pg_sequence_last_value(format('public.%I', sequencename)::regclass), 0)
   FROM pg_sequences WHERE schemaname = 'public' ORDER BY sequencename COLLATE "C";
 SELECT 'writes_' || relname || '=' || (n_tup_ins + n_tup_upd + n_tup_del)
   FROM pg_stat_user_tables WHERE schemaname = 'public' ORDER BY relname COLLATE "C";
@@ -213,7 +220,7 @@ SELECT 'grants_sha256=' || encode(sha256(convert_to(coalesce(string_agg(table_na
 SELECT 'extensions_count=' || count(*) FROM pg_extension;
 SELECT 'extensions_sha256=' || encode(sha256(convert_to(coalesce(string_agg(extname || ' ' || extversion, E'\n' ORDER BY extname COLLATE "C"), ''), 'UTF8')), 'hex')
   FROM pg_extension;
-SELECT 'locale_sha256=' || encode(sha256(convert_to(datcollate || ' ' || datctype, 'UTF8')), 'hex')
+SELECT 'locale_sha256=' || encode(sha256(convert_to(datcollate || ' ' || datctype || ' ' || pg_encoding_to_char(encoding), 'UTF8')), 'hex')
   FROM pg_database WHERE datname = current_database();
 SELECT 'migrations_count=' || count(*) FROM drizzle.__drizzle_migrations;
 SELECT 'migrations_sha256=' || encode(sha256(convert_to(coalesce(string_agg(hash, E'\n' ORDER BY created_at, hash COLLATE "C"), ''), 'UTF8')), 'hex')
@@ -264,6 +271,7 @@ SQL
   # po migracjach nie ma niepustych tabel.
   run_sql <<'SQL'
 BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
+SET LOCAL row_security = off;
 SELECT 'SELECT ''nonempty_tables='' || (0' || coalesce(string_agg(format(' + (EXISTS (SELECT 1 FROM public.%I))::int', c.relname), '' ORDER BY c.relname COLLATE "C"), '') || ')'
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition \gexec

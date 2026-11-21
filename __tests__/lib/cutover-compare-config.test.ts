@@ -15,7 +15,10 @@
  *  - --expect-empty odmawia kodem 4 dla hosta ≠ 127.0.0.1 (bez połączenia)
  *    i dla serwera z ustawieniami neon.* (bez czyszczenia);
  *  - tryb domyślny: jedno wywołanie psql, jedna transakcja REPEATABLE READ
- *    READ ONLY z pięcioma SET LOCAL przed pierwszym rows_hash;
+ *    READ ONLY z sześcioma SET LOCAL (w tym row_security = off) przed pierwszym
+ *    count/rows_hash; row_security = off także w bloku --expect-empty;
+ *    sekwencje przez pg_sequence_last_value; locale_sha256 z kodowaniem bazy;
+ *  - kontrola seeda drugi raz zaraz po `pnpm test:pg`, przed Playwrightem;
  *  - klasy błędów: connection, unique_violation, read_only, other;
  *  - połączenie tylko ze zmiennych libpq, bez .pgpass, bez PGOPTIONS;
  *  - test na prawdziwym Postgresie biegnie w e2e-smoke (krok `pnpm test:pg`) po
@@ -304,7 +307,9 @@ describe("compare.sh: czyszczenie auth_rate_limit tylko w --expect-empty", () =>
     expect(r.psql).toHaveLength(3);
     expect(r.psql[0]!.sql).toContain("FROM pg_settings WHERE name LIKE 'neon.%'");
     expect(r.psql[1]!.sql).toBe("BEGIN;\nSET LOCAL lock_timeout = '5s';\nTRUNCATE public.auth_rate_limit;\nCOMMIT;\n");
-    expect(r.psql[2]!.sql).toMatch(/^BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\n/);
+    // RLS bez kontekstu salonu nie może po cichu dać expect_empty=yes: z
+    // row_security = off rola objęta polityką dostaje błąd 42501.
+    expect(r.psql[2]!.sql).toMatch(/^BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;\nSET LOCAL row_security = off;\n/);
     expect(r.psql[2]!.sql).not.toMatch(/TRUNCATE/i);
     expect(r.psql[2]!.sql).not.toMatch(/NOT IN|<>|!=/);
     expect(r.pgDump).toBeNull();
@@ -358,18 +363,21 @@ describe("compare.sh: jedna transakcja READ ONLY z SET LOCAL", () => {
     return SOURCE.slice(SOURCE.indexOf("<<'SQL'\n", start) + 8, SOURCE.indexOf("\nSQL\n", start));
   })();
 
-  it("blok SQL: BEGIN … READ ONLY, pięć SET LOCAL, odczyty, COMMIT", () => {
+  it("blok SQL: BEGIN … READ ONLY, sześć SET LOCAL (w tym row_security = off), odczyty, COMMIT", () => {
     const l = block.split("\n");
-    expect(l.slice(0, 6)).toEqual([
+    expect(l.slice(0, 7)).toEqual([
       "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;",
       "SET LOCAL TimeZone = 'UTC';",
       "SET LOCAL DateStyle = 'ISO, YMD';",
       "SET LOCAL IntervalStyle = 'postgres';",
       "SET LOCAL extra_float_digits = 1;",
       "SET LOCAL bytea_output = 'hex';",
+      "SET LOCAL row_security = off;",
     ]);
+    expect(block.match(/\bSET LOCAL\b/g)).toHaveLength(6);
     expect(l[l.length - 1]).toBe("COMMIT;");
-    expect(block.indexOf("rows_hash_")).toBeGreaterThan(block.indexOf("SET LOCAL bytea_output"));
+    expect(block.indexOf("count_")).toBeGreaterThan(block.indexOf("SET LOCAL row_security = off;"));
+    expect(block.indexOf("rows_hash_")).toBeGreaterThan(block.indexOf("SET LOCAL row_security = off;"));
     expect(block.match(/\bBEGIN\b/g)).toHaveLength(1);
     expect(block.match(/\bCOMMIT\b/g)).toHaveLength(1);
     for (const k of ["'count_'", "'rows_hash_'", "'last_value_'", "'writes_'", "'rls_'", "'force_rls_'", "'policies_'"]) {
@@ -382,6 +390,17 @@ describe("compare.sh: jedna transakcja READ ONLY z SET LOCAL", () => {
       "md5(coalesce(string_agg(t::text, E''\\n'' ORDER BY (t::text) COLLATE \"C\"), ''''))",
     );
     expect(block).toContain("AND (:'all_tables' = 'yes' OR c.relname NOT IN ('auth_rate_limit', 'session', 'verification'))");
+  });
+
+  it("sekwencje przez pg_sequence_last_value (brak uprawnienia = błąd), nie last_value z pg_sequences (NULL → 0)", () => {
+    expect(block).toContain(
+      "coalesce(pg_sequence_last_value(format('public.%I', sequencename)::regclass), 0)",
+    );
+    expect(block).not.toMatch(/coalesce\(last_value\b/);
+  });
+
+  it("locale_sha256 obejmuje kodowanie bazy (pg_encoding_to_char)", () => {
+    expect(block).toContain("datcollate || ' ' || datctype || ' ' || pg_encoding_to_char(encoding)");
   });
 
   it("przebieg: jedno wywołanie psql na wszystkie liczby i hashe, potem pg_dump schematu", () => {
@@ -560,6 +579,7 @@ describe("CI: test compare.sh na prawdziwym Postgresie", () => {
   const WF = readFileSync(join(ROOT, ".github/workflows/quality-gate.yml"), "utf8");
   const job = WF.slice(WF.indexOf("\n  e2e-smoke:\n"), WF.indexOf("\n  e2e-full:\n"));
   const PG_STEP = "      - name: Integration test — subscription locks (real Postgres)\n";
+  const SEED_AFTER_PG = "      - name: Seed check (after test:pg)\n";
 
   it("bez osobnego joba: test w e2e-smoke, krok `pnpm test:pg` po migracjach i seedzie, przed Playwrightem", () => {
     expect(job.length).toBeGreaterThan(100);
@@ -570,11 +590,23 @@ describe("CI: test compare.sh na prawdziwym Postgresie", () => {
       "run: pnpm exec tsx scripts/verify-seed.ts",
       PG_STEP,
       "        run: pnpm test:pg\n",
+      SEED_AFTER_PG,
       "run: pnpm exec playwright install chromium",
     ].map((s) => job.indexOf(s));
     for (const i of order) expect(i).toBeGreaterThan(0);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(job.split("run: pnpm test:pg").length - 1).toBe(1);
+  });
+
+  it("kontrola seeda zaraz po `pnpm test:pg`: następny krok po teście pg, przed instalacją Chromium", () => {
+    const pgRun = job.indexOf("        run: pnpm test:pg\n");
+    const next = job.indexOf("\n      - name: ", pgRun);
+    expect(pgRun).toBeGreaterThan(0);
+    expect(job.indexOf(SEED_AFTER_PG)).toBe(next + 1);
+    expect(job.slice(next + 1)).toMatch(/^ {6}- name: Seed check \(after test:pg\)\n {8}run: pnpm exec tsx scripts\/verify-seed\.ts\n/);
+    expect(job.indexOf(SEED_AFTER_PG)).toBeLessThan(job.indexOf("run: pnpm exec playwright install chromium"));
+    // Kontrola przed test:pg zostaje; po test:pg dochodzi druga.
+    expect(job.split("run: pnpm exec tsx scripts/verify-seed.ts").length - 1).toBe(2);
   });
 
   it("krok testu: ten sam adres bazy joba, CUTOVER_COMPARE_PG=1 i id kontenera usługi postgres", () => {
