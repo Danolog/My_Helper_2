@@ -261,7 +261,7 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("compare.sh na prawdziwym Postgres
 
     a0 = compare("pos_dev");
     expect(a0.status, a0.lines.join(" ")).toBe(0);
-  }, 300_000);
+  }, 180_000);
 
   afterAll(async () => {
     await Promise.allSettled([b?.end({ timeout: 5 }), c?.end({ timeout: 5 }), d?.end({ timeout: 5 })]);

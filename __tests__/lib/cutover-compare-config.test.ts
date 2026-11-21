@@ -385,9 +385,9 @@ describe("compare.sh: jedna transakcja READ ONLY z SET LOCAL", () => {
     }
   });
 
-  it("hash treści: md5 string_agg(t::text) posortowany po tekście wiersza z COLLATE \"C\"", () => {
+  it("hash treści: md5 string_agg(cmp_row_::text) (alias, którego nie zasłoni kolumna) posortowany po tekście wiersza z COLLATE \"C\"", () => {
     expect(block).toContain(
-      "md5(coalesce(string_agg(t::text, E''\\n'' ORDER BY (t::text) COLLATE \"C\"), ''''))",
+      "md5(coalesce(string_agg(cmp_row_::text, E''\\n'' ORDER BY (cmp_row_::text) COLLATE \"C\"), '''')) FROM public.%I cmp_row_'",
     );
     expect(block).toContain("AND (:'all_tables' = 'yes' OR c.relname NOT IN ('auth_rate_limit', 'session', 'verification'))");
   });
@@ -541,6 +541,7 @@ describe("compare.sh: argumenty, środowisko, dry-run", () => {
 
   it.each([
     ["nieznany argument", ["--force"], {}],
+    ["pusty --schema-baseline=", ["--schema-baseline="], {}],
     ["URL jako argument", ["postgresql://u:p@127.0.0.1/db"], {}],
     ["brak PGHOST", [], { PGHOST: undefined }],
     ["brak PGDATABASE", [], { PGDATABASE: undefined }],

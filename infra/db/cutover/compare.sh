@@ -86,7 +86,7 @@ while [[ $# -gt 0 ]]; do
     --expect-empty) MODE="expect_empty" ;;
     --all-tables) ALL_TABLES="yes" ;;
     --dry-run) DRY_RUN=1 ;;
-    --schema-baseline=*) SCHEMA_BASELINE="${1#*=}" ;;
+    --schema-baseline=*) SCHEMA_BASELINE="${1#*=}"; [[ -n "$SCHEMA_BASELINE" ]] || exit 2 ;;
     *) exit 2 ;;
   esac
   shift
@@ -192,7 +192,7 @@ SELECT format('SELECT %L || count(*) FROM public.%I', 'count_' || c.relname || '
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
   ORDER BY c.relname COLLATE "C" \gexec
-SELECT format('SELECT %L || md5(coalesce(string_agg(t::text, E''\n'' ORDER BY (t::text) COLLATE "C"), '''')) FROM public.%I t', 'rows_hash_' || c.relname || '=', c.relname)
+SELECT format('SELECT %L || md5(coalesce(string_agg(cmp_row_::text, E''\n'' ORDER BY (cmp_row_::text) COLLATE "C"), '''')) FROM public.%I cmp_row_', 'rows_hash_' || c.relname || '=', c.relname)
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
     AND (:'all_tables' = 'yes' OR c.relname NOT IN ('auth_rate_limit', 'session', 'verification'))
