@@ -815,20 +815,33 @@ export const treatmentSchema = z.object({
   materialsJson: z.any().optional(),
 });
 
-export const invoiceSchema = z.object({
-  buyerName: requiredString("Nazwa nabywcy"),
-  buyerNip: z.string().optional(),
-  buyerAddress: z.string().optional(),
-  items: z.array(z.object({
-    name: z.string(),
-    quantity: z.number().positive(),
-    unitPrice: z.number().nonnegative(),
-    vatRate: z.string().optional(),
-  })).optional(),
-  notes: z.string().nullable().optional(),
-  dueDate: z.string().optional(),
-  paymentMethod: z.string().optional(),
-});
+// Kontrakt = body z invoice-dialog.tsx: { type, clientName, clientAddress,
+// companyName, companyNip, companyAddress, paymentMethod }; pola drugiego typu
+// dokumentu przychodzą jako null. Wymagalność pól zależną od typu (imię klienta
+// dla paragonu, nazwa i NIP firmy dla faktury) sprawdza trasa własnymi
+// komunikatami 400, więc tu pola są nullable/optional. type i paymentMethod
+// bez null: trasa podstawia domyślne wartości tylko dla braku klucza.
+// .strict(): pole spoza kontraktu (np. dawne buyerName/items) => 400.
+export const INVOICE_TYPES = ["paragon", "faktura"] as const;
+export const INVOICE_PAYMENT_METHODS = ["cash", "card", "transfer"] as const;
+
+export const invoiceSchema = z
+  .object({
+    type: z
+      .enum(INVOICE_TYPES, { message: "Typ faktury musi byc 'paragon' lub 'faktura'" })
+      .optional(),
+    clientName: z.string().nullable().optional(),
+    clientAddress: z.string().nullable().optional(),
+    companyName: z.string().nullable().optional(),
+    companyNip: z.string().nullable().optional(),
+    companyAddress: z.string().nullable().optional(),
+    paymentMethod: z
+      .enum(INVOICE_PAYMENT_METHODS, {
+        message: "Metoda platnosci musi byc 'cash', 'card' lub 'transfer'",
+      })
+      .optional(),
+  })
+  .strict();
 
 export const bookPackageSchema = z.object({
   salonId: requiredString("Salon ID"),
