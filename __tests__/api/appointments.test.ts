@@ -1126,7 +1126,13 @@ describe("POST /api/appointments", () => {
       return (insertChain.values!.mock.calls[0]![0] as Record<string, unknown>).bookedByUserId;
     }
 
-    it("zalogowany: bookedByUserId z body jest ignorowany, zapisany jest uzytkownik sesji", async () => {
+    // Domyślnie sesja = właściciel salonu wizyty (getSalonContext: OWNER_CTX).
+    afterEach(() => {
+      mockGetSalonContext.mockReset();
+      mockGetSalonContext.mockResolvedValue(OWNER_CTX);
+    });
+
+    it("#193 personel (właściciel): bookedByUserId z body ignorowany, zapisany jest null", async () => {
       const insertChain = arrangeInsert();
 
       const response = await createAppointment(
@@ -1139,6 +1145,70 @@ describe("POST /api/appointments", () => {
             startTime: "2026-04-01T10:00:00Z",
             endTime: "2026-04-01T11:00:00Z",
             bookedByUserId: VICTIM_USER_ID,
+          },
+        })
+      );
+
+      expect(response.status).toBe(201);
+      expect(bookedByOf(insertChain)).toBeNull();
+    });
+
+    it("#193 personel (pracownik): wizyta z panelu nie dostaje userId pracownika", async () => {
+      mockGetSalonContext.mockResolvedValue(EMPLOYEE_CTX);
+      const insertChain = arrangeInsert();
+
+      const response = await createAppointment(
+        createMockRequest("http://localhost:3000/api/appointments", {
+          method: "POST",
+          body: {
+            salonId: TEST_IDS.SALON_UUID,
+            employeeId: TEST_IDS.EMPLOYEE_UUID,
+            clientId: TEST_IDS.CLIENT_UUID,
+            startTime: "2026-04-01T10:00:00Z",
+            endTime: "2026-04-01T11:00:00Z",
+          },
+        })
+      );
+
+      expect(response.status).toBe(201);
+      expect(bookedByOf(insertChain)).toBeNull();
+    });
+
+    it("#193 klient portalu (bez kontekstu salonu): zapisany jest uzytkownik sesji, body ignorowane", async () => {
+      mockGetSalonContext.mockResolvedValue(null);
+      const insertChain = arrangeInsert();
+
+      const response = await createAppointment(
+        createMockRequest("http://localhost:3000/api/appointments", {
+          method: "POST",
+          body: {
+            salonId: TEST_IDS.SALON_UUID,
+            employeeId: TEST_IDS.EMPLOYEE_UUID,
+            serviceId: TEST_IDS.SERVICE_UUID, // #63: rezerwacja spoza personelu wskazuje usługę
+            startTime: "2026-04-01T10:00:00Z",
+            endTime: "2026-04-01T11:00:00Z",
+            bookedByUserId: VICTIM_USER_ID,
+          },
+        })
+      );
+
+      expect(response.status).toBe(201);
+      expect(bookedByOf(insertChain)).toBe("test-user-id");
+    });
+
+    it("#193 klient portalu bez bookedByUserId w body: zapisany jest uzytkownik sesji", async () => {
+      mockGetSalonContext.mockResolvedValue(null);
+      const insertChain = arrangeInsert();
+
+      const response = await createAppointment(
+        createMockRequest("http://localhost:3000/api/appointments", {
+          method: "POST",
+          body: {
+            salonId: TEST_IDS.SALON_UUID,
+            employeeId: TEST_IDS.EMPLOYEE_UUID,
+            serviceId: TEST_IDS.SERVICE_UUID,
+            startTime: "2026-04-01T10:00:00Z",
+            endTime: "2026-04-01T11:00:00Z",
           },
         })
       );
@@ -1172,7 +1242,7 @@ describe("POST /api/appointments", () => {
       expect(bookedByOf(insertChain)).toBeNull();
     });
 
-    it("zalogowany bez bookedByUserId w body: zapisany jest uzytkownik sesji", async () => {
+    it("#193 personel bez bookedByUserId w body: zapisany jest null", async () => {
       const insertChain = arrangeInsert();
 
       const response = await createAppointment(
@@ -1188,7 +1258,7 @@ describe("POST /api/appointments", () => {
       );
 
       expect(response.status).toBe(201);
-      expect(bookedByOf(insertChain)).toBe("test-user-id");
+      expect(bookedByOf(insertChain)).toBeNull();
     });
   });
 
