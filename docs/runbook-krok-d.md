@@ -694,6 +694,78 @@ proxy do bazy nie zostaje w tle.
 Założenie kroku D: baza na starcie **pusta**. Jeśli Oliver to zmieni, procedurę
 pisze Ethan w planie 0.5 — ten runbook jej nie zawiera.
 
+## 10a. LB — load balancer HTTPS dla app.nordsignal.cc (krok 1, P1)
+
+Skrypt: `infra/gcp/lb.sh`, strażnik `__tests__/lib/lb-config.test.ts`. Uruchamia
+wyłącznie sesja główna (Z1). Zasady jak w sekcji 0: domyślnie dry-run (zero
+wywołań gcloud, także odczytów), `--project` w każdym wywołaniu, region tylko
+`europe-central2`, stałe nazwy zasobów `myhelper-lb-*`. Decyzje architektury: LB **regionalny**, ingress usługi Cloud Run zostaje `all` na betę
+(skrypt nie zmienia usługi), certyfikat przez **autoryzację DNS**. Skrypt nie
+ustawia żadnych wiązań IAM.
+
+### Warunki przed `--apply`
+
+1. **Budżet.** Budżet 300 PLN/mies. z progami 50/90/100% istnieje (sekcja 1
+   pkt 2). **Koszt LB z Billing Catalog** (jak sekcja 1 pkt 3) liczy sesja główna
+   przed Z1: godziny instancji proxy regionalnego LB + dwie forwarding rules
+   (443 i 80) + statyczny IP. Suma > **150 PLN/mies.** = stop, architekt wraca
+   z decyzją (globalny LB albo bez reguły 80). Wynik (SKU, stawki, suma) w tej
+   sekcji, bez danych kont.
+2. **CAA.** Rekord CAA `nordsignal.cc` dopuszcza `pki.goog` albo go nie ma.
+   Inny CA bez `pki.goog` = certyfikat nie zostanie wydany; właściciel dopisuje
+   `0 issue "pki.goog"` w Cloudflare przed `--apply`.
+3. **Brak TXT pod `_acme-challenge.app`.** Pod `_acme-challenge.app.nordsignal.cc`
+   nie ma rekordu TXT (pozostałość po innym wystawcy blokuje autoryzację DNS).
+   Jest = właściciel usuwa go przed `--apply`.
+
+Odczyt warunków 2 i 3 (oczekiwane: pusto albo wpis z `pki.goog`; drugie
+polecenie: pusto):
+
+```bash
+dig +short CAA nordsignal.cc
+dig +short TXT _acme-challenge.app.nordsignal.cc
+```
+
+### Wykonanie
+
+Dry-run, porównanie listy `+ …` z §2 P1 projektu (kroki 1–12 w tej kolejności),
+potem `--apply`. Adres e-mail powiadomień uptime checka podaje sesja główna
+w chwili uruchomienia (zmienna `LB_NOTIFY_EMAIL` albo `--notify-email=`).
+**Adresu nie ma w repo, w runbooku ani w komentarzach** (repo publiczne);
+skrypt go nie wypisuje.
+
+```bash
+infra/gcp/lb.sh --project=my-helper-2-488419
+read -r LB_NOTIFY_EMAIL
+export LB_NOTIFY_EMAIL
+infra/gcp/lb.sh --project=my-helper-2-488419 --apply
+unset LB_NOTIFY_EMAIL
+```
+
+Wyjście `--apply` zawiera `LB_IP=…` (adres LB do sprawdzeń kroku 1) i
+`dns: …` — rekord CNAME autoryzacji (`_acme-challenge_….app.nordsignal.cc`).
+Właściciel dodaje go w Cloudflare jako **DNS only** (bez proxy). Rekord `app` jeszcze
+nie wskazuje LB. Sesja główna czeka na stan `ACTIVE` certyfikatu (15–60 min):
+
+```bash
+gcloud --project=my-helper-2-488419 certificate-manager certificates describe myhelper-lb-cert --location=europe-central2 --format='value(managed.state)'
+```
+
+Alert uptime checka powstaje **wyłączony** (usługa za domeną odpowiada dopiero
+po kroku 3); włączenie w kroku 3 w konsoli Cloud Monitoring (polityka
+`myhelper-app-health-alert`).
+
+### Wycofanie
+
+`--teardown` usuwa zasoby w odwrotnej kolejności (bez wyłączania API), też
+najpierw jako dry-run. Właściciel usuwa CNAME autoryzacji. Bez wpływu na
+użytkowników, dopóki rekord `app` nie wskazuje LB.
+
+```bash
+infra/gcp/lb.sh --project=my-helper-2-488419 --teardown
+infra/gcp/lb.sh --project=my-helper-2-488419 --teardown --apply
+```
+
 ## 11. Punkty otwarte
 
 - `wif`: warunek ostateczny (sekcja 3.8); wykonanie czeka na bramkę (hook
