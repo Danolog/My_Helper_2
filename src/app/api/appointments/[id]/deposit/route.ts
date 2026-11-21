@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
+import { notifyDepositMarkedPaid } from "@/lib/deposit-marked-sms";
 import { recordDepositStatusEvent, type DepositStatusEventActor } from "@/lib/deposit-status-events";
 import { logger } from "@/lib/logger";
 import { toErrorIdentity } from "@/lib/safe-error";
@@ -26,7 +27,7 @@ import { isValidUuid } from "@/lib/validations";
  * (zwrot ustala salon sam). Wpłatę BLIK widzi posiadacz konta przypisanego do
  * numeru; recepcja oznacza ją, gdy ma ten wgląd albo jego potwierdzenie. Pracownik (`employee`) — 403.
  *
- * Trasa NIE wysyła SMS do klienta (ani przy oznaczeniu, ani przy cofnięciu).
+ * Po oznaczeniu „wpłacony” (tylko przy zmianie stanu, po zatwierdzeniu transakcji) trasa wysyła klientowi SMS (`notifyDepositMarkedPaid`), najwyżej jeden na wizytę — ponowne oznaczenie po cofnięciu go nie powtarza; brak telefonu albo błąd SMS nie zmienia stanu ani odpowiedzi. Cofnięcie nie wysyła SMS.
  *
  * Kolejność: sesja (401) → kontekst salonu (404) → rola (403) → format id (400)
  * → jedna transakcja `forSalon(ctx.salonId).raw`: wizyta z jawnym `eq(salonId)`
@@ -182,6 +183,20 @@ async function markDeposit(
       depositPaid: targetPaid,
       changed: outcome.changed,
     });
+
+    // SMS do klienta dopiero po COMMIT (forSalon.raw już się rozstrzygnęło) i tylko
+    // przy faktycznym oznaczeniu jako wpłacony; cofnięcie nie wysyła SMS.
+    // Błąd SMS nie zmienia stanu ani odpowiedzi.
+    if (targetPaid && outcome.changed) {
+      try {
+        await notifyDepositMarkedPaid({ salonId: scopedSalonId, appointmentId: id });
+      } catch (error) {
+        logger.warn("[AppointmentDeposit API] Deposit marked SMS failed", {
+          appointmentId: id,
+          ...toErrorIdentity(error),
+        });
+      }
+    }
 
     return NextResponse.json({
       success: true,

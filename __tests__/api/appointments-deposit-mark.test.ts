@@ -15,6 +15,8 @@
  * wstrzyknąć błąd wpisu. Kolejność „UPDATE przed wpisem” sprawdzamy przez
  * `invocationCallOrder` szpiega `h.setSpy` (wołanego w `tx.update().set`)
  * względem `h.record`.
+ *
+ * SMS po oznaczeniu: moduł `@/lib/deposit-marked-sms` podmieniony atrapą `h.notify`; kolejność względem końca transakcji przez `h.txEnd`.
  */
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -43,6 +45,8 @@ const h = await vi.hoisted(async () => {
     "@/lib/deposit-status-events"
   );
   const record = vi.fn<typeof events.recordDepositStatusEvent>();
+  /** Atrapa `notifyDepositMarkedPaid` (SMS do klienta po oznaczeniu). */
+  const notify = vi.fn();
 
   type Tx = Parameters<Parameters<typeof m.db.transaction>[0]>[0];
   type Chain = Record<string, (...args: unknown[]) => unknown>;
@@ -85,7 +89,7 @@ const h = await vi.hoisted(async () => {
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   return {
     m, selectWheres, selectColumns, setArgs, forUpdate, state, db, logger,
-    txObjects, setSpy, txEnd, record,
+    txObjects, setSpy, txEnd, record, notify,
     actualRecord: events.recordDepositStatusEvent,
     DepositStatusEventError: events.DepositStatusEventError,
   };
@@ -101,6 +105,7 @@ vi.mock("@/lib/db", () => ({ db: h.db }));
 vi.mock("@/lib/server/system/db-system", () => ({ dbSystem: h.m.dbSystem }));
 vi.mock("@/lib/temporary-access", () => ({ hasTemporaryAccess: h.m.hasTemporaryAccess }));
 vi.mock("@/lib/logger", () => ({ logger: h.logger }));
+vi.mock("@/lib/deposit-marked-sms", () => ({ notifyDepositMarkedPaid: h.notify }));
 
 const { m } = h;
 const dialect = new PgDialect();
@@ -154,7 +159,18 @@ beforeEach(() => {
   m.hasTemporaryAccess.mockResolvedValue(false);
   h.record.mockReset();
   h.record.mockImplementation(h.actualRecord);
+  h.notify.mockReset();
+  h.notify.mockResolvedValue(undefined);
 });
+
+/** SMS wołany dokładnie raz, po zakończeniu transakcji, a wpis dziennika przed jej końcem. */
+function expectNotifiedAfterCommit() {
+  expect(h.notify).toHaveBeenCalledTimes(1);
+  expect(h.notify.mock.calls[0]).toEqual([{ salonId: SALON_A, appointmentId: APPT_ID }]);
+  expect(h.txEnd).toHaveBeenCalledTimes(1);
+  expect(h.record.mock.invocationCallOrder[0]!).toBeLessThan(h.txEnd.mock.invocationCallOrder[0]!);
+  expect(h.txEnd.mock.invocationCallOrder[0]!).toBeLessThan(h.notify.mock.invocationCallOrder[0]!);
+}
 
 /** Wpis dziennika, jaki prawdziwy pomocnik przekazuje do INSERT. */
 function event(over: Record<string, unknown> = {}) {
@@ -185,6 +201,7 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect(h.state.transactions).toBe(1);
     expect(new Set(m.rlsSalonIds())).toEqual(new Set([SALON_A]));
     expect(m.insertedValues).toEqual([event()]);
+    expectNotifiedAfterCommit();
   });
 
   it("POST receptionist → 200, changed=true", async () => {
@@ -197,6 +214,7 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect((await res.json()).data).toEqual({ appointmentId: APPT_ID, depositPaid: true, changed: true });
     expect(h.setArgs[0]!.depositPaid).toBe(true);
     expect(m.insertedValues).toEqual([event({ actorUserId: "staff-a", actorRole: "receptionist" })]);
+    expectNotifiedAfterCommit();
   });
 
   it("DELETE owner → depositPaid=false, changed=true", async () => {
@@ -212,6 +230,8 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect(m.insertedValues).toEqual([
       event({ source: "manual_unmark", previousDepositPaid: true, depositPaid: false }),
     ]);
+    // Cofnięcie nie wysyła SMS.
+    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it("DELETE receptionist → wpis manual_unmark z rolą recepcji", async () => {
@@ -230,6 +250,7 @@ describe("200: oznaczenie i cofnięcie", () => {
         actorRole: "receptionist",
       }),
     ]);
+    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it("POST przy depositPaid=null (stary wiersz) → wpis z previousDepositPaid=false", async () => {
@@ -241,6 +262,7 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect(res.status).toBe(200);
     expect((await res.json()).data.changed).toBe(true);
     expect(m.insertedValues).toEqual([event({ previousDepositPaid: false })]);
+    expectNotifiedAfterCommit();
   });
 
   it("status confirmed też można oznaczyć", async () => {
@@ -262,6 +284,8 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect(h.setArgs).toEqual([]);
     expect(m.insertedValues).toEqual([]);
     expect(h.record).not.toHaveBeenCalled();
+    // changed=false: bez SMS (SMS tylko przy zmianie stanu).
+    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it.each([false, null])("idempotencja: drugi DELETE (depositPaid=%s) → 200, changed=false, bez UPDATE", async (paid) => {
@@ -275,6 +299,7 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect(updates()).toEqual([]);
     expect(m.insertedValues).toEqual([]);
     expect(h.record).not.toHaveBeenCalled();
+    expect(h.notify).not.toHaveBeenCalled();
   });
 });
 
@@ -326,6 +351,7 @@ describe("400", () => {
     expect(res.status).toBe(400);
     expect(h.state.transactions).toBe(0);
     expect(m.insertedValues).toEqual([]);
+    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it.each([null, "0", "0.00", "-10.00"])("wizyta bez zadatku (depositAmount=%j) → 400, bez UPDATE", async (amount) => {
@@ -338,6 +364,7 @@ describe("400", () => {
     expect((await res.json()).success).toBe(false);
     expect(updates()).toEqual([]);
     expect(m.insertedValues).toEqual([]);
+    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it.each(["cancelled", "completed", "no_show"])("wizyta %s → 400, bez UPDATE (POST i DELETE)", async (status) => {
@@ -351,6 +378,7 @@ describe("400", () => {
 
     expect(updates()).toEqual([]);
     expect(m.insertedValues).toEqual([]);
+    expect(h.notify).not.toHaveBeenCalled();
   });
 });
 
@@ -363,6 +391,7 @@ describe("401 / 403 / 404", () => {
     expect((await call(handler)).status).toBe(401);
     expect(h.state.transactions).toBe(0);
     expect(m.insertedValues).toEqual([]);
+    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -376,6 +405,7 @@ describe("401 / 403 / 404", () => {
     expect(updates()).toEqual([]);
     expect(m.insertedValues).toEqual([]);
     expect(h.record).not.toHaveBeenCalled();
+    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it("403 employee także z grantem temporary_access", async () => {
@@ -403,6 +433,7 @@ describe("401 / 403 / 404", () => {
     expect(rendered(h.selectWheres[0]).params).toEqual([APPT_ID, SALON_A]);
     expect(updates()).toEqual([]);
     expect(m.insertedValues).toEqual([]);
+    expect(h.notify).not.toHaveBeenCalled();
   });
 });
 
@@ -424,6 +455,7 @@ describe("409 DEPOSIT_ONLINE_PAYMENT", () => {
       });
       expect(updates()).toEqual([]);
       expect(m.insertedValues).toEqual([]);
+      expect(h.notify).not.toHaveBeenCalled();
     }
   );
 
@@ -433,6 +465,7 @@ describe("409 DEPOSIT_ONLINE_PAYMENT", () => {
     expect((await call(DELETE)).status).toBe(409);
     expect(updates()).toEqual([]);
     expect(m.insertedValues).toEqual([]);
+    expect(h.notify).not.toHaveBeenCalled();
   });
 });
 
@@ -450,6 +483,7 @@ describe("500 i logi", () => {
     expect(meta).toEqual({ salonId: SALON_A, appointmentId: APPT_ID, errorName: "Error" });
     expect(loggedText()).not.toContain("connection refused");
     expect(loggedText()).not.toContain(GUEST_PHONE);
+    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it("błąd wpisu dziennika → 500, wpis wołany raz po UPDATE w tym samym tx (rzut cofa transakcję)", async () => {
@@ -474,6 +508,7 @@ describe("500 i logi", () => {
     const [, meta] = h.logger.error.mock.calls[0]!;
     expect(meta).toEqual({ salonId: SALON_A, appointmentId: APPT_ID, errorName: "Error" });
     expect(loggedText()).not.toContain(GUEST_PHONE);
+    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it("DepositStatusEventError z pomocnika → 500, errorName DepositStatusEventError", async () => {
@@ -494,6 +529,7 @@ describe("500 i logi", () => {
       errorName: "DepositStatusEventError",
       errorCode: "actor",
     });
+    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it("log info: salonId, appointmentId, userId, rola, nowy stan i changed — nic więcej", async () => {
@@ -523,5 +559,52 @@ describe("500 i logi", () => {
       expect.any(String),
       expect.objectContaining({ role: "owner", depositPaid: false, changed: false })
     );
+  });
+});
+
+describe("SMS po oznaczeniu: best-effort", () => {
+  it("atrapa SMS się rozstrzyga (np. brak telefonu obsłużony w module) → 200, bez warn", async () => {
+    m.asOwnerOf(SALON_A);
+    givenAppointment();
+
+    const res = await call(POST);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      success: true,
+      data: { appointmentId: APPT_ID, depositPaid: true, changed: true },
+    });
+    expect(h.notify).toHaveBeenCalledTimes(1);
+    expect(h.logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("błąd SMS → 200, oznaczenie zostaje, warn z samą tożsamością błędu", async () => {
+    m.asOwnerOf(SALON_A);
+    givenAppointment();
+    h.notify.mockRejectedValueOnce(new Error("sms params: +48500600700"));
+
+    const res = await call(POST);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      success: true,
+      data: { appointmentId: APPT_ID, depositPaid: true, changed: true },
+    });
+    expect(h.state.transactions).toBe(1);
+    expect(m.insertedValues).toEqual([event()]);
+    expect(h.logger.warn).toHaveBeenCalledTimes(1);
+    const [, warnMeta] = h.logger.warn.mock.calls[0]!;
+    expect(warnMeta).toEqual({ appointmentId: APPT_ID, errorName: "Error" });
+    expect(h.logger.info).toHaveBeenCalledTimes(1);
+    expect(h.logger.info).toHaveBeenCalledWith(expect.any(String), {
+      salonId: SALON_A,
+      appointmentId: APPT_ID,
+      userId: "owner-a",
+      role: "owner",
+      depositPaid: true,
+      changed: true,
+    });
+    expect(h.logger.error).not.toHaveBeenCalled();
+    expect(loggedText()).not.toContain(GUEST_PHONE);
   });
 });
