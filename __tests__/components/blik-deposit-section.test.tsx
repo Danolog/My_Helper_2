@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { inspect } from "node:util";
 import { BlikDepositSection } from "@/app/dashboard/settings/payments/_components/blik-deposit-section";
 import PaymentSettingsPage from "@/app/dashboard/settings/payments/page";
 import { RoleProvider } from "@/components/dashboard/role-provider";
@@ -113,7 +114,7 @@ async function fillAndSave(user: ReturnType<typeof userEvent.setup>, phone = PHO
 function allConsoleArgs(): string {
   return consoleSpies
     .flatMap((spy) => spy.mock.calls)
-    .map((args) => args.map((a) => String(a)).join(" "))
+    .map((args) => args.map((a) => (typeof a === "string" ? a : inspect(a, { depth: null }))).join(" "))
     .join("\n");
 }
 
