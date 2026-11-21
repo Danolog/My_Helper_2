@@ -99,6 +99,13 @@
       "when": 1794922703856,
       "tag": "0013_waiting_list_entry_source",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795215648105,
+      "tag": "0014_deposit_status_events",
+      "breakpoints": true
     }
   ]
 }

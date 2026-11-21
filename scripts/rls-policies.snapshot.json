@@ -84,6 +84,18 @@
     "sha256": "003bf74c64caf33053fd877a944187875dc6ccaf93ac202f54bc7e4f04ace9eb"
   },
   {
+    "table": "deposit_status_events",
+    "name": "tenant_isolation",
+    "cmd": "ALL",
+    "permissive": "PERMISSIVE",
+    "roles": [
+      "public"
+    ],
+    "qual": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "withCheck": "(salon_id = (NULLIF(current_setting('app.current_salon_id'::text, true), ''::text))::uuid)",
+    "sha256": "aec4134614aff04bc790752beb6e2432592eba944b4860565c00a6583558ed26"
+  },
+  {
     "table": "employee_commissions",
     "name": "tenant_isolation",
     "cmd": "ALL",
