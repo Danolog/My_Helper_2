@@ -15,6 +15,7 @@
  * - liczba tabel z `relrowsecurity` w bazie nie mniejsza niż liczba tabel z pliku;
  * - jawne `CREATE POLICY` musi mieć w pliku `ALTER TABLE … ENABLE ROW LEVEL SECURITY`.
  * Zmiana formatu pliku albo pusta lista = głośny błąd, nie „OK”.
+ * Lista tabel = lista z 0005 + jawne polityki z migracji w `RLS_EXTRA_MIGRATION_FILES`.
  *
  * Gdzie działa: krok „RLS guard” po `pnpm db:migrate` w obu jobach z Postgresem
  * w `.github/workflows/quality-gate.yml`; test `__tests__/pg/rls-guard.pg.test.ts`.
@@ -34,10 +35,10 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import postgres from "postgres";
 
-/** Plik migracji, z którego wyprowadzana jest lista tabel z RLS. */
+/** Plik migracji 0005, z którego wyprowadzana jest bazowa lista tabel z RLS (kolejne pliki: RLS_EXTRA_MIGRATION_FILES). */
 export const RLS_MIGRATION_FILE = "drizzle/0005_rls_tenant_isolation.sql";
 
-/** Tabela z RLS i nazwa polityki, której wymaga migracja 0005. */
+/** Tabela z RLS i nazwa polityki, której wymaga migracja 0005 albo plik z RLS_EXTRA_MIGRATION_FILES. */
 export interface RlsRequirement {
   table: string;
   policy: string;
@@ -117,9 +118,70 @@ export function parseRlsRequirements(sql: string): RlsRequirement[] {
   return out;
 }
 
-/** Wymagania RLS z pliku migracji w repozytorium. */
+/**
+ * Migracje po 0005, które zakładają RLS nowej tabeli jawnym `CREATE POLICY`.
+ * Plik dopisuje się tu w tym samym PR co migrację.
+ */
+export const RLS_EXTRA_MIGRATION_FILES: readonly string[] = ["drizzle/0014_deposit_status_events.sql"];
+
+const failIn = (file: string, what: string): never => {
+  throw new Error(`${file}: ${what} — zmieniony format migracji, popraw parser strażnika`);
+};
+
+/**
+ * Wymagania RLS z migracji po 0005: jawne `CREATE POLICY <nazwa> ON <tabela>` od
+ * początku linii (nazwy bez cudzysłowów — ten sam wzorzec co dla 0005), każda tabela
+ * z `ALTER TABLE <tabela> ENABLE ROW LEVEL SECURITY`, nazwa polityki `tenant_*`
+ * (inaczej semantyka polityk w `checkPolicySemantics` by jej nie objęła).
+ * Pada głośno, gdy w pliku nie ma żadnej polityki — plik z listy bez polityki to błąd listy.
+ */
+export function parseExplicitRlsRequirements(sql: string, file: string): RlsRequirement[] {
+  const explicit = [...sql.matchAll(/^CREATE POLICY\s+([a-z_][a-z0-9_]*)\s+ON\s+([a-z_][a-z0-9_]*)/gim)].map(
+    (m) => ({ table: m[2]!, policy: m[1]! }),
+  );
+  if (explicit.length === 0) failIn(file, "brak jawnego CREATE POLICY");
+  const seen = new Set<string>();
+  for (const { table, policy } of explicit) {
+    if (!IDENT.test(table) || !IDENT.test(policy) || seen.has(table)) {
+      failIn(file, `nieoczekiwana albo zdublowana tabela ${table}`);
+    }
+    seen.add(table);
+    if (!policy.startsWith("tenant_")) failIn(file, `polityka ${policy} na ${table} bez przedrostka tenant_`);
+    if (!new RegExp(`^ALTER TABLE\\s+${table}\\s+ENABLE ROW LEVEL SECURITY`, "m").test(sql)) {
+      failIn(file, `CREATE POLICY na ${table} bez ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
+    }
+  }
+  return explicit;
+}
+
+/**
+ * Wymagania z 0005 + z kolejnych migracji. Tabela powtórzona (względem 0005 albo
+ * między plikami) = błąd z nazwą pliku i tabeli: druga polityka na tej samej tabeli
+ * oznacza zmianę istniejącej izolacji, nie nową tabelę.
+ */
+export function mergeRlsRequirements(
+  base: RlsRequirement[],
+  extra: Array<{ file: string; requirements: RlsRequirement[] }>,
+): RlsRequirement[] {
+  const seen = new Set(base.map((r) => r.table));
+  const out = [...base];
+  for (const { file, requirements } of extra) {
+    for (const r of requirements) {
+      if (seen.has(r.table)) failIn(file, `tabela ${r.table} ma już wymaganie RLS`);
+      seen.add(r.table);
+      out.push(r);
+    }
+  }
+  return out;
+}
+
+/** Wymagania RLS z plików migracji w repozytorium (0005 + `RLS_EXTRA_MIGRATION_FILES`). */
 export function loadRlsRequirements(root = process.cwd()): RlsRequirement[] {
-  return parseRlsRequirements(readFileSync(join(root, RLS_MIGRATION_FILE), "utf8"));
+  const read = (f: string) => readFileSync(join(root, f), "utf8");
+  return mergeRlsRequirements(
+    parseRlsRequirements(read(RLS_MIGRATION_FILE)),
+    RLS_EXTRA_MIGRATION_FILES.map((f) => ({ file: f, requirements: parseExplicitRlsRequirements(read(f), f) })),
+  );
 }
 
 /** RLS i polityki w schemacie public (tylko odczyt katalogu). */
@@ -135,8 +197,8 @@ export type RlsGuardResult =
   | { ok: false; missing: string[]; message: string };
 
 /**
- * Czysta decyzja: każda tabela z 0005 istnieje, ma RLS i politykę o nazwie z pliku;
- * tabel z RLS w bazie co najmniej tyle, ile tabel w pliku. Pusta lista wymagań = odmowa.
+ * Czysta decyzja: każda tabela z listy (0005 + RLS_EXTRA_MIGRATION_FILES) istnieje, ma RLS i politykę o nazwie z pliku;
+ * tabel z RLS w bazie co najmniej tyle, ile tabel na liście. Pusta lista wymagań = odmowa.
  */
 export function checkRls(rows: readonly RlsRow[], required: readonly RlsRequirement[]): RlsGuardResult {
   if (required.length === 0) {
@@ -151,7 +213,7 @@ export function checkRls(rows: readonly RlsRow[], required: readonly RlsRequirem
     else if (!row.policies.includes(req.policy)) missing.push(`${req.table} (brak polityki ${req.policy})`);
   }
   const rlsTables = rows.filter((r) => r.rls === true).length;
-  if (rlsTables < required.length) missing.push(`tabel z RLS w bazie ${rlsTables} < ${required.length} z 0005`);
+  if (rlsTables < required.length) missing.push(`tabel z RLS w bazie ${rlsTables} < ${required.length} z migracji`);
   if (missing.length === 0) return { ok: true, checked: required.length, rlsTables };
   const shown = missing.slice(0, 5).join(", ");
   const more = missing.length > 5 ? ` i ${missing.length - 5} więcej` : "";
@@ -159,7 +221,7 @@ export function checkRls(rows: readonly RlsRow[], required: readonly RlsRequirem
     ok: false,
     missing,
     message:
-      `RLS z 0005 niekompletne (${missing.length}): ${shown}${more} — baza zbudowana bez db:migrate ` +
+      `RLS z migracji niekompletne (${missing.length}): ${shown}${more} — baza zbudowana bez db:migrate ` +
       "albo po nim nadpisana przez db:push. Schemat tylko przez pnpm db:migrate.",
   };
 }
@@ -400,7 +462,7 @@ async function main(): Promise<number> {
       return 1;
     }
     console.log(
-      `[db-rls-guard] OK: RLS i polityki z 0005 na ${result.checked} tabelach; tabel z RLS w bazie: ${result.rlsTables}; ` +
+      `[db-rls-guard] OK: RLS i polityki z migracji na ${result.checked} tabelach; tabel z RLS w bazie: ${result.rlsTables}; ` +
         `polityk zgodnych z migawką: ${policies.policies}; role aplikacji bez SUPERUSER/BYPASSRLS`,
     );
     return 0;

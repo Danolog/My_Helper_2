@@ -732,3 +732,55 @@ export async function sendBlikDepositBookingSms(params: BlikDepositBookingSmsPar
     clientId: params.clientId,
   });
 }
+
+/** Powód nieudanej wysyłki z zamkniętej listy (do logu zamiast `result.error`, który może nieść zamaskowany numer). */
+export type SmsFailureReason = "test_phone" | "provider_unavailable" | "send_failed" | "rejected";
+
+export function smsFailureReason(result: SmsResult): SmsFailureReason {
+  if (result.skipped === "test_phone") return "test_phone";
+  if (result.error === SMS_PROVIDER_UNAVAILABLE_ERROR) return "provider_unavailable";
+  if (result.error === SMS_SEND_FAILED_ERROR) return "send_failed";
+  return "rejected";
+}
+
+/**
+ * Parametry SMS po ręcznym oznaczeniu zadatku jako wpłaconego przez salon.
+ * Celowo bez imienia klienta, usługi, pracownika i numeru BLIK: treść ma się
+ * zmieścić w jednym segmencie GSM-7 i nie niesie tekstu z publicznego formularza.
+ */
+export interface DepositMarkedSmsParams {
+  clientPhone: string;
+  amount: number;
+  appointmentDate: Date;
+  salonName: string | null | undefined;
+  salonId: string;
+  clientId?: string | undefined;
+}
+
+/**
+ * Treść SMS po ręcznym oznaczeniu zadatku (czysta funkcja, bez wysyłki).
+ * Nazwa salonu przez `salonNameForSms` (pusty wynik → bez fragmentu „w <salon>”),
+ * data przez `toGsm7Basic`, data i godzina w strefie SMS_TIME_ZONE. „Przez salon”:
+ * wpłatę oznacza salon ręcznie, MyHelper jej nie weryfikuje. Najdłuższa treść
+ * (kwota 11 znaków, data 15, salon 40) ma 148 znaków, czyli jeden segment.
+ */
+export function buildDepositMarkedSms(params: DepositMarkedSmsParams): string {
+  const formattedDate = toGsm7Basic(
+    params.appointmentDate.toLocaleDateString("pl-PL", { timeZone: SMS_TIME_ZONE, day: "numeric", month: "long" })
+  );
+  const formattedTime = params.appointmentDate.toLocaleTimeString("pl-PL", {
+    timeZone: SMS_TIME_ZONE, hour: "2-digit", minute: "2-digit",
+  });
+  const salon = salonPart(salonNameForSms(params.salonName));
+  return `Zadatek ${params.amount.toFixed(2)} PLN za wizyte ${formattedDate} o ${formattedTime}${salon} zostal potwierdzony przez salon. Do zobaczenia!`;
+}
+
+/** Send the SMS with the text from buildDepositMarkedSms. */
+export async function sendDepositMarkedSms(params: DepositMarkedSmsParams): Promise<SmsResult> {
+  return sendSms({
+    to: params.clientPhone,
+    message: buildDepositMarkedSms(params),
+    salonId: params.salonId,
+    clientId: params.clientId,
+  });
+}

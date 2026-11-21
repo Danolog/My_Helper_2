@@ -4,7 +4,7 @@
  *
  * Trasa: limit IP → schemat → termin nie w przeszłości → gość/sesja →
  * przynależność refów → kwota z serwera → salon z długością usługi (długość
- * wizyty = usługa + wariant) → numer BLIK salonu → blokada doradcza, limit
+ * wizyty = usługa + wariant) → numer BLIK salonu → data zgody BLIK → blokada doradcza, limit
  * salonu i limit gościa (personel tego salonu je pomija) → kolizja i blokady
  * → zapis wizyty `scheduled/false` (bez wiersza `deposit_payments`)
  * w transakcji forSalon.
@@ -201,14 +201,17 @@ const validBody = {
 };
 
 /**
- * Wiersz salonu (WHERE po `id`) z poddrzewem `deposits.blikPhone` i długością
- * usługi z joinu (60 min = `validBody` 10:00–11:00, bez wariantu).
+ * Wiersz salonu (WHERE po `id`) z poddrzewem `deposits.blikPhone`, datą zgody
+ * `deposits.blikConsentAt` i długością usługi z joinu (60 min = `validBody`
+ * 10:00–11:00, bez wariantu).
  */
+const BLIK_CONSENT_AT = "2026-11-21T00:00:00.000Z";
 const salonRow = (blikPhone: unknown = BLIK_PHONE, phone: string | null = SALON_PHONE) => ({
   id: SALON,
   name: SALON_NAME,
   phone,
   blikPhone,
+  blikConsentAt: BLIK_CONSENT_AT as unknown,
   serviceDuration: 60 as number | null,
   variantRowId: null as string | null,
   variantDurationModifier: null as number | null,
@@ -886,10 +889,11 @@ describe("długość wizyty = baseDuration usługi + durationModifier wariantu z
     expect(body).toEqual(DURATION_MISMATCH_BODY);
   });
 
-  it("odczyt salonu: numer, dane odbiorcy i długość usługi w jednym zapytaniu", async () => {
+  it("odczyt salonu: numer, data zgody, dane odbiorcy i długość usługi w jednym zapytaniu", async () => {
     primeHappyPath();
     await post();
     expect(Object.keys(h.selectArgs[0] as object).sort()).toEqual([
+      "blikConsentAt",
       "blikPhone",
       "name",
       "phone",
@@ -1016,6 +1020,63 @@ describe("409 — termin, blokada, brak numeru BLIK, wyścig", () => {
     expect(h.selectCalls).toBe(1); // kalendarz nieodpytywany
   });
 
+  it.each([
+    ["brak klucza", undefined],
+    ["null", null],
+    ["pusty napis", ""],
+    ["same spacje", "   "],
+    ["liczba", 1763683200000],
+    ["napis, który nie jest datą", "nie-data"],
+    ["obiekt", { at: BLIK_CONSENT_AT }],
+  ])(
+    "data zgody BLIK: %s przy ustawionym numerze → 409 DEPOSIT_BLIK_NOT_CONFIGURED z telefonem salonu, bez zapisu i SMS, numer poza odpowiedzią i logami",
+    async (_n, consentAt) => {
+      const row: Record<string, unknown> = { ...salonRow() };
+      if (consentAt === undefined) delete row.blikConsentAt;
+      else row.blikConsentAt = consentAt;
+      h.queue.push([row]);
+      const res = await post();
+      const text = await res.text();
+      expect(res.status).toBe(409);
+      expect(JSON.parse(text)).toEqual({
+        success: false,
+        code: "DEPOSIT_BLIK_NOT_CONFIGURED",
+        error: `Ten salon nie przyjmuje teraz rezerwacji online z zadatkiem. Zadzwoń: ${SALON_PHONE}`,
+      });
+      expect(text).not.toContain(BLIK_PHONE);
+      expect(text).not.toContain("000600703");
+      expect(h.insert).not.toHaveBeenCalled();
+      expect(h.selectCalls).toBe(1); // kalendarz nieodpytywany
+      expect(h.sms).not.toHaveBeenCalled();
+      expect(h.logger.warn).toHaveBeenCalledWith(
+        "[BlikBooking API] Deposit booking refused — salon has no BLIK consent",
+        { salonId: SALON, serviceId: SERVICE }
+      );
+      const logged = JSON.stringify(Object.values(h.logger).flatMap((fn) => fn.mock.calls));
+      expect(logged).not.toContain(BLIK_PHONE);
+      expect(logged).not.toContain("000600703");
+    }
+  );
+
+  it("brak numeru BLIK i brak daty zgody → 409, w logu ostrzeżenie o braku numeru, nie o braku zgody", async () => {
+    const row: Record<string, unknown> = { ...salonRow(null) };
+    delete row.blikConsentAt;
+    h.queue.push([row]);
+    const { status, body } = await parseResponse<Err>(await post());
+    expect(status).toBe(409);
+    expect(body.code).toBe("DEPOSIT_BLIK_NOT_CONFIGURED");
+    expect(h.logger.warn).toHaveBeenCalledWith(
+      "[BlikBooking API] Deposit booking refused — salon has no BLIK number",
+      { salonId: SALON, serviceId: SERVICE }
+    );
+    expect(h.logger.warn).not.toHaveBeenCalledWith(
+      "[BlikBooking API] Deposit booking refused — salon has no BLIK consent",
+      expect.anything()
+    );
+    expect(h.insert).not.toHaveBeenCalled();
+    expect(h.sms).not.toHaveBeenCalled();
+  });
+
   it("brak numeru BLIK i telefonu salonu → zdanie bez numeru", async () => {
     h.queue.push([salonRow(null, null)]);
     const { status, body } = await parseResponse<Err>(await post());
@@ -1040,6 +1101,19 @@ describe("409 — termin, blokada, brak numeru BLIK, wyścig", () => {
     expect(status).toBe(409);
     expect(body.error).toBe("Wybrany termin jest juz zajety. Wybierz inny termin.");
     expect(JSON.stringify(body)).not.toContain(BLIK_PHONE);
+  });
+});
+
+describe("201 — zgoda BLIK bez wersji", () => {
+  it("numer i poprawna data zgody bez blikConsentVersion → 201 z numerem BLIK i SMS", async () => {
+    const row: Record<string, unknown> = { ...salonRow() };
+    expect(row).not.toHaveProperty("blikConsentVersion");
+    h.queue.push([row], [], [], [], [], [detailsRow()]);
+    const { status, body } = await parseResponse<Ok>(await post());
+    expect(status).toBe(201);
+    expect(body.data.blik.phone).toBe(BLIK_PHONE);
+    expect(h.insert).toHaveBeenCalledTimes(1);
+    expect(h.sms).toHaveBeenCalledTimes(1);
   });
 });
 

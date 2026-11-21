@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { recordDepositStatusEvent } from "@/lib/deposit-status-events";
 import { logger } from "@/lib/logger";
 import { processAutomaticRefund } from "@/lib/refund";
 import {
@@ -170,7 +171,12 @@ export async function confirmDepositPayment(
     // Stan wizyty PO blokadzie płatności — anulowanie (DELETE / cron)
     // czeka na nas albo już się zatwierdziło i to widzimy.
     const [current] = await tx
-      .select({ id: appointments.id, status: appointments.status, depositPaid: appointments.depositPaid })
+      .select({
+        id: appointments.id,
+        salonId: appointments.salonId,
+        status: appointments.status,
+        depositPaid: appointments.depositPaid,
+      })
       .from(appointments)
       .where(eq(appointments.id, payment.appointmentId))
       .for("update");
@@ -206,6 +212,19 @@ export async function confirmDepositPayment(
         )
       )
       .returning();
+
+    // Dziennik zmian zadatku w TEJ SAMEJ transakcji, tylko przy faktycznej
+    // zmianie false → true: błąd wpisu cofa płatność i wizytę razem.
+    if (updatedAppointment) {
+      await recordDepositStatusEvent(tx, {
+        salonId: current.salonId,
+        appointmentId: current.id,
+        previousDepositPaid: current.depositPaid,
+        depositPaid: true,
+        source: "stripe_confirmation",
+        actor: null,
+      });
+    }
 
     return { updatedPayment, updatedAppointment, wasScheduled };
   });

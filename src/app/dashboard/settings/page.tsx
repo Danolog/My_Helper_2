@@ -29,8 +29,8 @@ const SETTINGS_ITEMS = [
     icon: Building2,
   },
   {
-    label: "Platnosci Stripe",
-    description: "Konfiguracja integracji Stripe i ustawienia platnosci",
+    label: "Płatności i zadatki",
+    description: "Ustawienia płatności i zadatków salonu",
     href: "/dashboard/settings/payments",
     icon: CreditCard,
   },

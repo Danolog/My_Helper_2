@@ -26,6 +26,7 @@
  * - (f) bez kontekstu (zmienna = '', jak po transakcji forSalon): odczyt → 0 wierszy,
  *   INSERT → 42501 z polityki RLS.
  * 42501 liczy się tylko z komunikatem o polityce RLS (brak uprawnienia do tabeli to inny powód).
+ * Wyjątek: tabele tylko do dopisywania (APPEND_ONLY) w (d) i (e) dają 42501 z braku uprawnienia.
  * INSERT w (c) i (f) jest bez RETURNING, żeby odmowa pochodziła z WITH CHECK (przy RETURNING
  * nowy wiersz sprawdza też USING).
  * Zachowanie na świeżym połączeniu (zmienna nieustawiona) sprawdza `salon-context-nullif.pg.test.ts`.
@@ -47,7 +48,7 @@ type Conn = { unsafe: (query: string, params?: unknown[]) => PromiseLike<readonl
 type Reserved = Conn & { release: () => void };
 
 /** Kolumny wiersza (nazwa kolumny w bazie → wartość); typy nadaje `jsonb_populate_record`. */
-type Row = Record<string, string | number>;
+type Row = Record<string, string | number | boolean>;
 
 /** Kolumna, po której polityka przypisuje wiersz do salonu. */
 type Via =
@@ -127,6 +128,14 @@ const FACTORIES: Record<string, Factory> = {
   scheduled_posts: direct(() => ({ platform: "instagram", post_type: "promotion", content: "IT C8", scheduled_at: START })),
   ai_conversations: direct(() => ({ channel: "chat" })),
   ai_generated_media: direct(() => ({ type: "image", provider: "sharp" })),
+  deposit_status_events: direct(async (b, s) => ({
+    appointment_id: await b.make("appointments", s),
+    deposit_paid: true,
+    previous_deposit_paid: false,
+    source: "manual_mark",
+    actor_user_id: `${PREFIX}-actor`,
+    actor_role: "owner",
+  })),
 
   time_blocks: child("employees", "employee_id", () => ({ start_time: START, end_time: END, block_type: "break" })),
   work_schedules: child("employees", "employee_id", () => ({ day_of_week: 1, start_time: "09:00", end_time: "17:00" })),
@@ -231,6 +240,15 @@ const EXPECTED = {
   fInsert: "42501 RLS" as unknown,
 };
 type Result = typeof EXPECTED;
+
+/**
+ * Tabele tylko do dopisywania: rola aplikacji nie ma UPDATE ani DELETE, więc (d) i (e) kończą
+ * się odmową uprawnienia (42501 bez komunikatu o polityce RLS), a nie polityką. Niezmienność
+ * wiersza po odmowie sprawdza `deposit-status-events.pg.test.ts`.
+ */
+const APPEND_ONLY: Record<string, Partial<Result>> = {
+  deposit_status_events: { dUpdate: "42501", eUpdate: "42501", eUpdateKept: false, eDelete: "42501", eDeleteKept: false },
+};
 
 describe("parametry testu izolacji (#193)", () => {
   it("lista tabel z parsera migracji niepusta i bez duplikatów", () => {
@@ -383,7 +401,7 @@ suite("izolacja salonów na każdej tabeli z RLS pod rolą aplikacji (#193)", ()
         return [r.rows.length, (await migrationRoleValue(rB.id)) === rB.ref] as const;
       });
 
-      expect(result).toEqual(EXPECTED);
+      expect(result).toEqual({ ...EXPECTED, ...(APPEND_ONLY[t] ?? {}) });
     } finally {
       await conn.unsafe("ROLLBACK TO SAVEPOINT table_case");
     }

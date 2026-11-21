@@ -30,7 +30,7 @@ import { and, eq, inArray, lt, ne } from "drizzle-orm";
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { GET as cleanupCron } from "@/app/api/cron/cleanup-pending-deposits/route";
 import { confirmDepositPayment } from "@/lib/deposit-confirmation";
-import { appointments, depositPayments, employees, salons, services, user } from "@/lib/schema";
+import { appointments, depositPayments, depositStatusEvents, employees, salons, services, user } from "@/lib/schema";
 import type { Sql } from "postgres";
 
 const h = await vi.hoisted(async () => (await import("./pg-harness")).createIntegrationDb());
@@ -294,6 +294,31 @@ suite("confirmDepositPayment — prawdziwy Postgres", () => {
     const { payment, appointment } = await state(b);
     expect(payment.status).toBe("succeeded");
     expect(appointment).toMatchObject({ status: "confirmed", depositPaid: true });
+  });
+
+  // ------------------------------------------------------------ dziennik zmian zadatku
+
+  it("potwierdzenie Stripe daje jeden wpis stripe_confirmation bez aktora, powtórzenie nie dodaje wpisu", async () => {
+    const b = await booking();
+    const events = () =>
+      h!.db.select().from(depositStatusEvents).where(eq(depositStatusEvents.appointmentId, b.appointmentId));
+
+    await confirmDepositPayment(b.paymentId, { paymentIntentId: "pi_it_evt" });
+    const first = await events();
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({
+      salonId,
+      appointmentId: b.appointmentId,
+      depositPaid: true,
+      previousDepositPaid: false,
+      source: "stripe_confirmation",
+      actorUserId: null,
+      actorRole: null,
+    });
+
+    const again = await confirmDepositPayment(b.paymentId, { paymentIntentId: "pi_it_evt" });
+    expect(again).toMatchObject({ success: true, alreadyConfirmed: true });
+    expect(await events()).toHaveLength(1);
   });
 
   // ------------------------------------------------------------ wyścig z cronem
