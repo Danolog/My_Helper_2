@@ -119,6 +119,15 @@ const TEMPLATES: Record<string, (mod: typeof sms, salonName: string) => Promise<
       salonId: SALON_ID,
       clientId: "client-1",
     }),
+  sendDepositMarkedSms: (mod, salonName) =>
+    mod.sendDepositMarkedSms({
+      clientPhone: PHONE,
+      amount: 50,
+      appointmentDate: DATE,
+      salonName,
+      salonId: SALON_ID,
+      clientId: "client-1",
+    }),
 };
 
 const mockFetch = vi.fn();
@@ -756,6 +765,99 @@ describe("SMS przypomnienia 24 h (buildAppointmentReminder24hSms)", () => {
     expect(result).toMatchObject({ success: false, skipped: "test_phone" });
     expect(mockFetch).not.toHaveBeenCalled();
     expect(mockDbValues).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * SMS po ręcznym oznaczeniu zadatku przez salon: kwota i termin, bez imienia,
+ * usługi, pracownika i numeru BLIK; jeden segment GSM-7.
+ */
+describe("SMS po ręcznym oznaczeniu zadatku (buildDepositMarkedSms)", () => {
+  const params = (patch: Partial<sms.DepositMarkedSmsParams> = {}): sms.DepositMarkedSmsParams => ({
+    clientPhone: PHONE,
+    amount: 50,
+    // 13:00 UTC = 14:00 w Warszawie (zima, UTC+1).
+    appointmentDate: new Date("2030-01-15T13:00:00Z"),
+    salonName: "Salon Uroda",
+    salonId: SALON_ID,
+    ...patch,
+  });
+
+  const build = (patch: Partial<sms.DepositMarkedSmsParams> = {}) => sms.buildDepositMarkedSms(params(patch));
+
+  const WITHOUT_SALON = "Zadatek 50.00 PLN za wizyte 15 stycznia o 14:00 zostal potwierdzony przez salon. Do zobaczenia!";
+
+  it("zwykłe wartości → pełna treść", () => {
+    expect(build()).toBe(
+      "Zadatek 50.00 PLN za wizyte 15 stycznia o 14:00 w Salon Uroda zostal potwierdzony przez salon. Do zobaczenia!"
+    );
+  });
+
+  it("najgorszy przypadek (kwota 11 znaków, data 15, salon skrócony do 40) → jeden segment (148 znaków)", () => {
+    const message = build({
+      amount: 99999999.99,
+      // 22:59 UTC = 23:59 w Warszawie (30 października 2030 już czas zimowy).
+      appointmentDate: new Date("2030-10-30T22:59:00Z"),
+      salonName: "x".repeat(60),
+    });
+    expect(message).toBe(
+      "Zadatek 99999999.99 PLN za wizyte 30 pazdziernika o 23:59 w " +
+        "x".repeat(37) +
+        "... zostal potwierdzony przez salon. Do zobaczenia!"
+    );
+    expect(message.length).toBeLessThanOrEqual(160);
+    expect(message).toHaveLength(148);
+  });
+
+  it.each([
+    ["null", null],
+    ["pusty napis", ""],
+    ["adres w nazwie", "Salon www.uroda-ania.pl"],
+  ])("nazwa salonu: %s → treść bez fragmentu „w <salon>”", (_n, salonName) => {
+    expect(build({ salonName })).toBe(WITHOUT_SALON);
+  });
+
+  it("nazwa salonu z polskimi znakami i nową linią → po oczyszczeniu", () => {
+    expect(build({ salonName: "Salon Łąka\nNowa" })).toContain(" w Salon Laka Nowa zostal");
+  });
+
+  it("godzina w strefie Warszawy także po północy UTC (następny dzień)", () => {
+    expect(build({ appointmentDate: new Date("2030-01-15T23:30:00Z") })).toContain("16 stycznia o 00:30");
+  });
+
+  it.each([
+    ["Salon Uroda", "Salon Uroda"],
+    ["null", null],
+    ["pusty napis", ""],
+  ])("treść wyłącznie z liter ASCII, cyfr, spacji i .:! (salon: %s)", (_n, salonName) => {
+    expect(build({ salonName })).toMatch(/^[A-Za-z0-9 .:!]+$/);
+  });
+
+  it("sendDepositMarkedSms wysyła treść z buildera przez sendSms (zapis w notifications, z clientId)", async () => {
+    const p = params({ clientId: "client-1" });
+    const result = await sms.sendDepositMarkedSms(p);
+    expect(result.success).toBe(true);
+    expect(sentMessage()).toBe(sms.buildDepositMarkedSms(p));
+    expect(mockDbValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        salonId: SALON_ID,
+        clientId: "client-1",
+        type: "sms",
+        message: sms.buildDepositMarkedSms(p),
+        status: "sent",
+      })
+    );
+  });
+});
+
+describe("smsFailureReason: zamknięta lista powodów", () => {
+  it.each([
+    ["numer testowy", { success: false, skipped: "test_phone", error: sms.SMS_TEST_PHONE_ERROR }, "test_phone"],
+    ["brak dostawcy", { success: false, error: sms.SMS_PROVIDER_UNAVAILABLE_ERROR }, "provider_unavailable"],
+    ["błąd wysyłki", { success: false, error: sms.SMS_SEND_FAILED_ERROR }, "send_failed"],
+    ["zły numer", { success: false, error: "Invalid phone number: ***" }, "rejected"],
+  ] as const)("%s → powód z listy", (_n, result, reason) => {
+    expect(sms.smsFailureReason(result)).toBe(reason);
   });
 });
 
