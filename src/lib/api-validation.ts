@@ -689,6 +689,7 @@ export function isPolishMobileNumber(e164: string): boolean {
 const BLIK_PHONE_FORMAT_MESSAGE = "Podaj prawidlowy numer telefonu (9 cyfr, opcjonalnie +48)";
 const BLIK_PHONE_MOBILE_MESSAGE = "Numer BLIK musi byc numerem komorkowym";
 const BLIK_CONSENT_MESSAGE = "Zaznacz zgode na pokazywanie numeru klientom";
+const BLIK_CONSENT_VERSION_MESSAGE = "Brak wersji tresci zgody. Odswiez strone";
 
 /**
  * Numer BLIK salonu: ta sama normalizacja co `guestPhone` (spacje, myślniki,
@@ -722,18 +723,29 @@ const blikPhoneField = z.preprocess(
 /**
  * PUT /api/salon/blik-deposit. `blikPhone` wymagany (null czyści numer —
  * brak klucza nie może przypadkiem skasować ustawienia). Numer wymaga
- * `consent: true` (RODO: zgoda właściciela na pokazanie numeru klientom).
- * Data zgody NIE pochodzi z body — nadaje ją serwer; nieznane klucze
- * (np. `blikConsentAt`) schemat pomija (strip), żądanie przechodzi.
+ * `consent: true` (RODO: zgoda właściciela na pokazanie numeru klientom)
+ * i `consentVersion` — wersji treści zgody, którą właściciel przeczytał
+ * (trasa porównuje ją z bieżącą). Data i zapisywana wersja zgody NIE
+ * pochodzą z body — nadaje je serwer; nieznane klucze (np. `blikConsentAt`,
+ * `blikConsentVersion`) schemat pomija (strip), żądanie przechodzi.
+ * `blikPhone: null` nie wymaga ani zgody, ani wersji.
  */
 export const blikDepositSettingsSchema = z
   .object({
     blikPhone: blikPhoneField,
     consent: z.boolean().optional(),
+    consentVersion: z.string().max(32).optional(),
   })
   .superRefine((v, ctx) => {
     if (v.blikPhone !== null && v.consent !== true) {
       ctx.addIssue({ code: "custom", path: ["consent"], message: BLIK_CONSENT_MESSAGE });
+    }
+    if (v.blikPhone !== null && v.consentVersion === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["consentVersion"],
+        message: BLIK_CONSENT_VERSION_MESSAGE,
+      });
     }
   });
 
