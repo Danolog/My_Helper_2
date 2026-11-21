@@ -53,6 +53,8 @@ const sqlCode = (f: string) =>
     .split("\n")
     .filter((l) => !l.trim().startsWith("--"))
     .join("\n");
+/** Rozpoznanie Neona: ta sama kontrola w skrypcie (źródło i cel) i w ownClient testu pg. */
+const NEON_PROBE = "(coalesce(current_setting('neon.timeline_id', true), '') <> '')::int";
 const PRE_CODE = sqlCode(PRE);
 const POST_CODE = sqlCode(POST);
 
@@ -264,7 +266,8 @@ describe("copy-cloudsql-to-neon.sh: jedna transakcja zapisu tylko w SQL z repo",
       expect(b).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|COPY|VACUUM)\b/i);
       expect(b).not.toMatch(/READ WRITE/);
     }
-    expect(sqlBlocks[0]).toContain("FROM pg_settings WHERE name LIKE 'neon.%'");
+    expect(sqlBlocks[0]).toContain(`SELECT 'neon_settings=' || ${NEON_PROBE};`);
+    expect(sqlBlocks[0]).not.toMatch(/pg_settings/);
     expect(sqlBlocks[0]).toContain("'default_transaction_read_only=on' = ANY (s.setconfig)");
     expect(sqlBlocks[0]).toContain("current_setting('default_transaction_read_only') = 'on'");
     expect(sqlBlocks[1]).toContain("WHERE c.contype = 'f' AND sn.nspname = 'public' AND dn.nspname = 'public'");
@@ -305,6 +308,49 @@ describe("copy-cloudsql-to-neon.sh: jedna transakcja zapisu tylko w SQL z repo",
     );
     expect(POST_CODE.match(/RAISE EXCEPTION/g)!.length).toBeGreaterThanOrEqual(6);
   });
+
+  it("rozpoznanie Neona bez ścieżki obejścia: dwie bezwarunkowe bramki kodu 4, brak zmiennej spoza listy", () => {
+    // Ta sama kontrola po obu stronach (jeden read_state) i w ownClient testu pg.
+    expect(CODE.match(/current_setting\('neon\./g)).toHaveLength(1);
+    expect(CODE_LINES.filter((l) => /^read_state (source|target)$/.test(l))).toEqual([
+      "read_state source",
+      "read_state target",
+      "read_state target",
+    ]);
+    // Kod 4 wyłącznie z dwóch wierszy na najwyższym poziomie, bez warunku obok.
+    expect(CODE_LINES.filter((l) => /\bexit 4\b/.test(l))).toEqual([
+      '[[ "${SRC_STATE[0]}" == 0 ]] || exit 4',
+      '[[ "${TGT_STATE[0]}" != 0 ]] || exit 4',
+    ]);
+    expect(CODE.match(/STATE\[0\]/g)).toHaveLength(2);
+    // Skrypt czyta tylko te zmienne: żadnej flagi typu SKIP/ALLOW/FORCE/NEON_* ze środowiska.
+    const refs = new Set([...CODE.matchAll(/\$\{?#?([A-Z_][A-Z0-9_]*)/g)].map((m) => m[1]!));
+    const allowed = new Set([
+      "HOME", "BASE", "LOG", "ERRF", "DUMP_ERR", "RESTORE_ERR", "EMIT_RE", "DRY_RUN", "BASH_SOURCE",
+      "SQL_DIR", "PRE_SQL", "POST_SQL", "PGHOSTADDR", "PGSERVICE", "TARGET_PGHOSTADDR", "TARGET_PGSERVICE",
+      "PGHOST", "PGDATABASE", "PGUSER", "PGPORT", "TARGET_PGHOST", "TARGET_PGDATABASE", "TARGET_PGUSER",
+      "TARGET_PGPORT", "TARGET_PGPASSWORD", "TARGET_PGSSLMODE", "ERROR_CLASS", "NF", "SQL_OUT", "NUMS",
+      "SRC_STATE", "TGT_STATE", "EXPECTED_LINE", "ENTRY", "OBJ", "EXPECTED_RE", "EXPECTED", "STREAM",
+      "PIPESTATUS", "SECONDS",
+    ]);
+    expect([...refs].filter((v) => !allowed.has(v)).sort()).toEqual([]);
+    expect(CODE).not.toMatch(/\b(SKIP|ALLOW|FORCE|BYPASS|UNSAFE|NO_NEON|NEON_CHECK)\w*/);
+    const T = readFileSync(join(ROOT, "__tests__/pg/cutover-copy-reverse.pg.test.ts"), "utf8");
+    expect(T).toContain(`const NEON_PROBE = "${NEON_PROBE}";`);
+    expect(T).toContain("ALTER DATABASE ${DB_T} SET neon.timeline_id = '${NEON_TIMELINE}'");
+    expect(T).not.toMatch(/from pg_settings/i);
+  });
+
+  it.each([
+    ["źródło", state(1, 1, 0), TGT_OK],
+    ["cel", SRC_OK, state(0, 1, 0)],
+  ])("neon_settings po złej stronie (%s) → kod 4 także ze zmiennymi wyglądającymi na obejście", (_l, s, t) => {
+    const env: Env = { SKIP_NEON_CHECK: "1", CUTOVER_ALLOW_NON_NEON: "1", NEON_CHECK: "0", FORCE: "1" };
+    const r = run([], { env, psql: [s, t] });
+    expect(r.status).toBe(4);
+    expect(r.lines).toEqual(["exit=4"]);
+    expect(r.dump).toBeNull();
+  }, LIMIT);
 
   it("kopia w przód bez zmian: cel tylko 127.0.0.1 i kod 4 dla celu z neon.*", () => {
     const fwd = readFileSync(FORWARD, "utf8").split("\n");

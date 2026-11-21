@@ -5,8 +5,8 @@
  * compare.sh i kopia w przód).
  *
  * Bazy testu: źródło S (po migracjach, dane pos_dev, własna sekwencja, wiersze
- * session i auth_rate_limit), cel T (szablon S, potem ustawienie neon.*
- * w bazie, zmieniony i dodatkowy wiersz user, dodatkowa sesja, inna wartość
+ * session i auth_rate_limit), cel T (szablon S, potem ustawienie bazy
+ * neon.timeline_id — ta sama kontrola co w skrypcie, zmieniony i dodatkowy wiersz user, dodatkowa sesja, inna wartość
  * sekwencji) i pusta baza E. Wszystkie trzy zamrożone przez freeze-neon.sh.
  * Źródło łączy się przez 127.0.0.1, cel przez localhost. pos_dev jest tylko
  * czytana (nigdy zamrażana).
@@ -140,7 +140,15 @@ function urlFor(db: string): string {
   return u.toString();
 }
 
-/** Klient do bazy testu: te same etapy guardu co harness + sonda serwera (neon.* tylko w celu). */
+/**
+ * Cel udaje Neona ustawieniem bazy neon.timeline_id (placeholder: na PG 15+ nie
+ * ma go w pg_settings, ale current_setting go widzi). Skrypt rozpoznaje Neona
+ * tą samą kontrolą (NEON_PROBE), więc test nie potrzebuje żadnego obejścia.
+ */
+const NEON_TIMELINE = randomBytes(16).toString("hex");
+const NEON_PROBE = "(coalesce(current_setting('neon.timeline_id', true), '') <> '')::int";
+
+/** Klient do bazy testu: te same etapy guardu co harness + sonda serwera (neon.timeline_id tylko w celu). */
 async function ownClient(db: string, neon: boolean): Promise<Sql> {
   if (!OWN_DBS.includes(db)) throw new Error("baza spoza listy testu");
   const url = urlFor(db);
@@ -152,12 +160,10 @@ async function ownClient(db: string, neon: boolean): Promise<Sql> {
     await sql.end({ timeout: 0 });
     throw new Error(`Odmowa: ${opts.reason}`);
   }
-  const [row] = await sql.unsafe(
-    "select current_database() as database, (select count(*) from pg_settings where name like 'neon.%')::int as neon",
-  );
-  if (row?.database !== db || (neon ? !(row?.neon > 0) : row?.neon !== 0)) {
+  const [row] = await sql.unsafe(`select current_database() as database, ${NEON_PROBE} as neon`);
+  if (row?.database !== db || (neon ? row?.neon !== 1 : row?.neon !== 0)) {
     await sql.end({ timeout: 0 });
-    throw new Error(neon ? "Odmowa: ustawienie neon.* niewidoczne w pg_settings celu" : "Odmowa: nieoczekiwana tożsamość serwera");
+    throw new Error(neon ? "Odmowa: neon.timeline_id niewidoczne w sesji celu" : "Odmowa: nieoczekiwana tożsamość serwera");
   }
   return sql;
 }
@@ -347,9 +353,9 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("copy-cloudsql-to-neon.sh na prawd
       await s0.end({ timeout: 5 });
     }
 
-    // Cel: szablon źródła, potem ustawienie neon.* w bazie i własne dane celu.
+    // Cel: szablon źródła, potem neon.timeline_id w bazie (jak compute Neona) i własne dane celu.
     await h.observer.unsafe(`CREATE DATABASE ${DB_T} TEMPLATE ${DB_S}`);
-    await h.observer.unsafe(`ALTER DATABASE ${DB_T} SET neon.cutover_probe = 'on'`);
+    await h.observer.unsafe(`ALTER DATABASE ${DB_T} SET neon.timeline_id = '${NEON_TIMELINE}'`);
     t = await ownClient(DB_T, true);
     const upd = await t`UPDATE "user" SET name = name || ' (neon)' WHERE id = ${SEED_OWNER_ID}`;
     expect(upd.count).toBe(1);

@@ -49,8 +49,8 @@
 # połączenia. Zmienne TARGET_* trafiają tylko do wywołań celu (jako PG*).
 #
 # Kroki (każdy osobnym połączeniem; przed strumieniem żadnego zapisu):
-#   1. źródło i cel (psql, READ ONLY): ustawienia neon.* (źródło 0, cel > 0,
-#      inaczej kod 4), zamrożenie (ustawienie bazy default_transaction_read_only
+#   1. źródło i cel (psql, READ ONLY): niepuste neon.timeline_id (źródło 0,
+#      cel 1, inaczej kod 4), zamrożenie (ustawienie bazy default_transaction_read_only
 #      =on i to samo w sesji), role_override (jak w freeze-neon.sh);
 #      source_frozen=no → kod 6; source_/target_role_override ≠ 0 → kod 7;
 #      target_frozen=no → kod 8.
@@ -236,12 +236,23 @@ read_nums() {
 }
 
 # Tożsamość serwera i zamrożenie jednej strony (osobne połączenie READ ONLY).
+# neon_settings=1 tylko gdy sesja widzi niepuste neon.timeline_id. Podstawa
+# (ZAŁOŻENIE do potwierdzenia przez CTO): na Neonie rozszerzenie neon
+# (shared_preload_libraries) definiuje GUC neon.timeline_id, a compute ustawia
+# je na id gałęzi przy starcie, czytelne dla zwykłej roli (SHOW neon.timeline_id);
+# Cloud SQL nie ma rozszerzenia neon, więc current_setting(…, true) = NULL → 0.
+# Gdyby GUC był tylko dla superużytkownika, current_setting rzuca 42501 →
+# error_class=other, kod 1, bez zapisu (bezpieczny wynik). Na PG 15+ ustawienie
+# bez załadowanego rozszerzenia (placeholder) nie jest widoczne w pg_settings,
+# ale jest w current_setting — stąd ta kontrola zamiast pg_settings LIKE 'neon.%'
+# (test CI udaje Neona ALTER DATABASE … SET neon.timeline_id, tą samą kontrolą).
+# Brak zmiennej ani flagi, która tę kontrolę wyłącza.
 # frozen=1 tylko gdy ustawienie bazy to default_transaction_read_only=on i nowa
 # sesja tej roli faktycznie startuje tylko do odczytu.
 read_state() {
   run_sql "$1" <<'SQL'
 BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;
-SELECT 'neon_settings=' || count(*) FROM pg_settings WHERE name LIKE 'neon.%';
+SELECT 'neon_settings=' || (coalesce(current_setting('neon.timeline_id', true), '') <> '')::int;
 SELECT 'frozen=' || CASE WHEN current_setting('default_transaction_read_only') = 'on'
     AND EXISTS (SELECT 1 FROM pg_db_role_setting s JOIN pg_database d ON d.oid = s.setdatabase
                   WHERE d.datname = current_database() AND s.setrole = 0
@@ -262,7 +273,7 @@ read_state source
 SRC_STATE=("${NUMS[@]}")
 read_state target
 TGT_STATE=("${NUMS[@]}")
-# Źródło = Cloud SQL (bez neon.*), cel = Neon (z neon.*).
+# Źródło = Cloud SQL (bez neon.timeline_id), cel = Neon (z neon.timeline_id).
 [[ "${SRC_STATE[0]}" == 0 ]] || exit 4
 [[ "${TGT_STATE[0]}" != 0 ]] || exit 4
 if [[ "${SRC_STATE[1]}" != 1 ]]; then
