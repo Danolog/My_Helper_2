@@ -17,6 +17,7 @@ import {
   isPolishMobileNumber,
   POLISH_MOBILE_PREFIXES,
   loyaltyRedeemSchema,
+  invoiceSchema,
 } from "@/lib/api-validation";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -1058,5 +1059,90 @@ describe("blikBookingSchema — rezerwacja z zadatkiem BLIK", () => {
     const result = blikBookingSchema.safeParse({ ...valid, ...patch });
     expect(result.success).toBe(false);
     expect(result.error?.issues.map((i) => i.path[0])).toContain(field);
+  });
+});
+
+describe("invoiceSchema — kontrakt okna wystawienia dokumentu w panelu", () => {
+  // Kształty dokładnie jak w invoice-dialog.tsx (pola drugiego typu = null).
+  const panelReceipt = {
+    type: "paragon",
+    clientName: "Jan Testowy",
+    clientAddress: null,
+    companyName: null,
+    companyNip: null,
+    companyAddress: null,
+    paymentMethod: "cash",
+  };
+  const panelInvoice = {
+    type: "faktura",
+    clientName: null,
+    clientAddress: null,
+    companyName: "Firma Testowa Sp. z o.o.",
+    companyNip: "0000000000",
+    companyAddress: "ul. Testowa 1, 00-000 Testowo",
+    paymentMethod: "transfer",
+  };
+
+  it("body paragonu z panelu przechodzi", () => {
+    expect(validateBody(invoiceSchema, panelReceipt)).toBeNull();
+  });
+
+  it("body paragonu z adresem klienta przechodzi", () => {
+    expect(
+      validateBody(invoiceSchema, { ...panelReceipt, clientAddress: "ul. Testowa 2" })
+    ).toBeNull();
+  });
+
+  it("body faktury z panelu przechodzi", () => {
+    expect(validateBody(invoiceSchema, panelInvoice)).toBeNull();
+  });
+
+  it.each(["cash", "card", "transfer"])("metoda płatności %s przechodzi", (paymentMethod) => {
+    expect(validateBody(invoiceSchema, { ...panelReceipt, paymentMethod })).toBeNull();
+  });
+
+  it("brak type i paymentMethod przechodzi (trasa podstawia paragon i cash)", () => {
+    expect(validateBody(invoiceSchema, { clientName: "Jan Testowy" })).toBeNull();
+  });
+
+  it("puste/null pola wymagane przez typ przechodzą schemat — komunikat 400 daje trasa", () => {
+    expect(validateBody(invoiceSchema, { ...panelReceipt, clientName: "" })).toBeNull();
+    expect(validateBody(invoiceSchema, { ...panelReceipt, clientName: null })).toBeNull();
+    expect(
+      validateBody(invoiceSchema, { ...panelInvoice, companyNip: null })
+    ).toBeNull();
+  });
+
+  it("stary kształt { buyerName, … } jest odrzucany", () => {
+    const result = validateBody(invoiceSchema, {
+      buyerName: "Jan Testowy",
+      buyerNip: "0000000000",
+      buyerAddress: "ul. Testowa 1",
+      items: [{ name: "Usługa", quantity: 1, unitPrice: 100 }],
+      paymentMethod: "cash",
+    });
+    expect(result).not.toBeNull();
+    expect(result!.error).toBe("Validation failed");
+  });
+
+  it("pole spoza kontraktu obok poprawnego body jest odrzucane", () => {
+    expect(validateBody(invoiceSchema, { ...panelReceipt, amount: 1 })).not.toBeNull();
+  });
+
+  it.each([
+    ["nieznany type", { type: "rachunek" }, "type"],
+    ["type = null", { type: null }, "type"],
+    ["type jako liczba", { type: 1 }, "type"],
+    ["nieznana metoda płatności", { paymentMethod: "blik" }, "paymentMethod"],
+    ["paymentMethod = null", { paymentMethod: null }, "paymentMethod"],
+    ["clientName jako liczba", { clientName: 123 }, "clientName"],
+    ["clientAddress jako obiekt", { clientAddress: { street: "x" } }, "clientAddress"],
+    ["companyName jako tablica", { companyName: ["x"] }, "companyName"],
+    ["companyNip jako liczba", { companyNip: 1234567890 }, "companyNip"],
+    ["companyAddress jako boolean", { companyAddress: true }, "companyAddress"],
+  ])("%s → błąd na polu %s", (_n, patch, field) => {
+    const result = validateBody(invoiceSchema, { ...panelReceipt, ...patch });
+    expect(result).not.toBeNull();
+    expect(result!.details[field]).toBeDefined();
   });
 });
