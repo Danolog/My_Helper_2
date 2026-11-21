@@ -194,10 +194,30 @@ set +x
 git ls-remote origin refs/heads/main
 ```
 
-Oczekiwane: `<sha okna>`. To samo polecenie przed 2.9 i na końcu okna przed
-K1.1 (po K1 oczekiwany sha = scalenie K1); inny
-sha = nowe wdrożenie Vercela w oknie (ruchu nie dostaje — zapora działa na
-cały projekt, ale rozjazd sha): stop, droga A, wyjaśnienie przed nowym oknem.
+Oczekiwane: `<sha okna>`. To samo polecenie w trzech miejscach; reguła przy
+innym sha zależy od miejsca odczytu (inny sha = nowe wdrożenie Vercela
+w oknie; ruchu nie dostaje, bo zapora działa na cały projekt):
+
+- **przed 2.9** — stop, droga A, wyjaśnienie przed nowym oknem;
+- **T3 (po T1, ingress `all`)** — stop według reguły pod tabelą sekcji 3:
+  odczyt stanu (2.10, blok „Odczyt stanu”), dalej droga B albo C. Drogą A
+  bez cofnięcia T1 iść nie wolno;
+- **na końcu okna przed K1.1** (po 2.10 z kodem 0 albo po drodze C; po K1
+  oczekiwany sha = scalenie K1) — drogi A nie ma (Cloud SQL odmrożony, GCP
+  mógł zapisać; runbook przełączenia, droga C). K1 się nie scala, ruch
+  zostaje na GCP, reguła zapory zostaje `Deny` dla wszystkiego (stan „droga
+  C bez K1”, sekcja 3, K1). Dodatkowo odczyt rewizji Cloud Run obsługującej
+  ruch:
+
+  ```bash
+  set +x
+  gcloud --project='<projekt GCP>' run services describe myhelper --region=europe-central2 --format='value(status.traffic[0].revisionName)'
+  ```
+
+  Oczekiwane: rewizja z P5. Inna rewizja = stop, decyzja właściciela na
+  miejscu (bez cofania rewizji — mogła zapisać). Do notatki okna: oba sha,
+  rewizja, wpis „droga C bez K1: inny sha `main`”. K1 dopiero po
+  wyjaśnieniu rozjazdu, osobnym scaleniem.
 
 **W5 — ingress Cloud Run `internal`** (od 2.1 do 2.9; w 3.3 do końca okna
 powrotu):
@@ -278,12 +298,22 @@ potwierdzenia w próbie, sekcja 0.3). OAuth bez zmian w oknie (P8).
 
 **K1 — przekierowanie `<domena Vercel Production>` → `app.nordsignal.cc`.**
 Wykonuje się po 2.10 z kodem 0 albo po drodze C, czyli zawsze po zakazie
-scaleń z L7. Po drodze C K1 wymaga, żeby T5 i T6 dały oczekiwany wynik. Jeśli
-nie dały: K1 się nie wykonuje, reguła zapory zostaje `Deny` dla wszystkiego
-(nie wyłączać, bo GCP mógł zapisać), do notatki okna idzie wpis „droga C bez
-K1: aplikacja wyłączona dla `<domena Vercel Production>`”, a dalej decyduje
-właściciel na miejscu. Zgoda: wiersz 1.2 „po 2.10 z kodem 0 albo po drodze C
-…”. To wdrożenie Vercel Production.
+scaleń z L7. Warunki przed K1.1 (obie drogi):
+
+1. W4 na końcu okna = `<sha okna>` (inny sha — reguła W4, K1 się nie scala);
+2. T5 z serwera autorytatywnego = `<LB_IP>`, oraz resolvery publiczne
+   (`@1.1.1.1`, `@8.8.8.8`) = `<LB_IP>` albo od T4 upłynęło minimum SOA
+   z P7 (czas do notatki okna);
+3. T6 = `200` i `0`; kontrola z `--resolve` wystarcza tylko przy spełnionym
+   pkt 2.
+
+Po 2.10 z kodem 0 niespełniony pkt 2 albo 3 = K1.1 czeka do spełnienia
+(ruch już na GCP). Po drodze C niespełniony warunek: K1 się nie wykonuje,
+reguła zapory zostaje `Deny` dla wszystkiego (nie wyłączać, bo GCP mógł
+zapisać), do notatki okna idzie wpis „droga C bez K1: aplikacja wyłączona
+dla `<domena Vercel Production>`”, a dalej decyduje właściciel na miejscu.
+Zgoda: wiersz 1.2 „po 2.10 z kodem 0 albo po drodze C …”. To wdrożenie
+Vercel Production.
 
 | Krok | Działanie | Polecenie | Oczekiwane |
 |---|---|---|---|
@@ -298,7 +328,8 @@ rozstrzygnięty przed P13). Przy F8 = tak K1 jest obowiązkowy w tym samym oknie
 ## 4. Cofnięcie przełączenia ruchu — droga B
 
 Tylko po odczycie stanu Cloud SQL = `on` (runbook przełączenia, droga B;
-2.10 „Odczyt stanu”). K1 nie był scalony (scalenie dopiero po 2.10 z kodem 0).
+2.10 „Odczyt stanu”). K1 nie był scalony (scalenie dopiero po 2.10 z kodem 0
+albo po drodze C — obie wykluczają drogę B).
 Zgoda: wiersz 1.2 „przełączenie ruchu aplikacji na GCP … przy wycofaniu
 (droga B) …”. Do starej domeny wraca się bez DNS. Użytkownicy, którzy
 w odcinku T6–2.10 weszli na `app.nordsignal.cc`, po B1 dostają błąd nazwy —
