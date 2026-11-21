@@ -812,6 +812,134 @@ infra/gcp/lb.sh --project=my-helper-2-488419 --teardown --release-ip
 infra/gcp/lb.sh --project=my-helper-2-488419 --teardown --release-ip --apply
 ```
 
+## 10b. Logi — filtr tokenów, retencja, audyt Secret Manager (P8)
+
+Skrypt: `infra/gcp/logging.sh`, strażnik `__tests__/lib/logging-config.test.ts`.
+Uruchamia wyłącznie sesja główna (Z3). Zasady jak w sekcji 0: domyślnie dry-run
+(zero wywołań gcloud, także odczytów), `--project` w każdym wywołaniu, region
+tylko `europe-central2`, stałe nazwy i wartości. Skrypt nie ustawia wiązań IAM,
+niczego nie usuwa i nie blokuje retencji.
+
+**Kiedy.** Po kroku 1 (LB z logowaniem), **przed** pierwszym odczytem wartości
+sekretu w 4a.1 (inaczej odczyt nie ma śladu) i **przed** rekordem `app` na LB
+(krok 3). Wykluczenie działa tylko na nowe wpisy.
+
+### Co robi
+
+1. **Wykluczenie `myhelper-auth-token-urls` w ujściu `_Default`** — wpis nie
+   trafia do logów, gdy adres żądania **albo** nagłówek Referer pasuje do
+   wyrażenia RE2 `/(api/auth/)?(verify-email|reset-password)`:
+
+   ```
+   httpRequest.requestUrl=~"/(api/auth/)?(verify-email|reset-password)" OR httpRequest.referer=~"/(api/auth/)?(verify-email|reset-password)"
+   ```
+
+   Filtr nie zawęża typu zasobu, więc obejmuje logi żądań Cloud Run i LB.
+   Adresy z tokenem jednorazowym (better-auth 1.7.25):
+
+   | Adres | Token | Źródło |
+   |---|---|---|
+   | `/api/auth/verify-email?token=…&callbackURL=…` | JWT weryfikacji e-mail w parametrze | `node_modules/better-auth/dist/api/routes/email-verification.mjs:31` |
+   | `/api/auth/reset-password/<token>?callbackURL=…` | token resetu w ścieżce | `node_modules/better-auth/dist/api/routes/password.mjs:81` |
+   | `/reset-password?token=…` | ten sam token po przekierowaniu na stronę aplikacji | `password.mjs:127`, `src/components/auth/forgot-password-form.tsx:44`, `src/components/auth/reset-password-form.tsx:15` |
+
+   Referer: strona `/reset-password?token=…` ładuje zasoby i wysyła formularz
+   z pełnym adresem w Referer (`Referrer-Policy: strict-origin-when-cross-origin`
+   w obrębie originu, `next.config.ts:94-95`). Sam token idzie w treści POST
+   (`reset-password-form.tsx:73-76`), treści żądań platforma nie loguje.
+   Poza filtrem: `/api/auth/callback/google?code=…&state=…` — kod jest
+   jednorazowy i zużywany w tym samym żądaniu (wymiana wymaga sekretu klienta
+   i stanu z bazy), więc wpis w logu nie daje przejęcia konta. Magic link i
+   zmiana adresu e-mail nie są włączone (`src/lib/auth.ts:55-121`).
+   Koszt: tracimy ślad żądań na tych ścieżkach (przyjęty).
+   Strażnik sprawdza te szablony adresów w zainstalowanej bibliotece: zmiana
+   po aktualizacji Better Auth zatrzymuje test, zanim filtr przestanie działać.
+2. **Retencja `_Default` = 30 dni** ustawiona jawnie. Do polityki prywatności:
+   IP i user-agent jako dane administratora, cel bezpieczeństwo, 30 dni.
+3. **Data Access `DATA_READ` dla `secretmanager.googleapis.com`** — każdy
+   odczyt wartości sekretu ma wpis audytu. Skrypt czyta politykę IAM projektu do
+   pliku tymczasowego (polityka zawiera adresy kont: nie jest wypisywana, bez
+   lokalnego logu gcloud), dopisuje wyłącznie `auditConfigs` i zapisuje ją z tym
+   samym `etag` (równoległa zmiana polityki = błąd, nie nadpisanie). Wymaga
+   `node` w `PATH`. Już włączone = `skip`.
+4. **Zasobnik `myhelper-audit` w `europe-central2`, retencja 365 dni**, i ujście
+   `myhelper-audit-sink`: Admin Activity całego projektu + Data Access Secret
+   Managera. Zasobnik w tym samym projekcie, więc ujście nie dostaje roli.
+   Wpisy dalej trafiają też do `_Required` (Admin Activity, 400 dni) i
+   `_Default` (Data Access, 30 dni). Koszt przy tym ruchu pomijalny.
+
+### Przed `--apply`
+
+Czy w logach są już wpisy z tymi ścieżkami (wynik: same znaczniki czasu, bez
+adresów):
+
+```bash
+set +x
+gcloud --project=my-helper-2-488419 logging read 'httpRequest.requestUrl=~"/(api/auth/)?(verify-email|reset-password)" OR httpRequest.referer=~"/(api/auth/)?(verify-email|reset-password)"' --freshness=30d --limit=5 --format='value(timestamp)'
+```
+
+Pusto = dalej. Niepusto = stop, decyzja właściciela (wpisy wygasają z
+retencją; usunąć można tylko cały log). Surowych wpisów sesja główna nie czyta.
+
+### Wykonanie
+
+```bash
+infra/gcp/logging.sh --project=my-helper-2-488419
+infra/gcp/logging.sh --project=my-helper-2-488419 --apply
+```
+
+Dry-run, porównanie listy `+ …` z punktami 1–4 (w tej kolejności), potem
+`--apply`.
+
+### Sprawdzenie (bez adresów kont)
+
+```bash
+gcloud --project=my-helper-2-488419 logging sinks describe _Default --format='value(exclusions[].name)'
+gcloud --project=my-helper-2-488419 logging buckets describe _Default --location=global --format='value(retentionDays)'
+gcloud --project=my-helper-2-488419 logging buckets describe myhelper-audit --location=europe-central2 --format='value(retentionDays)'
+gcloud --project=my-helper-2-488419 logging sinks describe myhelper-audit-sink --format='value(destination)'
+gcloud --project=my-helper-2-488419 projects get-iam-policy my-helper-2-488419 --format='json(auditConfigs)'
+```
+
+Oczekiwane: `myhelper-auth-token-urls` na liście, `30`, `365`, cel z
+`locations/europe-central2/buckets/myhelper-audit`, wpis
+`secretmanager.googleapis.com` z `DATA_READ`. Ostatnie polecenie wypisuje
+wyłącznie `auditConfigs` (bez wiązań i adresów kont).
+
+**Próba filtra.** Jedno żądanie z nieważnym tokenem i jedno kontrolne, po
+2 min odczyt samych znaczników czasu:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' "https://myhelper-<hash>.europe-central2.run.app/api/auth/verify-email?token=probe-invalid"
+curl -s -o /dev/null -w '%{http_code}\n' "https://myhelper-<hash>.europe-central2.run.app/api/health"
+gcloud --project=my-helper-2-488419 logging read 'httpRequest.requestUrl=~"probe-invalid"' --freshness=10m --format='value(timestamp)'
+gcloud --project=my-helper-2-488419 logging read 'httpRequest.requestUrl=~"/api/health"' --freshness=10m --limit=1 --format='value(timestamp)'
+```
+
+Oczekiwane: pierwszy odczyt pusty, drugi ze znacznikiem czasu. Odwrotnie = stop.
+Wynik w #121: tylko „pusto / jest”.
+
+**Ślad odczytu sekretu.** Po pierwszym `secrets versions access` w 4a.1:
+
+```bash
+gcloud --project=my-helper-2-488419 logging read 'protoPayload.serviceName="secretmanager.googleapis.com" AND protoPayload.methodName:"AccessSecretVersion"' --bucket=myhelper-audit --location=europe-central2 --view=_AllLogs --freshness=1h --limit=1 --format='value(timestamp)'
+```
+
+Oczekiwany znacznik czasu. Pusto = stop przed kolejnymi odczytami sekretów.
+
+### Wycofanie
+
+Brak `--teardown` z założenia: wykluczenie i ślad audytu zmniejszają ryzyko,
+a usunięty zasobnik logów blokuje nazwę na 7 dni. Zmiana wartości = zmiana stałych
+w skrypcie, recenzja i ponowne `--apply` (istniejące zasoby dostają `update`).
+
+### Znane ograniczenie
+
+Zasobnik `_Default` ma lokalizację `global` i nie da się jej zmienić. Logi
+żądań (IP, user-agent, adres) mogą być przechowywane poza `europe-central2`.
+Do rozstrzygnięcia przy DPA: wpis „logi platformy: UE/global” albo nowy
+zasobnik `_Default` w `europe-central2` z przekierowaniem ujścia (osobny krok).
+
 ## 11. Punkty otwarte
 
 - `wif`: warunek ostateczny (sekcja 3.8); wykonanie czeka na bramkę (hook
