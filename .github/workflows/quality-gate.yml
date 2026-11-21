@@ -128,9 +128,13 @@ jobs:
       #   unfreeze-neon.sh): własna baza i role it_cutover_, zrywanie po bazie,
       #   zapis na nowym połączeniu read_only / po odmrożeniu przechodzi; ta sama
       #   bramka i ten sam klient PG z kontenera co porównanie.
+      # - przeniesienie danych (infra/db/cutover/copy-neon-to-cloudsql.sh, jeden
+      #   strumień pg_dump | pg_restore bez pliku) i kontrola RLS (rls-check.sh):
+      #   własne bazy it_cutover_, pos_dev tylko czytana; przerwany strumień →
+      #   cel pusty; ta sama bramka i ten sam klient PG z kontenera.
       # Adres = ten sam service container (localhost), bez nowych sekretów.
       - name: Integration test — subscription locks (real Postgres)
-        timeout-minutes: 4
+        timeout-minutes: 5
         run: pnpm test:pg
         env:
           INTEGRATION_POSTGRES_URL: postgresql://dev_user:dev_password@localhost:5432/pos_dev
