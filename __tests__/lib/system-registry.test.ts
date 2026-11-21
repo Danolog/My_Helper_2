@@ -38,6 +38,8 @@ const SESSION_EXPORTS = [
 const CRON_EXPORTS = ["cleanupExpiredTemporaryAccess"];
 const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
 const AUTH_THROTTLE_EXPORTS = ["clearSignInFailures", "consumeAuthRateLimit", "reserveAccountSignInAttempt"];
+/** #193 A2b: hash hasła konta `credential` (potwierdzenie hasłem usunięcia klienta). */
+const CREDENTIALS_EXPORTS = ["findCredentialPasswordHash"];
 /** #193 P5a-1: subskrypcje push po stronie wysyłki (decyzja CTO 3d / 3d-KOREKTA). */
 const NOTIFICATIONS_EXPORTS = [
   // #193 P5a-2: crony przypomnień push 1h / 24h i SMS 1h (cross-salon, sekret crona).
@@ -75,11 +77,13 @@ const REGISTRY_SOURCES = [
   "notifications.ts",
   "waiting-list.ts",
   "auth-throttle.ts",
+  "credentials.ts",
 ];
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts": ["authAdapter"],
   "auth-throttle.ts": AUTH_THROTTLE_EXPORTS,
   "catalog.ts": CATALOG_EXPORTS,
+  "credentials.ts": CREDENTIALS_EXPORTS,
   "cron.ts": CRON_EXPORTS,
   "db-system.ts": ["dbSystem"],
   "deposits-cleanup.ts": DEPOSITS_CLEANUP_EXPORTS,
@@ -95,6 +99,7 @@ const SNAPSHOT: Record<string, string[]> = {
     ...NOTIFICATIONS_EXPORTS,
     ...WAITING_LIST_EXPORTS,
     ...AUTH_THROTTLE_EXPORTS,
+    ...CREDENTIALS_EXPORTS,
   ].sort(),
   "notifications.ts": NOTIFICATIONS_EXPORTS,
   "plans.ts": PLANS_EXPORTS,
