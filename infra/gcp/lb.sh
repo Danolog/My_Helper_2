@@ -35,19 +35,25 @@
 # Manager bezpośrednio na proxy (mapy obsługuje tylko LB globalny).
 #
 # --teardown: usuwa w odwrotnej kolejności (bez wyłączania API). Też dry-run
-# domyślnie.
+# domyślnie. Statyczny IP ZOSTAJE: zwolniony adres wraca do puli Google i może
+# trafić do innego projektu, a rekord DNS wskazujący na niego oddałby mu ruch.
+# Zwolnienie wyłącznie z --release-ip (tylko razem z --teardown), po
+# sprawdzeniu, że rekord A domeny nie wskazuje adresu LB (dig @1.1.1.1 i
+# @8.8.8.8; błąd albo brak dig = stop). dig nie widzi rekordu proxowanego przez
+# Cloudflare — warunek panelu w runbooku jest obowiązkowy.
 #
 # Adres powiadomień: WYŁĄCZNIE z --notify-email=… albo zmiennej
-# LB_NOTIFY_EMAIL (repo publiczne — adresu nie ma w repo). Nie jest wypisywany.
+# LB_NOTIFY_EMAIL (repo publiczne — adresu nie ma w repo). Nie jest wypisywany,
+# nie trafia do lokalnego logu gcloud ani na stderr.
 #
 # Użycie:
-#   infra/gcp/lb.sh --project ID [--region=europe-central2] [--notify-email=ADRES] [--teardown] [--apply]
+#   infra/gcp/lb.sh --project ID [--region=europe-central2] [--notify-email=ADRES] [--teardown [--release-ip]] [--apply]
 # Nazwy zasobów i domena są stałymi niżej (zmiana = nowa recenzja).
 #
 # Strażnik: __tests__/lib/lb-config.test.ts.
 set -euo pipefail
 
-APPLY=0 TEARDOWN=0
+APPLY=0 TEARDOWN=0 RELEASE_IP=0
 PROJECT_ID="" REGION=""
 NOTIFY_EMAIL="${LB_NOTIFY_EMAIL:-}"
 
@@ -86,6 +92,7 @@ while [[ $# -gt 0 ]]; do
     --apply) APPLY=1 ;;
     --dry-run) APPLY=0 ;;
     --teardown) TEARDOWN=1 ;;
+    --release-ip) RELEASE_IP=1 ;;
     --project=*) PROJECT_ID="${1#*=}" ;;
     --project) [[ $# -ge 2 ]] || die "--project needs a value"; PROJECT_ID="$2"; shift ;;
     --region=*) REGION="${1#*=}" ;;
@@ -101,6 +108,7 @@ done
 [[ "$PROJECT_ID" =~ ^[a-z][a-z0-9-]{4,28}[a-z0-9]$ ]] || die "invalid --project"
 REGION="${REGION:-$ALLOWED_REGION}"
 [[ "$REGION" == "$ALLOWED_REGION" ]] || die "--region must be $ALLOWED_REGION"
+[[ "$RELEASE_IP" == 0 || "$TEARDOWN" == 1 ]] || die "--release-ip requires --teardown"
 if [[ -n "$NOTIFY_EMAIL" ]]; then
   [[ "$NOTIFY_EMAIL" =~ ^[^@[:space:],]+@[^@[:space:],]+\.[A-Za-z]{2,}$ ]] || die "invalid --notify-email"
 fi
@@ -269,15 +277,17 @@ YAML
       --resource-labels="host=${DOMAIN},project_id=${PROJECT_ID}" \
       --protocol=https --port=443 --path="$HEALTH_PATH" --period=1 --validate-ssl=true
   fi
-  # Kanał e-mail: adres tylko w argumencie gcloud, nigdy w wyjściu.
+  # Kanał e-mail: adres tylko w argumencie gcloud, nigdy w wyjściu. Bez
+  # lokalnego logu gcloud (zapisuje argumenty) i bez stderr (komunikat błędu
+  # walidacji powtarza wartość etykiety); błąd niesie `die` niżej.
   lookup beta monitoring channels list "--filter=displayName=\"${CHANNEL}\"" "--format=value(name)"
   local channel="$LOOKUP"
   if [[ -z "$channel" ]]; then
     echo "+ gcloud --project=$PROJECT_ID --quiet beta monitoring channels create --display-name=$CHANNEL --type=email --channel-labels=email_address=<--notify-email> --format=value(name)"
     channel="<channel-name>"
     if [[ "$APPLY" == 1 ]]; then
-      channel="$("${GC[@]}" beta monitoring channels create --display-name="$CHANNEL" --type=email \
-        --channel-labels=email_address="$NOTIFY_EMAIL" "--format=value(name)")" || die "cannot create channel $CHANNEL"
+      channel="$(CLOUDSDK_CORE_DISABLE_FILE_LOGGING=1 "${GC[@]}" beta monitoring channels create --display-name="$CHANNEL" --type=email \
+        --channel-labels=email_address="$NOTIFY_EMAIL" "--format=value(name)" 2>/dev/null)" || die "cannot create channel $CHANNEL"
       channel="$(printf '%s' "$channel" | head -n 1)"
     fi
   fi
@@ -311,6 +321,34 @@ JSON
   fi
 }
 
+# Zwolnienie statycznego IP (tylko --teardown --release-ip). Przy --apply:
+# odczyt adresu, potem rekord A domeny z dwóch resolwerów publicznych. Linia
+# równa adresowi LB, błąd dig albo brak dig = stop przed `delete`. Pusta
+# odpowiedź = brak rekordu. Dry-run: bez wywołań gcloud i dig.
+release_ip() {
+  exists compute addresses describe "$ADDRESS" "${R[@]}" || return 0
+  lookup compute addresses describe "$ADDRESS" "${R[@]}" "--format=value(address)"
+  local ip="$LOOKUP" resolver answer line
+  [[ -n "$ip" ]] || die "cannot read $ADDRESS address — IP not released"
+  for resolver in 1.1.1.1 8.8.8.8; do
+    echo "? dig +short A $DOMAIN @$resolver"
+    if [[ "$APPLY" != 1 ]]; then
+      echo "  state: not checked (dry-run)"
+      continue
+    fi
+    command -v dig >/dev/null 2>&1 || die "dig not found — IP not released"
+    answer="$(dig +short +time=5 +tries=2 A "$DOMAIN" "@$resolver" 2>/dev/null)" ||
+      die "dig @$resolver failed — IP not released"
+    while IFS= read -r line; do
+      if [[ "$line" == "$ip" ]]; then
+        die "$DOMAIN still points to the LB address — IP not released"
+      fi
+    done <<<"$answer"
+    echo "  state: $DOMAIN does not point to the LB address (@$resolver)"
+  done
+  run compute addresses delete "$ADDRESS" "${R[@]}"
+}
+
 teardown_all() {
   lookup alpha monitoring policies list "--filter=displayName=\"${ALERT}\"" "--format=value(name)"
   [[ -n "$LOOKUP" ]] && run alpha monitoring policies delete "$LOOKUP"
@@ -329,7 +367,11 @@ teardown_all() {
   exists compute url-maps describe "$URL_MAP" "${R[@]}" && run compute url-maps delete "$URL_MAP" "${R[@]}"
   exists compute backend-services describe "$BACKEND" "${R[@]}" && run compute backend-services delete "$BACKEND" "${R[@]}"
   exists compute network-endpoint-groups describe "$NEG" "${R[@]}" && run compute network-endpoint-groups delete "$NEG" "${R[@]}"
-  exists compute addresses describe "$ADDRESS" "${R[@]}" && run compute addresses delete "$ADDRESS" "${R[@]}"
+  if [[ "$RELEASE_IP" == 1 ]]; then
+    release_ip
+  else
+    echo "  skip: $ADDRESS kept (use --release-ip after DNS check)"
+  fi
   exists compute networks subnets describe "$PROXY_SUBNET" "${R[@]}" && run compute networks subnets delete "$PROXY_SUBNET" "${R[@]}"
   exists compute networks describe "$NETWORK" && run compute networks delete "$NETWORK"
   return 0

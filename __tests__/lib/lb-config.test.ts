@@ -15,7 +15,10 @@
  *  - 80 → 301 na https; uptime check https /api/health co 1 min;
  *    adres powiadomień tylko z parametru/zmiennej, nigdy w wyjściu ani w repo;
  *  - brak `add-iam-policy-binding`, brak zmian usługi Cloud Run (ingress `all`);
- *  - idempotencja: istniejące zasoby nie są tworzone ponownie.
+ *  - idempotencja: istniejące zasoby nie są tworzone ponownie;
+ *  - --teardown zostawia statyczny IP; zwolnienie tylko z --release-ip po
+ *    sprawdzeniu DNS (podstawiony `dig`, fail-closed);
+ *  - kanał e-mail: bez lokalnego logu gcloud i bez stderr gcloud w wyjściu.
  */
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -42,6 +45,11 @@ writeFileSync(
   join(FAKE, "gcloud"),
   `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_LOG"
+case " $* " in
+  *" channels create "*)
+    printf 'nolog=%s\\n---\\n' "\${CLOUDSDK_CORE_DISABLE_FILE_LOGGING:-}" >> "$FAKE_FILES"
+    [ -n "$FAKE_CHANNEL_ERROR" ] && { printf 'ERROR: Invalid value for [--channel-labels]: %s\\n' "$*" >&2; exit 1; } ;;
+esac
 for a in "$@"; do
   case "$a" in
     --source=*|--policy-from-file=*) cat "\${a#*=}" >> "$FAKE_FILES"; printf '\\n---\\n' >> "$FAKE_FILES" ;;
@@ -65,6 +73,19 @@ exit 0
 `,
 );
 chmodSync(join(FAKE, "gcloud"), 0o755);
+// Podstawiony dig: FAKE_DIG_OUT wypisywany tylko dla resolwera FAKE_DIG_AT
+// (albo dla każdego przy FAKE_DIG_AT=any); FAKE_DIG_FAIL = kod ≠ 0.
+writeFileSync(
+  join(FAKE, "dig"),
+  `#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_DIG_LOG"
+[ -n "$FAKE_DIG_FAIL" ] && { echo ";; connection timed out; no servers could be reached" >&2; exit 9; }
+if [ "$FAKE_DIG_AT" = "any" ]; then printf '%s\\n' "$FAKE_DIG_OUT"; exit 0; fi
+case " $* " in *" @$FAKE_DIG_AT "*) [ -n "$FAKE_DIG_AT" ] && printf '%s\\n' "$FAKE_DIG_OUT" ;; esac
+exit 0
+`,
+);
+chmodSync(join(FAKE, "dig"), 0o755);
 
 interface Run {
   status: number | null;
@@ -72,6 +93,7 @@ interface Run {
   stderr: string;
   calls: string[];
   files: string;
+  digCalls: string[];
 }
 
 let n = 0;
@@ -79,7 +101,8 @@ function lb(args: string[], opts: { exists?: boolean; listError?: boolean; env?:
   const id = n++;
   const log = join(DIR, `log-${id}`);
   const files = join(DIR, `files-${id}`);
-  for (const f of [log, files]) writeFileSync(f, "");
+  const digLog = join(DIR, `dig-${id}`);
+  for (const f of [log, files, digLog]) writeFileSync(f, "");
   const r = spawnSync("bash", [SCRIPT, ...args], {
     encoding: "utf8",
     env: {
@@ -87,6 +110,7 @@ function lb(args: string[], opts: { exists?: boolean; listError?: boolean; env?:
       PATH: `${FAKE}:${process.env.PATH}`,
       FAKE_LOG: log,
       FAKE_FILES: files,
+      FAKE_DIG_LOG: digLog,
       ...(opts.exists ? { FAKE_EXISTS: "1" } : {}),
       ...(opts.listError ? { FAKE_LIST_ERROR: "1" } : {}),
       ...opts.env,
@@ -98,12 +122,15 @@ function lb(args: string[], opts: { exists?: boolean; listError?: boolean; env?:
     stderr: r.stderr,
     calls: readFileSync(log, "utf8").split("\n").filter(Boolean),
     files: readFileSync(files, "utf8"),
+    digCalls: readFileSync(digLog, "utf8").split("\n").filter(Boolean),
   };
 }
 
 const P = [`--project=${PROJECT}`];
 const APPLY = [...P, `--notify-email=${EMAIL}`, "--apply"];
 const TEARDOWN = [...P, "--teardown", "--apply"];
+const RELEASE = [...P, "--teardown", "--release-ip", "--apply"];
+const LB_IP = "203.0.113.10";
 const MUTATING = / (create|import|add-backend|update|delete|enable) /;
 
 // Kolejność z §2 P1 (1)–(12): wzorce wywołań zmieniających.
@@ -151,9 +178,9 @@ describe("P1: dry-run i parametry", () => {
   });
 
   it("wyjście dry-run to wyłącznie polecenia, odczyty stanu i treść plików", () => {
-    for (const args of [P, [...P, "--teardown"]]) {
+    for (const args of [P, [...P, "--teardown"], [...P, "--teardown", "--release-ip"]]) {
       for (const line of lb(args).stdout.split("\n").filter(Boolean)) {
-        expect(line).toMatch(/^(mode: |\? gcloud |\+ gcloud |  state: |  urlmap: |  policy: |  dns: |  skip: |  LB_IP=|lb (create|teardown): done$)/);
+        expect(line).toMatch(/^(mode: |\? gcloud |\? dig |\+ gcloud |  state: |  urlmap: |  policy: |  dns: |  skip: |  LB_IP=|lb (create|teardown): done$)/);
       }
     }
   });
@@ -304,8 +331,11 @@ describe("P1: zasoby (1)–(11)", () => {
     }
     expect(fr443).toMatch(/ --ports=443( |$)/);
     expect(fr443).toContain("--target-https-proxy=myhelper-lb-https-proxy");
+    // Bez flagi regionu odwołania gcloud szuka zasobu globalnego.
+    expect(fr443).toContain(`--target-https-proxy-region=${REGION}`);
     expect(fr80).toMatch(/ --ports=80( |$)/);
     expect(fr80).toContain("--target-http-proxy=myhelper-lb-http-proxy");
+    expect(fr80).toContain(`--target-http-proxy-region=${REGION}`);
     expect(r.stdout).toContain("  LB_IP=203.0.113.10");
   });
 
@@ -347,7 +377,9 @@ describe("P1: zasoby (1)–(11)", () => {
     expect(s).toMatch(/ --min-tls-version=1\.2( |$)/);
     const p = one(/^compute target-https-proxies create /);
     expect(p).toContain("--ssl-policy=myhelper-lb-tls12");
+    expect(p).toContain(`--ssl-policy-region=${REGION}`);
     expect(p).toContain("--url-map=myhelper-lb-https");
+    expect(p).toContain(`--url-map-region=${REGION}`);
     expect(p).toContain(`--certificate-manager-certificates=projects/${PROJECT}/locations/${REGION}/certificates/myhelper-lb-cert`);
   });
 
@@ -355,7 +387,9 @@ describe("P1: zasoby (1)–(11)", () => {
     expect(one(/^compute url-maps import /)).toContain(`--region=${REGION}`);
     expect(r.files).toMatch(/name: myhelper-lb-http-redirect\ndefaultUrlRedirect:\n {2}httpsRedirect: true\n {2}redirectResponseCode: MOVED_PERMANENTLY_DEFAULT/);
     expect(r.files).not.toMatch(/defaultService/);
-    expect(one(/^compute target-http-proxies create /)).toContain("--url-map=myhelper-lb-http-redirect");
+    const hp = one(/^compute target-http-proxies create /);
+    expect(hp).toContain("--url-map=myhelper-lb-http-redirect");
+    expect(hp).toContain(`--url-map-region=${REGION}`);
   });
 
   it("brak add-iam-policy-binding i brak zmian usługi Cloud Run (ingress `all`)", () => {
@@ -400,6 +434,19 @@ describe("P1: uptime check i powiadomienie (12)", () => {
     expect(r.files).not.toContain(EMAIL);
   });
 
+  it("tworzenie kanału bez lokalnego logu gcloud (zmienna w wywołaniu)", () => {
+    const r = lb(APPLY);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.files).toContain("nolog=1\n");
+  });
+
+  it("błąd tworzenia kanału: stderr gcloud (z adresem) nie trafia do wyjścia, kod 2", () => {
+    const r = lb(APPLY, { env: { FAKE_CHANNEL_ERROR: "1" } });
+    expect(r.status).toBe(2);
+    expect(r.stdout + r.stderr).not.toContain(EMAIL);
+    expect(r.stderr).toContain("cannot create channel myhelper-lb-owner-email");
+  });
+
   it("błąd odczytu listy (uptime/kanał/alert) przerywa przebieg zamiast tworzyć duplikat", () => {
     const r = lb(APPLY, { listError: true });
     expect(r.status).toBe(2);
@@ -419,31 +466,94 @@ describe("P1: idempotencja i --teardown", () => {
     expect(upd.some((c) => /^compute backend-services update myhelper-lb-backend .*--enable-logging/.test(c))).toBe(true);
   });
 
-  it("--teardown usuwa w odwrotnej kolejności i niczego nie tworzy", () => {
-    const calls = lb(TEARDOWN, { exists: true }).calls.map(strip);
+  const DELETE_ORDER: RegExp[] = [
+    /^alpha monitoring policies delete /,
+    /^beta monitoring channels delete /,
+    /^monitoring uptime delete /,
+    /^compute forwarding-rules delete myhelper-lb-http-fr /,
+    /^compute target-http-proxies delete myhelper-lb-http-proxy /,
+    /^compute url-maps delete myhelper-lb-http-redirect /,
+    /^compute forwarding-rules delete myhelper-lb-https-fr /,
+    /^compute target-https-proxies delete myhelper-lb-https-proxy /,
+    /^compute ssl-policies delete myhelper-lb-tls12 /,
+    /^certificate-manager certificates delete myhelper-lb-cert /,
+    /^certificate-manager dns-authorizations delete myhelper-lb-dnsauth /,
+    /^compute url-maps delete myhelper-lb-https /,
+    /^compute backend-services delete myhelper-lb-backend /,
+    /^compute network-endpoint-groups delete myhelper-lb-neg /,
+    /^compute addresses delete myhelper-lb-ip /,
+    /^compute networks subnets delete myhelper-lb-proxy-only /,
+    /^compute networks delete myhelper-lb-vpc/,
+  ];
+
+  it.each([
+    ["--teardown (adres IP zostaje)", TEARDOWN, DELETE_ORDER.filter((re) => !/addresses/.test(String(re)))],
+    ["--teardown --release-ip (DNS bez adresu LB)", RELEASE, DELETE_ORDER],
+  ])("%s: usuwa w odwrotnej kolejności i niczego nie tworzy", (_l, args, order) => {
+    const r = lb(args, { exists: true });
+    expect(r.status, r.stderr).toBe(0);
+    const calls = r.calls.map(strip);
     expect(calls.filter((c) => / (create|import|add-backend|enable) /.test(c))).toEqual([]);
     const deletes = calls.filter((c) => / delete /.test(c));
-    const order = [
-      /^alpha monitoring policies delete /,
-      /^beta monitoring channels delete /,
-      /^monitoring uptime delete /,
-      /^compute forwarding-rules delete myhelper-lb-http-fr /,
-      /^compute target-http-proxies delete myhelper-lb-http-proxy /,
-      /^compute url-maps delete myhelper-lb-http-redirect /,
-      /^compute forwarding-rules delete myhelper-lb-https-fr /,
-      /^compute target-https-proxies delete myhelper-lb-https-proxy /,
-      /^compute ssl-policies delete myhelper-lb-tls12 /,
-      /^certificate-manager certificates delete myhelper-lb-cert /,
-      /^certificate-manager dns-authorizations delete myhelper-lb-dnsauth /,
-      /^compute url-maps delete myhelper-lb-https /,
-      /^compute backend-services delete myhelper-lb-backend /,
-      /^compute network-endpoint-groups delete myhelper-lb-neg /,
-      /^compute addresses delete myhelper-lb-ip /,
-      /^compute networks subnets delete myhelper-lb-proxy-only /,
-      /^compute networks delete myhelper-lb-vpc/,
-    ];
     expect(deletes).toHaveLength(order.length);
     order.forEach((re, i) => expect(deletes[i], String(re)).toMatch(re));
+  });
+
+  it("--teardown bez --release-ip nie zwalnia adresu IP i mówi, że go zostawia", () => {
+    const r = lb(TEARDOWN, { exists: true });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.calls.map(strip).filter((c) => /^compute addresses delete /.test(c))).toEqual([]);
+    expect(r.stdout).toContain("  skip: myhelper-lb-ip kept (use --release-ip after DNS check)");
+    expect(r.digCalls).toEqual([]);
+  });
+
+  it("--release-ip bez --teardown → kod 2, zero wywołań", () => {
+    for (const args of [[...APPLY, "--release-ip"], [...P, "--release-ip"]]) {
+      const r = lb(args, { exists: true });
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain("--release-ip requires --teardown");
+      expect(r.calls).toEqual([]);
+      expect(r.digCalls).toEqual([]);
+    }
+  });
+
+  it.each(["1.1.1.1", "8.8.8.8", "any"])("rekord A app wskazuje adres LB (resolwer %s) → kod 2, adres nie jest usuwany", (at) => {
+    const r = lb(RELEASE, { exists: true, env: { FAKE_DIG_AT: at, FAKE_DIG_OUT: LB_IP } });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("still points to the LB address — IP not released");
+    expect(r.calls.map(strip).filter((c) => /^compute addresses delete /.test(c))).toEqual([]);
+    expect(r.digCalls.some((c) => c.includes("app.nordsignal.cc") && c.includes(`@${at === "any" ? "1.1.1.1" : at}`))).toBe(true);
+  });
+
+  it("błąd dig → kod 2 (fail-closed), adres nie jest usuwany", () => {
+    const r = lb(RELEASE, { exists: true, env: { FAKE_DIG_FAIL: "1" } });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("dig @1.1.1.1 failed — IP not released");
+    expect(r.calls.map(strip).filter((c) => /^compute addresses delete /.test(c))).toEqual([]);
+  });
+
+  it("dig pusty (brak rekordu) → adres usuwany po obu regułach przekierowania", () => {
+    const r = lb(RELEASE, { exists: true });
+    expect(r.status, r.stderr).toBe(0);
+    const calls = r.calls.map(strip);
+    const del = calls.findIndex((c) => /^compute addresses delete myhelper-lb-ip /.test(c));
+    expect(del).toBeGreaterThanOrEqual(0);
+    for (const fr of ["myhelper-lb-http-fr", "myhelper-lb-https-fr"]) {
+      const i = calls.findIndex((c) => c.startsWith(`compute forwarding-rules delete ${fr} `));
+      expect(i, fr).toBeGreaterThanOrEqual(0);
+      expect(i, fr).toBeLessThan(del);
+    }
+    expect(r.digCalls.filter((c) => /\+short .*A app\.nordsignal\.cc @(1\.1\.1\.1|8\.8\.8\.8)/.test(c))).toHaveLength(2);
+  });
+
+  it("dry-run z --release-ip: zero wywołań gcloud i dig, kroki DNS wypisane", () => {
+    const r = lb([...P, "--teardown", "--release-ip"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.calls).toEqual([]);
+    expect(r.digCalls).toEqual([]);
+    expect(r.stdout).toContain("? dig +short A app.nordsignal.cc @1.1.1.1");
+    expect(r.stdout).toContain("? dig +short A app.nordsignal.cc @8.8.8.8");
+    expect(r.stdout).toMatch(/\+ gcloud .* compute addresses delete myhelper-lb-ip /);
   });
 
   it("--teardown nie usuwa niczego, czego nie ma", () => {

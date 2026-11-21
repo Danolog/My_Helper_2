@@ -703,6 +703,19 @@ wywołań gcloud, także odczytów), `--project` w każdym wywołaniu, region ty
 (skrypt nie zmienia usługi), certyfikat przez **autoryzację DNS**. Skrypt nie
 ustawia żadnych wiązań IAM.
 
+**Dług: ingress `all`.** Adres `run.app` omija LB (bez `ssl-policy` LB, bez logów
+LB i bez przyszłych reguł na LB). Próg zamknięcia: przed pierwszym płacącym
+salonem, przy wyniku (c)/(d) pomiaru XFF (4a.2) gorszym niż oczekiwany albo
+przed pierwszą regułą bezpieczeństwa na LB (Cloud Armor, limit na LB), bo
+`run.app` by ją omijał. Zamknięcie = ingress `internal-and-cloud-load-balancing`
++ Cloud Scheduler przez OIDC.
+
+**Logi LB.** Backend loguje 100% żądań z pełnym `requestUrl` i IP klienta.
+Rekord `app` nie może wskazywać LB (krok 3) przed zastosowaniem filtra ścieżek
+tokenów (`verify-email|reset-password`) dla Cloud Run **i** LB z retencją 30 dni
+(P8). Sprawdzenia kroku 1 (`curl --resolve`) nie wywołują ścieżek `/api/auth/*`
+z tokenami.
+
 ### Warunki przed `--apply`
 
 1. **Budżet.** Budżet 300 PLN/mies. z progami 50/90/100% istnieje (sekcja 1
@@ -711,35 +724,50 @@ ustawia żadnych wiązań IAM.
    (443 i 80) + statyczny IP. Suma > **150 PLN/mies.** = stop, architekt wraca
    z decyzją (globalny LB albo bez reguły 80). Wynik (SKU, stawki, suma) w tej
    sekcji, bez danych kont.
-2. **CAA.** Rekord CAA `nordsignal.cc` dopuszcza `pki.goog` albo go nie ma.
-   Inny CA bez `pki.goog` = certyfikat nie zostanie wydany; właściciel dopisuje
-   `0 issue "pki.goog"` w Cloudflare przed `--apply`.
+2. **CAA.** CA szuka CAA od nazwy certyfikatu w górę drzewa, a gdy `app` jest
+   CNAME-em, idzie za aliasem (RFC 8659) i obowiązuje CAA domeny docelowej.
+   Dlatego najpierw `app.nordsignal.cc` (dig idzie za CNAME), potem
+   `nordsignal.cc`. Oczekiwane w obu: pusto albo wpis z `pki.goog`. Rozstrzyga
+   najbliższy niepusty wynik. Inny CA bez `pki.goog` = certyfikat nie zostanie
+   wydany; właściciel dopisuje `0 issue "pki.goog"` w Cloudflare przed `--apply`.
 3. **Brak TXT pod `_acme-challenge.app`.** Pod `_acme-challenge.app.nordsignal.cc`
    nie ma rekordu TXT (pozostałość po innym wystawcy blokuje autoryzację DNS).
    Jest = właściciel usuwa go przed `--apply`.
+4. **Komponenty `alpha` i `beta` gcloud.** Skrypt używa `gcloud beta` i
+   `gcloud alpha` (kanał i alert). Bez nich `--quiet` doinstaluje je w trakcie
+   `--apply` albo (SDK z Homebrew, menedżer komponentów wyłączony) przerwie
+   przebieg po utworzeniu LB, a przed monitoringiem. Oczekiwane: oba `Installed`.
 
-Odczyt warunków 2 i 3 (oczekiwane: pusto albo wpis z `pki.goog`; drugie
-polecenie: pusto):
+Odczyt warunków 2–4 (CAA: pusto albo wpis z `pki.goog`; TXT: pusto; komponenty:
+`alpha` i `beta` w stanie `Installed`):
 
 ```bash
+dig +short CAA app.nordsignal.cc
 dig +short CAA nordsignal.cc
+dig +short app.nordsignal.cc
 dig +short TXT _acme-challenge.app.nordsignal.cc
+gcloud components list --filter='id:(alpha beta)' --format='value(id,state.name)'
 ```
+
+Trzecie polecenie odpowiada na pytanie, czy rekord `app` istnieje i dokąd
+wskazuje. Wynik w #121 bez wartości IP i nazw hostów, tylko: „brak / CNAME na
+zewnętrzny host / A”.
 
 ### Wykonanie
 
 Dry-run, porównanie listy `+ …` z §2 P1 projektu (kroki 1–12 w tej kolejności),
-potem `--apply`. Adres e-mail powiadomień uptime checka podaje sesja główna
-w chwili uruchomienia (zmienna `LB_NOTIFY_EMAIL` albo `--notify-email=`).
-**Adresu nie ma w repo, w runbooku ani w komentarzach** (repo publiczne);
-skrypt go nie wypisuje.
+potem `--apply`. Adres e-mail powiadomień uptime checka właściciel zapisuje
+wcześniej w pliku `$HOME/secure/lb-notify-email` (FileVault, jak klucze
+w 4a.1). Sesja główna czyta go z pliku w samym poleceniu: narzędzie Bash nie ma
+TTY, więc `read` dostałby EOF, a `--notify-email=` w poleceniu wkłada adres do
+transkryptu i historii. Zmienna obowiązuje tylko dla tego jednego polecenia
+(bez `export`/`unset`). **Adresu nie ma w repo, w runbooku ani w komentarzach**
+(repo publiczne); skrypt go nie wypisuje, nie zapisuje w lokalnym logu gcloud
+i nie przepuszcza stderr gcloud z tego wywołania.
 
 ```bash
 infra/gcp/lb.sh --project=my-helper-2-488419
-read -r LB_NOTIFY_EMAIL
-export LB_NOTIFY_EMAIL
-infra/gcp/lb.sh --project=my-helper-2-488419 --apply
-unset LB_NOTIFY_EMAIL
+LB_NOTIFY_EMAIL="$(cat "$HOME/secure/lb-notify-email")" infra/gcp/lb.sh --project=my-helper-2-488419 --apply
 ```
 
 Wyjście `--apply` zawiera `LB_IP=…` (adres LB do sprawdzeń kroku 1) i
@@ -761,9 +789,27 @@ po kroku 3); włączenie w kroku 3 w konsoli Cloud Monitoring (polityka
 najpierw jako dry-run. Właściciel usuwa CNAME autoryzacji. Bez wpływu na
 użytkowników, dopóki rekord `app` nie wskazuje LB.
 
+Statyczny IP `myhelper-lb-ip` **zostaje** (wyjście: `skip: myhelper-lb-ip kept`).
+Zwolniony adres wraca do puli Google i może trafić do innego projektu GCP; jeśli
+rekord DNS nadal na niego wskazuje, przejmujący dostaje ruch salonów i może
+uzyskać certyfikat dla `app`.
+
 ```bash
 infra/gcp/lb.sh --project=my-helper-2-488419 --teardown
 infra/gcp/lb.sh --project=my-helper-2-488419 --teardown --apply
+```
+
+Zwolnienie adresu (`--release-ip`, tylko razem z `--teardown`). Skrypt przed
+`delete` sprawdza rekord A `app.nordsignal.cc` przez `dig` (1.1.1.1 i 8.8.8.8)
+i przerywa, gdy wskazuje adres LB albo gdy `dig` zawiedzie. `dig` nie widzi
+rekordu proxowanego przez Cloudflare (zwraca IP Cloudflare), dlatego **warunek
+przed `--release-ip`**: właściciel potwierdza w panelu Cloudflare, że **żaden**
+rekord strefy (A/AAAA, proxowany czy nie) nie ma wartości `LB_IP`, i usuwa
+CNAME `_acme-challenge_….app`. Odpowiedź tylko „tak/nie”; „nie” = stop.
+
+```bash
+infra/gcp/lb.sh --project=my-helper-2-488419 --teardown --release-ip
+infra/gcp/lb.sh --project=my-helper-2-488419 --teardown --release-ip --apply
 ```
 
 ## 11. Punkty otwarte
