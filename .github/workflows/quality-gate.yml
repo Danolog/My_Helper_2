@@ -132,6 +132,11 @@ jobs:
       #   strumień pg_dump | pg_restore bez pliku) i kontrola RLS (rls-check.sh):
       #   własne bazy it_cutover_, pos_dev tylko czytana; przerwany strumień →
       #   cel pusty; ta sama bramka i ten sam klient PG z kontenera.
+      # - wycofanie przełączenia (infra/db/cutover/copy-cloudsql-to-neon.sh,
+      #   strumień pg_dump -Fp | psql z jedną transakcją i bramką kompletności):
+      #   własne bazy it_cutover_ zamrożone freeze-neon.sh, pos_dev tylko czytana
+      #   (nigdy zamrażana); pliki SQL skryptu kopiowane do kontenera usługi
+      #   (docker cp) pod tę samą ścieżkę; ta sama bramka i ten sam klient PG.
       # Adres = ten sam service container (localhost), bez nowych sekretów.
       - name: Integration test — subscription locks (real Postgres)
         timeout-minutes: 5
