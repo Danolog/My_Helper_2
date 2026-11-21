@@ -438,17 +438,20 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("compare.sh na prawdziwym Postgres
     ).rejects.toMatchObject({ code: "42501" });
 
     // Sekwencja bez uprawnienia: pg_sequence_last_value rzuca 42501 (nie NULL → 0).
-    const [seq] = await b.unsafe(
-      "select sequencename as s from pg_sequences where schemaname = 'public' order by sequencename collate \"C\" limit 1",
-    );
-    expect(seq, "sekwencja w schemacie public").toBeDefined();
-    const seqName = `"${String(seq!.s).replace(/"/g, '""')}"`;
-    await expect(
-      b.begin(async (tx) => {
-        await tx.unsafe(`SET LOCAL ROLE ${RO_ROLE}`);
-        await tx.unsafe(`select pg_sequence_last_value('public.${seqName.replace(/'/g, "''")}'::regclass)`);
-      }),
-    ).rejects.toMatchObject({ code: "42501" });
+    // Schemat aplikacji nie ma dziś sekwencji (identyfikatory tekstowe), więc test
+    // tworzy własną, bez GRANT dla roli, i usuwa ją od razu po sprawdzeniu.
+    const seqName = `"${TAG}_seq_probe"`;
+    await b.unsafe(`CREATE SEQUENCE public.${seqName}`);
+    try {
+      await expect(
+        b.begin(async (tx) => {
+          await tx.unsafe(`SET LOCAL ROLE ${RO_ROLE}`);
+          await tx.unsafe(`select pg_sequence_last_value('public.${seqName}'::regclass)`);
+        }),
+      ).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await b.unsafe(`DROP SEQUENCE public.${seqName}`);
+    }
 
     // compare.sh jako ta rola: błąd, nie liczby.
     const cmp = compare(DB_B, [], RO_PASS, RO_ROLE);
