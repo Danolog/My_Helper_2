@@ -284,7 +284,7 @@ describe("200: oznaczenie i cofnięcie", () => {
     expect(h.setArgs).toEqual([]);
     expect(m.insertedValues).toEqual([]);
     expect(h.record).not.toHaveBeenCalled();
-    // changed=false: bez SMS (klient dostał go przy pierwszym oznaczeniu).
+    // changed=false: bez SMS (SMS tylko przy zmianie stanu).
     expect(h.notify).not.toHaveBeenCalled();
   });
 

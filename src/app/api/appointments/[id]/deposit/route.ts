@@ -27,7 +27,7 @@ import { isValidUuid } from "@/lib/validations";
  * (zwrot ustala salon sam). Wpłatę BLIK widzi posiadacz konta przypisanego do
  * numeru; recepcja oznacza ją, gdy ma ten wgląd albo jego potwierdzenie. Pracownik (`employee`) — 403.
  *
- * Po oznaczeniu „wpłacony” (tylko przy zmianie stanu, po zatwierdzeniu transakcji) trasa wysyła klientowi SMS (`notifyDepositMarkedPaid`); brak telefonu albo błąd SMS nie zmienia stanu ani odpowiedzi. Cofnięcie nie wysyła SMS.
+ * Po oznaczeniu „wpłacony” (tylko przy zmianie stanu, po zatwierdzeniu transakcji) trasa wysyła klientowi SMS (`notifyDepositMarkedPaid`), najwyżej jeden na wizytę — ponowne oznaczenie po cofnięciu go nie powtarza; brak telefonu albo błąd SMS nie zmienia stanu ani odpowiedzi. Cofnięcie nie wysyła SMS.
  *
  * Kolejność: sesja (401) → kontekst salonu (404) → rola (403) → format id (400)
  * → jedna transakcja `forSalon(ctx.salonId).raw`: wizyta z jawnym `eq(salonId)`
