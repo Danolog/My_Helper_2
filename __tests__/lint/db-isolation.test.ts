@@ -87,8 +87,8 @@ const BASELINE: Record<string, readonly string[]> = {
     "src/lib/ai/usage-limits.ts",
   ],
   P3_FILES: [],
+  // #193 (ADR-002): anulowanie przez klienta zdjęte — odczyt systemowy + forSalon.
   P4_FILES: [
-    "src/app/api/client/appointments/[id]/cancel/route.ts",
     "src/app/api/client/appointments/[id]/review/route.ts",
     "src/app/api/client/appointments/[id]/route.ts",
     "src/app/api/client/appointments/route.ts",

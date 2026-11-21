@@ -1,22 +1,37 @@
 import { NextResponse } from "next/server";
-import { eq, and } from "drizzle-orm";
+import { and, eq, notInArray } from "drizzle-orm";
 import { isValidUuid } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { refundAppointmentDeposits, selectSucceededDeposits } from "@/lib/refund";
-import { appointments, employees, services, salons } from "@/lib/schema";
+import { refundAppointmentDeposits, selectSucceededDepositsInTx } from "@/lib/refund";
+import { appointments } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+import { findClientAppointmentForUser, type ClientAppointmentForCancel } from "@/lib/server/system";
 import { notifyWaitingList } from "@/lib/waiting-list";
+
+// #193 (ADR-002, wariant U): wizyta klienta przez odczyt systemowy
+// `findClientAppointmentForUser` (tożsamość z sesji, warunek booked_by_user_id),
+// a odczyt płatności i zapis anulowania przez forSalon(salon z wyniku odczytu).
+// Salon nigdy nie pochodzi z żądania. Skutki uboczne (zwrot, zatrzymanie
+// zadatku, lista oczekujących) dopiero po zapisie, który zwrócił wiersz.
+
+/** Stany, z których klient nie anuluje wizyty (sprawdzane też w samym zapisie). */
+const FINAL_STATUSES = ["cancelled", "completed"];
+
+const NOT_FOUND = { success: false, error: "Appointment not found" } as const;
 
 /**
  * Wpłacony zadatek bez płatności `succeeded` w MyHelper (np. BLIK na telefon
  * salonu oznaczony ręcznie): aplikacja nie ma czego zwrócić ani zatrzymać,
  * więc o zwrocie decyduje salon poza aplikacją. Klient nie może dostać
- * obietnicy przelewu, którego nikt nie wykona.
+ * obietnicy przelewu, którego nikt nie wykona. Odczyt w kontekście salonu
+ * wizyty — bez kontekstu rola aplikacji widziałaby 0 płatności i każdy zadatek
+ * wyglądałby na rozliczany przez salon.
  */
-async function isDepositSettledBySalon(appointmentId: string): Promise<boolean> {
-  const payments = await selectSucceededDeposits(appointmentId);
+async function isDepositSettledBySalon(found: ClientAppointmentForCancel): Promise<boolean> {
+  const payments = await forSalon(found.salonId).raw((tx) =>
+    selectSucceededDepositsInTx(tx, found.salonId, found.appointmentId)
+  );
   return payments.length === 0;
 }
 
@@ -39,35 +54,11 @@ export async function GET(
       );
     }
 
-    // Fetch appointment ensuring it belongs to this user
-    const result = await db
-      .select({
-        appointment: appointments,
-        employee: employees,
-        service: services,
-        salon: salons,
-      })
-      .from(appointments)
-      .leftJoin(employees, eq(appointments.employeeId, employees.id))
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .leftJoin(salons, eq(appointments.salonId, salons.id))
-      .where(
-        and(
-          eq(appointments.id, id),
-          eq(appointments.bookedByUserId, userId)
-        )
-      )
-      .limit(1);
-
-    const row = result[0];
-    if (!row) {
-      return NextResponse.json(
-        { success: false, error: "Appointment not found" },
-        { status: 404 }
-      );
+    // Wizyta zarezerwowana przez to konto; cudza i nieistniejąca = 404 bez rozróżnienia.
+    const appointment = await findClientAppointmentForUser(userId, id);
+    if (!appointment) {
+      return NextResponse.json(NOT_FOUND, { status: 404 });
     }
-
-    const appointment = row.appointment;
 
     // Already cancelled?
     if (appointment.status === "cancelled") {
@@ -99,7 +90,7 @@ export async function GET(
     let depositAction: "refund" | "forfeit" | "salon" | "none" = "none";
     let settledBySalon = false;
     if (hasDeposit && depositPaid) {
-      settledBySalon = await isDepositSettledBySalon(appointment.id);
+      settledBySalon = await isDepositSettledBySalon(appointment);
       if (settledBySalon) {
         depositAction = "salon";
       } else {
@@ -110,7 +101,7 @@ export async function GET(
     return NextResponse.json({
       success: true,
       data: {
-        appointmentId: appointment.id,
+        appointmentId: appointment.appointmentId,
         status: appointment.status,
         startTime: appointment.startTime,
         endTime: appointment.endTime,
@@ -124,15 +115,15 @@ export async function GET(
           action: depositAction,
           settledBySalon,
         },
-        employee: row.employee
-          ? { name: `${row.employee.firstName} ${row.employee.lastName}` }
-          : null,
-        service: row.service
-          ? { name: row.service.name, price: row.service.basePrice }
-          : null,
-        salon: row.salon
-          ? { name: row.salon.name, phone: row.salon.phone ?? null }
-          : null,
+        employee: appointment.employeeName !== null ? { name: appointment.employeeName } : null,
+        service:
+          appointment.serviceName !== null
+            ? { name: appointment.serviceName, price: appointment.servicePrice }
+            : null,
+        salon:
+          appointment.salonName !== null
+            ? { name: appointment.salonName, phone: appointment.salonPhone }
+            : null,
       },
     });
   } catch (error) {
@@ -163,35 +154,11 @@ export async function POST(
       );
     }
 
-    // Fetch appointment ensuring it belongs to this user
-    const result = await db
-      .select({
-        appointment: appointments,
-        service: services,
-        employee: employees,
-        salon: salons,
-      })
-      .from(appointments)
-      .leftJoin(services, eq(appointments.serviceId, services.id))
-      .leftJoin(employees, eq(appointments.employeeId, employees.id))
-      .leftJoin(salons, eq(appointments.salonId, salons.id))
-      .where(
-        and(
-          eq(appointments.id, id),
-          eq(appointments.bookedByUserId, userId)
-        )
-      )
-      .limit(1);
-
-    const row = result[0];
-    if (!row) {
-      return NextResponse.json(
-        { success: false, error: "Appointment not found" },
-        { status: 404 }
-      );
+    // Wizyta zarezerwowana przez to konto; cudza i nieistniejąca = 404 bez rozróżnienia.
+    const appointment = await findClientAppointmentForUser(userId, id);
+    if (!appointment) {
+      return NextResponse.json(NOT_FOUND, { status: 404 });
     }
-
-    const appointment = row.appointment;
 
     // Already cancelled?
     if (appointment.status === "cancelled") {
@@ -233,7 +200,7 @@ export async function POST(
     // Sprawdzane przed zmianą statusu: błąd odczytu płatności kończy się 500
     // bez anulowania, a nie anulowaniem z błędną informacją o zadatku.
     if (hasDeposit && depositPaid) {
-      depositSettledBySalon = await isDepositSettledBySalon(id);
+      depositSettledBySalon = await isDepositSettledBySalon(appointment);
     }
 
     if (hasDeposit && depositPaid && !depositSettledBySalon) {
@@ -244,12 +211,36 @@ export async function POST(
       }
     }
 
-    // Cancel the appointment
-    const [cancelledAppointment] = await db
-      .update(appointments)
-      .set({ status: "cancelled" })
-      .where(eq(appointments.id, id))
-      .returning();
+    // Zapis w salonie wizyty z ponowionymi warunkami: id, salon, tożsamość
+    // z sesji i stan. Wizyta, która w międzyczasie zmieniła stan (np. równoległe
+    // anulowanie) albo nie należy już do tego konta, daje 0 wierszy.
+    const salonId = appointment.salonId;
+    const [cancelledAppointment] = await forSalon(salonId).raw((tx) =>
+      tx
+        .update(appointments)
+        .set({ status: "cancelled" })
+        .where(
+          and(
+            eq(appointments.id, appointment.appointmentId),
+            eq(appointments.salonId, salonId),
+            eq(appointments.bookedByUserId, userId),
+            notInArray(appointments.status, FINAL_STATUSES)
+          )
+        )
+        .returning({
+          id: appointments.id,
+          status: appointments.status,
+          startTime: appointments.startTime,
+          endTime: appointments.endTime,
+        })
+    );
+
+    // 0 wierszy: jak dla wizyty nieznalezionej — bez zwrotu, zatrzymania
+    // zadatku i powiadomienia listy oczekujących.
+    if (!cancelledAppointment) {
+      logger.info("[Client Cancel API] Cancel write matched no row", { appointmentId: id });
+      return NextResponse.json(NOT_FOUND, { status: 404 });
+    }
 
     logger.info(`[Client Cancel API] Client ${userId} cancelled appointment ${id}`, {
       hoursUntilAppointment: hoursUntilAppointment.toFixed(1),
@@ -274,7 +265,7 @@ export async function POST(
     // Mark deposit as forfeited if late cancellation (<24h) of a deposit paid online (succeeded payment in MyHelper)
     if (depositForfeited) {
       // Zatrzymana tylko najstarsza płatność `succeeded`; kolejne (np. druga
-      // sesja Checkout) wracają do klienta (Ethan, #98).
+      // sesja Checkout) wracają do klienta (#98).
       try {
         const forfeitResult = await refundAppointmentDeposits(
           id,
@@ -293,23 +284,17 @@ export async function POST(
       }
     }
 
-    // Notify waiting list entries about the freed slot
+    // Notify waiting list entries about the freed slot (salon z odczytu wizyty, nie z żądania)
     try {
-      const salonName = row.salon?.name || "Salon";
-      const serviceName = row.service?.name || "Wizyta";
-      const employeeName = row.employee
-        ? `${row.employee.firstName} ${row.employee.lastName}`
-        : "Pracownik";
-
       const waitingListResult = await notifyWaitingList({
-        salonId: appointment.salonId,
+        salonId,
         serviceId: appointment.serviceId,
         employeeId: appointment.employeeId,
         startTime,
         endTime: new Date(appointment.endTime),
-        serviceName,
-        employeeName,
-        salonName,
+        serviceName: appointment.serviceName || "Wizyta",
+        employeeName: appointment.employeeName || "Pracownik",
+        salonName: appointment.salonName || "Salon",
       });
 
       // Tylko liczniki — wynik nie może zawierać danych klientów z listy oczekujących.
@@ -322,7 +307,12 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
-      data: cancelledAppointment,
+      data: {
+        id: cancelledAppointment.id,
+        status: cancelledAppointment.status,
+        startTime: cancelledAppointment.startTime,
+        endTime: cancelledAppointment.endTime,
+      },
       message: "Wizyta zostala anulowana",
       cancellationDetails: {
         hoursUntilAppointment: Math.max(0, hoursUntilAppointment),

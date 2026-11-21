@@ -100,7 +100,6 @@ export const P3_FILES = [];
 
 /** P4: portal klienta (forUser). */
 export const P4_FILES = [
-  "src/app/api/client/appointments/[id]/cancel/route.ts",
   "src/app/api/client/appointments/[id]/review/route.ts",
   "src/app/api/client/appointments/[id]/route.ts",
   "src/app/api/client/appointments/route.ts",

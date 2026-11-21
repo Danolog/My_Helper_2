@@ -60,3 +60,5 @@ export type {
 } from "./notifications";
 export { resolveWaitingListToken } from "./waiting-list";
 export type { WaitingListTokenTarget } from "./waiting-list";
+export { findClientAppointmentForUser } from "./client-portal";
+export type { ClientAppointmentForCancel } from "./client-portal";
