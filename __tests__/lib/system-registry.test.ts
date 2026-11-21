@@ -75,6 +75,8 @@ const PLANS_EXPORTS = ["ensurePlansExist"];
 const CATALOG_EXPORTS = ["listPublicSalonCatalog"];
 /** #193 P5b: seed danych demonstracyjnych z blokadą celu (poza produkcją). */
 const SEED_EXPORTS = ["seedDemoData"];
+/** #193 (ADR-002): odczyty portalu klienta po tożsamości z sesji, bez funkcji zapisujących. */
+const CLIENT_PORTAL_EXPORTS = ["findClientAppointmentForUser"];
 /** Pliki re-eksportowane przez rejestr `index.ts` w całości. */
 const REGISTRY_SOURCES = [
   "session.ts",
@@ -89,11 +91,13 @@ const REGISTRY_SOURCES = [
   "auth-throttle.ts",
   "credentials.ts",
   "staff-access.ts",
+  "client-portal.ts",
 ];
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts": ["authAdapter"],
   "auth-throttle.ts": AUTH_THROTTLE_EXPORTS,
   "catalog.ts": CATALOG_EXPORTS,
+  "client-portal.ts": CLIENT_PORTAL_EXPORTS,
   "credentials.ts": CREDENTIALS_EXPORTS,
   "cron.ts": CRON_EXPORTS,
   "db-system.ts": ["dbSystem"],
@@ -112,6 +116,7 @@ const SNAPSHOT: Record<string, string[]> = {
     ...AUTH_THROTTLE_EXPORTS,
     ...CREDENTIALS_EXPORTS,
     ...STAFF_ACCESS_EXPORTS,
+    ...CLIENT_PORTAL_EXPORTS,
   ].sort(),
   "notifications.ts": NOTIFICATIONS_EXPORTS,
   "plans.ts": PLANS_EXPORTS,

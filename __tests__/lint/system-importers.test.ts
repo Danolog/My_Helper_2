@@ -72,6 +72,9 @@ const SNAPSHOT: Record<string, string[]> = {
   "auth-throttle.ts:reserveAccountSignInAttempt": ["src/lib/auth-rate-limit-options.ts"],
   // Publiczna lista salonów: bez argumentów (brak userId/salonId), tylko odczyt.
   "catalog.ts:listPublicSalonCatalog": ["src/app/api/salons/route.ts"],
+  // #193 (ADR-002): tylko odczyt; sessionUserId = authResult.user.id z requireAuth (nie z żądania),
+  // appointmentId z adresu (UUID); salon do zapisu wyłącznie z wyniku odczytu.
+  "client-portal.ts:findClientAppointmentForUser": ["src/app/api/client/appointments/[id]/cancel/route.ts"],
   // #193: tylko odczyt hasha; userId = session.user.id z auth.api.getSession (nie z żądania).
   "credentials.ts:findCredentialPasswordHash": ["src/app/api/clients/[id]/route.ts"],
   // #193: trasa temporary-access sprząta wygasłe granty przy GET/POST (bez argumentów);
