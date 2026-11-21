@@ -8,6 +8,7 @@
 import type { NextRequest } from "next/server";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { POST } from "@/app/api/appointments/[id]/invoice/route";
+import { getUserSalonId } from "@/lib/get-user-salon";
 import { createMockRequest, createRouteParams, parseResponse, TEST_IDS } from "./helpers";
 
 // -------------------------------------------------------
@@ -53,7 +54,7 @@ vi.mock("@/lib/auth-middleware", () => ({
 }));
 
 vi.mock("@/lib/get-user-salon", () => ({
-  getUserSalonId: vi.fn().mockResolvedValue(TEST_IDS.SALON_UUID),
+  getUserSalonId: vi.fn(),
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -92,6 +93,7 @@ function post(body: unknown) {
 
 describe("POST /api/appointments/[id]/invoice — kontrakt z panelem", () => {
   beforeEach(() => {
+    vi.mocked(getUserSalonId).mockResolvedValue(TEST_IDS.SALON_UUID);
     mockRaw.mockReset();
     // Wizyta nie istnieje: trasa kończy na 404 zaraz po walidacji, więc 404
     // oznacza, że body przeszło schemat i własne sprawdzenia trasy.
