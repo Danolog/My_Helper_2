@@ -737,6 +737,7 @@ proxy do bazy nie zostaje w tle.
 
 Założenie kroku D: baza na starcie **pusta**. Jeśli Oliver to zmieni, procedurę
 pisze Ethan w planie 0.5 — ten runbook jej nie zawiera.
+Procedura okna przełączenia bazy i powrotu: `docs/runbook-przelaczenie-bazy.md`.
 
 ## 10a. LB — load balancer HTTPS dla app.nordsignal.cc (krok 1, P1)
 
