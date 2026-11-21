@@ -159,6 +159,7 @@ wielokrotność budżetu).
 Tworzy:
 - instancję `myhelper-pg`: `--edition=enterprise`, `POSTGRES_18`, `db-f1-micro`,
   zonal, SSD 10 GB z auto-increase do 30 GB, kopie o 01:00 UTC ×7, PITR 7 dni,
+  lokalizacja kopii `--backup-location=europe-central2` (sekcja 3.6a),
   `--deletion-protection`, okno serwisowe SUN 03:00 UTC, `--ssl-mode=ENCRYPTED_ONLY`,
   publiczne IP **bez** autoryzowanych sieci (połączenia wyłącznie przez Cloud SQL
   Auth Proxy / wbudowany konektor Cloud Run);
@@ -215,7 +216,7 @@ gcloud --project=$P secrets versions list postgres-admin-password --format='valu
 ```
 
 Oczekiwane: `POSTGRES_18`, `ENTERPRISE`, `db-f1-micro`, `ZONAL`, `10`, `30`,
-kopie włączone z PITR i `retainedBackups: 7`, okno `day: 7 hour: 3`,
+kopie włączone z PITR i `retainedBackups: 7`, `location: europe-central2`, okno `day: 7 hour: 3`,
 `ENCRYPTED_ONLY`, brak `authorizedNetworks`, `deletionProtectionEnabled: true`;
 bazy zawierają `myhelper`; loginy: `myhelper_owner`, `postgres`; oba sekrety:
 `1 ENABLED`.
@@ -239,6 +240,46 @@ done
 Oczekiwane: `CAN_ACCESS` dla `myhelper-pg`, `CANNOT_ACCESS` dla drugiej. Inny
 wynik dla `myhelper-pg` → pierwszy przebieg z `run_migrations=true` padnie na
 kopii (fail-closed) — zgłoszenie do Evy i Ryana przed D-7.
+
+### 3.6a Kopie zapasowe: lokalizacja i kopie na żądanie
+
+**Lokalizacja.** Bez `--backup-location` Cloud SQL zapisuje kopie w domyślnej
+lokalizacji wielu regionów (dla `europe-central2` to UE, nie Warszawa). Umowa
+powierzenia podaje `europe-central2`, więc `bootstrap.sh` tworzy instancję z
+`--backup-location=europe-central2` (strażnik G-D1). Instancja `myhelper-pg`
+powstała przed tą zmianą — jednorazowo, **przed pierwszą kopią z danymi
+produkcyjnymi** (przed próbą generalną przełączenia), sesja główna za zgodą
+właściciela wykonuje (zmiana konfiguracji, bez dostępu do danych):
+
+```bash
+set +x
+P=my-helper-2-488419
+gcloud --project=$P sql instances patch myhelper-pg --backup-location=europe-central2
+gcloud --project=$P sql instances describe myhelper-pg --format='value(settings.backupConfiguration.location)'
+```
+
+Oczekiwane: `europe-central2`. Kopie sprzed zmiany (pusta baza) zostają w
+dotychczasowej lokalizacji i podlegają zasadzie 30 dni niżej.
+
+**Kopie na żądanie.** `retained-backups-count=7` i PITR 7 dni dotyczą tylko kopii
+automatycznych. Kopie na żądanie (`pre-migrate` z `run-migrate.sh`, kopie przed
+importem i przed próbą generalną) nie rotują same. Zasada: **kopia na żądanie
+żyje najwyżej 30 dni.** Usuwa ją sesja główna (`sql backups delete`, wyjście bez
+danych), wpis w #121. Konto deploy nie ma uprawnienia do usuwania kopii i nie
+dostaje go. Wyjątek: kopia sprzed importu danych jest celem wycofania i zostaje
+do końca okresu wycofania przełączenia.
+
+**Cotygodniowy przegląd** (przy cotygodniowym odczycie kosztów):
+
+```bash
+set +x
+P=my-helper-2-488419
+gcloud --project=$P sql backups list --instance=myhelper-pg --format='value(id,type,windowStartTime)'
+```
+
+Każda kopia typu `ON_DEMAND` starsza niż 30 dni (`windowStartTime`) idzie do
+usunięcia: `gcloud --project=$P sql backups delete ID --instance=myhelper-pg`.
+Wynik przeglądu (liczba kopii, liczba usuniętych) w #121.
 
 ### 3.7 `run` (odstępstwo od listy etapów w zleceniu — uzasadnienie)
 Powłoki usługi `myhelper` i joba `myhelper-migrate`, żeby konto deploy dostało

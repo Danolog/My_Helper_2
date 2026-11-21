@@ -367,6 +367,7 @@ stage_sql() {
       --storage-auto-increase \
       --storage-auto-increase-limit=30 \
       --backup-start-time=01:00 \
+      --backup-location="$REGION" \
       --retained-backups-count=7 \
       --enable-point-in-time-recovery \
       --retained-transaction-log-days=7 \

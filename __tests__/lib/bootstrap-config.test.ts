@@ -374,6 +374,16 @@ describe("G-D1: Cloud SQL (Ethan, 0.4)", () => {
     }
   });
 
+  // Lokalizacja kopii: bez flagi kopie lądują w domyślnej lokalizacji wielu regionów (UE),
+  // a umowa powierzenia mówi o europe-central2. Flaga dokładnie raz, wartość = region.
+  it("instancja: kopie zapasowe w regionie — --backup-location=europe-central2 dokładnie raz", () => {
+    const parts = create.split(" ");
+    expect(parts.filter((p) => p.startsWith("--backup-location"))).toEqual(["--backup-location=europe-central2"]);
+    const region = parts.find((p) => p.startsWith("--region="))!.slice("--region=".length);
+    expect(parts).toContain(`--backup-location=${region}`);
+    expect(r.calls.filter((c) => c.includes("--backup-location")).length).toBe(1);
+  });
+
   it("instancja: tylko szyfrowane połączenia, bez autoryzowanych sieci", () => {
     expect(create).toContain("--ssl-mode=ENCRYPTED_ONLY");
     expect(r.calls.join("\n")).not.toMatch(/authorized-networks|--no-assign-ip|0\.0\.0\.0/);
