@@ -14,6 +14,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  *     tylko najstarszej, depositPaid=false tylko gdy wszystkie zwroty OK.
  */
 const {
+  txSelectQueue,
+  mockTxFor,
+  mockTxSelectWhere,
+  txClient,
+  mockTransaction,
+  mockRecordEvent,
   mockStripeRefundsCreate,
   mockSessionsRetrieve,
   stripeState,
@@ -58,7 +64,27 @@ const {
   const mockDbUpdateSet = vi.fn((..._args: unknown[]) => ({ where: mockDbUpdateWhere }));
   const mockDbUpdateTable = vi.fn((..._args: unknown[]) => ({ set: mockDbUpdateSet }));
 
+  // db.transaction(tx => …): tx.select().from().where().for("update") — wiersz
+  // wizyty z kolejki (domyślnie depositPaid=true); tx.update = to samo co db.update.
+  const txSelectQueue: unknown[][] = [];
+  const mockTxFor = vi.fn((..._args: unknown[]) =>
+    Promise.resolve(
+      txSelectQueue.length > 0 ? txSelectQueue.shift()! : [{ id: "appt-1", salonId: "salon-1", depositPaid: true }]
+    )
+  );
+  const mockTxSelectWhere = vi.fn((..._args: unknown[]) => ({ for: mockTxFor }));
+  const mockTxSelect = vi.fn((..._args: unknown[]) => ({ from: () => ({ where: mockTxSelectWhere }) }));
+  const txClient = { select: mockTxSelect, update: mockDbUpdateTable };
+  const mockTransaction = vi.fn((fn: (tx: typeof txClient) => unknown) => fn(txClient));
+  const mockRecordEvent = vi.fn((..._args: unknown[]) => Promise.resolve());
+
   return {
+    txSelectQueue,
+    mockTxFor,
+    mockTxSelectWhere,
+    txClient,
+    mockTransaction,
+    mockRecordEvent,
     mockStripeRefundsCreate,
     mockSessionsRetrieve,
     stripeState,
@@ -88,7 +114,12 @@ vi.mock("@/lib/db", () => ({
   db: {
     select: (...args: unknown[]) => mockDbSelect(...(args as [])),
     update: (...args: unknown[]) => mockDbUpdateTable(...args),
+    transaction: (...args: unknown[]) => mockTransaction(...(args as Parameters<typeof mockTransaction>)),
   },
+}));
+
+vi.mock("@/lib/deposit-status-events", () => ({
+  recordDepositStatusEvent: (...args: unknown[]) => mockRecordEvent(...args),
 }));
 
 vi.mock("@/lib/logger", () => ({
@@ -110,6 +141,8 @@ vi.mock("@/lib/schema", () => ({
   },
   appointments: {
     id: "appointments.id",
+    salonId: "appointments.salonId",
+    depositPaid: "appointments.depositPaid",
   },
 }));
 
@@ -146,6 +179,7 @@ function resetAll() {
   vi.clearAllMocks();
   selectQueue.length = 0;
   updateReturningQueue.length = 0;
+  txSelectQueue.length = 0;
   stripeState.configured = true;
 }
 
@@ -414,5 +448,107 @@ describe("refundAppointmentDeposits — wszystkie 'succeeded' wizyty", () => {
     const result = await refundAppointmentDeposits("appt-1", "powod");
     expect(result).toMatchObject({ success: false, refunded: false, error: "refund_error" });
     expect(mockStripeRefundsCreate).not.toHaveBeenCalled();
+  });
+
+  describe("dziennik zmian zadatku (refund)", () => {
+    it("wszystkie zwroty OK i flaga true => w jednej transakcji FOR UPDATE, UPDATE i jeden wpis refund bez aktora", async () => {
+      queuePayments(payment());
+      txSelectQueue.push([{ id: "appt-1", salonId: "salon-z-wizyty", depositPaid: true }]);
+      mockStripeRefundsCreate.mockResolvedValue({ id: "re_1" });
+
+      const result = await refundAppointmentDeposits("appt-1", "powod");
+
+      expect(result).toMatchObject({ success: true, refunded: true });
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(mockTxSelectWhere).toHaveBeenCalledWith(eqArgs("appointments.id", "appt-1"));
+      expect(mockTxFor).toHaveBeenCalledWith("update");
+      expect(appointmentSets()).toEqual([expect.objectContaining({ set: { depositPaid: false } })]);
+      expect(mockRecordEvent).toHaveBeenCalledTimes(1);
+      expect(mockRecordEvent.mock.calls[0]![0]).toBe(txClient);
+      expect(mockRecordEvent.mock.calls[0]![1]).toEqual({
+        salonId: "salon-z-wizyty",
+        appointmentId: "appt-1",
+        previousDepositPaid: true,
+        depositPaid: false,
+        source: "refund",
+        actor: null,
+      });
+      // wpis po UPDATE wizyty
+      const apptUpdateCall = mockDbUpdateTable.mock.calls.findIndex((c) => (c[0] as { id?: string }).id === "appointments.id");
+      expect(mockRecordEvent.mock.invocationCallOrder[0]!).toBeGreaterThan(
+        mockDbUpdateTable.mock.invocationCallOrder[apptUpdateCall]!
+      );
+    });
+
+    it.each([false, null])("flaga %s => bez UPDATE wizyty i bez wpisu", async (flag) => {
+      queuePayments(payment());
+      txSelectQueue.push([{ id: "appt-1", salonId: "salon-1", depositPaid: flag }]);
+      mockStripeRefundsCreate.mockResolvedValue({ id: "re_1" });
+
+      const result = await refundAppointmentDeposits("appt-1", "powod");
+
+      expect(result).toMatchObject({ success: true, refunded: true });
+      expect(mockTxFor).toHaveBeenCalledWith("update");
+      expect(appointmentSets()).toHaveLength(0);
+      expect(mockRecordEvent).not.toHaveBeenCalled();
+    });
+
+    it("brak wiersza wizyty => bez UPDATE i bez wpisu", async () => {
+      queuePayments(payment());
+      txSelectQueue.push([]);
+      mockStripeRefundsCreate.mockResolvedValue({ id: "re_1" });
+
+      await refundAppointmentDeposits("appt-1", "powod");
+
+      expect(appointmentSets()).toHaveLength(0);
+      expect(mockRecordEvent).not.toHaveBeenCalled();
+    });
+
+    it("czesciowa porazka zwrotu => bez transakcji, bez UPDATE wizyty i bez wpisu", async () => {
+      queuePayments(payment(), payment({ id: "pay-2", stripePaymentIntentId: "pi_2" }));
+      mockStripeRefundsCreate.mockResolvedValueOnce({ id: "re_1" }).mockRejectedValueOnce(new Error("card_declined"));
+
+      const result = await refundAppointmentDeposits("appt-1", "powod");
+
+      expect(result).toMatchObject({ success: false, refunded: false });
+      expect(mockTransaction).not.toHaveBeenCalled();
+      expect(appointmentSets()).toHaveLength(0);
+      expect(mockRecordEvent).not.toHaveBeenCalled();
+    });
+
+    it("forfeit => bez transakcji i bez wpisu (flaga zostaje)", async () => {
+      selectQueue.push([payment()]);
+      await refundAppointmentDeposits("appt-1", "x", { forfeitReason: "zatrzymany" });
+      expect(mockTransaction).not.toHaveBeenCalled();
+      expect(mockRecordEvent).not.toHaveBeenCalled();
+    });
+
+    it("blad wpisu => blad leci do wolajacego (transakcja odrzucona), nie jest polykany", async () => {
+      queuePayments(payment());
+      mockStripeRefundsCreate.mockResolvedValue({ id: "re_1" });
+      const dbError = new Error("insert failed");
+      mockRecordEvent.mockRejectedValueOnce(dbError);
+
+      await expect(refundAppointmentDeposits("appt-1", "powod")).rejects.toBe(dbError);
+
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      await expect(mockTransaction.mock.results[0]!.value).rejects.toBe(dbError);
+      expect(mockRecordEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it("blad UPDATE wizyty => blad do wolajacego, bez wpisu", async () => {
+      queuePayments(payment());
+      mockStripeRefundsCreate.mockResolvedValue({ id: "re_1" });
+      const dbError = new Error("update failed");
+      // pierwsze update = zapis refunded płatności, drugie = UPDATE wizyty w transakcji
+      mockDbUpdateTable
+        .mockImplementationOnce((..._a: unknown[]) => ({ set: mockDbUpdateSet }))
+        .mockImplementationOnce(() => {
+          throw dbError;
+        });
+
+      await expect(refundAppointmentDeposits("appt-1", "powod")).rejects.toBe(dbError);
+      expect(mockRecordEvent).not.toHaveBeenCalled();
+    });
   });
 });

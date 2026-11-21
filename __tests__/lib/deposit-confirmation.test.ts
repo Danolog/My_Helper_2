@@ -36,7 +36,9 @@ const {
   mockSendSms,
   txSelectQueue,
   mockTxFor,
+  mockTxSelect,
   mockRefund,
+  mockRecordEvent,
 } = vi.hoisted(() => {
   // db.select().from().where() — kolejne wyniki z kolejki (FIFO)
   const selectQueue: unknown[][] = [];
@@ -71,6 +73,7 @@ const {
 
   const mockSendSms = vi.fn();
   const mockRefund = vi.fn();
+  const mockRecordEvent = vi.fn((..._args: unknown[]) => Promise.resolve());
 
   // forSalon(salonId).raw(tx => tx.select().from(salons).where()) — odczyt
   // nazwy salonu przez bramę salonu; wyniki z osobnej kolejki.
@@ -98,9 +101,15 @@ const {
     mockSendSms,
     txSelectQueue,
     mockTxFor,
+    mockTxSelect,
     mockRefund,
+    mockRecordEvent,
   };
 });
+
+vi.mock("@/lib/deposit-status-events", () => ({
+  recordDepositStatusEvent: (...args: unknown[]) => mockRecordEvent(...args),
+}));
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -633,5 +642,119 @@ describe("confirmDepositPayment", () => {
     const result = await confirmDepositPayment("dp-1");
     expect(result.success).toBe(true);
     expect(result.smsSent).toBe(false);
+  });
+
+  describe("dziennik zmian zadatku (stripe_confirmation)", () => {
+    it("zmiana false -> true => jeden wpis w tej samej transakcji, salonId z zablokowanego wiersza wizyty, bez aktora", async () => {
+      queueSelect([pendingPayment], [], [{ firstName: "Ewa", lastName: "Nowak" }], []);
+      txSelectQueue.push([{ id: "appt-1", salonId: "salon-z-wizyty", status: "scheduled", depositPaid: false }]);
+      txReturningQueue.push([updatedPayment], [{ ...confirmedAppointment, clientId: null, guestPhone: "+48600700800" }]);
+
+      const result = await confirmDepositPayment("dp-1", { paymentIntentId: "pi_1" });
+
+      expect(result).toMatchObject({ success: true, alreadyConfirmed: false });
+      expect(mockRecordEvent).toHaveBeenCalledTimes(1);
+      const [tx, input] = mockRecordEvent.mock.calls[0]!;
+      // ten sam klient transakcyjny co UPDATE wizyty
+      expect((tx as { update: unknown }).update).toBe(mockTxUpdate);
+      expect(input).toEqual({
+        salonId: "salon-z-wizyty",
+        appointmentId: "appt-1",
+        previousDepositPaid: false,
+        depositPaid: true,
+        source: "stripe_confirmation",
+        actor: null,
+      });
+      // wpis po UPDATE wizyty (drugi tx.update)
+      expect(mockTxUpdate).toHaveBeenCalledTimes(2);
+      expect(mockRecordEvent.mock.invocationCallOrder[0]!).toBeGreaterThan(mockTxUpdate.mock.invocationCallOrder[1]!);
+    });
+
+    it("stara wizyta z depositPaid NULL => wpis z previousDepositPaid NULL (pomocnik liczy go jako false)", async () => {
+      queueSelect([pendingPayment], [], [{ firstName: "Ewa", lastName: "Nowak" }], []);
+      txSelectQueue.push([{ id: "appt-1", salonId: "salon-1", status: "confirmed", depositPaid: null }]);
+      txReturningQueue.push([updatedPayment], [{ ...confirmedAppointment, clientId: null, guestPhone: "+48600700800" }]);
+
+      await confirmDepositPayment("dp-1");
+
+      expect(mockRecordEvent).toHaveBeenCalledTimes(1);
+      expect(mockRecordEvent.mock.calls[0]![1]).toMatchObject({ previousDepositPaid: null, depositPaid: true });
+    });
+
+    it("zadatek juz oplacony inna platnoscia => zero wpisow (zwrot drugiej platnosci)", async () => {
+      queueSelect([pendingPayment]);
+      txSelectQueue.push([{ id: "appt-1", salonId: "salon-1", status: "scheduled", depositPaid: true }]);
+      txReturningQueue.push([updatedPayment]);
+
+      const result = await confirmDepositPayment("dp-1", { stripePaymentStatus: "paid" });
+
+      expect(result.inactiveAppointment).toMatchObject({ reason: "deposit_already_paid" });
+      expect(mockRecordEvent).not.toHaveBeenCalled();
+    });
+
+    it("wizyta nieaktywna => zero wpisow", async () => {
+      queueSelect([pendingPayment]);
+      txSelectQueue.push([{ id: "appt-1", salonId: "salon-1", status: "cancelled", depositPaid: false }]);
+      txReturningQueue.push([updatedPayment]);
+
+      await confirmDepositPayment("dp-1", { stripePaymentStatus: "paid" });
+
+      expect(mockRecordEvent).not.toHaveBeenCalled();
+    });
+
+    it("powtorzone potwierdzenie (platnosc succeeded) => zero wpisow, bez transakcji", async () => {
+      queueSelect([{ ...pendingPayment, status: "succeeded" }]);
+
+      await confirmDepositPayment("dp-1");
+
+      expect(mockTransaction).not.toHaveBeenCalled();
+      expect(mockRecordEvent).not.toHaveBeenCalled();
+    });
+
+    it("UPDATE wizyty bez wiersza => zero wpisow", async () => {
+      queueSelect([pendingPayment]);
+      txSelectQueue.push([{ id: "appt-1", salonId: "salon-1", status: "scheduled", depositPaid: false }]);
+      txReturningQueue.push([updatedPayment], []);
+
+      await confirmDepositPayment("dp-1");
+
+      expect(mockRecordEvent).not.toHaveBeenCalled();
+    });
+
+    it("blad wpisu => wyjatek do wolajacego jak przy bledzie transakcji, zapisy wycofane, bez SMS i bez zwrotu", async () => {
+      // Atrapa transakcji z zatwierdzaniem: zapisy z set() trafiają do `committed`
+      // dopiero, gdy callback się rozstrzygnie bez błędu.
+      const committed: unknown[] = [];
+      mockTransaction.mockImplementationOnce(async (fn) => {
+        const staged: unknown[] = [];
+        const tx = {
+          update: (...a: unknown[]) => {
+            const chain = (mockTxUpdate as (...x: unknown[]) => { set: (v: unknown) => unknown })(...a);
+            return {
+              set: (v: unknown) => {
+                staged.push(v);
+                return chain.set(v);
+              },
+            };
+          },
+          select: mockTxSelect,
+        };
+        const r = await fn(tx as unknown as Parameters<typeof fn>[0]);
+        committed.push(...staged);
+        return r;
+      });
+      queueSelect([pendingPayment]);
+      txSelectQueue.push([{ id: "appt-1", salonId: "salon-1", status: "scheduled", depositPaid: false }]);
+      txReturningQueue.push([updatedPayment], [confirmedAppointment]);
+      const dbError = new Error("insert failed");
+      mockRecordEvent.mockRejectedValueOnce(dbError);
+
+      await expect(confirmDepositPayment("dp-1")).rejects.toBe(dbError);
+
+      expect(mockRecordEvent).toHaveBeenCalledTimes(1);
+      expect(committed).toEqual([]);
+      expect(mockSendSms).not.toHaveBeenCalled();
+      expect(mockRefund).not.toHaveBeenCalled();
+    });
   });
 });
