@@ -148,8 +148,6 @@ export async function POST(request: Request) {
       guestEmail,
     } = parsed.data;
 
-    const bookedByUserId = session?.user?.id || null;
-
     // Guest validation: require name and phone when not logged in.
     // Format (trim, min. 2 znaki, telefon PL po normalizacji) sprawdził już
     // schemat — tu tylko obecność pól dla gościa.
@@ -209,6 +207,12 @@ export async function POST(request: Request) {
     if (!isSalonStaff && bodyClientId) {
       logger.warn("[Deposits API] Ignored client-supplied clientId (non-staff booking)", { salonId });
     }
+
+    // #193: wizyta dodana przez personel salonu należy do klienta z kartoteki,
+    // nie do konta personelu — inaczej trafia do portalu klienta pracownika
+    // (szukanie po booked_by_user_id) i można ją tam anulować z pominięciem roli.
+    // Klient portalu: id z sesji; gość: null.
+    const bookedByUserId: string | null = isSalonStaff ? null : session?.user?.id || null;
 
     // P1 (Ryan): klient, pracownik i usluga musza nalezec do salonu — PRZED
     // sprawdzeniem kolizji i zapisem. Bez tego obcy employeeId dostawal wizyte
@@ -389,7 +393,12 @@ export async function POST(request: Request) {
     const stripe = stripeConfigured ? getStripe() : null;
     if (stripe) {
       const origin = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-      const customerEmail = session?.user?.email || guestEmail || undefined;
+      // #193: personel nie wysyła swojego e-maila do Stripe (paragon trafiłby
+      // do pracownika) — tylko e-mail gościa z formularza, a bez niego pole
+      // pomijamy; Checkout zapyta płacącego o adres.
+      const customerEmail = isSalonStaff
+        ? guestEmail || undefined
+        : session?.user?.email || guestEmail || undefined;
 
       try {
         const checkoutSession = await stripe.checkout.sessions.create({

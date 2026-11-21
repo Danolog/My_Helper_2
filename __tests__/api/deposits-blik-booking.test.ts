@@ -1480,3 +1480,50 @@ describe("personel salonu omija blokadę i oba liczniki", () => {
     expect(h.insert).not.toHaveBeenCalled();
   });
 });
+
+// ─── bookedByUserId: personel, klient portalu, gość (#193) ──────────────────
+
+describe("bookedByUserId wizyty BLIK (#193)", () => {
+  const inserted = () => h.insertValues.mock.calls[0]![0] as Record<string, unknown>;
+
+  it("personel tego salonu → bookedByUserId null (wizyta nie trafia do portalu personelu)", async () => {
+    h.session.mockResolvedValue({ user: { id: "owner-1", email: "owner-193@example.invalid" } });
+    h.salonCtx.mockResolvedValue({ salonId: SALON, role: "owner" });
+    primeStaffPath();
+    expect((await post({ ...validBody, clientId: CLIENT })).status).toBe(201);
+    expect(inserted()).toMatchObject({ bookedByUserId: null, clientId: CLIENT });
+  });
+
+  it("personel tego salonu bez telefonu gościa → 201, liczniki pominięte (klucz gościa nieliczony)", async () => {
+    h.session.mockResolvedValue({ user: { id: "owner-1" } });
+    h.salonCtx.mockResolvedValue({ salonId: SALON, role: "owner" });
+    primeStaffPath();
+    expect(
+      (await post({ ...validBody, clientId: CLIENT, guestName: undefined, guestPhone: undefined })).status
+    ).toBe(201);
+    expect(limitedSelects()).toHaveLength(0);
+    expect(inserted()).toMatchObject({ bookedByUserId: null, guestPhone: null });
+  });
+
+  it("personel INNEGO salonu → traktowany jak klient portalu: bookedByUserId z sesji", async () => {
+    h.session.mockResolvedValue({ user: { id: "owner-2" } });
+    h.salonCtx.mockResolvedValue({ salonId: OTHER_SALON, role: "owner" });
+    primeHappyPath();
+    expect((await post()).status).toBe(201);
+    expect(inserted()).toMatchObject({ bookedByUserId: "owner-2" });
+  });
+
+  it("klient portalu → bookedByUserId z sesji", async () => {
+    h.session.mockResolvedValue({ user: { id: "portal-193", email: "portal-193@example.invalid" } });
+    primeHappyPath();
+    expect((await post({ ...validBody, guestName: undefined, guestPhone: undefined })).status).toBe(201);
+    expect(inserted()).toMatchObject({ bookedByUserId: "portal-193" });
+  });
+
+  it("gość → bookedByUserId null", async () => {
+    primeHappyPath();
+    expect((await post()).status).toBe(201);
+    expect(inserted()).toMatchObject({ bookedByUserId: null });
+    expect(h.salonCtx).not.toHaveBeenCalled();
+  });
+});

@@ -405,7 +405,6 @@ export async function POST(request: Request) {
 
   try {
     const session = await getOptionalSession();
-    const bookedByUserId = session?.user?.id ?? null;
 
     // Gość: imię i telefon obowiązkowe (format sprawdził schemat).
     if (!session) {
@@ -431,6 +430,13 @@ export async function POST(request: Request) {
     if (!isSalonStaff && bodyClientId) {
       logger.warn("[BlikBooking API] Ignored client-supplied clientId (non-staff booking)", { salonId });
     }
+
+    // #193: wizyta dodana przez personel salonu należy do klienta z kartoteki,
+    // nie do konta personelu — inaczej trafia do portalu klienta pracownika
+    // (szukanie po booked_by_user_id). Klient portalu: id z sesji; gość: null.
+    // Klucz licznika gościa (guestKeyWhere) to nie zmienia: personel tego
+    // salonu omija liczniki, więc null personelu nigdy tam nie trafia.
+    const bookedByUserId: string | null = isSalonStaff ? null : session?.user?.id ?? null;
 
     // Pracownik, usługa, wariant i klient muszą należeć do salonu — przed
     // wyliczeniem kwoty, odczytem ustawień salonu i sprawdzeniem kalendarza.

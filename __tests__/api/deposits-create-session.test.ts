@@ -14,6 +14,9 @@
  *   appointment is deleted so the slot is not blocked by an unpayable booking.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { getSalonContext } from "@/lib/salon-context";
+import { getOptionalSession } from "@/lib/session";
+import { TEST_PHONE } from "@/lib/test-phone";
 import {
   createMockRequest,
   parseResponse,
@@ -514,6 +517,103 @@ describe("POST /api/deposits/create-session — kolizja półotwarta (#165)", ()
     const { status, body } = await parseResponse<{ error: string }>(await createSession(makeRequest()));
     expect(status).toBe(409);
     expect(body.error).toBe("Pracownik nie jest dostepny w wybranym terminie.");
+  });
+});
+
+describe("POST /api/deposits/create-session — bookedByUserId i e-mail Stripe (#193)", () => {
+  const STAFF_USER_ID = "staff-user-193";
+  const STAFF_EMAIL = "staff-193@example.invalid";
+  const PORTAL_USER_ID = "portal-user-193";
+  const PORTAL_EMAIL = "portal-193@example.invalid";
+  const GUEST_EMAIL = "guest-193@example.invalid";
+  const mockSessionsCreate = vi.fn();
+  const fakeStripe = {
+    checkout: { sessions: { create: (...a: unknown[]) => mockSessionsCreate(...a) } },
+  };
+  let appointmentChain: ReturnType<typeof createChainMock>;
+
+  function appointmentValues(): Record<string, unknown> {
+    return (appointmentChain.values as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Record<string, unknown>;
+  }
+  function stripeArgs(): Record<string, unknown> {
+    return mockSessionsCreate.mock.calls[0]![0] as Record<string, unknown>;
+  }
+  function asStaffOf(salonId: string) {
+    vi.mocked(getOptionalSession).mockResolvedValueOnce({
+      user: { id: STAFF_USER_ID, email: STAFF_EMAIL, name: "Staff 193" },
+    } as never);
+    vi.mocked(getSalonContext).mockResolvedValueOnce({ salonId } as never);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDbSelect.mockReset();
+    mockDbInsert.mockReset();
+    mockDbSelect
+      .mockReturnValueOnce(createChainMock([]))
+      .mockReturnValueOnce(createChainMock([]));
+    appointmentChain = createChainMock([insertedAppointment]);
+    mockDbInsert
+      .mockReturnValueOnce(appointmentChain)
+      .mockReturnValueOnce(createChainMock([insertedPayment]));
+    mockDbUpdate.mockReturnValue(createChainMock([]));
+    mockDbDelete.mockReturnValue(createChainMock([]));
+    primeExpectedDeposit(50);
+    mockIsStripeConfigured.mockReturnValue(true);
+    mockGetStripe.mockReturnValue(fakeStripe);
+    mockSessionsCreate.mockResolvedValue({
+      id: "cs_test_193",
+      url: "https://checkout.stripe.com/c/pay/cs_test_193",
+    });
+  });
+
+  it("personel tego salonu → bookedByUserId null, bez e-maila personelu w Stripe (pole pominięte)", async () => {
+    asStaffOf(SALON_UUID);
+    const res = await createSession(makeRequest({ ...validBody, clientId: CLIENT_UUID }));
+    expect(res.status).toBe(201);
+    expect(appointmentValues().bookedByUserId).toBeNull();
+    expect(appointmentValues().clientId).toBe(CLIENT_UUID);
+    expect(stripeArgs()).not.toHaveProperty("customer_email");
+    expect(JSON.stringify(mockSessionsCreate.mock.calls)).not.toContain(STAFF_EMAIL);
+  });
+
+  it("personel tego salonu z e-mailem gościa w formularzu → customer_email gościa, nie personelu", async () => {
+    asStaffOf(SALON_UUID);
+    const res = await createSession(
+      makeRequest({ ...validBody, guestName: "Anna Test", guestPhone: TEST_PHONE, guestEmail: GUEST_EMAIL })
+    );
+    expect(res.status).toBe(201);
+    expect(appointmentValues().bookedByUserId).toBeNull();
+    expect(stripeArgs().customer_email).toBe(GUEST_EMAIL);
+  });
+
+  it("personel INNEGO salonu → traktowany jak klient portalu: id i e-mail z sesji", async () => {
+    asStaffOf("99999999-9999-4999-8999-999999999999");
+    const res = await createSession(makeRequest());
+    expect(res.status).toBe(201);
+    expect(appointmentValues().bookedByUserId).toBe(STAFF_USER_ID);
+    expect(stripeArgs().customer_email).toBe(STAFF_EMAIL);
+  });
+
+  it("klient portalu → bookedByUserId z sesji, customer_email z sesji", async () => {
+    vi.mocked(getOptionalSession).mockResolvedValueOnce({
+      user: { id: PORTAL_USER_ID, email: PORTAL_EMAIL, name: "Portal 193" },
+    } as never);
+    const res = await createSession(makeRequest());
+    expect(res.status).toBe(201);
+    expect(appointmentValues().bookedByUserId).toBe(PORTAL_USER_ID);
+    expect(stripeArgs().customer_email).toBe(PORTAL_EMAIL);
+  });
+
+  it("gość bez sesji → bookedByUserId null, customer_email gościa, kontekst salonu nieczytany", async () => {
+    vi.mocked(getOptionalSession).mockResolvedValueOnce(null as never);
+    const res = await createSession(
+      makeRequest({ ...validBody, guestName: "Anna Test", guestPhone: TEST_PHONE, guestEmail: GUEST_EMAIL })
+    );
+    expect(res.status).toBe(201);
+    expect(appointmentValues().bookedByUserId).toBeNull();
+    expect(stripeArgs().customer_email).toBe(GUEST_EMAIL);
+    expect(getSalonContext).not.toHaveBeenCalled();
   });
 });
 
