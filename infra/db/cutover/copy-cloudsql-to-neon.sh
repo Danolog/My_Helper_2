@@ -237,7 +237,7 @@ read_nums() {
 
 # Tożsamość serwera i zamrożenie jednej strony (osobne połączenie READ ONLY).
 # neon_settings=1 tylko gdy sesja widzi niepuste neon.timeline_id. Podstawa
-# (ZAŁOŻENIE do potwierdzenia przez CTO): na Neonie rozszerzenie neon
+# (potwierdzana próbą generalną na gałęzi Neona przed oknem): na Neonie rozszerzenie neon
 # (shared_preload_libraries) definiuje GUC neon.timeline_id, a compute ustawia
 # je na id gałęzi przy starcie, czytelne dla zwykłej roli (SHOW neon.timeline_id);
 # Cloud SQL nie ma rozszerzenia neon, więc current_setting(…, true) = NULL → 0.
