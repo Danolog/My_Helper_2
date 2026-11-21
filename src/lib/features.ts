@@ -3,7 +3,9 @@
  *
  * Rdzeń produktu (kalendarz, rezerwacje, klienci, usługi, pracownicy,
  * zadatki, przypomnienia SMS, opinie, galeria, 3 podstawowe raporty)
- * jest ZAWSZE włączony i nie występuje w tym rejestrze.
+ * jest ZAWSZE włączony i nie występuje w tym rejestrze. Wyjątek: płatność
+ * zadatku przez Stripe jest zamrożona (moduł `onlineDeposits`), a zadatek
+ * klient wpłaca BLIK-iem na telefon salonu (`/api/deposits/blik-booking`).
  *
  * Moduły opcjonalne są domyślnie WYŁĄCZONE — właściciel salonu włącza je
  * w Ustawienia → Moduły. Stan zapisujemy w `salons.settingsJson.modules`
@@ -21,7 +23,10 @@
  * - `POST /api/appointments/[id]/complete` — punkty lojalnościowe naliczane
  *   tylko, gdy `resolveModules(...).loyalty`;
  * - trasy modułów zamrożonych same pytają `isModuleFrozen()` (druga linia
- *   obrony, gdyby proxy zostało ominięte) — `src/lib/server/frozen-guard.ts`;
+ *   obrony, gdyby proxy zostało ominięte) — `src/lib/server/frozen-guard.ts`,
+ *   w tym `POST /api/deposits/create-session` (strażnik w trasie, moduł
+ *   `onlineDeposits`); `/api/deposits/confirm` chroni proxy plus bramka
+ *   hostingu w samej trasie (bez strażnika modułu);
  * - promocje — typy z `FROZEN_PROMOTION_TYPES` nie są tworzone, zwracane ani
  *   naliczane (`/api/promotions`, `promo-discount.ts`, `deposit-calculation.ts`);
  * - interfejs — `useModuleEnabled()` / `<ModuleGate>` / `moduleForRoute()`.
@@ -46,7 +51,8 @@ export type ModuleKey =
   | "aiNotifications"
   | "pushNotifications"
   | "complexPromotions"
-  | "imageGen";
+  | "imageGen"
+  | "onlineDeposits";
 
 export interface ModuleDef {
   key: ModuleKey;
@@ -190,6 +196,22 @@ export const MODULES: readonly ModuleDef[] = [
     defaultEnabled: false,
     hardOff: true,
   },
+  {
+    // Płatność zadatku online przy rezerwacji w portalu: trasy
+    // `/api/deposits/create-session` i `/api/deposits/confirm`
+    // (`API_MODULE_PATTERNS`). Zamrożenie przełącza portal na zadatek BLIK
+    // (`isBlikDepositFlow()`, `/api/deposits/blik-booking`). Webhook płatności
+    // i cron `cleanup-pending-deposits` NIE należą do modułu — dokańczają
+    // sesje otwarte przed zamrożeniem.
+    // Zdjęcie `hardOff` wymaga w tej samej zmianie strażnika
+    // `frozenModuleResponse("onlineDeposits")` w trasie `confirm`.
+    key: "onlineDeposits",
+    label: "Płatność zadatku online",
+    description:
+      "Płatność zadatku przy rezerwacji online. Wyłączona: zadatek klient wpłaca BLIK-iem na telefon salonu.",
+    defaultEnabled: false,
+    hardOff: true,
+  },
 ] as const;
 
 /** Moduły z przełącznikiem w Ustawienia → Moduły. */
@@ -208,12 +230,16 @@ export function isModuleFrozen(key: ModuleKey): boolean {
 
 /**
  * Czy zadatek w portalu rezerwacji jest płatny BLIK-iem na telefon salonu
- * zamiast płatności online. Jedyne miejsce przełączenia ścieżki zadatku;
- * na razie zwraca false (płatność online). Hook rezerwacji portalu czyta
- * wyłącznie tę funkcję.
+ * zamiast płatności online. Jedyne miejsce przełączenia ścieżki zadatku:
+ * czyta rejestr — BLIK, dopóki moduł `onlineDeposits` jest zamrożony
+ * (`hardOff`). Odczyt jest stały w czasie działania (statyczny rejestr),
+ * więc trzy miejsca, które go wołają, nie mogą dać różnych odpowiedzi:
+ * - hook rezerwacji portalu (`src/app/(client)/salons/[id]/book/_hooks/use-booking-data.ts`),
+ * - podsumowanie rezerwacji (`src/components/booking/booking-summary.tsx`),
+ * - ekran potwierdzenia (`src/components/booking/booking-confirmation.tsx`).
  */
 export function isBlikDepositFlow(): boolean {
-  return false;
+  return isModuleFrozen("onlineDeposits");
 }
 
 /**
@@ -376,6 +402,9 @@ export const API_MODULE_PATTERNS: ReadonlyArray<{ pattern: RegExp; module: Modul
     pattern: /^\/api\/ai\/image\/(generate|banner|service-illustration)(\/|$)/,
     module: "imageGen",
   },
+  // Płatność zadatku online. `blik-booking` i cron
+  // `cleanup-pending-deposits` zostają poza wzorcem.
+  { pattern: /^\/api\/deposits\/(create-session|confirm)(\/|$)/, module: "onlineDeposits" },
   // Moduły zamrożone wcześniej i usunięte w B3–B5: głos (voiceAi, B3), wideo
   // (videoGen) i publikacja postów (socialPosts, B4), fiskalizacja (fiscal,
   // B5) — tras nie ma, wzorców też (strażnik: removed-features).

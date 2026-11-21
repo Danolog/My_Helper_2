@@ -24,6 +24,7 @@ import { getSalonContext } from "@/lib/salon-context";
 import { assertSalonRefs } from "@/lib/salon-refs";
 import { timeBlocks } from "@/lib/schema";
 import { appointments, depositPayments } from "@/lib/schema";
+import { frozenModuleResponse } from "@/lib/server/frozen-guard";
 import { getOptionalSession } from "@/lib/session";
 import { getStripe, isStripeConfigured } from "@/lib/stripe";
 
@@ -104,6 +105,11 @@ function isPaymentSimulationAllowed(): boolean {
 }
 
 export async function POST(request: Request) {
+  // Moduł `onlineDeposits` zamrożony: odmowa przed limitem, sesją i bazą
+  // (druga linia obrony obok proxy). Zadatek idzie przez blik-booking.
+  const frozen = frozenModuleResponse("onlineDeposits");
+  if (frozen) return frozen;
+
   // Rate limit: deposit payment creation is a sensitive operation
   const ip = getClientIp(request);
   const rateLimitResult = strictRateLimit.check(ip);

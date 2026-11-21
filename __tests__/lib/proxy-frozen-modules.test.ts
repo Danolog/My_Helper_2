@@ -106,6 +106,10 @@ describe("proxy: trasy API modułów zamrożonych", () => {
     expect(FROZEN_ROUTES).toContain("/api/ai/image/banner");
     expect(FROZEN_ROUTES).toContain("/api/ai/image/service-illustration");
     expect(FROZEN_ROUTES).not.toContain("/api/ai/image/enhance");
+    // Płatność zadatku online (moduł onlineDeposits); zadatek idzie BLIK-iem
+    expect(FROZEN_ROUTES).toContain("/api/deposits/create-session");
+    expect(FROZEN_ROUTES).toContain("/api/deposits/confirm");
+    expect(FROZEN_ROUTES).not.toContain("/api/deposits/blik-booking");
   });
 
   describe.each(FROZEN_ROUTES)("%s", (route) => {
@@ -285,6 +289,7 @@ describe("proxy: trasy sąsiednie przechodzą", () => {
     "/api/notifications/low-stock",
     "/api/cron/sms-reminders",
     "/api/cron/cleanup-pending-deposits",
+    "/api/deposits/blik-booking",
     "/api/salons/x1/notification-type-settings",
     "/api/salons/x1/modules",
     "/api/appointments/x1/complete",
