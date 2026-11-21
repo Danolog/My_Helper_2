@@ -822,9 +822,9 @@ niczego nie usuwa i nie blokuje retencji.
 
 **Kiedy.** Po kroku 1 (LB z logowaniem), **przed** pierwszym odczytem wartości
 sekretu w 4a.1 (inaczej odczyt nie ma śladu) i **przed** rekordem `app` na LB
-(krok 3), i **po** scaleniu zmiany aplikacji z podsekcji „Warunek przed
-krokiem 2 okna” niżej — bez niej `--apply` odmawia. Wykluczenie działa tylko na
-nowe wpisy.
+(krok 3). Zmiana aplikacji z podsekcji „Warunek przed krokiem 2 okna” niżej
+jest na `main`, więc sprawdzenie `next.config.ts` przechodzi; jej cofnięcie
+zatrzymuje CI i `--apply`. Wykluczenie działa tylko na nowe wpisy.
 
 ### Co robi
 
@@ -879,14 +879,16 @@ Najpierw odczyt ujścia `_Default` (błąd odczytu = stop przed jakąkolwiek zmi
    |---|---|---|
    | `/api/auth/verify-email?token=…&callbackURL=…` | JWT weryfikacji e-mail w parametrze | `node_modules/better-auth/dist/api/routes/email-verification.mjs:31` |
    | `/api/auth/reset-password/<token>?callbackURL=…` | token resetu w ścieżce | `node_modules/better-auth/dist/api/routes/password.mjs:81` |
-   | `/reset-password?token=…` | ten sam token po przekierowaniu na stronę aplikacji | `password.mjs:127`, `src/components/auth/forgot-password-form.tsx:44`, `src/components/auth/reset-password-form.tsx:15` |
+   | `/reset-password?token=…` | ten sam token po przekierowaniu na stronę aplikacji | `password.mjs:127`, `src/components/auth/forgot-password-form.tsx:44`, `src/components/auth/reset-password-form.tsx:35` |
 
-   Referer: strona `/reset-password?token=…` ładuje zasoby i wysyła formularz
-   z pełnym adresem w Referer (`Referrer-Policy: strict-origin-when-cross-origin`
-   w obrębie originu, `next.config.ts:94-95`). Bez klauzuli Referer token z tej
-   strony trafiłby do `httpRequest.referer`. Usuwa go aplikacja, nie filtr logów:
-   warunek przed krokiem 2 okna niżej. Sam token idzie w treści POST
-   (`reset-password-form.tsx:73-76`), treści żądań platforma nie loguje.
+   Referer: przy domyślnej polityce (`strict-origin-when-cross-origin` w obrębie
+   originu, `next.config.ts:94-95`) strona `/reset-password?token=…` wysyłałaby
+   pełny adres w Referer zasobów, RSC i formularza, a filtr bez klauzuli Referer
+   nie usunąłby tokenu z `httpRequest.referer`. Usuwa go aplikacja, nie filtr
+   logów (podsekcja „Warunek przed krokiem 2 okna” niżej): `Referrer-Policy:
+   no-referrer` na trzech adresach z tokenem i usunięcie tokenu z paska adresu.
+   Sam token idzie w treści POST (`reset-password-form.tsx:97-100`), treści
+   żądań platforma nie loguje.
    Poza filtrem: `/api/auth/callback/google?code=…&state=…` — kod jest
    jednorazowy i zużywany w tym samym żądaniu (wymiana wymaga sekretu klienta
    i stanu z bazy), więc wpis w logu nie daje przejęcia konta. Magic link i
@@ -948,9 +950,11 @@ refused: …` z listą brakujących ścieżek), bez żadnego wywołania gcloud. 
 działa zawsze i wypisuje wynik (`referrer-policy: ok …` albo `referrer-policy:
 missing …`). Sprawdzenie jest tekstowe: wpis w postaci `source: "…"` i
 `key`/`value` w tej samej albo kolejnych liniach; linie `//` są pomijane.
-Flagi ani zmiennej omijającej nie ma. Skrypt `--apply` uruchamia się więc
-dopiero z `main` po scaleniu PR aplikacji z podsekcji „Warunek przed krokiem 2
-okna”.
+Flagi ani zmiennej omijającej nie ma. Na `main` wpisy są (podsekcja „Warunek
+przed krokiem 2 okna”), więc wynik to `referrer-policy: ok`. Strażnik
+`__tests__/lib/logging-config.test.ts` uruchamia skrypt z repo i oczekuje
+wyniku `ok`: usunięcie albo zmiana któregoś wpisu zatrzymuje CI, zanim
+zatrzyma `--apply`. Skrypt `--apply` uruchamia się z `main`.
 
 ### Wykonanie
 
@@ -959,8 +963,8 @@ infra/gcp/logging.sh --project=my-helper-2-488419
 infra/gcp/logging.sh --project=my-helper-2-488419 --apply
 ```
 
-Dry-run: najpierw `referrer-policy: ok …` (inaczej `--apply` odmówi — stop,
-najpierw PR aplikacji), potem `? … sinks describe _Default`, potem lista `+ …` z punktami
+Dry-run: najpierw `referrer-policy: ok …` (inaczej `--apply` odmówi — stop:
+wpisy z `next.config.ts` zniknęły albo skrypt nie jest uruchomiony z `main`), potem `? … sinks describe _Default`, potem lista `+ …` z punktami
 0–4 (w tej kolejności: `buckets create|update myhelper-logs`, `sinks update
 _Default <cel myhelper-logs> --add-exclusion|--update-exclusion=…,disabled=false`,
 `buckets update _Default`, `set-iam-policy`, zasobnik i ujście audytu), potem
@@ -1052,31 +1056,48 @@ gcloud --project=my-helper-2-488419 logging sinks update _Default logging.google
 ### Warunek przed krokiem 2 okna (zmiana aplikacji)
 
 Filtr nie obejmuje nagłówka Referer, więc strona `/reset-password?token=…` nie
-może wysyłać adresu z tokenem. Osobny PR aplikacji (pełny proces: ścieżka resetu
-hasła), **scalony i wdrożony na rewizji GCP przed krokiem 2 okna** (najprościej
-przed 4a.1, wtedy 4a.1 wdraża sha z poprawką; scalenie bez migracji jest
-dozwolone w zamrożeniu). Zakres:
+może wysyłać adresu z tokenem. Zmiana aplikacji (osobny PR, pełny proces:
+ścieżka resetu hasła) ma być **wdrożona na rewizji GCP przed krokiem 2 okna**
+(najprościej przed 4a.1, wtedy 4a.1 wdraża sha z poprawką; scalenie bez
+migracji jest dozwolone w zamrożeniu). Zawartość:
 
 - `next.config.ts` `headers()`: osobne wpisy `source: "/reset-password"`,
   `source: "/api/auth/reset-password/:token"` i `source: "/api/auth/verify-email"`
   z `Referrer-Policy: no-referrer`, **po** wpisie `"/(.*)"` (przy tym samym
-  kluczu wygrywa ostatni) — dokładnie w kształcie, który sprawdza
-  `logging.sh` (wyżej, „Odmowa `--apply` bez `no-referrer`”). Nagłówek, nie
-  tylko `<meta>`: zasoby z `<head>` startują przed parsowaniem meta.
-- `src/components/auth/reset-password-form.tsx`: token wczytany do `useRef`
-  przy pierwszym renderze, potem `history.replaceState` bez `token`; formularz
-  czyta token z ref, nie z `useSearchParams` (po `replaceState` parametry
-  znikają i formularz pokazałby „Brak tokenu”). Bez `router.replace` (fetch RSC).
+  kluczu wygrywa ostatni), bezwarunkowe (bez `has`/`missing`) i poza komentarzem
+  blokowym — w kształcie, który sprawdza `logging.sh` (wyżej, „Odmowa `--apply`
+  bez `no-referrer`”). Nagłówek, nie tylko `<meta>`: zasoby z `<head>` startują
+  przed parsowaniem meta.
+- `src/components/auth/reset-password-form.tsx`: token wczytany do stanu
+  (`useState`) przy pierwszym renderze, potem `history.replaceState(null, …)`
+  bez `token` (pozostałe parametry i fragment zostają). Formularz czyta token
+  ze stanu, nie z `useSearchParams` (w Next 16 `replaceState` odświeża
+  `useSearchParams`, więc formularz pokazałby „Brak tokenu”). Stan `null`, żeby
+  Next.js zsynchronizował adres routera; bez `router.replace` (fetch RSC).
   Usunięcie tokenu z adresu chroni też historię przeglądarki na współdzielonym
   komputerze w salonie.
-- Strona aplikacji z tokenem weryfikacji w adresie, jeśli istnieje: to samo.
-- Testy: nagłówek odpowiedzi `/reset-password` = `no-referrer`, innych stron =
-  `strict-origin-when-cross-origin`; formularz po `replaceState` nadal wysyła
-  token; reset kończy się sukcesem (E2E na bazie CI).
+- Weryfikacja e-mail nie ma strony aplikacji z tokenem w adresie: link z e-maila
+  prowadzi wprost na `/api/auth/verify-email?token=…`, a ten przekierowuje na
+  `callbackURL` bez tokenu (`email-verification.mjs:166-288`).
+- Testy: `__tests__/lib/referrer-policy-headers.test.ts` (nagłówki z
+  `next.config.ts`: `no-referrer` na trzech adresach, `strict-origin-when-cross-origin`
+  na innych, kształt wpisów), `__tests__/components/ResetPasswordForm.test.tsx`
+  (token znika z adresu, formularz po `replaceState` nadal wysyła token,
+  `error=INVALID_TOKEN` z przekierowania Better Auth daje komunikat o wygasłym
+  linku), `tests/auth/authentication.spec.ts` „Reset password token handling”
+  (E2E na bazie CI). `@smoke`: nagłówki odpowiedzi, brak tokenu w adresie,
+  wpis historii nadal z `__NA` i drzewem routera, „wstecz”/„naprzód” bez
+  tokenu, POST z tokenem bez Referer, wygasły link z e-maila; także `@smoke` (dowód przed scaleniem): pełny
+  reset z prawdziwym tokenem: własny użytkownik testu, prośba o link, token
+  odczytany z tabeli `verification` (ten sam `POSTGRES_URL` i strażnik hosta
+  co `globalTeardown`), link `GET /api/auth/reset-password/<token>` → 302 →
+  strona resetu, `no-referrer` na obu odpowiedziach, POST bez Referer,
+  przekierowanie na `/login?reset=success`, logowanie nowym hasłem (stare
+  odrzucone).
 
-Kolejność wymuszona skryptem: bez tej zmiany w `next.config.ts` na `main`
-`logging.sh --apply` odmawia (kod 2), więc Z3 idzie **po** scaleniu PR
-aplikacji. **Brak tej zmiany przed krokiem 2 okna = stop okna.**
+Kolejność wymuszona skryptem: bez tych wpisów w `next.config.ts`
+`logging.sh --apply` odmawia (kod 2), a strażnik skryptu na prawdziwym repo
+czerwieni CI. **Brak tej zmiany na rewizji GCP przed krokiem 2 okna = stop okna.**
 
 ### Znane ograniczenie
 

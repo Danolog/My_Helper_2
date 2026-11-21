@@ -1,17 +1,19 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ResetPasswordForm } from "@/components/auth/reset-password-form";
 
-// Mock Next.js navigation
+// Mock Next.js navigation. useSearchParams czyta BIEŻĄCY adres przy każdym
+// renderze — tak jak w Next 16, gdzie history.replaceState aktualizuje
+// useSearchParams. Formularz, który czytałby token z searchParams, po usunięciu
+// tokenu z adresu pokazałby „Brak tokenu”.
 const mockReplace = vi.fn();
-let mockSearchParams = new URLSearchParams("token=valid-token-123");
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     replace: mockReplace,
   }),
-  useSearchParams: () => mockSearchParams,
+  useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 
 // Mock Next.js Link
@@ -43,12 +45,31 @@ vi.mock("@/lib/error-messages", () => ({
     message || fallback,
 }));
 
+/** Adres strony resetu w oknie testu (ścieżka + zapytanie). */
+function openAt(search: string) {
+  window.history.replaceState(null, "", `/reset-password${search}`);
+}
+
+async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText("Nowe haslo"), "newpassword123");
+  await user.type(screen.getByLabelText("Potwierdz nowe haslo"), "newpassword123");
+  await user.click(screen.getByRole("button", { name: "Zresetuj haslo" }));
+}
+
 describe("ResetPasswordForm", () => {
   const user = userEvent.setup();
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSearchParams = new URLSearchParams("token=valid-token-123");
+    // clearAllMocks nie czyści kolejki mockResolvedValueOnce: niezużyta wartość
+    // z jednego testu przeszłaby do następnego.
+    mockResetPassword.mockReset();
+    openAt("?token=valid-token-123");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.history.replaceState(null, "", "/");
   });
 
   it("renders the form with password fields when token is present", () => {
@@ -62,7 +83,8 @@ describe("ResetPasswordForm", () => {
   });
 
   it("shows missing token message when no token in URL", () => {
-    mockSearchParams = new URLSearchParams("");
+    openAt("");
+    const spy = vi.spyOn(window.history, "replaceState");
     render(<ResetPasswordForm />);
 
     expect(
@@ -71,12 +93,24 @@ describe("ResetPasswordForm", () => {
       )
     ).toBeInTheDocument();
     expect(screen.getByText("Wyslij nowy link")).toBeInTheDocument();
+    // Bez tokenu w adresie nie ma czego usuwać.
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("shows missing token message when token param is empty", () => {
+    openAt("?token=");
+    render(<ResetPasswordForm />);
+
+    expect(
+      screen.getByText(
+        "Brak tokenu resetowania. Uzyj linku z wiadomosci email."
+      )
+    ).toBeInTheDocument();
+    expect(window.location.search).toBe("");
   });
 
   it("shows invalid token message when error param is invalid_token", () => {
-    mockSearchParams = new URLSearchParams(
-      "token=expired&error=invalid_token"
-    );
+    openAt("?token=expired&error=invalid_token");
     render(<ResetPasswordForm />);
 
     expect(
@@ -85,6 +119,140 @@ describe("ResetPasswordForm", () => {
       )
     ).toBeInTheDocument();
   });
+
+  // Better Auth (GET /api/auth/reset-password/<token>) przekierowuje wygasły
+  // albo nieznany link na callbackURL z `error=INVALID_TOKEN` — wielkimi literami.
+  it("shows invalid token message for INVALID_TOKEN from the Better Auth redirect", () => {
+    openAt("?error=INVALID_TOKEN");
+    render(<ResetPasswordForm />);
+
+    expect(
+      screen.getByText(
+        "Ten link do resetowania hasla jest nieprawidlowy lub wygasl."
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Brak tokenu resetowania. Uzyj linku z wiadomosci email.")
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Wyslij nowy link")).toBeInTheDocument();
+  });
+
+  // --- token poza adresem (Referer, historia przeglądarki) -------------------
+
+  it("removes the token from the address bar after the first render", async () => {
+    const spy = vi.spyOn(window.history, "replaceState");
+    render(<ResetPasswordForm />);
+
+    await waitFor(() => {
+      expect(window.location.search).toBe("");
+    });
+    expect(window.location.pathname).toBe("/reset-password");
+    expect(window.location.href).not.toContain("valid-token-123");
+    // Wywołanie z formularza: adres bez tokenu, stan historii routera bez zmian.
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[2]).toBe("/reset-password");
+  });
+
+  // Stan null = wywołanie przejmuje Next.js (zachowuje swój stan historii
+  // i synchronizuje adres routera). Przekazanie stanu routera (__NA) ominęłoby
+  // synchronizację i router mógłby przywrócić adres z tokenem.
+  it("calls history.replaceState with null state, even when the router state is present", async () => {
+    window.history.replaceState({ __NA: true, tree: "router-tree" }, "", "/reset-password?token=valid-token-123");
+    const spy = vi.spyOn(window.history, "replaceState");
+    render(<ResetPasswordForm />);
+
+    await waitFor(() => {
+      expect(window.location.search).toBe("");
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toBeNull();
+  });
+
+  it("removes only the token: other params and the fragment stay", async () => {
+    openAt("?token=valid-token-123&error=invalid_token#x");
+    render(<ResetPasswordForm />);
+
+    await waitFor(() => {
+      expect(window.location.search).toBe("?error=invalid_token");
+    });
+    expect(window.location.hash).toBe("#x");
+    expect(window.location.href).not.toContain("valid-token-123");
+    expect(
+      screen.getByText(
+        "Ten link do resetowania hasla jest nieprawidlowy lub wygasl."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("after the token is removed from the address the form still shows and sends the token", async () => {
+    mockResetPassword.mockResolvedValue({ data: {} });
+    const { rerender } = render(<ResetPasswordForm />);
+
+    await waitFor(() => {
+      expect(window.location.search).toBe("");
+    });
+    // Next 16: zmiana adresu odświeża useSearchParams i komponent renderuje się ponownie.
+    window.history.replaceState(window.history.state, "", "/reset-password");
+    rerender(<ResetPasswordForm />);
+
+    expect(
+      screen.queryByText("Brak tokenu resetowania. Uzyj linku z wiadomosci email.")
+    ).not.toBeInTheDocument();
+    await fillAndSubmit(user);
+
+    await waitFor(() => {
+      expect(mockResetPassword).toHaveBeenCalledWith({
+        newPassword: "newpassword123",
+        token: "valid-token-123",
+      });
+    });
+    expect(mockReplace).toHaveBeenCalledWith("/login?reset=success");
+  });
+
+  it("shows error and keeps the form usable when reset fails after the token was removed", async () => {
+    mockResetPassword
+      .mockResolvedValueOnce({ error: { message: "Token expired" } })
+      .mockResolvedValueOnce({ data: {} });
+    render(<ResetPasswordForm />);
+
+    await waitFor(() => {
+      expect(window.location.search).toBe("");
+    });
+    await fillAndSubmit(user);
+
+    await waitFor(() => {
+      expect(screen.getByText("Token expired")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText("Brak tokenu resetowania. Uzyj linku z wiadomosci email.")
+    ).not.toBeInTheDocument();
+
+    // Ponowna próba nadal wysyła ten sam token.
+    await user.click(screen.getByRole("button", { name: "Zresetuj haslo" }));
+    await waitFor(() => {
+      expect(mockResetPassword).toHaveBeenCalledTimes(2);
+    });
+    expect(mockResetPassword).toHaveBeenLastCalledWith({
+      newPassword: "newpassword123",
+      token: "valid-token-123",
+    });
+  });
+
+  it("shows generic error when resetPassword throws", async () => {
+    mockResetPassword.mockRejectedValue(new Error("network down"));
+    render(<ResetPasswordForm />);
+
+    await fillAndSubmit(user);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Wystapil nieoczekiwany blad. Sprobuj ponownie pozniej.")
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("network down")).not.toBeInTheDocument();
+  });
+
+  // --- walidacja i wysyłka (bez zmian) ---------------------------------------
 
   it("shows validation errors for empty password fields", async () => {
     render(<ResetPasswordForm />);
@@ -133,12 +301,7 @@ describe("ResetPasswordForm", () => {
 
     render(<ResetPasswordForm />);
 
-    await user.type(screen.getByLabelText("Nowe haslo"), "newpassword123");
-    await user.type(
-      screen.getByLabelText("Potwierdz nowe haslo"),
-      "newpassword123"
-    );
-    await user.click(screen.getByRole("button", { name: "Zresetuj haslo" }));
+    await fillAndSubmit(user);
 
     await waitFor(() => {
       expect(mockResetPassword).toHaveBeenCalledWith({
@@ -153,12 +316,7 @@ describe("ResetPasswordForm", () => {
 
     render(<ResetPasswordForm />);
 
-    await user.type(screen.getByLabelText("Nowe haslo"), "newpassword123");
-    await user.type(
-      screen.getByLabelText("Potwierdz nowe haslo"),
-      "newpassword123"
-    );
-    await user.click(screen.getByRole("button", { name: "Zresetuj haslo" }));
+    await fillAndSubmit(user);
 
     await waitFor(() => {
       expect(mockReplace).toHaveBeenCalledWith("/login?reset=success");
@@ -172,12 +330,7 @@ describe("ResetPasswordForm", () => {
 
     render(<ResetPasswordForm />);
 
-    await user.type(screen.getByLabelText("Nowe haslo"), "newpassword123");
-    await user.type(
-      screen.getByLabelText("Potwierdz nowe haslo"),
-      "newpassword123"
-    );
-    await user.click(screen.getByRole("button", { name: "Zresetuj haslo" }));
+    await fillAndSubmit(user);
 
     await waitFor(() => {
       expect(screen.getByText("Token expired")).toBeInTheDocument();
@@ -191,12 +344,7 @@ describe("ResetPasswordForm", () => {
 
     render(<ResetPasswordForm />);
 
-    await user.type(screen.getByLabelText("Nowe haslo"), "newpassword123");
-    await user.type(
-      screen.getByLabelText("Potwierdz nowe haslo"),
-      "newpassword123"
-    );
-    await user.click(screen.getByRole("button", { name: "Zresetuj haslo" }));
+    await fillAndSubmit(user);
 
     expect(
       screen.getByRole("button", { name: "Resetowanie..." })
