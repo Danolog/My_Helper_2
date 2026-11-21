@@ -16,6 +16,7 @@ import {
   blikBookingSchema,
   isPolishMobileNumber,
   POLISH_MOBILE_PREFIXES,
+  loyaltyRedeemSchema,
 } from "@/lib/api-validation";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -84,6 +85,44 @@ describe("validateBody", () => {
     });
     const result = validateBody(schema, { required: "yes" });
     expect(result).toBeNull();
+  });
+});
+
+// Kontrakt = body z client-loyalty-tab.tsx: { rewardTierId, salonId }.
+// Punkty liczy trasa z progu nagrody — klient ich nie podaje.
+describe("loyaltyRedeemSchema", () => {
+  const uiBody = { rewardTierId: "tier-1", salonId: "salon-123" };
+
+  it("przepuszcza body wysyłane przez panel", () => {
+    expect(validateBody(loyaltyRedeemSchema, uiBody)).toBeNull();
+  });
+
+  it("przepuszcza body bez salonId", () => {
+    expect(validateBody(loyaltyRedeemSchema, { rewardTierId: "tier-1" })).toBeNull();
+  });
+
+  it("odrzuca brak rewardTierId", () => {
+    const result = validateBody(loyaltyRedeemSchema, { salonId: "salon-123" });
+    expect(result).not.toBeNull();
+    expect(result!.details.rewardTierId).toBeDefined();
+  });
+
+  it("odrzuca pusty rewardTierId", () => {
+    const result = validateBody(loyaltyRedeemSchema, { ...uiBody, rewardTierId: "" });
+    expect(result).not.toBeNull();
+    expect(result!.details.rewardTierId).toBeDefined();
+  });
+
+  it("odrzuca rewardTierId innego typu niż tekst", () => {
+    const result = validateBody(loyaltyRedeemSchema, { ...uiBody, rewardTierId: 42 });
+    expect(result).not.toBeNull();
+    expect(result!.details.rewardTierId).toBeDefined();
+  });
+
+  it("odrzuca stary kształt { tierId, pointsToRedeem }", () => {
+    const result = validateBody(loyaltyRedeemSchema, { tierId: "tier-1", pointsToRedeem: 100 });
+    expect(result).not.toBeNull();
+    expect(result!.details.rewardTierId).toBeDefined();
   });
 });
 
