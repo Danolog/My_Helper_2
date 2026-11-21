@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { GET as detailGET } from "@/app/api/client/appointments/[id]/route";
 import { GET as listGET } from "@/app/api/client/appointments/route";
-import { appointments, depositPayments, treatmentHistory } from "@/lib/schema";
+import { appointments, depositPayments, serviceVariants, treatmentHistory } from "@/lib/schema";
 
 // Portal klienta nie zwraca notatek personelu (appointments.notes) ani treści
 // treatment_history (ADR-002 §2.5). Testy pilnują kluczy odpowiedzi i tego,
@@ -11,6 +11,7 @@ import { appointments, depositPayments, treatmentHistory } from "@/lib/schema";
 const h = vi.hoisted(() => {
   const state = {
     fromCalls: [] as unknown[],
+    selectArgs: [] as unknown[],
     results: [] as Array<unknown[] | Error>,
     requireAuth: vi.fn(),
   };
@@ -33,7 +34,12 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@/lib/db", () => ({
-  db: { select: () => h.makeChain() },
+  db: {
+    select: (fields?: unknown) => {
+      h.state.selectArgs.push(fields);
+      return h.makeChain();
+    },
+  },
 }));
 
 vi.mock("@/lib/auth-middleware", () => ({
@@ -90,6 +96,17 @@ const DETAIL_KEYS = [
   "depositPayment",
 ];
 
+const DEPOSIT_PAYMENT_KEYS = [
+  "amount",
+  "currency",
+  "paymentMethod",
+  "blikPhoneNumber",
+  "status",
+  "paidAt",
+];
+
+const VARIANT_SELECT_KEYS = ["name", "priceModifier", "durationModifier"];
+
 const USER_ID = "user-1";
 const APPOINTMENT_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -122,6 +139,7 @@ function detailRequest(id: string) {
 
 beforeEach(() => {
   h.state.fromCalls.length = 0;
+  h.state.selectArgs.length = 0;
   h.state.results.length = 0;
   h.state.requireAuth.mockReset();
   h.state.requireAuth.mockResolvedValue({ session: {}, user: { id: USER_ID } });
@@ -212,6 +230,85 @@ describe("GET /api/client/appointments/[id] (szczegół)", () => {
     // Dokładny kształt depositPayment pilnuje osobny test.
     expect(body.data.depositPayment).not.toBeNull();
     expect(h.state.fromCalls).toEqual([appointments, depositPayments]);
+  });
+
+  it("200: depositPayment — dokładny zbiór kluczy, bez identyfikatorów Stripe i powodu zwrotu", async () => {
+    h.state.results.push([appointmentRow({ depositAmount: "50" })]);
+    // Atrapa zwraca też kolumny zakazane — trasa nie może ich przepuścić.
+    h.state.results.push([
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        appointmentId: APPOINTMENT_ID,
+        salonId: "22222222-2222-4222-8222-222222222222",
+        amount: "50",
+        currency: "PLN",
+        paymentMethod: "stripe",
+        blikPhoneNumber: null,
+        stripePaymentIntentId: "pi_secret_value",
+        stripeRefundId: "re_secret_value",
+        status: "refunded",
+        paidAt: new Date("2026-11-02T10:00:00Z"),
+        refundedAt: new Date("2026-11-03T10:00:00Z"),
+        refundReason: "powod zwrotu salonu",
+        createdAt: new Date("2026-11-01T10:00:00Z"),
+      },
+    ]);
+
+    const res = await detailRequest(APPOINTMENT_ID);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const dp = body.data.depositPayment;
+    expect(Object.keys(dp).sort()).toEqual([...DEPOSIT_PAYMENT_KEYS].sort());
+    expect(dp).not.toHaveProperty("stripePaymentIntentId");
+    expect(dp).not.toHaveProperty("stripeRefundId");
+    expect(dp).not.toHaveProperty("refundReason");
+    expect(dp.amount).toBe("50");
+    expect(dp.status).toBe("refunded");
+    const text = JSON.stringify(body);
+    expect(text).not.toContain("pi_secret_value");
+    expect(text).not.toContain("re_secret_value");
+    expect(text).not.toContain("powod zwrotu salonu");
+
+    // Zapytanie o płatność ma jawną listę kolumn (nie select() całego wiersza).
+    const depositIdx = h.state.fromCalls.indexOf(depositPayments);
+    expect(depositIdx).toBeGreaterThan(-1);
+    const depositSelect = h.state.selectArgs[depositIdx] as Record<string, unknown> | undefined;
+    expect(depositSelect).toBeDefined();
+    expect(Object.keys(depositSelect!).sort()).toEqual([...DEPOSIT_PAYMENT_KEYS].sort());
+    expect(depositSelect!.amount).toBe(depositPayments.amount);
+    expect(depositSelect!.blikPhoneNumber).toBe(depositPayments.blikPhoneNumber);
+  });
+
+  it("200: wariant — tylko nazwa i modyfikatory, jawna lista kolumn w zapytaniu", async () => {
+    const VARIANT_ID = "55555555-5555-4555-8555-555555555555";
+    h.state.results.push([appointmentRow({ variantId: VARIANT_ID })]);
+    h.state.results.push([
+      {
+        id: VARIANT_ID,
+        serviceId: "66666666-6666-4666-8666-666666666666",
+        name: "Długie włosy",
+        priceModifier: "20",
+        durationModifier: 15,
+        createdAt: new Date("2026-10-01T10:00:00Z"),
+      },
+    ]);
+
+    const res = await detailRequest(APPOINTMENT_ID);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Object.keys(body.data).sort()).toEqual([...DETAIL_KEYS].sort());
+    expect(body.data.variantName).toBe("Długie włosy");
+    expect(body.data.variantPriceModifier).toBe("20");
+    expect(body.data.variantDurationModifier).toBe(15);
+    expect(JSON.stringify(body)).not.toContain("66666666-6666-4666-8666-666666666666");
+    expect(h.state.fromCalls).toEqual([appointments, serviceVariants]);
+
+    const variantSelect = h.state.selectArgs[1] as Record<string, unknown> | undefined;
+    expect(variantSelect).toBeDefined();
+    expect(Object.keys(variantSelect!).sort()).toEqual([...VARIANT_SELECT_KEYS].sort());
+    expect(variantSelect!.name).toBe(serviceVariants.name);
+    expect(variantSelect!.priceModifier).toBe(serviceVariants.priceModifier);
+    expect(variantSelect!.durationModifier).toBe(serviceVariants.durationModifier);
   });
 
   it("200: wizyta scheduled — bez notes, treatment null", async () => {
