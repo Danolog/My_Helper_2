@@ -4,6 +4,7 @@ import { isValidUuid } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 import { logger } from "@/lib/logger";
 import { refundAppointmentDeposits, selectSucceededDepositsInTx } from "@/lib/refund";
+import { toErrorIdentity } from "@/lib/safe-error";
 import { appointments } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
 import { findClientAppointmentForUser, type ClientAppointmentForCancel } from "@/lib/server/system";
@@ -127,7 +128,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    logger.error("[Client Cancel API] Error", { error: error });
+    logger.error("[Client Cancel API] Error", { ...toErrorIdentity(error) });
     return NextResponse.json(
       { success: false, error: "Failed to get cancellation info" },
       { status: 500 }
@@ -259,7 +260,16 @@ export async function POST(
         id,
         "Anulacja wizyty przez klienta - wiecej niz 24h przed terminem"
       );
-      logger.info(`[Client Cancel API] Refund result for appointment ${id}`, { refundResult: refundResult as unknown as Record<string, unknown> });
+      // Bez identyfikatorów zwrotu (id operatora płatności) — tylko stan i kwoty.
+      logger.info(`[Client Cancel API] Refund result for appointment ${id}`, {
+        success: refundResult.success,
+        refunded: refundResult.refunded,
+        amount: refundResult.amount ?? null,
+        failedAmount: refundResult.failedAmount ?? null,
+        error: refundResult.error ?? null,
+        paymentCount: refundResult.paymentCount,
+        results: refundResult.results.length,
+      });
     }
 
     // Mark deposit as forfeited if late cancellation (<24h) of a deposit paid online (succeeded payment in MyHelper)
@@ -279,7 +289,7 @@ export async function POST(
       } catch (forfeitError) {
         logger.error("[Client Cancel API] Failed to mark deposit as forfeited", {
           appointmentId: id,
-          errorName: forfeitError instanceof Error ? forfeitError.name : typeof forfeitError,
+          ...toErrorIdentity(forfeitError),
         });
       }
     }
@@ -301,7 +311,7 @@ export async function POST(
       const { notified, smsCount, pushCount, errors } = waitingListResult;
       logger.info(`[Client Cancel API] Waiting list notification result`, { notified, smsCount, pushCount, errors });
     } catch (waitingListError) {
-      logger.error("[Client Cancel API] Failed to notify waiting list", { error: waitingListError });
+      logger.error("[Client Cancel API] Failed to notify waiting list", { ...toErrorIdentity(waitingListError) });
       // Don't fail the cancellation if waiting list notification fails
     }
 
@@ -325,14 +335,13 @@ export async function POST(
         depositSettledBySalon,
         refund: refundResult ? {
           processed: refundResult.refunded,
-          refundId: refundResult.refundId,
           amount: refundResult.amount,
           message: refundResult.message,
         } : null,
       },
     });
   } catch (error) {
-    logger.error("[Client Cancel API] Error", { error: error });
+    logger.error("[Client Cancel API] Error", { ...toErrorIdentity(error) });
     return NextResponse.json(
       { success: false, error: "Failed to cancel appointment" },
       { status: 500 }

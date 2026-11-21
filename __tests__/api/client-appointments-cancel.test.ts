@@ -377,12 +377,14 @@ describe("POST /api/client/appointments/[id]/cancel", () => {
     expect(Object.keys(body).sort()).toEqual(POST_KEYS);
     expect(Object.keys(body.data).sort()).toEqual(POST_DATA_KEYS);
     expect(Object.keys(body.cancellationDetails).sort()).toEqual(DETAILS_KEYS);
+    // Bez identyfikatora zwrotu (id Stripe albo wewnętrzne id płatności, ADR-002 §2.5).
     expect(Object.keys(body.cancellationDetails.refund as object).sort()).toEqual([
       "amount",
       "message",
       "processed",
-      "refundId",
     ]);
+    expect(body.cancellationDetails.refund).not.toHaveProperty("refundId");
+    expect(JSON.stringify(body)).not.toContain("re_1");
     expect(body.data.status).toBe("cancelled");
   });
 
@@ -415,8 +417,9 @@ describe("POST /api/client/appointments/[id]/cancel", () => {
       depositRefunded: true,
       depositForfeited: false,
       depositSettledBySalon: false,
-      refund: { processed: true, refundId: "re_1", amount: 50 },
+      refund: { processed: true, amount: 50 },
     });
+    expect(body.cancellationDetails.refund).not.toHaveProperty("refundId");
     expect(m.refundDeposits).toHaveBeenCalledTimes(1);
     expect(m.refundDeposits).toHaveBeenCalledWith(APPOINTMENT_ID, expect.any(String));
   });

@@ -405,7 +405,10 @@ suite("#193: anulowanie wizyty w portalu klienta, salony A i B, prawdziwy Postgr
     expect(Object.keys(res.body.data as object).sort()).toEqual(POST_DATA_KEYS);
     const details = res.body.cancellationDetails as Record<string, unknown>;
     expect(Object.keys(details).sort()).toEqual(DETAILS_KEYS);
-    expect(Object.keys(details.refund as object).sort()).toEqual(["amount", "message", "processed", "refundId"]);
+    // Bez identyfikatora zwrotu: ani id Stripe, ani `manual_<id płatności>` (ADR-002 §2.5).
+    expect(Object.keys(details.refund as object).sort()).toEqual(["amount", "message", "processed"]);
+    expect(details.refund).not.toHaveProperty("refundId");
+    expect(JSON.stringify(res.body)).not.toContain(ids.payment);
     expect(details).toMatchObject({ depositRefunded: true, depositForfeited: false, depositSettledBySalon: false });
     expect((res.body.data as { status: string }).status).toBe("cancelled");
     expect(await paymentStatus()).toBe("refunded");
