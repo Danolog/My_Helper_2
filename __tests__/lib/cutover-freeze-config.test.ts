@@ -235,6 +235,14 @@ describe.each(SCRIPTS)("$name", (s) => {
       expect(SOURCE).toContain("'backends_before=' || (SELECT count(*) FROM target WHERE NOT superuser)");
     });
 
+    it("widoczność pg_stat_activity: bez pg_read_all_stats albo z niewidoczną sesją → 42501 przed ALTER DATABASE", () => {
+      const step2 = sqlBlocks[1]!;
+      expect(step2).toContain("IF NOT pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')");
+      expect(step2).toContain("WHERE backend_type IS NULL AND datname = current_database()) THEN");
+      expect(step2).toContain("USING ERRCODE = '42501';");
+      expect(step2.indexOf("RAISE EXCEPTION")).toBeLessThan(step2.indexOf("ALTER DATABASE"));
+    });
+
     it("role_override: ustawienia ról (setrole <> 0) globalne i dla tej bazy", () => {
       expect(sqlBlocks[0]).toContain("WHERE setrole <> 0");
       expect(sqlBlocks[0]).toContain("setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))");
@@ -250,9 +258,12 @@ describe.each(SCRIPTS)("$name", (s) => {
       expect(r.stderr).toBe("");
       for (const l of r.lines) expect(EMIT.test(l), l).toBe(true);
       expect(r.psql).toHaveLength(4);
-      // Sesja administracyjna na zamrożonej bazie startuje tylko do odczytu: SET przed ALTER.
+      // Najpierw sprawdzenie widoczności pg_stat_activity (przed jakąkolwiek zmianą),
+      // potem: sesja administracyjna na zamrożonej bazie startuje tylko do odczytu — SET przed ALTER.
       expect(r.psql[1]!.sql).toMatch(
-        new RegExp(`^SET default_transaction_read_only = off;\\nALTER DATABASE :"db" SET default_transaction_read_only = ${s.value};\\n`),
+        new RegExp(
+          `^DO \\$\\$\\n[\\s\\S]*?\\n\\$\\$;\\nSET default_transaction_read_only = off;\\nALTER DATABASE :"db" SET default_transaction_read_only = ${s.value};\\n`,
+        ),
       );
       expect(r.psql[1]!.args).toContain("db=neondb");
       expect(r.psql[2]!.args).toContain("db=neondb");

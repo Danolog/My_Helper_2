@@ -11,6 +11,10 @@
  *      połączeniu przechodzi (w ROLLBACK).
  *      `ALTER ROLE … SET default_transaction_read_only` (globalnie i IN DATABASE)
  *      → role_override=1, kod 7, baza bez zmian.
+ * Realne zachowanie widoczności: bez pg_read_all_stats cudze sesje są w
+ * pg_stat_activity z backend_type NULL, więc filtr zrywania ich nie widzi —
+ * oba skrypty kończą się wtedy 42501, error_class=other, kod 1, przed ALTER
+ * DATABASE (nie cichym backends_before=0).
  * Realne zachowanie uprawnień: rola właściciela bazy bez pg_signal_backend nie
  * może zerwać połączenia innej roli — pg_terminate_backend rzuca 42501, a skrypt
  * kończy się error_class=other, kod 1 (nie cichym terminated=0).
@@ -278,15 +282,35 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("freeze-neon.sh / unfreeze-neon.sh
     expect(await alive(h, victim.pid)).toBe(true);
   });
 
-  it("rola właściciela bez pg_signal_backend: zerwanie połączenia innej roli → 42501, error_class=other, kod 1", async () => {
-    const f = runScript(FREEZE);
-    expect(f.lines).toEqual(["role_override=0", "error_class=other", "exit=1"]);
-    expect(f.status).toBe(1);
-    expect(f.log).toMatch(/ERROR: +42501/);
+  it("rola właściciela bez pg_read_all_stats: cudze sesje niewidoczne → 42501, kod 1, baza bez zmian (nie ciche backends_before=0)", async () => {
+    // Realne zachowanie: bez pg_read_all_stats cudza sesja jest w pg_stat_activity,
+    // ale z backend_type NULL — filtr zrywania by jej nie zobaczył.
+    const own = psqlAs(OWNER, OWNER_PASS, `SELECT count(*) FROM pg_stat_activity WHERE pid = ${victim.pid} AND backend_type IS NULL;\n`);
+    expect(own.stdout.trim()).toBe("1");
+    for (const script of [FREEZE, UNFREEZE]) {
+      const r = runScript(script);
+      expect(r.lines).toEqual(["role_override=0", "error_class=other", "exit=1"]);
+      expect(r.status).toBe(1);
+      expect(r.log).toMatch(/ERROR: +42501/);
+    }
     expect(await alive(h, victim.pid)).toBe(true);
-    // ALTER DATABASE przeszło przed zerwaniem; stan wyjściowy dla kolejnego przypadku.
-    expect(await dbSettings(h)).toContain("default_transaction_read_only=on");
-    await h.observer.unsafe(`ALTER DATABASE ${DB_F} RESET default_transaction_read_only`);
+    expect(await dbSettings(h)).not.toContain("default_transaction_read_only");
+  });
+
+  it("rola właściciela bez pg_signal_backend: zerwanie połączenia innej roli → 42501, error_class=other, kod 1", async () => {
+    await h.observer.unsafe(`GRANT pg_read_all_stats TO ${OWNER}`);
+    try {
+      const f = runScript(FREEZE);
+      expect(f.lines).toEqual(["role_override=0", "error_class=other", "exit=1"]);
+      expect(f.status).toBe(1);
+      expect(f.log).toMatch(/ERROR: +42501/);
+      expect(await alive(h, victim.pid)).toBe(true);
+      // ALTER DATABASE przeszło przed zerwaniem.
+      expect(await dbSettings(h)).toContain("default_transaction_read_only=on");
+    } finally {
+      // Stan wyjściowy dla kolejnego przypadku także po czerwonym wyniku.
+      await h.observer.unsafe(`ALTER DATABASE ${DB_F} RESET default_transaction_read_only`);
+    }
   });
 
   it("(f2) połączenie rolą logowania sprzed freeze → terminated ≥ 1; zapis na nowym połączeniu → read_only", async () => {

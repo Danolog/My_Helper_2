@@ -25,7 +25,9 @@
 #
 # Kroki (każdy osobnym wywołaniem psql, czyli osobnym połączeniem):
 #   1. role_override jak w freeze-neon.sh; ≠ 0 → stop (kod 7), baza bez zmian.
-#   2. ALTER DATABASE … SET default_transaction_read_only = off, potem zerwanie
+#   2. Najpierw widoczność jak w freeze-neon.sh (bez pg_read_all_stats albo z
+#      niewidoczną sesją tej bazy = błąd 42501, kod 1, baza bez zmian).
+#      Potem ALTER DATABASE … SET default_transaction_read_only = off i zerwanie
 #      PO BAZIE tym samym filtrem co w freeze-neon.sh — połączenia (także
 #      poolera) otwarte w czasie zamrożenia zostają tylko do odczytu, dopóki nie
 #      zostaną zerwane. backends_before, terminated, login_roles,
@@ -210,7 +212,21 @@ emit role_override "${NUMS[0]}"
 # --- 2. ustawienie bazy i zerwanie po bazie --------------------------------------
 # Nowa sesja zamrożonej bazy startuje tylko do odczytu, a ALTER DATABASE jest
 # w takiej transakcji zabronione (25006): sesja administracyjna wyłącza to u siebie.
+# Bez pg_read_all_stats pg_stat_activity pokazuje cudze sesje z backend_type
+# NULL — filtr niżej nie widziałby ich wcale i zgłosiłby backends_before=0.
+# Dlatego najpierw (przed ALTER DATABASE) sprawdzenie widoczności: brak
+# uprawnienia albo choć jedna niewidoczna sesja tej bazy = błąd 42501 (kod 1).
 run_sql admin -v db="$PGDATABASE" <<'SQL'
+DO $$
+BEGIN
+  IF NOT pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')
+     OR EXISTS (SELECT 1 FROM pg_stat_activity
+                  WHERE backend_type IS NULL AND datname = current_database()) THEN
+    RAISE EXCEPTION 'pg_stat_activity not fully visible (pg_read_all_stats required)'
+      USING ERRCODE = '42501';
+  END IF;
+END
+$$;
 SET default_transaction_read_only = off;
 ALTER DATABASE :"db" SET default_transaction_read_only = off;
 WITH target AS (

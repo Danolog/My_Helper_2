@@ -27,7 +27,10 @@
 #   1. role_override = liczba ustawień default_transaction_read_only na poziomie
 #      roli (ALTER ROLE … SET, także … IN DATABASE tej bazy) — mają pierwszeństwo
 #      przed ustawieniem bazy. ≠ 0 → stop (kod 7), baza bez zmian.
-#   2. ALTER DATABASE … SET default_transaction_read_only = on, potem zerwanie
+#   2. Najpierw widoczność: rola administracyjna bez pg_read_all_stats albo
+#      jakakolwiek niewidoczna sesja tej bazy (backend_type NULL) = błąd 42501
+#      (error_class=other, kod 1), baza bez zmian — nigdy ciche backends_before=0.
+#      Potem ALTER DATABASE … SET default_transaction_read_only = on i zerwanie
 #      PO BAZIE, nie po roli: każdy client backend tej bazy poza własnym, z
 #      wyjątkiem backendów superużytkownika (rola właściciela nie może ich zerwać;
 #      u dostawcy to jego procesy). pg_terminate_backend czeka do 5 s na koniec
@@ -214,7 +217,21 @@ emit role_override "${NUMS[0]}"
 # Ponowne uruchomienie na zamrożonej bazie: nowa sesja startuje tylko do odczytu,
 # a ALTER DATABASE jest w takiej transakcji zabronione (25006) — sesja
 # administracyjna wyłącza to u siebie (nie wpływa na inne sesje).
+# Bez pg_read_all_stats pg_stat_activity pokazuje cudze sesje z backend_type
+# NULL — filtr niżej nie widziałby ich wcale i zgłosiłby backends_before=0.
+# Dlatego najpierw (przed ALTER DATABASE) sprawdzenie widoczności: brak
+# uprawnienia albo choć jedna niewidoczna sesja tej bazy = błąd 42501 (kod 1).
 run_sql admin -v db="$PGDATABASE" <<'SQL'
+DO $$
+BEGIN
+  IF NOT pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')
+     OR EXISTS (SELECT 1 FROM pg_stat_activity
+                  WHERE backend_type IS NULL AND datname = current_database()) THEN
+    RAISE EXCEPTION 'pg_stat_activity not fully visible (pg_read_all_stats required)'
+      USING ERRCODE = '42501';
+  END IF;
+END
+$$;
 SET default_transaction_read_only = off;
 ALTER DATABASE :"db" SET default_transaction_read_only = on;
 WITH target AS (
