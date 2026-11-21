@@ -33,7 +33,9 @@ export function ResetPasswordForm() {
   // aktualizuje useSearchParams, więc po usunięciu tokenu z adresu
   // searchParams.get("token") dałoby null i formularz pokazałby „Brak tokenu”.
   const [token] = useState(() => searchParams.get("token"))
-  const error = searchParams.get("error")
+  // Better Auth przekierowuje wygasły albo nieznany link z `error=INVALID_TOKEN`
+  // (wielkie litery); porównanie bez względu na wielkość liter.
+  const invalidLink = searchParams.get("error")?.toUpperCase() === "INVALID_TOKEN"
 
   useEffect(() => {
     removeTokenFromAddressBar()
@@ -53,11 +55,11 @@ export function ResetPasswordForm() {
     })
   }
 
-  if (error === "invalid_token" || !token) {
+  if (invalidLink || !token) {
     return (
       <div className="space-y-4 w-full max-w-sm text-center">
         <p className="text-sm text-destructive">
-          {error === "invalid_token"
+          {invalidLink
             ? "Ten link do resetowania hasla jest nieprawidlowy lub wygasl."
             : "Brak tokenu resetowania. Uzyj linku z wiadomosci email."}
         </p>

@@ -1,3 +1,5 @@
+import * as path from 'path';
+import { decideCleanupTarget, guardedCleanupClient, resolveCleanupUrl } from '../e2e-cleanup';
 import { failedLoginEmail } from '../failed-login-email';
 import { test, expect, type Page } from '../fixtures';
 
@@ -27,6 +29,20 @@ async function fillLoginForm(page: Page, email: string, password: string) {
   await page.waitForTimeout(500);
   await page.fill('#email', email);
   await page.fill('#password', password);
+}
+
+/**
+ * Czy bieżący wpis historii nadal należy do routera Next.js (`__NA` i drzewo).
+ * Formularz resetu usuwa token przez `history.replaceState(null, …)`; tylko
+ * wersja podmieniona przez router przepisuje wtedy swój stan. Oryginalne
+ * `replaceState` (gdyby efekt formularza wyprzedził efekt routera) zostawiłoby
+ * wpis bez `__NA`: „wstecz”/„naprzód” zmieniałyby adres bez zmiany widoku,
+ * a router przy najbliższej zmianie stanu przywróciłby adres z tokenem.
+ */
+async function historyEntryOwnedByRouter(page: Page): Promise<boolean> {
+  return page.evaluate(
+    () => window.history.state?.__NA === true && !!window.history.state?.__PRIVATE_NEXTJS_INTERNALS_TREE
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -292,8 +308,9 @@ test.describe('Flow 1: Authentication', () => {
   // Strona /reset-password?token=… i adresy z tokenem Better Auth maja
   // Referrer-Policy: no-referrer (next.config.ts), a formularz usuwa token
   // z paska adresu (history.replaceState) i nadal wysyla go w tresci POST.
-  // Token jest falszywy: odpowiedz Better Auth to blad tokenu, nie sukces —
-  // test sprawdza droge tokenu, nie samo ustawienie hasla.
+  // Trzy testy uzywaja falszywego tokenu (droga tokenu, wygasly link).
+  // Czwarty przechodzi caly reset z prawdziwym tokenem: token czyta z tabeli
+  // `verification` bazy serwera testow (POSTGRES_URL, jak globalTeardown).
 
   test.describe('Reset password token handling', () => {
     const FAKE_TOKEN = 'e2eNotARealResetToken123';
@@ -304,6 +321,8 @@ test.describe('Flow 1: Authentication', () => {
 
       // Token znika z adresu po hydratacji (efekt formularza)...
       await expect(page).toHaveURL(/\/reset-password$/, { timeout: 15000 });
+      // ...przez replaceState routera Next.js, nie oryginalne (wpis historii z __NA i drzewem)...
+      expect(await historyEntryOwnedByRouter(page), 'wpis historii po usunieciu tokenu bez stanu routera').toBe(true);
       // ...a formularz zostaje (Next 16: replaceState odswieza useSearchParams).
       await expect(page.getByText(/brak tokenu/i)).toHaveCount(0);
       const submit = page.locator('form button[type="submit"]');
@@ -325,6 +344,126 @@ test.describe('Flow 1: Authentication', () => {
       await expect(page.locator('form p.text-destructive')).toBeVisible({ timeout: 30000 });
       await expect(page).toHaveURL(/\/reset-password$/);
       expect(page.url()).not.toContain(FAKE_TOKEN);
+    });
+
+    test('reset page: back and forward do not bring the token back', { tag: '@smoke' }, async ({ page }) => {
+      await page.goto('/forgot-password', { waitUntil: 'load' });
+      await page.goto(`/reset-password?token=${FAKE_TOKEN}`, { waitUntil: 'load' });
+      await expect(page).toHaveURL(/\/reset-password$/, { timeout: 15000 });
+      expect(await historyEntryOwnedByRouter(page), 'wpis historii po usunieciu tokenu bez stanu routera').toBe(true);
+
+      await page.goBack({ waitUntil: 'commit' });
+      await expect(page).toHaveURL(/\/forgot-password$/, { timeout: 15000 });
+      await page.goForward({ waitUntil: 'commit' });
+      await expect(page).toHaveURL(/\/reset-password$/, { timeout: 15000 });
+      expect(page.url()).not.toContain(FAKE_TOKEN);
+    });
+
+    // Wygasly albo nieznany link z e-maila: Better Auth przekierowuje na
+    // callbackURL z `error=INVALID_TOKEN` (wielkie litery).
+    test('expired reset link from email: Better Auth redirect shows "link expired" message', { tag: '@smoke' }, async ({ page }) => {
+      const response = await page.goto(`/api/auth/reset-password/${FAKE_TOKEN}?callbackURL=%2Freset-password`, {
+        waitUntil: 'load',
+      });
+      expect(response?.headers()['referrer-policy']).toBe('no-referrer');
+      await expect(page).toHaveURL(/\/reset-password\?error=INVALID_TOKEN$/);
+      await expect(
+        page.getByText('Ten link do resetowania hasla jest nieprawidlowy lub wygasl.')
+      ).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText(/brak tokenu/i)).toHaveCount(0);
+    });
+
+    // Pelny reset z prawdziwym tokenem, od linku z e-maila do logowania nowym
+    // haslem. Wlasny uzytkownik testu (nie SEEDED_OWNER: zmiana hasla zepsulaby
+    // inne testy). Token z tabeli `verification` bazy serwera testow — ten sam
+    // adres i ten sam straznik hosta co globalTeardown (tests/e2e-cleanup.ts);
+    // zapytanie tylko czyta. W CI brak bazy = czerwony test, lokalnie pominiecie.
+    test('reset with a real token from the email link sets the new password', { tag: '@smoke' }, async ({ page, request, baseURL }) => {
+      const dbUrl = resolveCleanupUrl(process.env, path.resolve(__dirname, '..', '..', '.env.local'));
+      const target = decideCleanupTarget(dbUrl);
+      if (!target.run) {
+        expect(process.env.CI, `CI: test resetu musi czytac baze serwera testow (${target.reason})`).toBeFalsy();
+        test.skip(true, target.reason);
+        return;
+      }
+
+      const origin = baseURL ?? 'http://localhost:3000';
+      const email = `reset-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
+      const oldPassword = 'OldPassword123!';
+      const newPassword = 'NewPassword456!';
+
+      // 1. Wlasny uzytkownik testu.
+      const signUp = await request.post('/api/auth/sign-up/email', {
+        data: { name: 'Reset E2E', email, password: oldPassword },
+        headers: { Origin: origin },
+      });
+      expect(signUp.status(), 'rejestracja uzytkownika testu').toBe(200);
+
+      // 2. Prosba o link resetu (bez dostawcy poczty link trafia tylko do bazy i logu).
+      const requested = await request.post('/api/auth/request-password-reset', {
+        data: { email, redirectTo: '/reset-password' },
+        headers: { Origin: origin },
+      });
+      expect(requested.status(), 'prosba o link resetu').toBe(200);
+
+      // 3. Token z tabeli verification (identifier = 'reset-password:<token>', value = userId).
+      const sql = await guardedCleanupClient(dbUrl, process.env);
+      let token = '';
+      try {
+        const rows = await sql<{ identifier: string }[]>`
+          select v.identifier from verification v
+          join "user" u on u.id = v.value
+          where u.email = ${email} and starts_with(v.identifier, 'reset-password:')
+          order by v.created_at desc
+          limit 1`;
+        token = rows[0]?.identifier.slice('reset-password:'.length) ?? '';
+      } finally {
+        await sql.end({ timeout: 5 });
+      }
+      expect(token, 'token resetu w tabeli verification').toMatch(/^[A-Za-z0-9]+$/);
+
+      // 4. Link z e-maila: GET /api/auth/reset-password/<token> -> 302 -> /reset-password?token=…
+      const response = await page.goto(`/api/auth/reset-password/${token}?callbackURL=%2Freset-password`, {
+        waitUntil: 'load',
+      });
+      const callback = await response?.request().redirectedFrom()?.response();
+      expect(callback?.status(), 'link z e-maila przekierowuje na strone resetu').toBe(302);
+      expect(callback?.headers()['referrer-policy'], 'Referrer-Policy linku z e-maila').toBe('no-referrer');
+      expect(response?.headers()['referrer-policy'], 'Referrer-Policy strony resetu').toBe('no-referrer');
+
+      // 5. Token znika z adresu, wpis historii zostaje wpisem routera.
+      await expect(page).toHaveURL(/\/reset-password$/, { timeout: 15000 });
+      expect(await historyEntryOwnedByRouter(page), 'wpis historii po usunieciu tokenu bez stanu routera').toBe(true);
+      expect(page.url()).not.toContain(token);
+
+      const submit = page.locator('form button[type="submit"]');
+      await expect(submit).toBeEnabled({ timeout: 15000 });
+      await page.fill('#password', newPassword);
+      await page.fill('#confirmPassword', newPassword);
+
+      const resetRequest = page.waitForRequest(
+        (r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/auth/reset-password'
+      );
+      await submit.click();
+      const resetPost = await resetRequest;
+      expect(resetPost.postDataJSON()).toMatchObject({ token, newPassword });
+      expect((await resetPost.allHeaders())['referer'], 'Referer na stronie resetu').toBeUndefined();
+      expect(resetPost.url()).not.toContain(token);
+      expect((await resetPost.response())?.status(), 'odpowiedz resetu hasla').toBe(200);
+
+      await page.waitForURL(/\/login\?reset=success/, { timeout: 30000 });
+
+      // 6. Logowanie: nowe haslo przechodzi, stare nie.
+      const oldSignIn = await request.post('/api/auth/sign-in/email', {
+        data: { email, password: oldPassword },
+        headers: { Origin: origin },
+      });
+      expect(oldSignIn.status(), 'logowanie starym haslem po resecie').toBe(401);
+      const newSignIn = await request.post('/api/auth/sign-in/email', {
+        data: { email, password: newPassword },
+        headers: { Origin: origin },
+      });
+      expect(newSignIn.status(), 'logowanie nowym haslem po resecie').toBe(200);
     });
 
     test('token URLs of Better Auth: no-referrer; other pages unchanged', { tag: '@smoke' }, async ({ request }) => {

@@ -1082,11 +1082,18 @@ migracji jest dozwolone w zamrożeniu). Zawartość:
 - Testy: `__tests__/lib/referrer-policy-headers.test.ts` (nagłówki z
   `next.config.ts`: `no-referrer` na trzech adresach, `strict-origin-when-cross-origin`
   na innych, kształt wpisów), `__tests__/components/ResetPasswordForm.test.tsx`
-  (token znika z adresu, formularz po `replaceState` nadal wysyła token),
-  `tests/auth/authentication.spec.ts` „Reset password token handling” (E2E na
-  bazie CI: nagłówki odpowiedzi, brak tokenu w adresie, POST z tokenem bez
-  Referer). Pełny reset z prawdziwym tokenem wymaga tokenu z bazy i nie jest
-  w E2E.
+  (token znika z adresu, formularz po `replaceState` nadal wysyła token,
+  `error=INVALID_TOKEN` z przekierowania Better Auth daje komunikat o wygasłym
+  linku), `tests/auth/authentication.spec.ts` „Reset password token handling”
+  (E2E na bazie CI). `@smoke`: nagłówki odpowiedzi, brak tokenu w adresie,
+  wpis historii nadal z `__NA` i drzewem routera, „wstecz”/„naprzód” bez
+  tokenu, POST z tokenem bez Referer, wygasły link z e-maila; także `@smoke` (dowód przed scaleniem): pełny
+  reset z prawdziwym tokenem: własny użytkownik testu, prośba o link, token
+  odczytany z tabeli `verification` (ten sam `POSTGRES_URL` i strażnik hosta
+  co `globalTeardown`), link `GET /api/auth/reset-password/<token>` → 302 →
+  strona resetu, `no-referrer` na obu odpowiedziach, POST bez Referer,
+  przekierowanie na `/login?reset=success`, logowanie nowym hasłem (stare
+  odrzucone).
 
 Kolejność wymuszona skryptem: bez tych wpisów w `next.config.ts`
 `logging.sh --apply` odmawia (kod 2), a strażnik skryptu na prawdziwym repo

@@ -61,6 +61,9 @@ describe("ResetPasswordForm", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks nie czyści kolejki mockResolvedValueOnce: niezużyta wartość
+    // z jednego testu przeszłaby do następnego.
+    mockResetPassword.mockReset();
     openAt("?token=valid-token-123");
   });
 
@@ -115,6 +118,23 @@ describe("ResetPasswordForm", () => {
         "Ten link do resetowania hasla jest nieprawidlowy lub wygasl."
       )
     ).toBeInTheDocument();
+  });
+
+  // Better Auth (GET /api/auth/reset-password/<token>) przekierowuje wygasły
+  // albo nieznany link na callbackURL z `error=INVALID_TOKEN` — wielkimi literami.
+  it("shows invalid token message for INVALID_TOKEN from the Better Auth redirect", () => {
+    openAt("?error=INVALID_TOKEN");
+    render(<ResetPasswordForm />);
+
+    expect(
+      screen.getByText(
+        "Ten link do resetowania hasla jest nieprawidlowy lub wygasl."
+      )
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Brak tokenu resetowania. Uzyj linku z wiadomosci email.")
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Wyslij nowy link")).toBeInTheDocument();
   });
 
   // --- token poza adresem (Referer, historia przeglądarki) -------------------
