@@ -1,5 +1,6 @@
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
+import { recordDepositStatusEvent } from "@/lib/deposit-status-events";
 import { logger } from "@/lib/logger";
 import { depositPayments, appointments } from "@/lib/schema";
 import { getStripe } from "@/lib/stripe";
@@ -214,6 +215,33 @@ export async function selectSucceededDeposits(appointmentId: string) {
 }
 
 /**
+ * `depositPaid=false` po udanym zwrocie wszystkich płatności wizyty.
+ * Odczyt z blokadą wiersza, UPDATE i wpis dziennika zmian zadatku w jednej
+ * transakcji; wpis i UPDATE tylko przy faktycznej zmianie true → false
+ * (flaga już false/NULL = bez zapisu). Błąd wpisu cofa UPDATE i leci do wołającego.
+ */
+async function clearDepositPaidAfterRefund(appointmentId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [current] = await tx
+      .select({ id: appointments.id, salonId: appointments.salonId, depositPaid: appointments.depositPaid })
+      .from(appointments)
+      .where(eq(appointments.id, appointmentId))
+      .for("update");
+    if (!current || current.depositPaid !== true) return;
+
+    await tx.update(appointments).set({ depositPaid: false }).where(eq(appointments.id, current.id));
+    await recordDepositStatusEvent(tx, {
+      salonId: current.salonId,
+      appointmentId: current.id,
+      previousDepositPaid: true,
+      depositPaid: false,
+      source: "refund",
+      actor: null,
+    });
+  });
+}
+
+/**
  * Zwrot zadatków anulowanej wizyty (Ethan, #98):
  * - każda płatność `succeeded` osobno, każda z własnym kluczem idempotencji;
  * - `forfeitReason` (klient odwołuje < 24 h): najstarsza `succeeded` jest
@@ -279,7 +307,7 @@ export async function refundAppointmentDeposits(
   );
 
   if (allRefunded && !forfeitedPaymentId) {
-    await db.update(appointments).set({ depositPaid: false }).where(eq(appointments.id, appointmentId));
+    await clearDepositPaidAfterRefund(appointmentId);
   }
 
   return {
