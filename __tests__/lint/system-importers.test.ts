@@ -133,6 +133,9 @@ const SNAPSHOT: Record<string, string[]> = {
     "src/app/api/employees/[id]/link-account/route.ts",
     "src/lib/temporary-access.ts",
   ],
+  // #193: tylko odczyt (flagi, bez id innych salonów); email z treści żądania właściciela,
+  // exceptEmployeeId = pracownik już znaleziony przez forSalon(salonId z getUserSalonId).
+  "staff-access.ts:findAccountForEmployeeLink": ["src/app/api/employees/[id]/link-account/route.ts"],
 };
 
 const rel = (abs: string) => path.relative(ROOT, abs).split(path.sep).join("/");

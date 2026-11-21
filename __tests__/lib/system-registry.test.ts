@@ -40,6 +40,8 @@ const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
 const AUTH_THROTTLE_EXPORTS = ["clearSignInFailures", "consumeAuthRateLimit", "reserveAccountSignInAttempt"];
 /** #193: hash hasła konta `credential` (potwierdzenie hasłem usunięcia klienta). */
 const CREDENTIALS_EXPORTS = ["findCredentialPasswordHash"];
+/** #193: konto do podpięcia pod pracownika (flagi reguł obejmujących wszystkie salony). */
+const STAFF_ACCESS_EXPORTS = ["findAccountForEmployeeLink"];
 /** #193 P5a-1: subskrypcje push po stronie wysyłki (decyzja CTO 3d / 3d-KOREKTA). */
 const NOTIFICATIONS_EXPORTS = [
   // #193 P5a-2: crony przypomnień push 1h / 24h i SMS 1h (cross-salon, sekret crona).
@@ -78,6 +80,7 @@ const REGISTRY_SOURCES = [
   "waiting-list.ts",
   "auth-throttle.ts",
   "credentials.ts",
+  "staff-access.ts",
 ];
 const SNAPSHOT: Record<string, string[]> = {
   "auth-adapter.ts": ["authAdapter"],
@@ -100,11 +103,13 @@ const SNAPSHOT: Record<string, string[]> = {
     ...WAITING_LIST_EXPORTS,
     ...AUTH_THROTTLE_EXPORTS,
     ...CREDENTIALS_EXPORTS,
+    ...STAFF_ACCESS_EXPORTS,
   ].sort(),
   "notifications.ts": NOTIFICATIONS_EXPORTS,
   "plans.ts": PLANS_EXPORTS,
   "seed.ts": SEED_EXPORTS,
   "session.ts": SESSION_EXPORTS,
+  "staff-access.ts": STAFF_ACCESS_EXPORTS,
   "waiting-list.ts": WAITING_LIST_EXPORTS,
 };
 
