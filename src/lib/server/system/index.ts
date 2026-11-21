@@ -23,8 +23,13 @@ export { cleanupExpiredTemporaryAccess } from "./cron";
 export { checkDatabase, pingDatabase } from "./health";
 export { clearSignInFailures, consumeAuthRateLimit, reserveAccountSignInAttempt } from "./auth-throttle";
 export { findCredentialPasswordHash } from "./credentials";
-export { findAccountForEmployeeLink } from "./staff-access";
-export type { EmployeeLinkAccount } from "./staff-access";
+export {
+  findAccountForEmployeeLink,
+  grantTemporaryAccess,
+  listSalonGrants,
+  revokeTemporaryAccess,
+} from "./staff-access";
+export type { EmployeeLinkAccount, TemporaryAccessGrant, TemporaryAccessGrantResult } from "./staff-access";
 export { cleanupStaleDepositBookings } from "./deposits-cleanup";
 export type { StaleDepositCleanupResult } from "./deposits-cleanup";
 export { ensurePlansExist } from "./plans";

@@ -40,8 +40,16 @@ const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
 const AUTH_THROTTLE_EXPORTS = ["clearSignInFailures", "consumeAuthRateLimit", "reserveAccountSignInAttempt"];
 /** #193: hash hasła konta `credential` (potwierdzenie hasłem usunięcia klienta). */
 const CREDENTIALS_EXPORTS = ["findCredentialPasswordHash"];
-/** #193: konto do podpięcia pod pracownika (flagi reguł obejmujących wszystkie salony). */
-const STAFF_ACCESS_EXPORTS = ["findAccountForEmployeeLink"];
+/**
+ * #193: konto do podpięcia pod pracownika (flagi reguł obejmujących wszystkie salony)
+ * oraz granty czasowe salonu (temporary_access bez salon_id; granted_by = właściciel).
+ */
+const STAFF_ACCESS_EXPORTS = [
+  "findAccountForEmployeeLink",
+  "grantTemporaryAccess",
+  "listSalonGrants",
+  "revokeTemporaryAccess",
+];
 /** #193 P5a-1: subskrypcje push po stronie wysyłki (decyzja CTO 3d / 3d-KOREKTA). */
 const NOTIFICATIONS_EXPORTS = [
   // #193 P5a-2: crony przypomnień push 1h / 24h i SMS 1h (cross-salon, sekret crona).

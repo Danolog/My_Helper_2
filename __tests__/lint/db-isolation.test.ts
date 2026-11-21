@@ -82,7 +82,6 @@ const BASELINE: Record<string, readonly string[]> = {
   P2_FILES: [
     "src/app/api/ai/content/newsletter/route.ts",
     "src/app/api/dashboard/stats/route.ts",
-    "src/app/api/temporary-access/route.ts",
     "src/lib/ai/business/chat.ts",
     "src/lib/ai/openrouter.ts",
     "src/lib/ai/usage-limits.ts",

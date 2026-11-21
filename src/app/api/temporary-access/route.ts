@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
-import { eq, and, gt, lt } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { validateBody, temporaryAccessSchema } from "@/lib/api-validation";
-// ADR-001: temporary_access nie ma salon_id (zawężenie po granted_by = właściciel
-// salonu z sesji) — świadomie surowe db, warunki salonu jawnie w WHERE.
-import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { requireSalonStaff, type SalonContext } from "@/lib/salon-context";
-import { temporaryAccess, employees } from "@/lib/schema";
+import { employees } from "@/lib/schema";
+import { forSalon } from "@/lib/server/repository";
+// #193: temporary_access nie ma salon_id — granty przez wyjścia systemowe z
+// warunkiem granted_by = właściciel salonu z sesji (ctx.userId) w każdym zapytaniu.
+import { grantTemporaryAccess, listSalonGrants, revokeTemporaryAccess } from "@/lib/server/system";
+import { cleanupExpiredTemporaryAccess } from "@/lib/temporary-access";
 
 /**
  * Uprawnienia (bez user.role — na produkcji rola "owner" jest tylko na części
@@ -46,24 +48,6 @@ const VALID_FEATURES = [
   "clients-delete",
 ] as const;
 
-/**
- * Clean up expired temporary access entries.
- * Called automatically on GET and POST to keep the table tidy.
- */
-async function cleanupExpiredAccess(): Promise<number> {
-  const now = new Date();
-  const expired = await db
-    .delete(temporaryAccess)
-    .where(lt(temporaryAccess.expiresAt, now))
-    .returning({ id: temporaryAccess.id });
-
-  if (expired.length > 0) {
-    logger.info(`[Temporary Access] Cleaned up ${expired.length} expired access entries`);
-  }
-
-  return expired.length;
-}
-
 // GET /api/temporary-access - List active temporary access grants of the
 // caller's salon (granted by its owner). Query params: userId (optional filter)
 export async function GET(request: Request) {
@@ -75,25 +59,14 @@ export async function GET(request: Request) {
     const { ctx } = gate;
 
     // Clean up expired entries first
-    await cleanupExpiredAccess();
+    await cleanupExpiredTemporaryAccess();
 
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get("userId");
 
-    const now = new Date();
-
     // Tylko granty nadane przez właściciela salonu z sesji (ctx.userId =
     // salons.ownerId). ?userId= zawęża dalej, nigdy nie wychodzi poza salon.
-    const grants = await db
-      .select()
-      .from(temporaryAccess)
-      .where(
-        and(
-          eq(temporaryAccess.grantedBy, ctx.userId),
-          ...(userId ? [eq(temporaryAccess.userId, userId)] : []),
-          gt(temporaryAccess.expiresAt, now)
-        )
-      );
+    const grants = await listSalonGrants(ctx.userId, { userId: userId || undefined });
 
     logger.info(`[Temporary Access] Found ${grants.length} active grants${userId ? ` for user ${userId}` : ""}`);
 
@@ -123,7 +96,7 @@ export async function POST(request: Request) {
     const { ctx } = gate;
 
     // Clean up expired entries
-    await cleanupExpiredAccess();
+    await cleanupExpiredTemporaryAccess();
 
     // Parse and validate body
     let body: {
@@ -174,16 +147,19 @@ export async function POST(request: Request) {
     }
 
     // The target must ALWAYS be an employee of the session's salon
-    const [employee] = await db
-      .select({ id: employees.id })
-      .from(employees)
-      .where(
-        and(
-          eq(employees.userId, userId),
-          eq(employees.salonId, ctx.salonId)
+    const salon = forSalon(ctx.salonId);
+    const [employee] = await salon.raw((tx) =>
+      tx
+        .select({ id: employees.id })
+        .from(employees)
+        .where(
+          and(
+            eq(employees.userId, userId),
+            eq(employees.salonId, salon.salonId)
+          )
         )
-      )
-      .limit(1);
+        .limit(1)
+    );
 
     if (!employee) {
       return NextResponse.json(
@@ -199,50 +175,24 @@ export async function POST(request: Request) {
     // Calculate expiration time
     const expiresAt = new Date(Date.now() + durationMinutes * 60 * 1000);
 
-    // Check if there's already an active grant for this user+feature IN THIS
-    // salon (granted_by = owner) — a grant from another salon is never
-    // updated/taken over.
-    const now = new Date();
-    const [existing] = await db
-      .select()
-      .from(temporaryAccess)
-      .where(
-        and(
-          eq(temporaryAccess.userId, userId),
-          eq(temporaryAccess.featureName, featureName),
-          eq(temporaryAccess.grantedBy, ctx.userId),
-          gt(temporaryAccess.expiresAt, now)
-        )
-      )
-      .limit(1);
+    // An active grant for this user+feature IN THIS salon (granted_by = owner)
+    // is extended; otherwise a new one is created. A grant from another salon
+    // is never updated/taken over.
+    const { grant, extended } = await grantTemporaryAccess(ctx.userId, {
+      userId,
+      featureName,
+      expiresAt,
+    });
 
-    if (existing) {
-      // Update the existing grant with new expiration
-      const [updated] = await db
-        .update(temporaryAccess)
-        .set({ expiresAt })
-        .where(eq(temporaryAccess.id, existing.id))
-        .returning();
-
+    if (extended) {
       logger.info(`[Temporary Access] Updated grant for user ${userId}: ${featureName} until ${expiresAt.toISOString()}`);
 
       return NextResponse.json({
         success: true,
-        data: updated,
+        data: grant,
         message: "Czasowy dostep zostal zaktualizowany",
       });
     }
-
-    // Create new grant
-    const [grant] = await db
-      .insert(temporaryAccess)
-      .values({
-        userId,
-        featureName,
-        grantedBy: ctx.userId,
-        expiresAt,
-      })
-      .returning();
 
     logger.info(`[Temporary Access] Granted ${featureName} to user ${userId} until ${expiresAt.toISOString()} by owner ${ctx.userId} (salon ${ctx.salonId})`);
 
@@ -294,35 +244,9 @@ export async function DELETE(request: Request) {
       );
     }
 
-    // Fetch the grant scoped to the session's salon (granted_by = owner);
-    // a grant from another salon is invisible (404, no existence disclosure).
-    const [grant] = await db
-      .select()
-      .from(temporaryAccess)
-      .where(
-        and(
-          eq(temporaryAccess.id, grantId),
-          eq(temporaryAccess.grantedBy, ctx.userId)
-        )
-      )
-      .limit(1);
-
-    if (!grant) {
-      return NextResponse.json(
-        { success: false, error: "Nie znaleziono uprawnienia" },
-        { status: 404 }
-      );
-    }
-
-    const [deleted] = await db
-      .delete(temporaryAccess)
-      .where(
-        and(
-          eq(temporaryAccess.id, grantId),
-          eq(temporaryAccess.grantedBy, ctx.userId)
-        )
-      )
-      .returning();
+    // Delete scoped to the session's salon (granted_by = owner); a grant from
+    // another salon is invisible (404, no existence disclosure).
+    const deleted = await revokeTemporaryAccess(ctx.userId, grantId);
 
     if (!deleted) {
       return NextResponse.json(

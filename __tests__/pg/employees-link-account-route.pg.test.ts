@@ -14,7 +14,8 @@
  *   to samo konto (200, `exceptEmployeeId`), odpina (200, userId null).
  *
  * Sesja (`requireAuth`, `getUserSalonId`) zmockowana; baza prawdziwa. Granty czasowe
- * (`revokeSalonGrantsForUser`) poza zakresem tego testu — atrapa.
+ * (`revokeSalonGrantsForUser`) tu atrapa — kasowanie grantów przy odpięciu konta na
+ * prawdziwej bazie sprawdza `temporary-access-route.pg.test.ts`.
  * Dane: użytkownicy `it-t3-emplink-…`; reszta kaskadą z salonów i użytkowników w `afterAll`.
  * Uruchomienie: `INTEGRATION_POSTGRES_URL=postgresql://…@localhost:5432/<baza> pnpm test:pg -- __tests__/pg/employees-link-account-route.pg.test.ts`.
  * Wymaga bazy po `pnpm db:migrate` (RLS i rola `myhelper_app`).

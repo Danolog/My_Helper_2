@@ -74,8 +74,11 @@ const SNAPSHOT: Record<string, string[]> = {
   "catalog.ts:listPublicSalonCatalog": ["src/app/api/salons/route.ts"],
   // #193: tylko odczyt hasha; userId = session.user.id z auth.api.getSession (nie z żądania).
   "credentials.ts:findCredentialPasswordHash": ["src/app/api/clients/[id]/route.ts"],
+  // #193: trasa temporary-access sprząta wygasłe granty przy GET/POST (bez argumentów);
+  // wcześniej robiła to tym samym zapytaniem na surowym db.
   "cron.ts:cleanupExpiredTemporaryAccess": [
     "src/app/api/cron/cleanup-temporary-access/route.ts",
+    "src/app/api/temporary-access/route.ts",
     "src/lib/temporary-access.ts",
   ],
   "db-system.ts:dbSystem": [],
@@ -136,6 +139,11 @@ const SNAPSHOT: Record<string, string[]> = {
   // #193: tylko odczyt (flagi, bez id innych salonów); email z treści żądania właściciela,
   // exceptEmployeeId = pracownik już znaleziony przez forSalon(salonId z getUserSalonId).
   "staff-access.ts:findAccountForEmployeeLink": ["src/app/api/employees/[id]/link-account/route.ts"],
+  // #193: ownerUserId = ctx.userId z requireSalonStaff przy roli "owner" (salons.ownerId
+  // z sesji, nie z żądania); userId/featureName/grantId z żądania, zawężone granted_by.
+  "staff-access.ts:grantTemporaryAccess": ["src/app/api/temporary-access/route.ts"],
+  "staff-access.ts:listSalonGrants": ["src/app/api/temporary-access/route.ts"],
+  "staff-access.ts:revokeTemporaryAccess": ["src/app/api/temporary-access/route.ts"],
 };
 
 const rel = (abs: string) => path.relative(ROOT, abs).split(path.sep).join("/");
@@ -367,7 +375,14 @@ describe("L7: importerzy wyjść rejestru systemowego (checker TS, src/)", () =>
   it("cron.ts:cleanupExpiredTemporaryAccess (kasuje dane): lista DOKŁADNIE dzisiejsza", () => {
     expect(a.importers["cron.ts:cleanupExpiredTemporaryAccess"], DATA_DELETING_CONTRACT).toEqual([
       "src/app/api/cron/cleanup-temporary-access/route.ts",
+      "src/app/api/temporary-access/route.ts",
       "src/lib/temporary-access.ts",
+    ]);
+  });
+
+  it("staff-access.ts:revokeTemporaryAccess (kasuje dane): lista DOKŁADNIE — tylko trasa temporary-access", () => {
+    expect(a.importers["staff-access.ts:revokeTemporaryAccess"], DATA_DELETING_CONTRACT).toEqual([
+      "src/app/api/temporary-access/route.ts",
     ]);
   });
 
