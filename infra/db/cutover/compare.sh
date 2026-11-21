@@ -19,8 +19,9 @@
 #   rows_hash_<tabela>   md5 treści wierszy (posortowane po tekście wiersza,
 #                        COLLATE "C"); bez session, verification, auth_rate_limit,
 #                        chyba że --all-tables
-#   last_value_<sekw.>   pg_sequence_last_value sekwencji public (0 = nieużyta;
-#                        brak uprawnienia = błąd, nie 0)
+#   last_value_<sekw.>   SELECT wprost z sekwencji public (0 = nieużyta;
+#                        brak uprawnienia = błąd 42501, nie 0 — PG 18
+#                        pg_sequence_last_value i pg_sequences dają wtedy NULL)
 #   writes_<tabela>      n_tup_ins + n_tup_upd + n_tup_del (pomocnicze)
 #   rls_<t>, force_rls_<t>, policies_<t>
 #   grants_count, grants_sha256       role_table_grants dla myhelper_app
@@ -196,8 +197,9 @@ SELECT format('SELECT %L || md5(coalesce(string_agg(t::text, E''\n'' ORDER BY (t
   WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
     AND (:'all_tables' = 'yes' OR c.relname NOT IN ('auth_rate_limit', 'session', 'verification'))
   ORDER BY c.relname COLLATE "C" \gexec
-SELECT 'last_value_' || sequencename || '=' || coalesce(pg_sequence_last_value(format('public.%I', sequencename)::regclass), 0)
-  FROM pg_sequences WHERE schemaname = 'public' ORDER BY sequencename COLLATE "C";
+SELECT format('SELECT %L || CASE WHEN is_called THEN last_value ELSE 0 END FROM public.%I',
+              'last_value_' || sequencename || '=', sequencename)
+  FROM pg_sequences WHERE schemaname = 'public' ORDER BY sequencename COLLATE "C" \gexec
 SELECT 'writes_' || relname || '=' || (n_tup_ins + n_tup_upd + n_tup_del)
   FROM pg_stat_user_tables WHERE schemaname = 'public' ORDER BY relname COLLATE "C";
 SELECT 'rls_' || c.relname || '=' || CASE WHEN c.relrowsecurity THEN 'yes' ELSE 'no' END

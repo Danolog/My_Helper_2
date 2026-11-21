@@ -19,7 +19,7 @@
  *      tabele) → compare.sh i --expect-empty dają `error_class=other`, kod 1
  *      (42501 przy `row_security = off`), a nie przefiltrowane „0 = 0”; ta sama
  *      rola z `row_security = on` widzi mniej wierszy bez błędu (zagrożenie
- *      istnieje), a pg_sequence_last_value bez uprawnienia rzuca 42501.
+ *      istnieje), a odczyt sekwencji bez uprawnienia rzuca 42501.
  *      Rolę tworzy i usuwa sam test; GRANT-y tylko w bazie testu.
  *
  * Bazy testu (`it_cutover_<los>_*`) tworzy i usuwa sam test przez pulę
@@ -437,16 +437,23 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("compare.sh na prawdziwym Postgres
       }),
     ).rejects.toMatchObject({ code: "42501" });
 
-    // Sekwencja bez uprawnienia: pg_sequence_last_value rzuca 42501 (nie NULL → 0).
+    // Sekwencja bez uprawnienia: pg_sequence_last_value daje NULL bez błędu (PG 18),
+    // a SELECT wprost z sekwencji (tak czyta compare.sh) rzuca 42501.
     // Schemat aplikacji nie ma dziś sekwencji (identyfikatory tekstowe), więc test
     // tworzy własną, bez GRANT dla roli, i usuwa ją od razu po sprawdzeniu.
     const seqName = `"${TAG}_seq_probe"`;
     await b.unsafe(`CREATE SEQUENCE public.${seqName}`);
     try {
+      const silent = await b.begin(async (tx) => {
+        await tx.unsafe(`SET LOCAL ROLE ${RO_ROLE}`);
+        const [x] = await tx.unsafe(`select pg_sequence_last_value('public.${seqName}'::regclass) as v`);
+        return x!.v as unknown;
+      });
+      expect(silent).toBeNull();
       await expect(
         b.begin(async (tx) => {
           await tx.unsafe(`SET LOCAL ROLE ${RO_ROLE}`);
-          await tx.unsafe(`select pg_sequence_last_value('public.${seqName}'::regclass)`);
+          await tx.unsafe(`select last_value from public.${seqName}`);
         }),
       ).rejects.toMatchObject({ code: "42501" });
     } finally {

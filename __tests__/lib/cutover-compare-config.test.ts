@@ -17,7 +17,7 @@
  *  - tryb domyślny: jedno wywołanie psql, jedna transakcja REPEATABLE READ
  *    READ ONLY z sześcioma SET LOCAL (w tym row_security = off) przed pierwszym
  *    count/rows_hash; row_security = off także w bloku --expect-empty;
- *    sekwencje przez pg_sequence_last_value; locale_sha256 z kodowaniem bazy;
+ *    sekwencje przez SELECT wprost z sekwencji; locale_sha256 z kodowaniem bazy;
  *  - kontrola seeda drugi raz zaraz po `pnpm test:pg`, przed Playwrightem;
  *  - klasy błędów: connection, unique_violation, read_only, other;
  *  - połączenie tylko ze zmiennych libpq, bez .pgpass, bez PGOPTIONS;
@@ -392,10 +392,11 @@ describe("compare.sh: jedna transakcja READ ONLY z SET LOCAL", () => {
     expect(block).toContain("AND (:'all_tables' = 'yes' OR c.relname NOT IN ('auth_rate_limit', 'session', 'verification'))");
   });
 
-  it("sekwencje przez pg_sequence_last_value (brak uprawnienia = błąd), nie last_value z pg_sequences (NULL → 0)", () => {
+  it("sekwencje przez SELECT wprost z sekwencji (brak uprawnienia = błąd), nie pg_sequence_last_value / pg_sequences (NULL → 0)", () => {
     expect(block).toContain(
-      "coalesce(pg_sequence_last_value(format('public.%I', sequencename)::regclass), 0)",
+      "SELECT format('SELECT %L || CASE WHEN is_called THEN last_value ELSE 0 END FROM public.%I',",
     );
+    expect(block).not.toMatch(/pg_sequence_last_value/);
     expect(block).not.toMatch(/coalesce\(last_value\b/);
   });
 
