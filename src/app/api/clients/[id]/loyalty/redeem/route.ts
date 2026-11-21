@@ -3,12 +3,26 @@ import { eq, and } from "drizzle-orm";
 import type { LoyaltySettings, RewardTier } from "@/app/api/salons/[id]/loyalty-settings/route";
 import { validateBody, loyaltyRedeemSchema } from "@/lib/api-validation";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// ADR-001 R2b grupa B: odczyty `salons` (polityka RLS po owner_id) — czekają na akcesor forOwner; świadomie surowe db
-import { db } from "@/lib/db";
 import { getUserSalonId } from "@/lib/get-user-salon";
 import { logger } from "@/lib/logger";
 import { loyaltyPoints, loyaltyTransactions, salons } from "@/lib/schema";
 import { forSalon } from "@/lib/server/repository";
+
+/**
+ * Ustawienia programu lojalnościowego salonu z sesji. Polityka RLS `salons`
+ * to `tenant_self` (`id = app.current_salon_id`), więc odczyt idzie przez
+ * `forSalon(salonId)` z jawnym `eq(salons.id, salonId)` (dwie tamy).
+ */
+async function findSalonLoyaltySettings(salonId: string) {
+  const [salon] = await forSalon(salonId).raw((tx) =>
+    tx
+      .select({ id: salons.id, settingsJson: salons.settingsJson })
+      .from(salons)
+      .where(eq(salons.id, salonId))
+      .limit(1)
+  );
+  return salon ?? null;
+}
 /**
  * POST /api/clients/[id]/loyalty/redeem
  *
@@ -48,11 +62,7 @@ export async function POST(
     }
 
     // 1. Fetch salon loyalty settings and find the reward tier
-    const [salon] = await db
-      .select({ id: salons.id, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
+    const salon = await findSalonLoyaltySettings(salonId);
 
     if (!salon) {
       return NextResponse.json(
@@ -205,11 +215,7 @@ export async function GET(
     }
 
     // 1. Fetch salon loyalty settings
-    const [salon] = await db
-      .select({ id: salons.id, settingsJson: salons.settingsJson })
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
+    const salon = await findSalonLoyaltySettings(salonId);
 
     if (!salon) {
       return NextResponse.json(
