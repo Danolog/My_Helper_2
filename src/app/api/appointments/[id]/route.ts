@@ -8,12 +8,6 @@ import {
   overlapsRange,
 } from "@/lib/appointment-overlap";
 import { requireAuth, isAuthError } from "@/lib/auth-middleware";
-// `db` pozostaje dla efektow ubocznych anulacji (forfeit zadatku, notyfikacja,
-// nazwa salonu do waiting-list) — to NIE jest brama zasobu [id], ktora pilnuje
-// test izolacji. Pelna migracja na repo + kontekst RLS tych zapisow = R2.
-// Pod RLS (rola myhelper_app) te zapytania wymagaja wlasnego kontekstu salonu;
-// sciezka pozytywna DELETE z zadatkiem nie jest pokryta testem R1 (zob. raport).
-import { db } from "@/lib/db";
 import { recordDepositStatusEvent, type DepositStatusEventActor } from "@/lib/deposit-status-events";
 import { logger } from "@/lib/logger";
 import { refundAppointmentDeposits, type AppointmentDepositsRefund } from "@/lib/refund";
@@ -154,9 +148,10 @@ export async function PUT(
 
     const { startTime, endTime, employeeId, clientId, serviceId, notes, status, depositAmount, depositPaid } = parsed.data;
 
-    // P1 (Ryan): pola zadatku zmienia tylko wlasciciel (reczne rozliczenie).
-    // Normalnie depositPaid ustawia potwierdzenie platnosci (webhook Stripe ->
-    // confirmDepositPayment), a kwote liczy /api/deposits/create-session.
+    // P1: pola zadatku zmienia tylko wlasciciel (reczne rozliczenie).
+    // Poza ta trasa depositPaid ustawia potwierdzenie platnosci (webhook Stripe
+    // -> confirmDepositPayment) albo reczne oznaczenie zadatku w panelu, a kwote
+    // ustala sciezka rezerwacji z zadatkiem (nie tylko create-session).
     // Zaden ekran panelu nie wysyla tych pol w PUT. Pracownik/recepcja,
     // ktorzy "oplacali" zadatek recznie, wlaczali tez sciezke zwrotu przy
     // anulacji (DELETE) — dlatego 403, nie ciche pominiecie.
@@ -462,11 +457,15 @@ export async function DELETE(
       notifyClient,
     });
 
-    const [salon] = await db
-      .select({ name: salons.name, phone: salons.phone })
-      .from(salons)
-      .where(eq(salons.id, appointment.salonId))
-      .limit(1);
+    // Efekty uboczne anulacji w kontekscie RLS salonu z sesji (#193): nazwa
+    // salonu (polityka `tenant_self`) i wpis powiadomienia; jawny filtr zostaje.
+    const [salon] = await forSalon(salonId).raw((tx) =>
+      tx
+        .select({ name: salons.name, phone: salons.phone })
+        .from(salons)
+        .where(eq(salons.id, salonId))
+        .limit(1)
+    );
     const salonName = salon?.name || "Salon";
     const serviceName = row.service?.name || "Wizyta";
 
@@ -475,20 +474,24 @@ export async function DELETE(
     let clientNotified = false;
     if (shouldNotify && row.client) {
       try {
-        await db.insert(notifications).values({
-          salonId: appointment.salonId,
-          clientId: row.client.id,
-          type: "sms",
-          message: buildSalonCancellationSms({
-            salonName,
-            salonPhone: salon?.phone ?? null,
-            serviceName,
-            startTime,
-            variant,
-            depositAmount,
-          }),
-          status: "pending",
+        const message = buildSalonCancellationSms({
+          salonName,
+          salonPhone: salon?.phone ?? null,
+          serviceName,
+          startTime,
+          variant,
+          depositAmount,
         });
+        const clientId = row.client.id;
+        await forSalon(salonId).raw((tx) =>
+          tx.insert(notifications).values({
+            salonId,
+            clientId,
+            type: "sms",
+            message,
+            status: "pending",
+          })
+        );
         clientNotified = true;
       } catch (notifError) {
         logger.error("[Appointments API] Failed to create notification", { error: notifError, appointmentId: id });

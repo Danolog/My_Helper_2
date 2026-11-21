@@ -2534,6 +2534,45 @@ describe("DELETE /api/appointments/[id]", () => {
     expect(status).toBe(500);
     expect(body.error).toContain("Failed to cancel appointment");
   });
+
+  // #193: efekty uboczne anulacji (nazwa salonu, wpis powiadomienia) w kontekście
+  // RLS salonu z sesji — każde otwarcie bramy z salonem sesji, wpis z salon_id sesji.
+  it("#193: odczyt wizyty, transakcja, nazwa salonu i wpis SMS przez forSalon(salon z sesji)", async () => {
+    queueSalonCancel({ appointment: makeAppointment({ startTime: new Date("2026-11-17T09:00:00Z") }) });
+
+    const { status, body } = await callDelete("?notifyClient=true");
+
+    expect(status).toBe(200);
+    expect((body as any).cancellationDetails.clientNotified).toBe(true);
+    const calls = vi.mocked(forSalon).mock.calls;
+    expect(calls).toHaveLength(4);
+    expect(calls.every(([salonId]) => salonId === TEST_IDS.SALON_UUID)).toBe(true);
+    expect(smsInserts()).toEqual([expect.objectContaining({ salonId: TEST_IDS.SALON_UUID, type: "sms" })]);
+  });
+
+  it("#193: bez SMS brama otwierana 3 razy (bez wpisu powiadomienia)", async () => {
+    queueSalonCancel({ appointment: makeAppointment({ startTime: new Date(Date.now() + 48 * 3600e3) }) });
+
+    const { status } = await callDelete();
+
+    expect(status).toBe(200);
+    expect(vi.mocked(forSalon).mock.calls).toHaveLength(3);
+    expect(mockDbInsert).not.toHaveBeenCalled();
+  });
+
+  it("#193: błąd wpisu powiadomienia w transakcji salonu → nadal 200, clientNotified false", async () => {
+    queueSalonCancel({ appointment: makeAppointment({ startTime: new Date("2026-11-17T09:00:00Z") }) });
+    const failing = chainMock([]);
+    (failing as Record<string, unknown>).then = (_: unknown, reject: (err: Error) => void) =>
+      reject(new Error("notif insert failure"));
+    mockDbInsert.mockReturnValue(failing);
+
+    const { status, body } = await callDelete("?notifyClient=true");
+
+    expect(status).toBe(200);
+    expect((body as any).cancellationDetails.clientNotified).toBe(false);
+    expect((body as any).data.status).toBe("cancelled");
+  });
 });
 
 // =======================================================

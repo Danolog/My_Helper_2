@@ -83,7 +83,6 @@ const BASELINE: Record<string, readonly string[]> = {
     "src/app/api/ai/content/newsletter/route.ts",
     "src/app/api/appointments/[id]/complete/route.ts",
     "src/app/api/appointments/[id]/invoice/route.ts",
-    "src/app/api/appointments/[id]/route.ts",
     "src/app/api/clients/[id]/loyalty/redeem/route.ts",
     "src/app/api/clients/[id]/route.ts",
     "src/app/api/dashboard/stats/route.ts",
