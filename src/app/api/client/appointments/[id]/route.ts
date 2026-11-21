@@ -4,7 +4,7 @@ import { requireAuth, isAuthError } from "@/lib/auth-middleware";
 // ADR-001: ścieżka user-scoped (nie salon-scoped) — świadomie surowe db
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
-import { appointments, employees, services, salons, treatmentHistory, depositPayments, serviceVariants } from "@/lib/schema";
+import { appointments, employees, services, salons, depositPayments, serviceVariants } from "@/lib/schema";
 import { isValidUuid } from "@/lib/validations";
 // GET /api/client/appointments/[id] - Get appointment detail for the authenticated client user
 export async function GET(
@@ -53,17 +53,6 @@ export async function GET(
       );
     }
 
-    // Fetch treatment history if appointment is completed
-    let treatment = null;
-    if (row.appointment.status === "completed") {
-      const treatmentResult = await db
-        .select()
-        .from(treatmentHistory)
-        .where(eq(treatmentHistory.appointmentId, id))
-        .limit(1);
-      treatment = treatmentResult[0] || null;
-    }
-
     // Fetch deposit payment info
     let depositPayment = null;
     if (row.appointment.depositAmount && parseFloat(row.appointment.depositAmount) > 0) {
@@ -107,11 +96,13 @@ export async function GET(
       startTime: row.appointment.startTime,
       endTime: row.appointment.endTime,
       status: row.appointment.status,
-      notes: row.appointment.notes,
       depositAmount: row.appointment.depositAmount,
       depositPaid: row.appointment.depositPaid,
       createdAt: row.appointment.createdAt,
-      treatment,
+      // appointments.notes i treatment_history (notes, materials_json, recipe,
+      // techniques) to dane personelu — poza portalem klienta (ADR-002 §2.5).
+      // Bez zapytania o treatment_history: nie czytamy danych, których nie zwracamy.
+      treatment: null,
       depositPayment: depositPayment
         ? {
             amount: depositPayment.amount,
