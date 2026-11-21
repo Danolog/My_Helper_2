@@ -118,6 +118,39 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // Adresy z tokenem jednorazowym Better Auth (reset hasła, weryfikacja
+      // e-mail): bez nagłówka Referer, żeby adres z tokenem nie trafiał do
+      // kolejnych żądań strony ani do logów żądań. Wpisy muszą stać PO "/(.*)"
+      // (przy tym samym kluczu wygrywa ostatni), bez has/missing i poza
+      // komentarzem blokowym — ten kształt sprawdza infra/gcp/logging.sh.
+      // Strażnik: __tests__/lib/referrer-policy-headers.test.ts.
+      {
+        source: "/reset-password",
+        headers: [
+          {
+            key: "Referrer-Policy",
+            value: "no-referrer",
+          },
+        ],
+      },
+      {
+        source: "/api/auth/reset-password/:token",
+        headers: [
+          {
+            key: "Referrer-Policy",
+            value: "no-referrer",
+          },
+        ],
+      },
+      {
+        source: "/api/auth/verify-email",
+        headers: [
+          {
+            key: "Referrer-Policy",
+            value: "no-referrer",
+          },
+        ],
+      },
     ];
   },
 };

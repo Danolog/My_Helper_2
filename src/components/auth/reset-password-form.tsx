@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -9,11 +9,35 @@ import { Label } from "@/components/ui/label"
 import { resetPassword } from "@/lib/auth-client"
 import { sanitizeAuthError } from "@/lib/error-messages"
 
+/**
+ * Usuwa parametr `token` z paska adresu bez nawigacji (bez fetchu RSC).
+ * Adres z tokenem nie zostaje w historii przeglądarki (współdzielony komputer
+ * w salonie) ani w nagłówku Referer kolejnych żądań.
+ *
+ * Stan `null`: Next.js przejmuje wtedy wywołanie (zachowuje swój stan historii
+ * i przepisuje adres do stanu routera). Przekazanie stanu routera (`__NA`)
+ * ominęłoby tę synchronizację, a router przy najbliższej zmianie stanu
+ * przywróciłby w pasku adres z tokenem.
+ */
+function removeTokenFromAddressBar() {
+  const url = new URL(window.location.href)
+  if (!url.searchParams.has("token")) return
+  url.searchParams.delete("token")
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+}
+
 export function ResetPasswordForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const token = searchParams.get("token")
+  // Token czytany RAZ, przy pierwszym renderze. W Next 16 history.replaceState
+  // aktualizuje useSearchParams, więc po usunięciu tokenu z adresu
+  // searchParams.get("token") dałoby null i formularz pokazałby „Brak tokenu”.
+  const [token] = useState(() => searchParams.get("token"))
   const error = searchParams.get("error")
+
+  useEffect(() => {
+    removeTokenFromAddressBar()
+  }, [])
 
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")

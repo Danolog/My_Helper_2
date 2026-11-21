@@ -287,6 +287,62 @@ test.describe('Flow 1: Authentication', () => {
     });
   });
 
+  // ── Reset hasla: token poza adresem i poza Referer ──────────────────────
+  //
+  // Strona /reset-password?token=… i adresy z tokenem Better Auth maja
+  // Referrer-Policy: no-referrer (next.config.ts), a formularz usuwa token
+  // z paska adresu (history.replaceState) i nadal wysyla go w tresci POST.
+  // Token jest falszywy: odpowiedz Better Auth to blad tokenu, nie sukces —
+  // test sprawdza droge tokenu, nie samo ustawienie hasla.
+
+  test.describe('Reset password token handling', () => {
+    const FAKE_TOKEN = 'e2eNotARealResetToken123';
+
+    test('reset page: no-referrer, token removed from URL, form still sends token without Referer', { tag: '@smoke' }, async ({ page }) => {
+      const response = await page.goto(`/reset-password?token=${FAKE_TOKEN}`, { waitUntil: 'load' });
+      expect(response?.headers()['referrer-policy']).toBe('no-referrer');
+
+      // Token znika z adresu po hydratacji (efekt formularza)...
+      await expect(page).toHaveURL(/\/reset-password$/, { timeout: 15000 });
+      // ...a formularz zostaje (Next 16: replaceState odswieza useSearchParams).
+      await expect(page.getByText(/brak tokenu/i)).toHaveCount(0);
+      const submit = page.locator('form button[type="submit"]');
+      await expect(submit).toBeEnabled({ timeout: 15000 });
+      await page.fill('#password', 'NewPassword123!');
+      await page.fill('#confirmPassword', 'NewPassword123!');
+
+      const resetRequest = page.waitForRequest(
+        (r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/auth/reset-password'
+      );
+      await submit.click();
+      const request = await resetRequest;
+      expect(request.postDataJSON()).toMatchObject({ token: FAKE_TOKEN });
+      const headers = await request.allHeaders();
+      expect(headers['referer'], 'Referer na stronie resetu').toBeUndefined();
+      expect(request.url()).not.toContain(FAKE_TOKEN);
+
+      // Falszywy token: komunikat bledu w formularzu, bez przekierowania.
+      await expect(page.locator('form p.text-destructive')).toBeVisible({ timeout: 30000 });
+      await expect(page).toHaveURL(/\/reset-password$/);
+      expect(page.url()).not.toContain(FAKE_TOKEN);
+    });
+
+    test('token URLs of Better Auth: no-referrer; other pages unchanged', { tag: '@smoke' }, async ({ request }) => {
+      const callback = await request.get(`/api/auth/reset-password/${FAKE_TOKEN}?callbackURL=%2Freset-password`, {
+        maxRedirects: 0,
+      });
+      expect(callback.headers()['referrer-policy']).toBe('no-referrer');
+
+      const verify = await request.get(`/api/auth/verify-email?token=${FAKE_TOKEN}`, { maxRedirects: 0 });
+      expect(verify.headers()['referrer-policy']).toBe('no-referrer');
+
+      for (const path of ['/login', '/forgot-password', '/api/health']) {
+        const res = await request.get(path, { maxRedirects: 0 });
+        expect(res.headers()['referrer-policy'], path).toBe('strict-origin-when-cross-origin');
+      }
+    });
+  });
+
   // ── Edge cases ──────────────────────────────────────────────────────────
 
   test.describe('Edge cases', () => {

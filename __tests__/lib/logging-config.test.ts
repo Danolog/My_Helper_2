@@ -721,18 +721,20 @@ describe("P8: --apply odmawia bez Referrer-Policy: no-referrer w next.config.ts"
     expect(d.stdout).toMatch(/\nlogging: done\n$/);
   });
 
-  it("skrypt w repo: wynik sprawdzenia zgodny z next.config.ts repo (odmowa bez gcloud albo ok)", () => {
+  // next.config.ts w repo ustawia no-referrer dla wszystkich trzech ścieżek:
+  // cofnięcie któregokolwiek wpisu ma zaczerwienić CI, a nie dopiero zatrzymać
+  // --apply przy uruchomieniu.
+  it("skrypt w repo: next.config.ts repo przechodzi sprawdzenie („referrer-policy: ok”), --apply kod 0", () => {
+    const ok = `referrer-policy: ok (next.config.ts sets no-referrer for /reset-password /api/auth/reset-password/:token /api/auth/verify-email)\n`;
     const a = lg(APPLY, { script: SCRIPT });
-    if (a.stdout.includes("referrer-policy: ok")) {
-      expect(a.status, a.stderr).toBe(0);
-    } else {
-      expect(a.status).toBe(2);
-      expect(a.calls).toEqual([]);
-      expect(a.stderr).toContain("--apply refused");
-    }
+    expect(a.status, a.stderr).toBe(0);
+    expect(a.stdout).toContain(ok);
+    expect(a.stderr).not.toContain("--apply refused");
+    expect(a.calls.length).toBeGreaterThan(0);
     const d = lg(P, { script: SCRIPT });
     expect(d.status, d.stderr).toBe(0);
     expect(d.calls).toEqual([]);
-    expect(d.stdout).toMatch(/\nreferrer-policy: (ok|missing) /);
+    expect(d.stdout).toContain(ok);
+    expect(d.stdout).not.toContain("referrer-policy: missing");
   });
 });
