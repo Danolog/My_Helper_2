@@ -10,8 +10,9 @@
  *  - T z jednym wierszem w każdej z trzech tabel → druga pusta baza (S): różnią
  *    się DOKŁADNIE trzy liczby (źródło 1, cel 0) — wykluczenie działa;
  *  - pg_dump padający w środku strumienia (nakładka ucina archiwum na 90%
- *    i kończy się kodem 1) → kod 1, dump_exit=1, restore_exit ≠ 0, cel pusty (transakcja
- *    pg_restore wycofana);
+ *    i kończy się kodem 1; test najpierw dowodzi, że ucięty prefiks ma ≥ 1 pełny
+ *    blok danych z wierszami i mniej pełnych bloków niż całe archiwum) → kod 1,
+ *    dump_exit=1, restore_exit ≠ 0, cel pusty (transakcja pg_restore wycofana);
  *  - rola źródła bez uprawnień → błąd i kod 1 (nie cichy sukces), cel pusty;
  *  - cel niepusty → kod 5 bez zrzutu, cel bez zmian; błędne hasło celu →
  *    error_class=connection.
@@ -26,6 +27,9 @@
  * czytana. Uwaga lokalnie: przerwanie testu w środku przypadku BYPASSRLS
  * zostawia tę rolę z BYPASSRLS — wtedy `ALTER ROLE myhelper_app NOBYPASSRLS`
  * na lokalnym Dockerze (w CI kontener jest efemeryczny).
+ * Przypadki zależą od kolejności (sekwencyjne `it`, `fileParallelism: false`):
+ * pierwszy wypełnia T danymi, z których korzystają kolejne, a X ma zostać pusty
+ * do rls-check na pustej bazie — porażka pierwszego czerwieni resztę kaskadowo.
  * psql, pg_dump, pg_restore w wersji ≥ serwera: z `CUTOVER_PG_CONTAINER`
  * nakładki `docker exec -i <id> <narzędzie>` (bez apt, bez nowych obrazów).
  *
@@ -337,27 +341,55 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("copy-neon-to-cloudsql.sh i rls-ch
       expect(a.map.get(`count_${k}`), k).toBe("1");
       expect(b.map.get(`count_${k}`), k).toBe("0");
     }
-  });
+  }, 120_000);
 
   it("(c) pg_dump pada w połowie strumienia → kod 1, dump_exit=1, restore_exit ≠ 0, cel pusty", async () => {
     // Pełny rozmiar archiwum (licznik bajtów, bez pliku), potem nakładka ucinająca
-    // je na 90% — za spisem treści archiwum, w danych: pg_restore zaczyna COPY
-    // w swojej transakcji i trafia na koniec strumienia w środku danych.
-    const size = spawnSync(
-      "bash",
-      ["-c", `set -o pipefail; pg_dump -w --data-only --schema=public -Fc ${EXCLUDE_FLAGS} | wc -c`],
-      { encoding: "utf8", env: pgEnv(DB_T), timeout: 120_000 },
-    );
+    // je na 90%. Zanim ruszy skrypt, test dowodzi, że ucięty prefiks zawiera co
+    // najmniej jeden PEŁNY blok danych z wierszami, a pełne archiwum ma więcej
+    // pełnych bloków niż prefiks (cięcie wypada w danych, nie w spisie treści).
+    // Dopiero wtedy pusty cel znaczy: COPY wykonane i transakcja wycofana.
+    const dump = `pg_dump -w --data-only --schema=public -Fc ${EXCLUDE_FLAGS}`;
+    const size = spawnSync("bash", ["-c", `set -o pipefail; ${dump} | wc -c`], {
+      encoding: "utf8",
+      env: pgEnv(DB_T),
+      timeout: 120_000,
+    });
     expect(size.status).toBe(0);
     const bytes = Number(size.stdout.trim());
     expect(bytes, "archiwum na tyle duże, żeby uciąć je w środku").toBeGreaterThan(1024);
+    const cut = Math.floor(bytes * 0.9);
+    // Pełne bloki COPY w SQL z pg_restore -f - (do potoku, bez pliku): blok jest
+    // pełny dopiero z terminatorem `\.`; blok ucięty w środku go nie dostaje.
+    // Wynik: "<wszystkie pełne bloki> <pełne bloki z ≥ 1 wierszem>". Kod potoku
+    // jest dowolny — pg_restore na uciętym strumieniu pada na końcu, o to chodzi.
+    const AWK = String.raw`/^COPY .* FROM stdin;$/ { inb = 1; n = 0; next }
+inb && $0 == "\\." { all++; if (n > 0) rows++; inb = 0; next }
+inb { n++ }
+END { print all + 0, rows + 0 }`;
+    const blocks = (limit?: number): [number, number] => {
+      const head = limit === undefined ? "" : ` | head -c ${limit}`;
+      const r = spawnSync("bash", ["-c", `${dump}${head} | pg_restore --data-only -f - | awk "$1"`, "bash", AWK], {
+        encoding: "utf8",
+        env: pgEnv(DB_T),
+        timeout: 120_000,
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      const m = /^(\d+) (\d+)$/.exec((r.stdout ?? "").trim());
+      expect(m, `licznik bloków: ${r.stdout}`).not.toBeNull();
+      return [Number(m![1]), Number(m![2])];
+    };
+    const [fullAll] = blocks();
+    const [cutAll, cutRows] = blocks(cut);
+    expect(cutRows, "prefiks zawiera ≥ 1 pełny blok danych z wierszami").toBeGreaterThanOrEqual(1);
+    expect(cutAll, "cięcie wypada przed końcem danych").toBeLessThan(fullAll);
     const real = toolDir
       ? join(toolDir, "pg_dump")
       : spawnSync("bash", ["-c", "command -v pg_dump"], { encoding: "utf8", env: { NODE_ENV: "test", PATH: toolPath } }).stdout.trim();
     expect(real).toMatch(/^\//);
     const breakDir = mkdtempSync(join(tmpdir(), "it-cutover-break-"));
     tmpDirs.push(breakDir);
-    writeFileSync(join(breakDir, "pg_dump"), `#!/bin/sh\n"${real}" "$@" | head -c ${Math.floor(bytes * 0.9)}\nexit 1\n`);
+    writeFileSync(join(breakDir, "pg_dump"), `#!/bin/sh\n"${real}" "$@" | head -c ${cut}\nexit 1\n`);
     chmodSync(join(breakDir, "pg_dump"), 0o755);
 
     const r = runScript(COPY, [], { ...copyEnv(DB_T, DB_X), PATH: `${breakDir}:${toolPath}` });
@@ -368,7 +400,7 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("copy-neon-to-cloudsql.sh i rls-ch
     expect(r.lines[r.lines.length - 1]).toBe("exit=1");
     expect(r.map.get("error_class")).toMatch(/^(other|connection)$/);
     expect(await nonemptyTables(x), "transakcja pg_restore wycofana").toEqual([]);
-  });
+  }, 120_000);
 
   it("(c) rola źródła bez uprawnień → błąd, kod 1 (nie cichy sukces), cel pusty", async () => {
     const r = runScript(COPY, [], copyEnv(DB_T, DB_X, { srcUser: NOPRIV, srcPass: NOPRIV_PASS }));
@@ -379,7 +411,7 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("copy-neon-to-cloudsql.sh i rls-ch
     expect(r.log).toMatch(/permission denied/);
     expect(r.log).not.toContain(NOPRIV_PASS);
     expect(await nonemptyTables(x)).toEqual([]);
-  });
+  }, 120_000);
 
   it("(c) cel niepusty → target_nonempty_tables=n, kod 5, bez zrzutu, cel bez zmian", async () => {
     const [before] = await t.unsafe(`select count(*)::int as n from "user"`);
@@ -390,7 +422,7 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("copy-neon-to-cloudsql.sh i rls-ch
     expect(r.lines[1]).toBe("exit=5");
     const [after] = await t.unsafe(`select count(*)::int as n from "user"`);
     expect(after!.n).toBe(before!.n);
-  });
+  }, 120_000);
 
   it("(c) błędne hasło celu → na fd 3 wyłącznie error_class=connection i exit=", () => {
     const wrong = `wrong-${randomBytes(8).toString("hex")}`;
@@ -409,7 +441,7 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("copy-neon-to-cloudsql.sh i rls-ch
     expect(r.lines).toEqual(RLS_OK);
     expect(r.status).toBe(0);
     expect(r.stderr).toBe("");
-  });
+  }, 120_000);
 
   it("(d) rls-check na pustej bazie po migracjach → 0/0/0, no/no/no, kod 0", () => {
     const r = runScript(RLS, [], pgEnv(DB_X));
@@ -430,7 +462,7 @@ describe.skipIf(!ENABLED || !INTEGRATION_URL)("copy-neon-to-cloudsql.sh i rls-ch
     }
     const [attrs] = await h.observer.unsafe("select rolbypassrls from pg_roles where rolname = 'myhelper_app'");
     expect(attrs!.rolbypassrls).toBe(false);
-  });
+  }, 120_000);
 
   it("(d) rola bez prawa SET ROLE myhelper_app → error_class=other, kod 1 (nie ciche 0)", () => {
     const r = runScript(RLS, [], pgEnv(DB_T, NOPRIV, NOPRIV_PASS));
