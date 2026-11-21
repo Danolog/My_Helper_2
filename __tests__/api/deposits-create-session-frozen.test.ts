@@ -4,9 +4,9 @@
  *
  * Prawdziwe `@/lib/features` i `@/lib/server/frozen-guard` (bez atrapy
  * strażnika). Atrapy-szpiedzy: limit, sesja, baza, Stripe, wyliczenie
- * zadatku. Każdy warunek, który bez zamrożenia dałby 201/400/401/429/404/500,
- * daje teraz 404 MODULE_DISABLED, a żaden szpieg nie jest wywołany —
- * strażnik stoi przed limitem, sesją i bazą.
+ * zadatku. Każdy z siedmiu przypadków (ciało poprawne i błędne, brak sesji,
+ * limit, brak salonu, błąd bazy) daje teraz 404 MODULE_DISABLED, a żaden
+ * szpieg nie jest wywołany — strażnik stoi przed limitem, sesją i bazą.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildDepositBody } from "@/app/(client)/salons/[id]/book/_lib/deposit-body";
@@ -101,7 +101,7 @@ function postRaw(raw: string) {
   );
 }
 
-/** Ustawienie, w którym bez zamrożenia trasa doszłaby do szczęśliwej ścieżki. */
+/** Atrapy w stanie otwartej trasy: limit wolny, sesja klienta, wyliczony zadatek. */
 function primeOpenRoute() {
   h.rateLimitCheck.mockReturnValue({ success: true, remaining: 4, reset: 60000 });
   h.getClientIp.mockReturnValue("127.0.0.1");
@@ -147,12 +147,12 @@ describe(
   "POST /api/deposits/create-session zamrożony modułem onlineDeposits — " +
     "403 nie dotyczy tej trasy, bo jest publiczna (gość i klient portalu)",
   () => {
-    it("poprawne ciało + sesja (bez zamrożenia: 201) → 404 MODULE_DISABLED", async () => {
+    it("poprawne ciało + sesja → 404 MODULE_DISABLED", async () => {
       await expectModuleDisabled(await post(validBody()));
       expectNothingTouched();
     });
 
-    it("niepoprawny JSON (bez zamrożenia: 400) → 404 MODULE_DISABLED", async () => {
+    it("niepoprawny JSON → 404 MODULE_DISABLED", async () => {
       await expectModuleDisabled(await postRaw("{nie-json"));
       expectNothingTouched();
     });
@@ -162,7 +162,7 @@ describe(
       expectNothingTouched();
     });
 
-    it("brak sesji (bez zamrożenia: 401/400 gościa) → 404 MODULE_DISABLED", async () => {
+    it("brak sesji → 404 MODULE_DISABLED", async () => {
       h.getOptionalSession.mockResolvedValue(null);
       await expectModuleDisabled(await post(validBody()));
       expectNothingTouched();
@@ -176,13 +176,13 @@ describe(
       expectNothingTouched();
     });
 
-    it("salon nieistniejący (bez zamrożenia: 404 NOT_FOUND) → 404 z kodem modułu", async () => {
+    it("salon nieistniejący → 404 z kodem modułu", async () => {
       h.calculateExpectedDeposit.mockResolvedValue({ ok: false });
       await expectModuleDisabled(await post(validBody(MISSING_SALON_UUID)));
       expectNothingTouched();
     });
 
-    it("baza rzuca (bez zamrożenia: 500) → 404 MODULE_DISABLED", async () => {
+    it("baza rzuca → 404 MODULE_DISABLED", async () => {
       const boom = () => {
         throw new Error("db down");
       };

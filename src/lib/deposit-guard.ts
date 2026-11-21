@@ -1,5 +1,5 @@
 /**
- * #63: wizyta usługi z zadatkiem nie może powstać bez płatności zadatku.
+ * #63: wizyta usługi z zadatkiem nie może powstać poza trasą zadatku.
  *
  * Jedyną ścieżką rezerwacji z zadatkiem jest POST /api/deposits/blik-booking
  * (kwota liczona serwerowo, zadatek BLIK-iem na telefon salonu).

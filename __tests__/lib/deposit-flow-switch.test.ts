@@ -29,6 +29,17 @@ describe("przełącznik zadatku BLIK (moduł onlineDeposits)", () => {
     expect(isBlikDepositFlow()).toBe(isModuleFrozen("onlineDeposits"));
   });
 
+  it("zdjęcie hardOff z onlineDeposits daje false", () => {
+    const e = MODULES.find((m) => m.key === "onlineDeposits") as { hardOff?: boolean | undefined };
+    const before = e.hardOff;
+    e.hardOff = false;
+    try {
+      expect(isBlikDepositFlow()).toBe(false);
+    } finally {
+      e.hardOff = before;
+    }
+  });
+
   it("onlineDeposits nie ma przełącznika w Ustawienia → Moduły", () => {
     expect(TOGGLEABLE_MODULES.map((m) => m.key)).not.toContain("onlineDeposits");
   });
