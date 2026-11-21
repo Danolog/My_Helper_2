@@ -214,16 +214,6 @@ export async function POST(request: Request) {
       endTime: new Date(endTime),
     };
 
-    // bookedByUserId WYLACZNIE z sesji (null dla goscia). Wartosc z body jest
-    // ignorowana: pozwalala przypisac wizyte do cudzego konta (portal klienta,
-    // odwolanie, opinia, przypomnienia push). Zaden front jej nie wysyla.
-    const bookedByUserId: string | null = session?.user?.id || null;
-    if (bodyUserId && bodyUserId !== bookedByUserId) {
-      logger.warn("[Appointments API] Ignored client-supplied bookedByUserId", {
-        sessionUserId: bookedByUserId,
-      });
-    }
-
     // UAT X-1: personel salonu (owner/employee/recepcja) tworzy wizyty tylko
     // we wlasnym salonie. Gosc/klient portalu bez kontekstu salonu bookuje jak
     // dotad. Wczesniej salonId z body byl ufany bez sprawdzenia -> zapis cross-tenant.
@@ -240,6 +230,21 @@ export async function POST(request: Request) {
       // zostaje jawne (nie !!staffCtx), żeby wyjątek od zadatku (#63) nie
       // zależał od tego, że 403 wyżej zawsze wyprzedza tę linię.
       isStaff = staffCtx?.salonId === salonId;
+    }
+
+    // bookedByUserId WYLACZNIE z sesji (null dla goscia). Wartosc z body jest
+    // ignorowana: pozwalala przypisac wizyte do cudzego konta (portal klienta,
+    // odwolanie, opinia, przypomnienia push). Zaden front jej nie wysyla.
+    // #193: wizyta dodana przez personel salonu należy do klienta z kartoteki,
+    // nie do konta personelu — inaczej trafia do portalu klienta pracownika
+    // (szukanie po booked_by_user_id) i można ją tam anulować z pominięciem roli.
+    const sessionUserId: string | null = session?.user?.id || null;
+    const bookedByUserId: string | null = isStaff ? null : sessionUserId;
+    if (bodyUserId && bodyUserId !== bookedByUserId) {
+      logger.warn("[Appointments API] Ignored client-supplied bookedByUserId", {
+        sessionUserId,
+        isStaff,
+      });
     }
 
     // P1: clientId wybiera WYLACZNIE personel salonu (panel). Gosc i

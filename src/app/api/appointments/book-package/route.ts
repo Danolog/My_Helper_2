@@ -43,9 +43,6 @@ export async function POST(request: Request) {
     }
     const { promotionId, employeeId, clientId, startTime } = body;
 
-    // Use the authenticated user's ID for tracking who booked
-    const bookedByUserId: string | null = authResult.user.id || null;
-
     // Tenant isolation (ADR-001): trasa wołana z dashboardu właściciela —
     // salon z sesji; promocja/usługi/terminy muszą należeć do tego salonu.
     const salonId = await getUserSalonId();
@@ -157,6 +154,12 @@ export async function POST(request: Request) {
     // na wypadek odmrożenia. Każda usługa pakietu osobno, przed kolizjami.
     const staffCtx = await getSalonContext();
     const isSalonStaff = staffCtx?.salonId === salonId;
+    // #193: pakiet zarezerwowany przez personel salonu należy do klienta
+    // z kartoteki, nie do konta personelu (portal klienta szuka wizyt po
+    // booked_by_user_id). Konto spoza personelu — jak dotąd z sesji.
+    const bookedByUserId: string | null = isSalonStaff
+      ? null
+      : authResult.user.id || null;
     if (!isSalonStaff) {
       for (const slot of appointmentSlots) {
         const depositError = await depositGuardResponse({
