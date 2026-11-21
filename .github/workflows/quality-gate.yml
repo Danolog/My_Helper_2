@@ -124,6 +124,10 @@ jobs:
       #   psql/pg_dump/pg_restore w wersji serwera: z kontenera usługi postgres
       #   (docker exec przez cienkie nakładki, które test tworzy w katalogu
       #   tymczasowym) — bez apt i bez nowych obrazów.
+      # - zamrożenie/odmrożenie bazy źródłowej (infra/db/cutover/freeze-neon.sh,
+      #   unfreeze-neon.sh): własna baza i role it_cutover_, zrywanie po bazie,
+      #   zapis na nowym połączeniu read_only / po odmrożeniu przechodzi; ta sama
+      #   bramka i ten sam klient PG z kontenera co porównanie.
       # Adres = ten sam service container (localhost), bez nowych sekretów.
       - name: Integration test — subscription locks (real Postgres)
         timeout-minutes: 4
