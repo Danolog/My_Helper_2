@@ -11,7 +11,8 @@ Zasady jak w `docs/runbook-przelaczenie-bazy.md` sekcja 0: uruchamia wyłącznie
 właściciel, we własnym terminalu; bloki bez linii komentarza, od `set +x`;
 w repo tylko symbole zastępcze w `<…>`; do notatki okna wolno zapisać tylko
 wartości z wyjątku w sekcji 0 runbooka przełączenia (host `<domena Vercel
-Production>`, adresy `*.vercel.app`, `<LB_IP>`), nigdy w repo ani
+Production>` i pozostałe domeny projektu z F1, adresy `*.vercel.app`,
+`<LB_IP>`), nigdy w repo ani
 w zgłoszeniach; polecenie oznaczone „(do potwierdzenia
 w próbie)” ma wynik zapisany w `docs/drills/` przed oknem, a polecenie z innym
 wynikiem w próbie poprawia się tu przed oknem. Kolumna „Zgoda” wskazuje wiersz
