@@ -116,7 +116,8 @@ is_pooler() {
 check_target() {
   local host="$1" db="$2" user="$3" port="$4" sslmode="$5"
   [[ -n "$host" && -n "$db" && -n "$user" ]] || exit 2
-  [[ "$host" =~ ^[A-Za-z0-9.-]+$ ]] || exit 2
+  # Tylko małe litery: wielkie omijałyby wykrywanie `-pooler.` (DNS ich nie rozróżnia).
+  [[ "$host" =~ ^[a-z0-9.-]+$ ]] || exit 2
   [[ "$db" =~ ^[A-Za-z0-9_.-]+$ ]] || exit 2
   [[ -z "$port" || "$port" =~ ^[0-9]+$ ]] || exit 2
   if ! is_local "$host"; then

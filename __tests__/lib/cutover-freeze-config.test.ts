@@ -479,6 +479,8 @@ describe.each(SCRIPTS)("$name", (s) => {
       ["host zdalny bez verify-full", [], { ...ENV_REMOTE, PGSSLMODE: "require" }],
       ["adres aplikacji zdalny bez verify-full", [], { ...ENV_REMOTE, VERIFY_PGSSLMODE: "require" }],
       ["pooler jako adres administracyjny", [], { ...ENV_REMOTE, PGHOST: "ep-x-1-pooler.eu-central-1.aws.neon.tech" }],
+      ["pooler wielkimi literami jako adres administracyjny", [], { ...ENV_REMOTE, PGHOST: "ep-x-1-POOLER.eu-central-1.aws.neon.tech", VERIFY_PGHOST: "ep-x-1-POOLER-pooler.eu-central-1.aws.neon.tech" }],
+      ["host administracyjny z wielkimi literami", [], { ...ENV_REMOTE, PGHOST: "EP-X-1.eu-central-1.aws.neon.tech" }],
       ["zdalny adres aplikacji bez poolera", [], { ...ENV_REMOTE, VERIFY_PGHOST: "ep-x-1.eu-central-1.aws.neon.tech" }],
       ["endpoint aplikacji ≠ endpoint administracyjny", [], { ...ENV_REMOTE, VERIFY_PGHOST: "ep-y-2-pooler.eu-central-1.aws.neon.tech" }],
       ["endpoint aplikacji w innym regionie", [], { ...ENV_REMOTE, VERIFY_PGHOST: "ep-x-1-pooler.us-east-2.aws.neon.tech" }],
