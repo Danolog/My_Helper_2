@@ -865,9 +865,12 @@ export const clientConsentsSchema = z
   })
   .strict();
 
+// Kontrakt = body z client-loyalty-tab.tsx: { rewardTierId, salonId }.
+// Punkty do odjęcia liczy trasa z progu nagrody (pointsRequired) — klient ich
+// nie podaje. salonId ignorowany: trasa bierze salon z sesji.
 export const loyaltyRedeemSchema = z.object({
-  tierId: requiredString("Nagroda"),
-  pointsToRedeem: z.number().int().positive("Liczba punktow musi byc wieksza od 0"),
+  rewardTierId: requiredString("Nagroda"),
+  salonId: z.string().nullable().optional(),
 });
 
 // Kontrakt = body z use-appointment-detail.ts: comment to trim() || null.
