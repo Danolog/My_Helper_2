@@ -1,5 +1,5 @@
 /**
- * #193 A2b: `DELETE /api/clients/[id]` na PRAWDZIWYM Postgresie — salony A i B.
+ * #193: `DELETE /api/clients/[id]` na PRAWDZIWYM Postgresie — salony A i B.
  *
  * Trasa: własność klienta przez `forSalon(salon z sesji).findOne` (rola bez
  * BYPASSRLS + `app.current_salon_id`), hash hasła przez wyjście systemowe

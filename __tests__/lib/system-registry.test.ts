@@ -38,7 +38,7 @@ const SESSION_EXPORTS = [
 const CRON_EXPORTS = ["cleanupExpiredTemporaryAccess"];
 const HEALTH_EXPORTS = ["checkDatabase", "pingDatabase"];
 const AUTH_THROTTLE_EXPORTS = ["clearSignInFailures", "consumeAuthRateLimit", "reserveAccountSignInAttempt"];
-/** #193 A2b: hash hasła konta `credential` (potwierdzenie hasłem usunięcia klienta). */
+/** #193: hash hasła konta `credential` (potwierdzenie hasłem usunięcia klienta). */
 const CREDENTIALS_EXPORTS = ["findCredentialPasswordHash"];
 /** #193 P5a-1: subskrypcje push po stronie wysyłki (decyzja CTO 3d / 3d-KOREKTA). */
 const NOTIFICATIONS_EXPORTS = [

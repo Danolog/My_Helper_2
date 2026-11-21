@@ -1,5 +1,5 @@
 /**
- * Wyjście systemowe (#193 A2b): hash hasła konta e-mail/hasło (`account`,
+ * Wyjście systemowe (#193): hash hasła konta e-mail/hasło (`account`,
  * `provider_id = 'credential'`) do potwierdzenia hasłem operacji w panelu
  * (dziś: usunięcie klienta, `DELETE /api/clients/[id]`).
  *

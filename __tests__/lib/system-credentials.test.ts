@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * #193 A2b: wyjście systemowe `findCredentialPasswordHash` (`system/credentials.ts`).
+ * #193: wyjście systemowe `findCredentialPasswordHash` (`system/credentials.ts`).
  *
  * Zapytanie przeniesione z `DELETE /api/clients/[id]`: konto `account` użytkownika
  * z `provider_id = 'credential'`, limit 1, przez pulę systemową (nie surowy `db`).

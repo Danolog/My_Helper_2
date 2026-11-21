@@ -38,7 +38,7 @@ const mockTx = {
   execute: vi.fn().mockResolvedValue(undefined), // SET LOCAL app.current_salon_id
 };
 
-// #193 A2b: trasy /api/clients i /api/clients/[id] nie biorą surowego `db` —
+// #193: trasy /api/clients i /api/clients/[id] nie biorą surowego `db` —
 // dane salonu idą przez forSalon (db.transaction → tx), hash hasła przez
 // wyjście systemowe. Każde zapytanie na surowym `db` poza transakcją rzuca.
 // (vi.hoisted: fabryka niżej woła rawDbUsed w chwili wywołania.)
@@ -58,7 +58,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-// #193 A2b: hash hasła konta `credential` — wyjście systemowe (nie surowy db).
+// #193: hash hasła konta `credential` — wyjście systemowe (nie surowy db).
 const systemMocks = vi.hoisted(() => ({ findCredentialPasswordHash: vi.fn() }));
 vi.mock("@/lib/server/system", () => ({
   findCredentialPasswordHash: (...args: unknown[]) => systemMocks.findCredentialPasswordHash(...args),
@@ -792,7 +792,7 @@ describe("DELETE /api/clients/[id]", () => {
     expect(mockDbDelete).not.toHaveBeenCalled();
   });
 
-  it("#193 A2b: cudzy klient → 404 PRZED sprawdzeniem hasła (bez odczytu hasha i bez usunięcia)", async () => {
+  it("#193: cudzy klient → 404 PRZED sprawdzeniem hasła (bez odczytu hasha i bez usunięcia)", async () => {
     mockGetSession.mockResolvedValue({
       user: { id: "user-1", email: "owner@test.com" },
     });
@@ -815,7 +815,7 @@ describe("DELETE /api/clients/[id]", () => {
     expect(mockDbDelete).not.toHaveBeenCalled();
   });
 
-  it("#193 A2b: błąd odczytu hasha → 500, bez usunięcia", async () => {
+  it("#193: błąd odczytu hasha → 500, bez usunięcia", async () => {
     mockGetSession.mockResolvedValue({
       user: { id: "user-1", email: "owner@test.com" },
     });
@@ -835,7 +835,7 @@ describe("DELETE /api/clients/[id]", () => {
     expect(mockDbDelete).not.toHaveBeenCalled();
   });
 
-  it("#193 A2b: atrapa surowego db rzuca — DELETE idzie wyłącznie przez forSalon i wyjście systemowe", async () => {
+  it("#193: atrapa surowego db rzuca — DELETE idzie wyłącznie przez forSalon i wyjście systemowe", async () => {
     const { db } = await import("@/lib/db");
     expect(() => db.select()).toThrow(/surowy db\.select/);
 

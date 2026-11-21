@@ -72,7 +72,7 @@ const SNAPSHOT: Record<string, string[]> = {
   "auth-throttle.ts:reserveAccountSignInAttempt": ["src/lib/auth-rate-limit-options.ts"],
   // Publiczna lista salonów: bez argumentów (brak userId/salonId), tylko odczyt.
   "catalog.ts:listPublicSalonCatalog": ["src/app/api/salons/route.ts"],
-  // #193 A2b: tylko odczyt hasha; userId = session.user.id z auth.api.getSession (nie z żądania).
+  // #193: tylko odczyt hasha; userId = session.user.id z auth.api.getSession (nie z żądania).
   "credentials.ts:findCredentialPasswordHash": ["src/app/api/clients/[id]/route.ts"],
   "cron.ts:cleanupExpiredTemporaryAccess": [
     "src/app/api/cron/cleanup-temporary-access/route.ts",
