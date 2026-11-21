@@ -57,7 +57,9 @@ export type DepositDecision =
 
 /**
  * JEDNA reguła zadatku (#67, kształt Ethana): używa jej strażnik tras bez
- * płatności i /api/deposits/create-session. Najpierw `Number.isFinite` —
+ * płatności i trasy zadatku: /api/deposits/blik-booking oraz
+ * /api/deposits/create-session (zamrożony modułem `onlineDeposits`).
+ * Najpierw `Number.isFinite` —
  * NaN nie jest ani "> 0", ani "≤ 0", więc bez tego wpadałby po cichu do "none".
  */
 export function depositDecision(
