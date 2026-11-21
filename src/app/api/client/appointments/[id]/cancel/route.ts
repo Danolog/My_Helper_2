@@ -223,7 +223,6 @@ export async function POST(
           and(
             eq(appointments.id, appointment.appointmentId),
             eq(appointments.salonId, salonId),
-            eq(appointments.bookedByUserId, userId),
             notInArray(appointments.status, FINAL_STATUSES)
           )
         )
