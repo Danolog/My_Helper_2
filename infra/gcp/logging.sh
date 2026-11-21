@@ -16,18 +16,24 @@
 #       (musi istnieć przed zmianą celu ujścia: cel bez zasobnika = błędy zapisu);
 #   (1) ujście `_Default`: cel = `myhelper-logs` (logi żądań z IP i user-agent
 #       zostają w europe-central2, nie w lokalizacji global) i wykluczenie
-#       wpisów, których ADRES ŻĄDANIA (od początku ścieżki, z kotwicą) jest
+#       wpisów GET, których ADRES ŻĄDANIA (od początku ścieżki, z kotwicą) jest
 #       adresem z tokenem jednorazowym Better Auth (Cloud Run i LB — filtr nie
 #       zawęża typu zasobu). Ścieżki (better-auth 1.7.25):
 #         /api/auth/verify-email?token=…        (link weryfikacji e-mail)
-#         /api/auth/reset-password/<token>?…    (link resetu hasła)
+#         /api/auth/reset-password/<token>?…    (link resetu hasła; token to
+#                                                JEDEN segment [A-Za-z0-9],
+#                                                generateId: a-z, A-Z, 0-9)
 #         /reset-password?token=…               (strona aplikacji po
 #                                                przekierowaniu z linku resetu)
+#       Segment tokenu bez `.`, `%` i `/`: adresy z `..` albo `%2e%2e` po
+#       prefiksie resetu (inna ścieżka po normalizacji) zostają w logach.
+#       Tylko GET (linki z e-maili); inne metody zostają w logach.
 #       Bez nagłówka Referer i bez dopasowania w parametrach zapytania: obie
 #       wartości ustala klient, więc pozwalałyby ukryć dowolne żądanie.
 #       Token w Referer usuwa aplikacja (Referrer-Policy: no-referrer na
-#       /reset-password i token usuwany z adresu strony) — osobna zmiana,
-#       warunek przed krokiem 2 okna (docs/runbook-krok-d.md, §10b).
+#       /reset-password i ścieżkach z tokenem) — osobna zmiana. Do tego czasu
+#       --apply odmawia (kod 2): skrypt sprawdza next.config.ts w repo
+#       (docs/runbook-krok-d.md, §10b). Dry-run wypisuje wynik sprawdzenia.
 #       Wykluczenie zawsze z disabled=false: ponowne --apply przywraca
 #       wykluczenie wyłączone w konsoli.
 #   (2) retencja zasobnika `_Default` = 30 dni, jawnie (wpisy sprzed zmiany celu);
@@ -66,10 +72,19 @@ AUDIT_RETENTION_DAYS=365
 AUDIT_SERVICE="secretmanager.googleapis.com"
 
 # Wyrażenie RE2 adresu z tokenem: kotwica na schemacie i hoście, ścieżka zaraz
-# po hoście. `[?]` zamiast `\?` (bez ucieczek w języku zapytań Logging).
+# po hoście. Token resetu: jeden segment alfabetu generateId, potem `?` albo
+# koniec adresu. `[?]` zamiast `\?` (bez ucieczek w języku zapytań Logging).
 # Bez przecinka (rozdziela pola --add-exclusion) i bez `\`.
-TOKEN_RE='^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/|reset-password/?[?])'
-EXCLUSION_FILTER="httpRequest.requestUrl=~\"${TOKEN_RE}\""
+TOKEN_RE='^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/[A-Za-z0-9]+([?]|$)|reset-password/?[?])'
+EXCLUSION_FILTER="httpRequest.requestMethod=\"GET\" AND httpRequest.requestUrl=~\"${TOKEN_RE}\""
+
+# Warunek --apply: next.config.ts w repo ustawia Referrer-Policy: no-referrer
+# dla każdej ścieżki niżej, we wpisie headers() PO wpisie "/(.*)" (przy tym
+# samym kluczu wygrywa ostatni). Bez tego token ze strony resetu trafia do
+# logów w nagłówku żądań kolejnych zasobów (filtr go nie obejmuje).
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+NEXT_CONFIG="${REPO_ROOT}/next.config.ts"
+NO_REFERRER_SOURCES=("/reset-password" "/api/auth/reset-password/:token" "/api/auth/verify-email")
 
 die() { echo "error: $*" >&2; exit 2; }
 
@@ -131,6 +146,49 @@ lookup() {
   LOOKUP="$("${GC[@]}" "$@" 2>/dev/null)" || die "cannot read: $* — stopped"
   LOOKUP="$(printf '%s' "$LOOKUP" | head -n 1)"
   if [[ -n "$LOOKUP" ]]; then echo "  state: exists"; else echo "  state: missing"; fi
+}
+
+# Czy next.config.ts ustawia no-referrer dla ścieżki $1. Odczyt pliku w repo
+# (nie gcloud), więc działa też w dry-run. Kształt wpisu headers():
+#   { source: "<ścieżka>", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] }
+# (key i value w jednej linii albo w kolejnych). Linie `//` są pomijane.
+# Wpis musi stać PO ostatnim wpisie "/(.*)". Wartość dokładnie "no-referrer"
+# (nie "no-referrer-when-downgrade").
+has_no_referrer() {
+  awk -v want="$1" '
+    /^[[:space:]]*\/\// { next }
+    /source:[[:space:]]*"/ {
+      s = $0; sub(/.*source:[[:space:]]*"/, "", s); sub(/".*/, "", s)
+      cur = s; rp = 0
+      if (s == "/(.*)") all = NR
+    }
+    cur == want && /key:[[:space:]]*"Referrer-Policy"/ { rp = 1 }
+    cur == want && rp && /value:[[:space:]]*"/ {
+      if ($0 ~ /value:[[:space:]]*"no-referrer"/) hit = NR
+      rp = 0
+    }
+    END { exit ((hit > 0 && hit > all + 0) ? 0 : 1) }
+  ' "$NEXT_CONFIG"
+}
+
+# Odmowa --apply bez no-referrer w next.config.ts (przed pierwszym gcloud).
+referrer_guard() {
+  local s missing=""
+  if [[ ! -f "$NEXT_CONFIG" ]]; then
+    missing="${NO_REFERRER_SOURCES[*]}"
+  else
+    command -v awk >/dev/null 2>&1 || die "awk not found — cannot check next.config.ts"
+    for s in "${NO_REFERRER_SOURCES[@]}"; do
+      has_no_referrer "$s" || missing="${missing:+$missing }$s"
+    done
+  fi
+  if [[ -z "$missing" ]]; then
+    echo "referrer-policy: ok (next.config.ts sets no-referrer for ${NO_REFERRER_SOURCES[*]})"
+    return 0
+  fi
+  echo "referrer-policy: missing no-referrer in next.config.ts for: $missing"
+  [[ "$APPLY" == 1 ]] && die "--apply refused: next.config.ts must set Referrer-Policy: no-referrer for: $missing (after \"/(.*)\") — see docs/runbook-krok-d.md §10b"
+  return 0
 }
 
 # Odczyt ujścia _Default przed jakąkolwiek zmianą (błąd odczytu = stop).
@@ -254,6 +312,7 @@ if [[ "$APPLY" == 1 ]]; then
 else
   echo "mode: DRY-RUN — nothing is executed (project=$PROJECT_ID region=$REGION)"
 fi
+referrer_guard
 read_default_sink
 logs_bucket
 exclusion

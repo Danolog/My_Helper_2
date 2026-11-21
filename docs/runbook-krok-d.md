@@ -822,8 +822,9 @@ niczego nie usuwa i nie blokuje retencji.
 
 **Kiedy.** Po kroku 1 (LB z logowaniem), **przed** pierwszym odczytem wartości
 sekretu w 4a.1 (inaczej odczyt nie ma śladu) i **przed** rekordem `app` na LB
-(krok 3). Wykluczenie działa tylko na nowe wpisy. Warunek przed krokiem 2 okna:
-zmiana aplikacji z podsekcji „Warunek przed krokiem 2 okna” niżej.
+(krok 3), i **po** scaleniu zmiany aplikacji z podsekcji „Warunek przed
+krokiem 2 okna” niżej — bez niej `--apply` odmawia. Wykluczenie działa tylko na
+nowe wpisy.
 
 ### Co robi
 
@@ -839,12 +840,22 @@ Najpierw odczyt ujścia `_Default` (błąd odczytu = stop przed jakąkolwiek zmi
    zasobnika `_Default` w lokalizacji `global`. Filtr `_Default` i wykluczenia są
    atrybutami ujścia, więc zostają. Wykluczenie ma zawsze `disabled=false`: ponowne
    `--apply` przywraca wykluczenie wyłączone w konsoli. Wpis nie trafia do logów
-   wyłącznie wtedy, gdy **adres żądania** (od schematu i hosta, ścieżka zaraz po
-   hoście) pasuje do wyrażenia RE2:
+   wyłącznie wtedy, gdy metoda to **GET** i **adres żądania** (od schematu
+   i hosta, ścieżka zaraz po hoście) pasuje do wyrażenia RE2:
 
    ```
-   httpRequest.requestUrl=~"^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/|reset-password/?[?])"
+   httpRequest.requestMethod="GET" AND httpRequest.requestUrl=~"^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/[A-Za-z0-9]+([?]|$)|reset-password/?[?])"
    ```
+
+   Token resetu to **jeden segment** z alfabetu `generateId` biblioteki
+   (`a-z`, `A-Z`, `0-9`, 24 znaki: `password.mjs:74`,
+   `@better-auth/core` `dist/utils/id.mjs:4`), po nim `?` albo koniec
+   adresu. Adresy z `..`, `%2e%2e`, `/` albo innym znakiem po prefiksie resetu
+   (np. `/api/auth/reset-password/../sign-in/email` — po normalizacji inna
+   ścieżka) **zostają w logach**; nie da się nimi ukryć żądania do innego
+   endpointu. Wykluczane jest wyłącznie GET (linki z e-maili); `POST`, `HEAD`
+   i inne metody na tych adresach zostają w logach. Strażnik ma te przypadki
+   wprost i sprawdza alfabet w zainstalowanej bibliotece.
 
    Kotwica i brak nagłówka Referer są celowe: parametry zapytania, fragment
    i Referer ustala klient. Wyrażenie bez kotwicy albo z Referer pozwalałoby
@@ -925,6 +936,20 @@ Rozbieżność z filtrem wykluczenia jest celowa: ten odczyt jest szeroki (dawne
 wyrażenie bez kotwicy, razem z Referer), bo tylko wykrywa i zwraca same znaczniki
 czasu. Odczyt bez `--bucket`, bo dotyczy historii w `_Default` (`global`).
 
+**Odmowa `--apply` bez `no-referrer`.** Przed pierwszym wywołaniem gcloud
+skrypt czyta `next.config.ts` z repo, z którego jest uruchomiony, i sprawdza, że
+`headers()` ma dla każdej ze ścieżek `/reset-password`,
+`/api/auth/reset-password/:token` i `/api/auth/verify-email` wpis
+`{ key: "Referrer-Policy", value: "no-referrer" }` **po** ostatnim wpisie
+`"/(.*)"`. Brak któregokolwiek = `--apply` kończy się kodem 2 (`error: --apply
+refused: …` z listą brakujących ścieżek), bez żadnego wywołania gcloud. Dry-run
+działa zawsze i wypisuje wynik (`referrer-policy: ok …` albo `referrer-policy:
+missing …`). Sprawdzenie jest tekstowe: wpis w postaci `source: "…"` i
+`key`/`value` w tej samej albo kolejnych liniach; linie `//` są pomijane.
+Flagi ani zmiennej omijającej nie ma. Skrypt `--apply` uruchamia się więc
+dopiero z `main` po scaleniu PR aplikacji z podsekcji „Warunek przed krokiem 2
+okna”.
+
 ### Wykonanie
 
 ```bash
@@ -932,7 +957,8 @@ infra/gcp/logging.sh --project=my-helper-2-488419
 infra/gcp/logging.sh --project=my-helper-2-488419 --apply
 ```
 
-Dry-run: najpierw `? … sinks describe _Default`, potem lista `+ …` z punktami
+Dry-run: najpierw `referrer-policy: ok …` (inaczej `--apply` odmówi — stop,
+najpierw PR aplikacji), potem `? … sinks describe _Default`, potem lista `+ …` z punktami
 0–4 (w tej kolejności: `buckets create|update myhelper-logs`, `sinks update
 _Default <cel myhelper-logs> --add-exclusion|--update-exclusion=…,disabled=false`,
 `buckets update _Default`, `set-iam-policy`, zasobnik i ujście audytu), potem
@@ -1029,10 +1055,12 @@ hasła), **scalony i wdrożony na rewizji GCP przed krokiem 2 okna** (najprości
 przed 4a.1, wtedy 4a.1 wdraża sha z poprawką; scalenie bez migracji jest
 dozwolone w zamrożeniu). Zakres:
 
-- `next.config.ts` `headers()`: osobny wpis `source: "/reset-password"`
+- `next.config.ts` `headers()`: osobne wpisy `source: "/reset-password"`,
+  `source: "/api/auth/reset-password/:token"` i `source: "/api/auth/verify-email"`
   z `Referrer-Policy: no-referrer`, **po** wpisie `"/(.*)"` (przy tym samym
-  kluczu wygrywa ostatni). Nagłówek, nie tylko `<meta>`: zasoby z `<head>`
-  startują przed parsowaniem meta.
+  kluczu wygrywa ostatni) — dokładnie w kształcie, który sprawdza
+  `logging.sh` (wyżej, „Odmowa `--apply` bez `no-referrer`”). Nagłówek, nie
+  tylko `<meta>`: zasoby z `<head>` startują przed parsowaniem meta.
 - `src/components/auth/reset-password-form.tsx`: token wczytany do `useRef`
   przy pierwszym renderze, potem `history.replaceState` bez `token`; formularz
   czyta token z ref, nie z `useSearchParams` (po `replaceState` parametry
@@ -1044,8 +1072,9 @@ dozwolone w zamrożeniu). Zakres:
   `strict-origin-when-cross-origin`; formularz po `replaceState` nadal wysyła
   token; reset kończy się sukcesem (E2E na bazie CI).
 
-Skrypt logów można zastosować (Z3) wcześniej: do okna na GCP nie ma prawdziwych
-resetów. **Brak tej zmiany przed krokiem 2 okna = stop okna.**
+Kolejność wymuszona skryptem: bez tej zmiany w `next.config.ts` na `main`
+`logging.sh --apply` odmawia (kod 2), więc Z3 idzie **po** scaleniu PR
+aplikacji. **Brak tej zmiany przed krokiem 2 okna = stop okna.**
 
 ### Znane ograniczenie
 

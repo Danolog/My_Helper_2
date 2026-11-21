@@ -11,6 +11,11 @@
  *    (tylko adres żądania, z kotwicą, bez Referer, disabled=false), zgodne ze
  *    ścieżkami tokenów w zainstalowanym Better Auth; adresy, które tylko
  *    wspominają ścieżkę resetu w parametrach albo we fragmencie, zostają w logach;
+ *    token resetu = jeden segment alfabetu generateId (bez `..`, `%2e%2e`);
+ *    wykluczane wyłącznie GET;
+ *  - --apply odmawia (kod 2, zero wywołań gcloud), gdy next.config.ts w repo
+ *    nie ustawia Referrer-Policy: no-referrer dla ścieżek z tokenem; dry-run
+ *    działa i wypisuje wynik sprawdzenia;
  *  - (2) retencja _Default = 30 dni jawnie;
  *  - (3) Data Access DATA_READ dla secretmanager.googleapis.com: zmienia się
  *    wyłącznie auditConfigs, wiązania i etag bez zmian, polityka (z adresami
@@ -22,7 +27,18 @@
  *  - brak add-iam-policy-binding, brak usuwania, brak blokady retencji.
  */
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomInt } from "node:crypto";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -38,8 +54,9 @@ const REGION = "europe-central2";
 const EMAIL = "wlasciciel-testowy@example.invalid";
 
 /** Wyrażenie RE2 adresu z tokenem (dosłownie jak w skrypcie). */
-const TOKEN_RE = "^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/|reset-password/?[?])";
-const EXCLUSION_FILTER = `httpRequest.requestUrl=~"${TOKEN_RE}"`;
+const TOKEN_RE =
+  "^https?://[^/?#]+/(api/auth/verify-email[?]|api/auth/reset-password/[A-Za-z0-9]+([?]|$)|reset-password/?[?])";
+const EXCLUSION_FILTER = `httpRequest.requestMethod="GET" AND httpRequest.requestUrl=~"${TOKEN_RE}"`;
 const LOGS_DEST = `logging.googleapis.com/projects/${PROJECT}/locations/${REGION}/buckets/myhelper-logs`;
 const AUDIT_DEST = `logging.googleapis.com/projects/${PROJECT}/locations/${REGION}/buckets/myhelper-audit`;
 const AUDIT_FILTER =
@@ -103,6 +120,53 @@ exit 0
 );
 chmodSync(join(FAKE, "gcloud"), 0o755);
 
+// Warunek --apply: next.config.ts w repo z no-referrer dla ścieżek z tokenem.
+// Skrypt czyta next.config.ts z katalogu ../../ względem siebie, więc przebiegi
+// --apply idą z kopii skryptu w drzewie testowym z wybraną treścią konfiguracji.
+const NEXT_OK = `const nextConfig = {
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          {
+            key: "Referrer-Policy",
+            value: "strict-origin-when-cross-origin",
+          },
+        ],
+      },
+      {
+        source: "/reset-password",
+        headers: [
+          {
+            key: "Referrer-Policy",
+            value: "no-referrer",
+          },
+        ],
+      },
+      { source: "/api/auth/reset-password/:token", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
+      { source: "/api/auth/verify-email", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
+    ];
+  },
+};
+export default nextConfig;
+`;
+const VERIFY_LINE =
+  '      { source: "/api/auth/verify-email", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },\n';
+const CATCH_ALL = NEXT_OK.slice(NEXT_OK.indexOf("      {\n        source: \"/(.*)\""), NEXT_OK.indexOf("      {\n        source: \"/reset-password\""));
+
+/** Kopia skryptu w drzewie DIR/<name>/infra/gcp z next.config.ts (null = brak pliku). */
+function repoWith(name: string, nextConfig: string | null, source = SOURCE): string {
+  const root = join(DIR, `repo-${name}`);
+  mkdirSync(join(root, "infra/gcp"), { recursive: true });
+  if (nextConfig !== null) writeFileSync(join(root, "next.config.ts"), nextConfig);
+  const script = join(root, "infra/gcp/logging.sh");
+  writeFileSync(script, source);
+  return script;
+}
+const SCRIPT_OK = repoWith("ok", NEXT_OK);
+
 interface Run {
   status: number | null;
   stdout: string;
@@ -133,7 +197,7 @@ function lg(
   mkdirSync(tmp, { recursive: true });
   for (const f of [log, files]) writeFileSync(f, "");
   const policy = opts.policy ? `policy-${opts.policy}.json` : opts.auditPresent ? "policy-present.json" : "policy.json";
-  const r = spawnSync("bash", [opts.script ?? SCRIPT, ...args], {
+  const r = spawnSync("bash", [opts.script ?? SCRIPT_OK, ...args], {
     encoding: "utf8",
     env: {
       NODE_ENV: "test",
@@ -190,7 +254,7 @@ describe("P8: dry-run i parametry", () => {
 
   it("wyjście dry-run to wyłącznie polecenia, odczyty stanu i opis zmiany", () => {
     for (const line of lg(P).stdout.split("\n").filter(Boolean)) {
-      expect(line).toMatch(/^(mode: |\? gcloud |\+ gcloud |  state: |  audit: |  skip: |logging: done$)/);
+      expect(line).toMatch(/^(mode: |referrer-policy: |\? gcloud |\+ gcloud |  state: |  audit: |  skip: |logging: done$)/);
     }
   });
 
@@ -296,7 +360,9 @@ describe("P8 (0): zasobnik myhelper-logs (cel ujścia _Default)", () => {
 describe("P8 (1): ujście _Default — cel myhelper-logs i filtr wykluczający tokeny", () => {
   it("dokładne wyrażenie filtru w kodzie: tylko adres żądania, bez Referer", () => {
     expect(SOURCE).toContain(`TOKEN_RE='${TOKEN_RE}'`);
-    expect(SOURCE).toContain('EXCLUSION_FILTER="httpRequest.requestUrl=~\\"${TOKEN_RE}\\""\n');
+    expect(SOURCE).toContain(
+      'EXCLUSION_FILTER="httpRequest.requestMethod=\\"GET\\" AND httpRequest.requestUrl=~\\"${TOKEN_RE}\\""\n',
+    );
   });
 
   it("filtr nie sprawdza nagłówka Referer (wartość ustala klient)", () => {
@@ -340,6 +406,7 @@ describe("P8 (1): ujście _Default — cel myhelper-logs i filtr wykluczający t
     "https://app.nordsignal.cc/reset-password?token=AbCdEf123456&_rsc=1x2y3",
     "http://app.nordsignal.cc/reset-password?token=AbCdEf123456",
     "https://app.nordsignal.cc:443/api/auth/verify-email?token=eyJhbGciOi.x.y",
+    "https://app.nordsignal.cc/api/auth/reset-password/AbCdEf123456",
   ])("obejmuje adres z tokenem: %s", (url) => {
     expect(re.test(url)).toBe(true);
   });
@@ -363,8 +430,75 @@ describe("P8 (1): ujście _Default — cel myhelper-logs i filtr wykluczający t
     "https://h/api/health?x=/reset-password",
     "https://h/api/auth/verify-email",
     "/reset-password?token=1",
+    // Segmenty kropkowe i kodowanie po prefiksie resetu: po normalizacji inna
+    // ścieżka (np. logowanie) — wpis zostaje.
+    "https://h/api/auth/reset-password/../sign-in/email",
+    "https://h/api/auth/reset-password/..",
+    "https://h/api/auth/reset-password/%2e%2e/sign-in/email",
+    "https://h/api/auth/reset-password/%2E%2E%2Fsign-in%2Femail",
+    "https://h/api/auth/reset-password/.%2e/sign-in/email?x=1",
+    "https://h/api/auth/reset-password/AbC123/../../sign-in/email",
+    "https://h/api/auth/reset-password/AbC123/../../sign-in/email?callbackURL=%2F",
+    "https://h/api/auth/reset-password/AbC123%2F..%2F..%2Fsign-in%2Femail",
+    "https://h/api/auth/reset-password/AbC.123?callbackURL=%2F",
+    "https://h/api/auth/reset-password/AbC123/",
+    "https://h/api/auth/reset-password/AbC123;x=1",
+    "https://h/api/auth/reset-password/?callbackURL=%2F",
+    "https://h/api/auth/reset-password//?callbackURL=%2F",
+    "https://h/api/auth/reset-password/AbC_123?callbackURL=%2F",
   ])("nie obejmuje (wpis zostaje): %s", (url) => {
     expect(re.test(url)).toBe(false);
+  });
+
+  // Ocena całego filtru (metoda AND adres) na wpisie żądania.
+  const parsed = /^httpRequest\.requestMethod="([A-Z]+)" AND httpRequest\.requestUrl=~"(.*)"$/.exec(EXCLUSION_FILTER);
+  const excluded = (method: string, url: string) =>
+    parsed !== null && method === parsed[1] && new RegExp(parsed[2]!).test(url);
+
+  it("filtr ma postać: metoda GET AND adres (jedna klauzula metody, bez OR)", () => {
+    expect(parsed).not.toBeNull();
+    expect(parsed![1]).toBe("GET");
+    expect(parsed![2]).toBe(TOKEN_RE);
+    expect(EXCLUSION_FILTER).not.toMatch(/\bOR\b|\bNOT\b|-httpRequest/);
+  });
+
+  it.each([
+    ["GET", "https://h/api/auth/verify-email?token=eyJ.x.y&callbackURL=%2F", true],
+    ["GET", "https://h/api/auth/reset-password/AbCdEf123456?callbackURL=%2F", true],
+    ["GET", "https://h/reset-password?token=AbCdEf123456", true],
+    ["POST", "https://h/api/auth/reset-password/AbCdEf123456?callbackURL=%2F", false],
+    ["POST", "https://h/api/auth/verify-email?token=1", false],
+    ["POST", "https://h/reset-password?token=AbCdEf123456", false],
+    ["POST", "https://h/api/auth/reset-password", false],
+    ["PUT", "https://h/api/auth/reset-password/AbCdEf123456", false],
+    ["HEAD", "https://h/api/auth/reset-password/AbCdEf123456", false],
+    ["get", "https://h/api/auth/reset-password/AbCdEf123456", false],
+    ["GET", "https://h/api/auth/reset-password/../sign-in/email", false],
+    ["GET", "https://h/api/auth/reset-password/%2e%2e/sign-in/email", false],
+    ["POST", "https://h/api/auth/reset-password/../sign-in/email", false],
+  ])("%s %s → wykluczony: %s", (method, url, want) => {
+    expect(excluded(method, url)).toBe(want);
+  });
+
+  // Alfabet tokenu resetu = alfabet generateId w zainstalowanym @better-auth/core.
+  // Zmiana alfabetu albo długości po aktualizacji zatrzymuje test, zanim token
+  // z nowym znakiem (np. `_`/`-`) przestanie być wykluczany.
+  it("token resetu: generateId(24) z alfabetu a-z, A-Z, 0-9 — segment filtru go obejmuje", () => {
+    const pw = readFileSync(join(ROOT, "node_modules/better-auth/dist/api/routes/password.mjs"), "utf8");
+    expect(pw).toContain('import { generateId } from "@better-auth/core/utils/id";');
+    expect(pw).toContain("const verificationToken = generateId(24);");
+    const sibling = join(realpathSync(join(ROOT, "node_modules/better-auth")), "../@better-auth/core/dist/utils/id.mjs");
+    const hoisted = join(ROOT, "node_modules/.pnpm/node_modules/@better-auth/core/dist/utils/id.mjs");
+    const idSrc = readFileSync(existsSync(sibling) ? sibling : hoisted, "utf8");
+    expect(idSrc).toContain('return createRandomStringGenerator("a-z", "A-Z", "0-9")(size || 32);');
+    const ALPHA = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    for (let i = 0; i < 200; i++) {
+      let t = "";
+      for (let j = 0; j < 24; j++) t += ALPHA[randomInt(ALPHA.length)];
+      expect(excluded("GET", `https://h/api/auth/reset-password/${t}?callbackURL=%2Freset-password`), t).toBe(true);
+    }
+    // Każdy znak alfabetu przynajmniej raz.
+    expect(excluded("GET", `https://h/api/auth/reset-password/${ALPHA}?callbackURL=%2F`)).toBe(true);
   });
 
   // Zmiana postaci linków w bibliotece (aktualizacja Better Auth) ma zatrzymać
@@ -507,13 +641,90 @@ describe("P8 (3): ścieżki błędów IAM i sprzątanie katalogu tymczasowego", 
   it("zmiana polityki poza auditConfigs → stop przed set-iam-policy (mutacja skryptu)", () => {
     const anchor = "p.auditConfigs = cfgs;";
     expect(SOURCE.split(anchor)).toHaveLength(2);
-    const mutated = join(DIR, "logging-mutated.sh");
-    writeFileSync(mutated, SOURCE.replace(anchor, `${anchor} p.bindings = [];`));
+    const mutated = repoWith("mutated", NEXT_OK, SOURCE.replace(anchor, `${anchor} p.bindings = [];`));
     const r = lg(APPLY, { script: mutated });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("IAM policy would change outside auditConfigs");
     expect(r.calls.map(strip).filter((c) => /set-iam-policy|myhelper-audit/.test(c))).toEqual([]);
     expect(r.stdout + r.stderr).not.toContain(EMAIL);
     expect(r.tmpLeft).toEqual([]);
+  });
+});
+
+describe("P8: --apply odmawia bez Referrer-Policy: no-referrer w next.config.ts", () => {
+  it("stałe w kodzie: next.config.ts z katalogu repo skryptu, trzy ścieżki z tokenem", () => {
+    expect(SOURCE).toContain('REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"\n');
+    expect(SOURCE).toContain('NEXT_CONFIG="${REPO_ROOT}/next.config.ts"\n');
+    expect(SOURCE).toContain(
+      'NO_REFERRER_SOURCES=("/reset-password" "/api/auth/reset-password/:token" "/api/auth/verify-email")\n',
+    );
+    // Sprawdzenie przed pierwszym odczytem gcloud, w obu trybach.
+    const main = CODE.slice(CODE.lastIndexOf('if [[ "$APPLY" == 1 ]]; then\n  echo "mode: APPLY'));
+    expect(main.indexOf("referrer_guard\n")).toBeGreaterThan(0);
+    expect(main.indexOf("referrer_guard\n")).toBeLessThan(main.indexOf("read_default_sink\n"));
+    // Brak zmiennej środowiska ani flagi omijającej sprawdzenie.
+    expect(CODE).not.toMatch(/NEXT_CONFIG=\$\{|--skip|--force|--no-check/);
+  });
+
+  it("konfiguracja z no-referrer → --apply przechodzi, wyjście „referrer-policy: ok”", () => {
+    const r = lg(APPLY);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain("referrer-policy: ok");
+    expect(r.calls.length).toBeGreaterThan(0);
+  });
+
+  it("key i value w jednej linii też przechodzą (wpisy /api/auth/* w NEXT_OK)", () => {
+    expect(NEXT_OK).toContain(VERIFY_LINE);
+    expect(lg(APPLY).status).toBe(0);
+  });
+
+  const BEFORE = NEXT_OK.replace(CATCH_ALL, "").replace("    ];\n", `${CATCH_ALL}    ];\n`);
+  it.each([
+    ["brak pliku next.config.ts", null, "/reset-password /api/auth/reset-password/:token /api/auth/verify-email"],
+    ["brak wpisu /api/auth/verify-email", NEXT_OK.replace(VERIFY_LINE, ""), "/api/auth/verify-email"],
+    ["wpis zakomentowany", NEXT_OK.replace(VERIFY_LINE, `// ${VERIFY_LINE}`), "/api/auth/verify-email"],
+    [
+      "no-referrer-when-downgrade zamiast no-referrer",
+      NEXT_OK.replace('            value: "no-referrer",', '            value: "no-referrer-when-downgrade",'),
+      "/reset-password",
+    ],
+    [
+      "no-referrer w innym nagłówku",
+      NEXT_OK.replace(VERIFY_LINE, VERIFY_LINE.replace('key: "Referrer-Policy"', 'key: "X-Other"')),
+      "/api/auth/verify-email",
+    ],
+    ["wpisy przed \"/(.*)\" (ostatni wygrywa)", BEFORE, "/reset-password /api/auth/reset-password/:token /api/auth/verify-email"],
+    [
+      "dzisiejszy kształt: tylko strict-origin-when-cross-origin na \"/(.*)\"",
+      `${NEXT_OK.slice(0, NEXT_OK.indexOf(CATCH_ALL) + CATCH_ALL.length)}    ];\n  },\n};\n`,
+      "/reset-password /api/auth/reset-password/:token /api/auth/verify-email",
+    ],
+  ])("%s → --apply: kod 2 przed pierwszym gcloud; dry-run: kod 0 z informacją", (name, cfg, missing) => {
+    if (cfg !== null) expect(cfg, "wariant musi różnić się od NEXT_OK").not.toBe(NEXT_OK);
+    const script = repoWith(`bad-${name.replace(/[^a-z0-9]+/gi, "-")}`, cfg);
+    const a = lg(APPLY, { script });
+    expect(a.status).toBe(2);
+    expect(a.calls).toEqual([]);
+    expect(a.stderr).toContain(`error: --apply refused: next.config.ts must set Referrer-Policy: no-referrer for: ${missing}`);
+    const d = lg(P, { script });
+    expect(d.status, d.stderr).toBe(0);
+    expect(d.calls).toEqual([]);
+    expect(d.stdout).toContain(`referrer-policy: missing no-referrer in next.config.ts for: ${missing}\n`);
+    expect(d.stdout).toMatch(/\nlogging: done\n$/);
+  });
+
+  it("skrypt w repo: wynik sprawdzenia zgodny z next.config.ts repo (odmowa bez gcloud albo ok)", () => {
+    const a = lg(APPLY, { script: SCRIPT });
+    if (a.stdout.includes("referrer-policy: ok")) {
+      expect(a.status, a.stderr).toBe(0);
+    } else {
+      expect(a.status).toBe(2);
+      expect(a.calls).toEqual([]);
+      expect(a.stderr).toContain("--apply refused");
+    }
+    const d = lg(P, { script: SCRIPT });
+    expect(d.status, d.stderr).toBe(0);
+    expect(d.calls).toEqual([]);
+    expect(d.stdout).toMatch(/\nreferrer-policy: (ok|missing) /);
   });
 });
