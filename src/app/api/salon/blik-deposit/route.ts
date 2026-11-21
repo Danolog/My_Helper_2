@@ -25,7 +25,7 @@ import { forSalon } from "@/lib/server/repository";
  * z żądania (requireSalonStaff: 401 bez sesji, 404 konto bez salonu).
  *
  * Prywatność (RODO): numer to dane osobowe właściciela. Nie trafia do logów
- * (logujemy tylko salonId i to, czy numer jest ustawiony), a komunikaty
+ * (logujemy tylko salonId, to, czy numer jest ustawiony, i kod odrzucenia 409), a komunikaty
  * walidacji są stałe. Pełne ustawienia zwraca ta trasa tylko właścicielowi;
  * sam numer dostaje też klient w odpowiedzi 201 rezerwacji z zadatkiem BLIK.
  */
@@ -108,7 +108,7 @@ export async function GET() {
 /**
  * PUT — body `{ blikPhone: string | null, consent?: boolean, consentVersion?: string }`.
  * Numer: normalizacja do E.164, tylko zakres komórkowy, wymaga `consent: true`
- * i `consentVersion` równej bieżącej (inaczej 409 `BLIK_CONSENT_VERSION_STALE`);
+ * i `consentVersion` (brak — 400) równej bieżącej (inna — 409 `BLIK_CONSENT_VERSION_STALE`);
  * `blikConsentAt` i `blikConsentVersion` nadaje serwer. Zapis numeru zamknięty
  * przy `BLIK_PRIVACY_POLICY_HREF === null` (409 `BLIK_SETTINGS_NOT_AVAILABLE`,
  * pierwszeństwo przed STALE). `blikPhone: null` czyści numer, datę i wersję.
