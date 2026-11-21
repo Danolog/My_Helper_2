@@ -22,8 +22,8 @@ import { sendDepositMarkedSms, smsFailureReason } from "@/lib/sms";
 export type DepositMarkedSmsSkipReason = "no_details" | "no_phone" | "not_paid" | "no_amount" | "already_confirmed";
 
 /**
- * Źródła wpisów dziennika, po których klient już ma potwierdzenie wpłaty:
- * `manual_mark` (ta trasa wysyła po nim SMS) i `stripe_confirmation` (płatność
+ * Źródła wpisów dziennika potwierdzających wpłatę: `manual_mark` (po pierwszym
+ * takim wpisie ta trasa próbuje wysłać SMS) i `stripe_confirmation` (płatność
  * online). `owner_edit` nie wysyła SMS, więc się nie liczy.
  */
 const CONFIRMING_SOURCES = ["manual_mark", "stripe_confirmation"] as const;
@@ -76,7 +76,7 @@ export async function notifyDepositMarkedPaid(input: {
     if (!details) return skip("no_details");
     // Równoległe „cofnij” po COMMIT oznaczenia: stan w bazie już nie „wpłacony”.
     if (details.depositPaid !== true) return skip("not_paid");
-    // Wpis bieżącego oznaczenia jest już w dzienniku (odczyt po COMMIT), więc drugi wpis potwierdzający = klient ma już SMS albo potwierdzenie Stripe; najwyżej jeden SMS na wizytę.
+    // Wpis bieżącego oznaczenia jest już w dzienniku (odczyt po COMMIT), więc drugi wpis potwierdzający = wizyta była już potwierdzona (SMS próbowany wcześniej albo płatność online); najwyżej jeden SMS na wizytę, także gdy wcześniejsza próba nie doszła.
     if (confirmations > 1) return skip("already_confirmed");
 
     const amount = Number(details.depositAmount);
