@@ -82,6 +82,7 @@ jobs:
       NEXT_PUBLIC_APP_URL: http://localhost:3000
       BASE_URL: http://localhost:3000
     steps:
+      # Testy na prawdziwym Postgresie biegną po seedzie (krok niżej).
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
@@ -104,14 +105,6 @@ jobs:
       - name: RLS guard (migration 0005)
         run: pnpm exec tsx scripts/db-rls-guard.ts
 
-      # T3: blokady subskrypcji na prawdziwym Postgresie (confirm ‖ webhook,
-      # pg_locks, 40P01). Własne wiersze z unikalnymi id, sprzątane po teście;
-      # adres = ten sam service container (localhost), bez nowych sekretów.
-      - name: Integration test — subscription locks (real Postgres)
-        run: pnpm test:pg
-        env:
-          INTEGRATION_POSTGRES_URL: postgresql://dev_user:dev_password@localhost:5432/pos_dev
-
       - name: Seed test data
         run: pnpm db:seed:test
 
@@ -120,6 +113,30 @@ jobs:
           PGPASSWORD=dev_password psql -h localhost -U dev_user -d pos_dev -c "SELECT id, email, email_verified, role FROM \"user\" WHERE email IN ('owner@test.com','client@test.com');"
           PGPASSWORD=dev_password psql -h localhost -U dev_user -d pos_dev -c "SELECT id, provider_id, user_id, CASE WHEN password IS NOT NULL THEN 'SET' ELSE 'NULL' END as pwd FROM account WHERE user_id IN ('test-owner-user-id-00001','test-client-user-id-00001');"
       - name: Seed check
+        run: pnpm exec tsx scripts/verify-seed.ts
+
+      # Testy na prawdziwym Postgresie (`pnpm test:pg`, pliki po kolei), po seedzie:
+      # - T3: blokady subskrypcji (confirm ‖ webhook, pg_locks, 40P01); własne
+      #   wiersze z unikalnymi id, sprzątane po teście;
+      # - porównanie baz przed przełączeniem (infra/db/cutover/compare.sh):
+      #   pos_dev po seedzie → zrzut danych → druga baza po migracjach. Bazy testu
+      #   (prefiks it_cutover_) tworzy i usuwa sam test, pos_dev tylko czyta.
+      #   psql/pg_dump/pg_restore w wersji serwera: z kontenera usługi postgres
+      #   (docker exec przez cienkie nakładki, które test tworzy w katalogu
+      #   tymczasowym) — bez apt i bez nowych obrazów.
+      # Adres = ten sam service container (localhost), bez nowych sekretów.
+      - name: Integration test — subscription locks (real Postgres)
+        timeout-minutes: 4
+        run: pnpm test:pg
+        env:
+          INTEGRATION_POSTGRES_URL: postgresql://dev_user:dev_password@localhost:5432/pos_dev
+          CUTOVER_COMPARE_PG: "1"
+          CUTOVER_PG_CONTAINER: ${{ job.services.postgres.id }}
+
+      # Seed drugi raz po test:pg, przed Playwrightem: test działający globalnie
+      # (cleanup, cron, agregaty) nie może po cichu zmienić wierszy seeda, na
+      # których stoi @smoke — wtedy czerwony ten krok, nie flakujący E2E.
+      - name: Seed check (after test:pg)
         run: pnpm exec tsx scripts/verify-seed.ts
 
       # Bez --with-deps: pobieranie pakietów systemowych (apt) potrafi trwać
